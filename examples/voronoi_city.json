@@ -1,0 +1,39 @@
+{
+  "description": "City blocks from relaxed 2D Voronoi cells; each block extruded to a random height by a foreach over prims.",
+  "vars": { "blocks": 70, "max_h": 14 },
+  "nodes": {
+    "cells": {
+      "type": "voronoi2d",
+      "params": { "count": "=blocks", "size": [60, 60], "inset": 1.2, "relax": 3, "seed": 5 }
+    },
+    "towers": {
+      "type": "foreach",
+      "in": ["cells"],
+      "params": {
+        "mode": "prims",
+        "body": {
+          "nodes": {
+            "cell": { "type": "input", "params": { "index": 0 } },
+            "h": {
+              "type": "extrude",
+              "in": ["cell"],
+              "params": { "height": "=2 + pow(rand(iteration, 11), 3) * max_h" }
+            },
+            "c": {
+              "type": "color",
+              "in": ["h"],
+              "params": {
+                "class": "prim",
+                "color": "=[0.55 + rand(iteration, 3) * 0.3, 0.57 + rand(iteration, 3) * 0.28, 0.6 + rand(iteration, 3) * 0.25]"
+              }
+            }
+          },
+          "output": "c"
+        }
+      }
+    },
+    "ground": { "type": "grid", "params": { "size": [64, 64], "divisions": [1, 1], "center": [0, -0.01, 0] } },
+    "ground_col": { "type": "color", "in": ["ground"], "params": { "color": "#3a3d42" } },
+    "out": { "type": "merge", "in": ["ground_col", "towers"] }
+  }
+}

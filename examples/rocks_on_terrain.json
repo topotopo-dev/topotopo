@@ -1,0 +1,48 @@
+{
+  "description": "Noise terrain coloured by height, with displaced rocks scattered on the flatter slopes.",
+  "vars": { "rock_count": 160, "seed": 7 },
+  "nodes": {
+    "terrain": {
+      "type": "terrain",
+      "params": {
+        "size": [30, 30],
+        "divisions": [160, 160],
+        "height": 3.2,
+        "frequency": 0.06,
+        "fractal": "fbm",
+        "seed": "=seed",
+        "octaves": 6
+      }
+    },
+    "tint": {
+      "type": "color",
+      "in": ["terrain"],
+      "params": {
+        "mode": "ramp",
+        "attrib": "height",
+        "ramp": [[0, "#3b5f2a"], [0.45, "#6b8f3a"], [0.75, "#8a7b5a"], [1, "#e8e6e1"]]
+      }
+    },
+    "pts": { "type": "scatter", "in": ["terrain"], "params": { "count": "=rock_count * 2", "seed": "=seed" } },
+    "flat": { "type": "delete", "in": ["pts"], "params": { "class": "point", "group": "@N.y<0.9" } },
+    "scale": {
+      "type": "attrib_randomize",
+      "in": ["flat"],
+      "params": { "name": "pscale", "min": 0.25, "max": 0.9, "seed": "=seed" }
+    },
+    "spin": {
+      "type": "attrib_randomize",
+      "in": ["scale"],
+      "params": { "name": "orient", "distribution": "orient", "seed": "=seed + 1" }
+    },
+    "rock": { "type": "sphere", "params": { "type": "ico", "level": 3, "scale": [1, 0.6, 0.85] } },
+    "rock_noise": {
+      "type": "noise_displace",
+      "in": ["rock"],
+      "params": { "amplitude": 0.25, "frequency": 1.8, "octaves": 4 }
+    },
+    "rock_col": { "type": "color", "in": ["rock_noise"], "params": { "color": "#7d7468" } },
+    "rocks": { "type": "copy_to_points", "in": ["rock_col", "spin"] },
+    "out": { "type": "merge", "in": ["tint", "rocks"] }
+  }
+}

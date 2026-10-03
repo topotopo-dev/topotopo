@@ -1,0 +1,19 @@
+{
+  "description": "Voronoi-fractured noisy sphere, pieces slightly separated and coloured by piece.",
+  "nodes": {
+    "ball": { "type": "sphere", "params": { "type": "ico", "level": 4 } },
+    "lumpy": { "type": "noise_displace", "in": ["ball"], "params": { "amplitude": 0.12, "frequency": 1.5 } },
+    "frac": { "type": "voronoi_fracture", "in": ["lumpy"], "params": { "count": 24, "gap": 0.03, "seed": 2 } },
+    "col": {
+      "type": "color",
+      "in": ["frac"],
+      "params": { "mode": "random", "class": "prim", "by": "class", "saturation": [0.35, 0.6] }
+    },
+    "inner": {
+      "type": "color",
+      "in": ["col"],
+      "params": { "class": "prim", "group": "inside", "color": "#e8d9b0" }
+    },
+    "out": { "type": "null", "in": ["inner"] }
+  }
+}

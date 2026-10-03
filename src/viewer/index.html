@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polyforge Preview</title>
+<style>
+  :root { --bg: #1b1d21; --panel: #23262b; --line: #34383f; --text: #d9dde3; --dim: #8b929c; --accent: #f0a23b; --err: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
+  #app { display: flex; height: 100%; }
+  #side { width: 260px; min-width: 200px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  #side header { padding: 12px; border-bottom: 1px solid var(--line); }
+  #side h1 { font-size: 14px; margin: 0 0 8px; letter-spacing: .04em; }
+  select, button { background: #2d3137; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  select { width: 100%; }
+  #nodes { overflow: auto; flex: 1; padding: 6px; }
+  .node { padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; }
+  .node:hover { background: #2c3036; }
+  .node.sel { background: #3a3f47; }
+  .node .t { color: var(--dim); font-size: 11px; }
+  .node.out .n::before { content: '● '; color: var(--accent); }
+  .node.err .n { color: var(--err); }
+  #main { flex: 1; position: relative; }
+  canvas { display: block; }
+  #bar { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; }
+  #info { position: absolute; bottom: 10px; left: 10px; right: 10px; white-space: pre-wrap; font: 12px/1.35 ui-monospace, Consolas, monospace; color: var(--dim); pointer-events: none; text-shadow: 0 1px 2px #000; }
+  #err { position: absolute; top: 50px; left: 10px; right: 10px; color: var(--err); white-space: pre-wrap; font: 12px ui-monospace, Consolas, monospace; }
+  #status { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+</style>
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <header>
+      <h1>POLYFORGE · PREVIEW</h1>
+      <select id="graph"></select>
+      <div id="status">connecting…</div>
+    </header>
+    <div id="nodes"></div>
+  </aside>
+  <main id="main">
+    <div id="bar">
+      <button id="follow" class="on" title="show the graph output; otherwise the selected node">follow output</button>
+      <button id="wire">wireframe</button>
+      <button id="frame">frame</button>
+    </div>
+    <div id="err"></div>
+    <div id="info"></div>
+  </main>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const $ = (id) => document.getElementById(id);
+const main = $('main');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+main.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a2d33);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
+camera.position.set(4, 3, 5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xdfe6f0, 0x3b342c, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(-3, 6, 4); scene.add(key);
+const fill = new THREE.DirectionalLight(0xbcd0ff, 0.6); fill.position.set(5, 2, -3); scene.add(fill);
+let grid = new THREE.GridHelper(10, 10, 0x666a72, 0x41454c); scene.add(grid);
+const axes = new THREE.AxesHelper(0.5); scene.add(axes);
+
+let state = { graphs: [], graph: null, node: null, follow: true, wire: false, framed: false };
+let current = null;
+const loader = new GLTFLoader();
+
+function resize() {
+  const w = main.clientWidth, h = main.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+
+function frame(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  if (box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const r = Math.max(size.length() / 2, 1e-3);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  if (!Number.isFinite(dir.x) || dir.length() < 0.5) dir.set(0.6, 0.45, 0.7).normalize();
+  camera.position.copy(c).addScaledVector(dir, r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.1);
+  camera.near = r / 100; camera.far = r * 100; camera.updateProjectionMatrix();
+  controls.target.copy(c);
+  scene.remove(grid);
+  const step = Math.pow(10, Math.floor(Math.log10(r)));
+  const ext = Math.ceil(r * 3 / step) * step;
+  grid = new THREE.GridHelper(ext * 2, Math.round(ext * 2 / step), 0x666a72, 0x41454c);
+  grid.position.set(Math.round(c.x / step) * step, 0, Math.round(c.z / step) * step);
+  scene.add(grid);
+}
+
+function applyWire(obj) {
+  obj.traverse((o) => { if (o.isMesh) { o.material.wireframe = state.wire; o.material.side = THREE.DoubleSide; } });
+}
+
+async function loadGeo() {
+  if (!state.graph) return;
+  const g = state.graphs.find((x) => x.name === state.graph);
+  if (!state.follow && !g?.nodes.some((n) => n.name === state.node)) { state.follow = true; state.node = null; $('follow').classList.add('on'); }
+  const node = state.follow ? '' : state.node ?? '';
+  const q = `graph=${encodeURIComponent(state.graph)}&node=${encodeURIComponent(node)}`;
+  $('err').textContent = '';
+  const res = await fetch('/api/geo?' + q);
+  if (!res.ok) { const j = await res.json().catch(() => ({})); $('err').textContent = j.error ?? res.statusText; return; }
+  const buf = await res.arrayBuffer();
+  loader.parse(buf, '', (gltf) => {
+    if (current) { scene.remove(current); current.traverse((o) => { o.geometry?.dispose(); o.material?.dispose?.(); }); }
+    current = gltf.scene;
+    current.traverse((o) => {
+      if (o.isPoints) o.material.size = 4, o.material.sizeAttenuation = false;
+      if (o.isLineSegments) o.material.color?.set(0x4aa3ff);
+    });
+    applyWire(current);
+    scene.add(current);
+    if (!state.framed) { frame(current); state.framed = true; }
+  }, (e) => { $('err').textContent = String(e); });
+  const info = await (await fetch('/api/info?' + q)).json().catch(() => null);
+  $('info').textContent = info?.summary ? `${state.graph}/${info.target}  (${info.ms.toFixed(0)} ms)\n${info.summary}` : '';
+}
+
+function renderNodes() {
+  const g = state.graphs.find((x) => x.name === state.graph);
+  const el = $('nodes');
+  el.innerHTML = '';
+  if (!g) return;
+  for (const n of g.nodes) {
+    const d = document.createElement('div');
+    d.className = 'node' + (n.name === g.output ? ' out' : '') + (n.error ? ' err' : '') + (!state.follow && n.name === state.node ? ' sel' : '');
+    d.title = n.error ?? `${n.type}${n.in?.length ? ' ← ' + n.in.filter(Boolean).join(', ') : ''}`;
+    d.innerHTML = `<span class="n"></span><span class="t"></span>`;
+    d.querySelector('.n').textContent = n.name;
+    d.querySelector('.t').textContent = n.type + (n.ms != null ? ` · ${n.ms.toFixed(0)}ms` : '');
+    d.onclick = () => { state.follow = false; state.node = n.name; $('follow').classList.remove('on'); renderNodes(); loadGeo(); };
+    el.appendChild(d);
+  }
+}
+
+async function refreshGraphs() {
+  state.graphs = await (await fetch('/api/graphs')).json();
+  const sel = $('graph');
+  const prev = state.graph;
+  sel.innerHTML = state.graphs.map((g) => `<option>${g.name}</option>`).join('');
+  if (!state.graphs.length) { $('status').textContent = 'no graphs yet — build one via MCP'; return; }
+  state.graph = state.graphs.some((g) => g.name === prev) ? prev : state.graphs[0].name;
+  sel.value = state.graph;
+  renderNodes();
+}
+
+$('graph').onchange = (e) => {
+  state.graph = e.target.value; state.framed = false;
+  state.follow = true; state.node = null; $('follow').classList.add('on');
+  renderNodes(); loadGeo();
+};
+$('follow').onclick = () => { state.follow = true; $('follow').classList.add('on'); renderNodes(); loadGeo(); };
+$('wire').onclick = () => { state.wire = !state.wire; $('wire').classList.toggle('on', state.wire); if (current) applyWire(current); };
+$('frame').onclick = () => current && frame(current);
+
+const es = new EventSource('/api/events');
+es.onopen = () => { $('status').textContent = 'live — updates on every build/edit'; };
+es.onerror = () => { $('status').textContent = 'disconnected (server stopped?)'; };
+es.onmessage = async (m) => {
+  const ev = JSON.parse(m.data);
+  if (!state.graph) state.graph = ev.graph;
+  await refreshGraphs();
+  if (ev.graph === state.graph) loadGeo();
+};
+await refreshGraphs();
+loadGeo();
+</script>
+</body>
+</html>

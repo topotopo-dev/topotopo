@@ -1,0 +1,32 @@
+{
+  "description": "Mechanical bracket via CSG: plates unioned (boolean with one input), bolt holes copied onto points and subtracted.",
+  "nodes": {
+    "base": { "type": "box", "params": { "size": [4, 0.4, 2], "center": [0, 0.2, 0] } },
+    "upright": { "type": "box", "params": { "size": [0.4, 2.4, 2], "center": [-1.8, 1.2, 0] } },
+    "gusset_shape": {
+      "type": "curve",
+      "params": { "points": [[-1.6, 0.4, 0], [0.4, 0.4, 0], [-1.6, 2.2, 0]], "closed": true }
+    },
+    "gusset": {
+      "type": "extrude",
+      "in": ["gusset_shape"],
+      "params": { "height": 0.3, "center": true, "plane": "xy" }
+    },
+    "body": { "type": "merge", "in": ["base", "upright", "gusset"] },
+    "solid": { "type": "boolean", "in": ["body"], "params": { "operation": "union" } },
+    "hole": { "type": "tube", "params": { "radius": 0.22, "height": 1, "cols": 32 } },
+    "hole_pts": {
+      "type": "points",
+      "params": { "positions": [[1.2, 0.2, 0.55], [1.2, 0.2, -0.55], [0.1, 0.2, 0.55], [0.1, 0.2, -0.55]] }
+    },
+    "holes_v": { "type": "copy_to_points", "in": ["hole", "hole_pts"] },
+    "hole_side": {
+      "type": "tube",
+      "params": { "radius": 0.3, "height": 1, "cols": 32, "axis": "x", "center": [-1.8, 1.6, 0] }
+    },
+    "cutters": { "type": "merge", "in": ["holes_v", "hole_side"] },
+    "drilled": { "type": "boolean", "in": ["solid", "cutters"], "params": { "operation": "subtract" } },
+    "paint": { "type": "color", "in": ["drilled"], "params": { "color": "#8fa3b8" } },
+    "out": { "type": "null", "in": ["paint"] }
+  }
+}

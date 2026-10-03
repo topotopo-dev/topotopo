@@ -1,0 +1,28 @@
+{
+  "description": "Interference waves written in a point wrangle, coloured by wave height, with buoys copied onto a random subset of crests.",
+  "nodes": {
+    "sea": { "type": "grid", "params": { "size": [16, 16], "divisions": [140, 140] } },
+    "waves": {
+      "type": "wrangle",
+      "in": ["sea"],
+      "params": {
+        "code": ["const d1 = length(sub(@P, [-4, 0, -3])), d2 = length(sub(@P, [5, 0, 4]));", "f@h = 0.35 * sin(d1 * 2.2) / (1 + d1 * 0.15) + 0.3 * sin(d2 * 1.7 + 1) / (1 + d2 * 0.12) + 0.08 * fbm(mul(@P, 0.8), 3);", "@P.y = @h;", "@Cd = mix([0.05, 0.18, 0.38], [0.55, 0.85, 0.95], fit(@h, -0.4, 0.5, 0, 1));"]
+      }
+    },
+    "peaks": {
+      "type": "delete",
+      "in": ["waves"],
+      "params": { "class": "point", "group": "@h>0.42", "keep": true }
+    },
+    "thin": {
+      "type": "group",
+      "in": ["peaks"],
+      "params": { "class": "point", "name": "pick", "random": 0.08, "seed": 4 }
+    },
+    "pick": { "type": "delete", "in": ["thin"], "params": { "class": "point", "group": "pick", "keep": true } },
+    "buoy": { "type": "sphere", "params": { "radius": 0.12, "type": "quad", "divisions": 4 } },
+    "buoys": { "type": "copy_to_points", "in": ["buoy", "pick"], "params": { "copy_attribs": "^Cd" } },
+    "buoy_col": { "type": "color", "in": ["buoys"], "params": { "color": "#ff6a3d" } },
+    "out": { "type": "merge", "in": ["waves", "buoy_col"] }
+  }
+}

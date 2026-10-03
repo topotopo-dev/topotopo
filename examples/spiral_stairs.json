@@ -1,0 +1,51 @@
+{
+  "description": "Spiral staircase: copy_xform steps around a column, a swept handrail along a helix with posts.",
+  "vars": { "steps": 24, "rise": 0.22, "turn": 18 },
+  "nodes": {
+    "step": { "type": "box", "params": { "size": [1.6, 0.08, 0.5], "center": [1, 0, 0] } },
+    "steps": {
+      "type": "copy_xform",
+      "in": ["step"],
+      "params": { "count": "=steps", "translate": [0, "=rise", 0], "rotate": [0, "=turn", 0] }
+    },
+    "column": {
+      "type": "tube",
+      "params": {
+        "radius": 0.22,
+        "height": "=steps * rise + 0.6",
+        "center": [0, "=(steps * rise + 0.6) / 2 - 0.1", 0],
+        "cols": 24
+      }
+    },
+    "rail_path": {
+      "type": "spiral",
+      "params": {
+        "radius": 1.75,
+        "height": "=steps * rise",
+        "turns": "=steps * turn / 360",
+        "points_per_turn": 64,
+        "center": [0, 0.95, 0],
+        "clockwise": false
+      }
+    },
+    "rail": { "type": "sweep", "in": ["rail_path"], "params": { "radius": 0.04, "divisions": 10 } },
+    "posts_pts": { "type": "resample", "in": ["rail_path"], "params": { "mode": "count", "count": 12 } },
+    "post": { "type": "tube", "params": { "radius": 0.02, "height": 0.9, "center": [0, -0.45, 0], "cols": 8 } },
+    "posts": { "type": "copy_to_points", "in": ["post", "posts_pts"] },
+    "metal": { "type": "merge", "in": ["rail", "posts"] },
+    "metal_col": { "type": "color", "in": ["metal"], "params": { "color": "#2b2f36" } },
+    "wood": {
+      "type": "color",
+      "in": ["steps"],
+      "params": {
+        "mode": "random",
+        "class": "prim",
+        "by": "copynum",
+        "hue_range": [0.06, 0.09],
+        "saturation": [0.45, 0.6],
+        "value": [0.55, 0.75]
+      }
+    },
+    "out": { "type": "merge", "in": ["wood", "column", "metal_col"] }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "description": "Rounded slab with text engraved by a boolean subtract, on a smoothed base.",
+  "vars": { "label": "POLYFORGE" },
+  "nodes": {
+    "slab_shape": {
+      "type": "shape2d",
+      "params": {
+        "shape": "rounded_rect",
+        "size": [6.4, 1.6],
+        "corner_radius": 0.35,
+        "plane": "xy",
+        "center": [0, 0, 0]
+      }
+    },
+    "slab": { "type": "extrude", "in": ["slab_shape"], "params": { "height": 0.5, "center": true } },
+    "words": {
+      "type": "text",
+      "params": { "text": "=label", "size": 0.9, "depth": 0.4, "valign": "center", "center": [0, 0, 0.25] }
+    },
+    "engraved": { "type": "boolean", "in": ["slab", "words"], "params": { "operation": "subtract" } },
+    "paint": { "type": "color", "in": ["engraved"], "params": { "class": "prim", "color": "#b9b3a6" } },
+    "letters": {
+      "type": "color",
+      "in": ["paint"],
+      "params": { "class": "prim", "group": "from_b", "color": "#c79a3a" }
+    },
+    "stand_shape": {
+      "type": "shape2d",
+      "params": { "shape": "rounded_rect", "size": [7, 1.4], "corner_radius": 0.5, "center": [0, -1.25, 0] }
+    },
+    "stand": { "type": "extrude", "in": ["stand_shape"], "params": { "height": 0.4 } },
+    "stand_col": { "type": "color", "in": ["stand"], "params": { "color": "#6f6a62" } },
+    "out": { "type": "merge", "in": ["letters", "stand_col"] }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "description": "Procedural building: floors stacked with foreach; walls split into window cells (grid_split), inset and recessed (poly_extrude); roof slab from an offset footprint.",
+  "vars": { "floors": 7, "floor_h": 3.2 },
+  "nodes": {
+    "footprint": { "type": "shape2d", "params": { "shape": "L", "size": [14, 10], "thickness": 6 } },
+    "floors": {
+      "type": "foreach",
+      "in": ["footprint"],
+      "params": {
+        "mode": "count",
+        "count": "=floors",
+        "body": {
+          "nodes": {
+            "fp": { "type": "input", "params": { "index": 0 } },
+            "slab": { "type": "extrude", "in": ["fp"], "params": { "height": "=floor_h", "divisions": 1 } },
+            "lift": { "type": "transform", "in": ["slab"], "params": { "translate": [0, "=iteration * floor_h", 0] } },
+            "walls": { "type": "group", "in": ["lift"], "params": { "name": "walls", "expr": "Math.abs(@N.y) < 0.1" } },
+            "cells": { "type": "grid_split", "in": ["walls"], "params": { "group": "walls", "size": [2.4, 100] } },
+            "win": {
+              "type": "poly_extrude",
+              "in": ["cells"],
+              "params": { "group": "walls", "mode": "individual", "inset": 0.45, "distance": 0 }
+            },
+            "recess": {
+              "type": "poly_extrude",
+              "in": ["win"],
+              "params": { "group": "front", "mode": "individual", "distance": -0.25 }
+            },
+            "glass": { "type": "color", "in": ["recess"], "params": { "class": "prim", "color": "#d9d4c7" } },
+            "glass2": {
+              "type": "color",
+              "in": ["glass"],
+              "params": { "class": "prim", "group": "front", "color": "#3d6f9e" }
+            }
+          },
+          "output": "glass2"
+        }
+      }
+    },
+    "roofshape": {
+      "type": "offset_curve",
+      "in": ["footprint"],
+      "params": { "distance": 0.4, "join": "miter", "output": "outlines" }
+    },
+    "roof": { "type": "extrude", "in": ["roofshape"], "params": { "height": 0.5 } },
+    "roof_up": { "type": "transform", "in": ["roof"], "params": { "translate": [0, "=floors * floor_h", 0] } },
+    "roof_col": { "type": "color", "in": ["roof_up"], "params": { "class": "prim", "color": "#5a5550" } },
+    "out": { "type": "merge", "in": ["floors", "roof_col"] }
+  }
+}

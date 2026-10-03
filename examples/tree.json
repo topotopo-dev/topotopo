@@ -1,0 +1,44 @@
+{
+  "description": "L-system tree: branches swept into tapered tubes, leaf cards instanced on leaf points.",
+  "vars": { "gens": 6 },
+  "nodes": {
+    "ls": {
+      "type": "lsystem",
+      "params": {
+        "axiom": "FFA",
+        "rules": { "A": [["F[&+A!J][&-A!J][^A!J]F", 0.6], ["F[&+A!J][^-A!J]A", 0.4]] },
+        "generations": "=gens",
+        "angle": 32,
+        "step": 0.45,
+        "width": 0.22,
+        "width_scale": 0.72,
+        "branch_scale": 0.82,
+        "angle_variance": 10,
+        "tropism": [0, -1, 0],
+        "tropism_strength": 0.08,
+        "seed": 3
+      }
+    },
+    "wood": { "type": "polywire", "in": ["ls"], "params": { "divisions": 7 } },
+    "bark": { "type": "color", "in": ["wood"], "params": { "color": "#6b4a2f" } },
+    "leafpts": { "type": "delete", "in": ["ls"], "params": { "class": "point", "group": "leaves", "keep": true } },
+    "leafsize": {
+      "type": "attrib_randomize",
+      "in": ["leafpts"],
+      "params": { "name": "pscale", "min": 0.25, "max": 0.45 }
+    },
+    "leafcol": {
+      "type": "color",
+      "in": ["leafsize"],
+      "params": { "mode": "random", "hue_range": [0.22, 0.33], "saturation": [0.55, 0.8], "value": [0.45, 0.75] }
+    },
+    "leaf": { "type": "shape2d", "params": { "shape": "ngon", "sides": 6, "radius": 0.5, "plane": "xy" } },
+    "leafshape": {
+      "type": "transform",
+      "in": ["leaf"],
+      "params": { "scale": [0.55, 1, 1], "translate": [0, 0, 0.3], "rotate": [90, 0, 0] }
+    },
+    "leaves": { "type": "copy_to_points", "in": ["leafshape", "leafcol"] },
+    "out": { "type": "merge", "in": ["bark", "leaves"] }
+  }
+}

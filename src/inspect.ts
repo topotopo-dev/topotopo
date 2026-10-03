@@ -1,0 +1,139 @@
+// Text-first geometry introspection for LLMs: compact summaries, attribute statistics,
+// topology health, and element listings.
+import { Geometry } from './core/geometry.ts';
+import type { AttribClass, Attribute } from './core/geometry.ts';
+import { primArea, signedVolume, topologyReport } from './core/topology.ts';
+import { evalGroup } from './core/groups.ts';
+import { fmtNum } from './render/raster.ts';
+
+const n = (x: number) => x.toLocaleString('en-US');
+const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
+const typeCode = (a: Attribute) => (a.type === 'float' ? 'f' : a.type === 'int' ? 'i' : 's') + a.size;
+
+function fmtVal(v: any): string {
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return '(' + v.map((x) => fmtNum(x)).join(', ') + ')';
+  return fmtNum(v);
+}
+
+export function summarize(g: Geometry): string {
+  const lines: string[] = [];
+  let polys = 0, lines_ = 0, tris = 0, quads = 0;
+  for (let p = 0; p < g.numPrims; p++) {
+    if (g.primClosed[p]) { polys++; const s = g.primSize(p); if (s === 3) tris++; else if (s === 4) quads++; } else lines_++;
+  }
+  const parts = [`${n(g.numPoints)} points`, `${n(g.numPrims)} prims`];
+  const kinds: string[] = [];
+  if (polys) kinds.push(`${n(polys)} polygons (${n(tris)} tri, ${n(quads)} quad, ${n(polys - tris - quads)} ngon)`);
+  if (lines_) kinds.push(`${n(lines_)} polylines`);
+  lines.push(`geometry: ${parts.join(', ')}${kinds.length ? ' = ' + kinds.join(' + ') : ''}, ${n(g.numVertices)} vertices${g.volumes.length ? `, ${g.volumes.length} SDF volume(s)` : ''}`);
+  if (g.numPoints || g.volumes.length) {
+    const b = g.bbox(true);
+    const size = [0, 1, 2].map((a) => b.max[a] - b.min[a]);
+    lines.push(`bbox: min ${v3(b.min)} max ${v3(b.max)} size ${size.map(fmtNum).join(' × ')} center ${v3([0, 1, 2].map((a) => (b.min[a] + b.max[a]) / 2))}`);
+  }
+  const attrLines: string[] = [];
+  for (const cls of ['point', 'vertex', 'prim', 'detail'] as AttribClass[]) {
+    const t = g.table(cls);
+    if (!t.map.size) continue;
+    const items = [...t.map].map(([k, a]) => {
+      if (cls === 'detail') return `${k} ${typeCode(a)} = ${fmtVal(a.get(0))}`;
+      if (a.type === 'string') { const u = new Set(a.data as string[]); return `${k} s (${u.size} unique)`; }
+      return `${k} ${typeCode(a)}`;
+    });
+    attrLines.push(`  ${cls}: ${items.join(', ')}`);
+  }
+  if (attrLines.length) lines.push('attributes:', ...attrLines);
+  const grp: string[] = [];
+  for (const cls of ['point', 'prim'] as const) {
+    const m = g.groups(cls);
+    if (!m.size) continue;
+    grp.push(`${cls}[${[...m].map(([k, mask]) => `${k} ${n(mask.reduce((s, x) => s + x, 0))}`).join(', ')}]`);
+  }
+  if (grp.length) lines.push(`groups: ${grp.join('  ')}`);
+  return lines.join('\n');
+}
+
+function attribStats(a: Attribute, count: number, sel?: Uint8Array | null): string {
+  if (a.type === 'string') {
+    const freq = new Map<string, number>();
+    for (let i = 0; i < count; i++) if (!sel || sel[i]) freq.set((a.data as string[])[i], (freq.get((a.data as string[])[i]) ?? 0) + 1);
+    const top = [...freq].sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k, c]) => `${JSON.stringify(k)}×${c}`);
+    return `${freq.size} unique: ${top.join(', ')}${freq.size > 8 ? ', …' : ''}`;
+  }
+  const s = a.size, d = a.data as Float64Array;
+  const mn = new Array(s).fill(Infinity), mx = new Array(s).fill(-Infinity), sum = new Array(s).fill(0);
+  let k = 0, nan = 0;
+  for (let i = 0; i < count; i++) {
+    if (sel && !sel[i]) continue;
+    k++;
+    for (let c = 0; c < s; c++) {
+      const x = d[i * s + c];
+      if (!Number.isFinite(x)) { nan++; continue; }
+      if (x < mn[c]) mn[c] = x; if (x > mx[c]) mx[c] = x; sum[c] += x;
+    }
+  }
+  if (!k) return 'no elements';
+  const f = (arr: number[]) => (s === 1 ? fmtNum(arr[0]) : v3(arr));
+  let extra = '';
+  if (a.type === 'int' && s === 1) {
+    const u = new Set<number>();
+    for (let i = 0; i < count && u.size < 1000; i++) if (!sel || sel[i]) u.add(d[i]);
+    extra = `, ${u.size >= 1000 ? '1000+' : u.size} unique`;
+  }
+  return `min ${f(mn)} max ${f(mx)} mean ${f(sum.map((x) => x / k))}${extra}${nan ? `, ${nan} NaN/inf` : ''}`;
+}
+
+export interface InspectOptions {
+  detail?: 'summary' | 'attributes' | 'topology' | 'elements' | 'all';
+  cls?: 'point' | 'prim' | 'vertex' | 'detail';
+  attribs?: string[];
+  start?: number;
+  count?: number;
+  group?: string;
+}
+
+export function inspect(g: Geometry, o: InspectOptions = {}): string {
+  const out: string[] = [summarize(g)];
+  const detail = o.detail ?? 'summary';
+  const sel = o.group && (o.cls === 'point' || o.cls === 'prim') ? evalGroup(g, o.cls, o.group) : null;
+  if (detail === 'attributes' || detail === 'all') {
+    out.push('attribute stats:');
+    for (const cls of ['point', 'vertex', 'prim', 'detail'] as AttribClass[]) {
+      if (o.cls && o.cls !== cls) continue;
+      const t = g.table(cls);
+      for (const [k, a] of t.map) {
+        if (o.attribs && !o.attribs.includes(k)) continue;
+        out.push(`  ${cls} ${k} ${typeCode(a)}: ${cls === 'detail' ? fmtVal(a.get(0)) : attribStats(a, t.count, cls === o.cls ? sel : null)}`);
+      }
+    }
+  }
+  if (detail === 'topology' || detail === 'all') {
+    const r = topologyReport(g);
+    out.push('topology:');
+    out.push(`  ${r.closed ? 'CLOSED manifold surface (watertight)' : `open/non-manifold: ${r.boundaryEdges} boundary edges, ${r.nonManifoldEdges} non-manifold edges`}`);
+    out.push(`  ${r.pieces} connected piece(s); ${r.edges} edges; ${r.degenerate} degenerate prims; ${r.unusedPoints} unused points`);
+    let area = 0;
+    for (let p = 0; p < g.numPrims; p++) area += primArea(g, p);
+    out.push(`  surface area ${fmtNum(area)}${r.closed ? `; volume ${fmtNum(signedVolume(g))}${signedVolume(g) < 0 ? ' (NEGATIVE: faces point inward — use reverse)' : ''}` : ''}`);
+    if (r.closed && r.pieces === 1) out.push(`  euler ${r.euler} → genus ${(2 - r.euler) / 2}`);
+  }
+  if (detail === 'elements' || detail === 'all') {
+    const cls = o.cls ?? 'point';
+    const t = g.table(cls);
+    const total = cls === 'detail' ? 1 : t.count;
+    const start = Math.max(0, o.start ?? 0), count = Math.min(o.count ?? 10, 200);
+    const names = [...t.map.keys()].filter((k) => !o.attribs || o.attribs.includes(k));
+    out.push(`${cls} elements ${start}..${Math.min(total, start + count) - 1} of ${total}${o.group ? ` (group ${o.group})` : ''}:`);
+    let shown = 0;
+    for (let i = start; i < total && shown < count; i++) {
+      if (sel && !sel[i]) continue;
+      const vals = names.map((k) => `${k}=${fmtVal(t.get(k)!.get(i))}`);
+      if (cls === 'prim') vals.unshift(`${g.primClosed[i] ? 'poly' : 'line'} pts[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
+      if (cls === 'vertex') vals.unshift(`pt ${g.vertexPoint[i]}`);
+      out.push(`  ${i}: ${vals.join('  ')}`);
+      shown++;
+    }
+  }
+  return out.join('\n');
+}
