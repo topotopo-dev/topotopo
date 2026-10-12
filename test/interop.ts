@@ -254,7 +254,8 @@ function sameGeo(a: Geometry, b: Geometry, label: string, tol = 0) {
   check(warns.some((w) => /Volume/.test(w)), `houdini_box.geo: volume prim skipped with a warning (${warns.join('; ')})`);
   check(g.vertexGroups.get('corner')?.length === g.numVertices && (g.edgeGroups.get('rim')?.size ?? 0) > 0, `houdini_box.geo: vertex group corner and edge group rim (${g.edgeGroups.get('rim')?.size ?? 0} edges)`);
   {
-    const again = importGeometry(new TextEncoder().encode(String(exportGeometry(g, 'geo', {}))), 'geo');
+    const out = exportGeometry(g, 'geo', {});
+    const again = importGeometry(typeof out === 'string' ? new TextEncoder().encode(out) : out, 'geo');
     check(again.vertexGroups.get('corner')?.join('') === g.vertexGroups.get('corner')?.join('') && again.edgeGroups.get('rim')?.toPairs().join() === g.edgeGroups.get('rim')?.toPairs().join(),
       'houdini_box.geo: vertex and edge groups survive a write/read round trip');
   }
