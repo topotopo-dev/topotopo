@@ -18,6 +18,7 @@ import { exportGeometry } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
+import { verifyTools } from './verify.ts';
 
 export type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export interface ToolResult { content: Content[]; isError?: boolean }
@@ -129,7 +130,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, group, topology, copy, solid, sdf, uv, code, flow, io, asset). Optional filter by category or search text.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, uv, code, flow, io, asset). Optional filter by category or search text.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -367,6 +368,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
     },
   ];
+  tools.push(...verifyTools(ws)); // explain, diff
   if (opts.onPreview) {
     tools.push({
       name: 'preview',
