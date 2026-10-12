@@ -421,5 +421,6 @@ export function appendElements(g: Geometry, pts: number[][], prims: { pts: numbe
   });
   for (const [k, m] of g.pointGroups) { const nm = new Uint8Array(npts); nm.set(m); out.pointGroups.set(k, nm); }
   for (const [k, m] of g.primGroups) { const nm = new Uint8Array(out.numPrims); nm.set(m); out.primGroups.set(k, nm); }
+  for (const [k, m] of g.vertexGroups) { const nm = new Uint8Array(out.numVertices); nm.set(m); out.vertexGroups.set(k, nm); }
   return out;
 }

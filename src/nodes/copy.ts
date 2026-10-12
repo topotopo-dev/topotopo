@@ -1,5 +1,6 @@
 // Scattering and instancing.
 import { Attribute, AttribTable, GeoBuilder, Geometry } from '../core/geometry.ts';
+import { EdgeSet } from '../core/edges.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { rng } from '../core/random.ts';
@@ -298,6 +299,8 @@ defineNode({
       out.primClosed = new Uint8Array(npr * nc);
       out.pointGroups = new Map([...src.pointGroups].map(([k, m]) => { const o = new Uint8Array(np * nc); for (let c = 0; c < nc; c++) o.set(m, c * np); return [k, o]; }));
       out.primGroups = new Map([...src.primGroups].map(([k, m]) => { const o = new Uint8Array(npr * nc); for (let c = 0; c < nc; c++) o.set(m, c * npr); return [k, o]; }));
+      out.vertexGroups = new Map([...src.vertexGroups].map(([k, m]) => { const o = new Uint8Array(nv * nc); for (let c = 0; c < nc; c++) o.set(m, c * nv); return [k, o]; }));
+      out.edgeGroups = new Map([...src.edgeGroups].map(([k, e]) => { const o = new EdgeSet(); for (let c = 0; c < nc; c++) for (const [a, b] of e) o.add(a + c * np, b + c * np); return [k, o]; }));
       out.volumes = [];
       const Pd = out.P, sP = src.P;
       const NA = out.points.get('N'), VNA = out.vertices.get('N');

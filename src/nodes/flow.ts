@@ -107,7 +107,7 @@ defineNode({
         const m = new Uint8Array(src.numPoints); m[i] = 1;
         const one = src.subsetPoints(m);
         one.primStart = new Int32Array(1); one.vertexPoint = new Int32Array(0); one.primClosed = new Uint8Array(0);
-        one.prims = one.prims.gather([]); one.vertices = one.vertices.gather([]); one.primGroups = new Map();
+        one.prims = one.prims.gather([]); one.vertices = one.vertices.gather([]); one.primGroups = new Map(); one.vertexGroups = new Map(); one.edgeGroups = new Map();
         items.push({ geo: one, value: i, attr: attrsOf(src, 'point', i) });
       }
     } else if (p.mode === 'prims') {

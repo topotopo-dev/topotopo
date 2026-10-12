@@ -342,6 +342,7 @@ export function reversePrims(g: Geometry, mask: ArrayLike<number> | null = null)
   }
   for (let v = 0; v < g.numVertices; v++) out.vertexPoint[v] = g.vertexPoint[order[v]];
   out.vertices = g.vertices.gather(order);
+  for (const [k, m] of g.vertexGroups) out.vertexGroups.set(k, Uint8Array.from(order, (v) => m[v]));
   const vn = out.vertices.get('N');
   if (vn && vn.type === 'float') {
     const d = vn.data as Float64Array;
