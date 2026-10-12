@@ -54,7 +54,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 |---|---|---|---|
 | P1-A | `polybevel` (edge + point, chamfer/round, segments) | queued | after C1 |
 | P1-B | `polysplit`/`knife`, `polybridge`, `polyfill` (quad), edge loop/ring/dissolve/collapse/divide ops | queued | after C1 |
-| P1-C | Deformers: `soft_transform` with falloff ramps, `lattice`, `path_deform`, `point_deform`, `rest` | running (agent) | started 2026-10-12 from cc5fb0a |
+| P1-C | Deformers: `soft_transform` with falloff ramps, `lattice`, `path_deform`, `point_deform`, `rest` | merged | 553beb1, 2026-10-12. 107 nodes. Limits: lattice cage must be axis-aligned; path_deform polylines only; point_deform max_points 4 default (8 measured better) |
 | P1-D | UVs: `uv_unwrap` (xatlas), `uv_layout`, `uv_flatten` (LSCM), UV view in render | running (agent) | started 2026-10-12 from cc5fb0a |
 | P1-E | `remesh_isotropic`, attribute-preserving `decimate` (meshopt), `mesh_repair`, `lod` | queued | after C1 |
 | P1-F | Measures: `curvature`, `occlusion`/`thickness` bake, `distance`, `assert`/`expect`, `explain` + `diff` MCP tools | queued | |
@@ -75,6 +75,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-12: P1-C merged (553beb1): soft_transform, lattice, path_deform, point_deform, rest.
 - 2026-10-12: text node now defaults to the bundled DejaVu Sans with a glyph layout fallback (74db5c2); goldens no longer machine dependent. External-agent briefs written.
 - 2026-10-12: PC crashed with four agents running. P0-C1 was complete on disk and was merged (ddcd449); P1-C, P1-D, P2-E1 resumed from their transcripts (little on disk). `.gitattributes` added (LF).
 - 2026-10-12: roadmap written, decisions taken, LICENSE added, run started. P0-A, P0-B, P0-C1 launched.

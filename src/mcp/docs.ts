@@ -5,7 +5,7 @@ import { CATEGORY_ORDER } from '../graph/registry.ts';
 export const INSTRUCTIONS = `Polyforge: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
 WORKFLOW
-1. catalog → see node types (95+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…).
+1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…).
 2. help {nodes:[...]} for exact params before using unfamiliar nodes; help {topic:"wrangle"|"graph"|"recipes"…} for concepts.
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals). inspect for numbers (bbox, attributes, watertightness).

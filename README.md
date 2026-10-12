@@ -4,7 +4,7 @@ A procedural geometry engine in the spirit of Houdini SOPs. You build JSON node 
 geometry. It runs headless (Node + WebAssembly, no GPU) and plugs into LLM agents as an **MCP server**. The core is
 browser-ready, so it can sit under a future GUI.
 
-- **97 node types**: generators, curves and sweeps, deformers, attributes and groups, polygon modelling, scattering and
+- **over 100 node types**: generators, curves and sweeps, deformers, attributes and groups, polygon modelling, scattering and
   instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit, L-systems, text, loops, a frame solver, assets,
   and code nodes.
 - **Time**: every cook happens at a frame. Only time-dependent nodes re-cook when the frame changes, and the `solver`
