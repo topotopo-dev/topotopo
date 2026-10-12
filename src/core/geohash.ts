@@ -50,7 +50,10 @@ export function geoContentHash(g: Geometry): string {
     const src = g.packedSources.map(geoContentHash);
     const X = g.packedXform!, S = g.packedSource!;
     for (let p = 0; p < g.numPrims; p++) {
-      if (!g.primKind[p]) continue;
+      if (g.primKind[p] !== 1) {
+        if (g.primKind[p]) { h.w(p); h.w(g.primKind[p]); } // spline kinds (2 Bezier, 3 NURBS)
+        continue;
+      }
       h.w(p); h.s(src[S[p]] ?? '');
       for (let k = 0; k < 9; k++) h.q(X[p * 9 + k], 1e9);
     }

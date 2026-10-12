@@ -63,8 +63,15 @@ export function geoToJSON(g: Geometry) {
   if (g.hasPacked()) {
     const prims: number[] = [], source: number[] = [], xform: number[] = [];
     const k = g.primKind!, S = g.packedSource!, X = g.packedXform!;
-    for (let p = 0; p < k.length; p++) if (k[p]) { prims.push(p); source.push(S[p]); for (let c = 0; c < 9; c++) xform.push(X[p * 9 + c]); }
+    for (let p = 0; p < k.length; p++) if (k[p] === 1) { prims.push(p); source.push(S[p]); for (let c = 0; c < 9; c++) xform.push(X[p * 9 + c]); }
     out.packed = { prims, source, xform, sources: g.packedSources.map(geoToJSON) };
+  }
+  // spline prims (only when present): prim numbers and kinds (2 Bezier, 3 NURBS); order, knots and weights are the
+  // ordinary attributes spline_order, knots and Pw
+  if (g.hasSplines()) {
+    const prims: number[] = [], kind: number[] = [];
+    g.primKind!.forEach((k, p) => { if (k >= 2) { prims.push(p); kind.push(k); } });
+    out.splines = { prims, kind };
   }
   // heightfield volumes (written only when present): grid + layers (SDF volumes are functions and are not stored)
   const hfs = heightfieldsOf(g);
@@ -95,6 +102,16 @@ export function geoFromJSON(j: any): Geometry {
     for (let i = 0; i + 1 < arr.length; i += 2)
       if (arr[i] >= 0 && arr[i] < g.numPoints && arr[i + 1] >= 0 && arr[i + 1] < g.numPoints) set.add(arr[i], arr[i + 1]);
     g.edgeGroups.set(k, set);
+  }
+  const sp = j.splines;
+  if (sp && Array.isArray(sp.prims) && sp.prims.length) {
+    g.ensurePacked();
+    sp.prims.forEach((p: number, i: number) => {
+      const k = Number(sp.kind?.[i]);
+      if (!(Number.isInteger(p) && p >= 0 && p < g.numPrims)) throw new Error(`spline prim ${p}: out of range (${g.numPrims} prims)`);
+      if (k !== 2 && k !== 3) throw new Error(`spline prim ${p}: kind ${sp.kind?.[i]} (2 = Bezier, 3 = NURBS)`);
+      g.primKind![p] = k;
+    });
   }
   const pk = j.packed;
   if (pk && Array.isArray(pk.prims) && pk.prims.length) {
