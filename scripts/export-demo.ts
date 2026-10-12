@@ -4,6 +4,7 @@
 //                      (import settings + steps), objects.glb (road + instances), instances.csv + instances.meshes.json
 //                      + meshes/*.glb
 //   scene.glb          node "scene": terrain mesh, road and EXT_mesh_gpu_instancing instances with per-instance attributes
+//   scene_expanded.glb the same with the instances as real geometry (importers without EXT_mesh_gpu_instancing)
 //   scene.usda         the same as a USD stage: PointInstancer with per-instance primvars, UsdPreviewSurface materials
 //   scene.geo          the same as Houdini JSON geometry (fpreal32): PackedGeometry prims with shared embedded geometry
 //   instances.csv      node "instances" as Unreal PCG rows (+ instances.meshes.json + instances_meshes/*.glb)
@@ -60,6 +61,7 @@ const write = async (g: Geometry, format: ExportFormat, rel: string, o: FileExpo
 
 await write(landscape, 'unreal_landscape', 'landscape');
 await write(scene, 'glb', 'scene.glb');
+await write(scene, 'glb', 'scene_expanded.glb', { instancing: 'expand' });
 await write(scene, 'usda', 'scene.usda');
 await write(scene, 'geo', 'scene.geo', { precision: 32 });
 await write(instances, 'csv', 'instances.csv', { pcg: true });

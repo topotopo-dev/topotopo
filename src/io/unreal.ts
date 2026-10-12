@@ -7,6 +7,8 @@
 //   layers/<layer>.png       every other heightfield layer as an 8-bit weight map (0..1 layers as they are, other
 //                            ranges normalised, the range recorded in the manifest)
 //   objects.glb              the geometry's meshes and packed instances (EXT_mesh_gpu_instancing), when it has prims
+//   objects_expanded.glb     the same with the instances as real geometry (for importers without the extension;
+//                            written up to EXPANDED_TRIANGLE_LIMIT triangles)
 //   instances.csv            the instance stream as Unreal PCG rows (one row per packed instance, Mesh column)
 //   instances.meshes.json    Mesh → meshes/<Mesh>.glb, one GLB per packed source (metres, Y-up, at the origin)
 //
@@ -23,10 +25,13 @@ import { exportGLB } from './gltf.ts';
 import { exportCSV, instanceMeshesJSON } from './points.ts';
 import { safeName } from './common.ts';
 import type { ExportOptions } from './common.ts';
-import { flattenSource } from '../core/packed.ts';
+import { expandedTriangles, flattenSource } from '../core/packed.ts';
 import { packedSourceNames } from './common.ts';
 
 export interface BundleFile { path: string; bytes: Uint8Array }
+
+/** objects_expanded.glb is written while the expanded instances stay below this many triangles. */
+export const EXPANDED_TRIANGLE_LIMIT = 2_000_000;
 
 const SECTION_SIZES = [7, 15, 31, 63, 127, 255];
 const SECTIONS_PER_COMPONENT = [1, 2];
@@ -76,7 +81,7 @@ export const LANDSCAPE_IMPORT_STEPS = [
   'Location: landscape.new_landscape_location_cm (the panel centres the landscape on it; the actor ends at actor_location_cm). Rotation 0, 0, 0. Scale: landscape.scale.',
   'Layers: give the landscape material one layer per layers[] entry (Landscape Layer Blend), then in the import panel (or later: Paint > Target Layers > right-click > Import) assign layers/<name>.png to each.',
   'Click Import. Height check: world Z (cm) = location.z + (value - 32768) * scale.z / 128, i.e. height_min..height_max metres x 100.',
-  'Objects: import objects.glb (meshes + EXT_mesh_gpu_instancing instances) with the Interchange glTF importer at location 0; Unreal maps glTF Y-up metres to Z-up centimetres (X = x, Y = z, Z = y), matching the landscape.',
+  'Objects: import objects.glb (meshes + EXT_mesh_gpu_instancing instances) with the Interchange glTF importer at location 0; Unreal maps glTF Y-up metres to Z-up centimetres (X = x, Y = z, Z = y), matching the landscape. If the importer rejects EXT_mesh_gpu_instancing, import objects_expanded.glb (the instances as real meshes, one per source name).',
   'Instances for PCG: import meshes/*.glb as static meshes, read instances.csv (Position/Rotation/Scale in cm and degrees, Mesh = the static mesh name) with the Polyforge PCG loader or a DataTable (pcg_struct export), and spawn by Mesh.',
 ];
 
@@ -124,11 +129,15 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
     });
   }
   // meshes and instances of the same geometry
-  let objects: string | null = null, instances: Record<string, any> | null = null;
+  let objects: string | null = null, expanded: string | null = null, instances: Record<string, any> | null = null;
   const glbOpts: ExportOptions = { materials: o.materials, readFile: o.readFile, warn: o.warn, custom: o.custom };
   if (g.numPrims > 0) {
     files.push({ path: 'objects.glb', bytes: await exportGLB(g, glbOpts) });
     objects = 'objects.glb';
+    if (g.hasPacked() && expandedTriangles(g) <= EXPANDED_TRIANGLE_LIMIT) {
+      files.push({ path: 'objects_expanded.glb', bytes: await exportGLB(g, { ...glbOpts, instancing: 'expand' }) });
+      expanded = 'objects_expanded.glb';
+    }
   }
   if (g.hasPacked()) {
     files.push({ path: 'instances.csv', bytes: new TextEncoder().encode(exportCSV(g, { pcg: true, scale: 100, warn: (m) => { if (!/other point/.test(m)) o.warn?.(m); } })) });
@@ -161,6 +170,7 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
     axes: ue.axes,
     layers,
     objects,
+    objects_expanded: expanded,
     instances,
     manual_import: LANDSCAPE_IMPORT_STEPS,
   };

@@ -696,7 +696,7 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
   const res = await exportFilesAsync(lg, 'unreal_landscape', 'bundle/level', {});
   const byPath = new Map(res.files.map((f) => [f.path, f.bytes]));
   const names = [...byPath.keys()];
-  const need = ['landscape.json', 'heightmap.png', 'heightmap.json', 'objects.glb', 'instances.csv', 'instances.meshes.json', 'meshes/bush.glb', 'layers/rock.png', 'layers/flow.png'];
+  const need = ['landscape.json', 'heightmap.png', 'heightmap.json', 'objects.glb', 'objects_expanded.glb', 'instances.csv', 'instances.meshes.json', 'meshes/bush.glb', 'layers/rock.png', 'layers/flow.png'];
   check(need.every((n) => byPath.has('bundle/level/' + n)), `bundle files: ${names.map((n) => n.replace('bundle/level/', '')).join(', ')}`);
   const man = JSON.parse(new TextDecoder().decode(byPath.get('bundle/level/landscape.json')!));
   const side = JSON.parse(new TextDecoder().decode(byPath.get('bundle/level/heightmap.json')!));
@@ -713,6 +713,8 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
   check(hm.width === 127 && hm.bitDepth === 16 && rk.width === 127 && rk.bitDepth === 8 && man.layers.some((l: any) => l.name === 'rock' && l.file === 'layers/rock.png'), 'bundle: 16-bit heightmap and 8-bit layer PNGs decode at 127×127');
   check(!man.layers.some((l: any) => l.name === 'height') && man.instances.count === 40 && man.instances.sources.join() === 'bush' && man.objects === 'objects.glb', 'bundle manifest: layers (no height), instances, objects');
   await validate(byPath.get('bundle/level/objects.glb')!, 'bundle objects.glb');
+  const oe = await importGeometryAsync(byPath.get('bundle/level/objects_expanded.glb')!, 'glb');
+  check(!oe.hasPacked() && oe.numPrims === 40 * 80 && man.objects_expanded === 'objects_expanded.glb', `bundle objects_expanded.glb: the instances as real geometry (${oe.numPrims} triangles)`);
   check(parseCSVText(new TextDecoder().decode(byPath.get('bundle/level/instances.csv')!)).length - 1 === 40, 'bundle instances.csv: 40 rows');
   const viaJson = await exportFilesAsync(lg, 'unreal_landscape', 'x/terrain.json', {});
   check(viaJson.files[0].path === 'x/terrain.json' && viaJson.files.some((f) => f.path === 'x/heightmap.png'), 'unreal_landscape with a .json path names the manifest');
@@ -730,7 +732,7 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
     const out = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'export-demo.ts'), tmp], { encoding: 'utf8', cwd: ROOT });
     const info = JSON.parse(fs.readFileSync(path.join(tmp, 'demo.json'), 'utf8'));
     const files: string[] = info.files.map((f: any) => f.path);
-    const need = ['landscape/landscape.json', 'landscape/heightmap.png', 'landscape/objects.glb', 'landscape/instances.csv', 'scene.glb', 'scene.usda', 'scene.geo', 'instances.csv', 'instances.meshes.json'];
+    const need = ['landscape/landscape.json', 'landscape/heightmap.png', 'landscape/objects.glb', 'landscape/objects_expanded.glb', 'landscape/instances.csv', 'scene.glb', 'scene_expanded.glb', 'scene.usda', 'scene.geo', 'instances.csv', 'instances.meshes.json'];
     check(need.every((f) => files.includes(f) && fs.statSync(path.join(tmp, f)).size > 0) && info.scene.instances > 100 && info.warnings.length === 0 && /files, /.test(out),
       `export:demo: ${files.length} files, ${info.scene.instances} instances of ${info.scene.sources} sources in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     const man = JSON.parse(fs.readFileSync(path.join(tmp, 'landscape', 'landscape.json'), 'utf8'));
