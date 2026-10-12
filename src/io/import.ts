@@ -1,20 +1,64 @@
-// Importers: OBJ, STL, PLY, glTF/GLB, native JSON.
-import { GeoBuilder, Geometry } from '../core/geometry.ts';
+// Importers: OBJ, STL, PLY, glTF/GLB (gltf-transform, src/io/gltf.ts), native JSON, Houdini .geo (src/io/hgeo.ts),
+// CSV and points JSON (src/io/points.ts).
+//
+// importGeometry() is synchronous and covers every format except glTF, whose reader (gltf-transform) is
+// asynchronous: use importGeometryAsync() for glb/gltf (it handles every format, and reads external .bin files).
+import { Geometry } from '../core/geometry.ts';
 import { geoFromJSON } from './json.ts';
-import { m4apply, m4applyDir, m4fromQuat, m4identity, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
-import type { Mat4 } from '../core/math.ts';
+import { importGLTFAsync } from './gltf.ts';
+import { importHoudiniGeo } from './hgeo.ts';
+import { importCSV, importPointsJSON, isPointsJSON } from './points.ts';
+
+export { importGLTFAsync } from './gltf.ts';
+export { importHoudiniGeo } from './hgeo.ts';
+export { importCSV, importPointsJSON } from './points.ts';
 
 const td = new TextDecoder();
 
-export function importGeometry(bytes: Uint8Array, fmt: string): Geometry {
+export const IMPORT_FORMATS = ['obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'csv', 'pointsjson'];
+
+export interface ImportOptions {
+  /** reads other files by path (glTF external buffers); usually Host.readFile */
+  readFile?: (path: string) => Promise<Uint8Array>;
+  /** path of the file, to resolve relative references */
+  path?: string;
+  /** receives non-fatal problems (skipped primitives or attributes) */
+  warn?: (msg: string) => void;
+}
+
+/** Format from a file name: the extension, with ".points.json" → pointsjson. */
+export function importFormatFromPath(path: string): string {
+  const p = String(path).split('?')[0].toLowerCase();
+  if (p.endsWith('.points.json')) return 'pointsjson';
+  return p.slice(p.lastIndexOf('.') + 1);
+}
+
+/** JSON of any supported flavour: polyforge geometry, points stream, or Houdini .geo (a key/value array). */
+function importAnyJSON(j: any, warn?: (m: string) => void): Geometry {
+  if (Array.isArray(j)) return importHoudiniGeo(j, warn);
+  if (isPointsJSON(j)) return importPointsJSON(j);
+  return geoFromJSON(j);
+}
+
+/** Synchronous import for every format except glb/gltf (see importGeometryAsync). */
+export function importGeometry(bytes: Uint8Array, fmt: string, opts: ImportOptions = {}): Geometry {
   switch (fmt) {
     case 'obj': return importOBJ(td.decode(bytes));
     case 'stl': return importSTL(bytes);
     case 'ply': return importPLY(bytes);
-    case 'glb': case 'gltf': return importGLTF(bytes);
-    case 'json': return geoFromJSON(JSON.parse(td.decode(bytes)));
-    default: throw new Error(`unsupported import format "${fmt}" (obj, stl, ply, glb, gltf, json)`);
+    case 'json': return importAnyJSON(JSON.parse(td.decode(bytes)), opts.warn);
+    case 'geo': case 'hgeo': return importHoudiniGeo(td.decode(bytes), opts.warn);
+    case 'csv': return importCSV(td.decode(bytes));
+    case 'pointsjson': return importPointsJSON(JSON.parse(td.decode(bytes)));
+    case 'glb': case 'gltf': throw new Error(`${fmt} import is asynchronous (gltf-transform): use importGeometryAsync`);
+    default: throw new Error(`unsupported import format "${fmt}" (${IMPORT_FORMATS.join(', ')})`);
   }
+}
+
+/** Import any supported format. */
+export async function importGeometryAsync(bytes: Uint8Array, fmt: string, opts: ImportOptions = {}): Promise<Geometry> {
+  if (fmt === 'glb' || fmt === 'gltf') return importGLTFAsync(bytes, opts);
+  return importGeometry(bytes, fmt, opts);
 }
 
 export function importOBJ(text: string): Geometry {
@@ -169,87 +213,4 @@ export function importPLY(bytes: Uint8Array): Geometry {
   }
   for (const [k, vals] of Object.entries(verts)) if (!used.has(k)) (g.points.add(k, 'float', 1).data as Float64Array).set(vals);
   return g;
-}
-
-export function importGLTF(bytes: Uint8Array): Geometry {
-  let json: any, bin: Uint8Array | null = null;
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (dv.getUint32(0, true) === 0x46546c67) {
-    let off = 12;
-    while (off < bytes.byteLength) {
-      const len = dv.getUint32(off, true), type = dv.getUint32(off + 4, true);
-      const chunk = bytes.subarray(off + 8, off + 8 + len);
-      if (type === 0x4e4f534a) json = JSON.parse(td.decode(chunk));
-      else if (type === 0x004e4942) bin = chunk;
-      off += 8 + len;
-    }
-  } else json = JSON.parse(td.decode(bytes));
-  if ((json.extensionsUsed ?? []).some((e: string) => /draco|meshopt/i.test(e))) throw new Error('compressed glTF (Draco/meshopt) is not supported; export uncompressed');
-  const buffers: Uint8Array[] = (json.buffers ?? []).map((b: any, i: number) => {
-    if (b.uri?.startsWith('data:')) return Uint8Array.from(atob(b.uri.split(',')[1]), (c) => c.charCodeAt(0));
-    if (i === 0 && bin) return bin;
-    throw new Error('external glTF buffers are not supported; use .glb or embedded data URIs');
-  });
-  const COMP: Record<number, [number, (d: DataView, o: number) => number, number]> = {
-    5120: [1, (d, o) => d.getInt8(o), 127], 5121: [1, (d, o) => d.getUint8(o), 255], 5122: [2, (d, o) => d.getInt16(o, true), 32767],
-    5123: [2, (d, o) => d.getUint16(o, true), 65535], 5125: [4, (d, o) => d.getUint32(o, true), 4294967295], 5126: [4, (d, o) => d.getFloat32(o, true), 1],
-  };
-  const NC: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
-  const accessor = (i: number): number[][] => {
-    const a = json.accessors[i];
-    const bv = json.bufferViews[a.bufferView];
-    const buf = buffers[bv.buffer];
-    const [cs, rd, mx] = COMP[a.componentType];
-    const nc = NC[a.type];
-    const stride = bv.byteStride || cs * nc;
-    const d = new DataView(buf.buffer, buf.byteOffset + (bv.byteOffset ?? 0) + (a.byteOffset ?? 0));
-    const out: number[][] = [];
-    for (let k = 0; k < a.count; k++) {
-      const e: number[] = [];
-      for (let c = 0; c < nc; c++) { const v = rd(d, k * stride + c * cs); e.push(a.normalized ? Math.max(v / mx, -1) : v); }
-      out.push(e);
-    }
-    return out;
-  };
-  const parts: Geometry[] = [];
-  const visit = (ni: number, parent: Mat4) => {
-    const n = json.nodes[ni];
-    let m = m4identity();
-    if (n.matrix) m = Float64Array.from(n.matrix);
-    else {
-      const t = n.translation ?? [0, 0, 0], r = n.rotation ?? [0, 0, 0, 1], s = n.scale ?? [1, 1, 1];
-      m = m4mul(m4translate(t[0], t[1], t[2]), m4mul(m4fromQuat(r), m4scale(s[0], s[1], s[2])));
-    }
-    const world = m4mul(parent, m);
-    if (n.mesh !== undefined) {
-      const mesh = json.meshes[n.mesh];
-      for (const prim of mesh.primitives) {
-        const mode = prim.mode ?? 4;
-        const P = accessor(prim.attributes.POSITION);
-        const idx = prim.indices !== undefined ? accessor(prim.indices).map((x) => x[0]) : P.map((_, i) => i);
-        const b = new GeoBuilder();
-        const nm = m4normalMatrix(world);
-        for (const q of P) { const w = m4apply(world, q[0], q[1], q[2]); b.addPoint(w[0], w[1], w[2]); }
-        const setPt = (name: string, acc: number | undefined, size: number, fn?: (v: number[]) => number[]) => {
-          if (acc === undefined) return;
-          const a = b.attrib('point', name, size);
-          accessor(acc).forEach((v, i) => a.set(i, fn ? fn(v) : v.slice(0, size)));
-        };
-        setPt('N', prim.attributes.NORMAL, 3, (v) => { const r = m4applyDir(nm, v[0], v[1], v[2]) as number[]; const l = Math.hypot(r[0], r[1], r[2]) || 1; return r.map((x) => x / l); });
-        setPt('uv', prim.attributes.TEXCOORD_0, 3, (v) => [v[0], 1 - v[1], 0]);
-        setPt('Cd', prim.attributes.COLOR_0, 3, (v) => v.slice(0, 3));
-        if (mode === 4) for (let i = 0; i + 2 < idx.length; i += 3) b.addPrim([idx[i], idx[i + 1], idx[i + 2]]);
-        else if (mode === 1) for (let i = 0; i + 1 < idx.length; i += 2) b.addPrim([idx[i], idx[i + 1]], false);
-        else if (mode === 3 || mode === 2) b.addPrim(idx, mode === 2 ? true : false);
-        const g = b.build();
-        if (n.name || mesh.name) { const a = g.prims.add('name', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, n.name ?? mesh.name); }
-        parts.push(g);
-      }
-    }
-    for (const c of n.children ?? []) visit(c, world);
-  };
-  const scene = json.scenes?.[json.scene ?? 0];
-  const roots: number[] = scene?.nodes ?? json.nodes?.map((_: any, i: number) => i) ?? [];
-  for (const r of roots) visit(r, m4identity());
-  return Geometry.merge(parts);
 }

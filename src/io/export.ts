@@ -1,198 +1,33 @@
-// Exporters: glTF binary (GLB), OBJ, STL, PLY, USDA, native JSON.
+// Exporters: glTF/GLB (gltf-transform, src/io/gltf.ts), OBJ, STL, PLY, USDA, native JSON, Houdini .geo
+// (src/io/hgeo.ts), CSV and points JSON (src/io/points.ts).
+//
+// exportGeometry() is synchronous and covers every format except glTF, whose writer (gltf-transform) is
+// asynchronous: use exportGeometryAsync() for glb/gltf (it handles every format).
 import { Geometry } from '../core/geometry.ts';
 import { primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { geoToJSON } from './json.ts';
+import { exportGLB, exportGLTF } from './gltf.ts';
+import { exportHoudiniGeo } from './hgeo.ts';
+import { exportCSV, exportPointsJSON } from './points.ts';
+import { isolatedMask, pieces, xf } from './common.ts';
+import type { ExportOptions } from './common.ts';
 
-export interface ExportOptions {
-  /** multiply positions (e.g. 100 for metres → centimetres) */
-  scale?: number;
-  /** 'y' (default) or 'z' to convert to a Z-up convention */
-  upAxis?: 'y' | 'z';
-  /** split into separate meshes/objects by the prim string attribute "name" */
-  splitByName?: boolean;
-  /** cusp angle for computed normals */
-  cuspAngle?: number;
-  /** include extra float point attributes (glTF _NAME, PLY properties, USD primvars) */
-  custom?: boolean;
-}
-
-export interface MeshBuffers {
-  positions: Float32Array;
-  normals: Float32Array;
-  uvs: Float32Array | null;
-  colors: Float32Array | null;
-  indices: Uint32Array;
-  custom: { name: string; size: number; data: Float32Array }[];
-}
+export type { ExportOptions } from './common.ts';
+export { exportGLB, exportGLTF } from './gltf.ts';
+export { exportHoudiniGeo } from './hgeo.ts';
+export { exportCSV, exportPointsJSON } from './points.ts';
 
 const SKIP_CUSTOM = new Set(['P', 'N', 'uv', 'Cd']);
 
-function xf(x: number, y: number, z: number, o: ExportOptions): [number, number, number] {
-  const s = o.scale ?? 1;
-  return o.upAxis === 'z' ? [x * s, -z * s, y * s] : [x * s, y * s, z * s];
-}
-
-/** Welded triangle buffers with per-corner normals/uv/colours resolved by Houdini precedence. */
-export function triangleBuffers(g: Geometry, o: ExportOptions = {}): MeshBuffers {
-  const { tris } = triangulate(g);
-  const vprim = g.vertexPrims();
-  const vN = g.vertices.get('N'), pN = g.points.get('N');
-  const normals = resolveVertexNormals(g, o.cuspAngle ?? 60);
-  const nOf = (v: number): number[] => [normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]];
-  const uvA = g.vertices.get('uv') ?? g.points.get('uv');
-  const uvVtx = !!g.vertices.get('uv');
-  const cdF = g.findAttrib('Cd', ['vertex', 'point', 'prim', 'detail']);
-  const cOf = (v: number): number[] | null => {
-    if (!cdF) return null;
-    const a = cdF.attr;
-    const i = cdF.cls === 'vertex' ? v : cdF.cls === 'point' ? g.vertexPoint[v] : cdF.cls === 'prim' ? vprim[v] : 0;
-    const c = a.get(i);
-    return Array.isArray(c) ? c : [c as number, c as number, c as number];
-  };
-  const customAttrs = o.custom ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && a.type !== 'string' && a.size <= 4) : [];
-  const fastKey = !vN && !!pN && !uvVtx && (!cdF || cdF.cls === 'point' || cdF.cls === 'detail');
-  const map = new Map<string | number, number>();
-  const P: number[] = [], N: number[] = [], UV: number[] = [], C: number[] = [];
-  const CU: number[][] = customAttrs.map(() => []);
-  const idx = new Uint32Array(tris.length);
-  const Pd = g.P;
-  const q = (x: number) => Math.round(x * 1e5);
-  for (let k = 0; k < tris.length; k++) {
-    const v = tris[k], pt = g.vertexPoint[v];
-    const n = nOf(v), c = cOf(v);
-    const uv = uvA ? (uvA.get(uvVtx ? v : pt) as number[]) : null;
-    const key = fastKey ? pt : `${pt}|${q(n[0])},${q(n[1])},${q(n[2])}|${uv ? q(uv[0]) + ',' + q(uv[1]) : ''}|${c ? q(c[0]) + ',' + q(c[1]) + ',' + q(c[2]) : ''}`;
-    let id = map.get(key);
-    if (id === undefined) {
-      id = P.length / 3;
-      map.set(key, id);
-      P.push(...xf(Pd[pt * 3], Pd[pt * 3 + 1], Pd[pt * 3 + 2], o));
-      const nn = o.upAxis === 'z' ? [n[0], -n[2], n[1]] : n;
-      N.push(nn[0], nn[1], nn[2]);
-      if (uv) UV.push(uv[0], 1 - uv[1]);
-      if (c) C.push(c[0], c[1], c[2]);
-      customAttrs.forEach(([, a], ci) => { const val = a.get(pt); if (Array.isArray(val)) CU[ci].push(...val); else CU[ci].push(val as number); });
-    }
-    idx[k] = id;
-  }
-  return {
-    positions: Float32Array.from(P), normals: Float32Array.from(N),
-    uvs: uvA ? Float32Array.from(UV) : null, colors: cdF ? Float32Array.from(C) : null, indices: idx,
-    custom: customAttrs.map(([name, a], ci) => ({ name, size: a.size, data: Float32Array.from(CU[ci]) })),
-  };
-}
-
-function lineBuffers(g: Geometry, o: ExportOptions) {
-  const P: number[] = [], I: number[] = [];
-  const Pd = g.P;
-  const map = new Map<number, number>();
-  const id = (pt: number) => { let i = map.get(pt); if (i === undefined) { i = P.length / 3; map.set(pt, i); P.push(...xf(Pd[pt * 3], Pd[pt * 3 + 1], Pd[pt * 3 + 2], o)); } return i; };
-  for (let pr = 0; pr < g.numPrims; pr++) {
-    if (g.primClosed[pr]) continue;
-    for (let v = g.primStart[pr]; v < g.primStart[pr + 1] - 1; v++) I.push(id(g.vertexPoint[v]), id(g.vertexPoint[v + 1]));
-  }
-  return { positions: Float32Array.from(P), indices: Uint32Array.from(I) };
-}
-
 function isolatedPoints(g: Geometry, o: ExportOptions) {
-  const used = new Uint8Array(g.numPoints);
-  for (let v = 0; v < g.numVertices; v++) used[g.vertexPoint[v]] = 1;
+  const iso = isolatedMask(g);
   const P: number[] = [], C: number[] = [];
   const cd = g.points.get('Cd');
-  for (let i = 0; i < g.numPoints; i++) if (!used[i]) {
+  for (let i = 0; i < g.numPoints; i++) if (iso[i]) {
     P.push(...xf(g.P[i * 3], g.P[i * 3 + 1], g.P[i * 3 + 2], o));
     if (cd) C.push(...(cd.get(i) as number[]));
   }
   return { positions: Float32Array.from(P), colors: cd ? Float32Array.from(C) : null };
-}
-
-function pieces(g: Geometry, o: ExportOptions): { name: string; geo: Geometry }[] {
-  const na = g.prims.get('name');
-  if (!o.splitByName || !na || na.type !== 'string') return [{ name: 'mesh', geo: g }];
-  const names = [...new Set(na.data as string[])];
-  if (names.length <= 1) return [{ name: names[0] || 'mesh', geo: g }];
-  const out = names.map((n) => ({ name: n || 'unnamed', geo: g.subsetPrims(Uint8Array.from(na.data as string[], (x) => (x === n ? 1 : 0))) }));
-  const used = new Uint8Array(g.numPoints);
-  for (let v = 0; v < g.numVertices; v++) used[g.vertexPoint[v]] = 1;
-  if (used.some((u) => !u)) out.push({ name: 'points', geo: g.subsetPoints(used.map((u) => (u ? 0 : 1))) });
-  return out;
-}
-
-// ---------------------------------------------------------------- GLB
-
-export function exportGLB(g: Geometry, o: ExportOptions = {}): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  let byteLen = 0;
-  const json: any = {
-    asset: { version: '2.0', generator: 'polyforge' },
-    scene: 0, scenes: [{ nodes: [] }], nodes: [], meshes: [], accessors: [], bufferViews: [], buffers: [],
-    materials: [{ name: 'default', pbrMetallicRoughness: { baseColorFactor: [0.8, 0.8, 0.8, 1], metallicFactor: 0, roughnessFactor: 0.8 }, doubleSided: false }],
-  };
-  const addView = (arr: Float32Array | Uint32Array, target?: number) => {
-    const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
-    const pad = (4 - (byteLen % 4)) % 4;
-    if (pad) { chunks.push(new Uint8Array(pad)); byteLen += pad; }
-    json.bufferViews.push({ buffer: 0, byteOffset: byteLen, byteLength: bytes.byteLength, ...(target ? { target } : {}) });
-    chunks.push(bytes);
-    byteLen += bytes.byteLength;
-    return json.bufferViews.length - 1;
-  };
-  const addAcc = (arr: Float32Array | Uint32Array, type: string, nc: number, target?: number, minmax = false) => {
-    const view = addView(arr, target);
-    const acc: any = { bufferView: view, componentType: arr instanceof Float32Array ? 5126 : 5125, count: arr.length / nc, type };
-    if (minmax) {
-      const mn = new Array(nc).fill(Infinity), mx = new Array(nc).fill(-Infinity);
-      for (let i = 0; i < arr.length; i++) { const c = i % nc; mn[c] = Math.min(mn[c], arr[i]); mx[c] = Math.max(mx[c], arr[i]); }
-      acc.min = mn; acc.max = mx;
-    }
-    json.accessors.push(acc);
-    return json.accessors.length - 1;
-  };
-  const TYPES = ['SCALAR', 'VEC2', 'VEC3', 'VEC4'];
-  for (const { name, geo } of pieces(g, { splitByName: true, ...o })) {
-    const prims: any[] = [];
-    let hasPoly = false;
-    for (let p = 0; p < geo.numPrims; p++) if (geo.primClosed[p]) { hasPoly = true; break; }
-    if (hasPoly) {
-      const m = triangleBuffers(geo, o);
-      if (m.indices.length) {
-        const attributes: any = { POSITION: addAcc(m.positions, 'VEC3', 3, 34962, true), NORMAL: addAcc(m.normals, 'VEC3', 3, 34962) };
-        if (m.uvs) attributes.TEXCOORD_0 = addAcc(m.uvs, 'VEC2', 2, 34962);
-        if (m.colors) attributes.COLOR_0 = addAcc(m.colors, 'VEC3', 3, 34962);
-        for (const c of m.custom) attributes['_' + c.name.toUpperCase()] = addAcc(c.data, TYPES[c.size - 1], c.size, 34962);
-        prims.push({ attributes, indices: addAcc(m.indices, 'SCALAR', 1, 34963), material: 0, mode: 4 });
-      }
-    }
-    const l = lineBuffers(geo, o);
-    if (l.indices.length) prims.push({ attributes: { POSITION: addAcc(l.positions, 'VEC3', 3, 34962, true) }, indices: addAcc(l.indices, 'SCALAR', 1, 34963), mode: 1 });
-    const pts = isolatedPoints(geo, o);
-    if (pts.positions.length) {
-      const attributes: any = { POSITION: addAcc(pts.positions, 'VEC3', 3, 34962, true) };
-      if (pts.colors) attributes.COLOR_0 = addAcc(pts.colors, 'VEC3', 3, 34962);
-      prims.push({ attributes, mode: 0 });
-    }
-    if (!prims.length) continue;
-    json.meshes.push({ name, primitives: prims });
-    json.nodes.push({ name, mesh: json.meshes.length - 1 });
-    json.scenes[0].nodes.push(json.nodes.length - 1);
-  }
-  const pad = (4 - (byteLen % 4)) % 4;
-  if (pad) { chunks.push(new Uint8Array(pad)); byteLen += pad; }
-  json.buffers.push({ byteLength: byteLen });
-  let jsonBytes = new TextEncoder().encode(JSON.stringify(json));
-  const jpad = (4 - (jsonBytes.length % 4)) % 4;
-  if (jpad) { const t = new Uint8Array(jsonBytes.length + jpad).fill(0x20); t.set(jsonBytes); jsonBytes = t; }
-  const total = 12 + 8 + jsonBytes.length + 8 + byteLen;
-  const out = new Uint8Array(total);
-  const dv = new DataView(out.buffer);
-  dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true);
-  dv.setUint32(12, jsonBytes.length, true); dv.setUint32(16, 0x4e4f534a, true);
-  out.set(jsonBytes, 20);
-  let off = 20 + jsonBytes.length;
-  dv.setUint32(off, byteLen, true); dv.setUint32(off + 4, 0x004e4942, true);
-  off += 8;
-  for (const c of chunks) { out.set(c, off); off += c.byteLength; }
-  return out;
 }
 
 // ---------------------------------------------------------------- OBJ
@@ -361,19 +196,40 @@ export function exportUSDA(g: Geometry, o: ExportOptions = {}): string {
   return out.join('\n');
 }
 
-export type ExportFormat = 'glb' | 'obj' | 'stl' | 'ply' | 'usda' | 'json';
+export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson';
 
+export const EXPORT_FORMATS: ExportFormat[] = ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'pointsjson'];
+
+/** Format from a file name: the extension, with ".points.json" → pointsjson. */
+export function exportFormatFromPath(path: string): string {
+  const p = String(path).split('?')[0].toLowerCase();
+  if (p.endsWith('.points.json')) return 'pointsjson';
+  const ext = p.slice(p.lastIndexOf('.') + 1);
+  return ext === 'usd' ? 'usda' : ext;
+}
+
+/** Synchronous export for every format except glb/gltf (see exportGeometryAsync). */
 export function exportGeometry(g: Geometry, format: ExportFormat, o: ExportOptions = {}): Uint8Array {
   const enc = new TextEncoder();
   switch (format) {
-    case 'glb': return exportGLB(g, o);
     case 'obj': return enc.encode(exportOBJ(g, o));
     case 'stl': return exportSTL(g, o);
     case 'ply': return exportPLY(g, o);
     case 'usda': return enc.encode(exportUSDA(g, o));
     case 'json': return enc.encode(JSON.stringify(geoToJSON(g)));
-    default: throw new Error(`unknown export format ${format}`);
+    case 'geo': return enc.encode(exportHoudiniGeo(g, o));
+    case 'csv': return enc.encode(exportCSV(g, o));
+    case 'pointsjson': return enc.encode(exportPointsJSON(g, o));
+    case 'glb': case 'gltf': throw new Error(`${format} export is asynchronous (gltf-transform): use exportGeometryAsync`);
+    default: throw new Error(`unknown export format "${format}" (${EXPORT_FORMATS.join(', ')})`);
   }
+}
+
+/** Export to any format. */
+export async function exportGeometryAsync(g: Geometry, format: ExportFormat, o: ExportOptions = {}): Promise<Uint8Array> {
+  if (format === 'glb') return exportGLB(g, o);
+  if (format === 'gltf') return new TextEncoder().encode(await exportGLTF(g, o));
+  return exportGeometry(g, format, o);
 }
 
 export { primNormals };
