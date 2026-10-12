@@ -310,6 +310,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           pcg: { type: 'boolean', description: 'csv: Unreal PCG columns (Position/Rotation/Scale/Density/Color/Seed) in Unreal space (Z-up, left-handed, cm)' },
           pcg_struct: { type: 'boolean', description: 'csv with pcg: Unreal struct-text cells ("(X=…,Y=…,Z=…)") for DataTable import with a row struct' },
           precision: { type: 'number', enum: [32, 64], description: 'geo: float storage (64 = lossless default, 32 = Houdini default)' },
+          instancing: { type: 'string', enum: ['packed', 'expand'], description: 'packed prims: glb/gltf (EXT_mesh_gpu_instancing) and usda (PointInstancer) keep instances by default; expand writes real copies' },
           ...FRAME_PROP,
         },
       },
@@ -320,7 +321,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
         const bytes = await exportGeometryAsync(geo, ext, {
           upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
-          materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct, precision: a.precision,
+          materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct, precision: a.precision, instancing: a.instancing,
         });
         fs.mkdirSync(path.dirname(p), { recursive: true });
         fs.writeFileSync(p, bytes);

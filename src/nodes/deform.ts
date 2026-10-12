@@ -262,6 +262,7 @@ function nearestSeedDistance(g: Geometry, seeds: number[], maxDist: number): Flo
 defineNode({
   type: 'soft_transform',
   category: 'deform',
+  packed: 'keep',
   summary: 'Move / rotate / scale a point group with a soft falloff around it (Houdini Soft Transform / Edit with a soft radius).',
   description:
     'Points in `group` get the full transform; other points within `radius` of the group get a partial one, weighted by ' +
@@ -579,6 +580,7 @@ function bboxRestLattice(geo: Geometry, deformed: Geometry, divisions: number[],
 defineNode({
   type: 'lattice',
   category: 'deform',
+  packed: 'keep',
   summary: 'Free-form deformation: bend geometry by moving the points of a coarse lattice box (trilinear or Bezier).',
   description:
     'Embeds the geometry in a lattice and moves it with the lattice. Three inputs: geo, rest lattice, deformed lattice ' +
@@ -756,6 +758,7 @@ class CurveSampler {
 defineNode({
   type: 'path_deform',
   category: 'deform',
+  packed: 'keep',
   summary: 'Bend geometry along a curve: the geometry axis (default Z) follows the path with rotation-minimising frames, twist and stretch.',
   description:
     'The geometry coordinate along `axis` becomes arc length on the curve; the other two coordinates become offsets in ' +
@@ -971,6 +974,7 @@ function proxyTransforms(R: Float64Array, D: Float64Array, bind: Binding, mode: 
 defineNode({
   type: 'point_deform',
   category: 'deform',
+  packed: 'keep',
   summary: 'Deform geometry by a proxy: points follow their nearest proxy points, including the local rotation (Houdini Point Deform).',
   description:
     'Each geometry point is captured by its `max_points` nearest rest proxy points (within `radius` when it is > 0), with ' +
@@ -1051,6 +1055,7 @@ defineNode({
 defineNode({
   type: 'rest',
   category: 'deform',
+  packed: 'keep',
   summary: 'Store the current positions in a "rest" point attribute, so noise and textures stay put while the geometry deforms.',
   description:
     'Copies P (or P of the second input, which must have the same point count) into a vec3 point attribute. Nodes that ' +

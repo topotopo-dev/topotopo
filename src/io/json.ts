@@ -48,7 +48,7 @@ export function geoToJSON(g: Geometry) {
   // written only when present, so files without them are unchanged
   if (g.vertexGroups.size) groups.vertex = groupsToJSON(g.vertexGroups);
   if (g.edgeGroups.size) groups.edge = edgeGroupsToJSON(g.edgeGroups);
-  return {
+  const out: Record<string, any> = {
     format: 'polyforge-geo',
     version: 1,
     points: { count: g.numPoints, attribs: tableToJSON(g.points) },
@@ -57,6 +57,15 @@ export function geoToJSON(g: Geometry) {
     detail: { attribs: tableToJSON(g.detail) },
     groups,
   };
+  // packed instances (only when present): the packed prim numbers, their source index and 3×3 (9 numbers, column-major),
+  // and each source once, recursively in the same format
+  if (g.hasPacked()) {
+    const prims: number[] = [], source: number[] = [], xform: number[] = [];
+    const k = g.primKind!, S = g.packedSource!, X = g.packedXform!;
+    for (let p = 0; p < k.length; p++) if (k[p]) { prims.push(p); source.push(S[p]); for (let c = 0; c < 9; c++) xform.push(X[p * 9 + c]); }
+    out.packed = { prims, source, xform, sources: g.packedSources.map(geoToJSON) };
+  }
+  return out;
 }
 
 export function geoFromJSON(j: any): Geometry {
@@ -82,6 +91,21 @@ export function geoFromJSON(j: any): Geometry {
     for (let i = 0; i + 1 < arr.length; i += 2)
       if (arr[i] >= 0 && arr[i] < g.numPoints && arr[i + 1] >= 0 && arr[i + 1] < g.numPoints) set.add(arr[i], arr[i + 1]);
     g.edgeGroups.set(k, set);
+  }
+  const pk = j.packed;
+  if (pk && Array.isArray(pk.prims) && pk.prims.length) {
+    const sources = (pk.sources ?? []).map(geoFromJSON);
+    g.ensurePacked();
+    pk.prims.forEach((p: number, i: number) => {
+      const s = pk.source?.[i];
+      if (!(Number.isInteger(p) && p >= 0 && p < g.numPrims && g.primSize(p) === 1)) throw new Error(`packed prim ${p}: not a one-vertex prim of this geometry`);
+      if (!(Number.isInteger(s) && s >= 0 && s < sources.length)) throw new Error(`packed prim ${p}: source ${s} out of range (${sources.length} sources)`);
+      g.primKind![p] = 1;
+      g.packedSource![p] = s;
+      for (let c = 0; c < 9; c++) g.packedXform![p * 9 + c] = Number(pk.xform?.[i * 9 + c] ?? (c % 4 === 0 ? 1 : 0));
+    });
+    g.packedSources = sources;
+    g.compactPackedSources();
   }
   return g;
 }

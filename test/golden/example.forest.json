@@ -1,0 +1,48 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3", "density:float:1", "height:float:1", "uv:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [53.6434, 8.775, 53.7867],
+      "min": [-53.6563, -6.0063, -53.157]
+    },
+    "counts": {
+      "points": 49881,
+      "prims": 49600,
+      "vertices": 108400,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "dad2758d2081e827",
+      "attributes": {
+        "point.Cd": "8484ac9e1ea76bd0",
+        "point.N": "bff32e24e86d4dfe",
+        "point.density": "d3e61eafec88c039",
+        "point.height": "ffa000a2b2819d00",
+        "point.uv": "d5a132b298526c98",
+        "prim.copynum": "e74fc5750575c28f"
+      },
+      "topology": "c2c4a56939610b5f"
+    },
+    "packed": {
+      "hash": "0e25fce8f90da7fa",
+      "instances": 30000,
+      "sources": ["51ec275edbbf0bd0", "29135fd52849853b", "5fe0cbf4cb7d7f8a"]
+    }
+  },
+  "name": "example.forest",
+  "ok": true,
+  "source": "examples/forest.json",
+  "warnings": []
+}

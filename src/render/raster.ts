@@ -12,6 +12,7 @@ import { halfEdges } from '../core/halfedge.ts';
 import type { HalfEdgeMesh } from '../core/halfedge.ts';
 import { drawText, textWidth } from './font.ts';
 import { readUV, polygonSides, uvSeamPairs } from '../core/uv.ts';
+import { expandForRender } from '../core/packed.ts';
 import { qNormalize, qRotate } from '../core/math.ts';
 import type { Quat, Vec3 } from '../core/math.ts';
 import { PLANE_UV, sliceTriangles, windingGrid } from './section.ts';
@@ -190,6 +191,8 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
 
 /** Render the geometry; returns RGBA pixels. */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
+  // packed instances are drawn expanded (within a triangle budget), see core/packed.ts
+  if (g.hasPacked()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   const views: ViewName[] = vlist?.length ? vlist : ['persp', 'front', 'right', 'top'];
   const ui = Math.max(1, Math.min(4, Math.round(o.scale ?? 1)));

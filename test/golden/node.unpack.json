@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3", "uv:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.9911, 1, 1.9879],
+      "min": [-1.9915, -1, -1.9922]
+    },
+    "counts": {
+      "points": 9720,
+      "prims": 19200,
+      "vertices": 57600,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "a8a8ff88c48f4e5a",
+      "attributes": {
+        "point.Cd": "8b79f2a583a5adff",
+        "point.N": "7c07b8a5ad8dc47f",
+        "point.uv": "539e76c544b5b11f",
+        "prim.copynum": "c18e7dc58d45dd1f"
+      },
+      "topology": "3279e083d40a3e65"
+    }
+  },
+  "name": "node.unpack",
+  "ok": true,
+  "source": "fixture for node type \"unpack\" (test/fixtures.ts)",
+  "warnings": []
+}

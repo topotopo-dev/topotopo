@@ -53,6 +53,11 @@ export interface NodeDef {
   usesTime?: boolean;
   /** deprecation notice naming the replacement; hidden from the catalog, warned about on cook */
   deprecated?: string;
+  /**
+   * Packed primitives: 'keep' = the node handles packed prims (instances) in its inputs; 'unpack' (default) = the
+   * engine expands them before cooking the node, with a warning. A function decides per cook from the resolved params.
+   */
+  packed?: 'keep' | 'unpack' | ((p: Record<string, any>) => 'keep' | 'unpack');
   /** extra cache-key material (e.g. file mtime) */
   signatureExtra?: (p: Record<string, any>, engine: Engine) => string;
   cook(ctx: CookContext): Geometry | Promise<Geometry>;

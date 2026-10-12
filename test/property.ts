@@ -33,7 +33,7 @@ const VERBOSE = args.includes('--verbose');
 const STRICT = args.includes('--strict');
 
 /** Fixtures a chain may start from. */
-const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE'];
+const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'PACKED'];
 
 /** Per-node param ranges that keep cooks fast ('keep' = leave the default). Vector ranges apply per component. */
 const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {

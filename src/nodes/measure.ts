@@ -273,6 +273,7 @@ const EXPR_NAMES = 'npoints nprims nvertices npolys nlines bbox (.min .max .size
 defineNode({
   type: 'assert',
   category: 'measure',
+  packed: 'keep',
   summary: 'Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression) and fail, warn or mark when a check fails. Passes the geometry through.',
   description:
     'Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the ' +

@@ -638,6 +638,7 @@ defineNode({
 defineNode({
   type: 'bound',
   category: 'topology',
+  packed: 'keep',
   summary: 'Bounding box of the input (whole or per connected piece) as a box mesh.',
   aliases: ['bbox', 'bounding_box'],
   inputs: [{ name: 'geo', desc: 'geometry' }],

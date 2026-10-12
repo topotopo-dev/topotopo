@@ -24,6 +24,8 @@ export interface ImportOptions {
   path?: string;
   /** receives non-fatal problems (skipped primitives or attributes) */
   warn?: (msg: string) => void;
+  /** glTF EXT_mesh_gpu_instancing: 'packed' (default) = packed prims sharing one source per mesh; 'expand' = real geometry */
+  instancing?: 'packed' | 'expand';
 }
 
 /** Format from a file name: the extension, with ".points.json" → pointsjson. */

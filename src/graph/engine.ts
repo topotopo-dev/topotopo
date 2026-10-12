@@ -16,6 +16,7 @@
 // are validated (unknown names, cycles), cooked before the param is resolved, and their signatures
 // (or, for ch(), the referenced value) are mixed into the dependent node's signature.
 import { Geometry } from '../core/geometry.ts';
+import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { hashString } from '../core/random.ts';
 import type { Host } from '../host/types.ts';
 import { allAliases, getNodeDef } from './registry.ts';
@@ -90,6 +91,8 @@ interface AssetEntry { name: string; graph: GraphSpec; def: NodeDef; hash: strin
 
 function geoBytes(g: Geometry): number {
   let b = g.primStart.byteLength + g.vertexPoint.byteLength + g.primClosed.byteLength + 256;
+  // packed: the per-prim arrays (sources are shared with the nodes that made them)
+  if (g.primKind) b += g.primKind.byteLength + g.packedSource!.byteLength + g.packedXform!.byteLength;
   for (const t of [g.points, g.vertices, g.prims, g.detail])
     for (const a of t.map.values()) b += a.bytes();
   for (const m of g.pointGroups.values()) b += m.byteLength;
@@ -365,6 +368,8 @@ export class Engine {
       inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })),
       params,
       signatureExtra: () => hash,
+      // the asset's own nodes unpack what they need
+      packed: 'keep',
       async cook(ctx) {
         const r = await ctx.subcook(graph, {
           vars: ctx.p,
@@ -844,6 +849,7 @@ export class Engine {
       stat: (k, v) => { (result.stats ??= {})[k] = v; },
     };
     try {
+      this.unpackInputs(def, rp.values, inputs, inputSigs, name, result);
       const out = await def.cook(ctx);
       if (!(out instanceof Geometry)) throw new Error(`node returned ${out === null ? 'null' : typeof out} instead of geometry`);
       checkFinite(out, result);
@@ -864,6 +870,29 @@ export class Engine {
     }
     result.ms = now() - t0;
     return result;
+  }
+
+  /**
+   * Expand packed prims in the inputs of a node that does not handle them (NodeDef.packed, default 'unpack'), in
+   * place, with one warning. The expansion is cached under the input's signature, so it happens once per input.
+   */
+  private unpackInputs(def: NodeDef, p: Record<string, any>, inputs: (Geometry | null)[], sigs: string[], name: string, result: NodeResult) {
+    const policy = typeof def.packed === 'function' ? def.packed(p) : def.packed ?? 'unpack';
+    if (policy === 'keep') return;
+    let n = 0;
+    for (let i = 0; i < inputs.length; i++) {
+      const g = inputs[i];
+      if (!g || !g.hasPacked()) continue;
+      n += g.numPacked;
+      const key = 'unpack:' + sigs[i];
+      let u = this.cache.get(key);
+      if (!u) {
+        u = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
+        this.cache.set(key, u);
+      }
+      inputs[i] = u;
+    }
+    if (n) result.warnings.push(`unpacked ${n} instances for ${name} (${def.type} needs real geometry; add an unpack node to choose what is transferred, or keep instances packed upstream)`);
   }
 }
 
