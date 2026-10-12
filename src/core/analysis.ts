@@ -362,6 +362,156 @@ export class RayScene {
     return hits;
   }
 
+  private mstack = new Int32Array(512);
+
+  // Packets: up to 32 rays from one origin walk the BVH together, live rays held in a bitmask. The node bounds
+  // relative to the origin are computed once per node; the slab test runs per live ray. ID holds the inverse
+  // directions and must not contain Infinity for a zero component (use 1 / (d || 1e-300)), so 0 * ID is never NaN.
+
+  /**
+   * Any-hit test of a packet of n <= 32 rays from one origin (directions D, inverse directions ID, 3 per ray):
+   * returns the bitmask of rays that hit a triangle at 0 < t < tmax.
+   */
+  occludedPacket(ox: number, oy: number, oz: number, D: Float64Array, ID: Float64Array, n: number, tmax: number): number {
+    if (this.empty || n <= 0) return 0;
+    const T = this.T, b = this.nodes, child = this.child, order = this.order, st = this.stack, ms = this.mstack;
+    let hit = 0, sp = 0;
+    st[sp] = 0; ms[sp++] = n >= 32 ? -1 : (1 << n) - 1;
+    while (sp > 0) {
+      sp--;
+      const nd = st[sp];
+      let m = ms[sp] & ~hit;
+      if (!m) continue;
+      // slab test of every live ray against the node
+      const o = nd * 6;
+      const x0 = b[o] - ox, y0 = b[o + 1] - oy, z0 = b[o + 2] - oz, x1 = b[o + 3] - ox, y1 = b[o + 4] - oy, z1 = b[o + 5] - oz;
+      let mm = 0;
+      while (m) {
+        const bit = m & -m;
+        m ^= bit;
+        const q = (31 - Math.clz32(bit)) * 3;
+        const ix = ID[q], iy = ID[q + 1], iz = ID[q + 2];
+        let t0 = x0 * ix, t1 = x1 * ix, s: number;
+        if (t0 > t1) { s = t0; t0 = t1; t1 = s; }
+        let tn = t0, tf = t1;
+        t0 = y0 * iy; t1 = y1 * iy;
+        if (t0 > t1) { s = t0; t0 = t1; t1 = s; }
+        if (t0 > tn) tn = t0;
+        if (t1 < tf) tf = t1;
+        t0 = z0 * iz; t1 = z1 * iz;
+        if (t0 > t1) { s = t0; t0 = t1; t1 = s; }
+        if (t0 > tn) tn = t0;
+        if (t1 < tf) tf = t1;
+        if (tn <= tf && tf >= 0 && tn < tmax) mm |= bit;
+      }
+      if (!mm) continue;
+      const c0 = child[nd * 2], c1 = child[nd * 2 + 1];
+      if (c0 >= 0) { st[sp] = c1; ms[sp++] = mm; st[sp] = c0; ms[sp++] = mm; continue; }
+      const s = -1 - c0;
+      for (let i = s; i < s + c1 && mm; i++) {
+        const tq = order[i] * 9;
+        const e1x = T[tq + 3] - T[tq], e1y = T[tq + 4] - T[tq + 1], e1z = T[tq + 5] - T[tq + 2];
+        const e2x = T[tq + 6] - T[tq], e2y = T[tq + 7] - T[tq + 1], e2z = T[tq + 8] - T[tq + 2];
+        const tx = ox - T[tq], ty = oy - T[tq + 1], tz = oz - T[tq + 2];
+        const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+        const tnum = e2x * qx + e2y * qy + e2z * qz;
+        let m2 = mm;
+        while (m2) {
+          const bit = m2 & -m2;
+          m2 ^= bit;
+          const q = (31 - Math.clz32(bit)) * 3;
+          const dx = D[q], dy = D[q + 1], dz = D[q + 2];
+          const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+          const det = e1x * px + e1y * py + e1z * pz;
+          if (det > -1e-30 && det < 1e-30) continue;
+          const inv = 1 / det;
+          const u = (tx * px + ty * py + tz * pz) * inv;
+          if (u < 0 || u > 1) continue;
+          const v = (dx * qx + dy * qy + dz * qz) * inv;
+          if (v < 0 || u + v > 1) continue;
+          const t = tnum * inv;
+          if (t > 0 && t < tmax) { hit |= bit; mm &= ~bit; }
+        }
+      }
+    }
+    return hit;
+  }
+
+  /**
+   * Nearest hits of a packet of n <= 32 rays from one origin: best[k] = nearest t in (0, tmax) of ray k, or Infinity.
+   * Children are visited near-first along the packet's first direction.
+   */
+  nearestPacket(ox: number, oy: number, oz: number, D: Float64Array, ID: Float64Array, n: number, tmax: number, best: Float64Array): void {
+    for (let k = 0; k < n; k++) best[k] = tmax;
+    if (!this.empty && n > 0) {
+      const T = this.T, b = this.nodes, child = this.child, order = this.order, st = this.stack, ms = this.mstack;
+      const ax = D[0], ay = D[1], az = D[2];
+      let sp = 0;
+      st[sp] = 0; ms[sp++] = n >= 32 ? -1 : (1 << n) - 1;
+      while (sp > 0) {
+        sp--;
+        const nd = st[sp];
+        // slab test of the packet's rays against the node, each limited by its own nearest hit so far
+        let m = ms[sp], mm = 0;
+        const o = nd * 6;
+        const x0 = b[o] - ox, y0 = b[o + 1] - oy, z0 = b[o + 2] - oz, x1 = b[o + 3] - ox, y1 = b[o + 4] - oy, z1 = b[o + 5] - oz;
+        while (m) {
+          const bit = m & -m;
+          m ^= bit;
+          const k = 31 - Math.clz32(bit), q = k * 3;
+          const ix = ID[q], iy = ID[q + 1], iz = ID[q + 2];
+          let t0 = x0 * ix, t1 = x1 * ix, s: number;
+          if (t0 > t1) { s = t0; t0 = t1; t1 = s; }
+          let tn = t0, tf = t1;
+          t0 = y0 * iy; t1 = y1 * iy;
+          if (t0 > t1) { s = t0; t0 = t1; t1 = s; }
+          if (t0 > tn) tn = t0;
+          if (t1 < tf) tf = t1;
+          t0 = z0 * iz; t1 = z1 * iz;
+          if (t0 > t1) { s = t0; t0 = t1; t1 = s; }
+          if (t0 > tn) tn = t0;
+          if (t1 < tf) tf = t1;
+          if (tn <= tf && tf >= 0 && tn < best[k]) mm |= bit;
+        }
+        if (!mm) continue;
+        const c0 = child[nd * 2], c1 = child[nd * 2 + 1];
+        if (c0 >= 0) {
+          const o0 = c0 * 6, o1 = c1 * 6;
+          const d = (b[o1] + b[o1 + 3] - b[o0] - b[o0 + 3]) * ax + (b[o1 + 1] + b[o1 + 4] - b[o0 + 1] - b[o0 + 4]) * ay + (b[o1 + 2] + b[o1 + 5] - b[o0 + 2] - b[o0 + 5]) * az;
+          if (d >= 0) { st[sp] = c1; ms[sp++] = mm; st[sp] = c0; ms[sp++] = mm; } else { st[sp] = c0; ms[sp++] = mm; st[sp] = c1; ms[sp++] = mm; }
+          continue;
+        }
+        const s = -1 - c0;
+        for (let i = s; i < s + c1; i++) {
+          const tq = order[i] * 9;
+          const e1x = T[tq + 3] - T[tq], e1y = T[tq + 4] - T[tq + 1], e1z = T[tq + 5] - T[tq + 2];
+          const e2x = T[tq + 6] - T[tq], e2y = T[tq + 7] - T[tq + 1], e2z = T[tq + 8] - T[tq + 2];
+          const tx = ox - T[tq], ty = oy - T[tq + 1], tz = oz - T[tq + 2];
+          const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+          const tnum = e2x * qx + e2y * qy + e2z * qz;
+          let m2 = mm;
+          while (m2) {
+            const bit = m2 & -m2;
+            m2 ^= bit;
+            const k = 31 - Math.clz32(bit), q = k * 3;
+            const dx = D[q], dy = D[q + 1], dz = D[q + 2];
+            const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+            const det = e1x * px + e1y * py + e1z * pz;
+            if (det > -1e-30 && det < 1e-30) continue;
+            const inv = 1 / det;
+            const u = (tx * px + ty * py + tz * pz) * inv;
+            if (u < 0 || u > 1) continue;
+            const v = (dx * qx + dy * qy + dz * qz) * inv;
+            if (v < 0 || u + v > 1) continue;
+            const t = tnum * inv;
+            if (t > 0 && t < best[k]) best[k] = t;
+          }
+        }
+      }
+    }
+    for (let k = 0; k < n; k++) if (!(best[k] < tmax)) best[k] = Infinity;
+  }
+
   /** Inside a closed mesh: majority vote of ray parity along three skewed directions. */
   inside(x: number, y: number, z: number): boolean {
     let votes = 0;
@@ -406,6 +556,11 @@ export function rayMeasure(P: ArrayLike<number>, N: ArrayLike<number>, scene: Ra
   const seedH = hash32(hashNumber(o.seed) ^ 0x2c1b3c6d);
   const maxD = o.maxDistance > 0 ? o.maxDistance : Infinity;
   const inward = o.mode === 'thickness';
+  const D = new Float64Array(96), ID = new Float64Array(96), best = new Float64Array(32);
+  // sample pattern: a Fibonacci lattice in the unit square (u1 stratified in S strata, u2 by the golden ratio),
+  // shifted per point by a seeded random offset (Cranley-Patterson rotation), mapped cosine-weighted into the cone
+  const U1 = new Float64Array(S), U2 = new Float64Array(S);
+  for (let s = 0; s < S; s++) { U1[s] = (s + 0.5) / S; U2[s] = (s * 0.6180339887498949) % 1; }
   for (let i = 0; i < n; i++) {
     if (mask && !mask[i]) continue;
     let nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2];
@@ -420,20 +575,31 @@ export function rayMeasure(P: ArrayLike<number>, N: ArrayLike<number>, scene: Ra
     tx /= tl; ty /= tl; tz /= tl;
     const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx;
     const ox = P[i * 3] + nx * o.bias, oy = P[i * 3 + 1] + ny * o.bias, oz = P[i * 3 + 2] + nz * o.bias;
-    const ph = hash32(Math.imul(i, 0x9e3779b1) ^ seedH);
-    const rot = ph / 4294967296;
+    const h1 = hash32(Math.imul(i, 0x9e3779b1) ^ seedH), h2 = hash32(h1 ^ 0x68e31da4);
+    const a1 = h1 / 4294967296, a2 = h2 / 4294967296;
     let acc = 0;
-    for (let s = 0; s < S; s++) {
-      const h1 = hash32(ph ^ Math.imul(s + 1, 0x85ebca6b)), h2 = hash32(h1 ^ 0x68e31da4);
-      const u1 = ((s % gx) + h1 / 4294967296) / gx, u2 = (Math.floor(s / gx) + h2 / 4294967296) / gy;
-      const st = Math.sqrt(u1) * sinA, ct = Math.sqrt(Math.max(0, 1 - st * st));
-      const phi = 2 * Math.PI * (u2 + rot);
-      const cx = st * Math.cos(phi), cy = st * Math.sin(phi);
-      const dx = tx * cx + bx * cy + nx * ct, dy = ty * cx + by * cy + ny * ct, dz = tz * cx + bz * cy + nz * ct;
+    // packets of up to 32 rays share the origin and one BVH walk
+    for (let s0 = 0; s0 < S; s0 += 32) {
+      const cnt = Math.min(32, S - s0);
+      for (let k = 0; k < cnt; k++) {
+        let u1 = U1[s0 + k] + a1, u2 = U2[s0 + k] + a2;
+        if (u1 >= 1) u1 -= 1;
+        if (u2 >= 1) u2 -= 1;
+        const st = Math.sqrt(u1) * sinA, ct = Math.sqrt(Math.max(0, 1 - st * st)), phi = 2 * Math.PI * u2;
+        const cx = st * Math.cos(phi), cy = st * Math.sin(phi);
+        const dx = tx * cx + bx * cy + nx * ct, dy = ty * cx + by * cy + ny * ct, dz = tz * cx + bz * cy + nz * ct;
+        D[k * 3] = dx; D[k * 3 + 1] = dy; D[k * 3 + 2] = dz;
+        // a zero component would give 0 * Infinity = NaN in the slab test: use a huge finite inverse instead
+        ID[k * 3] = 1 / (dx || 1e-300); ID[k * 3 + 1] = 1 / (dy || 1e-300); ID[k * 3 + 2] = 1 / (dz || 1e-300);
+      }
       if (o.mode === 'occlusion') {
-        if (scene.occluded(ox, oy, oz, dx, dy, dz, maxD)) acc++;
-      } else {
-        const t = scene.nearest(ox, oy, oz, dx, dy, dz, maxD);
+        let m = scene.occludedPacket(ox, oy, oz, D, ID, cnt, maxD);
+        while (m) { acc++; m &= m - 1; }
+        continue;
+      }
+      scene.nearestPacket(ox, oy, oz, D, ID, cnt, maxD, best);
+      for (let k = 0; k < cnt; k++) {
+        const t = best[k];
         if (o.mode === 'cavity') { if (t < maxD) acc += 1 - t / maxD; }
         else acc += t < maxD ? t + o.bias : o.maxDistance;
       }

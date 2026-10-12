@@ -11,6 +11,7 @@ WORKFLOW
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/obj/usda/ply/stl/json for Unreal, Blender, Houdini.
+7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
@@ -205,6 +206,35 @@ Options: up_axis "y" (default, glTF/Houdini/Maya) or "z" (Blender/Unreal-style d
 Normals: N if present, else computed with a 60° cusp (hard edges stay hard). uv → TEXCOORD_0 (V flipped for glTF), Cd → vertex colours.
 Unreal: import GLB (Interchange) or USD. Blender: File > Import > glTF. Houdini: File SOP reads glb/obj/usd/ply.
 Importing: the "file" node loads obj, stl, ply, glb/gltf, json (up_axis "z" converts Z-up sources).`,
+
+  verify: `VERIFY YOUR WORK (cheap checks before reaching for a render)
+1. ASSERT IN THE GRAPH: an assert node passes geometry through and fails the build/edit when an invariant breaks,
+   with one message listing every failed check and its measured value.
+   {"type":"assert","in":["out"],"params":{"watertight":true,"no_flipped":true,"max_prims":20000,
+     "bbox_min":[-5,0,-5],"bbox_max":[5,10,5],"expr":"pieces == 1 && volume > 2"}}
+   Checks (all off by default): watertight, manifold, no_flipped (winding + closed pieces facing outward; cavity walls
+   of hollow solids are fine), min_points/max_points, min_prims/max_prims (-1 = off), bbox_min/bbox_max ([x,y,z] or
+   null), min_edge_length, no_degenerate (zero-area faces, coincident points within tolerance), no_self_intersections
+   (BVH, stops after max_tests candidate pairs and says so), attrib (must exist; attrib_min/attrib_max bound its first
+   component; attrib_class), group (exists and is non-empty), expr (JS over npoints nprims nvertices npolys nlines
+   bbox.min/.max/.size/.center (.x .y .z) volume area pieces open_pieces genus closed boundary_edges).
+   on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
+   then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
+2. EXPLAIN AFTER A BUILD/EDIT: explain {graph, node?} describes the result in words, e.g.
+   "reads as: one closed piece, box-like, 2 × 1 × 1 m, 3 cm thin walls, mirror-symmetric in x, z", then pieces,
+   watertight/genus/boundary loops, flipped normals, symmetry planes, principal axis + aspect, sampled thickness,
+   degenerate faces, polygon mix, attributes, groups. Compare it with what you meant to build.
+3. DIFF TO SEE WHAT A CHANGE DID: graphs {action:"duplicate", name:"main", to:"before"} → edit → diff {a:"before", b:"main"}:
+   counts, bbox delta, topology/volume, attribute and group changes, Hausdorff + mean distance, per-point displacement
+   (same point count), verdict. a/b: "graph", "graph/node" or {graph, node, frame} (two nodes or two frames work too).
+   render:true overlays them: grey = unchanged, blue = only in b, orange = only in a.
+4. RENDER for what text cannot tell (proportions, style); inspect for one attribute's numbers.
+MEASURE NODES (category measure) turn shape into attributes for masks and colour:
+  curvature   type mean|gaussian|principal_min|principal_max|convexity (1/m; normalize → 0..1) — wear on convex edges
+  occlusion   mode occlusion → ao 0..1 | cavity → cavity 0..1 | thickness → metres (rays inward; closed meshes);
+              optional occluder input — dirt in crevices, scatter masks under overhangs, thin-wall checks
+  distance    to a mesh surface, curves or points (input 2); signed (inside < 0), max_distance, extra → nearest_prim/uv/P
+  e.g. {"type":"occlusion","in":["rock"]} → {"type":"color","params":{"mode":"ramp","attrib":"ao","range":[0,1]}}`,
 
   recipes: `RECIPES (copy, then adapt)
 1) Rocks on terrain:

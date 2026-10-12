@@ -50,6 +50,8 @@ export const INPUTS: Record<string, string[]> = {
   scatter: ['MESH'], decimate: ['MESH'], remesh: ['BOX'], smooth_solid: ['BOX'], foreach: ['BOX'],
   soft_transform: ['GRID'], lattice: ['MESH', 'LATTICE_REST', 'LATTICE_DEF'], path_deform: ['ZBAR', 'CURVE'],
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
+  // measure (P1-F): curvature on the box (flat faces, sharp edges), distance from grid points to the sphere
+  curvature: ['BOX'], distance: ['GRID', 'MESH'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -70,6 +72,8 @@ export const PARAMS: Record<string, any> = {
   lsystem: { generations: 3 },
   soft_transform: { group: '24', translate: [0, 0.5, 0], rotate: [0, 0, 20], radius: 0.8, weight_attrib: 'softweight' },
   path_deform: { stretch: true, twist: 90 },
+  distance: { signed: true, extra: true },
+  assert: { watertight: true, no_flipped: true, no_degenerate: true, expr: 'pieces == 1 && genus == 0', on_fail: 'mark' },
   graph_ref: null,
 };
 

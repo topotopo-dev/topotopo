@@ -288,7 +288,7 @@ defineNode({
     label: { type: 'string', default: '', desc: 'what this assert guards, prefixed to the message', aliases: ['message', 'msg'] },
     watertight: { type: 'bool', default: false, desc: 'closed surface: only polygons, every edge shared by exactly two of them', aliases: ['closed'] },
     manifold: { type: 'bool', default: false, desc: 'no edge shared by 3+ polygons and no bowtie points (fans touching at a point)' },
-    no_flipped: { type: 'bool', default: false, desc: 'neighbouring polygons wound consistently, and closed pieces face outward (positive volume)', aliases: ['outward', 'consistent_winding'] },
+    no_flipped: { type: 'bool', default: false, desc: 'neighbouring polygons wound consistently, and closed pieces face outward (positive volume; the walls of a cavity inside a hollow solid may face inward)', aliases: ['outward', 'consistent_winding'] },
     min_points: { type: 'int', default: -1, min: -1, desc: 'at least this many points (-1 = off)' },
     max_points: { type: 'int', default: -1, min: -1, desc: 'at most this many points (-1 = off)' },
     min_prims: { type: 'int', default: -1, min: -1, desc: 'at least this many prims (-1 = off)' },
