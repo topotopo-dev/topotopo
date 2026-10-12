@@ -58,8 +58,19 @@ function findLicenceFile(dir: string): string | null {
   return pick ? path.join(dir, pick) : null;
 }
 
+/** The checkout that holds node_modules: this one, or the main checkout when running inside a git worktree. */
+function installRoot(): string {
+  if (fs.existsSync(path.join(ROOT, 'node_modules'))) return ROOT;
+  try {
+    const common = execSync('git rev-parse --git-common-dir', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const main = path.resolve(ROOT, common, '..');
+    if (fs.existsSync(path.join(main, 'node_modules'))) return main;
+  } catch { /* not a worktree */ }
+  return ROOT;
+}
+
 function prodTree(): Record<string, any> {
-  const json = execSync('npm ls --prod --all --json --long=false', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64e6 });
+  const json = execSync('npm ls --prod --all --json --long=false', { cwd: installRoot(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64e6 });
   return JSON.parse(json);
 }
 
@@ -73,7 +84,7 @@ function collect(): Dep[] {
       if (!version) continue; // optional dependency that is not installed on this platform
       const key = `${name}@${version}`;
       if (!seen.has(key)) {
-        const dir = (info as any).path ?? path.join(ROOT, 'node_modules', name);
+        const dir = (info as any).path ?? path.join(installRoot(), 'node_modules', name);
         let pkg: any = {};
         try { pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { /* keep going */ }
         const licence = typeof pkg.license === 'string' ? pkg.license : pkg.license?.type ?? (Array.isArray(pkg.licenses) ? pkg.licenses.map((l: any) => l.type).join(' OR ') : 'UNKNOWN');
