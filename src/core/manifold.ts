@@ -242,6 +242,14 @@ export function toPolygons(g: Geometry, plane: Plane): { polys: [number, number]
   return { polys, offset: cnt ? off / cnt : 0 };
 }
 
+/**
+ * A manifold CrossSection from 2D contours. No contours (empty input, points only, open curves) gives an empty
+ * section: manifold's constructor throws a raw TypeError on an empty list.
+ */
+export function crossSection(polys: [number, number][][], fillRule: 'EvenOdd' | 'NonZero' | 'Positive' | 'Negative'): any {
+  return new (M().CrossSection)(polys.length ? polys : [[]], fillRule);
+}
+
 /** Column-major Mat4 mapping manifold (u, v, w) space into the world plane frame. */
 export function planeMatrix(plane: Plane, offset = 0): number[] {
   const { U, V, N } = PLANE_FRAMES[plane];

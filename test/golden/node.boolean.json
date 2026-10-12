@@ -5,13 +5,16 @@
       "detail": [],
       "point": ["P:float:3"],
       "prim": [],
-      "vertex": []
+      "vertex": ["uv:float:3"]
     },
-    "bbox": null,
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
     "counts": {
-      "points": 0,
-      "prims": 0,
-      "vertices": 0,
+      "points": 61,
+      "prims": 118,
+      "vertices": 354,
       "volumes": 0
     },
     "groups": {
@@ -21,12 +24,13 @@
       "vertex": []
     },
     "hashes": {
-      "P": "811c9dc5050c5d1f",
+      "P": "4baa4c7c7445e676",
       "attributes": {
-        "group.prim.from_a": "9be171658ea4219f",
-        "group.prim.from_b": "9be171658ea4219f"
+        "group.prim.from_a": "b1baef32f15a11c8",
+        "group.prim.from_b": "a5beecd3308370e9",
+        "vertex.uv": "afb524f8c3331b5a"
       },
-      "topology": "c6aecfc4fbcb4a1e"
+      "topology": "b21458e878d65f42"
     }
   },
   "name": "node.boolean",

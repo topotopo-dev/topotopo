@@ -183,7 +183,10 @@ export function resolveVertexNormals(g: Geometry, cuspDeg = 60): Float64Array {
   return out;
 }
 
-/** After moving points: recompute any existing N so shading follows the new shape (vertex N keeps hardEdges hard). */
+/**
+ * After moving points: recompute any existing N so shading follows the new shape (vertex N keeps hardEdges hard).
+ * Writes into g's N attributes in place and returns g: only call it on a clone or freshly built geometry.
+ */
 export function refreshNormals(g: Geometry, cuspDeg = 60, hardEdges: EdgeSet | null = null): Geometry {
   const pN = g.points.get('N');
   if (pN && pN.size === 3 && pN.type === 'float') {

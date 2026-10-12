@@ -3,8 +3,9 @@
 //   node test/fuzz.ts [--count N] [--seed S] [--verbose]      (FUZZ_COUNT env also sets the count)
 //
 // Asserts:
-//   - nothing hangs: infinite loops are stopped by the sandbox timeout (the run happens in a child process
-//     with a hard wall-clock limit, so a timeout that fails to fire fails the test instead of hanging CI),
+//   - nothing hangs: infinite loops (in wrangles, and in script nodes after an await) are stopped by the sandbox
+//     timeout (the run happens in a child process with a hard wall-clock limit, so a timeout that fails to fire
+//     fails the test instead of hanging CI),
 //   - malformed code fails the wrangle node (a per-node error, never a throw) with a "(line N: …)" hint,
 //   - valid code cooks, passes checkGeo, and is deterministic.
 import { spawnSync } from 'node:child_process';
@@ -102,7 +103,7 @@ function snippet(r: Rand): string {
 
 // ------------------------------------------------------------------ cases
 
-interface Case { kind: 'valid' | 'malformed' | 'hang'; code: string; runOver: string; source: string; line?: number; knownGap?: string }
+interface Case { kind: 'valid' | 'malformed' | 'hang'; code: string; runOver: string; source: string; line?: number; knownGap?: string; node?: 'wrangle' | 'script' }
 
 /** Curated malformed snippets with the line the error hint must point at. */
 const MALFORMED: { code: string; line?: number; knownGap?: string }[] = [
@@ -120,12 +121,30 @@ const MALFORMED: { code: string; line?: number; knownGap?: string }[] = [
   { code: '@P.y += 1;\nnull.foo;', line: 2 },
   { code: 'error("boom at " + @ptnum);', line: 1 },
   { code: '@P.y += 1;\nconst q = @P;\nq.nope.deeper = 1;', line: 3 },
-  // the parser only notices these at the end of the generated kernel, past the snippet's last line
-  { code: '@Cd = [1, 0, 0', knownGap: 'unclosed bracket: error is reported after the snippet ends' },
-  { code: '}', knownGap: 'stray closing brace closes the generated kernel early' },
+  // bracket mistakes: inside the kernel the parser only noticed these past the snippet's end, and a stray `}` closed
+  // the kernel's wrapper; the snippet is now parsed on its own first, unclosed brackets point at the opening line
+  { code: '@Cd = [1, 0, 0', line: 1 },
+  { code: '}', line: 1 },
+  { code: '@P.y += 1;\n}\n@Cd = [1, 0, 0];', line: 2 },
+  { code: 'if (@P.x > 0) {\n  @P.y += 1;\n', line: 1 },
+  { code: '@P.y += 1; // [\n@Cd = [1,\n0,\n0', line: 2 },
+  { code: 'const s = `${@P.x}`;\nif (s) {\n  @P.y += /[{]/.test(s) ? 1 : 0;\n', line: 2 },
+  // balanced the other way round: this compiled inside the kernel before (closing the wrapper and reopening it)
+  { code: '}, __x = function(){', line: 1 },
 ];
 
 const HANGS = ['while(true){}', 'for(;;){ @P.y += 0; }', 'while (@P.y < 1e9) { @Cd = [0, 0, 0]; }', 'let k = 0;\nwhile (k >= 0) { k++; }'];
+
+/** Script nodes that never finish after an await: the continuations must be inside the timeout too. */
+const SCRIPT_HANGS = [
+  'await 0; while(true){}',
+  "const s = await lib.run('sphere', { radius: 0.5 });\nwhile (true) {}",
+  "for (;;) await lib.run('box');",
+  // script is an async node: its promise settles outside the realm
+  "await lib.run('script', { code: 'return geo;' });\nwhile (true) {}",
+  "for (;;) await lib.run('script', { code: 'await 0; return geo;' });",
+  'await new Promise(() => {});',
+];
 
 function buildCases(): Case[] {
   const r = rng(SEED);
@@ -143,6 +162,7 @@ function buildCases(): Case[] {
   }
   for (const code of HANGS) cases.push({ kind: 'hang', code, runOver: 'points', source: 'MESH' });
   cases.push({ kind: 'hang', code: 'while(true){}', runOver: 'prims', source: 'BOX' });
+  for (const code of SCRIPT_HANGS) cases.push({ kind: 'hang', code, runOver: '-', source: 'MESH', node: 'script' });
   return cases;
 }
 
@@ -151,7 +171,9 @@ function buildCases(): Case[] {
 async function cookCase(engine: Engine, c: Case) {
   const nodes: Record<string, NodeSpec> = {};
   addFixture(nodes, c.source);
-  nodes.w = { type: 'wrangle', in: [c.source], params: { code: c.code, run_over: c.runOver } };
+  nodes.w = c.node === 'script'
+    ? { type: 'script', in: [c.source], params: { code: c.code } }
+    : { type: 'wrangle', in: [c.source], params: { code: c.code, run_over: c.runOver } };
   engine.cache.clear();
   return engine.cook({ nodes, output: 'w' });
 }
@@ -201,7 +223,7 @@ for (const [i, c] of cases.entries()) {
   }
   if (problems.length) {
     fail++;
-    console.log(`FAIL #${i} ${c.kind} (run_over ${c.runOver}, on ${c.source})`);
+    console.log(`FAIL #${i} ${c.node ?? 'wrangle'} ${c.kind} (run_over ${c.runOver}, on ${c.source})`);
     console.log('  code: ' + JSON.stringify(c.code));
     for (const p of problems) console.log('  ' + p);
   } else if (VERBOSE) console.log(`ok   #${i} ${c.kind.padEnd(9)} ${ms.toFixed(0).padStart(5)}ms ${JSON.stringify(c.code).slice(0, 100)}`);
