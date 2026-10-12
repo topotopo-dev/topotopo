@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 170,
+      "prims": 336,
+      "vertices": 1008,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "d6daec66e3d84d9c",
+      "attributes": {
+        "vertex.uv": "0bfd7495f45226ef"
+      },
+      "topology": "b4449b7552e8bd43"
+    }
+  },
+  "name": "node.remesh_isotropic",
+  "ok": true,
+  "source": "fixture for node type \"remesh_isotropic\" (test/fixtures.ts)",
+  "warnings": []
+}

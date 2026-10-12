@@ -465,6 +465,9 @@ defineNode({
   type: 'remesh',
   category: 'topology',
   summary: 'Voxel remesh: rebuild a closed mesh as an even, watertight triangle mesh (mesh → SDF → isosurface).',
+  description:
+    'Always watertight and merges overlapping parts, but sharp edges round off and attributes are dropped. To keep the ' +
+    'surface, sharp edges, boundaries, uv and other attributes use remesh_isotropic (Houdini Remesh SOP).',
   aliases: ['voxel_remesh', 'remesh_voxel'],
   inputs: [{ name: 'mesh', desc: 'closed mesh (may self-intersect; overlapping parts get merged)' }],
   params: {

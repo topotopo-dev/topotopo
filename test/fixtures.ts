@@ -52,6 +52,9 @@ export const SRC: Record<string, NodeSpec> = {
   HFM: { type: 'heightfield_mask_by_feature', in: ['HFN'], params: { feature: 'slope', min_angle: 25 } },
   HF_CURVE: { type: 'curve', params: { points: [[-2, 0, -1], [0, 0.4, 0.5], [2, 0, 1]], smooth: true } },
   HF_STAMP: { type: 'box', params: { size: [1, 1, 1], center: [0.6, 0.5, 0] } },
+  // mesh_repair (P1-E): a box with a missing face and four reversed faces
+  HOLED: { type: 'delete', in: ['BOX'], params: { group: '0' } },
+  BROKEN: { type: 'reverse', in: ['HOLED'], params: { group: '1-4' } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -77,6 +80,7 @@ export const INPUTS: Record<string, string[]> = {
   heightfield_mask_by_feature: ['HFN'], heightfield_mask_by_object: ['HFN', 'HF_CURVE'], heightfield_mask_expand: ['HFM'],
   heightfield_erode: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
   heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
+  remesh_isotropic: ['BOX'], mesh_repair: ['BROKEN'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -121,6 +125,9 @@ export const PARAMS: Record<string, any> = {
   heightfield_resample: { factor: 0.5 },
   heightfield_transform: { translate: [1, 0.5, 0], rotate: 90, height_scale: 1.5 },
   // heightfield_from_image: { path } is filled in by createFixtureEngine() (a 16-bit PNG written to the temp dir)
+  remesh_isotropic: { target_length: 0.2, iterations: 4 },
+  mesh_repair: { self_intersections: 'report' },
+  lod: { levels: 3 },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */

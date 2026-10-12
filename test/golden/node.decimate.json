@@ -2,19 +2,19 @@
   "errors": [],
   "fingerprint": {
     "attributes": {
-      "detail": [],
+      "detail": ["error:float:1", "error_abs:float:1"],
       "point": ["N:float:3", "P:float:3"],
       "prim": [],
       "vertex": []
     },
     "bbox": {
-      "max": [0.9619, 0.9619, 0.9619],
-      "min": [-0.9619, -0.9619, -0.9619]
+      "max": [0.9511, 0.9619, 0.9619],
+      "min": [-0.9619, -0.9619, -0.9511]
     },
     "counts": {
-      "points": 42,
-      "prims": 80,
-      "vertices": 240,
+      "points": 50,
+      "prims": 96,
+      "vertices": 288,
       "volumes": 0
     },
     "groups": {
@@ -24,11 +24,13 @@
       "vertex": []
     },
     "hashes": {
-      "P": "da58bbf6da52bb54",
+      "P": "928b65ae4d2f9134",
       "attributes": {
-        "point.N": "91a4c2c1aee4bed7"
+        "detail.error": "37ab5b431f90be35",
+        "detail.error_abs": "4c1a77ba39ac4974",
+        "point.N": "81f445fc13644b42"
       },
-      "topology": "5a0e2fdfb23fb3a5"
+      "topology": "e91ba8c3b8fcbae9"
     }
   },
   "name": "node.decimate",
