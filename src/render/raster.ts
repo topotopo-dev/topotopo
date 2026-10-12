@@ -1020,7 +1020,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       for (let k = 0; k < (flat2d ? 0 : dotPts.length); k++) {
         const i = dotPts[k];
         if (!keptPt(i) || (cam.persp && vz[i] < 1e-4) || hidden(cz[i], sx[i] * inv, sy[i] * inv)) continue;
-        dotOv(tb, T, T, sx[i] * inv, sy[i] * inv, 2 * ui + 1, styles[dotSt[k]].c);
+        dotOv(tb, T, T, sx[i] * inv, sy[i] * inv, 2 * ui, styles[dotSt[k]].c);
       }
       // glyphs: anchored on visible surface points, parts behind the surface dimmed, brighter tip
       const m3 = [0, 0, 0, 0];
