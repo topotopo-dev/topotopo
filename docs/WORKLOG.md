@@ -52,7 +52,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 ### Phase 1: modelling parity
 | id | item | status | notes |
 |---|---|---|---|
-| P1-A | `polybevel` (edge + point, chamfer/round, segments) | queued | after C1 |
+| P1-A | `polybevel` (edge + point, chamfer/round, segments) | merged | db74e85, 2026-10-12. Node is poly_bevel (aliases polybevel, bevel, chamfer). 121 nodes. Limits: boundary edges skipped; clamp is one global factor; irregular round corners relaxed, not spherical |
 | P1-B | `polysplit`/`knife`, `polybridge`, `polyfill` (quad), edge loop/ring/dissolve/collapse/divide ops | merged | 80ed39a, 2026-10-12. 119 nodes. Limits: knife above/below groups single plane; polybridge inner-face heuristic; polyfill quad fan pole |
 | P1-C | Deformers: `soft_transform` with falloff ramps, `lattice`, `path_deform`, `point_deform`, `rest` | merged | 553beb1, 2026-10-12. 107 nodes. Limits: lattice cage must be axis-aligned; path_deform polylines only; point_deform max_points 4 default (8 measured better) |
 | P1-D | UVs: `uv_unwrap` (xatlas), `uv_layout`, `uv_flatten` (LSCM), UV view in render | merged | 522dc77, 2026-10-12. xatlas-wasm 0.1.3 (MIT). Limits: uv_layout packs bounding rects; unwrap 2.7 s/20k tris; autoseam rough |
@@ -75,6 +75,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-12: P1-A merged (db74e85). GitHub Actions stopped: the account budget for the private repo is exhausted; tests run locally at every merge. Running: P1-F, P2-C, P1-E, P1-G, P2-A.
 - 2026-10-12: P2-E1 merged (0d1ec15). Dependency note: manifold-3d pulls @gltf-transform/functions → sharp (LGPL libvips, optional native, unused by us). Blender addon not reachable for the GLB check.
 - 2026-10-12: P0-E, P1-D, P1-B merged (5b11ce0, 522dc77, 80ed39a). P2-C, P1-E, P1-G launched. Running: P2-E1, P1-A, P1-F, P2-C, P1-E, P1-G.
 - 2026-10-12: P0-C2 merged (3506ba8): array attributes. P1-F launched.
