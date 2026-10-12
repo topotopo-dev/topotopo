@@ -91,7 +91,7 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `scale: 2`; a footer line names what is shown (help topic `render`) |
 | `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json; heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
-| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete |
+| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a shelf asset into the workspace to edit |
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
@@ -150,6 +150,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json) |
+| shelf | 35 graph assets used like nodes (see [Shelf](#shelf)): `wall_segment` `window_frame` `door_frame` `stairs` `spiral_stairs` `railing` `fence` `pillar` `arch` `roof_gable` `roof_hip` `brick_wall` `tile_floor` `hex_grid_floor` `scaffold` `beam_truss` `crate` `barrel` `pallet` `log` `rock` `cliff_block` `tree_lowpoly` `bush` `lamp_post` `bollard` `bench` `sign_post` `sandbag_wall` `cable` `pipe_run` `road_strip` `scatter_rocks` `forest_patch` `grass_clumps` |
 
 Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated
 [node reference](docs/nodes.md).
@@ -238,7 +239,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | layer | command | what it checks |
 |---|---|---|
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
-| golden | `npm run test:golden [-- filter]` | every node fixture and every `examples/*.json` graph matches its fingerprint in `test/golden/` |
+| golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every shelf asset matches its fingerprint in `test/golden/` |
 | property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions |
 | io | `node test/io.ts` | export → import round trips for every format |
@@ -250,6 +251,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | packed | `node test/packed.ts` | packed prims: model (clone, subsets, merge dedup, builder, bbox), pack/unpack round trips, packed copies equal real copies, transforms, auto-unpack, JSON/GLB/USD, render budget, every node type fed instances |
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, erosion determinism and mass conservation, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
+| shelf | `npm run test:shelf [-- filter]` | every shelf asset: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; index, thumbnails and README table current; workspace override precedence; `assets` list / delete / fork |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.

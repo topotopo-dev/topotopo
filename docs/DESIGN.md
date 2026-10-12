@@ -73,6 +73,7 @@ src/host/      Node host: fs, vm sandbox (timeouts), fonts
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
 src/workspace.ts  named graphs persisted as JSON, edit operations, assets
+shelf/        shipped graph assets (one GraphSpec per file + index.json + thumbs/), registered as category "shelf"
 ```
 
 ### Geometry model
@@ -245,7 +246,11 @@ These are the decisions that most affect how well an agent can work with it:
    `sdf_expr` uses IQ-style distance functions. If a node is missing, the agent can still do the thing. The
    sandbox is a vm realm with a timeout, so a runaway loop fails the node instead of hanging the server.
 7. **Parametric by default.** `vars` plus `"=expr"` params make every graph tweakable. A graph with vars becomes a
-   reusable **asset** node in one call, so the library grows with use.
+   reusable **asset** node in one call, so the library grows with use. The **shelf** ships 35 such assets
+   (`shelf/*.json`): `Engine.init` reads `shelf/index.json` through `Host.readFile` from `Host.shelfPath` (a
+   directory or URL, so a browser host can serve the same files) and registers each graph with category `shelf`;
+   workspace assets of the same name are registered over them and win. Shelf assets may use each other (index order
+   lists dependencies first), and re-registering any asset with a different graph clears the result cache.
 8. **Deterministic.** All randomness is seeded hashing, so the same graph always produces the same geometry.
 9. **Incremental edits.** `edit` ops (`set`, `insert` after a node, `remove` with auto-rewire, `rename`, `vars`) keep
    iteration cheap in both tokens and time.
