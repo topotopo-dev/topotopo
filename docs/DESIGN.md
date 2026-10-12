@@ -186,6 +186,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 | opentype.js | MIT | TrueType/OpenType outlines for `text` |
 | three | MIT | the live viewer (GLTFLoader, OrbitControls) |
 | @modelcontextprotocol/sdk | MIT | MCP transport |
+| DejaVu Sans (assets/fonts) | Bitstream Vera licence (redistributable) | bundled default font for `text`, so output is identical on every machine; system fonts are used only when named |
 
 Written in-house: the geometry model, attribute-preserving builder, Catmull-Clark, poly extrude/inset, sweep with
 rotation-minimising frames, L-systems, Voronoi fracture (manifold half-space trims), narrow-band mesh→SDF with fast

@@ -3,6 +3,7 @@ import vm from 'node:vm';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import type { Host } from './types.ts';
 import { installSnippetLib } from '../core/snippet-lib.ts';
 import { makeCurl, makeNoise } from '../core/noise.ts';
@@ -46,6 +47,8 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
         ? ['/System/Library/Fonts/Supplemental', '/Library/Fonts', '/System/Library/Fonts', path.join(os.homedir(), 'Library/Fonts')]
         : ['/usr/share/fonts', '/usr/local/share/fonts', path.join(os.homedir(), '.fonts')];
   const defaults = ['arial.ttf', 'Arial.ttf', 'segoeui.ttf', 'DejaVuSans.ttf', 'LiberationSans-Regular.ttf', 'Roboto-Regular.ttf', 'NotoSans-Regular.ttf'];
+  // The bundled font makes the text node deterministic across machines; system fonts only serve explicit names.
+  const bundledFont = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/fonts/DejaVuSans.ttf');
 
   const findIn = (dir: string, pred: (f: string) => boolean, depth = 0): string | null => {
     let entries: fs.Dirent[];
@@ -101,6 +104,7 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
         }
         return null;
       }
+      if (fs.existsSync(bundledFont)) return bundledFont;
       for (const d of fontDirs) for (const f of defaults) {
         const hit = findIn(d, (x) => x === f);
         if (hit) return hit;
@@ -115,6 +119,7 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
       if (name) { const f = this.findFont(name); return f ? [f] : []; }
       const out: string[] = [];
       const push = (f: string | null) => { if (f && !out.includes(f)) out.push(f); };
+      if (fs.existsSync(bundledFont)) push(bundledFont);
       for (const f of defaults) for (const d of fontDirs) push(findIn(d, (x) => x === f));
       // then any other TrueType fonts, a handful per directory, as a last resort
       for (const d of fontDirs) {

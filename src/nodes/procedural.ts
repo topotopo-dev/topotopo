@@ -168,6 +168,30 @@ defineNode({
 // ---------------------------------------------------------------- text
 
 const fontFailed = new Map<string, string>();
+
+/**
+ * Glyph outlines and advance for one line. opentype.js shapes text through the font's GSUB table, which it
+ * parses lazily and rejects for some fonts (DejaVu: "lookupType 6 substFormat 2 is not yet supported"), so when
+ * shaping throws we lay the glyphs out ourselves: character → glyph, advance widths, kerning when available.
+ */
+function layoutLine(font: any, line: string, y: number, size: number): { commands: any[]; width: number } {
+  try {
+    const path = font.getPath(line, 0, y, size, { kerning: true });
+    return { commands: path.commands, width: font.getAdvanceWidth(line, size, { kerning: true }) };
+  } catch {
+    const scale = size / font.unitsPerEm;
+    const commands: any[] = [];
+    let x = 0, prev: any = null;
+    for (const ch of line) {
+      const glyph = font.charToGlyph(ch);
+      if (prev) { try { x += font.getKerningValue(prev, glyph) * scale; } catch { /* no kerning */ } }
+      commands.push(...glyph.getPath(x, y, size).commands);
+      x += (glyph.advanceWidth ?? 0) * scale;
+      prev = glyph;
+    }
+    return { commands, width: x };
+  }
+}
 const fontCache = new Map<string, any>();
 
 function flattenPath(cmds: any[], segs: number): number[][][] {
@@ -204,7 +228,7 @@ defineNode({
   inputs: [],
   params: {
     text: { type: 'string', default: 'Polyforge', desc: 'text (use \\n for new lines)' },
-    font: { type: 'string', default: '', desc: 'font file path or family name ("" = system default sans)' },
+    font: { type: 'string', default: '', desc: 'font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine)' },
     size: { type: 'float', default: 1, desc: 'font size (em height in units)' },
     align: { type: 'enum', options: ['left', 'center', 'right'], default: 'center', desc: 'horizontal alignment' },
     valign: { type: 'enum', options: ['baseline', 'center', 'bottom', 'top'], default: 'bottom', desc: 'vertical alignment' },
@@ -239,11 +263,10 @@ defineNode({
     let polys: number[][][] = [];
     const lineH = p.size * p.line_spacing;
     lines.forEach((line, li) => {
-      const path0 = font.getPath(line, 0, li * lineH, p.size, { kerning: true });
-      let cs = flattenPath(path0.commands, p.curve_segments);
+      const { commands, width } = layoutLine(font, line, li * lineH, p.size);
+      let cs = flattenPath(commands, p.curve_segments);
       if (p.align !== 'left' && cs.length) {
-        const w = font.getAdvanceWidth(line, p.size, { kerning: true });
-        const dx = p.align === 'center' ? -w / 2 : -w;
+        const dx = p.align === 'center' ? -width / 2 : -width;
         cs = cs.map((c) => c.map(([x, y]) => [x + dx, y]));
       }
       polys.push(...cs);

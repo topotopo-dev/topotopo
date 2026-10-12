@@ -307,7 +307,7 @@ None (generator).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `text` | string | `"Polyforge"` |  |  |  | text (use \\n for new lines) |
-| `font` | string | `""` |  |  |  | font file path or family name ("" = system default sans) |
+| `font` | string | `""` |  |  |  | font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine) |
 | `size` | float | `1` |  |  |  | font size (em height in units) |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment |
 | `valign` | enum | `"bottom"` |  | `baseline`, `center`, `bottom`, `top` |  | vertical alignment |

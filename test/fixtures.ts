@@ -66,8 +66,12 @@ export const PARAMS: Record<string, any> = {
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */
 export const SKIP = new Set(['input', 'graph_ref']);
 
-/** Node types whose output depends on the machine (system fonts), not just on the graph. */
-export const ENV_DEPENDENT_TYPES = new Set(['text']);
+/**
+ * Node types whose output depends on the machine, not just on the graph. The text node used to be one (system
+ * fonts); it now defaults to the bundled assets/fonts/DejaVuSans.ttf, so the set is empty unless a fixture names a
+ * system font explicitly.
+ */
+export const ENV_DEPENDENT_TYPES = new Set<string>([]);
 
 /** Structural invariants every cooked geometry must satisfy. Returns a list of violations (empty = ok). */
 export function checkGeo(g: Geometry): string[] {

@@ -186,8 +186,8 @@ npm run test:update -- sweep   # only names containing "sweep"
 git diff test/golden           # review what changed, then commit it with the code
 ```
 
-A failing golden prints each changed field with its old and new value. Outputs that depend on the machine (the
-`text` node's system font) record it and are skipped where a different font is found.
+A failing golden prints each changed field with its old and new value. Nothing depends on the machine: the `text`
+node defaults to the bundled `assets/fonts/DejaVuSans.ttf`, so its fingerprint is the same everywhere.
 
 **Property tests and fuzz.** `node test/property.ts --count 1000 --seed 7` explores more graphs; a failure prints
 the graph JSON and the `--seed S --only I` flags to reproduce it. `--strict` also fails on node errors that look like
