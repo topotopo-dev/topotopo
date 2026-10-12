@@ -18,8 +18,10 @@
       "volumes": 0
     },
     "groups": {
+      "edge": [],
       "point": [],
-      "prim": ["inside"]
+      "prim": ["inside"],
+      "vertex": []
     },
     "hashes": {
       "P": "4c2c404e28f6a930",

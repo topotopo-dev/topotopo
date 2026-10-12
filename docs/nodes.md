@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-97 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+102 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -13,7 +13,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [noise_displace](#noise_displace) · [peak](#peak) · [ray](#ray) · [smooth](#smooth) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [measure](#measure)
-- [group](#group-nodes): [delete](#delete) · [group](#group)
+- [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [normal](#normal) · [poly_extrude](#poly_extrude) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
@@ -1121,7 +1121,7 @@ Delete attributes by name pattern (wildcards, "^name" to keep).
 |---|---|---|---|---|---|---|
 | `names` | string | `""` |  |  | `name`, `pattern` | space-separated names/patterns, e.g. "Cd uv* ^uv2" |
 | `class` | enum | `"all"` |  | `all`, `point`, `prim`, `vertex`, `detail` |  | which classes |
-| `groups` | string | `""` |  |  |  | also delete groups matching this pattern |
+| `groups` | string | `""` |  |  |  | also delete groups (of every class) matching this pattern |
 
 ### attrib_noise
 
@@ -1318,7 +1318,7 @@ Measure prim area/perimeter, curve length, per-piece volume/area, or point curva
 
 category: `group` · aliases: `blast`, `remove`, `keep`
 
-Delete (or keep only) points/prims matching a group pattern (Houdini Blast).
+Delete (or keep only) points/prims/vertices matching a group pattern, or the prims using an edge group (Houdini Blast).
 
 **Inputs**
 
@@ -1331,15 +1331,17 @@ Delete (or keep only) points/prims matching a group pattern (Houdini Blast).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `group` | group | `""` |  |  |  | what to delete: group name, "!name", range "0-10", or "@P.y<0" |
-| `class` | enum | `"prim"` |  | `prim`, `point` |  | element class of the pattern |
+| `class` | enum | `"prim"` |  | `prim`, `point`, `vertex`, `edge` |  | element class of the pattern. vertex: removes those corners (polygons losing one are deleted, polylines shrink); edge: deletes every prim that uses one of the edges (dissolving edges is a separate polygon-modelling op) |
 | `keep` | bool | `false` |  |  | `invert`, `negate`, `delete_non_selected` | invert: keep the matches, delete the rest |
-| `remove_unused_points` | bool | `true` |  |  |  | drop points no longer used by prims (prim mode) |
+| `remove_unused_points` | bool | `true` |  |  |  | drop points no longer used by prims (prim, vertex and edge modes) |
 
 ### group
 
 category: `group` · aliases: `group_create`, `groupcreate`, `select`
 
-Create/modify a point or prim group by pattern, JS expression, bounding box, normal direction or random %.
+Create/modify a point, prim, vertex or edge group by pattern, JS expression, bounding box, normal direction or random %.
+
+Edge groups are sets of point pairs. Edge patterns add selectors: "boundary" (unshared edges), "shared", "angle>30" (dihedral angle in degrees), "length<0.1", "border:top" (border of a prim group), "p3-7" and chains "p0-1-2-3-0", "2e1" (side 1 of prim 2); index ranges address the unique-edge list. See help topic "groups".
 
 **Inputs**
 
@@ -1352,17 +1354,167 @@ Create/modify a point or prim group by pattern, JS expression, bounding box, nor
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `name` | string | `"group1"` |  |  |  | group name |
-| `class` | enum | `"prim"` |  | `prim`, `point` |  | element class |
-| `pattern` | group | `""` |  |  |  | base pattern ("" = no pattern filter): names, ranges, "@P.y>0", "!grp" |
-| `expr` | code | `""` |  |  |  | JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9" |
-| `bbox_min` | vec3 | `[-1000000000,-1000000000,-1000000000]` |  |  |  | keep elements inside this box (points; prims use centroid) |
+| `class` | enum | `"prim"` |  | `prim`, `point`, `vertex`, `edge` |  | element class (edge = point pairs) |
+| `pattern` | group | `""` |  |  |  | base pattern ("" = no pattern filter): names, ranges, "@P.y>0", "!grp"; edges also "boundary", "angle>30", "p3-7", "border:grp" |
+| `expr` | code | `""` |  |  |  | JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9" (vertex class runs over vertices; edge class: the expression must hold for both points of the edge) |
+| `bbox_min` | vec3 | `[-1000000000,-1000000000,-1000000000]` |  |  |  | keep elements inside this box (points; prims use centroid; vertices their point; edges their midpoint) |
 | `bbox_max` | vec3 | `[1000000000,1000000000,1000000000]` |  |  |  | box max |
-| `normal` | vec3 | `[0,0,0]` |  |  |  | keep elements whose normal is within spread_angle of this direction ([0,0,0] = off) |
+| `normal` | vec3 | `[0,0,0]` |  |  |  | keep elements whose normal is within spread_angle of this direction ([0,0,0] = off; vertices use vertex normals, edges the mean of their polygons) |
 | `spread_angle` | float | `30` |  |  |  | normal test cone half-angle in degrees |
 | `random` | float | `1` | 0..1 |  |  | keep this fraction at random (1 = all) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `mode` | enum | `"replace"` |  | `replace`, `union`, `intersect`, `subtract` |  | combine with an existing group of the same name |
 | `invert` | bool | `false` |  |  |  | invert the selection |
+
+### group_combine
+
+category: `group` · aliases: `groupcombine`, `combine_groups`, `group_bool`, `groupbool`
+
+Boolean combination of groups into a new group: "a & !b | c" (| or, & and, ^ xor, ! not, parentheses).
+
+Operands are group names (wildcards allowed) or any single group-pattern token of the class, e.g. "@P.y>0", "0-10", "boundary" or "angle>30" for edges; a group of another class is converted like in patterns. Precedence: ! then & then ^ then |; operands written next to each other are unioned.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `name` | string | `"combined"` |  |  | `output` | output group name (replaces an existing group of that class) |
+| `class` | enum | `"prim"` |  | `prim`, `point`, `vertex`, `edge` |  | element class |
+| `expr` | string | `""` |  |  | `expression`, `pattern` | boolean expression, e.g. "top & !side*", "(a \| b) & @P.y>0", "boundary ^ seams" |
+
+**Example**
+
+```json
+{
+  "type": "group_combine",
+  "params": {
+    "name": "top_only",
+    "class": "prim",
+    "expr": "top & !side"
+  }
+}
+```
+
+### group_delete
+
+category: `group` · aliases: `groupdelete`, `delete_group`, `remove_group`
+
+Delete groups by name (wildcards, "^name" keeps) from one or all classes.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `groups` | string | `""` |  |  | `group`, `names`, `pattern` | names to delete: "tmp*", "a b c", "* ^keep" |
+| `class` | enum | `"all"` |  | `all`, `point`, `vertex`, `prim`, `edge` |  | which classes |
+
+### group_expand
+
+category: `group` · aliases: `groupexpand`, `grow_group`, `groupgrow`, `shrink_group`
+
+Grow or shrink a point, prim or edge group by N steps across connectivity (negative steps shrink).
+
+Grow adds every neighbour of the group per step; shrink removes every member that has a neighbour outside the group. Neighbours: points share an edge; prims share an edge (or a point, connectivity = point); edges share a point.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | string | `""` |  |  | `name`, `base_group` | group to expand (name); a group pattern also works when new_name is set |
+| `class` | enum | `"prim"` |  | `prim`, `point`, `edge` |  | element class of the group |
+| `steps` | int | `1` |  |  | `iterations`, `amount`, `numsteps` | steps to grow (negative = shrink) |
+| `connectivity` | enum | `"edge"` |  | `edge`, `point` |  | prim class: neighbours share an edge or only a point |
+| `new_name` | string | `""` |  |  | `output`, `newname` | output group ("" = overwrite the input group) |
+
+**Example**
+
+```json
+{
+  "type": "group_expand",
+  "params": {
+    "group": "top",
+    "class": "prim",
+    "steps": 2
+  }
+}
+```
+
+### group_promote
+
+category: `group` · aliases: `grouppromote`, `promote_group`, `group_convert`, `groupconvert`
+
+Convert groups between point, vertex, prim and edge classes, with any/all inclusion (Houdini Group Promote).
+
+An element of the target class joins when any (or all) of the source-class elements touching it are in the group. Touching: a prim touches its points, vertices and sides; an edge touches its two points; a vertex touches its point, its prim and the two sides it bounds. Examples: point→prim any = prims with a selected point, all = prims entirely in the group; prim→point = all their points; prim→edge = all their sides; edge→point = endpoints; edge→prim any = prims using a grouped edge, all = prims whose every side is grouped; point→edge all = edges with both points selected.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | string | `""` |  |  | `groups`, `group_name` | source group name(s); wildcards and several names allowed ("top", "side* rim") |
+| `from` | enum | `"point"` |  | `point`, `vertex`, `prim`, `edge` | `fromtype`, `from_class`, `in_class` | class of the source group |
+| `to` | enum | `"prim"` |  | `point`, `vertex`, `prim`, `edge` | `totype`, `to_class`, `out_class` | class to convert to |
+| `include` | enum | `"any"` |  | `any`, `all` |  | any = touched by at least one grouped element; all = every touching element is grouped (Houdini "include only elements entirely contained") |
+| `new_name` | string | `""` |  |  | `output`, `newname` | name of the converted group ("" = keep the name; several matched groups are unioned into it) |
+| `delete_source` | bool | `true` |  |  |  | remove the source group after converting |
+
+**Example**
+
+```json
+{
+  "type": "group_promote",
+  "params": {
+    "group": "top",
+    "from": "point",
+    "to": "prim",
+    "include": "all"
+  }
+}
+```
+
+### group_rename
+
+category: `group` · aliases: `grouprename`, `rename_group`
+
+Rename a group (any class).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `from` | string | `""` |  |  |  | existing group name |
+| `to` | string | `""` |  |  |  | new name (replaces a same-named group of that class) |
+| `class` | enum | `"auto"` |  | `auto`, `point`, `vertex`, `prim`, `edge` |  | class (auto = first class that has the group: point, vertex, prim, edge) |
 
 ## topology nodes
 
@@ -1529,6 +1681,7 @@ Compute normals N on points (smooth), vertices (hard edges above the cusp angle)
 |---|---|---|---|---|---|---|
 | `class` | enum | `"vertex"` |  | `vertex`, `point`, `prim` |  | vertex = smooth with hard edges past cusp_angle |
 | `cusp_angle` | float | `60` | 0..180 |  |  | vertex mode: faces meeting sharper than this keep hard edges |
+| `hard_edges` | group | `""` |  |  | `hardedges`, `hard_edge_group` | vertex mode: edge group or edge pattern that is always hard, on top of cusp_angle ("" = none), e.g. "seams", "boundary", "angle>30", "p0-1-2" |
 
 ### poly_extrude
 
@@ -1619,7 +1772,9 @@ Reorder points or prims: by axis, random, attribute value, or reverse.
 
 category: `topology` · aliases: `subd`, `catmull_clark`, `subdivision`
 
-Catmull-Clark (smooth) or linear subdivision; all attributes interpolated.
+Catmull-Clark (smooth) or linear subdivision with semi-sharp creases; all attributes and groups interpolated.
+
+Creases (DeRose/Kass/Truong): edges in the "creases" edge group/pattern get crease_weight, and a crease attribute (default "creaseweight", Houdini convention: vertex class = both corners of the edge carry the weight; point class = both endpoints; prim class = every side of the prim) adds its values; the larger wins. Sharpness s >= 1 uses the sharp rules (edge midpoint, crease vertex 3/4·v + 1/8·neighbours, corner where 3+ creases meet stays fixed), 0 < s < 1 blends with the smooth rules, and s drops by 1 per level, so weight 1 is sharp for one level then smooths out; weight >= levels stays fully sharp. Boundary points touched by an interior crease become corners. The output keeps edge groups on the child edges and writes the remaining sharpness back to the crease attribute (prim class becomes vertex class).
 
 **Inputs**
 
@@ -1634,6 +1789,22 @@ Catmull-Clark (smooth) or linear subdivision; all attributes interpolated.
 | `levels` | int | `1` | 0..6 |  | `depth`, `iterations` | subdivision depth (each level ~4x faces) |
 | `method` | enum | `"catmull_clark"` |  | `catmull_clark`, `linear` |  | smooth or flat subdivision |
 | `boundary` | enum | `"smooth"` |  | `smooth`, `sharp` |  | open boundary rule |
+| `creases` | group | `""` |  |  | `crease_group`, `creasegroup` | edge group or edge pattern to crease ("" = none), e.g. "sharp", "angle>40", "p0-1-2-3-0" |
+| `crease_weight` | float | `10` | 0.. |  | `creaseweight`, `sharpness` | sharpness for the creases edges (>= levels = fully sharp; 1 = sharp for one level; 0.5 = half way) |
+| `crease_attrib` | string | `"creaseweight"` |  |  |  | vertex/point/prim attribute with crease weights ("" = ignore) |
+
+**Example**
+
+```json
+{
+  "type": "subdivide",
+  "params": {
+    "levels": 3,
+    "creases": "p2-1-6-5-2",
+    "crease_weight": 10
+  }
+}
+```
 
 ### triangulate
 
@@ -2130,7 +2301,7 @@ Code runs once per element with @attr bound to the current element. Read/write a
 |---|---|---|---|---|---|---|
 | `code` | code | `""` |  |  | `snippet`, `vexpression`, `vex` | JS snippet (statements). Example: "@P.y += noise(@P) * 0.2; @Cd = [@P.y, 0.5, 1];" |
 | `run_over` | enum | `"points"` |  | `points`, `prims`, `vertices`, `detail` | `class`, `runover` | element class to iterate |
-| `group` | group | `""` |  |  |  | only run on elements in this group (points/prims) |
+| `group` | group | `""` |  |  |  | only run on elements in this group (point, prim or vertex pattern, matching run_over) |
 
 **Example**
 
