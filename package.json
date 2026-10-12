@@ -36,7 +36,8 @@
     "meshoptimizer": "^1.3.0",
     "opentype.js": "^2.0.0",
     "simplex-noise": "^4.0.3",
-    "three": "^0.186.1"
+    "three": "^0.186.1",
+    "xatlas-wasm": "0.1.3"
   },
   "devDependencies": {
     "@types/d3-delaunay": "^6.0.4",
