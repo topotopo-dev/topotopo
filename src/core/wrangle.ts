@@ -100,7 +100,7 @@ export function runWrangle(
       continue;
     }
     const grp = /^group_(\w+)$/.exec(name);
-    if (grp && (cls === 'point' || cls === 'prim')) {
+    if (grp && (cls === 'point' || cls === 'prim' || cls === 'vertex')) {
       const gname = grp[1];
       let mask = g.groups(cls).get(gname);
       if (!mask) mask = g.addGroup(cls, gname);
@@ -272,7 +272,8 @@ export class WrangleAPI {
   delPts = new Set<number>();
   delPrims = new Set<number>();
   sets: { cls: AttribClass; idx: number; name: string; value: any }[] = [];
-  groupSets: { cls: 'point' | 'prim'; name: string; idx: number; value: number }[] = [];
+  groupSets: { cls: 'point' | 'prim' | 'vertex'; name: string; idx: number; value: number }[] = [];
+  edgeSets: { name: string; a: number; b: number; value: number }[] = [];
 
   constructor(g: Geometry, inputs: Geometry[], logs: string[]) {
     this.g = g;
@@ -332,9 +333,13 @@ export class WrangleAPI {
     const r = this.bvhOf(i).raycast(o[0], o[1], o[2], d[0], d[1], d[2]);
     return r ? { prim: r.prim, pos: r.pos, dist: r.t * Math.hypot(d[0], d[1], d[2]) } : null;
   }
-  ingroup(i: number, cls: 'point' | 'prim', name: string, idx: number) {
+  ingroup(i: number, cls: 'point' | 'prim' | 'vertex', name: string, idx: number) {
     const m = this.geo(i).groups(cls).get(name);
     return m ? m[idx] === 1 : false;
+  }
+  inedgegroup(i: number, name: string, a: number, b: number) {
+    const s = this.geo(i).edgeGroups.get(name);
+    return s ? s.has(a, b) : false;
   }
   addpoint(pos: any): number {
     if (typeof pos === 'number') {
@@ -355,7 +360,8 @@ export class WrangleAPI {
     if (andPoints) (this as any).delPrimPts = true;
   }
   setattr(cls: AttribClass, idx: number, name: string, value: any) { this.sets.push({ cls, idx, name, value: Array.isArray(value) ? value.slice() : value }); }
-  setgroup(cls: 'point' | 'prim', name: string, idx: number, value: any) { this.groupSets.push({ cls, name, idx, value: value ? 1 : 0 }); }
+  setgroup(cls: 'point' | 'prim' | 'vertex', name: string, idx: number, value: any) { this.groupSets.push({ cls, name, idx, value: value ? 1 : 0 }); }
+  setedgegroup(name: string, a: number, b: number, value: any) { this.edgeSets.push({ name, a: Number(a), b: Number(b), value: value ? 1 : 0 }); }
   log(msg: string) { if (this.logs.length < 50) this.logs.push(msg); }
 
   /** Apply deferred edits and return the resulting geometry. */
@@ -375,9 +381,14 @@ export class WrangleAPI {
       if (s.idx >= 0 && s.idx < t.count) a.set(s.idx, s.value);
     }
     for (const s of this.groupSets) {
-      const n = s.cls === 'point' ? g.numPoints : g.numPrims;
+      const n = g.count(s.cls);
       const m = g.groups(s.cls).get(s.name) ?? g.addGroup(s.cls, s.name);
       if (s.idx >= 0 && s.idx < n) m[s.idx] = s.value;
+    }
+    for (const s of this.edgeSets) {
+      const set = g.edgeGroups.get(s.name) ?? g.addEdgeGroup(s.name);
+      if (!(s.a >= 0 && s.b >= 0 && s.a < g.numPoints && s.b < g.numPoints)) continue;
+      if (s.value) set.add(s.a, s.b); else set.delete(s.a, s.b);
     }
     if (this.delPrims.size) {
       const keep = new Uint8Array(g.numPrims).fill(1);
