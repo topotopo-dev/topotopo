@@ -7,7 +7,7 @@
 // (GeoBuilder provenance from each output point's final closest-point projection onto the input surface).
 //
 // Kernel loop, per iteration (L = target length, per vertex when adaptive; an edge uses the mean of its ends):
-//   1. split edges longer than 4/3 L at their midpoint (repeated until none is left, at most 10 rounds)
+//   1. split edges longer than 4/3 L at their midpoint, longest first (rounds until none is left, at most 16)
 //   2. collapse edges shorter than 4/5 L when no edge of the result gets longer than 4/3 L (link condition,
 //      valence, normal-flip and feature checks; the lower-valence end goes)
 //   3. flip edges when that brings the four vertices closer to valence 6 (4 on boundaries)
@@ -17,7 +17,12 @@
 //      input constraint segment (both through a BVH, starting from the previous hit)
 // Constraint edges (features, seams, resampled boundaries) are never flipped, are split like other edges (the new
 // vertex joins the curve) and are only collapsed along the curve. Locked edges (preserved boundaries, group borders,
-// non-manifold edges) are never touched and their vertices never move.
+// non-manifold edges) are never touched and their vertices never move; their ends take the edge length as target so
+// the mesh grades towards a long locked edge instead of fanning slivers onto it. Points where several fans meet
+// (bowties) stay fixed and their edges are only split.
+//
+// Measured (i7-10700K, 10 iterations, loaded machine): a 100k-triangle uv sphere (seams, poles) → 118k triangles in
+// ~1.7 s; an 82k-triangle noisy ico sphere at its own edge length in ~0.6 s.
 import { GeoBuilder } from './geometry.ts';
 import type { Attribute, Geometry, Src } from './geometry.ts';
 import { EDGE_KEY_LIMIT, edgeList } from './edges.ts';
