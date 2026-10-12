@@ -10,6 +10,8 @@ import { getNodeDef } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { exportOBJ } from '../src/io/export.ts';
+import { encodeGreyPNG } from '../src/io/heightmap.ts';
+import zlib from 'node:zlib';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 
 /** Named source geometry. A fixture may wire other fixtures (`in`), which are pulled in automatically. */
@@ -44,6 +46,12 @@ export const SRC: Record<string, NodeSpec> = {
   // packed prims (P2-A): three identical boxes (pack shares one source), and packed copies of a coloured sphere
   PIECES: { type: 'copy_xform', in: ['BOX'], params: { count: 3, translate: [1.5, 0, 0], copy_attrib: '' } },
   PACKED: { type: 'copy_to_points', in: ['COLORED', 'PTS'], params: { pack: true } },
+  // heightfields (P2-C): a 4 × 4 m field at 0.1 m (41 × 41 samples), noise hills, a slope mask, a curve and a stamp
+  HF: { type: 'heightfield', params: { size: [4, 4], resolution: 0.1 } },
+  HFN: { type: 'heightfield_noise', in: ['HF'], params: { amplitude: 0.8, element_size: 2, seed: 1 } },
+  HFM: { type: 'heightfield_mask_by_feature', in: ['HFN'], params: { feature: 'slope', min_angle: 25 } },
+  HF_CURVE: { type: 'curve', params: { points: [[-2, 0, -1], [0, 0.4, 0.5], [2, 0, 1]], smooth: true } },
+  HF_STAMP: { type: 'box', params: { size: [1, 1, 1], center: [0.6, 0.5, 0] } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -63,6 +71,12 @@ export const INPUTS: Record<string, string[]> = {
   // measure (P1-F): curvature on the box (flat faces, sharp edges), distance from grid points to the sphere
   curvature: ['BOX'], distance: ['GRID', 'MESH'],
   pack: ['PIECES'], unpack: ['PACKED'],
+  heightfield_noise: ['HF'], heightfield_mask_noise: ['HF'], heightfield_to_mesh: ['HFN'], heightfield_to_sdf: ['HFN'],
+  heightfield_remap: ['HFN'], heightfield_blur: ['HFN'], heightfield_mask_blur: ['HFM'], heightfield_terrace: ['HFN'],
+  heightfield_clip: ['HFN'], heightfield_cutout: ['HFN', 'CIRCLE'], heightfield_layer: ['HFN'],
+  heightfield_mask_by_feature: ['HFN'], heightfield_mask_by_object: ['HFN', 'HF_CURVE'], heightfield_mask_expand: ['HFM'],
+  heightfield_erode: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
+  heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -96,6 +110,17 @@ export const PARAMS: Record<string, any> = {
   dissolve: { group: '@P.x>0.1' },
   edge_collapse: { group: '0-40:8' },
   polybridge: { source: '@P.y>0.4', target: '@P.y<-0.4', divisions: 2, blend: 0.5, delete_inner_faces: true },
+  heightfield_from_mesh: { resolution: 0.05 },
+  heightfield_layer: { layer: 'combo', expression: 'height * 2 + sin(x * 3) * 0.1 + mask' },
+  heightfield_cutout: { value: -0.5, feather: 0.2 },
+  heightfield_mask_by_object: { distance: 0.3, falloff: 0.3 },
+  heightfield_erode: { iterations: 8 },
+  heightfield_project: { radius: 0.4 },
+  heightfield_path: { width: 0.6, shoulder: 0.4, smooth: 1, bank: 5 },
+  heightfield_scatter: { density: 4 },
+  heightfield_resample: { factor: 0.5 },
+  heightfield_transform: { translate: [1, 0.5, 0], rotate: 90, height_scale: 1.5 },
+  // heightfield_from_image: { path } is filled in by createFixtureEngine() (a 16-bit PNG written to the temp dir)
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */
@@ -198,6 +223,12 @@ export async function createFixtureEngine(): Promise<{ engine: Engine; tmp: stri
   const objPath = path.join(tmp, 'cube.obj');
   fs.writeFileSync(objPath, exportOBJ((await engine.cook({ nodes: { b: { type: 'box' } } })).geo!));
   PARAMS.file = { path: objPath };
+  // heightfield_from_image: a 33 × 17 16-bit grey heightmap (ramp + bumps), zlib-compressed like real files
+  const W = 33, H = 17, px = new Uint16Array(W * H);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) px[j * W + i] = Math.round(65535 * (0.5 * (i / (W - 1)) + 0.25 * (1 + Math.sin(i * 0.7) * Math.cos(j * 0.9)) * 0.5));
+  const pngPath = path.join(tmp, 'height16.png');
+  fs.writeFileSync(pngPath, encodeGreyPNG(px, W, H, 16, (d) => zlib.deflateSync(d)));
+  PARAMS.heightfield_from_image = { path: pngPath, size: [4, 2], height_min: 0, height_max: 2 };
   return { engine, tmp, objPath };
 }
 

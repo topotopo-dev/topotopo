@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "height:float:1", "mask:float:1", "slope:float:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [2, 0.4512, 2],
+      "min": [-1.9755, -0.4494, -2]
+    },
+    "counts": {
+      "points": 52,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "6098b96baafeabd1",
+      "attributes": {
+        "point.N": "09fc6dd0b001926e",
+        "point.height": "630a76b3ff2f1421",
+        "point.mask": "ceed2ff6fcbe362c",
+        "point.slope": "76477f7ca4aea272"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.heightfield_scatter",
+  "ok": true,
+  "source": "fixture for node type \"heightfield_scatter\" (test/fixtures.ts)",
+  "warnings": []
+}

@@ -17,6 +17,8 @@ import { renderArgs } from '../render/options.ts';
 import { encodePNG } from '../render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath, exportGeometryAsync } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
+import { HEIGHTMAP_FORMATS, heightmapExport, heightmapPaths } from '../io/heightmap.ts';
+import type { HeightmapFormat } from '../io/heightmap.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 import { verifyTools } from './verify.ts';
@@ -69,6 +71,17 @@ function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: strin
   return { img: { type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, notes: r.notes, png };
 }
 
+/** Heightmap export: the main file, the JSON sidecar (png16/r16) or one PNG per mask layer. */
+function writeHeightmap(geo: Geometry, format: HeightmapFormat, p: string, a: any): string {
+  const res = heightmapExport(geo, format, {
+    layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield,
+    deflate: (d) => zlib.deflateSync(d, { level: 6 }),
+  });
+  const paths = heightmapPaths(p, res.files);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  res.files.forEach((f, i) => fs.writeFileSync(paths[i], f.bytes));
+  return `wrote ${paths.join(', ')} (${format}): ${res.summary}`;
+}
 function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
   let highlight: RenderOptions['highlight'] = null;
@@ -151,7 +164,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, uv, code, flow, io, asset). Optional filter by category or search text.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, asset). Optional filter by category or search text.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -291,14 +304,19 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials, vertex colours, uv, custom attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda, .ply, .stl, .geo (Houdini JSON geometry, every attribute and group), .csv (point stream; pcg:true for Unreal PCG columns), .points.json, .json (lossless polyforge). Relative paths go into the workspace. help {topic:"export"} for details.',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials, vertex colours, uv, custom attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda, .ply, .stl, .geo (Houdini JSON geometry, every attribute and group), .csv (point stream; pcg:true for Unreal PCG columns), .points.json, .json (lossless polyforge). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers).',
       inputSchema: {
         type: 'object',
         required: ['path'],
         properties: {
           graph: { type: 'string' }, node: { type: 'string' },
-          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json"' },
+          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap)' },
           format: { type: 'string', enum: EXPORT_FORMATS, description: 'default: from the extension (.points.json = pointsjson)' },
+          layer: { type: 'string', description: 'heightmaps: layer to write (png16/r16 default "height", mask_png default "mask")' },
+          layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png)' },
+          height_min: { type: 'number', description: 'png16/r16: fixed range start (default: the layer minimum), e.g. shared by tiles' },
+          height_max: { type: 'number', description: 'png16/r16: fixed range end (default: the layer maximum)' },
+          heightfield: { type: 'number', description: 'heightmaps: which heightfield when there are several (index, default 0)' },
           up_axis: { type: 'string', enum: ['y', 'z'] },
           scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres; pcg csv defaults to 100)' },
           split_by_name: { type: 'boolean', description: 'separate meshes per prim "name" (default true)' },
@@ -317,8 +335,10 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
         const p = path.resolve(ws.dir, a.path);
-        const ext = String(a.format ?? exportFormatFromPath(p)).toLowerCase() as ExportFormat;
+        const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
+        const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt0] ?? fmt0) as ExportFormat;
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
+        if (HEIGHTMAP_FORMATS.includes(ext as HeightmapFormat)) return text(writeHeightmap(geo, ext as HeightmapFormat, p, a) + ` (from ${name}/${r.target}${atFrame(r)})`);
         const bytes = await exportGeometryAsync(geo, ext, {
           upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
           materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct, precision: a.precision, instancing: a.instancing,

@@ -1,0 +1,53 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [2, 1.4044, 1],
+          "min": [-2, 0.088, -1]
+        },
+        "grid": {
+          "cellSize": 0.125,
+          "height": 17,
+          "origin": [-2, -1],
+          "width": 33
+        },
+        "kind": "heightfield",
+        "layers": {
+          "height": "54baaf6756d824d5",
+          "mask": "ab3521aadfe76720"
+        },
+        "name": "heightfield"
+      }
+    ]
+  },
+  "name": "node.heightfield_from_image",
+  "ok": true,
+  "source": "fixture for node type \"heightfield_from_image\" (test/fixtures.ts)",
+  "warnings": []
+}

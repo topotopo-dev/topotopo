@@ -34,10 +34,12 @@ the human side can be pure browser with no install. Every Node-specific capabili
 
 ```
 src/core/      geometry model + algorithms (no I/O)
-  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF volumes,
+  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF and heightfield volumes,
                  packed prims), GeoBuilder
   packed.ts      packed primitives: expansion (unpack, auto-unpack, render budget), transform composition, statistics
   geohash.ts     content hash of a geometry (deduplicates packed sources)
+  heightfield.ts heightfield volumes: grid + named layers, bilinear sampling, blur, distance transforms, rasterising meshes/curves, to-mesh, render preview
+  erosion.ts     erodeStep: droplet hydraulic + thermal erosion over typed arrays (the WASM-replaceable kernel)
   edges.ts       EdgeSet (unordered point pairs, integer keys), unique-edge list
   halfedge.ts    half-edge mesh derived on demand and cached per Geometry: loops, rings, one-rings, boundaries, dihedral angles
   topology.ts    normals (hard edges), triangulation (earcut), edges, connectivity, boundary loops, health report
@@ -62,7 +64,7 @@ src/nodes/     ~95 node types, one defineNode() each
 src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision)
 src/inspect.ts, src/explain.ts  text views of geometry: summaries, statistics, a "reads as" description, diffs
 src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON
-               (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts
+               (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts · heightmaps (png16, r16, mask_png) · PNG decoder
 src/host/      Node host: fs, vm sandbox (timeouts), fonts
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
@@ -115,6 +117,19 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   where the source has none. The renderer expands within a triangle budget (an evenly spread subset beyond it); glTF
   writes `EXT_mesh_gpu_instancing`, USD a `PointInstancer`; formats without instancing expand.
 - **SDF volumes** travel inside the geometry as lazy sample functions, so implicit modelling composes like any other node.
+- **Heightfield volumes** are the second volume kind (`Volume = SdfVolume | HeightfieldVolume`, `core/heightfield.ts`),
+  Houdini's terrain model: a regular grid of samples in the XZ plane, Y up, with named `Float32Array` layers (`height`
+  in world Y, `mask`, `flow`, `sediment`, `debris`, `water`, user layers). Samples sit on grid nodes: sample (i, j) is at
+  `origin + (i, j) × cellSize`, so a W × H field spans (W − 1) × (H − 1) cells, which is how Unreal Landscape counts
+  vertices; layers are row-major (`j × width + i`). `sample(x, z)` / `sampleLayer(name, x, z)` interpolate bilinearly.
+  `Geometry.clone()` and `merge()` give each heightfield its own layer map but share the arrays (copy-on-write: nodes
+  write through `Heightfield.writable(name)`), and `bbox(true)` includes the field. The renderer and the live viewer
+  draw a heightfield through its preview mesh (decimated to at most 256² quads, layers as point attributes, mask in
+  red); `heightfield_to_mesh` and `heightfield_to_sdf` convert it. Erosion lives behind one function,
+  `erodeStep(field, params, rng)` in `core/erosion.ts`, over plain typed arrays (particle droplets + thermal talus
+  relaxation, deterministic, mass-conserving with closed borders), so a WASM kernel can replace it. Export writes
+  16-bit PNG / RAW heightmaps with a JSON sidecar holding the range and the Unreal import scale (`io/heightmap.ts`),
+  and `io/png-decode.ts` is a dependency-free PNG decoder (inflate included) for heightmap and mask import.
 - **GeoBuilder** records the *provenance* of each new element: a source index or a weighted blend. On `build()`,
   every attribute and group of the source is interpolated automatically. That is why subdivide, extrude, resample,
   clip, sweep and the rest preserve `uv`, `Cd` and custom attributes without per-node code. Point and prim groups
@@ -280,7 +295,8 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
   `PointInstancer`). Still open: per-instance attributes in glTF/USD exports, a PCG point stream from instances, packed
   disk references (Houdini packed disk prims), and instanced rendering in the rasteriser (it draws expanded copies).
 - PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
-- Heightfield node set: erosion, masks, scatter by mask, terrain → Unreal Landscape heightmap export.
+- Heightfields (done in P2-C: 23 nodes, erosion, Unreal heightmap export). Next: a grid (pipe-model) erosion variant
+  and the WASM erosion kernel behind `erodeStep`, heightfield tiles, and Unreal weight-layer import presets.
 - Curve toolkit: NURBS/Bezier evaluation, fillet, curve booleans, path offset in 3D.
 - Performance: move hot kernels (sdf sampling, rasteriser, subdivide) to Workers, WebGPU or WASM; add multithreaded cooking of
   independent branches.

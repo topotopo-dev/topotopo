@@ -17,7 +17,8 @@ INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions st
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
-ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.`;
+ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
+TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape. See help topic "heightfield".`;
 
 export const TOPICS: Record<string, string> = {
   graph: `GRAPH FORMAT
@@ -218,6 +219,40 @@ sdf_expr: write the distance in JS: p = [x,y,z]; return a number. Inputs via sdf
 Example: {"type":"sdf_expr","params":{"code":"const b = sdBox(p,[0.6,0.3,0.4]); const s = sdSphere(sub(p,[0,0.35,0]),0.35); return smin(b, s, 0.15) + 0.03*noise(mul(p,6));"}}
 Then: {"type":"sdf_to_mesh","in":["that"],"params":{"divisions":120}}. Set bounds_min/bounds_max to enclose the shape.`,
 
+  heightfield: `HEIGHTFIELDS (terrain; Houdini's HeightField model, exports to Unreal Landscape)
+A heightfield is a volume carried in the geometry (like an SDF), not polygons: a regular grid of samples in the XZ
+plane, Y up, with named float layers. Samples sit on grid nodes: size 20 at resolution 0.1 = 201 × 201 samples (Unreal
+counts landscape vertices the same way). Layers: height (world Y), mask (0..1 selection), flow, sediment, debris, water
+(written by heightfield_erode), path (heightfield_path) and any user layer (rock, snow …).
+WORKFLOW
+  heightfield {size, resolution} → heightfield_noise {fractal: "ridged", amplitude, element_size, range: "positive"}
+  → heightfield_erode {iterations: 60} (gullies and sediment fans; writes flow, sediment, debris, water)
+  → heightfield_path (road along a curve, writes "path") · heightfield_project (stamp meshes/curves: plateaus, ridges)
+  → heightfield_mask_by_feature (slope/height/curvature/direction/flow/occlusion) → heightfield_scatter → copy_to_points
+  → heightfield_to_mesh {color: "terrain"} for polygons (layers become point attributes), or export png16.
+  Other sources: heightfield_from_mesh (project polygons along Y), heightfield_from_image (8/16-bit PNG).
+  Layer tools: heightfield_layer (expression over layers "height * mask + 2", or copy/rename/delete/fill), remap, blur,
+  terrace, clip, cutout, mask_noise, mask_blur, mask_expand, resample (e.g. samples [505, 505]), transform (translate,
+  scale, 90° turns; the generic transform node works too), to_sdf (solid terrain for caves/overhangs with sdf_combine).
+MASKS: every mask node combines with the existing mask (mode replace/add/subtract/multiply/max/min): chain them,
+  multiply = and, max = or. Most layer nodes take mask_layer to blend their effect by a mask.
+  e.g. rocks on steep slopes off the road: mask_by_feature slope 33° → heightfield_layer {layer:"mask", expression:"mask * (1 - path)"}.
+EROSION: droplets (rain_density per sample per iteration, rain_amount, erosion_rate, deposition_rate, sediment_capacity,
+  evaporation, inertia, gravity, max_lifetime) + thermal (thermal_talus_angle, thermal_rate); hardness_layer (1 = rock),
+  freeze_layer (1 = untouched); boundary closed conserves material. Deterministic per seed. Cost ≈ samples ×
+  rain_density × iterations × 30 steps (512² × 100 iterations ≈ 2–3 s). Stronger: more iterations or sediment_capacity.
+RENDER / INSPECT: render draws heightfields as a shaded grid (the mask in red); color_by any layer name. inspect and
+  every cook summary list the grid and each layer's min/max/mean.
+UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with
+  height_min / height_max and the import settings. Pixel column = X, row = Z (row 0 at min Z); Unreal X = X,
+  Unreal Y = Z, Unreal Z = Y, centimetres.
+  value v → h = height_min + v / 65535 × range.  Unreal: Z_cm = location.z + (v − 32768) × scale.z / 128, so
+  scale.z = range_m × 12800 / 65535 (≈ range_m / 512 × 100: Z scale 100 spans 512 m), scale.x = scale.y = cell × 100,
+  location = (origin.x × 100, origin.z × 100, 100 × (height_min + range × 32768 / 65535)).
+  Prefer resolutions Unreal likes (127, 253, 505, 1009, 2017, 4033 per side): heightfield_resample {samples: [505, 505]}.
+  Weight layers: export {format: "mask_png", layers: ["mask", "flow"]} → one 8-bit PNG per layer (name_<layer>.png).
+  Tiles: pass the same height_min / height_max to every export.`,
+
   loops: `FOREACH LOOPS
 {"type": "foreach", "in": ["lots"], "params": {"mode": "prims", "body": {
    "nodes": {
@@ -353,6 +388,8 @@ HOUDINI: File SOP reads .geo (and glb/obj/usd). CSV points: Table Import SOP, ma
 BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME).
 PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing, usda a PointInstancer, json keeps
   them; obj/ply/stl/geo/csv/points.json expand them. Option instancing "expand" writes real geometry everywhere.
+Heightfields: png16 (.png) / r16 (.r16, .raw) heightmaps with a .json sidecar (range + Unreal Landscape scale/location),
+mask_png (8-bit weight layers; layers: [...]); height_min/height_max fix the range. See help topic "heightfield".
 IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; external .bin; node transforms;
   EXT_mesh_gpu_instancing as packed prims, instancing:"expand" for geometry; names → "name", materials → "material" + table), geo and uncompressed bgeo
   (Houdini; not .bgeo.sc; volumes skipped), csv (P.x | x,y,z | P[x] | Unreal Position.X or struct cells), points.json,

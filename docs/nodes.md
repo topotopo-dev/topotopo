@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-127 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+150 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -19,6 +19,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
+- [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
 - [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
@@ -263,9 +264,9 @@ None (generator).
 
 ### terrain
 
-category: `generate` · aliases: `heightfield`, `landscape`
+category: `generate` · aliases: `landscape`
 
-Heightfield terrain: a ground grid displaced by fractal noise, with height attribute and normals.
+Terrain mesh: a ground grid displaced by fractal noise, with height attribute and normals (for erosion, masks and Unreal heightmaps use the heightfield nodes).
 
 **Inputs**
 
@@ -3475,6 +3476,1491 @@ Polygonise SDF volumes into a watertight triangle mesh (all volumes are unioned)
 | `iso` | float | `0` |  |  | `level`, `offset` | iso value (+ grows, − shrinks) |
 | `normals` | bool | `true` |  |  |  | write point N from the field gradient |
 | `keep_input` | bool | `false` |  |  |  | also keep the input polygons |
+
+## heightfield nodes
+
+### heightfield
+
+category: `heightfield` · aliases: `heightfield_create`, `hf`, `height_field`
+
+Create a flat heightfield: a terrain grid in XZ (Y up) with height and mask layers. Start of every terrain workflow.
+
+Houdini: HeightField. A heightfield is a volume carried in the geometry (like an SDF), not polygons: a regular grid of samples with named float layers (height = world Y, mask 0..1, plus flow, sediment, debris, water and any user layer). Samples sit on the grid nodes, so size 20 at resolution 0.1 gives 201 × 201 samples, the way Unreal counts landscape vertices. render draws it as a shaded grid (mask in red, color_by any layer); heightfield_to_mesh makes polygons; export png16/r16 writes an Unreal Landscape heightmap.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `size` | vec2 | `[20,20]` |  |  |  | extent in X and Z (metres), rounded up to whole cells |
+| `resolution` | float | `0.1` | 0.001.. |  | `grid_spacing`, `cell_size`, `spacing`, `voxel_size`, `divsize` | cell size: distance between samples (metres) |
+| `samples` | ivec2 | `[0,0]` | 0.. |  |  | sample counts [nx, nz]; when nx > 1 they override resolution (cell = size.x / (nx - 1), depth = (nz - 1) × cell), e.g. [505, 505] for Unreal |
+| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos` | field centre: X and Z place the grid, Y is added to the initial height |
+| `height` | float | `0` |  |  | `initial_height`, `elevation` | initial height (world Y) |
+| `name` | string | `"heightfield"` |  |  |  | heightfield name (shown by inspect) |
+
+**Writes:** heightfield volume with layers height, mask
+
+**Example**
+
+```json
+{
+  "type": "heightfield",
+  "params": {
+    "size": [
+      20,
+      20
+    ],
+    "resolution": 0.1
+  }
+}
+```
+
+### heightfield_blur
+
+category: `heightfield` · aliases: `hf_blur`, `heightfield_smooth`
+
+Blur a heightfield layer (gaussian or box, radius in metres): soften terrain, smooth masks before scattering.
+
+Houdini: HeightField Blur. Separable running-sum boxes (gaussian = three box passes), clamped at the borders, so any radius costs the same.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"height"` |  |  |  | layer to blur |
+| `radius` | float | `1` | 0.. |  | `size`, `distance` | blur radius (metres) |
+| `mode` | enum | `"gaussian"` |  | `gaussian`, `box` | `filter`, `type` | gaussian (smooth, radius = 2 sigma) or box (flat average) |
+| `iterations` | int | `1` | 1..50 |  |  | repeat the blur |
+| `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
+
+**Writes:** the layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 2,
+        "element_size": 1
+      }
+    },
+    "b": {
+      "type": "heightfield_blur",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "radius": 0.5
+      }
+    }
+  },
+  "output": "b"
+}
+```
+
+### heightfield_clip
+
+category: `heightfield` · aliases: `hf_clip`, `heightfield_clamp`
+
+Clamp a heightfield layer below and/or above a value (flat lake beds, plateaus, sea level).
+
+Houdini: HeightField Clip.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"height"` |  |  |  | layer to modify |
+| `min` | float | `0` |  |  | `low`, `floor` | lowest value kept (when clip_min) |
+| `max` | float | `10` |  |  | `high`, `ceiling` | highest value kept (when clip_max) |
+| `clip_min` | bool | `true` |  |  |  | raise values below min to min |
+| `clip_max` | bool | `true` |  |  |  | lower values above max to max |
+| `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
+
+**Writes:** the layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 3
+      }
+    },
+    "c": {
+      "type": "heightfield_clip",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "min": -0.5,
+        "clip_max": false
+      }
+    }
+  },
+  "output": "c"
+}
+```
+
+### heightfield_cutout
+
+category: `heightfield` · aliases: `heightfield_cutoutbyobject`, `hf_cutout`, `heightfield_cut`
+
+Set a layer to a value outside a mask or outside a shape's footprint (cut terrain to a shape, flatten around a plot).
+
+Houdini: HeightField Cutout by Object. With a shape connected (closed polygons, projected along Y), samples outside its footprint get `value`; without one, the mask layer decides (soft: result = value + (layer − value) × mask). invert cuts inside instead; feather softens the edge (metres). write_mask stores the keep-mask in a layer.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+| 1 | `shape` | yes | no | optional closed polygons whose footprint is kept |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"height"` |  |  |  | layer to modify |
+| `value` | float | `0` |  |  | `height` | value written outside |
+| `mask_layer` | string | `"mask"` |  |  |  | mask that keeps the layer (when no shape is connected) |
+| `invert` | bool | `false` |  |  |  | cut inside the shape/mask instead |
+| `feather` | float | `0` | 0.. |  | `blend`, `falloff` | soft edge width (metres) |
+| `write_mask` | string | `""` |  |  |  | also store the keep-mask in this layer ("" = no) |
+
+**Writes:** the layer (and write_mask)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 2
+      }
+    },
+    "c": {
+      "type": "circle",
+      "params": {
+        "radius": 8,
+        "plane": "xz",
+        "segments": 48
+      }
+    },
+    "cut": {
+      "type": "heightfield_cutout",
+      "in": [
+        "n",
+        "c"
+      ],
+      "params": {
+        "value": -1,
+        "feather": 1
+      }
+    }
+  },
+  "output": "cut"
+}
+```
+
+### heightfield_erode
+
+category: `heightfield` · aliases: `hf_erode`, `erosion`, `heightfield_erosion`, `heightfield_hydro_erode`
+
+Hydraulic + thermal erosion: rain droplets carve gullies and drop sediment fans, talus slides off steep slopes. Writes flow, sediment, debris, water.
+
+Houdini: HeightField Erode (hydro + thermal). Each iteration rains rain_density × samples droplets (seeded, deterministic) that run downhill with inertia, erode where fast and under capacity (capacity = slope × speed × water × sediment_capacity) and deposit where they slow down, climb or evaporate; then one thermal pass moves material steeper than thermal_talus_angle to lower neighbours. Material is conserved with boundary closed. Layers: height (updated), sediment (+thickness of loose material water deposited, added to an existing layer), debris (+thickness of talus/scree from thermal erosion), flow (0..1, where water ran: rivers and gullies), water (0..1, where water came to rest). Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain. Cost ~ samples × rain_density × iterations × max_lifetime: 512² × 100 iterations takes about 2–3 s.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `iterations` | int | `50` | 0..5000 |  | `iter`, `steps` | rain passes (each followed by a thermal pass) |
+| `seed` | float | `0` |  |  |  | random seed |
+| `erosion_rate` | float | `0.3` | 0..1 |  | `erodability`, `erode_rate`, `erosion` | fraction of the free capacity a droplet picks up per step |
+| `deposition_rate` | float | `0.3` | 0..1 |  | `deposit_rate`, `deposition` | fraction of the excess sediment dropped per step |
+| `sediment_capacity` | float | `1` | 0.. |  | `capacity` | how much sediment fast, steep water can carry (higher = deeper gullies, bigger fans) |
+| `evaporation` | float | `0.1` | 0..1 |  | `evaporation_rate` | fraction of a droplet's water lost per step: its load settles gradually as it dries (lower = longer rivers) |
+| `rain_amount` | float | `1` | 0.. |  | `rain`, `water_amount` | water per droplet |
+| `rain_density` | float | `0.02` | 0..1 |  | `droplets` | droplets per sample per iteration |
+| `inertia` | float | `0.1` | 0..1 |  |  | droplet momentum: 0 = always steepest descent, higher = smoother, longer channels |
+| `gravity` | float | `4` | 0.. |  |  | acceleration on slopes |
+| `min_slope` | float | `0.01` | 0.. |  |  | minimum capacity (as a slope), keeps flats eroding a little |
+| `erosion_radius` | int | `3` | 1..8 |  | `brush_radius` | droplet erosion footprint radius (samples) |
+| `max_lifetime` | int | `30` | 1..256 |  | `lifetime`, `max_steps` | maximum steps per droplet |
+| `thermal_talus_angle` | float | `40` | 0..89 |  | `talus_angle`, `repose_angle`, `cut_angle` | thermal: angle of repose in degrees (steeper slopes shed material) |
+| `thermal_rate` | float | `0.1` | 0..1 |  | `thermal` | thermal: fraction of the excess moved per iteration (0 = no thermal erosion) |
+| `hardness_layer` | string | `""` |  |  |  | optional 0..1 layer: 1 = rock that does not erode |
+| `freeze_layer` | string | `""` |  |  |  | optional 0..1 layer: 1 = frozen (unchanged), e.g. under buildings or roads |
+| `boundary` | enum | `"closed"` |  | `closed`, `open` |  | closed: water stops at the border and drops its sediment (mass conserved); open: it leaves with it |
+
+**Writes:** layers height, flow, sediment, debris, water
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          20,
+          20
+        ],
+        "resolution": 0.1
+      }
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "fractal": "ridged",
+        "amplitude": 4,
+        "element_size": 8,
+        "range": "positive"
+      }
+    },
+    "e": {
+      "type": "heightfield_erode",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "iterations": 60
+      }
+    }
+  },
+  "output": "e"
+}
+```
+
+### heightfield_from_image
+
+category: `heightfield` · aliases: `heightfield_file`, `heightmap_import`, `hf_from_image`, `heightfield_image`
+
+Load a heightmap or mask from an 8/16-bit PNG (grey or colour) into a heightfield layer.
+
+Houdini: HeightField File. One sample per pixel; image column = X, row = Z with row 0 at the field's min Z (the layout export png16 writes, so a round trip lines up). Values 0..1 map to height_min..height_max (use the numbers from the export sidecar; 0 and 1 for masks). With a heightfield connected, the image is stretched over that field and written into `layer` instead of creating a new field.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | yes | no | optional: write the image into this field (stretched over its extent) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the workspace) or URL |
+| `layer` | string | `"height"` |  |  |  | layer to write |
+| `height_min` | float | `0` |  |  | `min`, `low` | value for black (0) |
+| `height_max` | float | `10` |  |  | `max`, `high` | value for white (1) |
+| `channel` | enum | `"luminance"` |  | `luminance`, `average`, `r`, `g`, `b`, `a` |  | which channel of a colour image |
+| `size` | vec2 | `[20,20]` |  |  |  | new field: extent in X and Z (metres) |
+| `resolution` | float | `0` | 0.. |  |  | new field: cell size; > 0 overrides size (extent = (pixels - 1) × resolution) |
+| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos` | field centre: X and Z place the grid, Y is added to the initial height |
+| `flip_z` | bool | `false` |  |  |  | image row 0 at max Z instead of min Z |
+| `name` | string | `"heightfield"` |  |  |  | new field name |
+
+**Writes:** the layer (a new field also gets height and mask)
+
+**Example**
+
+```json
+{
+  "type": "heightfield_from_image",
+  "params": {
+    "path": "terrain.png",
+    "size": [
+      100,
+      100
+    ],
+    "height_min": 0,
+    "height_max": 25
+  }
+}
+```
+
+### heightfield_from_mesh
+
+category: `heightfield` · aliases: `heightfield_project_mesh`, `mesh_to_heightfield`, `hf_from_mesh`
+
+Make a heightfield from polygons by projecting them along Y: height = highest (or lowest) surface, mask = 1 where hit.
+
+Houdini: HeightField Project onto a new HeightField. Every sample takes the Y of the mesh surface straight above/below it (exact: the triangles are rasterised onto the grid, same result as a vertical ray per sample). The field covers the mesh's XZ bounds plus padding unless size is set. Samples that miss get the mesh's lowest Y (miss "min"), 0, or background.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `mesh` | no | no | polygons (terrain scans, sculpted meshes, building footprints) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | float | `0.1` | 0.001.. |  | `grid_spacing`, `cell_size`, `spacing`, `voxel_size` | cell size (metres) |
+| `padding` | float | `0` | 0.. |  |  | extra border around the mesh bounds (metres) |
+| `size` | vec2 | `[0,0]` |  |  |  | field extent in X and Z; 0 = the mesh bounds (+ padding) |
+| `center` | vec3 | `[0,0,0]` |  |  |  | field centre when size is set |
+| `direction` | enum | `"down"` |  | `down`, `up` |  | down = the highest surface (looking from above), up = the lowest |
+| `miss` | enum | `"min"` |  | `min`, `zero`, `background` |  | height where nothing is hit: the mesh's lowest Y, 0, or the background value |
+| `background` | float | `0` |  |  |  | height for misses when miss = background |
+| `mask` | bool | `true` |  |  |  | write mask = 1 where the mesh was hit, 0 elsewhere |
+| `name` | string | `"heightfield"` |  |  |  | heightfield name |
+
+**Writes:** heightfield volume with layers height, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "g": {
+      "type": "grid",
+      "params": {
+        "size": [
+          10,
+          10
+        ]
+      }
+    },
+    "n": {
+      "type": "noise_displace",
+      "in": [
+        "g"
+      ],
+      "params": {
+        "amplitude": 1
+      }
+    },
+    "hf": {
+      "type": "heightfield_from_mesh",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "resolution": 0.1
+      }
+    }
+  },
+  "output": "hf"
+}
+```
+
+### heightfield_layer
+
+category: `heightfield` · aliases: `heightfield_copylayer`, `heightfield_layerclear`, `hf_layer`, `heightfield_wrangle`, `heightfield_expr`
+
+Layer operations: compute a layer from an expression over layers ("height * mask + 2"), copy, rename, delete or fill.
+
+Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer's current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), vars.*, b_<layer> = a layer of the heightfield in input 1 sampled at x, z, and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+| 1 | `other` | yes | no | optional second heightfield: its layers as b_<name> |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `operation` | enum | `"expression"` |  | `expression`, `copy`, `rename`, `delete`, `fill` | `op`, `mode` | expression: layer = expression; copy/rename: layer ← source; delete: remove layer; fill: layer = value |
+| `layer` | string | `"height"` |  |  |  | target layer (created if missing) |
+| `expression` | code | `"height"` |  |  | `expr`, `code` | JS expression per sample (or a body with return) |
+| `source` | string | `"mask"` |  |  |  | source layer for copy/rename |
+| `value` | float | `0` |  |  |  | fill value |
+| `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
+
+**Writes:** the target layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 2,
+        "range": "positive"
+      }
+    },
+    "l": {
+      "type": "heightfield_layer",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "layer": "snow",
+        "expression": "smoothstep(1.2, 1.8, height)"
+      }
+    }
+  },
+  "output": "l"
+}
+```
+
+### heightfield_mask_blur
+
+category: `heightfield` · aliases: `hf_mask_blur`
+
+Blur a mask layer (radius in metres): soft mask edges for blending and scattering.
+
+Houdini: HeightField Blur on the mask layer. Same filter as heightfield_blur with layer "mask".
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"mask"` |  |  |  | layer to blur |
+| `radius` | float | `1` | 0.. |  | `size`, `distance` | blur radius (metres) |
+| `mode` | enum | `"gaussian"` |  | `gaussian`, `box` | `filter`, `type` | gaussian (smooth, radius = 2 sigma) or box (flat average) |
+| `iterations` | int | `1` | 1..50 |  |  | repeat the blur |
+| `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
+
+**Writes:** the mask layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "m": {
+      "type": "heightfield_mask_noise",
+      "in": [
+        "hf"
+      ]
+    },
+    "b": {
+      "type": "heightfield_mask_blur",
+      "in": [
+        "m"
+      ],
+      "params": {
+        "radius": 0.5
+      }
+    }
+  },
+  "output": "b"
+}
+```
+
+### heightfield_mask_by_feature
+
+category: `heightfield` · aliases: `heightfield_maskbyfeature`, `hf_mask_by_feature`, `heightfield_mask_slope`
+
+Mask terrain by a feature: slope angle, height range, curvature (valleys/ridges), facing direction, flow, or ambient occlusion.
+
+Houdini: HeightField Mask by Feature. Computes a 0..1 mask from one feature, shapes it with ramp, then combines it with the existing mask layer (mode). Chain several to combine features (mode multiply = and, max = or). slope: 1 between min_angle and max_angle, fading over angle_falloff degrees. height: absolute Y range. curvature: concave = valleys (the surface is below its blurred self by curvature_threshold), convex = ridges. direction: downhill facing, 0° = +X, 90° = +Z, within direction_spread. flow: a flow layer (from heightfield_erode) above min_flow. occlusion: horizon-based ambient occlusion over occlusion_radius (8-direction sweep), 1 = enclosed.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `feature` | enum | `"slope"` |  | `slope`, `height`, `curvature`, `direction`, `flow`, `occlusion` |  | what to mask by |
+| `layer` | string | `"mask"` |  |  |  | mask layer to write |
+| `mode` | enum | `"replace"` |  | `replace`, `add`, `subtract`, `multiply`, `max`, `min` | `combine`, `operation` | combine with the existing mask |
+| `min_angle` | float | `30` | 0..90 |  | `min_slope` | slope: lowest angle in the mask (degrees) |
+| `max_angle` | float | `90` | 0..90 |  | `max_slope` | slope: highest angle in the mask (degrees) |
+| `angle_falloff` | float | `5` | 0.. |  | `slope_falloff` | slope: soft edge (degrees) |
+| `min_height` | float | `0` |  |  |  | height: lowest Y in the mask |
+| `max_height` | float | `1000` |  |  |  | height: highest Y in the mask |
+| `height_falloff` | float | `0.5` | 0.. |  |  | height: soft edge (metres) |
+| `curvature_type` | enum | `"concave"` |  | `concave`, `convex` |  | curvature: concave = valleys and creases, convex = ridges and peaks |
+| `curvature_radius` | float | `1` | 0.. |  |  | curvature: feature scale (metres) |
+| `curvature_threshold` | float | `0.05` | 0.. |  |  | curvature: depth (metres) below/above the blurred surface for a full mask |
+| `direction` | float | `0` |  |  | `facing`, `aspect` | direction: downhill facing in degrees (0 = +X, 90 = +Z, 180 = −X, 270 = −Z) |
+| `direction_spread` | float | `45` | 0..180 |  |  | direction: half-width of the facing band (degrees) |
+| `flow_layer` | string | `"flow"` |  |  |  | flow: layer to read |
+| `min_flow` | float | `0.5` |  |  |  | flow: value where the mask starts (erode's flow: ~0.3 sheet flow, > 0.6 channels) |
+| `flow_falloff` | float | `0.2` | 0.. |  |  | flow: soft edge above min_flow |
+| `occlusion_radius` | float | `5` | 0.. |  |  | occlusion: how far to look for the horizon (metres) |
+| `ramp` | ramp | `[[0,0],[1,1]]` |  |  |  | reshape the feature mask (0..1 → 0..1) before combining |
+| `invert` | bool | `false` |  |  |  | invert the feature mask |
+| `blur` | float | `0` | 0.. |  |  | blur the feature mask (metres) before combining |
+
+**Writes:** the mask layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 4,
+        "fractal": "ridged",
+        "element_size": 6
+      }
+    },
+    "m": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "feature": "slope",
+        "min_angle": 35
+      }
+    }
+  },
+  "output": "m"
+}
+```
+
+### heightfield_mask_by_object
+
+category: `heightfield` · aliases: `heightfield_maskbyobject`, `hf_mask_by_object`
+
+Mask terrain by geometry: under a mesh's footprint, or within a distance of curves or points (roads, rivers, building plots).
+
+Houdini: HeightField Mask by Object. footprint: samples under the polygons (projected along Y), grown by distance; distance: samples within distance of the curves/points (XZ). Both fade to 0 over falloff metres. Exact: polygons are rasterised onto the grid and curve segments measured per sample.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+| 1 | `object` | no | no | polygons, curves or points |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `by` | enum | `"auto"` |  | `auto`, `footprint`, `distance` | `method`, `source` | auto = footprint for polygons, distance for curves and points |
+| `distance` | float | `1` | 0.. |  | `radius`, `width` | full-mask distance from the curves/points, or growth of the footprint (metres) |
+| `falloff` | float | `1` | 0.. |  |  | soft edge beyond distance (metres) |
+| `layer` | string | `"mask"` |  |  |  | mask layer to write |
+| `mode` | enum | `"replace"` |  | `replace`, `add`, `subtract`, `multiply`, `max`, `min` | `combine`, `operation` | combine with the existing mask |
+| `invert` | bool | `false` |  |  |  | invert the object mask |
+
+**Writes:** the mask layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "c": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            -8,
+            0,
+            -6
+          ],
+          [
+            0,
+            0,
+            2
+          ],
+          [
+            8,
+            0,
+            4
+          ]
+        ],
+        "smooth": true
+      }
+    },
+    "m": {
+      "type": "heightfield_mask_by_object",
+      "in": [
+        "hf",
+        "c"
+      ],
+      "params": {
+        "distance": 1.5,
+        "falloff": 2
+      }
+    }
+  },
+  "output": "m"
+}
+```
+
+### heightfield_mask_expand
+
+category: `heightfield` · aliases: `heightfield_maskexpand`, `heightfield_mask_shrink`, `hf_mask_expand`, `heightfield_mask_dilate`
+
+Grow (dilate) or shrink (erode) a mask by a distance in metres, with a soft edge.
+
+Houdini: HeightField Mask Expand / Shrink. The mask is thresholded, an exact Euclidean distance transform measures the distance to the region, and the result fades over falloff. Growing keeps the original values inside (max), shrinking never adds (min).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"mask"` |  |  |  | mask layer |
+| `distance` | float | `1` |  |  | `amount`, `radius` | grow (+) or shrink (−) distance (metres) |
+| `falloff` | float | `0.5` | 0.. |  |  | soft edge (metres) |
+| `threshold` | float | `0.5` | 0..1 |  |  | mask values at or above this count as inside |
+
+**Writes:** the mask layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "m": {
+      "type": "heightfield_mask_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "contrast": 4
+      }
+    },
+    "e": {
+      "type": "heightfield_mask_expand",
+      "in": [
+        "m"
+      ],
+      "params": {
+        "distance": 0.5
+      }
+    }
+  },
+  "output": "e"
+}
+```
+
+### heightfield_mask_noise
+
+category: `heightfield` · aliases: `hf_mask_noise`
+
+Noise into a mask layer (clamped 0..1): break up masks, vary scatter density and materials.
+
+Houdini: HeightField Mask Noise. Same noise as heightfield_noise with mask defaults: range positive, mode replace; use mode multiply to break up an existing mask.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"mask"` |  |  |  | mask layer to write |
+| `mode` | enum | `"replace"` |  | `replace`, `add`, `subtract`, `multiply`, `max`, `min` | `combine`, `operation`, `method` | how the noise combines with the mask |
+| `noise` | enum | `"simplex"` |  | `perlin`, `simplex`, `value`, `worley` | `basis`, `noise_type` | base noise |
+| `fractal` | enum | `"fbm"` |  | `fbm`, `ridged`, `turbulence`, `none` |  | layering: fbm = rolling hills, ridged = mountain ridges, turbulence = billowy |
+| `amplitude` | float | `1` |  |  | `amp`, `height`, `scale` | noise height (metres for the height layer) |
+| `element_size` | float | `3` | 0.001.. |  | `elementsize`, `feature_size`, `wavelength` | size of the largest features (metres); frequency = 1 / element_size |
+| `frequency` | float | `0` | 0.. |  | `freq` | features per metre; > 0 overrides element_size |
+| `octaves` | int | `4` | 1..12 |  |  | fractal octaves (detail levels) |
+| `roughness` | float | `0.5` | 0..1 |  | `gain`, `persistence` | amplitude gain per octave (higher = rougher) |
+| `lacunarity` | float | `2.01` | 1.. |  |  | frequency gain per octave |
+| `range` | enum | `"positive"` |  | `zero_centered`, `positive` |  | zero_centered: noise in [-amplitude, amplitude]; positive: [0, amplitude] |
+| `offset` | vec3 | `[0,0,0]` |  |  | `translate_noise`, `noise_offset` | noise-space offset (scrolls the pattern; Y picks another slice) |
+| `seed` | float | `0` |  |  |  | random seed |
+| `contrast` | float | `1` | 0.. |  |  | sharpen (> 1) or soften (< 1) the noise around 0.5 before combining |
+
+**Writes:** the mask layer (0..1)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "m": {
+      "type": "heightfield_mask_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "element_size": 4,
+        "contrast": 2
+      }
+    }
+  },
+  "output": "m"
+}
+```
+
+### heightfield_noise
+
+category: `heightfield` · aliases: `hf_noise`, `heightfield_mountain`
+
+Add (or multiply, replace, max, min) fractal noise on a heightfield layer: mountains, hills, dunes, mask variation.
+
+Houdini: HeightField Noise. Noise is sampled at each sample's world X/Z, so it is resolution-independent. For mountains use fractal ridged, amplitude a few metres, element_size about a third of the field. mask_layer blends the result in by a 0..1 layer.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"height"` |  |  |  | layer to modify |
+| `mode` | enum | `"add"` |  | `replace`, `add`, `subtract`, `multiply`, `max`, `min` | `combine`, `operation`, `method` | how the noise combines with the layer |
+| `noise` | enum | `"simplex"` |  | `perlin`, `simplex`, `value`, `worley` | `basis`, `noise_type` | base noise |
+| `fractal` | enum | `"fbm"` |  | `fbm`, `ridged`, `turbulence`, `none` |  | layering: fbm = rolling hills, ridged = mountain ridges, turbulence = billowy |
+| `amplitude` | float | `1` |  |  | `amp`, `height`, `scale` | noise height (metres for the height layer) |
+| `element_size` | float | `5` | 0.001.. |  | `elementsize`, `feature_size`, `wavelength` | size of the largest features (metres); frequency = 1 / element_size |
+| `frequency` | float | `0` | 0.. |  | `freq` | features per metre; > 0 overrides element_size |
+| `octaves` | int | `6` | 1..12 |  |  | fractal octaves (detail levels) |
+| `roughness` | float | `0.5` | 0..1 |  | `gain`, `persistence` | amplitude gain per octave (higher = rougher) |
+| `lacunarity` | float | `2.01` | 1.. |  |  | frequency gain per octave |
+| `range` | enum | `"zero_centered"` |  | `zero_centered`, `positive` |  | zero_centered: noise in [-amplitude, amplitude]; positive: [0, amplitude] |
+| `offset` | vec3 | `[0,0,0]` |  |  | `translate_noise`, `noise_offset` | noise-space offset (scrolls the pattern; Y picks another slice) |
+| `seed` | float | `0` |  |  |  | random seed |
+| `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
+
+**Writes:** the layer (created if missing)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          20,
+          20
+        ],
+        "resolution": 0.1
+      }
+    },
+    "mtn": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "fractal": "ridged",
+        "amplitude": 4,
+        "element_size": 8,
+        "range": "positive"
+      }
+    }
+  },
+  "output": "mtn"
+}
+```
+
+### heightfield_path
+
+category: `heightfield` · aliases: `hf_path`, `heightfield_road`, `road_cut`
+
+Cut a road or path along curves: flatten the terrain to a smooth profile across `width`, blend shoulders, bank in bends; writes a path mask.
+
+Houdini: HeightField Project of a road profile / Path tools. The road height follows the terrain under the curve smoothed over `smooth` metres (height_mode terrain), or the curve's own Y (curve). Across the road the surface is flat (tilted by up to `bank` degrees in tight bends, outer edge up); beyond width/2 it blends back to the terrain over `shoulder` metres, cutting through hills and filling dips. mask_layer (default "path") marks the road surface for texturing, scattering exclusion or freezing erosion.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+| 1 | `curves` | no | no | polylines (draw them flat at y = 0 for height_mode terrain) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `4` | 0.. |  |  | flat road width (metres) |
+| `shoulder` | float | `2` | 0.. |  | `falloff`, `blend`, `embankment` | blend distance from the road edge back to the terrain (metres) |
+| `bank` | float | `0` | 0..45 |  | `banking`, `superelevation` | maximum bank angle in tight bends (degrees; full bank at a radius of 5 × width) |
+| `height_mode` | enum | `"terrain"` |  | `terrain`, `curve` |  | terrain: follow the ground under the curve (smoothed); curve: use the curve's Y |
+| `smooth` | float | `5` | 0.. |  | `smoothing`, `smooth_distance` | smoothing of the road profile along the curve (metres) |
+| `offset` | float | `0` |  |  |  | raise (+) or sink (−) the road surface (metres) |
+| `layer` | string | `"height"` |  |  |  | layer to modify |
+| `mask_layer` | string | `"path"` |  |  |  | layer marking the road surface ("" = no) |
+
+**Writes:** the layer and the mask layer ("path")
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 2
+      }
+    },
+    "c": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            -9,
+            0,
+            -4
+          ],
+          [
+            -2,
+            0,
+            1
+          ],
+          [
+            4,
+            0,
+            -1
+          ],
+          [
+            9,
+            0,
+            5
+          ]
+        ],
+        "smooth": true
+      }
+    },
+    "r": {
+      "type": "heightfield_path",
+      "in": [
+        "n",
+        "c"
+      ],
+      "params": {
+        "width": 3,
+        "shoulder": 2
+      }
+    }
+  },
+  "output": "r"
+}
+```
+
+### heightfield_project
+
+category: `heightfield` · aliases: `hf_project`, `heightfield_stamp`
+
+Stamp meshes or curves onto a heightfield: replace, raise (max), lower (min), add or subtract, blended over a radius.
+
+Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample; open curves stamp their own height within width/2 of the curve. Outside the stamp the effect fades over radius metres towards the terrain (the nearest stamped height is used). mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+| 1 | `stamp` | no | no | polygons (plateaus, platforms, rocks) and/or curves (ridges, dykes) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"replace"` |  | `replace`, `max`, `min`, `add`, `subtract` | `combine`, `operation`, `method` | replace = set to the stamp, max = only raise, min = only lower, add/subtract = add/remove the stamp height |
+| `layer` | string | `"height"` |  |  |  | layer to modify |
+| `radius` | float | `1` | 0.. |  | `blend`, `falloff` | blend distance outside the stamp (metres) |
+| `offset` | float | `0` |  |  |  | added to the stamped height (metres) |
+| `width` | float | `1` | 0.. |  |  | curves: stamp width (metres) |
+| `direction` | enum | `"down"` |  | `down`, `up` |  | polygons: stamp the highest (down) or lowest (up) surface |
+| `mask_layer` | string | `""` |  |  |  | store the stamp weight in this layer ("" = no) |
+
+**Writes:** the layer (and mask_layer)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 2
+      }
+    },
+    "b": {
+      "type": "box",
+      "params": {
+        "size": [
+          4,
+          1,
+          4
+        ],
+        "center": [
+          3,
+          1.5,
+          0
+        ]
+      }
+    },
+    "s": {
+      "type": "heightfield_project",
+      "in": [
+        "n",
+        "b"
+      ],
+      "params": {
+        "mode": "replace",
+        "radius": 2
+      }
+    }
+  },
+  "output": "s"
+}
+```
+
+### heightfield_remap
+
+category: `heightfield` · aliases: `hf_remap`
+
+Remap a layer's values: fit an input range to an output range through a ramp (normalise, invert, shape heights or masks).
+
+Houdini: HeightField Remap. t = (value − input_min) / (input_max − input_min) (auto_range uses the layer's own min/max), then value = output_min + ramp(t) × (output_max − output_min). A ramp like [[0,0],[0.5,0.2],[1,1]] flattens valleys and sharpens peaks.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"height"` |  |  |  | layer to modify |
+| `auto_range` | bool | `true` |  |  |  | use the layer's min/max as the input range |
+| `input_min` | float | `0` |  |  |  | input range start (when auto_range is off) |
+| `input_max` | float | `1` |  |  |  | input range end (when auto_range is off) |
+| `output_min` | float | `0` |  |  | `min` | output for t = 0 |
+| `output_max` | float | `1` |  |  | `max` | output for t = 1 |
+| `ramp` | ramp | `[[0,0],[1,1]]` |  |  |  | shape: [[t, value], ...] with t and value 0..1 |
+| `clamp` | bool | `true` |  |  |  | clamp t to 0..1 before the ramp |
+| `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
+
+**Writes:** the layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 3
+      }
+    },
+    "r": {
+      "type": "heightfield_remap",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "output_min": 0,
+        "output_max": 6,
+        "ramp": [
+          [
+            0,
+            0
+          ],
+          [
+            0.6,
+            0.25
+          ],
+          [
+            1,
+            1
+          ]
+        ]
+      }
+    }
+  },
+  "output": "r"
+}
+```
+
+### heightfield_resample
+
+category: `heightfield` · aliases: `hf_resample`, `heightfield_resize`
+
+Change a heightfield's resolution over the same extent (all layers, bilinear; pre-blurred when shrinking), e.g. to an Unreal size like 505 × 505.
+
+Houdini: HeightField Resample. Give the new cell size (resolution), exact sample counts (samples), or a factor on the sample count (2 = twice as many per side). The X extent is kept exactly; Z follows the new cell size.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | float | `0` | 0.. |  | `cell_size`, `grid_spacing` | new cell size (metres); 0 = use samples or factor |
+| `samples` | ivec2 | `[0,0]` | 0.. |  |  | new sample counts [nx, nz]; nx > 1 overrides resolution (nz 0 = keep the extent) |
+| `factor` | float | `1` | 0.01..16 |  | `scale` | multiply the samples per side (when resolution and samples are 0) |
+
+**Writes:** all layers at the new resolution
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          50,
+          50
+        ],
+        "resolution": 0.25
+      }
+    },
+    "r": {
+      "type": "heightfield_resample",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "samples": [
+          253,
+          253
+        ]
+      }
+    }
+  },
+  "output": "r"
+}
+```
+
+### heightfield_scatter
+
+category: `heightfield` · aliases: `hf_scatter`, `heightfield_scatter_points`
+
+Scatter points on a heightfield by a mask layer's density: P on the surface, N from the slope, height/slope/mask attributes. Feed copy_to_points.
+
+Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter). Points sit exactly on the bilinear surface; N follows the terrain normal; attributes: height (Y), slope (degrees), mask (the density layer value at the point).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `density` | float | `0.5` | 0.. |  | `density_per_m2` | points per square metre at mask 1 |
+| `count` | int | `0` | 0.. |  | `npts`, `points` | exact number of points; > 0 overrides density |
+| `mask_layer` | string | `"mask"` |  |  | `mask`, `density_layer` | density layer (0..1); "" = uniform everywhere |
+| `relax` | bool | `true` |  |  |  | even (blue-noise) spacing |
+| `seed` | float | `0` |  |  |  | random seed |
+| `keep_heightfield` | bool | `false` |  |  |  | also keep the heightfield (default: points only) |
+
+**Writes:** points: N, height, slope, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 3
+      }
+    },
+    "m": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "feature": "slope",
+        "min_angle": 20
+      }
+    },
+    "s": {
+      "type": "heightfield_scatter",
+      "in": [
+        "m"
+      ],
+      "params": {
+        "density": 0.3
+      }
+    }
+  },
+  "output": "s"
+}
+```
+
+### heightfield_terrace
+
+category: `heightfield` · aliases: `hf_terrace`
+
+Terrace a heightfield: quantise heights into flat steps (rice terraces, mesas, strata), with rounded risers.
+
+Houdini: HeightField Terrace. Levels are base + n × step (step = (max − min) / steps unless step_height is set). rounding 0 = flat steps with vertical risers, 1 = smooth S-shaped risers across the whole step.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layer` | string | `"height"` |  |  |  | layer to modify |
+| `steps` | int | `8` | 1..1000 |  | `count`, `levels` | number of terraces between the layer's min and max |
+| `step_height` | float | `0` | 0.. |  | `height`, `spacing` | terrace height (metres); > 0 overrides steps |
+| `offset` | float | `0` |  |  | `shift` | shift the terrace levels (metres) |
+| `rounding` | float | `0.2` | 0..1 |  | `smoothness`, `sharpness` | riser width as a fraction of the step: 0 = sharp, 1 = smooth |
+| `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
+
+**Writes:** the layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 3,
+        "range": "positive"
+      }
+    },
+    "t": {
+      "type": "heightfield_terrace",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "step_height": 0.5,
+        "rounding": 0.3
+      }
+    }
+  },
+  "output": "t"
+}
+```
+
+### heightfield_to_mesh
+
+category: `heightfield` · aliases: `heightfield_convert`, `hf_to_mesh`, `heightfield_to_polygons`, `convert_heightfield`
+
+Convert heightfields to a quad grid mesh (height as Y) with layers as point attributes, N, uv and optional colours.
+
+Houdini: HeightField Convert to polygons. Points are row-major like the layers (point = j × width + i at step 1), quads face +Y. Every layer becomes a point float attribute of the same name (mask, flow, sediment …) for attribute-driven shading, scattering or export. color writes Cd: mask (white → red), height (ramp), terrain (grass, rock on slopes, sand where sediment/debris settled, darker where water flows, snow on high flat ground, asphalt on a "path" layer).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with heightfields |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `step` | int | `1` | 1..64 |  | `decimate`, `lod` | use every Nth sample (2 = a quarter of the quads) |
+| `layers` | bool | `true` |  |  |  | copy every layer to a point float attribute |
+| `normals` | bool | `true` |  |  |  | point N from the field gradient |
+| `uv` | bool | `true` |  |  |  | point uv 0..1 over the field |
+| `color` | enum | `"none"` |  | `none`, `mask`, `height`, `terrain` |  | point Cd from the layers |
+| `keep_heightfield` | bool | `false` |  |  |  | keep the heightfield volume alongside the mesh |
+
+**Writes:** quads; point N, uv, Cd and one float attribute per layer
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 2
+      }
+    },
+    "m": {
+      "type": "heightfield_to_mesh",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "color": "terrain"
+      }
+    }
+  },
+  "output": "m"
+}
+```
+
+### heightfield_to_sdf
+
+category: `heightfield` · aliases: `heightfield_convert_sdf`, `hf_to_sdf`, `sdf_from_heightfield`
+
+Turn a heightfield into an SDF volume (solid ground below the surface) for sdf_combine / sdf_to_mesh: caves, overhangs, closed terrain blocks.
+
+Houdini: Convert HeightField to VDB (SDF). Distance = (y − h(x, z)) / sqrt(1 + |∇h|²), negative below the surface. closed caps the sides and the bottom (depth below the lowest point), so sdf_to_mesh gives a watertight terrain block; subtract SDF shapes from it to carve caves and overhangs.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with heightfields |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `depth` | float | `1` | 0.. |  | `thickness` | solid thickness below the lowest point (metres) |
+| `closed` | bool | `true` |  |  |  | cap the sides and the bottom (a finite block); false = an infinite slab clipped by the bounds |
+| `keep_heightfield` | bool | `false` |  |  |  | keep the heightfield volume |
+| `name` | string | `"terrain_sdf"` |  |  |  | SDF volume name |
+
+**Writes:** one SDF volume per heightfield
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          10,
+          10
+        ],
+        "resolution": 0.1
+      }
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 1.5
+      }
+    },
+    "s": {
+      "type": "heightfield_to_sdf",
+      "in": [
+        "n"
+      ]
+    },
+    "m": {
+      "type": "sdf_to_mesh",
+      "in": [
+        "s"
+      ],
+      "params": {
+        "divisions": 100
+      }
+    }
+  },
+  "output": "m"
+}
+```
+
+### heightfield_transform
+
+category: `heightfield` · aliases: `heightfield_xform`, `hf_transform`, `heightfield_move`
+
+Move, scale, raise or turn (by 90° steps) heightfields: translate X/Z moves the grid, Y raises the heights; scale resizes the cells.
+
+Houdini: HeightField Transform. Heightfields stay axis-aligned grids: rotation snaps to multiples of 90°, scale is uniform in X/Z (it changes the cell size), height_scale multiplies heights about pivot Y. The generic transform node applies the same rules.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `translate` | vec3 | `[0,0,0]` |  |  | `t`, `move`, `offset` | move: X/Z shift the grid, Y raises the height layer |
+| `scale` | float | `1` | 0.0001.. |  | `s`, `uniform_scale` | uniform X/Z scale of the grid (cell size × scale) |
+| `height_scale` | float | `1` |  |  | `scale_y`, `vertical_scale` | multiply heights about pivot Y |
+| `rotate` | float | `0` |  |  | `r`, `rot` | rotation about Y in degrees (snapped to 90° steps) |
+| `pivot` | vec3 | `[0,0,0]` |  |  |  | pivot for scale and rotation (X/Z ignored when pivot_at_center) |
+| `pivot_at_center` | bool | `true` |  |  |  | use the field centre as the X/Z pivot |
+
+**Writes:** transformed heightfields
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ]
+    },
+    "t": {
+      "type": "heightfield_transform",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "translate": [
+          20,
+          0,
+          0
+        ],
+        "height_scale": 2
+      }
+    }
+  },
+  "output": "t"
+}
+```
 
 ## uv nodes
 

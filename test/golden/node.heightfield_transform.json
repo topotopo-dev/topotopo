@@ -1,0 +1,53 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [3, 1.3489, 2],
+          "min": [-1, -0.2898, -2]
+        },
+        "grid": {
+          "cellSize": 0.1,
+          "height": 41,
+          "origin": [-1, -2],
+          "width": 41
+        },
+        "kind": "heightfield",
+        "layers": {
+          "height": "64ca1d9b26675e95",
+          "mask": "fd9f539e6509b32c"
+        },
+        "name": "heightfield"
+      }
+    ]
+  },
+  "name": "node.heightfield_transform",
+  "ok": true,
+  "source": "fixture for node type \"heightfield_transform\" (test/fixtures.ts)",
+  "warnings": []
+}
