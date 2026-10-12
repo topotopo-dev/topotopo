@@ -280,7 +280,7 @@ defineNode({
   example: {
     nodes: {
       grid: { type: 'grid', params: { size: [4, 4], divisions: [40, 40] } },
-      out: { type: 'soft_transform', in: ['grid'], params: { group: '@P.x>-0.05 @P.x<0.05', translate: [0, 1, 0], radius: 1.5 } },
+      out: { type: 'soft_transform', in: ['grid'], params: { group: '@P.x>-0.05 ^@P.x>0.05', translate: [0, 1, 0], radius: 1.5 } },
     },
   },
   cook: ({ input, p, warn }) => {
@@ -943,7 +943,7 @@ function proxyTransforms(R: Float64Array, D: Float64Array, bind: Binding, mode: 
       tr += 1;
     }
     // a small pull toward identity resolves rotations about collinear neighbourhoods and unconstrained directions
-    const lam = 1e-6 * tr;
+    const lam = 1e-9 * tr;
     const Sr = S.slice();
     Sr[0] += lam; Sr[4] += lam; Sr[8] += lam;
     const Rm = quatToM3(hornRotation(Sr));
