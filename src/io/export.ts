@@ -13,6 +13,7 @@ import { decomposeXform, expandForExport, isolatedMask, pieces, xf, xfLinear } f
 import type { ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, stripPacked } from '../core/packed.ts';
 import { heightmapBytes } from './heightmap.ts';
+import { splinesToPolylines } from '../core/splines.ts';
 import type { HeightmapFormat } from './heightmap.ts';
 
 export type { ExportOptions } from './common.ts';
@@ -275,9 +276,21 @@ export function exportFormatFromPath(path: string): string {
   return ext === 'usd' ? 'usda' : ext;
 }
 
+/**
+ * Spline prims (Bezier/NURBS) written as the polylines they evaluate to, with a note: the formats here have no spline
+ * prims (json keeps them losslessly and is not converted).
+ */
+function splinesForExport(g: Geometry, o: ExportOptions, format: string): Geometry {
+  if (!g.hasSplines()) return g;
+  const r = splinesToPolylines(g);
+  o.warn?.(`${format}: ${r.converted} spline curve${r.converted === 1 ? '' : 's'} (Bezier/NURBS) written as polylines (json keeps them as splines)`);
+  return r.geo;
+}
+
 /** Synchronous export for every format except glb/gltf (see exportGeometryAsync). */
 export function exportGeometry(g: Geometry, format: ExportFormat, o: ExportOptions = {}): Uint8Array {
   const enc = new TextEncoder();
+  if (format !== 'json') g = splinesForExport(g, o, format);
   switch (format) {
     // heightfield -> Unreal heightmap (main file only; heightmapExport also returns the JSON sidecar and mask layers)
     case 'png16': case 'r16': case 'mask_png': return heightmapBytes(g, format, o);
@@ -296,6 +309,7 @@ export function exportGeometry(g: Geometry, format: ExportFormat, o: ExportOptio
 
 /** Export to any format. */
 export async function exportGeometryAsync(g: Geometry, format: ExportFormat, o: ExportOptions = {}): Promise<Uint8Array> {
+  if (format === 'glb' || format === 'gltf') g = splinesForExport(g, o, format);
   if (format === 'glb') return exportGLB(g, o);
   if (format === 'gltf') return new TextEncoder().encode(await exportGLTF(g, o));
   return exportGeometry(g, format, o);

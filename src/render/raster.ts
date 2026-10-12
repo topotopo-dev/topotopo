@@ -192,8 +192,8 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
 
 /** Render the geometry; returns RGBA pixels. */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
-  // packed instances are drawn expanded (within a triangle budget), see core/packed.ts
-  if (g.hasPacked()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
+  // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
+  if (g.hasPacked() || g.hasSplines()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
   g = withHeightfieldPreview(g); // heightfields draw as their (decimated) grid mesh with layers as attributes
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   const views: ViewName[] = vlist?.length ? vlist : ['persp', 'front', 'right', 'top'];
