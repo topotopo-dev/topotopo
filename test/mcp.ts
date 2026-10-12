@@ -71,6 +71,18 @@ const rnd = await call('render', { node: 'terrain', color_by: 'height', views: [
 check(!!rnd.img, 'render tool image');
 if (rnd.img) fs.writeFileSync(path.join(wsDir, 'render.png'), Buffer.from(rnd.img.data, 'base64'));
 
+// verification tools: explain a node, then diff two versions of the graph with an overlay render
+const ex = await call('explain', { node: 'rk' });
+check(!ex.isError && /reads as: one closed piece/.test(ex.txt) && /watertight/.test(ex.txt), `explain: ${ex.txt.split('\n')[0]}`);
+const dup = await call('graphs', { action: 'duplicate', name: 'main', to: 'before' });
+check(!dup.isError, 'graphs duplicate main → before');
+await call('edit', { ops: [{ op: 'set', node: 'rk', params: { amplitude: 0.45 } }] });
+const df = await call('diff', { a: 'before/rk', b: { graph: 'main', node: 'rk' }, render: true, views: 'persp', size: 300 });
+check(!df.isError && /Hausdorff/.test(df.txt) && /points \(same count/.test(df.txt) && df.img?.mimeType === 'image/png', `diff: ${df.txt.split('\n').find((l: string) => l.startsWith('verdict')) ?? df.txt.slice(0, 120)}`);
+if (df.img) fs.writeFileSync(path.join(wsDir, 'diff.png'), Buffer.from(df.img.data, 'base64'));
+const dfBad = await call('diff', { a: 'before/nope', b: 'main' });
+check(dfBad.isError && /nope/.test(dfBad.txt), 'diff reports an unknown node');
+
 for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'points.json']) {
   const x = await call('export', { path: `exports/scene.${fmt}` });
   check(!x.isError && fs.existsSync(path.join(wsDir, 'exports', `scene.${fmt}`)), `export ${fmt}: ${x.txt.split('\n')[0].slice(0, 90)}`);

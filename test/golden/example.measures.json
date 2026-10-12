@@ -1,0 +1,51 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "ao:float:1",
+        "curvature:float:1",
+        "dist:float:1",
+        "uv:float:3"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [5.5, 2.157, 3],
+      "min": [-5.5, -0.2736, -3]
+    },
+    "counts": {
+      "points": 27296,
+      "prims": 47561,
+      "vertices": 149321,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "de67145845ac3ada",
+      "attributes": {
+        "point.Cd": "60eee040ef1a2fb6",
+        "point.N": "9dc9544dec435737",
+        "point.ao": "51ffcf1af8a7bce8",
+        "point.curvature": "d7dfc2c7e5da4201",
+        "point.dist": "b3e53e07c692f905",
+        "point.uv": "1c06c553bf6151b9"
+      },
+      "topology": "87a474ed55c62f1b"
+    }
+  },
+  "name": "example.measures",
+  "ok": true,
+  "source": "examples/measures.json",
+  "warnings": []
+}

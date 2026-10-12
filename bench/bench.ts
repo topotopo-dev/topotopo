@@ -194,6 +194,19 @@ const CASES: Case[] = [
       },
     }),
   },
+  {
+    name: 'occlusion_50k',
+    what: (q) => `occlusion (32 rays per point, BVH build included) on a noisy sphere with ${k(q ? 63 * 80 + 2 : 198 * 251 + 2)} points`,
+    elements: (q) => (q ? 63 * 80 + 2 : 198 * 251 + 2) * 32, unit: 'rays',
+    target: 2000, targetSource: 'P1-F (50k points × 32 samples under 2 s)',
+    graph: (q) => ({
+      nodes: {
+        s: { type: 'sphere', params: { rows: q ? 64 : 199, cols: q ? 80 : 251 } },
+        n: { type: 'noise_displace', in: ['s'], params: { amplitude: 0.3, frequency: 2 } },
+        target: { type: 'occlusion', in: ['n'], params: { samples: 32 } },
+      },
+    }),
+  },
 ];
 
 function booleanGraph(rows: number): GraphSpec {
