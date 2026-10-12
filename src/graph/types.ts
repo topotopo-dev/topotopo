@@ -1,5 +1,8 @@
 import type { Geometry } from '../core/geometry.ts';
-import type { Engine } from './engine.ts';
+import type { CookOptions, CookReport, Engine } from './engine.ts';
+
+/** Current graph format version. Bump it together with a migration in migrate.ts. */
+export const GRAPH_VERSION = 1;
 
 export type ParamType =
   | 'float' | 'int' | 'bool' | 'string' | 'enum'
@@ -42,6 +45,14 @@ export interface NodeDef {
   example?: any;
   /** the node's code can read graph vars directly (wrangles, scripts) */
   usesVars?: boolean;
+  /**
+   * the node always depends on the cook time (e.g. solver): frame/time are mixed into its signature.
+   * Other nodes become time-dependent per cook when their "=expr" params read frame/time/fps or when
+   * their cook reads ctx.frame / ctx.time / ctx.fps / ctx.timeInc.
+   */
+  usesTime?: boolean;
+  /** deprecation notice naming the replacement; hidden from the catalog, warned about on cook */
+  deprecated?: string;
   /** extra cache-key material (e.g. file mtime) */
   signatureExtra?: (p: Record<string, any>, engine: Engine) => string;
   cook(ctx: CookContext): Geometry | Promise<Geometry>;
@@ -66,6 +77,8 @@ export interface VarDef {
 }
 
 export interface GraphSpec {
+  /** graph format version (see GRAPH_VERSION); missing = 0, migrated on load */
+  version?: number;
   nodes: Record<string, NodeSpec>;
   output?: string;
   vars?: Record<string, any>;
@@ -89,6 +102,22 @@ export interface CookContext {
   /** cache signatures of the inputs (for nested cooks) */
   inputSigs: string[];
   depth: number;
+  /** current frame (1 = time 0). Reading it makes this cook time-dependent. */
+  readonly frame: number;
+  /** current time in seconds. Reading it makes this cook time-dependent. */
+  readonly time: number;
+  /** frames per second. Reading it makes this cook time-dependent. */
+  readonly fps: number;
+  /** time step in seconds (1/fps, or 1/(fps*substeps) inside a solver). Reading it makes this cook time-dependent. */
+  readonly timeInc: number;
+  /** mark the result as depending on time (when the dependency is not visible to the engine) */
+  markTimeDependent(): void;
+  /** cook a nested graph (foreach body, asset, solver step) inheriting the time; propagates time dependence */
+  subcook(graph: GraphSpec, opts?: CookOptions): Promise<CookReport>;
+  /** input i cooked at another frame (the current result if the input is not time-dependent) */
+  inputAt(i: number, frame: number): Promise<{ geo: Geometry; sig: string; timeDependent: boolean }>;
+  /** record a numeric statistic on the node result (e.g. solver steps) */
+  stat(name: string, value: number): void;
 }
 
 export class NodeError extends Error {

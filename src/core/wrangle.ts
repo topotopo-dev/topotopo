@@ -35,7 +35,8 @@ const KNOWN: Record<string, { type: AttribType; size: number }> = {
   name: { type: 'string', size: 1 }, path: { type: 'string', size: 1 }, material: { type: 'string', size: 1 },
 };
 
-const SPECIAL = new Set(['ptnum', 'primnum', 'vtxnum', 'elemnum', 'numpt', 'numprim', 'numvtx', 'numelem', 'Frame', 'Time']);
+const SPECIAL = new Set(['ptnum', 'primnum', 'vtxnum', 'elemnum', 'numpt', 'numprim', 'numvtx', 'numelem', 'Frame', 'Time', 'TimeInc']);
+const TIME_REFS = ['Frame', 'Time', 'TimeInc'];
 
 const REF = /(?<![\w$.@])([fivpus])?@([A-Za-z_][A-Za-z0-9_]*)/g;
 
@@ -70,9 +71,21 @@ export function scanRefs(code: string) {
   return { refs, assigned };
 }
 
+/** Does the snippet read @Frame, @Time or @TimeInc? (Only then is a wrangle time-dependent.) */
+export function referencesTime(code: string): boolean {
+  const { refs } = scanRefs(code);
+  return TIME_REFS.some((k) => refs.has(k));
+}
+
+export interface WrangleTime { frame: number; time: number; timeInc: number }
+
 export function runWrangle(
   geo: Geometry,
-  opts: { code: string; runOver: RunOver; mask: Uint8Array | null; inputs: Geometry[]; vars: Record<string, any>; host: Host; timeoutMs: number },
+  opts: {
+    code: string; runOver: RunOver; mask: Uint8Array | null; inputs: Geometry[]; vars: Record<string, any>; host: Host; timeoutMs: number;
+    /** values of @Frame @Time @TimeInc (pass them only when referencesTime(code), so other wrangles stay time-independent) */
+    time?: WrangleTime;
+  },
 ): WrangleResult {
   const g = geo; // caller passes a clone we may mutate
   const runOver = opts.runOver;
@@ -163,7 +176,7 @@ export function runWrangle(
   const src: string[] = [];
   src.push('(function(__env){', '"use strict";');
   src.push('const __n=__env.n, __mask=__env.mask, __vp=__env.vp, __vprim=__env.vprim, __B=__env.B;');
-  src.push('const numpt=__env.numpt, numprim=__env.numprim, numvtx=__env.numvtx, numelem=__n, Frame=__env.frame, Time=__env.time;');
+  src.push('const numpt=__env.numpt, numprim=__env.numprim, numvtx=__env.numvtx, numelem=__n, Frame=__env.frame, Time=__env.time, TimeInc=__env.timeInc;');
   src.push('const vars=__env.vars, iteration=vars.iteration, numiterations=vars.numiterations;');
   src.push('let ptnum=0, primnum=0, vtxnum=0, elemnum=0;');
   bindings.forEach((b, i) => src.push(`const __d${i}=__B[${i}].data; let ${b.local};`));
@@ -218,7 +231,8 @@ export function runWrangle(
   const env = {
     n, mask: runOver === 'detail' ? null : opts.mask, vp: g.vertexPoint, vprim,
     B: bindings, numpt: g.numPoints, numprim: g.numPrims, numvtx: g.numVertices,
-    frame: opts.vars.frame ?? 1, time: opts.vars.time ?? 0, vars: opts.vars,
+    frame: opts.time?.frame ?? opts.vars.frame ?? 1, time: opts.time?.time ?? opts.vars.time ?? 0,
+    timeInc: opts.time?.timeInc ?? opts.vars.timeInc ?? 1 / 24, vars: opts.vars,
     centroid: (p: number) => primCentroid(g, p),
   };
   const realm = opts.host.compile('globalThis');

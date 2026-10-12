@@ -14,7 +14,7 @@ import { KDTree, TriBVH } from '../core/spatial.ts';
 import { fromManifold, propLayout, toManifold } from '../core/manifold.ts';
 import { evalGroup } from '../core/groups.ts';
 import { appendElements } from '../core/wrangle.ts';
-import { mask } from './util.ts';
+import { mask, wrangleTime } from './util.ts';
 
 defineNode({
   type: 'wrangle',
@@ -26,6 +26,7 @@ defineNode({
     'New attributes are created on write (type from prefix f@ i@ v@ p@ u@ s@, a known name, or the first assigned value). ' +
     'Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). ' +
     'Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. ' +
+    'Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). ' +
     'Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… ' +
     'Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.',
   inputs: [
@@ -41,7 +42,8 @@ defineNode({
   },
   usesVars: true,
   example: { type: 'wrangle', params: { run_over: 'points', code: '@P.y += sin(@P.x * 4) * 0.2;\n@Cd = hsv2rgb(fit(@P.y, -0.2, 0.2, 0.6, 0), 0.7, 1);' } },
-  cook: ({ input, inputs, p, vars, engine, warn }) => {
+  cook: (ctx) => {
+    const { input, inputs, p, vars, engine, warn } = ctx;
     const g = input(0);
     const ro = p.run_over as RunOver;
     const m = ro === 'points' ? mask(g, 'point', p.group) : ro === 'prims' ? mask(g, 'prim', p.group) : null;
@@ -49,6 +51,7 @@ defineNode({
     const r = runWrangle(g.clone(), {
       code: p.code, runOver: ro, mask: m, vars, host: engine.host, timeoutMs: engine.scriptTimeoutMs,
       inputs: [g, ...inputs.slice(1).map((x) => x ?? (null as any))],
+      time: wrangleTime(ctx, p.code),
     });
     for (const l of r.log.slice(0, 20)) warn(l.startsWith('warning') || l.startsWith('note') ? l : `print: ${l}`);
     if (r.log.length > 20) warn(`(${r.log.length - 20} more log lines)`);
@@ -65,16 +68,23 @@ function scriptLib(ctx: CookContext) {
     KDTree, TriBVH, evalGroup, appendElements,
     manifold: { wasm: engine.manifold, toManifold, fromManifold, propLayout },
     merge: (geos: Geometry[]) => Geometry.merge(geos),
+    // time: reading any of these makes the script time-dependent (re-cooked per frame)
+    get frame() { return ctx.frame; },
+    get time() { return ctx.time; },
+    get fps() { return ctx.fps; },
+    get timeInc() { return ctx.timeInc; },
     /** Run any node type directly: await lib.run('sphere', {radius: 2}) */
     async run(type: string, params: Record<string, any> = {}, ...inputs: Geometry[]) {
       const def = engine.resolveDef(type);
       if (!def) throw new Error(`lib.run: unknown node type "${type}"`);
-      const rp = resolveParams(def, params, ctx.vars);
+      // "=frame" etc. read the script's own time (and mark it time-dependent)
+      const rp = resolveParams(def, params, ctx.vars, { time: ctx });
       if (rp.errors.length) throw new Error(`lib.run(${type}): ${rp.errors.join('; ')}`);
-      const sub: CookContext = {
-        ...ctx, node: `${ctx.node}/${type}`, type: def.type, p: rp.values, inputs,
-        input: (i) => inputs[i] ?? new Geometry(), hasInput: (i) => !!inputs[i], inputSigs: inputs.map(() => 'script'),
-      };
+      // inherit from ctx through the prototype so its time getters stay lazy
+      const sub: CookContext = Object.assign(Object.create(ctx), {
+        node: `${ctx.node}/${type}`, type: def.type, p: rp.values, inputs,
+        input: (i: number) => inputs[i] ?? new Geometry(), hasInput: (i: number) => !!inputs[i], inputSigs: inputs.map(() => 'script'),
+      });
       return await def.cook(sub);
     },
     warn: (m: string) => ctx.warn(String(m)),
@@ -88,7 +98,8 @@ defineNode({
   aliases: ['python', 'js', 'javascript', 'python_sop'],
   description:
     'The body of `async function(geo, inputs, lib, vars)`. geo is a writable clone of input 0; inputs[i] are the raw inputs. ' +
-    'lib: Geometry, GeoBuilder, math, topology, random, noise, KDTree, TriBVH, manifold, merge(geos), run(type, params, ...inputs), warn(msg). ' +
+    'lib: Geometry, GeoBuilder, math, topology, random, noise, KDTree, TriBVH, manifold, merge(geos), run(type, params, ...inputs), warn(msg), ' +
+    'frame, time, fps, timeInc (reading them makes the script re-cook per frame). ' +
     'Must return a Geometry (e.g. `return geo;`).',
   inputs: [
     { name: 'geo', desc: 'main input (optional)', optional: true },

@@ -2,8 +2,15 @@ import { Geometry } from '../core/geometry.ts';
 import { evalGroup, GroupError } from '../core/groups.ts';
 import { pointNormals } from '../core/topology.ts';
 import { NodeError } from '../graph/types.ts';
-import type { ParamDef } from '../graph/types.ts';
+import type { CookContext, ParamDef } from '../graph/types.ts';
 import type { Vec3 } from '../core/math.ts';
+import { referencesTime } from '../core/wrangle.ts';
+import type { WrangleTime } from '../core/wrangle.ts';
+
+/** @Frame/@Time/@TimeInc values for a wrangle snippet, read from the context (which makes the node time-dependent) only when the code uses them. */
+export function wrangleTime(ctx: CookContext, code: string): WrangleTime | undefined {
+  return referencesTime(code) ? { frame: ctx.frame, time: ctx.time, timeInc: ctx.timeInc } : undefined;
+}
 
 export type PlaneName = 'xz' | 'xy' | 'yz';
 
