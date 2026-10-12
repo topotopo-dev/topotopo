@@ -7,6 +7,8 @@ import { rng } from '../core/random.ts';
 import { connectivity, primNormals, triangulate } from '../core/topology.ts';
 import { composePackedXforms } from '../core/packed.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
+import { TriSurface, elementSeed, minDistanceSelect, relaxPoints } from '../core/pcg.ts';
+import type { TriPoint } from '../core/pcg.ts';
 import { lookAtBasis, m4apply, m4applyDir, m4basis, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize } from '../core/math.ts';
 import type { Mat4, Vec3 } from '../core/math.ts';
 import { P, mask } from './util.ts';
@@ -64,10 +66,75 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number)
   return Int32Array.from(out);
 }
 
+/** Most points one scatter may make (guards against runaway densities). */
+const MAX_SCATTER = 10_000_000;
+
+/** A numeric point, vertex or prim attribute (looked up in that order) read per triangle corner / segment end. */
+type CornerReader = (v: number, pt: number, pr: number) => number;
+
+function cornerReader(g: Geometry, name: string, param: string): CornerReader | null {
+  if (!name) return null;
+  const ok = (a: Attribute | undefined): a is Attribute => !!a && a.type !== 'string' && !a.isArray;
+  const pa = g.points.get(name), va = g.vertices.get(name), ra = g.prims.get(name);
+  if (ok(pa)) { const d = pa.data as Float64Array, s = pa.size; return (_v, pt) => d[pt * s]; }
+  if (ok(va)) { const d = va.data as Float64Array, s = va.size; return (v) => d[v * s]; }
+  if (ok(ra)) { const d = ra.data as Float64Array, s = ra.size; return (_v, _pt, pr) => d[pr * s]; }
+  const list = (t: AttribTable) => t.names().filter((n) => ok(t.get(n))).join(', ') || 'none';
+  throw new NodeError(`${param} "${name}" is not a numeric point, vertex or prim attribute`, `point: ${list(g.points)} · vertex: ${list(g.vertices)} · prim: ${list(g.prims)}`);
+}
+
+/**
+ * Attribute name pattern: globs separated by spaces or commas, "^glob" excludes ("" matches nothing, "*" everything;
+ * only exclusions = everything else).
+ */
+export function namePattern(pattern: string): (name: string) => boolean {
+  const toks = String(pattern ?? '').split(/[\s,]+/).filter(Boolean);
+  const re = (s: string) => new RegExp('^' + s.replace(/[.+?${}()|[\]\\^]/g, '\\$&').replace(/\*/g, '.*') + '$');
+  const inc = toks.filter((t) => !t.startsWith('^')).map(re), exc = toks.filter((t) => t.startsWith('^')).map((t) => re(t.slice(1)));
+  const all = !inc.length && exc.length > 0;
+  return (n) => (all || inc.some((r) => r.test(n))) && !exc.some((r) => r.test(n));
+}
+
+/** Prim uv of corner vertex v of prim pr (the SurfaceQuery convention: triangle barycentrics, quad bilinear corners, n-gon polar). */
+function cornerPrimUV(g: Geometry, v: number, pr: number): [number, number] {
+  const s = g.primStart[pr], n = g.primStart[pr + 1] - s, c = v - s;
+  if (n === 3) return [c === 1 ? 1 : 0, c === 2 ? 1 : 0];
+  if (n === 4) return [c === 1 || c === 2 ? 1 : 0, c >= 2 ? 1 : 0];
+  const a = (2 * Math.PI * c) / n;
+  return [0.5 + 0.5 * Math.cos(a), 0.5 + 0.5 * Math.sin(a)];
+}
+
+/** Points to make: count, or density × density_scale × measure (see the generate_by param). */
+function scatterCount(p: Record<string, any>, weighted: number, autoMeasure: number, warn: (m: string) => void): number {
+  let n: number;
+  if (p.generate_by === 'count' || (p.generate_by === 'auto' && !(p.density > 0))) n = p.count;
+  else {
+    n = Math.round(p.density * p.density_scale * (p.generate_by === 'density' ? weighted : autoMeasure));
+    if (p.generate_by === 'density' && !(p.density > 0)) warn('generate_by "density" with density 0 makes no points: set density (points per square metre)');
+  }
+  if (!(n >= 0)) n = 0;
+  if (n > MAX_SCATTER) throw new NodeError(`scatter: ${n.toLocaleString('en-US')} points is too many (max ${MAX_SCATTER.toLocaleString('en-US')}); lower count, density or density_scale`);
+  return n;
+}
+
+const clamp01 = (x: number) => (x > 0 ? (x < 1 ? x : 1) : 0);
+
 defineNode({
   type: 'scatter',
   category: 'copy',
-  summary: 'Scatter points on surfaces (area-weighted, optional blue-noise relax), along curves, or inside volumes.',
+  summary: 'Scatter points on surfaces (area-weighted, blue-noise spacing; by count or per m²; density attribute and 0..1 mask; relaxation; exact minimum distance), along curves, or inside volumes.',
+  description:
+    'Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). ' +
+    'generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, ' +
+    'per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib ' +
+    'only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or ' +
+    'prim attribute, Houdini\'s density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise ' +
+    'spacing by weighted sample elimination (5 candidates per point). relax_iterations: Lloyd-style point relaxation afterwards (surface ' +
+    'mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface ' +
+    'through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart ' +
+    'throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source ' +
+    'prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; ' +
+    '"^name" excludes). Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").',
   aliases: ['scatter_points', 'distribute'],
   inputs: [{ name: 'geo', desc: 'surface, curves, or closed mesh (volume mode)' }],
   params: {
@@ -75,48 +142,111 @@ defineNode({
     density: { type: 'float', default: 0, min: 0, desc: 'points per unit area/length/volume (overrides count when > 0)' },
     mode: { type: 'enum', options: ['auto', 'surface', 'curve', 'volume'], default: 'auto', desc: 'auto = surface if polygons, curve if only polylines' },
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing via sample elimination' },
-    density_attrib: { type: 'string', default: '', desc: 'point float attribute weighting where points land (e.g. a noise mask)' },
+    density_attrib: { type: 'string', default: '', desc: 'point, vertex or prim float attribute (≥ 0) scaling the local density (e.g. a noise mask; 2 = twice as many points as 1)', aliases: ['densityattrib', 'density_attribute'] },
     seed: P.seed(),
     group: P.group('prim'),
-    keep_attribs: { type: 'bool', default: true, desc: 'interpolate source point attributes onto scattered points' },
+    keep_attribs: { type: 'bool', default: true, desc: 'carry source attributes onto the scattered points (see emit_attributes)' },
+    generate_by: { type: 'enum', options: ['auto', 'count', 'density'], default: 'auto', desc: 'count = exactly count points; density = density × density_scale points per m² of area × weight; auto = density when density > 0, else count', aliases: ['generateby', 'count_mode', 'method'] },
+    density_mask: { type: 'string', default: '', desc: 'point, vertex or prim attribute 0..1 multiplying the density (e.g. "mask" from the mask node)', aliases: ['mask', 'mask_attrib', 'density_mask_attrib'] },
+    density_scale: { type: 'float', default: 1, min: 0, desc: 'multiplies density (density and auto modes)', aliases: ['densityscale'] },
+    relax_iterations: { type: 'int', default: 0, min: 0, max: 100, desc: 'surface: Lloyd-style relaxation passes (points push apart and are projected back onto the surface)', aliases: ['relaxiterations', 'relax_iter', 'relax_passes'] },
+    relax_radius: { type: 'float', default: 0, min: 0, desc: 'relaxation spacing in metres (0 = from the local density)' },
+    min_distance: { type: 'float', default: 0, min: 0, desc: 'exact minimum distance between points (0 = off); the count can come out lower', aliases: ['mindist', 'min_dist', 'poisson_radius'] },
+    max_per_prim: { type: 'int', default: 0, min: 0, desc: 'at most this many points per source prim (0 = no limit)', aliases: ['maxperprim'] },
+    emit_attributes: { type: 'string', default: '*', desc: 'source attributes carried onto the points (pattern: point/vertex interpolated, prim copied; "^Cd" excludes)', aliases: ['attributes', 'interpolate', 'emit'] },
+    write_sourceprim: { type: 'bool', default: true, desc: 'write int sourceprim (the source prim of each point)', aliases: ['source_prim', 'sourceprim'] },
+    write_primuv: { type: 'bool', default: false, desc: 'write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention)', aliases: ['prim_uv', 'sourceprimuv'] },
+    write_seed: { type: 'bool', default: false, desc: 'write int seed per point (PCG $Seed; a hash of seed and the point number)', aliases: ['seed_attrib', 'pcg_seed'] },
   },
-  outputs: 'point N (surface normal), sourceprim; interpolated source attributes',
-  cook: ({ input, p }) => {
+  outputs: 'point N (surface normal), sourceprim; optional sourceprimuv, seed; source attributes (emit_attributes)',
+  example: {
+    nodes: {
+      ground: { type: 'grid', params: { size: [20, 20], divisions: [40, 40] } },
+      m: { type: 'mask', in: ['ground'], params: { by: 'noise', min: 0.5, max: 1, falloff: 0.1 } },
+      pts: { type: 'scatter', in: ['m'], params: { generate_by: 'density', density: 2, density_mask: 'mask', min_distance: 0.3 } },
+    },
+    output: 'pts',
+  },
+  cook: ({ input, p, warn }) => {
     const g = input(0);
     const r = rng(p.seed + 0.5);
     const sel = mask(g, 'prim', p.group);
     let hasPoly = false, hasLine = false;
     for (let pr = 0; pr < g.numPrims; pr++) if (!sel || sel[pr]) { if (g.primClosed[pr]) hasPoly = true; else hasLine = true; }
     const mode = p.mode === 'auto' ? (hasPoly ? 'surface' : hasLine ? 'curve' : 'volume') : p.mode;
-    const dA = p.density_attrib ? g.points.get(p.density_attrib) : null;
-    if (p.density_attrib && !dA) throw new NodeError(`density_attrib "${p.density_attrib}" is not a point attribute`);
-    const dw = (pt: number) => (dA ? Math.max(0, dA.get(pt) as number) : 1);
+    const dA = cornerReader(g, p.density_attrib, 'density_attrib');
+    const mA = cornerReader(g, p.density_mask, 'density_mask');
+    const weighted = !!(dA || mA);
+    const dw = (v: number, pt: number, pr: number) => (dA ? Math.max(0, dA(v, pt, pr)) : 1) * (mA ? clamp01(mA(v, pt, pr)) : 1);
+    const mw = (v: number, pt: number, pr: number) => (mA ? clamp01(mA(v, pt, pr)) : 1);
+    const md = Math.max(0, p.min_distance || 0), cap = Math.max(0, Math.floor(p.max_per_prim || 0));
+    const extra = md > 0 || cap > 0;
+    const emitOk = namePattern(p.emit_attributes);
     const b = new GeoBuilder(g);
     if (!p.keep_attribs) for (const n of g.points.names()) b.skip.point.add(n);
+    else for (const n of g.points.names()) if (n !== 'P' && !emitOk(n)) b.skip.point.add(n);
     b.skip.point.add('N');
     b.keepSrcGroups = false;
     const Nout = b.attrib('point', 'N', 3);
-    const sp = b.attrib('point', 'sourceprim', 1, 'int');
-    const Pd = g.P;
+    const sp = p.write_sourceprim ? b.attrib('point', 'sourceprim', 1, 'int') : null;
+    const puv = p.write_primuv ? b.attrib('point', 'sourceprimuv', 3) : null;
+    // vertex and prim attributes carried onto the points (point attributes travel through the builder's provenance)
+    const reserved = new Set(['P', 'N', 'sourceprim', 'sourceprimuv', 'seed']);
+    const emits: { name: string; cls: 'vertex' | 'prim'; a: Attribute; out: ReturnType<GeoBuilder['attrib']> }[] = [];
+    if (p.keep_attribs)
+      for (const cls of ['vertex', 'prim'] as const)
+        for (const name of g.table(cls).names()) {
+          if (reserved.has(name) || g.points.has(name) || emits.some((e) => e.name === name) || !emitOk(name)) continue;
+          const a = g.table(cls).get(name)!;
+          emits.push({ name, cls, a, out: b.attrib('point', name, a.size, a.type, a.def) });
+        }
+    const emitAt = (id: number, verts: number[], w: number[], pr: number) => {
+      for (const e of emits) {
+        const a = e.a;
+        if (e.cls === 'prim') { e.out.set(id, a.isArray ? a.getArray(pr) : a.get(pr)); continue; }
+        if (a.type === 'float' && !a.isArray) {
+          const s = a.size, d = a.data as Float64Array;
+          const v = new Array(s).fill(0);
+          for (let k = 0; k < verts.length; k++) for (let c = 0; c < s; c++) v[c] += d[verts[k] * s + c] * w[k];
+          e.out.set(id, s === 1 ? v[0] : v);
+        } else {
+          let best = 0;
+          for (let k = 1; k < verts.length; k++) if (w[k] > w[best]) best = k;
+          e.out.set(id, a.isArray ? a.getArray(verts[best]) : a.get(verts[best]));
+        }
+      }
+    };
+    const finish = (): Geometry => {
+      const out = b.build();
+      for (const e of emits) { out.vertices.delete(e.name); out.prims.delete(e.name); }
+      if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }
+      return out;
+    };
+    const Pd = g.P, vp = g.vertexPoint;
 
     if (mode === 'surface') {
       if (!hasPoly) throw new NodeError('no polygons to scatter on (use mode=curve for polylines or volume for a bounding box)');
       const { tris, triPrim } = triangulate(g, sel);
       const nt = tris.length / 3;
       const cdf = new Float64Array(nt);
-      let total = 0, area = 0;
+      let total = 0, area = 0, maskedArea = 0;
       for (let t = 0; t < nt; t++) {
-        const a = g.vertexPoint[tris[t * 3]], bb = g.vertexPoint[tris[t * 3 + 1]], c = g.vertexPoint[tris[t * 3 + 2]];
+        const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2], pr = triPrim[t];
+        const a = vp[va], bb = vp[vb], c = vp[vc];
         const ux = Pd[bb * 3] - Pd[a * 3], uy = Pd[bb * 3 + 1] - Pd[a * 3 + 1], uz = Pd[bb * 3 + 2] - Pd[a * 3 + 2];
         const vx = Pd[c * 3] - Pd[a * 3], vy = Pd[c * 3 + 1] - Pd[a * 3 + 1], vz = Pd[c * 3 + 2] - Pd[a * 3 + 2];
         const ar = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
         area += ar;
-        total += ar * (dw(a) + dw(bb) + dw(c)) / 3;
+        total += ar * (dw(va, a, pr) + dw(vb, bb, pr) + dw(vc, c, pr)) / 3;
+        if (mA) maskedArea += ar * (mw(va, a, pr) + mw(vb, bb, pr) + mw(vc, c, pr)) / 3;
         cdf[t] = total;
       }
-      if (total <= 0) throw new NodeError('zero scatter area (or density attribute is 0 everywhere)');
-      const count = p.density > 0 ? Math.round(p.density * area) : p.count;
-      const ncand = p.relax ? count * 5 : count;
+      if (!(total > 0)) {
+        if (mA && area > 0) { warn(`density_mask "${p.density_mask}" is 0 everywhere: no points`); return finish(); }
+        throw new NodeError('zero scatter area (or density attribute is 0 everywhere)');
+      }
+      const count = scatterCount(p, total, mA ? maskedArea : area, warn);
+      const ncand = p.relax || extra ? count * 5 : count;
       const fn = primNormals(g);
       const cand: { t: number; w: number[]; pos: number[] }[] = [];
       const pos = new Float64Array(ncand * 3);
@@ -127,16 +257,67 @@ defineNode({
         const t = lo;
         const s1 = Math.sqrt(r()), s2 = r();
         const w = [1 - s1, s1 * (1 - s2), s1 * s2];
-        const ids = [0, 1, 2].map((j) => g.vertexPoint[tris[t * 3 + j]]);
+        const ids = [0, 1, 2].map((j) => vp[tris[t * 3 + j]]);
         const q = [0, 1, 2].map((c) => w[0] * Pd[ids[0] * 3 + c] + w[1] * Pd[ids[1] * 3 + c] + w[2] * Pd[ids[2] * 3 + c]);
         cand.push({ t, w, pos: q });
         pos.set(q, k * 3);
       }
-      const keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count))) : Int32Array.from({ length: ncand }, (_, i) => i);
+      let keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count))) : Int32Array.from({ length: ncand }, (_, i) => i);
+      const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
+      if (extra) {
+        // the well-spaced selection first, the other candidates as refill; exact distance test and per-prim cap
+        const inKeep = new Uint8Array(ncand), order = new Int32Array(ncand);
+        let o = 0;
+        for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
+        for (let k = 0; k < ncand; k++) if (!inKeep[k]) order[o++] = k;
+        keep = minDistanceSelect(pos, order, md, count,
+          perPrim ? (k) => perPrim[triPrim[cand[k].t]] < cap : undefined,
+          perPrim ? (k) => { perPrim[triPrim[cand[k].t]]++; } : undefined).sort();
+      }
+      let pts = Array.from(keep, (k) => cand[k]);
+      if (p.relax_iterations > 0 && pts.length > 1) {
+        const surf = new TriSurface(g, tris);
+        const n = pts.length;
+        const RP = new Float64Array(n * 3);
+        pts = pts.map((c, i) => { RP.set(c.pos, i * 3); return { t: c.t, w: c.w.slice(), pos: c.pos.slice() }; });
+        const wAt = (t: number, w: number[]) => {
+          let s = 0;
+          for (let j = 0; j < 3; j++) { const v = tris[t * 3 + j]; s += w[j] * dw(v, vp[v], triPrim[t]); }
+          return s;
+        };
+        const dBar = Math.sqrt((2 * area) / (Math.sqrt(3) * n)), wMean = total / area;
+        const spacingAt = (t: number, w: number[]) => {
+          if (p.relax_radius > 0) return p.relax_radius;
+          if (!weighted) return dBar;
+          const wl = wAt(t, w);
+          const s = wl > 0 ? dBar * Math.sqrt(wMean / wl) : 4 * dBar;
+          return Math.min(4 * dBar, Math.max(0.25 * dBar, s));
+        };
+        const spacing = Float64Array.from(pts, (c) => spacingAt(c.t, c.w));
+        const tp: TriPoint = { x: 0, y: 0, z: 0, b0: 1, b1: 0, b2: 0 };
+        relaxPoints(RP, spacing, p.relax_iterations, (i, x, y, z) => {
+          const t = surf.closest(x, y, z, tp);
+          if (t < 0) return;
+          RP[i * 3] = tp.x; RP[i * 3 + 1] = tp.y; RP[i * 3 + 2] = tp.z;
+          const c = pts[i];
+          c.t = t; c.w = [tp.b0, tp.b1, tp.b2]; c.pos = [tp.x, tp.y, tp.z];
+          spacing[i] = spacingAt(t, c.w);
+        });
+        // points relaxed into zero-density areas go; the distance and per-prim limits are enforced again
+        let order: Int32Array = Int32Array.from({ length: n }, (_, i) => i);
+        if (weighted) order = order.filter((i) => wAt(pts[i].t, pts[i].w) > 0);
+        if (extra) {
+          if (perPrim) perPrim.fill(0);
+          order = minDistanceSelect(RP, order, md, Infinity,
+            perPrim ? (i) => perPrim[triPrim[pts[i].t]] < cap : undefined,
+            perPrim ? (i) => { perPrim[triPrim[pts[i].t]]++; } : undefined).sort();
+        }
+        if (order.length < n) pts = Array.from(order, (i) => pts[i]);
+      }
       const nA = g.points.get('N');
-      for (const k of keep) {
-        const c = cand[k];
-        const ids = [0, 1, 2].map((j) => g.vertexPoint[tris[c.t * 3 + j]]);
+      for (const c of pts) {
+        const verts = [tris[c.t * 3], tris[c.t * 3 + 1], tris[c.t * 3 + 2]];
+        const ids = verts.map((v) => vp[v]);
         const id = b.addPoint(c.pos[0], c.pos[1], c.pos[2], { i: ids, w: c.w });
         const pr = triPrim[c.t];
         let n: number[] = [fn[pr * 3], fn[pr * 3 + 1], fn[pr * 3 + 2]];
@@ -145,38 +326,65 @@ defineNode({
           n = normalize([0, 1, 2].map((cc) => c.w[0] * d[ids[0] * 3 + cc] + c.w[1] * d[ids[1] * 3 + cc] + c.w[2] * d[ids[2] * 3 + cc]) as Vec3);
         }
         Nout.set(id, n);
-        sp.set(id, pr);
+        if (sp) sp.set(id, pr);
+        if (puv) {
+          let u = 0, v = 0;
+          for (let j = 0; j < 3; j++) { const q = cornerPrimUV(g, verts[j], pr); u += c.w[j] * q[0]; v += c.w[j] * q[1]; }
+          puv.set(id, [u, v, 0]);
+        }
+        if (emits.length) emitAt(id, verts, c.w, pr);
       }
-      return b.build();
+      return finish();
     }
 
     if (mode === 'curve') {
-      const segs: { a: number; b: number; pr: number; len: number }[] = [];
+      const segs: { a: number; b: number; va: number; vb: number; pr: number; len: number; u0: number; u1: number }[] = [];
       let total = 0;
       for (let pr = 0; pr < g.numPrims; pr++) {
         if (sel && !sel[pr]) continue;
         const s = g.primStart[pr], e = g.primStart[pr + 1];
         const last = g.primClosed[pr] ? e : e - 1;
+        const nseg = Math.max(1, last - s);
         for (let v = s; v < last; v++) {
-          const a = g.vertexPoint[v], bb = g.vertexPoint[v + 1 < e ? v + 1 : s];
-          const len = Math.hypot(Pd[bb * 3] - Pd[a * 3], Pd[bb * 3 + 1] - Pd[a * 3 + 1], Pd[bb * 3 + 2] - Pd[a * 3 + 2]) * (dw(a) + dw(bb)) / 2;
+          const vb = v + 1 < e ? v + 1 : s;
+          const a = vp[v], bb = vp[vb];
+          const len = Math.hypot(Pd[bb * 3] - Pd[a * 3], Pd[bb * 3 + 1] - Pd[a * 3 + 1], Pd[bb * 3 + 2] - Pd[a * 3 + 2]) * (dw(v, a, pr) + dw(vb, bb, pr)) / 2;
           total += len;
-          segs.push({ a, b: bb, pr, len: total });
+          segs.push({ a, b: bb, va: v, vb, pr, len: total, u0: (v - s) / nseg, u1: (v - s + 1) / nseg });
         }
       }
-      if (!segs.length || total <= 0) throw new NodeError('no curve length to scatter along');
-      const count = p.density > 0 ? Math.round(p.density * total) : p.count;
+      if (!segs.length || !(total > 0)) {
+        if (mA && segs.length) { warn(`density_mask "${p.density_mask}" is 0 everywhere: no points`); return finish(); }
+        throw new NodeError('no curve length to scatter along');
+      }
+      const count = scatterCount(p, total, total, warn);
+      const picks: { sg: number; f: number }[] = [];
+      const pos = new Float64Array(count * 3);
       for (let k = 0; k < count; k++) {
         const x = p.relax ? ((k + 0.5) / count) * total : r() * total;
         let lo = 0, hi = segs.length - 1;
         while (lo < hi) { const mid = (lo + hi) >> 1; if (segs[mid].len < x) lo = mid + 1; else hi = mid; }
         const sg = segs[lo], prev = lo ? segs[lo - 1].len : 0;
         const f = sg.len > prev ? (x - prev) / (sg.len - prev) : 0;
+        picks.push({ sg: lo, f });
+        for (let c = 0; c < 3; c++) pos[k * 3 + c] = Pd[sg.a * 3 + c] * (1 - f) + Pd[sg.b * 3 + c] * f;
+      }
+      let order: ArrayLike<number> = Int32Array.from({ length: count }, (_, i) => i);
+      if (extra) {
+        const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
+        order = minDistanceSelect(pos, order, md, Infinity,
+          perPrim ? (k) => perPrim[segs[picks[k].sg].pr] < cap : undefined,
+          perPrim ? (k) => { perPrim[segs[picks[k].sg].pr]++; } : undefined);
+      }
+      for (let o = 0; o < order.length; o++) {
+        const { sg: si, f } = picks[order[o]], sg = segs[si];
         const id = b.blendPoint([sg.a, sg.b], [1 - f, f]);
         Nout.set(id, normalize([Pd[sg.b * 3] - Pd[sg.a * 3], Pd[sg.b * 3 + 1] - Pd[sg.a * 3 + 1], Pd[sg.b * 3 + 2] - Pd[sg.a * 3 + 2]]));
-        sp.set(id, sg.pr);
+        if (sp) sp.set(id, sg.pr);
+        if (puv) puv.set(id, [sg.u0 + (sg.u1 - sg.u0) * f, 0, 0]);
+        if (emits.length) emitAt(id, [sg.va, sg.vb], [1 - f, f], sg.pr);
       }
-      return b.build();
+      return finish();
     }
 
     // volume
@@ -184,8 +392,8 @@ defineNode({
     const ext = [0, 1, 2].map((a) => bb.max[a] - bb.min[a]);
     const closed = hasPoly ? new TriBVH(g) : null;
     const vol = Math.max(1e-12, ext[0] * ext[1] * ext[2]);
-    const count = p.density > 0 ? Math.round(p.density * vol) : p.count;
-    const ncand = p.relax ? count * 5 : count;
+    const count = scatterCount(p, vol, vol, warn);
+    const ncand = p.relax || md > 0 ? count * 5 : count;
     const pos: number[] = [];
     let tries = 0;
     while (pos.length / 3 < ncand && tries++ < ncand * 200) {
@@ -195,8 +403,16 @@ defineNode({
     }
     const P0 = Float64Array.from(pos);
     const nc = P0.length / 3;
-    const keep = p.relax && count > 0 && nc > count ? sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6) : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
+    let keep = p.relax && count > 0 && nc > count ? sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6) : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
+    if (md > 0) {
+      const inKeep = new Uint8Array(nc), order = new Int32Array(nc);
+      let o = 0;
+      for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
+      for (let k = 0; k < nc; k++) if (!inKeep[k]) order[o++] = k;
+      keep = minDistanceSelect(P0, order, md, count).sort();
+    }
     const out = new Geometry({ positions: Array.from(keep).flatMap((k) => [P0[k * 3], P0[k * 3 + 1], P0[k * 3 + 2]]) });
+    if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }
     return out;
   },
 });
