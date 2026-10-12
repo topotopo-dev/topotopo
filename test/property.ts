@@ -9,6 +9,7 @@
 //   - no exception escapes engine.cook (errors must be reported per node),
 //   - every successfully cooked node result passes checkGeo,
 //   - determinism: two cold-cache cooks give the same fingerprint (or the same errors),
+//   - immutability: no node's cooked result changes after downstream nodes have cooked (clone before writing),
 //   - cache correctness: change a numeric param, cook, restore it, cook → same fingerprint as the first cook,
 //     and the engine reports the restored node (and the output) as cached.
 // --strict also fails on node errors that look like internal JS errors (TypeError etc.).
@@ -225,6 +226,20 @@ async function cookChecked(engine: Engine, graph: GraphSpec, problems: string[],
   return { rep, out: { ok: rep.ok, sig: JSON.stringify(rep.errors.map((e) => `[${e.node}] ${e.message}`)), fp } };
 }
 
+/** Node names with every node after the nodes it is wired to. */
+function topoOrder(graph: GraphSpec): string[] {
+  const out: string[] = [], seen = new Set<string>();
+  const visit = (n: string) => {
+    if (seen.has(n) || !graph.nodes[n]) return;
+    seen.add(n);
+    const ins = graph.nodes[n].in;
+    for (const d of Array.isArray(ins) ? ins : typeof ins === 'string' ? [ins] : []) if (d) visit(d);
+    out.push(n);
+  };
+  for (const n of Object.keys(graph.nodes)) visit(n);
+  return out;
+}
+
 const sameOutcome = (a: Outcome, b: Outcome) => a.ok === b.ok && a.sig === b.sig && JSON.stringify(a.fp) === JSON.stringify(b.fp);
 
 function outcomeDiff(a: Outcome, b: Outcome): string[] {
@@ -260,7 +275,7 @@ function pickParamChange(r: Rand, graph: GraphSpec): { node: string; param: stri
 
 const { engine } = await createFixtureEngine();
 const t0 = performance.now();
-let failures = 0, okGraphs = 0, errGraphs = 0, cacheChecks = 0, truncatedCount = 0, nodeCount = 0;
+let failures = 0, okGraphs = 0, errGraphs = 0, cacheChecks = 0, cacheHitAsserts = 0, truncatedCount = 0, nodeCount = 0;
 const errorsByType = new Map<string, Map<string, number>>();
 const internal: string[] = [];
 const typeCoverage = new Map<string, number>();
@@ -275,12 +290,31 @@ for (const i of indices) {
   for (const t of built.chain.slice(1)) typeCoverage.set(t, (typeCoverage.get(t) ?? 0) + 1);
   if (built.truncated) truncatedCount++;
 
-  // determinism: two cold-cache cooks
+  // cook 1: cold cache, fingerprint every node result afterwards
   engine.cache.clear();
   const A = await cookChecked(engine, graph, problems, 'cook 1');
+  const after = new Map<string, any>();
+  if (A.rep) for (const [n, res] of A.rep.results) if (res.geo) after.set(n, fingerprint(res.geo));
+
+  // cook 2: cold cache again, one node at a time in topological order, fingerprinting each result right away
+  // (before anything downstream has seen it). Determinism: the output matches cook 1. Immutability: every node's
+  // result in cook 1 still matches its fresh fingerprint, i.e. no downstream node wrote to its input.
   engine.cache.clear();
-  const B = await cookChecked(engine, graph, problems, 'cook 2 (cold cache)');
-  if (A.rep && B.rep && !sameOutcome(A.out, B.out)) problems.push(`not deterministic: cook 1 vs cook 2\n${outcomeDiff(A.out, B.out).join('\n')}`);
+  let B: Awaited<ReturnType<typeof cookChecked>> | null = null;
+  const fresh = new Map<string, any>();
+  for (const n of topoOrder(graph)) {
+    const r2 = await cookChecked(engine, { ...graph, output: n }, problems, `cook 2 (target ${n})`);
+    const g = r2.rep?.results.get(n)?.geo;
+    if (g) fresh.set(n, fingerprint(g));
+    if (n === graph.output) B = r2;
+  }
+  if (A.rep && B?.rep && !sameOutcome(A.out, B.out)) problems.push(`not deterministic: cook 1 vs cook 2 (both cold cache)\n${outcomeDiff(A.out, B.out).join('\n')}`);
+  for (const [n, fp] of after) {
+    const f = fresh.get(n);
+    if (!f || n === graph.output || JSON.stringify(f) === JSON.stringify(fp)) continue;
+    const consumers = Object.entries(graph.nodes).filter(([, s]) => Array.isArray(s.in) && s.in.includes(n)).map(([m, s]) => `${m} (${s.type})`);
+    problems.push(`immutability: the result of "${n}" (${graph.nodes[n].type}) changed after downstream nodes cooked; one of ${consumers.join(', ')} writes to its input without clone()\n${formatDiff(diffFields(f, fp), 8).join('\n')}`);
+  }
 
   if (A.rep) {
     if (A.rep.ok) okGraphs++; else errGraphs++;
@@ -310,6 +344,7 @@ for (const i of indices) {
       if (okBefore && !okBefore.error) {
         for (const n of new Set([change.node, graph.output!])) {
           const res = D.rep.results.get(n);
+          if (res && !res.error) cacheHitAsserts++;
           if (res && !res.error && !res.cached) problems.push(`cache: node "${n}" re-cooked after restoring ${change.node}.${change.param} (expected a cache hit)`);
         }
       }
@@ -342,5 +377,5 @@ if (internal.length) {
 }
 const untested = CHAINABLE.map((d) => d.type).filter((t) => !typeCoverage.has(t));
 console.log(`\ncoverage: ${typeCoverage.size}/${CHAINABLE.length} chainable node types${untested.length ? ` (not drawn: ${untested.join(', ')})` : ''}`);
-console.log(`property: ${indices.length} graphs (seed ${SEED}), ${nodeCount} random nodes, ${okGraphs} cooked ok, ${errGraphs} with node errors, ${cacheChecks} cache checks, ${truncatedCount} chains stopped early; ${failures} failed (${secs}s)`);
+console.log(`property: ${indices.length} graphs (seed ${SEED}), ${nodeCount} random nodes, ${okGraphs} cooked ok, ${errGraphs} with node errors, ${cacheChecks} param change/restore checks (${cacheHitAsserts} cache hits asserted), ${truncatedCount} chains stopped early; ${failures} failed (${secs}s)`);
 process.exit(failures ? 1 : 0);
