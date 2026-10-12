@@ -31,6 +31,8 @@ export interface XatlasChartOptions {
   textureSeamWeight?: number;
   maxCost?: number;
   maxIterations?: number;
+  /** enforce consistent (non-mirrored) uv winding */
+  fixWinding?: boolean;
 }
 
 export interface XatlasPackOptions {

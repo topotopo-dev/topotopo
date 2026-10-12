@@ -227,6 +227,30 @@ defineNode({
         else { uv[v * 2] = 0; uv[v * 2 + 1] = 0; unplaced++; }
       }
     }
+    // xatlas may return charts mirrored relative to the polygon winding (its texel space has v down):
+    // mirror those charts in u inside their own bounding box, so faces keep their orientation and the packing holds
+    const chartSum = new Map<number, number>();
+    const chartBox = new Map<number, [number, number]>();
+    for (let pr = 0; pr < g.numPrims; pr++) {
+      const c = primChart[pr];
+      if (c < 0) continue;
+      const s = g.primStart[pr], e = g.primStart[pr + 1];
+      let a = 0;
+      for (let v = s; v < e; v++) {
+        const w = v + 1 < e ? v + 1 : s;
+        a += uv[v * 2] * uv[w * 2 + 1] - uv[w * 2] * uv[v * 2 + 1];
+        const b = chartBox.get(c);
+        if (!b) chartBox.set(c, [uv[v * 2], uv[v * 2]]);
+        else { if (uv[v * 2] < b[0]) b[0] = uv[v * 2]; if (uv[v * 2] > b[1]) b[1] = uv[v * 2]; }
+      }
+      chartSum.set(c, (chartSum.get(c) ?? 0) + a);
+    }
+    for (let pr = 0; pr < g.numPrims; pr++) {
+      const c = primChart[pr];
+      if (c < 0 || !(chartSum.get(c)! < 0)) continue;
+      const [u0, u1] = chartBox.get(c)!;
+      for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) uv[v * 2] = u0 + u1 - uv[v * 2];
+    }
     writeUV(g, uv);
     writePrimInt(g, 'chart', primChart);
     g.prims.delete('atlas');
