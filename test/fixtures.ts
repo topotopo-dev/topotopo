@@ -57,6 +57,8 @@ export const INPUTS: Record<string, string[]> = {
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
   attrib_array: ['NBRS'],
   polysplit: ['BOX'], edge_divide: ['BOX'], dissolve: ['GRID'], polybridge: ['CUBE'], polyfill: ['OPENTUBE'],
+  // measure (P1-F): curvature on the box (flat faces, sharp edges), distance from grid points to the sphere
+  curvature: ['BOX'], distance: ['GRID', 'MESH'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -81,6 +83,8 @@ export const PARAMS: Record<string, any> = {
   path_deform: { stretch: true, twist: 90 },
   // input already has point int[] nbrs (from_neighbours); the fixture adds prim int[] pts
   attrib_array: { mode: 'from_group_points' },
+  distance: { signed: true, extra: true },
+  assert: { watertight: true, no_flipped: true, no_degenerate: true, expr: 'pieces == 1 && genus == 0', on_fail: 'mark' },
   graph_ref: null,
   knife: { origin: [0, 0.1, 0], direction: [0.3, 1, 0.2] },
   polysplit: { count: 2 },

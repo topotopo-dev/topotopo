@@ -1,0 +1,40 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["assert_failed:int:1", "assert_report:string:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "9ec54b8e97d6dcdc",
+      "attributes": {
+        "detail.assert_failed": "9be171658ea4219f",
+        "detail.assert_report": "6c796466cf5d8990",
+        "point.N": "3c28f9be0faf0b34"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.assert",
+  "ok": true,
+  "source": "fixture for node type \"assert\" (test/fixtures.ts)",
+  "warnings": []
+}

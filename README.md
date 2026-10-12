@@ -77,7 +77,7 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, assets, uv, export, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, assets, uv, export, verify, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
@@ -85,6 +85,8 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | `export` | glb / obj / usda / ply / stl / json |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete |
+| `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
+| `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
 
 ## Graph format
@@ -129,6 +131,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | transform | `transform` `match_size` `mirror` |
 | deform | `noise_displace` `twist` `bend` `taper` `smooth` `peak` `jitter` `ray` `soft_transform` `lattice` `path_deform` `point_deform` `rest` |
 | attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_array` `attrib_noise` `color` `material` `measure` `connectivity` (float/int tuples, strings, and float[]/int[]/string[] array attributes) |
+| measure | `curvature` `occlusion` (ambient occlusion, cavity, thickness) `distance` `assert` (in-graph checks: watertight, counts, bbox, edge length, degenerate, self-intersections, attributes, groups, expression) |
 | group | `group` `delete` `group_promote` `group_expand` `group_combine` `group_delete` `group_rename` (point, vertex, prim and edge groups) |
 | topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `poly_bevel` `grid_split` `fill_holes` `bound` `decimate` `remesh` `knife` `polysplit` `edge_divide` `dissolve` `edge_collapse` `polybridge` `polyfill` |
 | copy | `copy_xform` `scatter` `copy_to_points` |

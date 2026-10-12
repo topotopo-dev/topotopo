@@ -44,6 +44,8 @@ src/core/      geometry model + algorithms (no I/O)
   polyedit.ts    polygon-editing kernels: edge-point insertion + face splits (knife, polysplit, edge divide), plane chords,
                  quad rings, chain ordering, bridge, hole fill (quad fan, Coons grid), dissolve, collapse
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
+  analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
+                 self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
   wrangle.ts     @-syntax compiler → per-element kernels; deferred addpoint/addprim/remove
@@ -55,6 +57,7 @@ src/graph/     node system
   migrate.ts     graph format versions and migrations
 src/nodes/     ~95 node types, one defineNode() each
 src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision)
+src/inspect.ts, src/explain.ts  text views of geometry: summaries, statistics, a "reads as" description, diffs
 src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON
                (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts
 src/host/      Node host: fs, vm sandbox (timeouts), fonts
@@ -194,7 +197,11 @@ These are the decisions that most affect how well an agent can work with it:
    names are case- and underscore-insensitive. A scalar broadcasts to a vector, and colours accept `"#hex"` or names.
    Unknown types and params fail with *did-you-mean* suggestions plus the list of valid names. `dry_run` validates without cooking.
 4. **Text-first verification.** Each cook returns counts, bbox, attribute tables and groups. `inspect` adds
-   attribute statistics, watertightness, volume, genus and element listings.
+   attribute statistics, watertightness, volume, genus and element listings. `assert` nodes turn invariants
+   (watertight, counts, bbox, an expression) into node errors that list every failed check with its measured value;
+   `explain` describes a result in words (pieces, symmetry, principal axis, wall thickness, flipped normals) and `diff`
+   compares two versions (bbox delta, schema changes, Hausdorff distance, an overlay render), so an agent can check
+   its work without a vision round-trip.
 5. **Vision feedback.** `render` returns a labelled quad view. Back faces of closed pieces are tinted blue, so flipped
    normals are obvious. Attributes can be colour-mapped, and groups are highlighted in orange. The renderer is pure JS,
    so it needs no GPU or browser.

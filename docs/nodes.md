@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-121 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+125 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -13,6 +13,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
+- [measure](#measure-nodes): [assert](#assert) · [curvature](#curvature) · [distance](#distance) · [occlusion](#occlusion)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
@@ -1815,6 +1816,366 @@ Measure prim area/perimeter, curve length, per-piece volume/area, or point curva
 | `name` | string | `""` |  |  |  | output attribute ("" = the measure name) |
 
 **Writes:** prim area/perimeter/length/volume, point curvature
+
+## measure nodes
+
+### assert
+
+category: `measure` · aliases: `expect`, `check`, `verify`
+
+Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression) and fail, warn or mark when a check fails. Passes the geometry through.
+
+Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges. Each cook records stats checks and failed.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry to check (passed through) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `on_fail` | enum | `"error"` |  | `error`, `warn`, `mark` | `onfail`, `action` | error = fail the node; warn = pass through with a warning; mark = pass through and write assert_failed / assert_report / group assert_fail |
+| `label` | string | `""` |  |  | `message`, `msg` | what this assert guards, prefixed to the message |
+| `watertight` | bool | `false` |  |  | `closed` | closed surface: only polygons, every edge shared by exactly two of them |
+| `manifold` | bool | `false` |  |  |  | no edge shared by 3+ polygons and no bowtie points (fans touching at a point) |
+| `no_flipped` | bool | `false` |  |  | `outward`, `consistent_winding` | neighbouring polygons wound consistently, and closed pieces face outward (positive volume; the walls of a cavity inside a hollow solid may face inward) |
+| `min_points` | int | `-1` | -1.. |  |  | at least this many points (-1 = off) |
+| `max_points` | int | `-1` | -1.. |  |  | at most this many points (-1 = off) |
+| `min_prims` | int | `-1` | -1.. |  |  | at least this many prims (-1 = off) |
+| `max_prims` | int | `-1` | -1.. |  |  | at most this many prims (-1 = off) |
+| `bbox_min` | json | `null` |  |  |  | [x, y, z] (or one number): no point may lie below it (null = off) |
+| `bbox_max` | json | `null` |  |  |  | [x, y, z] (or one number): no point may lie above it (null = off) |
+| `min_edge_length` | float | `0` | 0.. |  |  | no edge shorter than this (0 = off) |
+| `no_degenerate` | bool | `false` |  |  |  | no zero-area polygons (area <= tolerance²) and no two points within tolerance of each other |
+| `no_self_intersections` | bool | `false` |  |  | `no_intersections` | no two non-adjacent triangles cross each other (BVH search, capped at max_tests) |
+| `max_tests` | int | `2000000` | 1000.. |  |  | self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped) *(advanced)* |
+| `attrib` | string | `""` |  |  | `attribute` | attribute that must exist ("" = off) |
+| `attrib_class` | enum | `"auto"` |  | `auto`, `point`, `vertex`, `prim`, `detail` |  | where attrib must live (auto = any class: vertex, point, prim, detail) |
+| `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of its first component (null = off) |
+| `attrib_max` | json | `null` |  |  |  | attrib: largest allowed value of its first component (null = off) |
+| `group` | string | `""` |  |  |  | group name (any class) that must exist and be non-empty ("" = off) |
+| `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges; e.g. "volume > 1 && pieces == 1" |
+| `tolerance` | float | `0.000001` | 0.. |  |  | distance tolerance for bbox_min/max and duplicate points *(advanced)* |
+
+**Writes:** passes geometry through; mark: detail int assert_failed, detail string assert_report, point/prim group assert_fail
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "body": {
+      "type": "box",
+      "params": {
+        "size": [
+          1,
+          2,
+          1
+        ],
+        "center": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "check": {
+      "type": "assert",
+      "in": [
+        "body"
+      ],
+      "params": {
+        "watertight": true,
+        "no_flipped": true,
+        "bbox_min": [
+          -1,
+          0,
+          -1
+        ],
+        "bbox_max": [
+          1,
+          2.5,
+          1
+        ],
+        "expr": "volume > 1.5 && pieces == 1"
+      }
+    }
+  },
+  "output": "check"
+}
+```
+
+### curvature
+
+category: `measure` · aliases: `measure_curvature`
+
+Per-point discrete curvature of a polygon mesh: mean, Gaussian, principal min/max or convexity.
+
+mean: signed mean curvature in 1/m from the cotangent Laplacian over the mixed Voronoi area (1 on a unit sphere, positive where the surface bulges along its normals, negative in creases). gaussian: angle deficit over the mixed area in 1/m² (positive on domes and bowls, negative on saddles). principal_min/max: H ∓ √(H² − K). convexity: sign of the mean curvature (1 convex, -1 concave, 0 flat). n-gons are measured through their triangulation. Boundary and non-manifold points take the value of the nearest interior point (a warning says how many). Typical use: colour or mask by curvature (wear on convex edges, dirt in concave creases).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `type` | enum | `"mean"` |  | `mean`, `gaussian`, `principal_min`, `principal_max`, `convexity` | `curvature_type`, `mode` | which curvature to write |
+| `smooth_iterations` | int | `0` | 0..200 |  | `smooth`, `blur` | Laplacian smoothing passes over the values (not the geometry) |
+| `normalize` | bool | `false` |  |  | `fit` | fit the values to 0..1 between the clip_percent and 100 - clip_percent percentiles (constant values become 0.5) |
+| `clip_percent` | float | `2` | 0..49 |  |  | normalize: percent of values clamped at each end before fitting (ignores spikes) |
+| `name` | string | `"curvature"` |  |  | `attrib`, `attribute` | output point attribute (float) |
+
+**Writes:** point float <name> (default "curvature")
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 4
+      }
+    },
+    "rough": {
+      "type": "noise_displace",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "amplitude": 0.25,
+        "frequency": 2
+      }
+    },
+    "k": {
+      "type": "curvature",
+      "in": [
+        "rough"
+      ],
+      "params": {
+        "type": "mean",
+        "smooth_iterations": 2,
+        "normalize": true
+      }
+    },
+    "out": {
+      "type": "color",
+      "in": [
+        "k"
+      ],
+      "params": {
+        "mode": "ramp",
+        "attrib": "curvature",
+        "range": [
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
+### distance
+
+category: `measure` · aliases: `measure_distance`, `xyzdist`
+
+Distance from each point to a target: mesh surface (BVH), polylines, or points (KD-tree); optionally signed and with the nearest prim, uv and position.
+
+The target (second input) is measured as polygons (closest point on the surface), polylines (closest point on the segments) and, when it has no prims at all, its points. signed makes points inside a closed target negative (ray-parity inside test). extra also writes nearest_prim (int, -1 = none), nearest_uv (prim uv: triangle barycentrics like Houdini primuv, quad bilinear, polyline u 0..1) and nearest_P. Points farther than max_distance get max_distance and nearest_prim -1 (Houdini xyzdist with a max distance).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | points to measure from |
+| 1 | `target` | no | no | geometry to measure to (mesh, curves or points) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `signed` | bool | `false` |  |  |  | negative inside a closed polygon target |
+| `max_distance` | float | `0` | 0.. |  | `maxdist`, `radius` | search radius (0 = unlimited); points beyond it get this value |
+| `extra` | bool | `false` |  |  |  | also write nearest_prim, nearest_uv and nearest_P |
+| `group` | group (point) | `""` |  |  |  | points to measure ("" = all); the others keep their values |
+| `name` | string | `"dist"` |  |  | `attrib`, `attribute` | output point attribute (float) |
+
+**Writes:** point float dist (or <name>); with extra: int nearest_prim, vec3 nearest_uv, vec3 nearest_P
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size": [
+          6,
+          6
+        ],
+        "divisions": [
+          60,
+          60
+        ]
+      }
+    },
+    "path": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            -3,
+            0,
+            -2
+          ],
+          [
+            -1,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            -1
+          ],
+          [
+            3,
+            0,
+            2
+          ]
+        ],
+        "smooth": true
+      }
+    },
+    "d": {
+      "type": "distance",
+      "in": [
+        "ground",
+        "path"
+      ]
+    },
+    "out": {
+      "type": "color",
+      "in": [
+        "d"
+      ],
+      "params": {
+        "mode": "ramp",
+        "attrib": "dist",
+        "range": [
+          0,
+          1.5
+        ]
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
+### occlusion
+
+category: `measure` · aliases: `ambient_occlusion`, `ao`, `thickness`
+
+Ray-cast per-point measures: ambient occlusion (0 open … 1 enclosed), thickness in metres, or cavity (0..1).
+
+Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone around the point normal and tests them against the geometry itself plus the optional occluder input (a triangle BVH). occlusion → "ao": fraction of rays blocked within max_distance. cavity → "cavity": occlusion over a short range where near walls count most (crevices and inner corners light up, flat and convex areas are 0). thickness → "thickness": mean distance to the opposite wall along rays cast inward (against the normal) in metres, so it needs closed or double-walled geometry with outward normals; normalize divides by max_distance. The alias "thickness" still defaults to mode occlusion: set mode. Points outside `group` keep their values.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | points to measure (normals from N, else computed from the polygons) |
+| 1 | `occluder` | yes | no | extra geometry the rays can hit (e.g. the ground under scattered rocks) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"occlusion"` |  | `occlusion`, `thickness`, `cavity` |  | what to measure |
+| `samples` | int | `32` | 1..1024 |  | `rays`, `count` | rays per point (stratified; more = smoother) |
+| `max_distance` | float | `0` | 0.. |  | `maxdist`, `distance`, `radius` | hits farther than this are ignored; 0 = auto (occlusion: unlimited, cavity: 5% of the scene diagonal, thickness: the scene diagonal) |
+| `bias` | float | `0` | 0.. |  |  | ray start offset along the normal against self-hits; 0 = auto (1e-4 of the scene diagonal) |
+| `cone_angle` | float | `0` | 0..90 |  | `angle`, `spread` | half-angle of the ray cone in degrees; 0 = auto (90 = hemisphere for occlusion and cavity, 15 for thickness: a slab reads within 2%) |
+| `seed` | float | `0` |  |  |  | random seed |
+| `invert` | bool | `false` |  |  |  | write 1 - value (thickness: max_distance - value), e.g. exposure instead of occlusion |
+| `normalize` | bool | `false` |  |  |  | thickness: divide by max_distance to get 0..1 (occlusion and cavity are always 0..1) |
+| `group` | group (point) | `""` |  |  |  | points to measure ("" = all); the others keep their values |
+| `name` | string | `""` |  |  | `attrib`, `attribute` | output point attribute ("" = ao, thickness or cavity by mode) |
+
+**Writes:** point float ao | thickness | cavity (or <name>)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "rock": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 4
+      }
+    },
+    "shape": {
+      "type": "noise_displace",
+      "in": [
+        "rock"
+      ],
+      "params": {
+        "amplitude": 0.35,
+        "frequency": 1.6
+      }
+    },
+    "ao": {
+      "type": "occlusion",
+      "in": [
+        "shape"
+      ],
+      "params": {
+        "samples": 32
+      }
+    },
+    "out": {
+      "type": "color",
+      "in": [
+        "ao"
+      ],
+      "params": {
+        "mode": "ramp",
+        "attrib": "ao",
+        "range": [
+          0,
+          1
+        ],
+        "ramp": [
+          [
+            0,
+            "#f2e6d0"
+          ],
+          [
+            1,
+            "#2b2118"
+          ]
+        ]
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ## group nodes
 
