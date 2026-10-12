@@ -16,6 +16,8 @@ import type { RenderOptions, ViewName } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { exportGeometry } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
+import { HEIGHTMAP_FORMATS, heightmapExport, heightmapPaths } from '../io/heightmap.ts';
+import type { HeightmapFormat } from '../io/heightmap.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 
@@ -65,6 +67,18 @@ function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: strin
   const r = renderGeometry(g, o);
   const png = encodePNG(r.rgba, r.width, r.height, (d) => zlib.deflateSync(d, { level: 6 }));
   return { img: { type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, notes: r.notes, png };
+}
+
+/** Heightmap export: the main file, the JSON sidecar (png16/r16) or one PNG per mask layer. */
+function writeHeightmap(geo: Geometry, format: HeightmapFormat, p: string, a: any): string {
+  const res = heightmapExport(geo, format, {
+    layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield,
+    deflate: (d) => zlib.deflateSync(d, { level: 6 }),
+  });
+  const paths = heightmapPaths(p, res.files);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  res.files.forEach((f, i) => fs.writeFileSync(paths[i], f.bytes));
+  return `wrote ${paths.join(', ')} (${format}): ${res.summary}`;
 }
 
 const VIEW_ENUM = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom'];
@@ -269,14 +283,19 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb (glTF binary; best for Unreal/Blender/web), .obj, .usda, .ply, .stl, .json (lossless). Relative paths go into the workspace.',
+      description: 'Write a node\'s output to a file: .glb (glTF binary; best for Unreal/Blender/web), .obj, .usda, .ply, .stl, .json (lossless). Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers). Relative paths go into the workspace.',
       inputSchema: {
         type: 'object',
         required: ['path'],
         properties: {
           graph: { type: 'string' }, node: { type: 'string' },
-          path: { type: 'string', description: 'e.g. "exports/rock.glb"' },
-          format: { type: 'string', enum: ['glb', 'obj', 'usda', 'ply', 'stl', 'json'] },
+          path: { type: 'string', description: 'e.g. "exports/rock.glb" or "exports/terrain.png" (heightmap)' },
+          format: { type: 'string', enum: ['glb', 'obj', 'usda', 'ply', 'stl', 'json', 'png16', 'r16', 'mask_png'] },
+          layer: { type: 'string', description: 'heightmaps: layer to write (png16/r16 default "height", mask_png default "mask")' },
+          layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png)' },
+          height_min: { type: 'number', description: 'png16/r16: fixed range start (default: the layer minimum), e.g. shared by tiles' },
+          height_max: { type: 'number', description: 'png16/r16: fixed range end (default: the layer maximum)' },
+          heightfield: { type: 'number', description: 'heightmaps: which heightfield when there are several (index, default 0)' },
           up_axis: { type: 'string', enum: ['y', 'z'] },
           scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres)' },
           split_by_name: { type: 'boolean', description: 'separate meshes per prim "name" (default true)' },
@@ -287,8 +306,10 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
         const p = path.resolve(ws.dir, a.path);
-        const ext = (a.format ?? path.extname(p).slice(1)).toLowerCase() as ExportFormat;
-        if (!['glb', 'obj', 'usda', 'ply', 'stl', 'json'].includes(ext)) throw new Error(`unknown format "${ext}"; use .glb .obj .usda .ply .stl .json`);
+        const fmt = (a.format ?? path.extname(p).slice(1)).toLowerCase();
+        const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt] ?? fmt) as ExportFormat;
+        if (!['glb', 'obj', 'usda', 'ply', 'stl', 'json', ...HEIGHTMAP_FORMATS].includes(ext)) throw new Error(`unknown format "${ext}"; use .glb .obj .usda .ply .stl .json, or png16 (.png) / r16 / mask_png for heightfields`);
+        if (HEIGHTMAP_FORMATS.includes(ext as HeightmapFormat)) return text(writeHeightmap(geo, ext as HeightmapFormat, p, a) + ` (from ${name}/${r.target}${atFrame(r)})`);
         const bytes = exportGeometry(geo, ext, { upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs });
         fs.mkdirSync(path.dirname(p), { recursive: true });
         fs.writeFileSync(p, bytes);

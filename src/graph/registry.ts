@@ -37,5 +37,5 @@ export function allAliases(): string[] {
 
 export const CATEGORY_ORDER = [
   'generate', 'curve', 'transform', 'deform', 'attribute', 'group', 'topology', 'copy',
-  'solid', 'sdf', 'uv', 'code', 'flow', 'io',
+  'solid', 'sdf', 'heightfield', 'uv', 'code', 'flow', 'io',
 ];

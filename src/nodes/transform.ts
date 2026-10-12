@@ -11,6 +11,7 @@ import { fractal, makeCurl, makeNoise } from '../core/noise.ts';
 import { rng, rand } from '../core/random.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { primNormals } from '../core/topology.ts';
+import { transformHeightfield } from '../core/heightfield.ts';
 import { AXES, P, getPointNormals, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
 
@@ -59,6 +60,7 @@ export function applyMatrix(src: Geometry, m: Mat4, ptMask: Uint8Array | null = 
   for (let k = 0; k < g.volumes.length; k++) {
     const v = g.volumes[k];
     if (ptMask) continue;
+    if (v.kind === 'heightfield') { g.volumes[k] = transformHeightfield(v, m); continue; } // stays an axis-aligned grid
     const inv = invertAffine(m);
     const sc = Math.cbrt(Math.abs(m4determinant3(m))) || 1;
     const corners: Vec3[] = [];

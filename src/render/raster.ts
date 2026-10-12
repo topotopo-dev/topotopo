@@ -4,6 +4,7 @@
 import { Geometry } from '../core/geometry.ts';
 import { buildEdges, connectivity, primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { drawText, textWidth } from './font.ts';
+import { withHeightfieldPreview } from '../core/heightfield.ts';
 import type { Vec3 } from '../core/math.ts';
 
 export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
@@ -86,6 +87,7 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
 
 /** Render the geometry; returns RGBA pixels. */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
+  g = withHeightfieldPreview(g); // heightfields draw as their (decimated) grid mesh with layers as attributes
   const views: ViewName[] = o.views?.length ? o.views : ['persp', 'front', 'right', 'top'];
   const tile = Math.max(128, Math.min(1600, Math.round(o.size ?? (views.length === 1 ? 800 : 512))));
   const ss = Math.max(1, Math.min(3, Math.round(o.ssaa ?? 2)));
