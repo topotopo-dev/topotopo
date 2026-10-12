@@ -1786,7 +1786,7 @@ Creases (DeRose/Kass/Truong): edges in the "creases" edge group/pattern get crea
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `levels` | int | `1` | 0..6 |  | `depth`, `iterations` | subdivision depth (each level ~4x faces) |
+| `levels` | int | `1` | 0..6 |  | `depth`, `iterations` | subdivision depth (each level ~4x faces; 0 = pass the input through) |
 | `method` | enum | `"catmull_clark"` |  | `catmull_clark`, `linear` |  | smooth or flat subdivision |
 | `boundary` | enum | `"smooth"` |  | `smooth`, `sharp` |  | open boundary rule |
 | `creases` | group | `""` |  |  | `crease_group`, `creasegroup` | edge group or edge pattern to crease ("" = none), e.g. "sharp", "angle>40", "p0-1-2-3-0" |

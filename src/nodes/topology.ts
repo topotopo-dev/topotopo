@@ -362,7 +362,7 @@ defineNode({
   aliases: ['subd', 'catmull_clark', 'subdivision'],
   inputs: [{ name: 'geo', desc: 'polygon mesh' }],
   params: {
-    levels: { type: 'int', default: 1, min: 0, max: 6, desc: 'subdivision depth (each level ~4x faces)', aliases: ['depth', 'iterations'] },
+    levels: { type: 'int', default: 1, min: 0, max: 6, desc: 'subdivision depth (each level ~4x faces; 0 = pass the input through)', aliases: ['depth', 'iterations'] },
     method: { type: 'enum', options: ['catmull_clark', 'linear'], default: 'catmull_clark', desc: 'smooth or flat subdivision' },
     boundary: { type: 'enum', options: ['smooth', 'sharp'], default: 'smooth', desc: 'open boundary rule' },
     creases: { type: 'group', default: '', desc: 'edge group or edge pattern to crease ("" = none), e.g. "sharp", "angle>40", "p0-1-2-3-0"', aliases: ['crease_group', 'creasegroup'] },
@@ -372,9 +372,11 @@ defineNode({
   example: { type: 'subdivide', params: { levels: 3, creases: 'p2-1-6-5-2', crease_weight: 10 } },
   cook: ({ input, p }) => {
     let g = input(0);
+    // depth 0 passes the input through untouched (refreshNormals below writes in place, and only ever sees new geometry)
+    if (p.levels <= 0) return g;
     if (g.numPrims && g.numVertices * Math.pow(4, p.levels) > 2e7) throw new NodeError(`subdivide: ${p.levels} levels would create ~${(g.numVertices * 4 ** p.levels / 1e6).toFixed(0)}M vertices; lower levels`);
     const smooth = p.method === 'catmull_clark';
-    const cr = p.levels > 0 ? creaseSharpness(g, p.creases, p.crease_weight, p.crease_attrib) : null;
+    const cr = creaseSharpness(g, p.creases, p.crease_weight, p.crease_attrib);
     if (!cr) {
       for (let l = 0; l < p.levels; l++) g = subdivideOnce(g, smooth, p.boundary);
       return refreshNormals(g);
