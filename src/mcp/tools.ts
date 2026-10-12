@@ -164,7 +164,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, asset). Optional filter by category or search text.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets). Optional filter by category or search text.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -380,31 +380,54 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'assets',
-      description: 'Reusable custom node types built from graphs (like HDAs). save {name, from_graph | graph, description, params:{var:{desc,min,max}}}: the graph\'s vars become parameters and its "input" nodes become inputs. list, get, delete.',
+      description: 'Reusable custom node types built from graphs (like HDAs). save {name, from_graph | graph, description, params:{var:{desc,min,max}}}: the graph\'s vars become parameters and its "input" nodes become inputs. list, get, delete. The shipped shelf assets (category shelf: stairs, wall_segment, fence, tree_lowpoly …) are read-only; fork {name, to} copies one into a workspace graph to edit, and saving under the same name overrides it.',
       inputSchema: {
         type: 'object',
         required: ['action'],
         properties: {
-          action: { type: 'string', enum: ['save', 'list', 'get', 'delete'] },
+          action: { type: 'string', enum: ['save', 'list', 'get', 'delete', 'fork'] },
           name: { type: 'string' }, from_graph: { type: 'string' }, graph: { type: 'object' },
           description: { type: 'string' }, params: { type: 'object' },
+          to: { type: 'string', description: 'fork: name of the workspace graph to create (default: the asset name)' },
         },
       },
       run: async (a) => {
+        const assetOf = (n: string) => {
+          const x = engine.assets.get(n);
+          if (!x) { const s = didYouMean(String(n), [...engine.assets.keys()]); throw new Error(`no asset "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); }
+          return x;
+        };
         switch (a.action) {
-          case 'list':
+          case 'list': {
             if (!engine.assets.size) return text('no assets yet');
-            return text([...engine.assets.values()].map((x) => `${x.name} — ${x.def.summary}; params: ${Object.keys(x.def.params).join(', ') || 'none'}; inputs: ${x.def.inputs.length}`).join('\n'));
+            const line = (x: { name: string; def: any }) => `  ${x.name} — ${x.def.summary}; params: ${Object.keys(x.def.params).join(', ') || 'none'}; inputs: ${x.def.inputs.length}`;
+            const all = [...engine.assets.values()], mine = all.filter((x) => x.def.category !== 'shelf'), shelf = all.filter((x) => x.def.category === 'shelf');
+            const out: string[] = [];
+            if (mine.length) out.push(`[asset] workspace assets (${mine.length})`, ...mine.map(line));
+            if (shelf.length) out.push(`[shelf] shipped assets (${shelf.length}; read-only, fork to edit)`, ...shelf.map(line));
+            return text(out.join('\n'));
+          }
           case 'get': {
-            const x = engine.assets.get(a.name);
-            if (!x) throw new Error(`no asset "${a.name}"`);
+            const x = assetOf(a.name);
             return text(nodeDoc(x.def) + '\n\n' + JSON.stringify(x.graph, null, 1));
           }
           case 'delete': {
-            if (!engine.assets.delete(a.name)) throw new Error(`no asset "${a.name}"`);
+            const x = assetOf(a.name);
+            if (x.def.category === 'shelf') throw new Error(`"${a.name}" is a shelf asset and cannot be deleted; fork it to edit a copy: assets {action:"fork", name:"${a.name}"}`);
+            engine.assets.delete(a.name);
             const f = path.join(ws.assetDir, a.name + '.json');
             if (fs.existsSync(f)) fs.unlinkSync(f);
-            return text(`deleted asset "${a.name}"`);
+            const shipped = engine.shelf.get(a.name);
+            if (shipped) { engine.registerAsset(a.name, shipped, { category: 'shelf' }); engine.cache.clear(); }
+            return text(`deleted asset "${a.name}"${shipped ? '; restored the shelf asset of that name' : ''}`);
+          }
+          case 'fork': {
+            const x = assetOf(a.name);
+            const to = a.to ?? a.name;
+            ws.setGraph(to, structuredClone(x.graph));
+            ws.bump(to);
+            return text(`forked ${x.def.category === 'shelf' ? 'shelf ' : ''}asset "${a.name}" into workspace graph "${to}" (its vars are the asset params, its "input" nodes the inputs). ` +
+              `Edit it with build/edit, then assets {action:"save", name:"${a.name}", from_graph:"${to}"} saves it as a workspace asset that replaces the ${x.def.category === 'shelf' ? 'shelf' : 'current'} one (delete restores it).`);
           }
           case 'save': {
             if (!a.name) throw new Error('"name" is required');

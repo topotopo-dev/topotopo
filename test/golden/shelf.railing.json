@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [8.0289, 1.6309, 1.0481],
+      "min": [-0.03, -0.0172, -1.03]
+    },
+    "counts": {
+      "points": 1270,
+      "prims": 1074,
+      "vertices": 4408,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "fccff612f0cc8f40",
+      "attributes": {
+        "detail.materials": "48d1df5a80acb048",
+        "prim.Cd": "1a3021a916342f13",
+        "prim.material": "21ee07c5babd09ef",
+        "prim.name": "cd2f0505523a7767",
+        "vertex.uv": "e62c164508476f0f"
+      },
+      "topology": "f0167e10a8c78e0a"
+    }
+  },
+  "name": "shelf.railing",
+  "ok": true,
+  "source": "shelf/railing.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

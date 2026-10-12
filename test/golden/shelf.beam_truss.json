@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [4.0301, 1.32, 0.048],
+      "min": [-4.0301, 0, -0.048]
+    },
+    "counts": {
+      "points": 192,
+      "prims": 112,
+      "vertices": 576,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "eb97113d51a57467",
+      "attributes": {
+        "detail.materials": "d8b8970ba188d3b1",
+        "prim.Cd": "57a97f05e44c83df",
+        "prim.material": "c29d17c5f2ee635f",
+        "prim.name": "424049d5628bbd1f",
+        "vertex.uv": "8062d705bc7c2c5f"
+      },
+      "topology": "edd4edd4e4c67bee"
+    }
+  },
+  "name": "shelf.beam_truss",
+  "ok": true,
+  "source": "shelf/beam_truss.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}
