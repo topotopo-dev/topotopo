@@ -1,11 +1,11 @@
 // Attribute, group, colour and UV nodes.
-import { Geometry, defaultValueFor } from '../core/geometry.ts';
-import type { AttribClass, AttribType } from '../core/geometry.ts';
+import { Attribute, Geometry, defaultValueFor, isArrayType } from '../core/geometry.ts';
+import type { AttribArrayType, AttribClass, AttribType } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { rand, gaussian, rng } from '../core/random.ts';
 import { fractal, makeNoise } from '../core/noise.ts';
-import { connectivity, primArea, primCentroid, primNormals, primPerimeter, vertexNormals, pointNormals, resolveVertexNormals, signedVolume } from '../core/topology.ts';
+import { connectivity, primArea, primCentroid, primNormals, primPerimeter, vertexNormals, pointNeighbors, pointNormals, resolveVertexNormals, signedVolume } from '../core/topology.ts';
 import { edgeList, edgeSetToMask, forEachPrimEdge, maskToEdgeSet } from '../core/edges.ts';
 import { halfEdges } from '../core/halfedge.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
@@ -30,25 +30,33 @@ function elemCount(g: Geometry, cls: AttribClass) {
 defineNode({
   type: 'attrib_create',
   category: 'attribute',
-  summary: 'Create/set an attribute to a constant value (type inferred from the value).',
+  summary: 'Create/set an attribute to a constant value (type inferred from the value; float[]/int[]/string[] make array attributes).',
+  description:
+    'A list value is a fixed-size TUPLE by default: [1,2,3] with type auto/float is a vector (float, size 3). ' +
+    'With type "float[]", "int[]" or "string[]" the same list is an ARRAY attribute: every element gets its own ' +
+    'variable-length list (here [1,2,3]), which wrangles, attrib_array and other nodes can then grow or shrink per element. ' +
+    'A list of strings with type auto becomes a string[] array (there are no string tuples).',
   aliases: ['attribcreate', 'set_attrib', 'attribute_create'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
     name: { type: 'string', default: 'attr', desc: 'attribute name' },
     class: CLS,
-    value: { type: 'json', default: 0, desc: 'value: number, [x,y,z...] or "string"' },
-    type: { type: 'enum', options: ['auto', 'float', 'int', 'string'], default: 'auto', desc: 'force a type' },
+    value: { type: 'json', default: 0, desc: 'value: number, [x,y,z...] (a tuple, or an array with an array type) or "string"' },
+    type: { type: 'enum', options: ['auto', 'float', 'int', 'string', 'float[]', 'int[]', 'string[]'], default: 'auto', desc: 'force a type; float[]/int[]/string[] = array attribute (value = the list every element gets)' },
     group: { type: 'group', default: '', desc: 'only set elements in this group (point/prim classes)' },
   },
+  example: { type: 'attrib_create', params: { name: 'tags', class: 'prim', type: 'string[]', value: ['wall', 'exterior'] } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     if (!p.name) throw new NodeError('name is empty');
     const v = p.value;
-    const type: AttribType = p.type !== 'auto' ? p.type : typeof v === 'string' ? 'string' : 'float';
-    const size = Array.isArray(v) ? v.length : 1;
+    const strList = Array.isArray(v) && v.length > 0 && v.every((x: any) => typeof x === 'string');
+    const type: AttribType = p.type !== 'auto' ? p.type : strList ? 'string[]' : typeof v === 'string' ? 'string' : 'float';
+    const size = Array.isArray(v) && !isArrayType(type) ? v.length : 1;
     const a = g.table(p.class).add(p.name, type, size, type === 'string' ? '' : defaultValueFor(p.name, size, type));
     const sel = p.class === 'point' || p.class === 'prim' ? mask(g, p.class, p.group) : null;
     for (let i = 0; i < elemCount(g, p.class); i++) if (!sel || sel[i]) a.set(i, v);
+    a.compact();
     return g;
   },
 });
@@ -116,7 +124,7 @@ defineNode({
     name: { type: 'string', default: 'Cd', desc: 'attribute name' },
     from: { type: 'enum', options: ['point', 'prim', 'vertex', 'detail'], default: 'point', desc: 'source class', aliases: ['inclass', 'from_class'] },
     to: { type: 'enum', options: ['point', 'prim', 'vertex', 'detail'], default: 'prim', desc: 'destination class', aliases: ['outclass', 'to_class'] },
-    method: { type: 'enum', options: ['average', 'min', 'max', 'sum', 'first', 'last'], default: 'average', desc: 'how to combine multiple sources' },
+    method: { type: 'enum', options: ['average', 'min', 'max', 'sum', 'first', 'last'], default: 'average', desc: 'how to combine multiple sources (array attributes are copied: first or last only)' },
     new_name: { type: 'string', default: '', desc: 'rename on promotion ("" = same name)' },
     keep_original: { type: 'bool', default: false, desc: 'keep the source attribute' },
   },
@@ -140,6 +148,16 @@ defineNode({
     else if (F === 'prim' && T === 'vertex') for (let v = 0; v < g.numVertices; v++) add(v, vprim[v]);
     else if (F === 'vertex' && T === 'prim') for (let v = 0; v < g.numVertices; v++) add(vprim[v], v);
     else if (F === T) throw new NodeError('from and to are the same class');
+    if (src.isArray) {
+      // arrays are copied, never combined: one-to-one promotions copy; many-to-one pick the first or last source
+      const oneToOne = F === 'detail' || (T === 'vertex' && (F === 'point' || F === 'prim'));
+      if (!oneToOne && p.method !== 'first' && p.method !== 'last')
+        throw new NodeError(`"${p.name}" is an array attribute (${src.type}): ${F} → ${T} can only take the first or last source's array, not "${p.method}"`, 'set method to "first" or "last"');
+      const idx = Int32Array.from(contrib, (c) => (!c.length ? -1 : p.method === 'last' && !oneToOne ? c[c.length - 1] : c[0]));
+      g.table(T).set(outName, src.gather(idx));
+      if (!p.keep_original) g.table(F).delete(p.name);
+      return g;
+    }
     const dst = g.table(T).add(outName, src.type === 'string' ? 'string' : src.type, s);
     for (let i = 0; i < n; i++) {
       const c = contrib[i];
@@ -229,6 +247,7 @@ defineNode({
     if (p.match_by) {
       const da = dt.get(p.match_by), sa = st.get(p.match_by);
       if (!da || !sa) throw new NodeError(`match_by attribute "${p.match_by}" missing on dest or source`);
+      if (da.isArray || sa.isArray) throw new NodeError(`match_by attribute "${p.match_by}" is an array attribute; match by an int or string attribute`);
       const idx = new Map<any, number>();
       for (let i = 0; i < st.count; i++) idx.set(sa.get(i), i);
       map = (i) => idx.get(da.get(i)) ?? -1;
@@ -237,6 +256,7 @@ defineNode({
       if (name === 'P' || !m(name) || name === p.match_by) continue;
       const d = dt.add(name, a.type, a.size);
       for (let i = 0; i < dt.count; i++) { const j = map(i); if (j >= 0) d.set(i, a.get(j)); }
+      d.compact();
     }
     return g;
   },
@@ -264,7 +284,9 @@ defineNode({
     const Pd = g.P;
     for (const name of names) {
       const sa = s.points.get(name)!;
-      const da = g.points.get(name) && g.points.get(name)!.size === sa.size ? g.points.get(name)! : g.points.add(name, sa.type, sa.size);
+      // arrays: the nearest point's (surface: the closest corner's) array is copied, never blended
+      const ex = g.points.get(name);
+      const da = ex && ex.size === sa.size && (sa.isArray ? ex.type === sa.type : !ex.isArray) ? ex : g.points.add(name, sa.type, sa.size);
       for (let i = 0; i < g.numPoints; i++) {
         const x = Pd[i * 3], y = Pd[i * 3 + 1], z = Pd[i * 3 + 2];
         let val: any = null, dist = Infinity;
@@ -291,7 +313,132 @@ defineNode({
         }
         da.set(i, val);
       }
+      da.compact();
     }
+    return g;
+  },
+});
+
+/** "a b c*" → existing attribute names of the table, in the listed order (wildcards expand in natural name order). */
+function listAttribs(names: string[], spec: string): string[] {
+  const out: string[] = [];
+  const natural = (a: string, b: string) => a.localeCompare(b, 'en', { numeric: true });
+  for (const tok of spec.split(/[\s,]+/).filter(Boolean)) {
+    const hits = /[*?]/.test(tok) ? names.filter(globRe(tok)).sort(natural) : names.includes(tok) ? [tok] : [];
+    for (const h of hits) if (!out.includes(h)) out.push(h);
+  }
+  return out;
+}
+
+defineNode({
+  type: 'attrib_array',
+  category: 'attribute',
+  summary: 'Build or inspect array attributes (int[]/float[]/string[]): point neighbour lists, prim point lists, pack/unpack scalar attributes, array lengths.',
+  description:
+    'Array attributes hold a variable-length list per element (Houdini i[]@/f[]@/s[]@). Modes: ' +
+    'from_neighbours = point int[] of neighbouring point numbers (connectivity: points sharing an edge, ascending; radius: points within radius, nearest first); ' +
+    'from_group_points = prim int[] of the prim\'s point numbers in vertex order; ' +
+    'from_attributes = pack the listed attributes (scalars, or tuples component by component) into one array per element; ' +
+    'to_attributes = unpack an array into name_0, name_1, … (shorter arrays leave defaults); ' +
+    'length = int attribute with each element\'s array length. Wrangles read arrays as JS arrays (help topic "attributes").',
+  aliases: ['attribarray', 'array_attrib', 'attribute_array'],
+  inputs: [{ name: 'geo', desc: 'geometry' }],
+  params: {
+    mode: { type: 'enum', options: ['from_neighbours', 'from_group_points', 'from_attributes', 'to_attributes', 'length'], default: 'from_neighbours', desc: 'what to do (see description)' },
+    name: { type: 'string', default: '', desc: 'the array attribute: written by from_* modes ("" = nbrs / pts / array), read by to_attributes and length (required there)' },
+    class: { type: 'enum', options: ['auto', 'point', 'prim', 'vertex', 'detail'], default: 'auto', desc: 'class of the array (from_attributes/to_attributes/length; auto = where the attribute is found). from_neighbours is always point, from_group_points always prim' },
+    method: { type: 'enum', options: ['connectivity', 'radius'], default: 'connectivity', desc: 'from_neighbours: points sharing an edge, or points within radius (any geometry, also point clouds)' },
+    radius: { type: 'float', default: 0.5, min: 0, desc: 'from_neighbours radius mode: search radius' },
+    max_count: { type: 'int', default: 0, min: 0, desc: 'from_neighbours: keep at most this many (radius: the nearest); to_attributes: unpack at most this many entries (0 = no limit)' },
+    include_self: { type: 'bool', default: false, desc: 'from_neighbours radius mode: include the point itself (Houdini nearpoints does)' },
+    attribs: { type: 'string', default: '', desc: 'from_attributes: attributes to pack, in order, space-separated; wildcards expand in natural order ("w_*" = w_0 w_1 … w_10)' },
+    out_name: { type: 'string', default: '', desc: 'to_attributes: prefix of the unpacked attributes ("" = name → name_0, name_1 …); length: the int attribute ("" = name_len)' },
+    delete_source: { type: 'bool', default: false, desc: 'from_attributes: delete the packed attributes; to_attributes: delete the array' },
+    group: { type: 'group', default: '', desc: 'only these elements get values (point group for from_neighbours, prim group for from_group_points; point/prim classes otherwise); others get the empty array' },
+  },
+  outputs: 'from_neighbours: point int[] nbrs; from_group_points: prim int[] pts; from_attributes: an array; to_attributes: name_0..name_k; length: int name_len',
+  example: { type: 'attrib_array', params: { mode: 'from_neighbours', method: 'radius', radius: 0.3, max_count: 8, name: 'nbrs' } },
+  cook: ({ input, p }) => {
+    const g = input(0).clone();
+    const mode: string = p.mode;
+    const selOf = (cls: AttribClass) => (cls === 'point' || cls === 'prim' ? mask(g, cls, p.group) : null);
+
+    if (mode === 'from_neighbours') {
+      const name = p.name || 'nbrs', n = g.numPoints, sel = selOf('point');
+      const lists: (number[] | Int32Array)[] = new Array(n);
+      if (p.method === 'radius') {
+        const kd = new KDTree(g.P), Pd = g.P;
+        const cap = p.max_count > 0 ? p.max_count + (p.include_self ? 0 : 1) : Infinity;
+        for (let i = 0; i < n; i++) {
+          if (sel && !sel[i]) { lists[i] = []; continue; }
+          let r = kd.within(Pd[i * 3], Pd[i * 3 + 1], Pd[i * 3 + 2], p.radius, cap);
+          if (!p.include_self) r = r.filter((j) => j !== i);
+          lists[i] = p.max_count > 0 ? r.slice(0, p.max_count) : r;
+        }
+      } else {
+        const nb = pointNeighbors(g);
+        for (let i = 0; i < n; i++) {
+          if (sel && !sel[i]) { lists[i] = []; continue; }
+          const l = nb.nb.slice(nb.start[i], nb.start[i + 1]).sort();
+          lists[i] = p.max_count > 0 ? l.subarray(0, p.max_count) : l;
+        }
+      }
+      g.points.set(name, Attribute.fromArrays('int[]', lists));
+      return g;
+    }
+
+    if (mode === 'from_group_points') {
+      const name = p.name || 'pts', sel = selOf('prim');
+      const lists = Array.from({ length: g.numPrims }, (_, pr) => (!sel || sel[pr] ? g.vertexPoint.subarray(g.primStart[pr], g.primStart[pr + 1]) : []));
+      g.prims.set(name, Attribute.fromArrays('int[]', lists));
+      return g;
+    }
+
+    if (mode === 'from_attributes') {
+      const name = p.name || 'array';
+      if (!p.attribs.trim()) throw new NodeError('from_attributes needs "attribs": the attributes to pack, e.g. "w_0 w_1 w_2" or "w_*"');
+      const order: AttribClass[] = p.class === 'auto' ? ['point', 'prim', 'vertex', 'detail'] : [p.class];
+      let cls: AttribClass | null = null, names: string[] = [];
+      for (const c of order) { names = listAttribs(g.table(c).names(), p.attribs); if (names.length) { cls = c; break; } }
+      if (!cls) throw new NodeError(`no ${order.join('/')} attributes match "${p.attribs}"`);
+      const t = g.table(cls), src = names.map((k) => t.get(k)!);
+      const type: AttribArrayType = src.some((a) => a.type.startsWith('string')) ? 'string[]' : src.some((a) => a.type.startsWith('float')) ? 'float[]' : 'int[]';
+      const sel = selOf(cls);
+      const lists = Array.from({ length: t.count }, (_, i) => {
+        if (sel && !sel[i]) return [];
+        const out: any[] = [];
+        for (const a of src) { const v = a.get(i); if (Array.isArray(v)) out.push(...v); else out.push(v); }
+        return out;
+      });
+      if (p.delete_source) for (const k of names) if (k !== name && k !== 'P') t.delete(k);
+      t.set(name, Attribute.fromArrays(type, lists));
+      return g;
+    }
+
+    // to_attributes / length: read an existing array
+    if (!p.name) throw new NodeError(`${mode} needs "name": the array attribute to read`);
+    const order: AttribClass[] = p.class === 'auto' ? ['vertex', 'point', 'prim', 'detail'] : [p.class];
+    const f = g.findAttrib(p.name, order);
+    if (!f) throw new NodeError(`no ${order.join('/')} attribute "${p.name}"`);
+    const a = f.attr, t = g.table(f.cls), n = t.count, sel = selOf(f.cls);
+    if (!a.isArray) throw new NodeError(`"${p.name}" is a ${a.type} attribute of size ${a.size}, not an array`, 'array attributes come from attrib_array from_* modes, attrib_create with type float[]/int[]/string[], or wrangle f[]@/i[]@/s[]@');
+    if (mode === 'length') {
+      const out = t.add(p.out_name || p.name + '_len', 'int', 1).data as Int32Array;
+      for (let i = 0; i < n; i++) if (!sel || sel[i]) out[i] = a.arrayLength(i);
+      return g;
+    }
+    let k = 0;
+    for (let i = 0; i < n; i++) if (!sel || sel[i]) k = Math.max(k, a.arrayLength(i));
+    if (p.max_count > 0) k = Math.min(k, p.max_count);
+    const base = a.type === 'string[]' ? 'string' : a.type === 'int[]' ? 'int' : 'float';
+    const prefix = p.out_name || p.name;
+    const outs = Array.from({ length: k }, (_, c) => t.add(`${prefix}_${c}`, base, 1));
+    for (let i = 0; i < n; i++) {
+      if (sel && !sel[i]) continue;
+      const v = a.getArray(i);
+      for (let c = 0; c < Math.min(k, v.length); c++) outs[c].set(i, v[c]);
+    }
+    if (p.delete_source) t.delete(p.name);
     return g;
   },
 });

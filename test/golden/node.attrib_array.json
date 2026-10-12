@@ -1,0 +1,40 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "nbrs:int[]:1", "uv:float:3"],
+      "prim": ["pts:int[]:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0, 1],
+      "min": [-1, 0, -1]
+    },
+    "counts": {
+      "points": 49,
+      "prims": 36,
+      "vertices": 144,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "2987a0e5c4b49e4f",
+      "attributes": {
+        "point.nbrs": "c13a706b214259d1",
+        "point.uv": "caf95c61b10871bb",
+        "prim.pts": "5ab6af2cf6f2de56"
+      },
+      "topology": "618482d81e5bdd62"
+    }
+  },
+  "name": "node.attrib_array",
+  "ok": true,
+  "source": "fixture for node type \"attrib_array\" (test/fixtures.ts)",
+  "warnings": []
+}

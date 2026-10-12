@@ -136,6 +136,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         legend = `COLOR BY ${aname} (${seen.size} VALUES)`;
       } else {
         const scalar = (i: number) => {
+          if (a.isArray) return a.arrayLength(i); // array attributes (float[]/int[]/string[]) colour by their length
           const x = a.get(i);
           if (!Array.isArray(x)) return x as number;
           return ci >= 0 ? x[ci] : Math.hypot(...x);

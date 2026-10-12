@@ -91,7 +91,7 @@ interface AssetEntry { name: string; graph: GraphSpec; def: NodeDef; hash: strin
 function geoBytes(g: Geometry): number {
   let b = g.primStart.byteLength + g.vertexPoint.byteLength + g.primClosed.byteLength + 256;
   for (const t of [g.points, g.vertices, g.prims, g.detail])
-    for (const a of t.map.values()) b += a.type === 'string' ? (a.data as string[]).length * 24 : (a.data as Float64Array).byteLength;
+    for (const a of t.map.values()) b += a.bytes();
   for (const m of g.pointGroups.values()) b += m.byteLength;
   for (const m of g.primGroups.values()) b += m.byteLength;
   return b;

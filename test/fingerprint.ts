@@ -2,6 +2,7 @@
 //
 // Stable across runs and tolerant to float noise: positions are quantised to 1e-5, other numeric attributes to
 // 1e-4, bboxes rounded to 1e-4, and everything is hashed with a fixed two-lane FNV-1a over the quantised integers.
+// Array attributes hash their CSR offsets and then their entries.
 // Point/prim order is part of the fingerprint (it is observable behaviour, as in Houdini).
 import { hashString } from '../src/core/random.ts';
 import type { Geometry } from '../src/core/geometry.ts';
@@ -117,7 +118,15 @@ export function fingerprint(g: Geometry): Fingerprint {
       if (cls === 'point' && n === 'P') continue;
       const a = t.get(n)!;
       const h = new Hasher();
-      if (a.type === 'string') for (const s of a.data as string[]) h.str(s);
+      if (a.isArray) {
+        // array attributes: CSR offsets (element lengths and order), then the quantised entries
+        a.compact();
+        h.int(a.offsets!.length);
+        for (const o of a.offsets!) h.int(o);
+        if (a.type === 'string[]') for (const s of a.data as string[]) h.str(s);
+        else if (a.type === 'int[]') for (const v of a.data as Int32Array) h.int(v);
+        else for (const v of a.data as Float64Array) h.float(v, ATTR_Q);
+      } else if (a.type === 'string') for (const s of a.data as string[]) h.str(s);
       else if (a.type === 'int') for (const v of a.data as Int32Array) h.int(v);
       else for (const v of a.data as Float64Array) h.float(v, ATTR_Q);
       fp.hashes.attributes[`${cls}.${n}`] = h.hex();

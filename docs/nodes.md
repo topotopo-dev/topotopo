@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-107 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+108 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -12,7 +12,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [curve](#curve-nodes): [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [curve](#curve) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [line](#line) · [loft](#loft) · [offset_curve](#offset_curve) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
-- [attribute](#attribute-nodes): [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [measure](#measure)
+- [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [measure](#measure)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [normal](#normal) · [poly_extrude](#poly_extrude) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
@@ -1453,6 +1453,53 @@ Twist around an axis: rotation grows linearly along that axis across the boundin
 
 ## attribute nodes
 
+### attrib_array
+
+category: `attribute` · aliases: `attribarray`, `array_attrib`, `attribute_array`
+
+Build or inspect array attributes (int[]/float[]/string[]): point neighbour lists, prim point lists, pack/unpack scalar attributes, array lengths.
+
+Array attributes hold a variable-length list per element (Houdini i[]@/f[]@/s[]@). Modes: from_neighbours = point int[] of neighbouring point numbers (connectivity: points sharing an edge, ascending; radius: points within radius, nearest first); from_group_points = prim int[] of the prim's point numbers in vertex order; from_attributes = pack the listed attributes (scalars, or tuples component by component) into one array per element; to_attributes = unpack an array into name_0, name_1, … (shorter arrays leave defaults); length = int attribute with each element's array length. Wrangles read arrays as JS arrays (help topic "attributes").
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"from_neighbours"` |  | `from_neighbours`, `from_group_points`, `from_attributes`, `to_attributes`, `length` |  | what to do (see description) |
+| `name` | string | `""` |  |  |  | the array attribute: written by from_* modes ("" = nbrs / pts / array), read by to_attributes and length (required there) |
+| `class` | enum | `"auto"` |  | `auto`, `point`, `prim`, `vertex`, `detail` |  | class of the array (from_attributes/to_attributes/length; auto = where the attribute is found). from_neighbours is always point, from_group_points always prim |
+| `method` | enum | `"connectivity"` |  | `connectivity`, `radius` |  | from_neighbours: points sharing an edge, or points within radius (any geometry, also point clouds) |
+| `radius` | float | `0.5` | 0.. |  |  | from_neighbours radius mode: search radius |
+| `max_count` | int | `0` | 0.. |  |  | from_neighbours: keep at most this many (radius: the nearest); to_attributes: unpack at most this many entries (0 = no limit) |
+| `include_self` | bool | `false` |  |  |  | from_neighbours radius mode: include the point itself (Houdini nearpoints does) |
+| `attribs` | string | `""` |  |  |  | from_attributes: attributes to pack, in order, space-separated; wildcards expand in natural order ("w_*" = w_0 w_1 … w_10) |
+| `out_name` | string | `""` |  |  |  | to_attributes: prefix of the unpacked attributes ("" = name → name_0, name_1 …); length: the int attribute ("" = name_len) |
+| `delete_source` | bool | `false` |  |  |  | from_attributes: delete the packed attributes; to_attributes: delete the array |
+| `group` | group | `""` |  |  |  | only these elements get values (point group for from_neighbours, prim group for from_group_points; point/prim classes otherwise); others get the empty array |
+
+**Writes:** from_neighbours: point int[] nbrs; from_group_points: prim int[] pts; from_attributes: an array; to_attributes: name_0..name_k; length: int name_len
+
+**Example**
+
+```json
+{
+  "type": "attrib_array",
+  "params": {
+    "mode": "from_neighbours",
+    "method": "radius",
+    "radius": 0.3,
+    "max_count": 8,
+    "name": "nbrs"
+  }
+}
+```
+
 ### attrib_copy
 
 category: `attribute` · aliases: `attribcopy`, `copy_attrib`
@@ -1478,7 +1525,9 @@ Copy attributes from the second input by element index (or by matching an id att
 
 category: `attribute` · aliases: `attribcreate`, `set_attrib`, `attribute_create`
 
-Create/set an attribute to a constant value (type inferred from the value).
+Create/set an attribute to a constant value (type inferred from the value; float[]/int[]/string[] make array attributes).
+
+A list value is a fixed-size TUPLE by default: [1,2,3] with type auto/float is a vector (float, size 3). With type "float[]", "int[]" or "string[]" the same list is an ARRAY attribute: every element gets its own variable-length list (here [1,2,3]), which wrangles, attrib_array and other nodes can then grow or shrink per element. A list of strings with type auto becomes a string[] array (there are no string tuples).
 
 **Inputs**
 
@@ -1492,9 +1541,26 @@ Create/set an attribute to a constant value (type inferred from the value).
 |---|---|---|---|---|---|---|
 | `name` | string | `"attr"` |  |  |  | attribute name |
 | `class` | enum | `"point"` |  | `point`, `prim`, `vertex`, `detail` |  | attribute class |
-| `value` | json | `0` |  |  |  | value: number, [x,y,z...] or "string" |
-| `type` | enum | `"auto"` |  | `auto`, `float`, `int`, `string` |  | force a type |
+| `value` | json | `0` |  |  |  | value: number, [x,y,z...] (a tuple, or an array with an array type) or "string" |
+| `type` | enum | `"auto"` |  | `auto`, `float`, `int`, `string`, `float[]`, `int[]`, `string[]` |  | force a type; float[]/int[]/string[] = array attribute (value = the list every element gets) |
 | `group` | group | `""` |  |  |  | only set elements in this group (point/prim classes) |
+
+**Example**
+
+```json
+{
+  "type": "attrib_create",
+  "params": {
+    "name": "tags",
+    "class": "prim",
+    "type": "string[]",
+    "value": [
+      "wall",
+      "exterior"
+    ]
+  }
+}
+```
 
 ### attrib_delete
 
@@ -1563,7 +1629,7 @@ Move an attribute between classes (point ↔ prim ↔ vertex ↔ detail) with av
 | `name` | string | `"Cd"` |  |  |  | attribute name |
 | `from` | enum | `"point"` |  | `point`, `prim`, `vertex`, `detail` | `inclass`, `from_class` | source class |
 | `to` | enum | `"prim"` |  | `point`, `prim`, `vertex`, `detail` | `outclass`, `to_class` | destination class |
-| `method` | enum | `"average"` |  | `average`, `min`, `max`, `sum`, `first`, `last` |  | how to combine multiple sources |
+| `method` | enum | `"average"` |  | `average`, `min`, `max`, `sum`, `first`, `last` |  | how to combine multiple sources (array attributes are copied: first or last only) |
 | `new_name` | string | `""` |  |  |  | rename on promotion ("" = same name) |
 | `keep_original` | bool | `false` |  |  |  | keep the source attribute |
 

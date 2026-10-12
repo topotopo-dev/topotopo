@@ -3,12 +3,13 @@
 //   @P.y += noise(@P) * 0.2;          // read/modify point position
 //   @Cd = hsv2rgb(rand(@ptnum), 0.6, 1);
 //   f@height = @P.y;                  // typed creation: f i v p u s prefixes
+//   i[]@nbrs = nearpoints(0, @P, 0.5); // array attributes: f[] i[] s[] (read = copy, written back)
 //   if (@P.y < 0) removepoint(0, @ptnum);
 //   @group_top = @N.y > 0.9;          // group membership
 //
 // The snippet is compiled into a kernel that loops over elements, binding each
 // referenced attribute to a local variable and writing it back afterwards.
-import { Attribute, Geometry, defaultValueFor } from './geometry.ts';
+import { Attribute, Geometry, defaultValueFor, isArrayType } from './geometry.ts';
 import type { AttribClass, AttribType } from './geometry.ts';
 import { primCentroid, primNormals, pointNeighbors, pointPrims } from './topology.ts';
 import { KDTree, TriBVH } from './spatial.ts';
@@ -21,6 +22,8 @@ const CLASS_OF: Record<RunOver, AttribClass> = { points: 'point', prims: 'prim',
 const PREFIX_TYPE: Record<string, { type: AttribType; size: number }> = {
   f: { type: 'float', size: 1 }, i: { type: 'int', size: 1 }, v: { type: 'float', size: 3 },
   p: { type: 'float', size: 4 }, u: { type: 'float', size: 2 }, s: { type: 'string', size: 1 },
+  // array attributes (variable length per element)
+  'f[]': { type: 'float[]', size: 1 }, 'i[]': { type: 'int[]', size: 1 }, 's[]': { type: 'string[]', size: 1 },
 };
 
 const KNOWN: Record<string, { type: AttribType; size: number }> = {
@@ -38,12 +41,13 @@ const KNOWN: Record<string, { type: AttribType; size: number }> = {
 const SPECIAL = new Set(['ptnum', 'primnum', 'vtxnum', 'elemnum', 'numpt', 'numprim', 'numvtx', 'numelem', 'Frame', 'Time', 'TimeInc']);
 const TIME_REFS = ['Frame', 'Time', 'TimeInc'];
 
-const REF = /(?<![\w$.@])([fivpus])?@([A-Za-z_][A-Za-z0-9_]*)/g;
+const REF = /(?<![\w$.@])([fivpus](?:\[\])?)?@([A-Za-z_][A-Za-z0-9_]*)/g;
 
 interface Binding {
   name: string;
   local: string;
-  kind: 'attr' | 'new' | 'group' | 'centroid' | 'primN' | 'input';
+  /** 'array': an array attribute; data is the Attribute (read with getArray, written with set) */
+  kind: 'attr' | 'new' | 'group' | 'centroid' | 'primN' | 'input' | 'array';
   cls: AttribClass;
   /** how to index the data: element, point-of-vertex, or 0 (detail) */
   index: 'elem' | 'vpoint' | 'zero';
@@ -98,6 +102,7 @@ export function runWrangle(
 
   for (const [name, prefix] of refs) {
     if (SPECIAL.has(name)) continue;
+    if (prefix && !PREFIX_TYPE[prefix]) throw new Error(`${prefix}@${name}: vector arrays are not supported; use f[]@${name} with flattened components (or several f[] attributes)`);
     const local = '__a_' + name;
     const ro = (why: string) => {
       if (assigned.has(name)) log.push(`warning: @${name} is ${why}; assignment ignored`);
@@ -109,7 +114,7 @@ export function runWrangle(
       if (!inp) throw new Error(`@${name}: input ${op[1]} is not connected`);
       const a = inp.table(cls).get(op[2]) ?? inp.points.get(op[2]);
       if (!a) throw new Error(`@${name}: input ${op[1]} has no ${cls} attribute "${op[2]}"`);
-      bindings.push({ name, local, kind: 'input', cls, index: 'elem', size: a.size, type: a.type, readonly: true, data: a.data });
+      bindings.push({ name, local, kind: 'input', cls, index: 'elem', size: a.size, type: a.type, readonly: true, data: a.isArray ? a : a.data });
       continue;
     }
     const grp = /^group_(\w+)$/.exec(name);
@@ -142,9 +147,10 @@ export function runWrangle(
         readonly = true;
       }
       if (readonly) ro(`a ${found.c} attribute (read-only here; use set${found.c}attrib)`);
-      const b: Binding = { name, local, kind: 'attr', cls: found.c, index, size: found.a.size, type: found.a.type, readonly, data: found.a.data };
+      const arr = found.a.isArray;
+      const b: Binding = { name, local, kind: arr ? 'array' : 'attr', cls: found.c, index, size: found.a.size, type: found.a.type, readonly, data: arr ? found.a : found.a.data };
       if (found.c === 'prim' && cls === 'vertex') {
-        b.data = found.a.data; b.index = 'elem';
+        b.index = 'elem';
         (b as any).primOfVertex = true;
       }
       bindings.push(b);
@@ -166,7 +172,7 @@ export function runWrangle(
     const t = want ?? KNOWN[name];
     if (t) {
       const a = g.table(cls).add(name, t.type, t.size, defaultValueFor(name, t.size, t.type));
-      bindings.push({ name, local, kind: 'attr', cls, index: 'elem', size: t.size, type: t.type, readonly: false, data: a.data });
+      bindings.push({ name, local, kind: a.isArray ? 'array' : 'attr', cls, index: 'elem', size: a.size, type: t.type, readonly: false, data: a.isArray ? a : a.data });
     } else {
       bindings.push({ name, local, kind: 'new', cls, index: 'elem', size: 0, type: 'any', readonly: false, data: new Array(n) });
     }
@@ -191,7 +197,8 @@ export function runWrangle(
   bindings.forEach((b, i) => {
     const ix = b.index === 'zero' ? '0' : b.index === 'vpoint' ? '__vp[__i]' : (b as any).primOfVertex ? '__vprim[__i]' : '__i';
     src.push(`{const __ix=${ix};`);
-    switch (b.kind) {
+    if (b.kind === 'array' || (b.kind === 'input' && isArrayType(b.type))) src.push(`${b.local}=__ga(__d${i},__ix);`);
+    else switch (b.kind) {
       case 'centroid': src.push(`${b.local}=__arr(__env.centroid(__i));`); break;
       case 'primN': src.push(`${b.local}=__rd(__d${i},__i,3);`); break;
       case 'group': src.push(`${b.local}=__d${i}[__ix];`); break;
@@ -206,7 +213,8 @@ export function runWrangle(
   bindings.forEach((b, i) => {
     if (b.readonly || b.kind === 'centroid' || b.kind === 'primN' || b.kind === 'input') return;
     const ix = b.index === 'zero' ? '0' : b.index === 'vpoint' ? '__vp[__i]' : '__i';
-    if (b.kind === 'group') src.push(`__d${i}[${ix}]=${b.local}?1:0;`);
+    if (b.kind === 'array') src.push(`__d${i}.set(${ix},${b.local});`);
+    else if (b.kind === 'group') src.push(`__d${i}[${ix}]=${b.local}?1:0;`);
     else if (b.kind === 'new') src.push(`__d${i}[${ix}]=${b.local};`);
     else if (b.type === 'string') src.push(`__d${i}[${ix}]=String(${b.local});`);
     else if (b.size === 1) src.push(`__d${i}[${ix}]=(typeof ${b.local}==='number'?${b.local}:+(${b.local}?.[0]??${b.local}));`);
@@ -255,11 +263,18 @@ export function runWrangle(
     let type: AttribType = 'float', size = 1;
     if (typeof first === 'string') type = 'string';
     else if (typeof first === 'boolean') type = 'int';
-    else if (first && first.length !== undefined) size = Math.max(1, Math.min(16, first.length));
+    else if (first && first.length !== undefined) {
+      size = Math.max(1, Math.min(16, first.length));
+      if (vals.some((v) => v && v.length !== undefined && v.length !== first.length))
+        log.push(`note: @${b.name} got arrays of different lengths and was stored as a float tuple of size ${size}; declare it f[]@${b.name} / i[]@${b.name} / s[]@${b.name} for an array attribute`);
+    }
     const a = g.table(b.cls).add(b.name, type, size);
     for (let i = 0; i < vals.length; i++) if (vals[i] !== undefined) a.set(i, typeof vals[i] === 'boolean' ? +vals[i] : vals[i]);
   }
-  return { geo: api.apply(), log };
+  const out = api.apply();
+  // array attributes written element by element are left in their loose layout: restore canonical CSR
+  for (const t of [out.points, out.vertices, out.prims, out.detail]) for (const a of t.map.values()) if (a.isArray) a.compact();
+  return { geo: out, log };
 }
 
 /** Map an error inside the generated kernel back to the user's snippet line. */
@@ -305,13 +320,13 @@ export class WrangleAPI {
   nprims(i: number) { return this.geo(i).numPrims; }
   nvertices(i: number) { return this.geo(i).numVertices; }
   hasattr(i: number, cls: AttribClass, name: string) { return this.geo(i).table(cls).has(name); }
-  attrtype(i: number, cls: AttribClass, name: string) { const a = this.geo(i).table(cls).get(name); return a ? `${a.type}${a.size}` : ''; }
+  attrtype(i: number, cls: AttribClass, name: string) { const a = this.geo(i).table(cls).get(name); return a ? (a.isArray ? a.type : `${a.type}${a.size}`) : ''; }
   attr(i: number, cls: AttribClass, name: string, idx: number) {
     const g = this.geo(i);
     if (cls === 'prim' && name === 'P' && !g.prims.has('P')) return primCentroid(g, idx);
     const a = g.table(cls).get(name);
     if (!a) throw new Error(`input ${i} has no ${cls} attribute "${name}"`);
-    if (idx < 0 || idx >= a.count) return a.type === 'string' ? '' : a.size === 1 ? 0 : new Array(a.size).fill(0);
+    if (idx < 0 || idx >= a.count) return a.isArray ? [] : a.type === 'string' ? '' : a.size === 1 ? 0 : new Array(a.size).fill(0);
     return a.get(idx);
   }
   primpoints(i: number, p: number) { return this.geo(i).primPoints(p); }
@@ -373,7 +388,8 @@ export class WrangleAPI {
     this.delPrims.add(p);
     if (andPoints) (this as any).delPrimPts = true;
   }
-  setattr(cls: AttribClass, idx: number, name: string, value: any) { this.sets.push({ cls, idx, name, value: Array.isArray(value) ? value.slice() : value }); }
+  // argument order of the snippet-lib callers: setpointattrib(0, name, idx, value) → setattr('point', name, idx, value)
+  setattr(cls: AttribClass, name: string, idx: number, value: any) { this.sets.push({ cls, idx: Number(idx), name: String(name), value: Array.isArray(value) ? value.slice() : value }); }
   setgroup(cls: 'point' | 'prim' | 'vertex', name: string, idx: number, value: any) { this.groupSets.push({ cls, name, idx, value: value ? 1 : 0 }); }
   setedgegroup(name: string, a: number, b: number, value: any) { this.edgeSets.push({ name, a: Number(a), b: Number(b), value: value ? 1 : 0 }); }
   log(msg: string) { if (this.logs.length < 50) this.logs.push(msg); }
