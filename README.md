@@ -71,11 +71,11 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, wrangle, groups, attributes, sdf, loops, assets, export, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, wrangle, groups, attributes, sdf, loops, assets, uv, export, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render` |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
-| `render` | PNG with persp/front/right/top views, colour by attribute, group highlight, flipped normals in blue |
+| `render` | PNG with persp/front/right/top views and a `uv` view (`quad_uv`), uv checker, colour by attribute, group highlight, flipped normals in blue |
 | `export` | glb / obj / usda / ply / stl / json |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete |
@@ -120,7 +120,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | copy | `copy_xform` `scatter` `copy_to_points` |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
-| uv | `uv_project` `uv_transform` |
+| uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, json) |
