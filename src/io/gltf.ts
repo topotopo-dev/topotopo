@@ -52,6 +52,7 @@ import type { Mat4 } from '../core/math.ts';
 import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, baseOf, decomposeXform, isolatedMask, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { AnchorAttrib, ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked } from '../core/packed.ts';
+import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
 
 /** Above this many polylines per material and mesh, curves go into one LINES primitive instead of LINE_STRIPs. */
 const MAX_LINE_STRIPS = 256;
@@ -316,6 +317,7 @@ const rgbAllOnes = (d: number[], size: number) => {
 
 /** Build a gltf-transform Document for the geometry (no IO yet). */
 export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
+  if (hasSplinesDeep(g)) g = splinesToPolylinesDeep(g).geo; // Bezier/NURBS prims (also in packed sources) as polylines
   const doc = new Document();
   doc.getRoot().getAsset().generator = 'polyforge';
   const buffer = doc.createBuffer();
@@ -472,7 +474,7 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
   const kind = g.primKind!, S = g.packedSource!, X = g.packedXform!, P = g.P;
   const bySrc = new Map<number, number[]>();
   for (let p = 0; p < kind.length; p++) {
-    if (!kind[p] || g.primStart[p + 1] - g.primStart[p] !== 1) continue;
+    if (kind[p] !== 1 || g.primStart[p + 1] - g.primStart[p] !== 1) continue;
     let l = bySrc.get(S[p]);
     if (!l) { l = []; bySrc.set(S[p], l); }
     l.push(p);

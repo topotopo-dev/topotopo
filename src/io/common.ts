@@ -95,7 +95,7 @@ export function packedPrims(g: Geometry): number[] {
   const out: number[] = [];
   const kind = g.primKind;
   if (!kind) return out;
-  for (let p = 0; p < kind.length; p++) if (kind[p] && g.primStart[p + 1] - g.primStart[p] === 1) out.push(p);
+  for (let p = 0; p < kind.length; p++) if (kind[p] === 1 && g.primStart[p + 1] - g.primStart[p] === 1) out.push(p);
   return out;
 }
 
