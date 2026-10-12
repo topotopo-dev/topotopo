@@ -12,7 +12,10 @@ import * as random from '../core/random.ts';
 import { fractal, makeCurl, makeNoise } from '../core/noise.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { fromManifold, propLayout, toManifold } from '../core/manifold.ts';
-import { evalGroup } from '../core/groups.ts';
+import { evalGroup, evalEdgeGroup } from '../core/groups.ts';
+import { halfEdges } from '../core/halfedge.ts';
+import { EdgeSet } from '../core/edges.ts';
+import { convertSelection } from '../core/groupconvert.ts';
 import { appendElements } from '../core/wrangle.ts';
 import { mask } from './util.ts';
 
@@ -37,14 +40,14 @@ defineNode({
   params: {
     code: { type: 'code', default: '', desc: 'JS snippet (statements). Example: "@P.y += noise(@P) * 0.2; @Cd = [@P.y, 0.5, 1];"', aliases: ['snippet', 'vexpression', 'vex'] },
     run_over: { type: 'enum', options: ['points', 'prims', 'vertices', 'detail'], default: 'points', desc: 'element class to iterate', aliases: ['class', 'runover'] },
-    group: { type: 'group', default: '', desc: 'only run on elements in this group (points/prims)' },
+    group: { type: 'group', default: '', desc: 'only run on elements in this group (point, prim or vertex pattern, matching run_over)' },
   },
   usesVars: true,
   example: { type: 'wrangle', params: { run_over: 'points', code: '@P.y += sin(@P.x * 4) * 0.2;\n@Cd = hsv2rgb(fit(@P.y, -0.2, 0.2, 0.6, 0), 0.7, 1);' } },
   cook: ({ input, inputs, p, vars, engine, warn }) => {
     const g = input(0);
     const ro = p.run_over as RunOver;
-    const m = ro === 'points' ? mask(g, 'point', p.group) : ro === 'prims' ? mask(g, 'prim', p.group) : null;
+    const m = ro === 'points' ? mask(g, 'point', p.group) : ro === 'prims' ? mask(g, 'prim', p.group) : ro === 'vertices' ? mask(g, 'vertex', p.group) : null;
     if (!p.code.trim()) return g;
     const r = runWrangle(g.clone(), {
       code: p.code, runOver: ro, mask: m, vars, host: engine.host, timeoutMs: engine.scriptTimeoutMs,
@@ -63,6 +66,8 @@ function scriptLib(ctx: CookContext) {
     Geometry, GeoBuilder, math, topology, random,
     noise: { makeNoise, fractal, makeCurl },
     KDTree, TriBVH, evalGroup, appendElements,
+    // topology: half-edge mesh (cached per geometry), edge sets, edge patterns, group conversion
+    halfEdges, EdgeSet, evalEdgeGroup, convertSelection,
     manifold: { wasm: engine.manifold, toManifold, fromManifold, propLayout },
     merge: (geos: Geometry[]) => Geometry.merge(geos),
     /** Run any node type directly: await lib.run('sphere', {radius: 2}) */
