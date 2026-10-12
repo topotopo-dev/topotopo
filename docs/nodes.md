@@ -2246,7 +2246,7 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 | `resolution` | int | `0` | 0..16384 |  |  | atlas size in texels; 0 = automatic from texels_per_unit (or about 1024 when both are 0). With texels_per_unit set, charts that do not fit spill into more atlases |
 | `texels_per_unit` | float | `0` | 0.. |  |  | texel density (texels per world unit); 0 = derived from resolution |
 | `bruteforce` | bool | `false` |  |  |  | slower, tighter packing |
-| `rotate_charts` | bool | `true` |  |  |  | rotate charts to pack tighter (and to the axis of their convex hull) |
+| `rotate_charts` | bool | `true` |  |  |  | rotate each chart to the axis of its convex hull before packing (xatlas packing-time 90° turns are not used: they mirror the chart) |
 | `block_align` | bool | `false` |  |  |  | align charts to 4×4 texel blocks (faster packing, for block-compressed textures) |
 | `udim` | bool | `true` |  |  |  | when xatlas makes several atlases, place atlas k in UDIM tile 1001+k (u offset k); off = all atlases overlap in 0..1 (see prim atlas) |
 
