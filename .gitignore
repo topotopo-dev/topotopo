@@ -3,3 +3,4 @@ workspace/
 tmp/
 out/
 *.log
+bench/last.json

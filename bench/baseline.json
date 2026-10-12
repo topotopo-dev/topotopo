@@ -1,0 +1,227 @@
+{
+  "generated": "2026-10-12T15:10:17.366Z",
+  "node": "v24.14.0",
+  "platform": "win32-x64",
+  "cpu": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+  "cpus": 16,
+  "quick": false,
+  "runs": 3,
+  "results": [
+    {
+      "name": "scatter_1m",
+      "what": "scatter 1M points on a grid (relax off)",
+      "elements": 1000000,
+      "unit": "points",
+      "ms": 1378.7,
+      "runs": [
+        1378.7,
+        1671.5,
+        1568.9
+      ],
+      "total_ms": 1382.5,
+      "elements_per_sec": 725311,
+      "target_ms": 1000,
+      "target_source": "roadmap §1.7 (scatter + packed copy of 1M under 1 s)",
+      "meets_target": false,
+      "out": "1M pts, 0 prims"
+    },
+    {
+      "name": "copy_to_points_100k",
+      "what": "copy a 100-triangle mesh to 100k points",
+      "elements": 10000000,
+      "unit": "triangles out",
+      "ms": 3086.5,
+      "runs": [
+        3167.9,
+        3086.5,
+        3176.9
+      ],
+      "total_ms": 3102.6,
+      "elements_per_sec": 3239877,
+      "target_ms": 1000,
+      "target_source": "goal (roadmap targets packed copies; these are real copies)",
+      "meets_target": false,
+      "out": "6.6M pts, 10M prims"
+    },
+    {
+      "name": "subdivide_100k",
+      "what": "Catmull-Clark, 1 level, 99.9k-face grid",
+      "elements": 99856,
+      "unit": "input faces",
+      "ms": 1358.7,
+      "runs": [
+        1563.9,
+        1457,
+        1358.7
+      ],
+      "total_ms": 1388.5,
+      "elements_per_sec": 73492,
+      "target_ms": 500,
+      "target_source": "roadmap §1.7 (100k faces × 2 levels under 1 s)",
+      "meets_target": false,
+      "out": "400.7k pts, 399.4k prims"
+    },
+    {
+      "name": "subdivide_100k_x2",
+      "what": "Catmull-Clark, 2 levels, 99.9k-face grid",
+      "elements": 99856,
+      "unit": "input faces",
+      "ms": 7407.9,
+      "runs": [
+        7878.4,
+        7407.9,
+        7608.2
+      ],
+      "total_ms": 7435.3,
+      "elements_per_sec": 13480,
+      "target_ms": 1000,
+      "target_source": "roadmap §1.7",
+      "meets_target": false,
+      "out": "1.6M pts, 1.6M prims"
+    },
+    {
+      "name": "boolean_100k",
+      "what": "boolean subtract of two 99.2k-triangle spheres",
+      "elements": 198448,
+      "unit": "input triangles",
+      "ms": 921.2,
+      "runs": [
+        947.5,
+        921.2,
+        929
+      ],
+      "total_ms": 1016,
+      "elements_per_sec": 215428,
+      "target_ms": 1200,
+      "target_source": "roadmap §1.7 (500k triangles under 3 s), scaled to 200k",
+      "meets_target": true,
+      "out": "64.5k pts, 129.1k prims"
+    },
+    {
+      "name": "boolean_500k",
+      "what": "boolean subtract of two 249k-triangle spheres",
+      "elements": 498000,
+      "unit": "input triangles",
+      "ms": 2277.5,
+      "runs": [
+        2345.2,
+        2277.5,
+        2416.7
+      ],
+      "total_ms": 2544.1,
+      "elements_per_sec": 218660,
+      "target_ms": 3000,
+      "target_source": "roadmap §1.7",
+      "meets_target": true,
+      "out": "160.4k pts, 320.9k prims"
+    },
+    {
+      "name": "noise_displace_1m",
+      "what": "noise_displace (fbm, along normals) on 1M points",
+      "elements": 1002001,
+      "unit": "points",
+      "ms": 312.9,
+      "runs": [
+        312.9,
+        322.8,
+        317
+      ],
+      "total_ms": 758.7,
+      "elements_per_sec": 3201949,
+      "target_ms": 1000,
+      "target_source": "goal",
+      "meets_target": true,
+      "out": "1M pts, 1M prims"
+    },
+    {
+      "name": "wrangle_1m",
+      "what": "point wrangle (sin + colour) over 1M points",
+      "elements": 1002001,
+      "unit": "points",
+      "ms": 100.9,
+      "runs": [
+        133.4,
+        121.3,
+        100.9
+      ],
+      "total_ms": 540,
+      "elements_per_sec": 9929050,
+      "target_ms": 500,
+      "target_source": "goal",
+      "meets_target": true,
+      "out": "1M pts, 1M prims"
+    },
+    {
+      "name": "sdf_to_mesh_128",
+      "what": "sdf_to_mesh of a torus at 128³",
+      "elements": 2097152,
+      "unit": "voxels",
+      "ms": 784.4,
+      "runs": [
+        834.4,
+        788.6,
+        784.4
+      ],
+      "total_ms": 784.5,
+      "elements_per_sec": 2673728,
+      "target_ms": 1000,
+      "target_source": "goal",
+      "meets_target": true,
+      "out": "76.8k pts, 153.6k prims"
+    },
+    {
+      "name": "triangulate_500k",
+      "what": "triangulate a 499.8k-quad grid",
+      "elements": 499849,
+      "unit": "polygons",
+      "ms": 296.2,
+      "runs": [
+        296.2,
+        384,
+        319.9
+      ],
+      "total_ms": 537.1,
+      "elements_per_sec": 1687661,
+      "target_ms": 500,
+      "target_source": "goal",
+      "meets_target": true,
+      "out": "501.3k pts, 999.7k prims"
+    },
+    {
+      "name": "merge_100",
+      "what": "merge 100 spheres (1280 triangles each)",
+      "elements": 128000,
+      "unit": "triangles out",
+      "ms": 4.8,
+      "runs": [
+        7.6,
+        4.8,
+        6.9
+      ],
+      "total_ms": 48.8,
+      "elements_per_sec": 26897537,
+      "target_ms": 100,
+      "target_source": "goal",
+      "meets_target": true,
+      "out": "64.2k pts, 128k prims"
+    },
+    {
+      "name": "fuse_500k",
+      "what": "fuse 502k points (every point doubled)",
+      "elements": 502002,
+      "unit": "points",
+      "ms": 4960.2,
+      "runs": [
+        5277.6,
+        5019.9,
+        4960.2
+      ],
+      "total_ms": 5122.4,
+      "elements_per_sec": 101207,
+      "target_ms": 1000,
+      "target_source": "goal",
+      "meets_target": false,
+      "out": "251k pts, 500k prims"
+    }
+  ]
+}
