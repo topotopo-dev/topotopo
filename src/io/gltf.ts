@@ -316,7 +316,9 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
         const chans: Channel[] = [posCh];
         if (normals) {
           const nn = normals;
-          chans.push({ semantic: 'NORMAL', size: 3, int: false, perPoint: false, read(v, _pt, _pr, out, oo) { const d = xfDir(nn[v * 3], nn[v * 3 + 1], nn[v * 3 + 2], o); out[oo] = d[0]; out[oo + 1] = d[1]; out[oo + 2] = d[2]; } });
+          // point N (and no vertex N) gives one normal per point: no need to split shared vertices
+          const pN = geo.points.get('N'), pointN = !geo.vertices.get('N') && !!pN && pN.size === 3 && pN.type === 'float';
+          chans.push({ semantic: 'NORMAL', size: 3, int: false, perPoint: pointN, read(v, _pt, _pr, out, oo) { const d = xfDir(nn[v * 3], nn[v * 3 + 1], nn[v * 3 + 2], o); out[oo] = d[0]; out[oo + 1] = d[1]; out[oo + 2] = d[2]; } });
         }
         const uv0 = uvCh('uv', 'TEXCOORD_0'), uv1 = uvCh('uv2', 'TEXCOORD_1');
         if (uv0) chans.push(uv0);

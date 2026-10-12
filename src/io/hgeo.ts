@@ -17,6 +17,7 @@
 // and every group, polygons as Polygon_run and polylines as PolygonCurve_run (open polygons), in Houdini's own
 // rawpagedata layout. Read: the same, plus the alternatives above. Prims of other types (volumes/VDB, packed,
 // spheres, NURBS…) are skipped with a warning.
+// Uncompressed binary .bgeo (Houdini's binary JSON encoding of the same tree) is read too; .bgeo.sc (Blosc) is not.
 import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
 import { materialBasename } from '../core/materials.ts';
@@ -281,6 +282,93 @@ function readPrims(list: any[], warn: (m: string) => void): { prims: (number[] |
   }
   for (const [t, n] of skipped) warn(`skipped ${n} ${t} primitive${n > 1 ? 's' : ''}${/volume|vdb/i.test(t) ? ' (volumes/SDFs are not imported)' : ' (only polygons and polylines are imported)'}`);
   return { prims, closed };
+}
+
+// ------------------------------------------------------------------ binary JSON (.bgeo)
+
+/** True when the bytes start with Houdini's binary JSON magic (0x7f "NSJb"). */
+export function isBinaryJSON(b: Uint8Array): boolean {
+  return b.length >= 5 && b[0] === 0x7f && ((b[1] === 0x4e && b[2] === 0x53 && b[3] === 0x4a && b[4] === 0x62) || (b[1] === 0x62 && b[2] === 0x4a && b[3] === 0x53 && b[4] === 0x4e));
+}
+
+function half(h: number): number {
+  const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 0x1f, f = h & 0x3ff;
+  if (e === 0) return s * 2 ** -14 * (f / 1024);
+  if (e === 31) return f ? NaN : s * Infinity;
+  return s * 2 ** (e - 15) * (1 + f / 1024);
+}
+
+/**
+ * Decode Houdini binary JSON (UT_JSON binary: token-defined strings, typed scalars, uniform arrays) into plain
+ * JSON values. Uniform arrays become typed arrays or plain arrays.
+ */
+export function decodeBinaryJSON(b: Uint8Array): any {
+  if (!isBinaryJSON(b)) throw new Error('not Houdini binary JSON (no 0x7f NSJb magic)');
+  const le = b[1] === 0x4e; // "NSJb" little-endian, "bJSN" byte-swapped
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const td = new TextDecoder();
+  const tokens = new Map<number, string>();
+  let o = 5;
+  const len = (): number => {
+    const c = b[o++];
+    if (c < 0xf1) return c;
+    if (c === 0xf2) { const v = dv.getUint16(o, le); o += 2; return v; }
+    if (c === 0xf4) { const v = dv.getUint32(o, le); o += 4; return v; }
+    if (c === 0xf8) { const v = Number(dv.getBigUint64(o, le)); o += 8; return v; }
+    throw new Error(`bgeo: bad length byte 0x${c.toString(16)} at ${o - 1}`);
+  };
+  const str = () => { const n = len(); const t = td.decode(b.subarray(o, o + n)); o += n; return t; };
+  const scalar = (t: number): number | boolean => {
+    let v: number;
+    switch (t) {
+      case 0x10: return b[o++] !== 0;
+      case 0x11: v = dv.getInt8(o); o += 1; return v;
+      case 0x12: v = dv.getInt16(o, le); o += 2; return v;
+      case 0x13: v = dv.getInt32(o, le); o += 4; return v;
+      case 0x14: v = Number(dv.getBigInt64(o, le)); o += 8; return v;
+      case 0x18: v = half(dv.getUint16(o, le)); o += 2; return v;
+      case 0x19: v = dv.getFloat32(o, le); o += 4; return v;
+      case 0x1a: v = dv.getFloat64(o, le); o += 8; return v;
+      case 0x21: return b[o++];
+      case 0x22: v = dv.getUint16(o, le); o += 2; return v;
+      default: throw new Error(`bgeo: unknown token 0x${t.toString(16)} at ${o - 1}`);
+    }
+  };
+  const value = (): any => {
+    for (;;) {
+      if (o >= b.length) throw new Error('bgeo: unexpected end of data');
+      const t = b[o++];
+      switch (t) {
+        case 0x2b: { const id = len(); tokens.set(id, str()); continue; } // token definition
+        case 0x2d: len(); continue; // token undefine
+        case 0x5b: { const a: any[] = []; while (b[o] !== 0x5d) a.push(value()); o++; return a; }
+        case 0x7b: { const m: Record<string, any> = {}; while (b[o] !== 0x7d) { const k = value(); m[String(k)] = value(); } o++; return m; }
+        case 0x27: return str();
+        case 0x26: return tokens.get(len()) ?? '';
+        case 0x30: return false;
+        case 0x31: return true;
+        case 0x00: return null;
+        case 0x40: {
+          const et = b[o++], n = len();
+          if (et === 0x10) {
+            const a: boolean[] = new Array(n);
+            for (let i = 0; i < n; i += 32) { const w = dv.getUint32(o, le); o += 4; for (let k = 0; k < 32 && i + k < n; k++) a[i + k] = ((w >>> k) & 1) === 1; }
+            return a;
+          }
+          const a: any[] = new Array(n);
+          for (let i = 0; i < n; i++) a[i] = scalar(et);
+          return a;
+        }
+        default: return scalar(t);
+      }
+    }
+  };
+  return value();
+}
+
+/** Uncompressed binary .bgeo. */
+export function importHoudiniBgeo(bytes: Uint8Array, warn: (m: string) => void = () => {}): Geometry {
+  return importHoudiniGeo(decodeBinaryJSON(bytes), warn);
 }
 
 /** Parse Houdini .geo JSON (text or already-parsed value). */
