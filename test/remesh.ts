@@ -361,7 +361,7 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   const named = await cook({ ...src, n: { type: 'attrib_create', in: ['c'], params: { name: 'name', class: 'prim', type: 'string', value: 'rock' } }, l: { type: 'lod', in: ['n'], params: { levels: 2 } } }, 'l');
   const nn = new Set(named.prims.get('name')!.data as string[]);
   check(nn.has('rock_LOD0') && nn.has('rock_LOD1') && nn.size === 2, `lod: existing names get the suffix (${[...nn].join(', ')})`);
-  const ss = await cook({ ...src, l: { type: 'lod', in: ['c'], params: { screen_sizes: [1, 0.3, 0.05] } } }, 'l');
+  const ss = await cook({ s: src.s, l: { type: 'lod', in: ['s'], params: { screen_sizes: [1, 0.3, 0.05] } } }, 'l');
   const sl = ss.prims.get('lod')!.data as Int32Array, sc = [0, 0, 0];
   for (const x of sl) sc[x]++;
   check(sc[0] >= sc[1] && sc[1] > sc[2] && sc[2] > 0, `lod screen_sizes: error-driven levels ${sc.join(' ≥ ')}`);
