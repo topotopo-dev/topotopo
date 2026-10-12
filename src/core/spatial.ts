@@ -9,25 +9,37 @@ export class KDTree {
   idx: Int32Array;
   axis: Int8Array;
   n: number;
+  /** positions in tree order (TP[3k..3k+2] = P[3·idx[k]..]) as of construction; neighbours() reads them */
+  readonly TP: Float64Array;
 
   constructor(P: ArrayLike<number>, subset?: ArrayLike<number>) {
     this.P = P;
-    this.idx = subset ? Int32Array.from(subset) : Int32Array.from({ length: P.length / 3 }, (_, i) => i);
+    if (subset) this.idx = Int32Array.from(subset);
+    else {
+      const n = P.length / 3, idx = new Int32Array(n);
+      for (let i = 0; i < idx.length; i++) idx[i] = i;
+      this.idx = idx;
+    }
     this.n = this.idx.length;
     this.axis = new Int8Array(this.n);
+    // the build permutes a copy of the coordinates alongside idx, so it reads them sequentially
+    const TP = (this.TP = new Float64Array(this.n * 3)), idx = this.idx;
+    for (let k = 0; k < this.n; k++) { const i = idx[k] * 3; TP[k * 3] = P[i]; TP[k * 3 + 1] = P[i + 1]; TP[k * 3 + 2] = P[i + 2]; }
     this.build(0, this.n);
   }
 
   private build(lo: number, hi: number) {
     if (hi - lo <= 1) return;
-    const P = this.P, idx = this.idx;
-    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
-    for (let i = lo; i < hi; i++) for (let c = 0; c < 3; c++) {
-      const v = P[idx[i] * 3 + c];
-      if (v < mn[c]) mn[c] = v; if (v > mx[c]) mx[c] = v;
+    const W = this.TP;
+    let mn0 = Infinity, mn1 = Infinity, mn2 = Infinity, mx0 = -Infinity, mx1 = -Infinity, mx2 = -Infinity;
+    for (let i = lo; i < hi; i++) {
+      const x = W[i * 3], y = W[i * 3 + 1], z = W[i * 3 + 2];
+      if (x < mn0) mn0 = x; if (x > mx0) mx0 = x;
+      if (y < mn1) mn1 = y; if (y > mx1) mx1 = y;
+      if (z < mn2) mn2 = z; if (z > mx2) mx2 = z;
     }
-    const ex = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]];
-    const ax = ex[0] >= ex[1] && ex[0] >= ex[2] ? 0 : ex[1] >= ex[2] ? 1 : 2;
+    const ex0 = mx0 - mn0, ex1 = mx1 - mn1, ex2 = mx2 - mn2;
+    const ax = ex0 >= ex1 && ex0 >= ex2 ? 0 : ex1 >= ex2 ? 1 : 2;
     const mid = (lo + hi) >> 1;
     this.select(lo, hi - 1, mid, ax);
     this.axis[mid] = ax;
@@ -35,15 +47,23 @@ export class KDTree {
     this.build(mid + 1, hi);
   }
 
+  /** Quickselect (Hoare partition, middle pivot) of position k on axis ax within idx[l..r], moving TP along. */
   private select(l: number, r: number, k: number, ax: number) {
-    const P = this.P, idx = this.idx;
+    const W = this.TP, idx = this.idx;
     while (r > l) {
-      const pv = P[idx[(l + r) >> 1] * 3 + ax];
+      const pv = W[((l + r) >> 1) * 3 + ax];
       let i = l, j = r;
       while (i <= j) {
-        while (P[idx[i] * 3 + ax] < pv) i++;
-        while (P[idx[j] * 3 + ax] > pv) j--;
-        if (i <= j) { const t = idx[i]; idx[i] = idx[j]; idx[j] = t; i++; j--; }
+        while (W[i * 3 + ax] < pv) i++;
+        while (W[j * 3 + ax] > pv) j--;
+        if (i <= j) {
+          const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+          const a = i * 3, b = j * 3;
+          let s = W[a]; W[a] = W[b]; W[b] = s;
+          s = W[a + 1]; W[a + 1] = W[b + 1]; W[b + 1] = s;
+          s = W[a + 2]; W[a + 2] = W[b + 2]; W[b + 2] = s;
+          i++; j--;
+        }
       }
       if (k <= j) r = j; else if (k >= i) l = i; else break;
     }
@@ -88,6 +108,39 @@ export class KDTree {
     return (maxCount < out.length ? out.slice(0, maxCount) : out).map((e) => e[1]);
   }
 
+  /**
+   * within() without allocations: the indices of the points within radius r, nearest first (equal distances in the
+   * order within() returns them), written to buf.idx (squared distances to buf.d2; both grow as needed). Returns the
+   * count. Same traversal, test and stable ordering as within(), so the lists are identical as long as the positions
+   * have not changed since the tree was built (it reads its tree-ordered copy, which is what makes it fast).
+   */
+  neighbours(x: number, y: number, z: number, r: number, buf: NeighbourBuffer): number {
+    const r2 = r * r, T = this.TP, idx = this.idx, axis = this.axis;
+    let st = this.stack, sp = 0, m = 0;
+    if (this.n > 0) { st[sp++] = 0; st[sp++] = this.n; }
+    while (sp > 0) {
+      const hi = st[--sp], lo = st[--sp];
+      if (lo >= hi) continue;
+      const mid = (lo + hi) >> 1, ax = axis[mid];
+      const dx = T[mid * 3] - x, dy = T[mid * 3 + 1] - y, dz = T[mid * 3 + 2] - z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 <= r2) {
+        if (m === buf.idx.length) growNeighbours(buf);
+        buf.idx[m] = idx[mid]; buf.d2[m] = d2; m++;
+      }
+      if (hi - lo === 1) continue;
+      const diff = (ax === 0 ? x : ax === 1 ? y : z) - T[mid * 3 + ax];
+      if (sp + 4 > st.length) { const g = new Int32Array(st.length * 2); g.set(st); this.stack = st = g; }
+      // within() recurses left then right: push right first so left pops first
+      if (diff >= -r) { st[sp++] = mid + 1; st[sp++] = hi; }
+      if (diff <= r) { st[sp++] = lo; st[sp++] = mid; }
+    }
+    sortByDistance(buf, m);
+    return m;
+  }
+
+  private stack = new Int32Array(128);
+
   /** k nearest points (unbounded radius). */
   knn(x: number, y: number, z: number, k: number): number[] {
     const heap: [number, number][] = []; // max-heap by distance (simple sorted insert, k small)
@@ -115,6 +168,50 @@ export class KDTree {
     rec(0, this.n);
     return heap.map((e) => e[1]);
   }
+}
+
+/** Scratch lists for KDTree.neighbours. */
+export interface NeighbourBuffer { idx: Int32Array; d2: Float64Array; tmpIdx?: Int32Array; tmpD2?: Float64Array }
+
+export function neighbourBuffer(capacity = 64): NeighbourBuffer {
+  return { idx: new Int32Array(capacity), d2: new Float64Array(capacity) };
+}
+
+function growNeighbours(buf: NeighbourBuffer) {
+  const idx = new Int32Array(buf.idx.length * 2), d2 = new Float64Array(buf.d2.length * 2);
+  idx.set(buf.idx); d2.set(buf.d2);
+  buf.idx = idx; buf.d2 = d2;
+}
+
+/** Stable sort of the first m entries by squared distance (the order Array.prototype.sort gives within()). */
+function sortByDistance(buf: NeighbourBuffer, m: number) {
+  const idx = buf.idx, d2 = buf.d2;
+  if (m <= 32) {
+    for (let k = 1; k < m; k++) {
+      const kd = d2[k], ki = idx[k];
+      let j = k - 1;
+      while (j >= 0 && d2[j] > kd) { d2[j + 1] = d2[j]; idx[j + 1] = idx[j]; j--; }
+      d2[j + 1] = kd; idx[j + 1] = ki;
+    }
+    return;
+  }
+  // bottom-up merge sort (stable), ping-ponging between the buffer and scratch
+  if (!buf.tmpIdx || buf.tmpIdx.length < m) { buf.tmpIdx = new Int32Array(idx.length); buf.tmpD2 = new Float64Array(idx.length); }
+  let si = idx, sd = d2, di = buf.tmpIdx, dd = buf.tmpD2!;
+  for (let width = 1; width < m; width *= 2) {
+    for (let lo = 0; lo < m; lo += 2 * width) {
+      const mid = Math.min(lo + width, m), hi = Math.min(lo + 2 * width, m);
+      let a = lo, b = mid, o = lo;
+      while (a < mid && b < hi) {
+        if (sd[b] < sd[a]) { di[o] = si[b]; dd[o++] = sd[b++]; } else { di[o] = si[a]; dd[o++] = sd[a++]; }
+      }
+      while (a < mid) { di[o] = si[a]; dd[o++] = sd[a++]; }
+      while (b < hi) { di[o] = si[b]; dd[o++] = sd[b++]; }
+    }
+    const ti = si, td = sd;
+    si = di; sd = dd; di = ti; dd = td;
+  }
+  if (si !== idx) { idx.set(si.subarray(0, m)); d2.set(sd.subarray(0, m)); }
 }
 
 // ---------------------------------------------------------------- triangle BVH

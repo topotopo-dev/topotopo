@@ -1,46 +1,81 @@
 // Scattering and instancing.
-import { Attribute, AttribTable, GeoBuilder, Geometry } from '../core/geometry.ts';
+import { Attribute, AttribTable, GeoBuilder, Geometry, defaultValueFor } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { rng } from '../core/random.ts';
 import { connectivity, primNormals, triangulate } from '../core/topology.ts';
 import { composePackedXforms } from '../core/packed.ts';
-import { KDTree, TriBVH } from '../core/spatial.ts';
+import { KDTree, TriBVH, neighbourBuffer } from '../core/spatial.ts';
 import { lookAtBasis, m4apply, m4applyDir, m4basis, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize } from '../core/math.ts';
 import type { Mat4, Vec3 } from '../core/math.ts';
 import { P, mask } from './util.ts';
 
 // ---------------------------------------------------------------- scatter
 
-/** Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. */
+/**
+ * Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates.
+ *
+ * Neighbour lists (within 2·rmax, nearest first, as KDTree.within orders them) and each neighbour's weight
+ * contribution (1 - d / r)^8 are computed once into CSR typed arrays; a removal reuses them to lower its neighbours'
+ * weights. Everything runs on the KD-tree's slot numbering (points in tree order), so neighbouring points sit next to
+ * each other in memory; the max-heap is the same heap over the same weights (initial slot k holds point k), only its
+ * entries are labelled by tree slot. A pair's contribution is computed once and shared by both of its lists (|a - b| is
+ * symmetric bit for bit). Same arithmetic, same heap operations, same subset as the straightforward version.
+ */
 export function sampleEliminate(pos: Float64Array, target: number, rmax: number): Int32Array {
   const n = pos.length / 3;
   if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
   const kd = new KDTree(pos);
   const r2 = 2 * rmax;
-  const nbrs: Int32Array[] = new Array(n);
-  const w = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const list = kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], r2).filter((j) => j !== i);
-    nbrs[i] = Int32Array.from(list);
-    for (const j of list) {
-      const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-      w[i] += Math.pow(1 - Math.min(d, r2) / r2, 8);
+  const order = kd.idx, TP = kd.TP;
+  const slotOf = new Int32Array(n);
+  for (let a = 0; a < n; a++) slotOf[order[a]] = a;
+  // neighbour lists by slot
+  const start = new Int32Array(n + 1);
+  let nbr = new Int32Array(Math.max(16, n * 20));
+  const buf = neighbourBuffer();
+  let len = 0;
+  for (let a = 0; a < n; a++) {
+    const i = order[a];
+    const m = kd.neighbours(TP[a * 3], TP[a * 3 + 1], TP[a * 3 + 2], r2, buf);
+    if (len + m > nbr.length) { const g = new Int32Array(Math.max(len + m, nbr.length * 2)); g.set(nbr); nbr = g; }
+    const idx = buf.idx;
+    for (let k = 0; k < m; k++) { const j = idx[k]; if (j !== i) nbr[len++] = slotOf[j]; }
+    start[a + 1] = len;
+  }
+  // weights: w[a] = sum over a's list (in list order) of (1 - min(d, r2) / r2)^8, d = |pos_a - pos_b|
+  const con = new Float64Array(len), w = new Float64Array(n);
+  for (let a = 0; a < n; a++) {
+    const ax = TP[a * 3], ay = TP[a * 3 + 1], az = TP[a * 3 + 2];
+    for (let e = start[a]; e < start[a + 1]; e++) {
+      const b = nbr[e];
+      let c = -1;
+      if (b < a) for (let f = start[b]; f < start[b + 1]; f++) if (nbr[f] === a) { c = con[f]; break; }
+      if (c < 0) {
+        const d = Math.hypot(ax - TP[b * 3], ay - TP[b * 3 + 1], az - TP[b * 3 + 2]);
+        c = Math.pow(1 - Math.min(d, r2) / r2, 8);
+      }
+      con[e] = c;
+      w[a] += c;
     }
   }
-  // max-heap on w
-  const heap = Int32Array.from({ length: n }, (_, i) => i);
-  const where = Int32Array.from({ length: n }, (_, i) => i);
+  // max-heap on w: heap[k] = slot of the point in heap position k, hw[k] = its weight, where[slot] = heap position
+  const heap = new Int32Array(n), where = new Int32Array(n), hw = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const a = slotOf[i]; heap[i] = a; where[a] = i; hw[i] = w[a]; }
   let size = n;
-  const swap = (a: number, b: number) => { const t = heap[a]; heap[a] = heap[b]; heap[b] = t; where[heap[a]] = a; where[heap[b]] = b; };
-  const up = (k: number) => { while (k > 0) { const p = (k - 1) >> 1; if (w[heap[p]] >= w[heap[k]]) break; swap(p, k); k = p; } };
+  const swap = (x: number, y: number) => {
+    const t = heap[x]; heap[x] = heap[y]; heap[y] = t;
+    const tw = hw[x]; hw[x] = hw[y]; hw[y] = tw;
+    where[heap[x]] = x; where[heap[y]] = y;
+  };
+  const up = (k: number) => { while (k > 0) { const p = (k - 1) >> 1; if (hw[p] >= hw[k]) break; swap(p, k); k = p; } };
   const down = (k: number) => {
     for (;;) {
       const l = 2 * k + 1, r = l + 1;
       let m = k;
-      if (l < size && w[heap[l]] > w[heap[m]]) m = l;
-      if (r < size && w[heap[r]] > w[heap[m]]) m = r;
+      if (l < size && hw[l] > hw[m]) m = l;
+      if (r < size && hw[r] > hw[m]) m = r;
       if (m === k) break;
       swap(k, m); k = m;
     }
@@ -48,20 +83,107 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number)
   for (let k = (size >> 1) - 1; k >= 0; k--) down(k);
   const removed = new Uint8Array(n);
   while (size > target) {
-    const i = heap[0];
-    removed[i] = 1;
+    const a = heap[0];
+    removed[a] = 1;
     swap(0, size - 1); size--; down(0);
-    for (const j of nbrs[i]) {
-      if (removed[j]) continue;
-      const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-      w[j] -= Math.pow(1 - Math.min(d, r2) / r2, 8);
-      const k = where[j];
-      if (k < size) { down(k); up(where[j]); }
+    for (let e = start[a]; e < start[a + 1]; e++) {
+      const b = nbr[e];
+      if (removed[b]) continue;
+      w[b] -= con[e];
+      const k = where[b];
+      hw[k] = w[b];
+      if (k < size) { down(k); up(where[b]); }
     }
   }
-  const out: number[] = [];
-  for (let i = 0; i < n; i++) if (!removed[i]) out.push(i);
-  return Int32Array.from(out);
+  let kept = 0;
+  for (let i = 0; i < n; i++) if (!removed[slotOf[i]]) kept++;
+  const out = new Int32Array(kept);
+  for (let i = 0, o = 0; i < n; i++) if (!removed[slotOf[i]]) out[o++] = i;
+  return out;
+}
+
+/**
+ * The surface-scatter result for candidates keep (triangle candT[k], barycentric weights candW[3k..3k+2], position
+ * pos[3k..3k+2]): what GeoBuilder.build gives for points added with provenance {i: corners, w} plus the N and sourceprim
+ * attributes, assembled in typed arrays. Source point attributes not in skip are interpolated (floats blended with the
+ * weights, others from the heaviest corner), P follows them, then N and sourceprim; no prims, no groups.
+ */
+function scatterSurfaceGeo(
+  g: Geometry, skip: Set<string>, keep: Int32Array, candT: Int32Array, candW: Float64Array, pos: Float64Array,
+  tris: ArrayLike<number>, triPrim: ArrayLike<number>, fn: Float64Array,
+): Geometry {
+  const n = keep.length, vp = g.vertexPoint;
+  const corner = new Int32Array(n * 3), wt = new Float64Array(n * 3), dom = new Int32Array(n);
+  for (let k = 0; k < n; k++) {
+    const c = keep[k], t = candT[c];
+    let best = -1, bw = -Infinity;
+    for (let j = 0; j < 3; j++) {
+      const q = vp[tris[t * 3 + j]], wj = candW[c * 3 + j];
+      corner[k * 3 + j] = q; wt[k * 3 + j] = wj;
+      if (wj > bw) { bw = wj; best = q; }
+    }
+    dom[k] = best;
+  }
+  const out = Object.create(Geometry.prototype) as Geometry;
+  const pts = new AttribTable(n);
+  for (const [name, a] of g.points.map) {
+    if (skip.has(name) || name === 'P') continue;
+    if (a.isArray) { pts.map.set(name, a.gather(dom)); continue; }
+    const d = Attribute.create(a.type, a.size, n, a.def), sz = a.size;
+    if (a.type === 'float') {
+      const sd = a.data as Float64Array, dd = d.data as Float64Array;
+      for (let k = 0; k < n; k++)
+        for (let c = 0; c < sz; c++) {
+          let acc = 0;
+          for (let j = 0; j < 3; j++) acc += sd[corner[k * 3 + j] * sz + c] * wt[k * 3 + j];
+          dd[k * sz + c] = acc;
+        }
+    } else if (a.type === 'string') {
+      const sd = a.data as string[], dd = d.data as string[];
+      for (let k = 0; k < n; k++) if (dom[k] >= 0) dd[k] = String(sd[dom[k]]);
+    } else {
+      const sd = a.data as Int32Array, dd = d.data as Int32Array;
+      for (let k = 0; k < n; k++) { const j = dom[k]; if (j >= 0) for (let c = 0; c < sz; c++) dd[k * sz + c] = sd[j * sz + c]; }
+    }
+    pts.map.set(name, d);
+  }
+  const P = pts.add('P', 'float', 3).data as Float64Array;
+  for (let k = 0; k < n; k++) { const c = keep[k]; P[k * 3] = pos[c * 3]; P[k * 3 + 1] = pos[c * 3 + 1]; P[k * 3 + 2] = pos[c * 3 + 2]; }
+  // N: the prim normal, or the point N interpolated and normalised
+  const nA = g.points.get('N');
+  const exN = pts.get('N');
+  const NA = exN && exN.type === 'float' && exN.size === 3 ? exN : pts.add('N', 'float', 3, defaultValueFor('N', 3, 'float'));
+  const Nd = NA.data as Float64Array;
+  const ndat = nA && nA.size === 3 ? (nA.data as Float64Array) : null;
+  for (let k = 0; k < n; k++) {
+    const c = keep[k], pr = triPrim[candT[c]];
+    if (ndat) {
+      const w0 = candW[c * 3], w1 = candW[c * 3 + 1], w2 = candW[c * 3 + 2];
+      const i0 = corner[k * 3], i1 = corner[k * 3 + 1], i2 = corner[k * 3 + 2];
+      const x = w0 * ndat[i0 * 3] + w1 * ndat[i1 * 3] + w2 * ndat[i2 * 3];
+      const y = w0 * ndat[i0 * 3 + 1] + w1 * ndat[i1 * 3 + 1] + w2 * ndat[i2 * 3 + 1];
+      const z = w0 * ndat[i0 * 3 + 2] + w1 * ndat[i1 * 3 + 2] + w2 * ndat[i2 * 3 + 2];
+      const l = Math.hypot(x, y, z);
+      if (l > 1e-20) { Nd[k * 3] = x / l; Nd[k * 3 + 1] = y / l; Nd[k * 3 + 2] = z / l; } else { Nd[k * 3] = 0; Nd[k * 3 + 1] = 0; Nd[k * 3 + 2] = 0; }
+    } else { Nd[k * 3] = fn[pr * 3]; Nd[k * 3 + 1] = fn[pr * 3 + 1]; Nd[k * 3 + 2] = fn[pr * 3 + 2]; }
+  }
+  const exS = pts.get('sourceprim');
+  const SA = exS && exS.type === 'int' && exS.size === 1 ? exS : pts.add('sourceprim', 'int', 1, defaultValueFor('sourceprim', 1, 'int'));
+  const Sd = SA.data as Int32Array;
+  for (let k = 0; k < n; k++) Sd[k] = triPrim[candT[keep[k]]];
+  out.points = pts;
+  out.vertices = g.vertices.gather(new Int32Array(0));
+  out.prims = g.prims.gather(new Int32Array(0));
+  out.detail = g.detail.clone();
+  out.primStart = new Int32Array(1);
+  out.vertexPoint = new Int32Array(0);
+  out.primClosed = new Uint8Array(0);
+  out.pointGroups = new Map();
+  out.primGroups = new Map();
+  out.vertexGroups = new Map();
+  out.edgeGroups = new Map();
+  out.volumes = g.volumes.slice();
+  return out;
 }
 
 defineNode({
@@ -118,7 +240,8 @@ defineNode({
       const count = p.density > 0 ? Math.round(p.density * area) : p.count;
       const ncand = p.relax ? count * 5 : count;
       const fn = primNormals(g);
-      const cand: { t: number; w: number[]; pos: number[] }[] = [];
+      // candidates: triangle, barycentric weights and position, in typed arrays
+      const candT = new Int32Array(ncand), candW = new Float64Array(ncand * 3);
       const pos = new Float64Array(ncand * 3);
       for (let k = 0; k < ncand; k++) {
         const x = r() * total;
@@ -126,28 +249,13 @@ defineNode({
         while (lo < hi) { const mid = (lo + hi) >> 1; if (cdf[mid] < x) lo = mid + 1; else hi = mid; }
         const t = lo;
         const s1 = Math.sqrt(r()), s2 = r();
-        const w = [1 - s1, s1 * (1 - s2), s1 * s2];
-        const ids = [0, 1, 2].map((j) => g.vertexPoint[tris[t * 3 + j]]);
-        const q = [0, 1, 2].map((c) => w[0] * Pd[ids[0] * 3 + c] + w[1] * Pd[ids[1] * 3 + c] + w[2] * Pd[ids[2] * 3 + c]);
-        cand.push({ t, w, pos: q });
-        pos.set(q, k * 3);
+        const w0 = 1 - s1, w1 = s1 * (1 - s2), w2 = s1 * s2;
+        const i0 = g.vertexPoint[tris[t * 3]] * 3, i1 = g.vertexPoint[tris[t * 3 + 1]] * 3, i2 = g.vertexPoint[tris[t * 3 + 2]] * 3;
+        for (let c = 0; c < 3; c++) pos[k * 3 + c] = w0 * Pd[i0 + c] + w1 * Pd[i1 + c] + w2 * Pd[i2 + c];
+        candT[k] = t; candW[k * 3] = w0; candW[k * 3 + 1] = w1; candW[k * 3 + 2] = w2;
       }
       const keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count))) : Int32Array.from({ length: ncand }, (_, i) => i);
-      const nA = g.points.get('N');
-      for (const k of keep) {
-        const c = cand[k];
-        const ids = [0, 1, 2].map((j) => g.vertexPoint[tris[c.t * 3 + j]]);
-        const id = b.addPoint(c.pos[0], c.pos[1], c.pos[2], { i: ids, w: c.w });
-        const pr = triPrim[c.t];
-        let n: number[] = [fn[pr * 3], fn[pr * 3 + 1], fn[pr * 3 + 2]];
-        if (nA && nA.size === 3) {
-          const d = nA.data as Float64Array;
-          n = normalize([0, 1, 2].map((cc) => c.w[0] * d[ids[0] * 3 + cc] + c.w[1] * d[ids[1] * 3 + cc] + c.w[2] * d[ids[2] * 3 + cc]) as Vec3);
-        }
-        Nout.set(id, n);
-        sp.set(id, pr);
-      }
-      return b.build();
+      return scatterSurfaceGeo(g, b.skip.point, keep, candT, candW, pos, tris, triPrim, fn);
     }
 
     if (mode === 'curve') {
