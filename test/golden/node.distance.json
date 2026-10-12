@@ -1,0 +1,49 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "P:float:3",
+        "dist:float:1",
+        "nearest_P:float:3",
+        "nearest_prim:int:1",
+        "nearest_uv:float:3",
+        "uv:float:3"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0, 1],
+      "min": [-1, 0, -1]
+    },
+    "counts": {
+      "points": 49,
+      "prims": 36,
+      "vertices": 144,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "2987a0e5c4b49e4f",
+      "attributes": {
+        "point.dist": "4b4dabded6ea8f24",
+        "point.nearest_P": "7f512f50f8d57b32",
+        "point.nearest_prim": "b3f8d999f50472ab",
+        "point.nearest_uv": "1ee59aa04671bf96",
+        "point.uv": "caf95c61b10871bb"
+      },
+      "topology": "618482d81e5bdd62"
+    }
+  },
+  "name": "node.distance",
+  "ok": true,
+  "source": "fixture for node type \"distance\" (test/fixtures.ts)",
+  "warnings": []
+}
