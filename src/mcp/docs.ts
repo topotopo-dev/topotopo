@@ -86,7 +86,7 @@ run_over: points | prims | vertices | detail (once). group: limits elements.
   Type prefixes for new attributes: f@ float, i@ int, v@ vec3, p@ vec4/quaternion, u@ vec2, s@ string.
   Known names get Houdini types (Cd/N/v/up/scale/uv = vec3, orient = vec4, pscale/width = float, id/class = int, name = string).
 Specials: @ptnum @primnum @vtxnum @elemnum @numpt @numprim @numvtx @numelem; time: @Frame @Time @TimeInc (only then is the wrangle re-cooked per frame)
-Groups: @group_top = 1 (membership of the current element). Inputs: @opinput1_P reads input 1 at the same index.
+Groups: @group_top = 1 (membership of the current element: point, prim or vertex group by run_over). Inputs: @opinput1_P reads input 1 at the same index.
 Prim mode: @P = centroid (read-only), @N = face normal (read-only) when no prim attrib exists.
 VECTORS are JS arrays with .x .y .z .w (.r .g .b) accessors. NO operator overloading: use
   add(a,b,...) sub(a,b) mul(a,b,...) div(a,b) (vector/scalar broadcasting) neg dot cross length length2 distance normalize
@@ -102,9 +102,11 @@ GEOMETRY QUERIES (input 0 = incoming geometry, 1..3 = other inputs):
   primpoints(i,pr) pointprims(i,pt) neighbours(i,pt) neighbourcount primvertexcount haspointattrib hasprimattrib
   nearpoint(i,pos[,maxdist]) nearpoints(i,pos,maxdist,maxcount) xyzdist(i,pos) minpos(i,pos) closest(i,pos)→{dist,pos,prim}
   intersect(i,orig,dir)→{prim,pos,dist} (prim -1 = miss)  inpointgroup(i,"grp",pt) inprimgroup(i,"grp",pr)
+  invertexgroup(i,"grp",v) inedgegroup(i,"grp",pt0,pt1)
 EDITS (applied after the loop, geohandle 0 optional):
   addpoint(0,pos)→pt  addprim(0,"poly"|"polyline",[pts])→prim  removepoint(0,pt)  removeprim(0,pr,andpoints)
   setpointattrib(0,"name",pt,v) setprimattrib setvertexattrib setdetailattrib(0,"name",v) setpointgroup(0,"g",pt,1) setprimgroup
+  setvertexgroup(0,"g",v,1) setedgegroup(0,"g",pt0,pt1,1)  (0 removes)
 DEBUG: print(...) (shows as warnings), error("msg") aborts. Use 'return' to skip the rest for the current element.
 Vars: vars.name (graph vars), iteration/numiterations inside foreach.
 SDF helpers are also available (see topic sdf).`,
@@ -117,7 +119,35 @@ SDF helpers are also available (see topic sdf).`,
   @P.y>0.5           attribute test, ops = == != > < >= <= ; components .x .y .z .w .r .g .b
   @class==3   @name=piece*   @Cd.r<0.2   @ptnum<100
 Tokens are space-separated and applied left to right (union unless prefixed ! or ^).
-A point pattern may name a prim group (selects its points) and vice versa (prims whose points are all selected).
+FOUR CLASSES: point, prim, vertex (polygon corners), edge (unordered point pairs, Houdini edge groups).
+  group node: "class": "point" | "prim" | "vertex" | "edge". delete: class vertex removes corners (a polygon losing
+  one is deleted, polylines shrink); class edge deletes every prim using one of the edges.
+VERTEX patterns: names, ranges (vertex numbers), @attr reads vertex then point/prim/detail attributes; @vtxnum @ptnum @primnum.
+EDGE patterns (index ranges address the unique-edge list: first occurrence walking prims, polyline segments included;
+  inspect {class:"edge"} lists it with p-pairs, lengths and angles):
+  p3-7               the edge between points 3 and 7       p0-1-2-3   chain      p0-1-2-3-0  closed chain
+  2e1                side 1 of prim 2 (its vertex 1 → vertex 2)
+  boundary | unshared   edges used by one polygon     shared   used by 2+     nonmanifold   used by 3+
+  angle>30  angle<=5    dihedral angle between the two polygons in degrees (box edges = 90; boundary edges never match)
+  length<0.1            edge length
+  border:top            border of a prim group or pattern (sides used by exactly one selected polygon)
+  @P.y>0                attribute test on the average of the two endpoints' point attributes; @edgenum
+  group:x edge:x        only edge groups      prim:x point:x vertex:x   convert a group of that class
+  A bare name is an edge group first, then a keyword above, then a group of another class.
+CROSS-CLASS NAMES: a pattern may name a group of another class; it is converted:
+  to points = points touched by the elements; to prims = prims whose points/vertices/sides are ALL selected;
+  to vertices = vertices of the selected points/prims/edges; to edges = sides of selected prims, or edges whose two
+  points are selected.
+GROUP TOOLS: group_promote (from → to class, include any | all, e.g. point→prim all = prims entirely in the group,
+  edge→prim any = prims using a grouped edge), group_expand (grow/shrink point/prim/edge groups by N steps; negative
+  shrinks), group_combine ("a & !b | c", ^ xor, parentheses), group_delete, group_rename.
+EDGE GROUPS IN NODES: subdivide creases (+ creaseweight attribute), normal hard_edges. Edge groups follow points:
+  they survive transforms, fuse (remapped), merge (offset), copies, deletes (edges that no longer bound a prim
+  drop out) and every node that rebuilds geometry where an edge's two points are copied 1:1; subdivide moves them to
+  the child edges. Booleans, remesh and other solid ops drop them.
+WRANGLE: @group_x works in vertices mode too; invertexgroup(i,"g",v) inedgegroup(i,"g",pt0,pt1) setvertexgroup(0,"g",v,1)
+  setedgegroup(0,"g",pt0,pt1,1). Scripts: lib.halfEdges(geo) (edge loops/rings, one-rings, boundaries), lib.EdgeSet,
+  lib.evalEdgeGroup(geo, pattern), lib.convertSelection(geo, from, to, sel, include).
 Groups produced by nodes: poly_extrude front/side, extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides,
 clip above/below/cap, fill_holes filled, lsystem leaves/J/K/M, voronoi_fracture inside. Create custom ones with "group".`,
 

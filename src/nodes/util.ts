@@ -1,5 +1,7 @@
 import { Geometry } from '../core/geometry.ts';
-import { evalGroup, GroupError } from '../core/groups.ts';
+import type { GroupClass } from '../core/geometry.ts';
+import type { EdgeSet } from '../core/edges.ts';
+import { evalEdgeGroup, evalGroup, GroupError } from '../core/groups.ts';
 import { pointNormals } from '../core/topology.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, ParamDef } from '../graph/types.ts';
@@ -23,13 +25,30 @@ export const FRAMES: Record<PlaneName, { U: Vec3; V: Vec3; N: Vec3 }> = {
 
 export const AXES: Record<string, Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], '-x': [-1, 0, 0], '-y': [0, -1, 0], '-z': [0, 0, -1] };
 
-export function mask(g: Geometry, cls: 'point' | 'prim', pattern: string): Uint8Array | null {
+/** Group pattern → mask (null = all). For cls 'edge' the mask runs over edgeList(g); prefer edgeMask. */
+export function mask(g: Geometry, cls: GroupClass, pattern: string): Uint8Array | null {
   try {
     return evalGroup(g, cls, pattern);
   } catch (e: any) {
-    if (e instanceof GroupError) throw new NodeError(e.message, 'group patterns: "name", "!name", "0-10", "@P.y>0", "@class==2", "*"');
+    if (e instanceof GroupError) throw new NodeError(e.message, groupHint(cls));
     throw e;
   }
+}
+
+/** Edge group pattern → EdgeSet ("" = every edge). */
+export function edgeMask(g: Geometry, pattern: string): EdgeSet {
+  try {
+    return evalEdgeGroup(g, pattern);
+  } catch (e: any) {
+    if (e instanceof GroupError) throw new NodeError(e.message, groupHint('edge'));
+    throw e;
+  }
+}
+
+function groupHint(cls: GroupClass) {
+  return cls === 'edge'
+    ? 'edge patterns: "name", "p3-7", "p0-1-2-3-0", "boundary", "angle>30", "border:primgroup", "@P.y>0", "0-10"'
+    : 'group patterns: "name", "!name", "0-10", "@P.y>0", "@class==2", "*"';
 }
 
 /** Point normals: existing point N, else vertex N averaged, else computed from faces. */

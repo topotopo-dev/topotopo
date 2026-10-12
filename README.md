@@ -126,7 +126,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | transform | `transform` `match_size` `mirror` |
 | deform | `noise_displace` `twist` `bend` `taper` `smooth` `peak` `jitter` `ray` |
 | attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_noise` `color` `measure` `connectivity` |
-| group | `group` `delete` |
+| group | `group` `delete` `group_promote` `group_expand` `group_combine` `group_delete` `group_rename` (point, vertex, prim and edge groups) |
 | topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `grid_split` `fill_holes` `bound` `decimate` `remesh` |
 | copy | `copy_xform` `scatter` `copy_to_points` |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |

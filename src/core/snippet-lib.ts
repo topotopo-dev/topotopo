@@ -230,6 +230,8 @@ export function installSnippetLib(g: any, host: any) {
   };
   L.inpointgroup = (i: number, grp: string, pt: number) => C().ingroup(i, 'point', grp, pt);
   L.inprimgroup = (i: number, grp: string, pr: number) => C().ingroup(i, 'prim', grp, pr);
+  L.invertexgroup = (i: number, grp: string, v: number) => C().ingroup(i, 'vertex', grp, v);
+  L.inedgegroup = (i: number, grp: string, a: number, b: number) => C().inedgegroup(i, grp, a, b);
   L.pointattribtype = (i: number, name: string) => C().attrtype(i, 'point', name);
 
   // edits (applied after the wrangle finishes, like VEX). geohandle 0 may be omitted.
@@ -253,6 +255,9 @@ export function installSnippetLib(g: any, host: any) {
   L.setdetailattrib = (...a: any[]) => { const r = h(a); C().setattr('detail', r[0], 0, r[1]); };
   L.setpointgroup = (...a: any[]) => { const r = h(a); C().setgroup('point', r[0], r[1], r[2] ?? 1); };
   L.setprimgroup = (...a: any[]) => { const r = h(a); C().setgroup('prim', r[0], r[1], r[2] ?? 1); };
+  L.setvertexgroup = (...a: any[]) => { const r = h(a); C().setgroup('vertex', r[0], r[1], r[2] ?? 1); };
+  // setedgegroup(0, "name", pt0, pt1, value=1)
+  L.setedgegroup = (...a: any[]) => { const r = h(a); C().setedgegroup(r[0], r[1], r[2], r[3] ?? 1); };
 
   L.print = L.printf = (...a: any[]) => C().log(a.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(' '));
   L.warning = (m: string) => C().log('warning: ' + m);

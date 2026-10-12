@@ -3,6 +3,7 @@ import './generate.ts';
 import './curves.ts';
 import './transform.ts';
 import './attributes.ts';
+import './groups.ts';
 import './topology.ts';
 import './copy.ts';
 import './solid.ts';

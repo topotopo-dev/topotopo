@@ -5,11 +5,13 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { rand, gaussian, rng } from '../core/random.ts';
 import { fractal, makeNoise } from '../core/noise.ts';
-import { connectivity, primArea, primCentroid, primNormals, primPerimeter, vertexNormals, pointNormals, signedVolume } from '../core/topology.ts';
+import { connectivity, primArea, primCentroid, primNormals, primPerimeter, vertexNormals, pointNormals, resolveVertexNormals, signedVolume } from '../core/topology.ts';
+import { edgeList, edgeSetToMask, forEachPrimEdge, maskToEdgeSet } from '../core/edges.ts';
+import { halfEdges } from '../core/halfedge.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { evalRamp, parseColor } from '../graph/params.ts';
 import { runWrangle } from '../core/wrangle.ts';
-import { P, getPointNormals, mask, wrangleTime } from './util.ts';
+import { P, edgeMask, getPointNormals, mask, wrangleTime } from './util.ts';
 import { normalize } from '../core/math.ts';
 
 const CLS = { type: 'enum' as const, options: ['point', 'prim', 'vertex', 'detail'], default: 'point', desc: 'attribute class' };
@@ -169,7 +171,7 @@ defineNode({
   params: {
     names: { type: 'string', default: '', desc: 'space-separated names/patterns, e.g. "Cd uv* ^uv2"', aliases: ['name', 'pattern'] },
     class: { type: 'enum', options: ['all', 'point', 'prim', 'vertex', 'detail'], default: 'all', desc: 'which classes' },
-    groups: { type: 'string', default: '', desc: 'also delete groups matching this pattern' },
+    groups: { type: 'string', default: '', desc: 'also delete groups (of every class) matching this pattern' },
   },
   cook: ({ input, p }) => {
     const g = input(0).clone();
@@ -180,7 +182,7 @@ defineNode({
     }
     if (p.groups) {
       const gm = globRe(p.groups);
-      for (const map of [g.pointGroups, g.primGroups]) for (const k of [...map.keys()]) if (gm(k)) map.delete(k);
+      for (const map of [g.pointGroups, g.primGroups, g.vertexGroups, g.edgeGroups] as Map<string, unknown>[]) for (const k of [...map.keys()]) if (gm(k)) map.delete(k);
     }
     return g;
   },
@@ -433,17 +435,21 @@ defineNode({
 defineNode({
   type: 'group',
   category: 'group',
-  summary: 'Create/modify a point or prim group by pattern, JS expression, bounding box, normal direction or random %.',
+  summary: 'Create/modify a point, prim, vertex or edge group by pattern, JS expression, bounding box, normal direction or random %.',
+  description:
+    'Edge groups are sets of point pairs. Edge patterns add selectors: "boundary" (unshared edges), "shared", "angle>30" ' +
+    '(dihedral angle in degrees), "length<0.1", "border:top" (border of a prim group), "p3-7" and chains "p0-1-2-3-0", ' +
+    '"2e1" (side 1 of prim 2); index ranges address the unique-edge list. See help topic "groups".',
   aliases: ['group_create', 'groupcreate', 'select'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
     name: { type: 'string', default: 'group1', desc: 'group name' },
-    class: { type: 'enum', options: ['prim', 'point'], default: 'prim', desc: 'element class' },
-    pattern: { type: 'group', default: '', desc: 'base pattern ("" = no pattern filter): names, ranges, "@P.y>0", "!grp"' },
-    expr: { type: 'code', default: '', desc: 'JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9"' },
-    bbox_min: { type: 'vec3', default: [-1e9, -1e9, -1e9], desc: 'keep elements inside this box (points; prims use centroid)' },
+    class: { type: 'enum', options: ['prim', 'point', 'vertex', 'edge'], default: 'prim', desc: 'element class (edge = point pairs)' },
+    pattern: { type: 'group', default: '', desc: 'base pattern ("" = no pattern filter): names, ranges, "@P.y>0", "!grp"; edges also "boundary", "angle>30", "p3-7", "border:grp"' },
+    expr: { type: 'code', default: '', desc: 'JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9" (vertex class runs over vertices; edge class: the expression must hold for both points of the edge)' },
+    bbox_min: { type: 'vec3', default: [-1e9, -1e9, -1e9], desc: 'keep elements inside this box (points; prims use centroid; vertices their point; edges their midpoint)' },
     bbox_max: { type: 'vec3', default: [1e9, 1e9, 1e9], desc: 'box max' },
-    normal: { type: 'vec3', default: [0, 0, 0], desc: 'keep elements whose normal is within spread_angle of this direction ([0,0,0] = off)' },
+    normal: { type: 'vec3', default: [0, 0, 0], desc: 'keep elements whose normal is within spread_angle of this direction ([0,0,0] = off; vertices use vertex normals, edges the mean of their polygons)' },
     spread_angle: { type: 'float', default: 30, desc: 'normal test cone half-angle in degrees' },
     random: { type: 'float', default: 1, min: 0, max: 1, desc: 'keep this fraction at random (1 = all)' },
     seed: P.seed(),
@@ -453,6 +459,14 @@ defineNode({
   cook: (ctx) => {
     const { input, p, engine, vars, inputs } = ctx;
     let g = input(0).clone();
+    if (p.class === 'vertex' || p.class === 'edge') return groupVertexEdge(g, p.class, p, (code, runOver) => {
+      const tmp = g.clone();
+      const r = runWrangle(tmp, {
+        code, runOver, mask: null,
+        inputs: [g, ...inputs.slice(1).map((x) => x ?? new Geometry())], vars, host: engine.host, timeoutMs: engine.scriptTimeoutMs,
+      });
+      return r.geo;
+    });
     const cls: 'point' | 'prim' = p.class;
     const n = cls === 'point' ? g.numPoints : g.numPrims;
     const sel = new Uint8Array(n).fill(1);
@@ -491,20 +505,100 @@ defineNode({
   },
 });
 
+/** group node for vertex and edge classes (point/prim keep their original code path above). */
+function groupVertexEdge(g: Geometry, cls: 'vertex' | 'edge', p: Record<string, any>, wrangle: (code: string, runOver: 'points' | 'vertices') => Geometry): Geometry {
+  const list = cls === 'edge' ? edgeList(g) : null;
+  const n = cls === 'vertex' ? g.numVertices : list!.count;
+  const sel = new Uint8Array(n).fill(1);
+  const base = mask(g, cls, p.pattern);
+  if (base) for (let i = 0; i < n; i++) sel[i] &= base[i];
+  const Pd = g.P;
+  const bmin = p.bbox_min, bmax = p.bbox_max;
+  const hasBox = bmin.some((v: number) => v > -1e8) || bmax.some((v: number) => v < 1e8);
+  const useN = Math.hypot(...p.normal) > 0;
+  const dir = useN ? normalize(p.normal) : [0, 0, 0];
+  const cosT = Math.cos((p.spread_angle * Math.PI) / 180);
+  let nrm: (i: number) => number[] = () => [0, 0, 0];
+  if (useN && cls === 'vertex') { const vn = resolveVertexNormals(g); nrm = (i) => [vn[i * 3], vn[i * 3 + 1], vn[i * 3 + 2]]; }
+  else if (useN) {
+    const he = halfEdges(g), fn = primNormals(g), pn = getPointNormals(g);
+    nrm = (i) => {
+      const a = list!.a[i], b = list!.b[i], e = he.edgeId(a, b);
+      const s = [0, 0, 0];
+      if (e >= 0) for (const f of he.edgeFaces(e)) for (let c = 0; c < 3; c++) s[c] += fn[f * 3 + c];
+      if (Math.hypot(s[0], s[1], s[2]) < 1e-12) for (let c = 0; c < 3; c++) s[c] = pn[a * 3 + c] + pn[b * 3 + c];
+      return normalize(s as [number, number, number]);
+    };
+  }
+  const pos = (i: number) => {
+    if (cls === 'vertex') { const q = g.vertexPoint[i] * 3; return [Pd[q], Pd[q + 1], Pd[q + 2]]; }
+    const a = list!.a[i] * 3, b = list!.b[i] * 3;
+    return [(Pd[a] + Pd[b]) / 2, (Pd[a + 1] + Pd[b + 1]) / 2, (Pd[a + 2] + Pd[b + 2]) / 2];
+  };
+  for (let i = 0; i < n; i++) {
+    if (!sel[i]) continue;
+    const c = pos(i);
+    if (hasBox && !(c[0] >= bmin[0] && c[0] <= bmax[0] && c[1] >= bmin[1] && c[1] <= bmax[1] && c[2] >= bmin[2] && c[2] <= bmax[2])) { sel[i] = 0; continue; }
+    if (useN) { const v = nrm(i); if (v[0] * dir[0] + v[1] * dir[1] + v[2] * dir[2] < cosT) { sel[i] = 0; continue; } }
+    if (p.random < 1 && rand(i, p.seed + 0.77) >= p.random) sel[i] = 0;
+  }
+  if (p.expr && p.expr.trim()) {
+    const code = `@group___pfexpr = (${p.expr}) ? 1 : 0;`;
+    if (cls === 'vertex') {
+      const em = wrangle(code, 'vertices').vertexGroups.get('__pfexpr')!;
+      for (let i = 0; i < n; i++) sel[i] &= em[i];
+    } else {
+      const pm = wrangle(code, 'points').pointGroups.get('__pfexpr')!;
+      for (let i = 0; i < n; i++) sel[i] &= pm[list!.a[i]] & pm[list!.b[i]];
+    }
+  }
+  if (p.invert) for (let i = 0; i < n; i++) sel[i] = sel[i] ? 0 : 1;
+  if (cls === 'vertex') {
+    const prev = g.vertexGroups.get(p.name);
+    if (prev && p.mode !== 'replace')
+      for (let i = 0; i < n; i++) sel[i] = p.mode === 'union' ? sel[i] | prev[i] : p.mode === 'intersect' ? sel[i] & prev[i] : prev[i] & (sel[i] ^ 1);
+    g.addGroup('vertex', p.name, sel);
+    return g;
+  }
+  const prevSet = g.edgeGroups.get(p.name);
+  if (prevSet && p.mode !== 'replace') {
+    const prev = edgeSetToMask(list!, prevSet);
+    for (let i = 0; i < n; i++) sel[i] = p.mode === 'union' ? sel[i] | prev[i] : p.mode === 'intersect' ? sel[i] & prev[i] : prev[i] & (sel[i] ^ 1);
+  }
+  g.addEdgeGroup(p.name, maskToEdgeSet(list!, sel));
+  return g;
+}
+
 defineNode({
   type: 'delete',
   category: 'group',
-  summary: 'Delete (or keep only) points/prims matching a group pattern (Houdini Blast).',
+  summary: 'Delete (or keep only) points/prims/vertices matching a group pattern, or the prims using an edge group (Houdini Blast).',
   aliases: ['blast', 'remove', 'keep'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
     group: { type: 'group', default: '', desc: 'what to delete: group name, "!name", range "0-10", or "@P.y<0"' },
-    class: { type: 'enum', options: ['prim', 'point'], default: 'prim', desc: 'element class of the pattern' },
+    class: {
+      type: 'enum', options: ['prim', 'point', 'vertex', 'edge'], default: 'prim',
+      desc: 'element class of the pattern. vertex: removes those corners (polygons losing one are deleted, polylines shrink); edge: deletes every prim that uses one of the edges (dissolving edges is a separate polygon-modelling op)',
+    },
     keep: { type: 'bool', default: false, desc: 'invert: keep the matches, delete the rest', aliases: ['invert', 'negate', 'delete_non_selected'] },
-    remove_unused_points: { type: 'bool', default: true, desc: 'drop points no longer used by prims (prim mode)' },
+    remove_unused_points: { type: 'bool', default: true, desc: 'drop points no longer used by prims (prim, vertex and edge modes)' },
   },
   cook: ({ input, p }) => {
     const g = input(0);
+    if (p.class === 'vertex') {
+      const m = mask(g, 'vertex', p.group);
+      const keep = new Uint8Array(g.numVertices);
+      for (let i = 0; i < keep.length; i++) { const hit = m ? m[i] : 1; keep[i] = p.keep ? hit : hit ? 0 : 1; }
+      return g.subsetVertices(keep, p.remove_unused_points && g.numPrims > 0);
+    }
+    if (p.class === 'edge') {
+      const es = edgeMask(g, p.group);
+      const hit = new Uint8Array(g.numPrims);
+      forEachPrimEdge(g, (pr, _v0, _v1, a, b) => { if (es.has(a, b)) hit[pr] = 1; });
+      const keep = Uint8Array.from(hit, (h) => (p.keep ? h : h ? 0 : 1));
+      return g.numPrims === 0 ? g : g.subsetPrims(keep, p.remove_unused_points);
+    }
     const cls: 'point' | 'prim' = p.class;
     const m = mask(g, cls, p.group);
     const n = cls === 'point' ? g.numPoints : g.numPrims;
@@ -643,6 +737,7 @@ defineNode({
       out.vertexPoint = Int32Array.from(vtx, (v) => g.vertexPoint[v]);
       out.primClosed = Uint8Array.from(order, (pr) => g.primClosed[pr]);
       out.primGroups = new Map([...g.primGroups].map(([k, m]) => [k, Uint8Array.from(order, (pr) => m[pr])]));
+      out.vertexGroups = new Map([...g.vertexGroups].map(([k, m]) => [k, Uint8Array.from(vtx, (v) => m[v])]));
       return out;
     }
     const inv = new Int32Array(n);
@@ -651,6 +746,7 @@ defineNode({
     out.points = g.points.gather(order);
     for (let v = 0; v < out.numVertices; v++) out.vertexPoint[v] = inv[g.vertexPoint[v]];
     out.pointGroups = new Map([...g.pointGroups].map(([k, m]) => [k, Uint8Array.from(order, (i) => m[i])]));
+    out.edgeGroups = new Map([...g.edgeGroups].map(([k, e]) => [k, e.remap(inv)]));
     return out;
   },
 });
@@ -666,11 +762,13 @@ defineNode({
   params: {
     class: { type: 'enum', options: ['vertex', 'point', 'prim'], default: 'vertex', desc: 'vertex = smooth with hard edges past cusp_angle' },
     cusp_angle: { type: 'float', default: 60, min: 0, max: 180, desc: 'vertex mode: faces meeting sharper than this keep hard edges' },
+    hard_edges: { type: 'group', default: '', desc: 'vertex mode: edge group or edge pattern that is always hard, on top of cusp_angle ("" = none), e.g. "seams", "boundary", "angle>30", "p0-1-2"', aliases: ['hardedges', 'hard_edge_group'] },
   },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     for (const c of ['point', 'vertex', 'prim'] as const) if (c !== p.class) g.table(c).delete('N');
-    const data = p.class === 'point' ? pointNormals(g) : p.class === 'prim' ? primNormals(g) : vertexNormals(g, p.cusp_angle);
+    const hard = p.class === 'vertex' && p.hard_edges ? edgeMask(g, p.hard_edges) : null;
+    const data = p.class === 'point' ? pointNormals(g) : p.class === 'prim' ? primNormals(g) : vertexNormals(g, p.cusp_angle, hard);
     (g.table(p.class).add('N', 'float', 3).data as Float64Array).set(data);
     return g;
   },
