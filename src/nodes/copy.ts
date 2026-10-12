@@ -1,12 +1,12 @@
 // Scattering and instancing.
-import { Attribute, AttribTable, GeoBuilder, Geometry } from '../core/geometry.ts';
+import { Attribute, AttribTable, GeoBuilder, Geometry, defaultValueFor } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { rng } from '../core/random.ts';
 import { connectivity, primNormals, triangulate } from '../core/topology.ts';
 import { composePackedXforms } from '../core/packed.ts';
-import { KDTree, TriBVH } from '../core/spatial.ts';
+import { KDTree, TriBVH, neighbourBuffer } from '../core/spatial.ts';
 import { TriSurface, elementSeed, minDistanceSelect, relaxPoints } from '../core/pcg.ts';
 import type { TriPoint } from '../core/pcg.ts';
 import { lookAtBasis, m4apply, m4applyDir, m4basis, m4euler, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize, qAxisAngle, qFromMat, qMul, qNormalize } from '../core/math.ts';
@@ -18,74 +18,238 @@ import { P, mask } from './util.ts';
  * Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. With `scale`, candidate i has
  * the radius rmax × scale[i] (pairs use the mean of their radii), so the spacing follows a varying density (smaller
  * radii where points should be denser); without it every candidate has rmax.
+ *
+ * Typed arrays throughout: each point's neighbour list (as KDTree.within orders it) and each pair's weight contribution
+ * (1 - d / r)^8 are computed once into CSR arrays and reused when a removal lowers the neighbours' weights; the max-heap
+ * keeps the weights of its slots next to the slots. Without scale, everything runs on the KD-tree's slot numbering
+ * (points in tree order, for locality) and a pair's contribution is computed once for both lists (|a - b| is symmetric
+ * bit for bit); with scale, pairs are found in point order as before (their weights accumulate in that order). The
+ * heap does the same operations on the same weights (entries relabelled), so the kept subset is the same as the
+ * straightforward version's.
  */
 export function sampleEliminate(pos: Float64Array, target: number, rmax: number, scale?: ArrayLike<number>): Int32Array {
   const n = pos.length / 3;
   if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
   const kd = new KDTree(pos);
   const r2 = 2 * rmax;
-  const nbrs: Int32Array[] = new Array(n);
-  const w = new Float64Array(n);
+  const buf = neighbourBuffer();
+  // neighbour lists in CSR form over labels (KD slots without scale, point indices with scale); w by label
+  const start = new Int32Array(n + 1), w = new Float64Array(n);
+  let nbr: Int32Array, con: Float64Array;
+  let labelOf: Int32Array | null = null;
   if (!scale) {
-    for (let i = 0; i < n; i++) {
-      const list = kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], r2).filter((j) => j !== i);
-      nbrs[i] = Int32Array.from(list);
-      for (const j of list) {
-        const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-        w[i] += Math.pow(1 - Math.min(d, r2) / r2, 8);
+    const order = kd.idx, TP = kd.TP;
+    labelOf = new Int32Array(n);
+    for (let a = 0; a < n; a++) labelOf[order[a]] = a;
+    let list = new Int32Array(Math.max(16, n * 20)), len = 0;
+    for (let a = 0; a < n; a++) {
+      const i = order[a];
+      const m = kd.neighbours(TP[a * 3], TP[a * 3 + 1], TP[a * 3 + 2], r2, buf);
+      if (len + m > list.length) { const g = new Int32Array(Math.max(len + m, list.length * 2)); g.set(list); list = g; }
+      const idx = buf.idx;
+      for (let k = 0; k < m; k++) { const j = idx[k]; if (j !== i) list[len++] = labelOf[j]; }
+      start[a + 1] = len;
+    }
+    nbr = list;
+    // w[a] = sum over a's list (in list order) of (1 - min(d, r2) / r2)^8, d = |pos_a - pos_b|
+    con = new Float64Array(len);
+    for (let a = 0; a < n; a++) {
+      const ax = TP[a * 3], ay = TP[a * 3 + 1], az = TP[a * 3 + 2];
+      for (let e = start[a]; e < start[a + 1]; e++) {
+        const b = nbr[e];
+        let c = -1;
+        if (b < a) for (let f = start[b]; f < start[b + 1]; f++) if (nbr[f] === a) { c = con[f]; break; }
+        if (c < 0) {
+          const d = Math.hypot(ax - TP[b * 3], ay - TP[b * 3 + 1], az - TP[b * 3 + 2]);
+          c = Math.pow(1 - Math.min(d, r2) / r2, 8);
+        }
+        con[e] = c;
+        w[a] += c;
       }
     }
   } else {
     // a pair interacts below rmax × (s_i + s_j) ≤ 2 rmax × max(s_i, s_j): it is found from the side with the larger radius
-    const lists: number[][] = Array.from({ length: n }, () => []);
+    let pi = new Int32Array(1024), pj = new Int32Array(1024), pf = new Float64Array(1024), np = 0;
+    const deg = new Int32Array(n);
     for (let i = 0; i < n; i++) {
       const si = scale[i];
-      for (const j of kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 2 * rmax * si)) {
+      const m = kd.neighbours(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 2 * rmax * si, buf);
+      const idx = buf.idx;
+      for (let k = 0; k < m; k++) {
+        const j = idx[k];
         if (j === i || scale[j] > si || (scale[j] === si && j < i)) continue;
         const rr = rmax * (si + scale[j]);
         const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
         if (d >= rr) continue;
         const f = Math.pow(1 - d / rr, 8);
         w[i] += f; w[j] += f;
-        lists[i].push(j); lists[j].push(i);
+        if (np === pi.length) {
+          const gi = new Int32Array(np * 2), gj = new Int32Array(np * 2), gf = new Float64Array(np * 2);
+          gi.set(pi); gj.set(pj); gf.set(pf); pi = gi; pj = gj; pf = gf;
+        }
+        pi[np] = i; pj[np] = j; pf[np] = f; np++;
+        deg[i]++; deg[j]++;
       }
     }
-    for (let i = 0; i < n; i++) nbrs[i] = Int32Array.from(lists[i]);
-  }
-  // max-heap on w
-  const heap = Int32Array.from({ length: n }, (_, i) => i);
-  const where = Int32Array.from({ length: n }, (_, i) => i);
-  let size = n;
-  const swap = (a: number, b: number) => { const t = heap[a]; heap[a] = heap[b]; heap[b] = t; where[heap[a]] = a; where[heap[b]] = b; };
-  const up = (k: number) => { while (k > 0) { const p = (k - 1) >> 1; if (w[heap[p]] >= w[heap[k]]) break; swap(p, k); k = p; } };
-  const down = (k: number) => {
-    for (;;) {
-      const l = 2 * k + 1, r = l + 1;
-      let m = k;
-      if (l < size && w[heap[l]] > w[heap[m]]) m = l;
-      if (r < size && w[heap[r]] > w[heap[m]]) m = r;
-      if (m === k) break;
-      swap(k, m); k = m;
+    // each pair is listed at both ends in discovery order; the removal weight of a pair equals its creation weight
+    // (same distance, same summed radius), so it is stored with it
+    for (let i = 0; i < n; i++) start[i + 1] = start[i] + deg[i];
+    nbr = new Int32Array(start[n]); con = new Float64Array(start[n]);
+    const fill = start.slice(0, n);
+    for (let k = 0; k < np; k++) {
+      const i = pi[k], j = pj[k], f = pf[k];
+      nbr[fill[i]] = j; con[fill[i]++] = f;
+      nbr[fill[j]] = i; con[fill[j]++] = f;
     }
-  };
-  for (let k = (size >> 1) - 1; k >= 0; k--) down(k);
+  }
+  // max-heap on w: heap[k] = label in heap position k, hw[k] = its weight, where[label] = heap position
+  const heap = new Int32Array(n), where = new Int32Array(n), hw = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const a = labelOf ? labelOf[i] : i; heap[i] = a; where[a] = i; hw[i] = w[a]; }
+  let size = n;
+  for (let k = (size >> 1) - 1; k >= 0; k--) heapDown(heap, hw, where, size, k);
   const removed = new Uint8Array(n);
   while (size > target) {
-    const i = heap[0];
-    removed[i] = 1;
-    swap(0, size - 1); size--; down(0);
-    for (const j of nbrs[i]) {
-      if (removed[j]) continue;
-      const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-      const rr = scale ? rmax * (scale[i] + scale[j]) : r2;
-      w[j] -= Math.pow(1 - Math.min(d, rr) / rr, 8);
-      const k = where[j];
-      if (k < size) { down(k); up(where[j]); }
+    const a = heap[0];
+    removed[a] = 1;
+    heapSwap(heap, hw, where, 0, size - 1); size--; heapDown(heap, hw, where, size, 0);
+    for (let e = start[a]; e < start[a + 1]; e++) {
+      const b = nbr[e];
+      if (removed[b]) continue;
+      w[b] -= con[e];
+      const k = where[b];
+      hw[k] = w[b];
+      if (k < size) { heapDown(heap, hw, where, size, k); heapUp(heap, hw, where, where[b]); }
     }
   }
-  const out: number[] = [];
-  for (let i = 0; i < n; i++) if (!removed[i]) out.push(i);
-  return Int32Array.from(out);
+  let kept = 0;
+  for (let i = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) kept++;
+  const out = new Int32Array(kept);
+  for (let i = 0, o = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) out[o++] = i;
+  return out;
+}
+
+// max-heap of sampleEliminate on weights hw (by heap position): module functions, so the optimised code keeps its call
+// targets from one call to the next (per-call closures made every later call deoptimise)
+function heapSwap(heap: Int32Array, hw: Float64Array, where: Int32Array, x: number, y: number) {
+  const t = heap[x]; heap[x] = heap[y]; heap[y] = t;
+  const tw = hw[x]; hw[x] = hw[y]; hw[y] = tw;
+  where[heap[x]] = x; where[heap[y]] = y;
+}
+function heapUp(heap: Int32Array, hw: Float64Array, where: Int32Array, k: number) {
+  while (k > 0) { const p = (k - 1) >> 1; if (hw[p] >= hw[k]) break; heapSwap(heap, hw, where, p, k); k = p; }
+}
+function heapDown(heap: Int32Array, hw: Float64Array, where: Int32Array, size: number, k: number) {
+  for (;;) {
+    const l = 2 * k + 1, r = l + 1;
+    let m = k;
+    if (l < size && hw[l] > hw[m]) m = l;
+    if (r < size && hw[r] > hw[m]) m = r;
+    if (m === k) break;
+    heapSwap(heap, hw, where, k, m); k = m;
+  }
+}
+
+/**
+ * The surface-scatter result for the points keep[k] (triangle candT[c], barycentric weights candW[3c..3c+2], position
+ * pos[3c..3c+2] for c = keep[k]): what GeoBuilder.build gives for points added with provenance {i: corners, w} plus the
+ * N, sourceprim and sourceprimuv attributes (the scatter node's builder path without emitted vertex/prim attributes),
+ * assembled in typed arrays. Source point attributes not in skip are interpolated (floats blended with the weights,
+ * others from the heaviest corner), P follows them, then N, sourceprim and sourceprimuv; no prims, no groups.
+ */
+function scatterSurfaceGeo(
+  g: Geometry, skip: Set<string>, keep: ArrayLike<number>, candT: Int32Array, candW: Float64Array, pos: Float64Array,
+  tris: ArrayLike<number>, triPrim: ArrayLike<number>, fn: Float64Array, writeSourceprim: boolean, writePrimuv: boolean,
+): Geometry {
+  const n = keep.length, vp = g.vertexPoint;
+  const corner = new Int32Array(n * 3), wt = new Float64Array(n * 3), dom = new Int32Array(n);
+  for (let k = 0; k < n; k++) {
+    const c = keep[k], t = candT[c];
+    let best = -1, bw = -Infinity;
+    for (let j = 0; j < 3; j++) {
+      const q = vp[tris[t * 3 + j]], wj = candW[c * 3 + j];
+      corner[k * 3 + j] = q; wt[k * 3 + j] = wj;
+      if (wj > bw) { bw = wj; best = q; }
+    }
+    dom[k] = best;
+  }
+  const out = Object.create(Geometry.prototype) as Geometry;
+  const pts = new AttribTable(n);
+  for (const [name, a] of g.points.map) {
+    if (skip.has(name) || name === 'P') continue;
+    if (a.isArray) { pts.map.set(name, a.gather(dom)); continue; }
+    const d = Attribute.create(a.type, a.size, n, a.def), sz = a.size;
+    if (a.type === 'float') {
+      const sd = a.data as Float64Array, dd = d.data as Float64Array;
+      for (let k = 0; k < n; k++)
+        for (let c = 0; c < sz; c++) {
+          let acc = 0;
+          for (let j = 0; j < 3; j++) acc += sd[corner[k * 3 + j] * sz + c] * wt[k * 3 + j];
+          dd[k * sz + c] = acc;
+        }
+    } else if (a.type === 'string') {
+      const sd = a.data as string[], dd = d.data as string[];
+      for (let k = 0; k < n; k++) if (dom[k] >= 0) dd[k] = String(sd[dom[k]]);
+    } else {
+      const sd = a.data as Int32Array, dd = d.data as Int32Array, cnt = a.count;
+      for (let k = 0; k < n; k++) {
+        const j = dom[k];
+        if (j < 0) continue;
+        if (j < cnt) for (let c = 0; c < sz; c++) dd[k * sz + c] = sd[j * sz + c];
+        else d.set(k, a.get(j));
+      }
+    }
+    pts.map.set(name, d);
+  }
+  const P = pts.add('P', 'float', 3).data as Float64Array;
+  for (let k = 0; k < n; k++) { const c = keep[k]; P[k * 3] = pos[c * 3]; P[k * 3 + 1] = pos[c * 3 + 1]; P[k * 3 + 2] = pos[c * 3 + 2]; }
+  // N: the prim normal, or the point N interpolated and normalised
+  const nA = g.points.get('N');
+  const exN = pts.get('N');
+  const NA = exN && exN.type === 'float' && exN.size === 3 ? exN : pts.add('N', 'float', 3, defaultValueFor('N', 3, 'float'));
+  const Nd = NA.data as Float64Array;
+  const ndat = nA && nA.size === 3 ? (nA.data as Float64Array) : null;
+  for (let k = 0; k < n; k++) {
+    const c = keep[k], pr = triPrim[candT[c]];
+    if (ndat) {
+      const w0 = candW[c * 3], w1 = candW[c * 3 + 1], w2 = candW[c * 3 + 2];
+      const i0 = corner[k * 3], i1 = corner[k * 3 + 1], i2 = corner[k * 3 + 2];
+      const x = w0 * ndat[i0 * 3] + w1 * ndat[i1 * 3] + w2 * ndat[i2 * 3];
+      const y = w0 * ndat[i0 * 3 + 1] + w1 * ndat[i1 * 3 + 1] + w2 * ndat[i2 * 3 + 1];
+      const z = w0 * ndat[i0 * 3 + 2] + w1 * ndat[i1 * 3 + 2] + w2 * ndat[i2 * 3 + 2];
+      const l = Math.hypot(x, y, z);
+      if (l > 1e-20) { Nd[k * 3] = x / l; Nd[k * 3 + 1] = y / l; Nd[k * 3 + 2] = z / l; } else { Nd[k * 3] = 0; Nd[k * 3 + 1] = 0; Nd[k * 3 + 2] = 0; }
+    } else { Nd[k * 3] = fn[pr * 3]; Nd[k * 3 + 1] = fn[pr * 3 + 1]; Nd[k * 3 + 2] = fn[pr * 3 + 2]; }
+  }
+  if (writeSourceprim) {
+    const ex = pts.get('sourceprim');
+    const SA = ex && ex.type === 'int' && ex.size === 1 ? ex : pts.add('sourceprim', 'int', 1, defaultValueFor('sourceprim', 1, 'int'));
+    const Sd = SA.data as Int32Array;
+    for (let k = 0; k < n; k++) Sd[k] = triPrim[candT[keep[k]]];
+  }
+  if (writePrimuv) {
+    const ex = pts.get('sourceprimuv');
+    const UA = ex && ex.type === 'float' && ex.size === 3 ? ex : pts.add('sourceprimuv', 'float', 3, defaultValueFor('sourceprimuv', 3, 'float'));
+    const Ud = UA.data as Float64Array;
+    for (let k = 0; k < n; k++) {
+      const c = keep[k], t = candT[c], pr = triPrim[t];
+      let u = 0, v = 0;
+      for (let j = 0; j < 3; j++) { const q = cornerPrimUV(g, tris[t * 3 + j], pr); u += candW[c * 3 + j] * q[0]; v += candW[c * 3 + j] * q[1]; }
+      Ud[k * 3] = u; Ud[k * 3 + 1] = v; Ud[k * 3 + 2] = 0;
+    }
+  }
+  out.points = pts;
+  out.vertices = g.vertices.gather(new Int32Array(0));
+  out.prims = g.prims.gather(new Int32Array(0));
+  out.detail = g.detail.clone();
+  out.primStart = new Int32Array(1);
+  out.vertexPoint = new Int32Array(0);
+  out.primClosed = new Uint8Array(0);
+  out.pointGroups = new Map();
+  out.primGroups = new Map();
+  out.vertexGroups = new Map();
+  out.edgeGroups = new Map();
+  out.volumes = g.volumes.slice();
+  return out;
 }
 
 /** Most points one scatter may make (guards against runaway densities). */
@@ -239,8 +403,8 @@ defineNode({
         }
       }
     };
-    const finish = (): Geometry => {
-      const out = b.build();
+    const finish = (built?: Geometry): Geometry => {
+      const out = built ?? b.build();
       for (const e of emits) { out.vertices.delete(e.name); out.prims.delete(e.name); }
       if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }
       return out;
@@ -271,7 +435,8 @@ defineNode({
       const count = scatterCount(p, total, mA ? maskedArea : area, warn);
       const ncand = p.relax || extra ? count * 5 : count;
       const fn = primNormals(g);
-      const cand: { t: number; w: number[]; pos: number[] }[] = [];
+      // candidates: triangle, barycentric weights and position, in typed arrays
+      const candT = new Int32Array(ncand), candW = new Float64Array(ncand * 3);
       const pos = new Float64Array(ncand * 3);
       for (let k = 0; k < ncand; k++) {
         const x = r() * total;
@@ -279,25 +444,26 @@ defineNode({
         while (lo < hi) { const mid = (lo + hi) >> 1; if (cdf[mid] < x) lo = mid + 1; else hi = mid; }
         const t = lo;
         const s1 = Math.sqrt(r()), s2 = r();
-        const w = [1 - s1, s1 * (1 - s2), s1 * s2];
-        const ids = [0, 1, 2].map((j) => vp[tris[t * 3 + j]]);
-        const q = [0, 1, 2].map((c) => w[0] * Pd[ids[0] * 3 + c] + w[1] * Pd[ids[1] * 3 + c] + w[2] * Pd[ids[2] * 3 + c]);
-        cand.push({ t, w, pos: q });
-        pos.set(q, k * 3);
+        const w0 = 1 - s1, w1 = s1 * (1 - s2), w2 = s1 * s2;
+        const i0 = vp[tris[t * 3]] * 3, i1 = vp[tris[t * 3 + 1]] * 3, i2 = vp[tris[t * 3 + 2]] * 3;
+        for (let c = 0; c < 3; c++) pos[k * 3 + c] = w0 * Pd[i0 + c] + w1 * Pd[i1 + c] + w2 * Pd[i2 + c];
+        candT[k] = t; candW[k * 3] = w0; candW[k * 3 + 1] = w1; candW[k * 3 + 2] = w2;
       }
       // weight at a point of triangle t (barycentrics w)
-      const wAt = (t: number, w: number[]) => {
+      const wAt = (t: number, w: ArrayLike<number>, o = 0) => {
         let s = 0;
-        for (let j = 0; j < 3; j++) { const v = tris[t * 3 + j]; s += w[j] * dw(v, vp[v], triPrim[t]); }
+        for (let j = 0; j < 3; j++) { const v = tris[t * 3 + j]; s += w[o + j] * dw(v, vp[v], triPrim[t]); }
         return s;
       };
       const wMean = total / area;
       // spacing that follows the weights (sqrt(mean / local) of the uniform spacing); the legacy auto mode with only
       // density_attrib keeps uniform radii, which even the density out
       const adaptive = weighted && (!!mA || p.generate_by !== 'auto');
-      const rscale = adaptive && p.relax && count > 0
-        ? Float64Array.from(cand, (c) => { const wl = wAt(c.t, c.w); return wl > 0 ? Math.min(4, Math.max(0.25, Math.sqrt(wMean / wl))) : 4; })
-        : undefined;
+      let rscale: Float64Array | undefined;
+      if (adaptive && p.relax && count > 0) {
+        rscale = new Float64Array(ncand);
+        for (let k = 0; k < ncand; k++) { const wl = wAt(candT[k], candW, k * 3); rscale[k] = wl > 0 ? Math.min(4, Math.max(0.25, Math.sqrt(wMean / wl))) : 4; }
+      }
       let keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count)), rscale) : Int32Array.from({ length: ncand }, (_, i) => i);
       const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
       if (extra) {
@@ -307,12 +473,14 @@ defineNode({
         for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
         for (let k = 0; k < ncand; k++) if (!inKeep[k]) order[o++] = k;
         keep = minDistanceSelect(pos, order, md, count,
-          perPrim ? (k) => perPrim[triPrim[cand[k].t]] < cap : undefined,
-          perPrim ? (k) => { perPrim[triPrim[cand[k].t]]++; } : undefined).sort();
+          perPrim ? (k) => perPrim[triPrim[candT[k]]] < cap : undefined,
+          perPrim ? (k) => { perPrim[triPrim[candT[k]]]++; } : undefined).sort();
       }
-      let pts = Array.from(keep, (k) => cand[k]);
-      if (p.relax_iterations > 0 && pts.length > 1) {
+      // the chosen candidates, as indices into the candidate arrays
+      let outKeep: ArrayLike<number> = keep, outT = candT, outW = candW, outPos = pos;
+      if (p.relax_iterations > 0 && keep.length > 1) {
         const surf = new TriSurface(g, tris);
+        let pts = Array.from(keep, (k) => ({ t: candT[k], w: [candW[k * 3], candW[k * 3 + 1], candW[k * 3 + 2]], pos: [pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]] }));
         const n = pts.length;
         const RP = new Float64Array(n * 3);
         pts = pts.map((c, i) => { RP.set(c.pos, i * 3); return { t: c.t, w: c.w.slice(), pos: c.pos.slice() }; });
@@ -344,9 +512,23 @@ defineNode({
             perPrim ? (i) => { perPrim[triPrim[pts[i].t]]++; } : undefined).sort();
         }
         if (order.length < n) pts = Array.from(order, (i) => pts[i]);
+        // the relaxed points become the candidate arrays of the output
+        const m = pts.length;
+        outT = new Int32Array(m); outW = new Float64Array(m * 3); outPos = new Float64Array(m * 3);
+        for (let i = 0; i < m; i++) {
+          const c = pts[i];
+          outT[i] = c.t;
+          outW[i * 3] = c.w[0]; outW[i * 3 + 1] = c.w[1]; outW[i * 3 + 2] = c.w[2];
+          outPos[i * 3] = c.pos[0]; outPos[i * 3 + 1] = c.pos[1]; outPos[i * 3 + 2] = c.pos[2];
+        }
+        outKeep = Int32Array.from({ length: m }, (_, i) => i);
       }
+      // no emitted vertex/prim attributes: assemble the result directly (what the builder path below gives)
+      if (!emits.length) return finish(scatterSurfaceGeo(g, b.skip.point, outKeep, outT, outW, outPos, tris, triPrim, fn, !!sp, !!puv));
       const nA = g.points.get('N');
-      for (const c of pts) {
+      for (let o = 0; o < outKeep.length; o++) {
+        const k = outKeep[o];
+        const c = { t: outT[k], w: [outW[k * 3], outW[k * 3 + 1], outW[k * 3 + 2]], pos: [outPos[k * 3], outPos[k * 3 + 1], outPos[k * 3 + 2]] };
         const verts = [tris[c.t * 3], tris[c.t * 3 + 1], tris[c.t * 3 + 2]];
         const ids = verts.map((v) => vp[v]);
         const id = b.addPoint(c.pos[0], c.pos[1], c.pos[2], { i: ids, w: c.w });
@@ -514,9 +696,115 @@ export function pointTransform(t: Geometry, i: number): Mat4 {
   return M;
 }
 
+/**
+ * pointTransform + m4normalMatrix for many template points without allocating: xf(i) fills xf.M and xf.Nm with the
+ * values pointTransform(t, i) and m4normalMatrix of it would return, by the same arithmetic in the same order (the
+ * products with the identity's zeros and ones included, so signed zeros match too). Returns null when an attribute
+ * pointTransform would read is not a plain numeric tuple (string, array, a pscale that is not a scalar); callers then
+ * use pointTransform.
+ */
+function pointXformer(t: Geometry): ({ (i: number): void; M: Float64Array; Nm: Float64Array }) | null {
+  const get = (n: string) => t.points.get(n);
+  const numeric = (a: Attribute | undefined | null) => !!a && a.type !== 'string' && !a.isArray;
+  const Pd = t.P;
+  const trA = get('trans'), oA = get('orient'), NA = get('N') ?? get('v'), upA = get('up'), rotA = get('rot'), psA = get('pscale'), scA = get('scale'), pvA = get('pivot');
+  const tr = trA && trA.size === 3 ? trA : null, orient = oA && oA.size === 4 ? oA : null;
+  const N = !orient && NA && NA.size === 3 ? NA : null, up = N && upA && upA.size === 3 ? upA : null;
+  const rot = rotA && rotA.size === 4 ? rotA : null, sc = scA && scA.size === 3 ? scA : null, pv = pvA && pvA.size === 3 ? pvA : null;
+  for (const a of [tr, orient, N, up, rot, sc, pv]) if (a && !numeric(a)) return null;
+  if (psA && (!numeric(psA) || psA.size !== 1)) return null;
+  const trD = tr?.data as Float64Array, oD = orient?.data as Float64Array, nD = N?.data as Float64Array, upD = up?.data as Float64Array;
+  const rotD = rot?.data as Float64Array, psD = psA?.data as Float64Array, scD = sc?.data as Float64Array, pvD = pv?.data as Float64Array;
+  let R = new Float64Array(16), R2 = new Float64Array(16), M = new Float64Array(16), M2 = new Float64Array(16);
+  const Q = new Float64Array(16), S = new Float64Array(16), RS = new Float64Array(16), T = new Float64Array(16), inv = new Float64Array(16);
+  const Nm = new Float64Array(16);
+  const identity = (m: Float64Array) => { m.fill(0); m[0] = m[5] = m[10] = m[15] = 1; };
+  // m4mul(a, b) into o (o is neither a nor b)
+  const mul = (a: Float64Array, b: Float64Array, o: Float64Array) => {
+    for (let c = 0; c < 4; c++)
+      for (let r = 0; r < 4; r++)
+        o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  };
+  // m4fromQuat
+  const quat = (d: Float64Array, o: number, m: Float64Array) => {
+    const x = d[o], y = d[o + 1], z = d[o + 2], w = d[o + 3];
+    identity(m);
+    m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y + z * w); m[2] = 2 * (x * z - y * w);
+    m[4] = 2 * (x * y - z * w); m[5] = 1 - 2 * (x * x + z * z); m[6] = 2 * (y * z + x * w);
+    m[8] = 2 * (x * z + y * w); m[9] = 2 * (y * z - x * w); m[10] = 1 - 2 * (x * x + y * y);
+  };
+  // lookAtBasis(dir, up)
+  const lookAt = (d0: number, d1: number, d2: number, u0: number, u1: number, u2: number, m: Float64Array) => {
+    const l = Math.hypot(d0, d1, d2);
+    let z0 = 0, z1 = 0, z2 = 0;
+    if (l > 1e-20) { z0 = d0 / l; z1 = d1 / l; z2 = d2 / l; }
+    identity(m);
+    if (Math.hypot(z0, z1, z2) === 0) return;
+    let x0 = u1 * z2 - u2 * z1, x1 = u2 * z0 - u0 * z2, x2 = u0 * z1 - u1 * z0;
+    if (Math.hypot(x0, x1, x2) < 1e-8) {
+      const a0 = Math.abs(z1) < 0.9 ? 0 : 1, a1 = Math.abs(z1) < 0.9 ? 1 : 0, a2 = 0;
+      x0 = a1 * z2 - a2 * z1; x1 = a2 * z0 - a0 * z2; x2 = a0 * z1 - a1 * z0;
+    }
+    const xl = Math.hypot(x0, x1, x2);
+    if (xl > 1e-20) { x0 = x0 / xl; x1 = x1 / xl; x2 = x2 / xl; } else { x0 = 0; x1 = 0; x2 = 0; }
+    m[0] = x0; m[1] = x1; m[2] = x2;
+    m[4] = z1 * x2 - z2 * x1; m[5] = z2 * x0 - z0 * x2; m[6] = z0 * x1 - z1 * x0;
+    m[8] = z0; m[9] = z1; m[10] = z2;
+    m[12] = 0; m[13] = 0; m[14] = 0;
+  };
+  const xf = (i: number) => {
+    let px = Pd[i * 3], py = Pd[i * 3 + 1], pz = Pd[i * 3 + 2];
+    if (tr) { px += trD[i * 3]; py += trD[i * 3 + 1]; pz += trD[i * 3 + 2]; }
+    if (orient) quat(oD, i * 4, R);
+    else if (N) {
+      const d0 = nD[i * 3], d1 = nD[i * 3 + 1], d2 = nD[i * 3 + 2];
+      if (Math.hypot(d0, d1, d2) > 1e-12) lookAt(d0, d1, d2, up ? upD[i * 3] : 0, up ? upD[i * 3 + 1] : 1, up ? upD[i * 3 + 2] : 0, R);
+      else identity(R);
+    } else identity(R);
+    if (rot) { quat(rotD, i * 4, Q); mul(R, Q, R2); const sw = R; R = R2; R2 = sw; }
+    const s = psA ? psD[i] : 1;
+    identity(S);
+    S[0] = s * (sc ? scD[i * 3] : 1); S[5] = s * (sc ? scD[i * 3 + 1] : 1); S[10] = s * (sc ? scD[i * 3 + 2] : 1);
+    mul(R, S, RS);
+    identity(T); T[12] = px; T[13] = py; T[14] = pz;
+    mul(T, RS, M);
+    if (pv) { identity(T); T[12] = -pvD[i * 3]; T[13] = -pvD[i * 3 + 1]; T[14] = -pvD[i * 3 + 2]; mul(M, T, M2); const sw = M; M = M2; M2 = sw; }
+    xf.M = M;
+    // m4normalMatrix(M): m4invert (identity when singular), upper 3×3 transposed
+    const a = M;
+    inv[0] = a[5] * a[10] * a[15] - a[5] * a[11] * a[14] - a[9] * a[6] * a[15] + a[9] * a[7] * a[14] + a[13] * a[6] * a[11] - a[13] * a[7] * a[10];
+    inv[4] = -a[4] * a[10] * a[15] + a[4] * a[11] * a[14] + a[8] * a[6] * a[15] - a[8] * a[7] * a[14] - a[12] * a[6] * a[11] + a[12] * a[7] * a[10];
+    inv[8] = a[4] * a[9] * a[15] - a[4] * a[11] * a[13] - a[8] * a[5] * a[15] + a[8] * a[7] * a[13] + a[12] * a[5] * a[11] - a[12] * a[7] * a[9];
+    inv[12] = -a[4] * a[9] * a[14] + a[4] * a[10] * a[13] + a[8] * a[5] * a[14] - a[8] * a[6] * a[13] - a[12] * a[5] * a[10] + a[12] * a[6] * a[9];
+    inv[1] = -a[1] * a[10] * a[15] + a[1] * a[11] * a[14] + a[9] * a[2] * a[15] - a[9] * a[3] * a[14] - a[13] * a[2] * a[11] + a[13] * a[3] * a[10];
+    inv[5] = a[0] * a[10] * a[15] - a[0] * a[11] * a[14] - a[8] * a[2] * a[15] + a[8] * a[3] * a[14] + a[12] * a[2] * a[11] - a[12] * a[3] * a[10];
+    inv[9] = -a[0] * a[9] * a[15] + a[0] * a[11] * a[13] + a[8] * a[1] * a[15] - a[8] * a[3] * a[13] - a[12] * a[1] * a[11] + a[12] * a[3] * a[9];
+    inv[13] = a[0] * a[9] * a[14] - a[0] * a[10] * a[13] - a[8] * a[1] * a[14] + a[8] * a[2] * a[13] + a[12] * a[1] * a[10] - a[12] * a[2] * a[9];
+    inv[2] = a[1] * a[6] * a[15] - a[1] * a[7] * a[14] - a[5] * a[2] * a[15] + a[5] * a[3] * a[14] + a[13] * a[2] * a[7] - a[13] * a[3] * a[6];
+    inv[6] = -a[0] * a[6] * a[15] + a[0] * a[7] * a[14] + a[4] * a[2] * a[15] - a[4] * a[3] * a[14] - a[12] * a[2] * a[7] + a[12] * a[3] * a[6];
+    inv[10] = a[0] * a[5] * a[15] - a[0] * a[7] * a[13] - a[4] * a[1] * a[15] + a[4] * a[3] * a[13] + a[12] * a[1] * a[7] - a[12] * a[3] * a[5];
+    inv[14] = -a[0] * a[5] * a[14] + a[0] * a[6] * a[13] + a[4] * a[1] * a[14] - a[4] * a[2] * a[13] - a[12] * a[1] * a[6] + a[12] * a[2] * a[5];
+    inv[3] = -a[1] * a[6] * a[11] + a[1] * a[7] * a[10] + a[5] * a[2] * a[11] - a[5] * a[3] * a[10] - a[9] * a[2] * a[7] + a[9] * a[3] * a[6];
+    inv[7] = a[0] * a[6] * a[11] - a[0] * a[7] * a[10] - a[4] * a[2] * a[11] + a[4] * a[3] * a[10] + a[8] * a[2] * a[7] - a[8] * a[3] * a[6];
+    inv[11] = -a[0] * a[5] * a[11] + a[0] * a[7] * a[9] + a[4] * a[1] * a[11] - a[4] * a[3] * a[9] - a[8] * a[1] * a[7] + a[8] * a[3] * a[5];
+    inv[15] = a[0] * a[5] * a[10] - a[0] * a[6] * a[9] - a[4] * a[1] * a[10] + a[4] * a[2] * a[9] + a[8] * a[1] * a[6] - a[8] * a[2] * a[5];
+    let det = a[0] * inv[0] + a[1] * inv[4] + a[2] * inv[8] + a[3] * inv[12];
+    if (Math.abs(det) < 1e-30) identity(inv);
+    else { det = 1 / det; for (let k = 0; k < 16; k++) inv[k] *= det; }
+    identity(Nm);
+    Nm[0] = inv[0]; Nm[1] = inv[4]; Nm[2] = inv[8];
+    Nm[4] = inv[1]; Nm[5] = inv[5]; Nm[6] = inv[9];
+    Nm[8] = inv[2]; Nm[9] = inv[6]; Nm[10] = inv[10];
+  };
+  xf.M = M;
+  xf.Nm = Nm;
+  return xf;
+}
+
 function repeatTable(t: AttribTable, reps: { src: Int32Array }[]): AttribTable {
   let total = 0;
   for (const r of reps) total += r.src.length;
+  if (!t.map.size) return new AttribTable(total); // nothing to gather: skip the index list
   const idx = new Int32Array(total);
   let o = 0;
   for (const r of reps) { idx.set(r.src, o); o += r.src.length; }
@@ -626,7 +914,11 @@ defineNode({
       // fast path: one source repeated
       const np = src.numPoints, nv = src.numVertices, npr = src.numPrims, nc = tpts.length;
       const out = Object.create(Geometry.prototype) as Geometry;
-      const rep = (n: number) => tpts.map(() => ({ src: Int32Array.from({ length: n }, (_, i) => i) }));
+      const rep = (n: number) => {
+        const ident = new Int32Array(n); // one identity index list shared by every copy
+        for (let i = 0; i < n; i++) ident[i] = i;
+        return tpts.map(() => ({ src: ident }));
+      };
       out.points = repeatTable(src.points, rep(np));
       out.vertices = repeatTable(src.vertices, rep(nv));
       out.prims = repeatTable(src.prims, rep(npr));
@@ -656,8 +948,10 @@ defineNode({
       const vecA = ['v', 'up'].map((n) => out.points.get(n)).filter((a) => a && a.size === 3) as Attribute[];
       const cn = p.copy_attrib ? (out.prims.add(p.copy_attrib, 'int', 1).data as Int32Array) : null;
       const tmp = [0, 0, 0];
+      const xf = pointXformer(t);
       tpts.forEach((ti, c) => {
-        const M = pointTransform(t, ti), Nm = m4normalMatrix(M);
+        let M: Mat4, Nm: Mat4;
+        if (xf) { xf(ti); M = xf.M; Nm = xf.Nm; } else { M = pointTransform(t, ti); Nm = m4normalMatrix(M); }
         for (let i = 0; i < np; i++) m4apply(M, sP[i * 3], sP[i * 3 + 1], sP[i * 3 + 2], Pd, (c * np + i) * 3);
         for (const [A, cnt] of [[NA, np], [VNA, nv]] as [Attribute | undefined, number][]) {
           if (!A || A.size !== 3) continue;
@@ -678,7 +972,15 @@ defineNode({
       for (const n of copyNames) {
         const ta = t.points.get(n)!;
         const a = out.points.add(n, ta.type, ta.size);
-        tpts.forEach((ti, c) => { const v = ta.get(ti); for (let i = c * np; i < (c + 1) * np; i++) a.set(i, v); });
+        if (a.type !== 'string' && !a.isArray && !ta.isArray && a.size === ta.size) {
+          // numeric tuple: the values a.set(i, ta.get(ti)) writes, filled per copy
+          const d = a.data as Float64Array, sz = a.size, tup = new Float64Array(sz);
+          tpts.forEach((ti, c) => {
+            const v = ta.get(ti);
+            for (let k = 0; k < sz; k++) tup[k] = typeof v === 'number' ? v : k < (v as number[]).length ? Number((v as number[])[k]) : 0;
+            for (let i = c * np; i < (c + 1) * np; i++) for (let k = 0; k < sz; k++) d[i * sz + k] = tup[k];
+          });
+        } else tpts.forEach((ti, c) => { const v = ta.get(ti); for (let i = c * np; i < (c + 1) * np; i++) a.set(i, v); });
         if (n === 'Cd') { out.prims.delete('Cd'); out.vertices.delete('Cd'); }
       }
       return out;

@@ -36,7 +36,7 @@
       "vertex": []
     },
     "hashes": {
-      "P": "1e44992c3cae89c2",
+      "P": "4178950396bb1711",
       "attributes": {
         "detail.materials": "0395a3589848bda6",
         "group.prim.caps": "008f8baef984ca54",
@@ -46,7 +46,7 @@
         "point.curveu": "ae2ac5413dc08e4b",
         "point.height": "f698a913923832fd",
         "point.hitdist": "a7c5bf1185fcf333",
-        "point.hitprim": "b6509a2d9f1dde4f",
+        "point.hitprim": "7335456d811c3197",
         "point.id": "a23527fdd4bbddef",
         "point.mask": "72ba541f756c06cd",
         "point.slope": "710a0c4a71f0f554",
@@ -54,7 +54,7 @@
         "prim.copynum": "f151fa095d914bc3",
         "prim.material": "02486648ab64db6a",
         "prim.name": "5fd2251f219e1f59",
-        "vertex.uv": "3bcfe9a19e91ed2b"
+        "vertex.uv": "c87ccf316be2cb2b"
       },
       "topology": "1cf5d13d29324793"
     },
