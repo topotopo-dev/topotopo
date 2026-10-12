@@ -58,6 +58,7 @@ export const PARAMS: Record<string, any> = {
   sdf_expr: { code: 'smin(sdSphere(p, 0.5), sdBox(sub(p, [0.5, 0, 0]), [0.3, 0.3, 0.3]), 0.2)' },
   copy_xform: { count: 3, translate: [1.5, 0, 0], rotate: [0, 30, 0] },
   measure: { measure: 'volume' },
+  material: { name: 'red', base_color: [1, 0, 0], roughness: 0.4, group: '@P.y>0' },
   text: { text: 'Hi', depth: 0.2 },
   lsystem: { generations: 3 },
   graph_ref: null,

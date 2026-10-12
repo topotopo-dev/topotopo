@@ -313,12 +313,12 @@ defineNode({
 defineNode({
   type: 'file',
   category: 'io',
-  summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON or polyforge JSON. Z-up files can be converted.',
+  summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo/.bgeo, CSV, points JSON or polyforge JSON. Z-up files can be converted.',
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {
     path: { type: 'path', default: '', desc: 'file path (relative to the workspace) or URL', aliases: ['file', 'filename'] },
-    format: { type: 'enum', options: ['auto', 'obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'csv', 'pointsjson'], default: 'auto', desc: 'file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo)' },
+    format: { type: 'enum', options: ['auto', 'obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'bgeo', 'csv', 'pointsjson'], default: 'auto', desc: 'file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
     weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans)' },

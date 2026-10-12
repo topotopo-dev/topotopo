@@ -6,16 +6,16 @@
 import { Geometry } from '../core/geometry.ts';
 import { geoFromJSON } from './json.ts';
 import { importGLTFAsync } from './gltf.ts';
-import { importHoudiniGeo } from './hgeo.ts';
+import { importHoudiniBgeo, importHoudiniGeo, isBinaryJSON } from './hgeo.ts';
 import { importCSV, importPointsJSON, isPointsJSON } from './points.ts';
 
 export { importGLTFAsync } from './gltf.ts';
-export { importHoudiniGeo } from './hgeo.ts';
+export { importHoudiniBgeo, importHoudiniGeo } from './hgeo.ts';
 export { importCSV, importPointsJSON } from './points.ts';
 
 const td = new TextDecoder();
 
-export const IMPORT_FORMATS = ['obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'csv', 'pointsjson'];
+export const IMPORT_FORMATS = ['obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'bgeo', 'csv', 'pointsjson'];
 
 export interface ImportOptions {
   /** reads other files by path (glTF external buffers); usually Host.readFile */
@@ -30,6 +30,7 @@ export interface ImportOptions {
 export function importFormatFromPath(path: string): string {
   const p = String(path).split('?')[0].toLowerCase();
   if (p.endsWith('.points.json')) return 'pointsjson';
+  if (p.endsWith('.bgeo.sc') || p.endsWith('.geo.sc') || p.endsWith('.bgeo.gz') || p.endsWith('.geo.gz')) return 'bgeo.sc';
   return p.slice(p.lastIndexOf('.') + 1);
 }
 
@@ -47,10 +48,11 @@ export function importGeometry(bytes: Uint8Array, fmt: string, opts: ImportOptio
     case 'stl': return importSTL(bytes);
     case 'ply': return importPLY(bytes);
     case 'json': return importAnyJSON(JSON.parse(td.decode(bytes)), opts.warn);
-    case 'geo': case 'hgeo': return importHoudiniGeo(td.decode(bytes), opts.warn);
+    case 'geo': case 'hgeo': case 'bgeo': return isBinaryJSON(bytes) ? importHoudiniBgeo(bytes, opts.warn) : importHoudiniGeo(td.decode(bytes), opts.warn);
     case 'csv': return importCSV(td.decode(bytes));
     case 'pointsjson': return importPointsJSON(JSON.parse(td.decode(bytes)));
     case 'glb': case 'gltf': throw new Error(`${fmt} import is asynchronous (gltf-transform): use importGeometryAsync`);
+    case 'bgeo.sc': throw new Error('compressed Houdini geometry (.bgeo.sc / .gz) is not supported: save as .geo or uncompressed .bgeo');
     default: throw new Error(`unsupported import format "${fmt}" (${IMPORT_FORMATS.join(', ')})`);
   }
 }
