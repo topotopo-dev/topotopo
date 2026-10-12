@@ -70,6 +70,12 @@ check(ins.txt.includes('topology:') && ins.txt.includes('point elements'), 'insp
 const rnd = await call('render', { node: 'terrain', color_by: 'height', views: ['top', 'persp'] });
 check(!!rnd.img, 'render tool image');
 if (rnd.img) fs.writeFileSync(path.join(wsDir, 'render.png'), Buffer.from(rnd.img.data, 'base64'));
+const ov = await call('render', { node: 'rocks', views: ['persp', 'section'], section_axis: 'x', wireframe: 'hard', glyphs: 'N', max_glyphs: 50, label_pieces: true, max_labels: 5, shading: 'matcap', size: 256 });
+check(!!ov.img && !ov.isError && /overlays: shading matcap .*section x=.*wire hard>30/.test(ov.txt) && /label_pieces: first 5 of/.test(ov.txt), `render tool overlays: ${ov.txt.split('\n').find((l) => l.includes('overlays'))?.slice(0, 120)}`);
+const ovBad = await call('render', { node: 'rocks', shading: 'toon' });
+check(ovBad.isError && /unknown shading "toon"/.test(ovBad.txt), 'render tool rejects an unknown shading mode');
+const helpR = await call('help', { topic: 'render' });
+check(helpR.txt.includes('QUESTION → OPTION') && helpR.txt.includes('wireframe:"boundary"'), 'help topic render');
 
 // verification tools: explain a node, then diff two versions of the graph with an overlay render
 const ex = await call('explain', { node: 'rk' });
