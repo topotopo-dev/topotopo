@@ -14,7 +14,7 @@ import { summarize, inspect } from '../inspect.ts';
 import { renderGeometry } from '../render/raster.ts';
 import type { RenderOptions, ViewName } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
-import { exportGeometry } from '../io/export.ts';
+import { EXPORT_FORMATS, exportFormatFromPath, exportGeometryAsync } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
@@ -271,27 +271,37 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb (glTF binary; best for Unreal/Blender/web), .obj, .usda, .ply, .stl, .json (lossless). Relative paths go into the workspace.',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials, vertex colours, uv, custom attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda, .ply, .stl, .geo (Houdini JSON geometry, every attribute and group), .csv (point stream; pcg:true for Unreal PCG columns), .points.json, .json (lossless polyforge). Relative paths go into the workspace. help {topic:"export"} for details.',
       inputSchema: {
         type: 'object',
         required: ['path'],
         properties: {
           graph: { type: 'string' }, node: { type: 'string' },
-          path: { type: 'string', description: 'e.g. "exports/rock.glb"' },
-          format: { type: 'string', enum: ['glb', 'obj', 'usda', 'ply', 'stl', 'json'] },
+          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json"' },
+          format: { type: 'string', enum: EXPORT_FORMATS, description: 'default: from the extension (.points.json = pointsjson)' },
           up_axis: { type: 'string', enum: ['y', 'z'] },
-          scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres)' },
+          scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres; pcg csv defaults to 100)' },
           split_by_name: { type: 'boolean', description: 'separate meshes per prim "name" (default true)' },
-          custom_attribs: { type: 'boolean', description: 'include extra float point attributes' },
+          custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: include extra numeric attributes (glTF _NAME accessors; default true for glTF and PLY, false for USD)' },
+          materials: { type: 'boolean', description: 'glTF: write materials from the prim "material" attribute + table (default true)' },
+          compress: { type: 'string', enum: ['none', 'meshopt', 'draco'], description: 'glTF: meshopt = EXT_meshopt_compression + quantization; draco needs the optional draco3dgltf package' },
+          quantize: { type: 'boolean', description: 'glTF: KHR_mesh_quantization (smaller, lossy) without compression' },
+          attributes: { type: 'array', items: { type: 'string' }, description: 'csv / points.json: point attributes to write (default all)' },
+          pcg: { type: 'boolean', description: 'csv: Unreal PCG columns (Position/Rotation/Scale/Density/Color/Seed) in Unreal space (Z-up, left-handed, cm)' },
+          pcg_struct: { type: 'boolean', description: 'csv with pcg: Unreal struct-text cells ("(X=…,Y=…,Z=…)") for DataTable import with a row struct' },
+          precision: { type: 'number', enum: [32, 64], description: 'geo: float storage (64 = lossless default, 32 = Houdini default)' },
           ...FRAME_PROP,
         },
       },
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
         const p = path.resolve(ws.dir, a.path);
-        const ext = (a.format ?? path.extname(p).slice(1)).toLowerCase() as ExportFormat;
-        if (!['glb', 'obj', 'usda', 'ply', 'stl', 'json'].includes(ext)) throw new Error(`unknown format "${ext}"; use .glb .obj .usda .ply .stl .json`);
-        const bytes = exportGeometry(geo, ext, { upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs });
+        const ext = String(a.format ?? exportFormatFromPath(p)).toLowerCase() as ExportFormat;
+        if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
+        const bytes = await exportGeometryAsync(geo, ext, {
+          upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
+          materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct, precision: a.precision,
+        });
         fs.mkdirSync(path.dirname(p), { recursive: true });
         fs.writeFileSync(p, bytes);
         return text(`wrote ${p} (${ext}, ${(bytes.byteLength / 1024).toFixed(1)} KB) from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims`);

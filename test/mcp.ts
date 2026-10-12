@@ -71,9 +71,14 @@ const rnd = await call('render', { node: 'terrain', color_by: 'height', views: [
 check(!!rnd.img, 'render tool image');
 if (rnd.img) fs.writeFileSync(path.join(wsDir, 'render.png'), Buffer.from(rnd.img.data, 'base64'));
 
-for (const fmt of ['glb', 'obj', 'usda', 'ply', 'stl', 'json']) {
+for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'points.json']) {
   const x = await call('export', { path: `exports/scene.${fmt}` });
   check(!x.isError && fs.existsSync(path.join(wsDir, 'exports', `scene.${fmt}`)), `export ${fmt}: ${x.txt.split('\n')[0].slice(0, 90)}`);
+}
+{
+  const x = await call('export', { path: 'exports/scene_meshopt.glb', compress: 'meshopt' });
+  const y = await call('export', { path: 'exports/scene_pcg.csv', pcg: true, attributes: ['pscale'] });
+  check(!x.isError && x.txt.includes('glb') && !y.isError && fs.readFileSync(path.join(wsDir, 'exports', 'scene_pcg.csv'), 'utf8').startsWith('Name,Position.X'), 'export meshopt glb and Unreal PCG csv');
 }
 
 const gl = await call('graphs', { action: 'list' });

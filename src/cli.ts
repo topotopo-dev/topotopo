@@ -2,7 +2,9 @@
 // Command line: cook a graph JSON file, then render / export / inspect.
 //   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb]
+//                   [--compress meshopt] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--inspect summary|attributes|topology|all]
+//   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter
@@ -17,7 +19,7 @@ import { createNodeHost } from './host/node.ts';
 import { renderGeometry } from './render/raster.ts';
 import type { ViewName } from './render/raster.ts';
 import { encodePNG } from './render/png.ts';
-import { exportGeometry } from './io/export.ts';
+import { exportFormatFromPath, exportGeometryAsync } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { inspect } from './inspect.ts';
 import { catalogText, nodeDoc } from './mcp/docs.ts';
@@ -30,6 +32,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     'usage: node src/cli.ts <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]',
     '         [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb] [--inspect all]',
+    '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     '       node src/cli.ts --catalog | --help-node <type>',
   ].join('\n'));
@@ -86,7 +90,7 @@ function report(r: CookReport) {
   for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
 }
 
-function writeOutputs(r: CookReport, frame?: number) {
+async function writeOutputs(r: CookReport, frame?: number) {
   const geo = r.geo!;
   const out = opt('--render');
   const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
@@ -103,22 +107,33 @@ function writeOutputs(r: CookReport, frame?: number) {
   const ex = opt('--export');
   if (ex) {
     const p = at(ex);
-    const fmt = path.extname(ex).slice(1).toLowerCase() as ExportFormat;
+    const fmt = exportFormatFromPath(ex) as ExportFormat;
+    const up = opt('--up-axis');
+    const bytes = await exportGeometryAsync(geo, fmt, {
+      splitByName: true,
+      compress: opt('--compress') as any,
+      quantize: argv.includes('--quantize') || undefined,
+      pcg: argv.includes('--pcg') || argv.includes('--pcg-struct') || undefined,
+      pcgStruct: argv.includes('--pcg-struct') || undefined,
+      attributes: opt('--attributes'),
+      upAxis: up === 'z' || up === 'y' ? up : undefined,
+      scale: opt('--scale') !== undefined ? Number(opt('--scale')) : undefined,
+    });
     fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
-    fs.writeFileSync(p, exportGeometry(geo, fmt, { splitByName: true }));
+    fs.writeFileSync(p, bytes);
     console.log(`exported ${p}`);
   }
 }
 
 if (framesArg) {
   const range = parseFrames(framesArg);
-  const res = await engine.cookFrames(graph, range, (r, f) => {
+  const res = await engine.cookFrames(graph, range, async (r, f) => {
     report(r);
     if (!r.ok || !r.geo) return;
     const cooked = [...r.results.values()].filter((n) => !n.cached && !n.error).length;
     console.log(`frame ${f}: ${r.target} in ${r.ms.toFixed(0)} ms (${cooked} node(s) cooked) — ${r.geo.numPoints} points, ${r.geo.numPrims} prims`);
     if (opt('--inspect')) console.log(inspect(r.geo, { detail: opt('--inspect') as any }));
-    writeOutputs(r, f);
+    await writeOutputs(r, f);
   }, { target, fps });
   console.log(`cooked ${file} frames ${range.start}-${range.end}${range.step !== 1 ? `:${range.step}` : ''}: ${res.frames - res.failed.length}/${res.frames} ok`);
   if (res.failed.length) fail(`failed frames: ${res.failed.join(', ')}`);
@@ -128,5 +143,5 @@ if (framesArg) {
   if (!r.ok || !r.geo) process.exit(1);
   console.log(`cooked ${file} → ${r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''} in ${r.ms.toFixed(0)} ms`);
   console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary' }));
-  writeOutputs(r);
+  await writeOutputs(r);
 }
