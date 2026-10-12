@@ -92,7 +92,8 @@ const sameTopology = (a: Geometry, b: Geometry) =>
     torus: { type: 'torus', params: { center: [-2.5, 0, 0] } },
     star: { type: 'shape2d', params: { shape: 'star', sides: 7 } },
     starx: { type: 'extrude', in: ['star'], params: { height: 0.3 } },
-    in: { type: 'merge', in: ['box', 'tube', 'torus', 'starx'] },
+    ico: { type: 'sphere', params: { type: 'ico', level: 3, center: [0, 0, 3] } },
+    in: { type: 'merge', in: ['box', 'tube', 'torus', 'starx', 'ico'] },
     out: { type: 'uv_unwrap', in: ['in'], params: { padding: 2, resolution: 512 } },
   };
   const src = (await cook(nodes, 'in')).geo;
@@ -106,14 +107,14 @@ const sameTopology = (a: Geometry, b: Geometry) =>
   check(ae.flipped === 0, `uv_unwrap: no mirrored triangles (${ae.flipped}/${ae.tris}); mean angle error ${ae.mean.toFixed(2)}°`);
   const st = sameTopology(src, g) ? polygonSides(g) : null;
   if (st) {
-    // charts are uv-connected: no uv seam inside a chart's interior edges between same-chart prims... (check islands = charts)
+    // chart borders are uv seams: two charts never share an edge with continuous uv
     const seam = uvSeamPairs(st, readUV(g)!);
     const cd = ch!.data as Int32Array;
     let bad = 0;
     for (let i = 0; i < st.count; i++) if (!seam[i] && cd[st.pA[i]] !== cd[st.pB[i]]) bad++;
     check(bad === 0, `uv_unwrap: different charts never share a continuous uv edge (${bad})`);
   }
-  check(!warnings.some((w) => /split across/.test(w)) || true, `uv_unwrap warnings: ${warnings.join(' | ') || 'none'}`);
+  check(!warnings.some((w) => /mirrored/.test(w)), `uv_unwrap: no mirrored-chart warning (warnings: ${warnings.join(' | ') || 'none'})`);
   // islands of the unwrap do not overlap
   const ov = overlapTexels(g, 'chart');
   check(ov.clash <= ov.covered * 0.002, `uv_unwrap: charts do not overlap (${ov.clash} shared texels of ${ov.covered} at 256²)`);

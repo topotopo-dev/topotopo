@@ -114,7 +114,7 @@ defineNode({
     resolution: { type: 'int', default: 0, min: 0, max: 16384, desc: 'atlas size in texels; 0 = automatic from texels_per_unit (or about 1024 when both are 0). With texels_per_unit set, charts that do not fit spill into more atlases' },
     texels_per_unit: { type: 'float', default: 0, min: 0, desc: 'texel density (texels per world unit); 0 = derived from resolution' },
     bruteforce: { type: 'bool', default: false, desc: 'slower, tighter packing' },
-    rotate_charts: { type: 'bool', default: true, desc: 'rotate charts to pack tighter (and to the axis of their convex hull)' },
+    rotate_charts: { type: 'bool', default: true, desc: 'rotate each chart to the axis of its convex hull before packing (xatlas packing-time 90° turns are not used: they mirror the chart)' },
     block_align: { type: 'bool', default: false, desc: 'align charts to 4×4 texel blocks (faster packing, for block-compressed textures)' },
     udim: { type: 'bool', default: true, desc: 'when xatlas makes several atlases, place atlas k in UDIM tile 1001+k (u offset k); off = all atlases overlap in 0..1 (see prim atlas)' },
   },
@@ -140,13 +140,13 @@ defineNode({
     const chart: XatlasChartOptions = {
       maxChartArea, maxBoundaryLength: p.max_boundary_length, normalDeviationWeight: p.normal_deviation,
       roundnessWeight: p.roundness, straightnessWeight: p.straightness, normalSeamWeight: p.normal_seam_weight,
-      textureSeamWeight: p.texture_seam_weight, maxCost: p.max_cost, maxIterations: Math.max(1, Math.min(16, p.max_iterations)),
+      textureSeamWeight: p.texture_seam_weight, maxCost: p.max_cost, maxIterations: Math.max(1, Math.min(16, p.max_iterations)), fixWinding: true,
     };
     const resolution = p.resolution > 0 ? Math.max(16, p.resolution) : 0;
     const res = runXatlas(X, g, chart, {
       padding: Math.max(0, p.padding), resolution, texelsPerUnit: Math.max(0, p.texels_per_unit),
-      bruteForce: p.bruteforce, rotateCharts: p.rotate_charts, rotateChartsToAxis: p.rotate_charts, blockAlign: p.block_align,
-    }, { vertexKey, faceGroup });
+      bruteForce: p.bruteforce, rotateCharts: false, rotateChartsToAxis: p.rotate_charts, blockAlign: p.block_align,
+    }, { vertexKey, faceGroup, unmirror: true });
     // ---- map triangles back to polygon corners
     const norm = Math.max(1, res.width, res.height);
     const uv = readUV(g) ?? new Float64Array(nv * 2);
@@ -227,30 +227,18 @@ defineNode({
         else { uv[v * 2] = 0; uv[v * 2 + 1] = 0; unplaced++; }
       }
     }
-    // xatlas may return charts mirrored relative to the polygon winding (its texel space has v down):
-    // mirror those charts in u inside their own bounding box, so faces keep their orientation and the packing holds
+    // charts must keep the polygon winding (fixWinding, no packing transposes, and a repack in runXatlas otherwise)
     const chartSum = new Map<number, number>();
-    const chartBox = new Map<number, [number, number]>();
     for (let pr = 0; pr < g.numPrims; pr++) {
       const c = primChart[pr];
       if (c < 0) continue;
       const s = g.primStart[pr], e = g.primStart[pr + 1];
       let a = 0;
-      for (let v = s; v < e; v++) {
-        const w = v + 1 < e ? v + 1 : s;
-        a += uv[v * 2] * uv[w * 2 + 1] - uv[w * 2] * uv[v * 2 + 1];
-        const b = chartBox.get(c);
-        if (!b) chartBox.set(c, [uv[v * 2], uv[v * 2]]);
-        else { if (uv[v * 2] < b[0]) b[0] = uv[v * 2]; if (uv[v * 2] > b[1]) b[1] = uv[v * 2]; }
-      }
+      for (let v = s; v < e; v++) { const w = v + 1 < e ? v + 1 : s; a += uv[v * 2] * uv[w * 2 + 1] - uv[w * 2] * uv[v * 2 + 1]; }
       chartSum.set(c, (chartSum.get(c) ?? 0) + a);
     }
-    for (let pr = 0; pr < g.numPrims; pr++) {
-      const c = primChart[pr];
-      if (c < 0 || !(chartSum.get(c)! < 0)) continue;
-      const [u0, u1] = chartBox.get(c)!;
-      for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) uv[v * 2] = u0 + u1 - uv[v * 2];
-    }
+    const mirrored = [...chartSum.values()].filter((a) => a < 0).length;
+    if (mirrored) warn(`${mirrored} charts are mirrored (uv winding opposite to the polygons)`);
     writeUV(g, uv);
     writePrimInt(g, 'chart', primChart);
     g.prims.delete('atlas');
