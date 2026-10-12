@@ -30,6 +30,7 @@ export const SRC: Record<string, NodeSpec> = {
   LOFT: { type: 'merge', in: ['CIRCLE', 'CIRCLE_UP'] },
   CIRCLE_UP: { type: 'circle', params: { radius: 0.3, segments: 24, center: [0, 1, 0] } },
   COLORED: { type: 'color', in: ['MESH'], params: { mode: 'random' } },
+  NBRS: { type: 'attrib_array', in: ['GRID'], params: { mode: 'from_neighbours' } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -42,6 +43,7 @@ export const INPUTS: Record<string, string[]> = {
   triangulate2d: ['PTS'], voronoi2d: ['PTS'], merge: ['MESH', 'BOX'], switch: ['MESH', 'BOX'],
   uv_transform: ['BOX'], poly_extrude: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],
   scatter: ['MESH'], decimate: ['MESH'], remesh: ['BOX'], smooth_solid: ['BOX'], foreach: ['BOX'],
+  attrib_array: ['NBRS'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -60,6 +62,8 @@ export const PARAMS: Record<string, any> = {
   measure: { measure: 'volume' },
   text: { text: 'Hi', depth: 0.2 },
   lsystem: { generations: 3 },
+  // input already has point int[] nbrs (from_neighbours); the fixture adds prim int[] pts
+  attrib_array: { mode: 'from_group_points' },
   graph_ref: null,
 };
 

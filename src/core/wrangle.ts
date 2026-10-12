@@ -394,7 +394,8 @@ export class WrangleAPI {
     this.delPrims.add(p);
     if (andPoints) (this as any).delPrimPts = true;
   }
-  setattr(cls: AttribClass, idx: number, name: string, value: any) { this.sets.push({ cls, idx, name, value: Array.isArray(value) ? value.slice() : value }); }
+  // argument order of the snippet-lib callers: setpointattrib(0, name, idx, value) → setattr('point', name, idx, value)
+  setattr(cls: AttribClass, name: string, idx: number, value: any) { this.sets.push({ cls, idx: Number(idx), name: String(name), value: Array.isArray(value) ? value.slice() : value }); }
   setgroup(cls: 'point' | 'prim' | 'vertex', name: string, idx: number, value: any) { this.groupSets.push({ cls, name, idx, value: value ? 1 : 0 }); }
   setedgegroup(name: string, a: number, b: number, value: any) { this.edgeSets.push({ name, a: Number(a), b: Number(b), value: value ? 1 : 0 }); }
   log(msg: string) { if (this.logs.length < 50) this.logs.push(msg); }
