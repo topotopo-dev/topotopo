@@ -152,6 +152,18 @@ function edgeLengths(g: Geometry) {
   check(watertight(us), 'uv sphere: watertight');
 }
 
+// ---------------------------------------------------------------- remesh_isotropic: non-manifold input
+{
+  // two cubes fused along one edge: the non-manifold edge stays as it is, the rest is remeshed without sliver fans
+  const two: Record<string, NodeSpec> = {
+    a: { type: 'box' }, b: { type: 'box', params: { center: [1, 1, 0] } }, m: { type: 'merge', in: ['a', 'b'] }, f: { type: 'fuse', in: ['m'] },
+    r: { type: 'remesh_isotropic', in: ['f'], params: { target_length: 0.1, iterations: 5 } },
+  };
+  const g = await cook(two, 'r');
+  const est = 12 / (0.433 * 0.01);
+  check(topologyReport(g).nonManifoldEdges === 1 && g.numPrims > est * 0.6 && g.numPrims < est * 1.6, `non-manifold input: the shared edge is kept, ${g.numPrims} triangles (estimate ${est.toFixed(0)})`);
+}
+
 // ---------------------------------------------------------------- remesh_isotropic: timing (100k triangles, 10 iterations)
 {
   const nodes: Record<string, NodeSpec> = {
@@ -207,6 +219,11 @@ function edgeLengths(g: Geometry) {
   check(border === 80 && lost === 0 && triCount(gl) < triCount(gs), `decimate lock_border: all ${border} border points kept (${triCount(gs)} → ${triCount(gl)} triangles)`);
   const gf = await cook({ g: grid, w: { type: 'wrangle', in: ['g'], params: { code: '@P.y = 0.1 * sin(@P.x * 3) * cos(@P.z * 2);' } }, d: { type: 'decimate', in: ['w'], params: { ratio: 0.1, lock_border: false, max_error: 1 } } }, 'd');
   check(triCount(gf) < triCount(gl), `decimate without lock_border reduces further (${triCount(gf)} < ${triCount(gl)})`);
+  // fracture pieces (closed pieces with coincident unwelded points): every piece stays closed (meshoptimizer leaves
+  // a two-sided "flap" there, which decimate removes)
+  const fr: Record<string, NodeSpec> = { s: { type: 'sphere', params: { type: 'ico', level: 2 } }, f: { type: 'voronoi_fracture', in: ['s'], params: { count: 6 } } };
+  const fd = await cook({ ...fr, d: { type: 'decimate', in: ['f'], params: { ratio: 0.3 } } }, 'd');
+  check(watertight(fd) && topologyReport(fd).pieces === 6, `decimate fracture pieces: 6 closed pieces stay closed and manifold (${fd.numPrims} triangles)`);
   // points mode
   const pts = await cook({ g: grid, s: { type: 'scatter', in: ['g'], params: { count: 1000 } }, d: { type: 'decimate', in: ['s'], params: { ratio: 0.2 } } }, 'd');
   check(pts.numPoints <= 200 && pts.numPoints >= 180, `decimate points mode: 1000 → ${pts.numPoints} points (target 200)`);
@@ -257,6 +274,12 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   const split = await cook({ ...two, r: { type: 'mesh_repair', in: ['f'] } }, 'r');
   const tr = topologyReport(split);
   check(watertight(split) && tr.pieces === 2 && report(split).split_points === 2, `repair split: manifold again (${tr.nonManifoldEdges} non-manifold edges, ${tr.pieces} pieces, ${report(split).split_points} points split)`);
+  // touching solids that do not share points stay as they are (fuse borders only)
+  const fr: Record<string, NodeSpec> = { s: { type: 'sphere', params: { type: 'ico', level: 2 } }, f: { type: 'voronoi_fracture', in: ['s'], params: { count: 6 } } };
+  const frIn = await cook(fr, 'f'), frOut = await cook({ ...fr, r: { type: 'mesh_repair', in: ['f'] } }, 'r');
+  check(frOut.numPrims === frIn.numPrims && watertight(frOut) && report(frOut).fused_points === 0, `repair: touching fracture pieces are left alone (${frOut.numPrims} prims, ${topologyReport(frOut).pieces} closed pieces)`);
+  const frAll = await cook({ ...fr, r: { type: 'mesh_repair', in: ['f'], params: { fuse: 'all' } } }, 'r');
+  check(report(frAll).fused_points > 0 && report(frAll).duplicate_faces > 0, `repair fuse all: touching pieces are welded and their shared walls removed (${report(frAll).duplicate_faces} faces)`);
   const rem = await cook({ ...two, r: { type: 'mesh_repair', in: ['f'], params: { non_manifold: 'remove', fill_holes: false } } }, 'r');
   check(topologyReport(rem).nonManifoldEdges === 0 && report(rem).non_manifold_faces_removed === 2, 'repair remove: the extra faces at the non-manifold edge are deleted');
   // zero-area sliver in a closed mesh: a tetrahedron whose edge 0-1 is split by point 4 on one side and closed by
@@ -265,7 +288,7 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
     positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 0, 0],
     prims: [[0, 2, 1], [0, 4, 3], [4, 1, 3], [1, 2, 3], [0, 3, 2], [0, 1, 4]],
   });
-  const sr = repairMesh(sg, { fuse: true, tolerance: 0, degenerate: true, duplicates: true, nonManifold: 'split', winding: true, outward: true, fillHoles: true, maxHoleEdges: 8, isolated: true, selfIntersections: 'off' });
+  const sr = repairMesh(sg, { fuse: 'borders', tolerance: 0, degenerate: true, duplicates: true, nonManifold: 'split', winding: true, outward: true, fillHoles: true, maxHoleEdges: 8, isolated: true, selfIntersections: 'off' });
   check(sr.report.slivers_merged === 1 && sr.report.degenerate_faces === 1 && watertight(sr.geo) && sr.geo.numPrims === 5 && sr.report.holes_filled === 0,
     `repair: zero-area sliver merged into its neighbour, mesh still closed (${sr.geo.numPrims} prims, sizes ${Array.from({ length: sr.geo.numPrims }, (_, p) => sr.geo.primSize(p)).join(',')})`);
   // self-intersections

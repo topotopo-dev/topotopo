@@ -289,6 +289,8 @@ export class ClosestBVH {
 export const EDGE_CONSTRAINT = 1;
 export const EDGE_LOCKED = 2;
 export const EDGE_SEAM = 4;
+/** internal: an edge at a non-manifold (bowtie) point: split, never collapsed or flipped */
+const EDGE_FIXED = 8;
 
 const VLOCK = 1, VDEAD = 2, VBAD = 4;
 
@@ -357,6 +359,7 @@ class IsoMesh {
   fanIn = -1;
   splits = 0; collapses = 0; flips = 0;
   uniform: boolean;
+  baseT = 0;
   triBVH: ClosestBVH;
   segBVH: ClosestBVH | null;
   refTriT: Float64Array | null;
@@ -371,6 +374,7 @@ class IsoMesh {
     this.pos.set(inp.pos);
     this.hv.set(inp.tris);
     this.uniform = typeof inp.target === 'number';
+    if (typeof inp.target === 'number') this.baseT = inp.target;
     if (typeof inp.target === 'number') this.vT.fill(inp.target, 0, nv); else this.vT.set(inp.target);
     for (let v = 0; v < nv; v++) { this.vOrig[v] = v; this.vItem[v] = -1; }
     this.triBVH = inp.refBVH ?? new ClosestBVH(inp.refTris, 3);
@@ -459,13 +463,23 @@ class IsoMesh {
         this.vFlag[v] |= VLOCK | VBAD;
         for (let k = start[v]; k < start[v + 1]; k++) {
           const h = list[k], t = ho[h];
-          hf[h] |= EDGE_LOCKED; if (t >= 0) hf[t] |= EDGE_LOCKED;
+          hf[h] |= EDGE_FIXED; if (t >= 0) hf[t] |= EDGE_FIXED;
           const p = prv(h), tp = ho[p];
-          hf[p] |= EDGE_LOCKED; if (tp >= 0) hf[tp] |= EDGE_LOCKED;
+          hf[p] |= EDGE_FIXED; if (tp >= 0) hf[tp] |= EDGE_FIXED;
         }
       }
     }
-    for (let h = 0; h < nh; h++) if (hf[h] & EDGE_LOCKED) { this.vFlag[hv[h]] |= VLOCK; this.vFlag[hv[nxt(h)]] |= VLOCK; }
+    // ends of locked edges are locked. A triangle on a locked edge always has a side of at least half its length, so
+    // a locked edge longer than the target would make every round split that triangle's other sides again (a fan
+    // of ever thinner slivers): its ends take the edge's length as their target, which grades the mesh around it.
+    for (let h = 0; h < nh; h++) {
+      if (!(hf[h] & EDGE_LOCKED)) continue;
+      const a = hv[h], b = hv[nxt(h)];
+      this.vFlag[a] |= VLOCK; this.vFlag[b] |= VLOCK;
+      const l = Math.sqrt(this.len2(a, b));
+      if (l > this.vT[a]) this.vT[a] = l;
+      if (l > this.vT[b]) this.vT[b] = l;
+    }
     for (let v = 0; v < nv; v++) {
       if (this.vFlag[v] & VDEAD) continue;
       if (this.vFlag[v] & VBAD) { this.vVal[v] = start[v + 1] - start[v]; continue; }
@@ -561,7 +575,8 @@ class IsoMesh {
     const a = hv[h], b = hv[h1], c = hv[h2];
     const P = this.pos;
     const m = this.newVertex((P[a * 3] + P[b * 3]) / 2, (P[a * 3 + 1] + P[b * 3 + 1]) / 2, (P[a * 3 + 2] + P[b * 3 + 2]) / 2);
-    this.vT[m] = (this.vT[a] + this.vT[b]) / 2;
+    // uniform: new points take the base target (ends of long locked edges carry a raised one that must not spread)
+    this.vT[m] = this.uniform ? this.baseT : (this.vT[a] + this.vT[b]) / 2;
     const ha = this.vKind[a] ? a : b;
     this.vItem[m] = this.vItem[ha]; this.vKind[m] = this.vKind[ha];
     const f2 = this.newFace();
@@ -651,7 +666,7 @@ class IsoMesh {
   private canCollapse(h: number, rem: number, keep: number): boolean {
     const vf = this.vFlag, hf = this.hf, hv = this.hv, ho = this.ho, P = this.pos;
     if (vf[rem] & (VLOCK | VBAD) || vf[keep] & VBAD) return false;
-    if (hf[h] & EDGE_LOCKED) return false;
+    if (hf[h] & (EDGE_LOCKED | EDGE_FIXED)) return false;
     const t = ho[h];
     // the sides of each incident face at rem (merged away) and at keep
     const er0 = hv[h] === rem ? prv(h) : nxt(h), ek0 = hv[h] === rem ? nxt(h) : prv(h);
@@ -791,7 +806,7 @@ class IsoMesh {
       if (this.fDead[(h / 3) | 0]) continue;
       const t = this.ho[h];
       if (t < h) continue;
-      if (this.hf[h] & (EDGE_CONSTRAINT | EDGE_LOCKED)) continue;
+      if (this.hf[h] & (EDGE_CONSTRAINT | EDGE_LOCKED | EDGE_FIXED)) continue;
       const hv = this.hv, vf = this.vFlag;
       const a = hv[h], b = hv[nxt(h)], c = hv[prv(h)], d = hv[prv(t)];
       if (c === d || (vf[a] | vf[b] | vf[c] | vf[d]) & VBAD) continue;
@@ -1009,6 +1024,8 @@ export interface IsoRemeshResult {
   inputTriangles: number;
   outputTriangles: number;
   stats: { splits: number; collapses: number; flips: number; features: number; lockedPoints: number };
+  /** points whose target_attrib value was not a positive number (they use the uniform target) */
+  badTargets: number;
 }
 
 export class RemeshError extends Error {}
@@ -1167,13 +1184,13 @@ export function isotropicRemesh(g: Geometry, o: IsoRemeshOptions): IsoRemeshResu
   const minL = diag * 1e-4;
   L = Math.max(L, minL);
   let target: number | Float64Array = L;
-  let refTriTarget: Float64Array | null = null, refSegTarget: Float64Array | null = null;
+  let refTriTarget: Float64Array | null = null, refSegTarget: Float64Array | null = null, badTargets = 0;
   if (o.targetAttrib) {
     const at = g.points.get(o.targetAttrib);
     if (!at || at.type === 'string' || at.isArray) throw new RemeshError(`target_attrib "${o.targetAttrib}" is not a numeric point attribute`);
     const d = at.data as Float64Array, s = at.size;
     const tv = new Float64Array(nv);
-    for (let i = 0; i < nv; i++) { const x = d[wPt[i] * s]; tv[i] = x > 0 && Number.isFinite(x) ? Math.max(x, minL) : L; }
+    for (let i = 0; i < nv; i++) { const x = d[wPt[i] * s]; if (x > 0 && Number.isFinite(x)) tv[i] = Math.max(x, minL); else { tv[i] = L; badTargets++; } }
     target = tv;
     refTriTarget = new Float64Array(nt * 3);
     for (let i = 0; i < nt * 3; i++) refTriTarget[i] = tv[tris[i]];
@@ -1331,5 +1348,5 @@ export function isotropicRemesh(g: Geometry, o: IsoRemeshOptions): IsoRemeshResu
     const d = n.data as Float64Array;
     for (let i = 0; i < d.length; i += 3) { const l = Math.hypot(d[i], d[i + 1], d[i + 2]); if (l > 1e-20) { d[i] /= l; d[i + 1] /= l; d[i + 2] /= l; } }
   }
-  return { geo, targetLength: L, inputTriangles: nt, outputTriangles: ont, stats: { ...out.stats, features: ns, lockedPoints: locked } };
+  return { geo, targetLength: L, inputTriangles: nt, outputTriangles: ont, stats: { ...out.stats, features: ns, lockedPoints: locked }, badTargets };
 }

@@ -7,7 +7,7 @@ import { RemeshError, isotropicRemesh } from '../core/remesh.ts';
 import { DecimateError, decimateMesh, decimatePoints, parseSteerAttribs } from '../core/decimate.ts';
 import type { DecimateOptions } from '../core/decimate.ts';
 import { repairMesh, repairSummary } from '../core/repair.ts';
-import type { NonManifoldMode, SelfIntersectMode } from '../core/repair.ts';
+import type { FuseMode, NonManifoldMode, SelfIntersectMode } from '../core/repair.ts';
 import { P, edgeMask, mask } from './util.ts';
 
 /** Run a kernel and turn its own errors into node errors. */
@@ -62,7 +62,7 @@ defineNode({
   },
   outputs: 'triangles; point/vertex/prim attributes and groups by provenance; feature edge groups (edge_groups) follow the new edges',
   example: { type: 'remesh_isotropic', params: { target_length: 0.05, iterations: 8, feature_angle: 40 } },
-  cook: ({ input, p, stat }) => {
+  cook: ({ input, p, stat, warn }) => {
     const g = input(0);
     const sel = mask(g, 'prim', p.group);
     const featureEdges = p.edge_groups ? edgeMask(g, p.edge_groups) : null;
@@ -72,6 +72,7 @@ defineNode({
       preserveBoundary: p.preserve_boundary, group: sel, featureEdges, featureGroups, keepPrimBorders: p.keep_prim_borders,
       relaxPasses: p.relax_passes, maxTriangles: p.max_triangles,
     }), 'set target_length (scene units) or iterations; the input needs polygons');
+    if (r.badTargets) warn(`remesh_isotropic: ${r.badTargets} points have no positive "${p.target_attrib}" value (NaN, 0 or negative); they use target_length ${+r.targetLength.toPrecision(4)}`);
     stat('triangles', r.outputTriangles);
     stat('target_length', r.targetLength);
     stat('feature_edges', r.stats.features);
@@ -156,8 +157,11 @@ defineNode({
   summary: 'Diagnose and fix meshes: fuse duplicates, degenerate/duplicate faces, non-manifold edges, winding, small holes, self-intersections.',
   description:
     'Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switched off: fuse points within ' +
-    'tolerance; drop repeated points and faces with < 3 distinct points, zero-area triangles hand their middle point ' +
-    'to the neighbour across their long side (no slit is left); duplicate faces (same points, either winding); ' +
+    'tolerance (by default only where one of the two lies on an open border: cracks and polygon soups close, solids ' +
+    'that merely touch, like fracture pieces, keep their own points); drop repeated points and faces with < 3 ' +
+    'distinct points, zero-area triangles hand their middle point to the neighbour across their long side (no slit ' +
+    'is left); duplicate faces (compared by position: a copy with the same winding goes, an opposite-winding pair on ' +
+    'the same points, i.e. an internal wall, goes entirely); ' +
     'non-manifold edges (3+ faces): keep, remove the extra faces, or split (faces around the edge are paired by ' +
     'angle and orientation, then every point whose corners form several fans (also bowtie points) is duplicated so ' +
     'each fan is manifold); winding made consistent across manifold edges (each piece keeps its majority ' +
@@ -171,7 +175,7 @@ defineNode({
   aliases: ['repair', 'polydoctor', 'mesh_doctor', 'fix_mesh'],
   inputs: [{ name: 'geo', desc: 'polygon mesh' }],
   params: {
-    fuse: { type: 'bool', default: true, desc: 'weld points within tolerance' },
+    fuse: { type: 'enum', options: ['borders', 'all', 'off'], default: 'borders', desc: 'weld points within tolerance: borders = only where one of the two is on an open border (cracks, polygon soups; touching solids stay separate); all = every pair' },
     tolerance: { type: 'float', default: 1e-5, min: 0, desc: 'fuse distance (0 = exactly coincident points only)', aliases: ['distance', 'fuse_distance'] },
     remove_degenerate: { type: 'bool', default: true, desc: 'remove faces with repeated points or zero area (collinear triangles merge into their neighbour)' },
     remove_duplicates: { type: 'bool', default: true, desc: 'remove faces that use the same points as an earlier face' },
@@ -188,7 +192,7 @@ defineNode({
   cook: ({ input, p, warn }) => {
     const g = input(0);
     const { geo, report } = repairMesh(g, {
-      fuse: p.fuse, tolerance: p.tolerance, degenerate: p.remove_degenerate, duplicates: p.remove_duplicates,
+      fuse: p.fuse as FuseMode, tolerance: p.tolerance, degenerate: p.remove_degenerate, duplicates: p.remove_duplicates,
       nonManifold: p.non_manifold as NonManifoldMode, winding: p.fix_winding, outward: p.outward, fillHoles: p.fill_holes,
       maxHoleEdges: p.max_hole_edges, isolated: p.remove_isolated, selfIntersections: p.self_intersections as SelfIntersectMode,
     });
