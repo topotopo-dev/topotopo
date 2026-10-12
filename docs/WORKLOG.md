@@ -63,7 +63,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 ### Phase 2: PCG and instancing
 | id | item | status | notes |
 |---|---|---|---|
-| P2-A | Packed primitives: `packed` prim kind, packed `copy_to_points`, `unpack`, auto-unpack, instanced rendering | queued | |
+| P2-A | Packed primitives: `packed` prim kind, packed `copy_to_points`, `unpack`, auto-unpack, instanced rendering | running (agent) | started 2026-10-12 from 87ac66f |
 | P2-B | `copy_to_points` variants, scatter v2 (density attr/map/mask, relax, min distance, collision prune), masks by slope/height/curvature/occlusion/distance, `attribute_from_map` (PNG/EXR), orient helpers, points along splines, clustering | queued | after P2-A |
 | P2-C | Heightfield prim + suite: create/from mesh/from image/noise/remap/blur/terrace/cutout/mask by feature/project/path/scatter/to mesh/to sdf, erosion, 16-bit PNG/RAW export | running (agent) | started 2026-10-12 from ac5f6b9 |
 | P2-D | Spline toolkit: bezier/nurbs prims, fillet, 3D offset, spline fit, project to surface, curveu/ramp attributes | queued | |
