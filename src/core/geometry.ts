@@ -174,14 +174,24 @@ export class Attribute {
     return out;
   }
 
-  /** Array attributes: a copy of element i's list (numbers, or strings for string[]). Fixed attributes: the value as an array. */
-  getArray(i: number): number[] | string[] {
+  /**
+   * Array attributes: a copy of element i's list (numbers, or strings for string[]), written into `out`
+   * when given (lets the wrangle realm receive its own arrays). Fixed attributes: the value as an array.
+   */
+  getArray(i: number, out?: any[]): number[] | string[] {
     const o = this.offsets;
-    if (!o) { const v = this.get(i); return Array.isArray(v) ? v : [v as any]; }
+    if (!o) {
+      const v = this.get(i);
+      if (!out) return Array.isArray(v) ? v : [v as any];
+      out.length = 0;
+      if (Array.isArray(v)) for (const x of v) out.push(x); else out.push(v);
+      return out;
+    }
     const s = o[i], n = this.lens ? this.lens[i] : o[i + 1] - s, d = this.data;
-    const out = new Array(n);
-    for (let k = 0; k < n; k++) out[k] = d[s + k];
-    return out;
+    const r = out ?? new Array(n);
+    r.length = n;
+    for (let k = 0; k < n; k++) r[k] = d[s + k];
+    return r;
   }
 
   set(i: number, v: AttribValue | string[]) {

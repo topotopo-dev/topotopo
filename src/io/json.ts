@@ -1,11 +1,15 @@
 // Lossless native format: all attributes, groups and topology.
-import { Attribute, AttribTable, Geometry } from '../core/geometry.ts';
+import { Attribute, AttribTable, Geometry, baseType, isArrayType } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
 
 function tableToJSON(t: AttribTable) {
   const out: Record<string, any> = {};
-  for (const [k, a] of t.map) out[k] = { type: a.type, size: a.size, data: Array.from(a.data as any) };
+  for (const [k, a] of t.map) {
+    // array attributes: CSR offsets (count + 1) + flat entries; element i = data[offsets[i] .. offsets[i+1])
+    if (a.isArray) { a.compact(); out[k] = { type: a.type, size: 1, offsets: Array.from(a.offsets!), data: Array.from(a.data as any) }; }
+    else out[k] = { type: a.type, size: a.size, data: Array.from(a.data as any) };
+  }
   return out;
 }
 
@@ -13,8 +17,15 @@ function tableFromJSON(count: number, obj: Record<string, any> | undefined): Att
   const t = new AttribTable(count);
   for (const [k, a] of Object.entries(obj ?? {})) {
     const type = a.type as AttribType;
-    const data = type === 'string' ? (a.data as string[]).slice() : type === 'int' ? Int32Array.from(a.data) : Float64Array.from(a.data);
-    t.map.set(k, new Attribute(type, a.size, data));
+    const base = baseType(type);
+    const data = base === 'string' ? (a.data as string[]).slice() : base === 'int' ? Int32Array.from(a.data) : Float64Array.from(a.data);
+    if (isArrayType(type)) {
+      const off = Int32Array.from(a.offsets ?? []);
+      let ok = off.length === count + 1 && off[0] === 0 && off[count] === data.length;
+      for (let i = 0; ok && i < count; i++) if (off[i + 1] < off[i]) ok = false;
+      if (!ok) throw new Error(`attribute "${k}" (${type}): offsets must have ${count + 1} non-decreasing entries from 0 to ${data.length}`);
+      t.map.set(k, new Attribute(type, 1, data, [], off));
+    } else t.map.set(k, new Attribute(type, a.size, data));
   }
   return t;
 }

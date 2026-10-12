@@ -44,8 +44,15 @@ export function installSnippetLib(g: any, host: any) {
   L.sign = (a: any) => map1(a, Math.sign);
   L.frac = (a: any) => map1(a, (x) => x - Math.floor(x));
   L.mod = (a: any, b: any) => map2(a, b, (x, y) => ((x % y) + y) % y);
-  L.min = (a: any, ...r: any[]) => r.reduce((m, b) => map2(m, b, Math.min), a);
-  L.max = (a: any, ...r: any[]) => r.reduce((m, b) => map2(m, b, Math.max), a);
+  // min/max of several values are component-wise; of ONE array they return its smallest/largest entry (VEX)
+  const extreme = (a: any[], less: boolean) => {
+    if (!a.length) return 0;
+    let m = a[0];
+    for (let i = 1; i < a.length; i++) if (less ? a[i] < m : a[i] > m) m = a[i];
+    return m;
+  };
+  L.min = (a: any, ...r: any[]) => (!r.length && isA(a) ? extreme(a, true) : r.reduce((m, b) => map2(m, b, Math.min), a));
+  L.max = (a: any, ...r: any[]) => (!r.length && isA(a) ? extreme(a, false) : r.reduce((m, b) => map2(m, b, Math.max), a));
   L.clamp = (x: any, lo: any, hi: any) => map2(map2(x, lo, Math.max), hi, Math.min);
   L.radians = (d: any) => map1(d, (x) => (x * Math.PI) / 180);
   L.degrees = (r: any) => map1(r, (x) => (x * 180) / Math.PI);
@@ -76,8 +83,22 @@ export function installSnippetLib(g: any, host: any) {
   L.efit = (x: any, a: number, b: number, c: number, d: number) => map1(x, (v) => c + ((v - a) / (b - a)) * (d - c));
   L.smoothstep = L.smooth = (e0: number, e1: number, x: any) =>
     map1(x, (v) => { const t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0))); return t * t * (3 - 2 * t); });
-  L.avg = (...a: any[]) => { if (a.length === 1 && isA(a[0])) a = a[0]; return L.div(L.add(...(a as [any])), a.length); };
+  L.avg = (...a: any[]) => { if (a.length === 1 && isA(a[0])) a = a[0]; return a.length ? L.div(L.add(...(a as [any])), a.length) : 0; };
   L.sum = (a: number[]) => a.reduce((s, x) => s + x, 0);
+
+  // arrays (array attributes read as JS arrays: f[]@ i[]@ s[]@). All return new arrays; inputs are not modified.
+  L.len = (a: any) => (a == null ? 0 : typeof a === 'object' || typeof a === 'string' ? (a.length ?? 0) : 1);
+  L.append = (a: any[], ...v: any[]) => { const o = Array.from(a ?? []); for (const x of v) o.push(x); return o; };
+  L.concat = (...arrs: any[][]) => { const o: any[] = []; for (const a of arrs) for (const x of a ?? []) o.push(x); return o; };
+  L.slice = (a: any, start = 0, end?: number) => (typeof a === 'string' ? a.slice(start, end) : Array.from(a ?? []).slice(start, end));
+  L.find = (a: any, v: any) => (a == null ? -1 : a.indexOf(v));
+  const cmp = (x: any, y: any) => (typeof x === 'number' && typeof y === 'number' ? x - y : String(x) < String(y) ? -1 : String(x) > String(y) ? 1 : 0);
+  L.sort = (a: any[]) => Array.from(a ?? []).sort(cmp);
+  L.argsort = (a: any[]) => Array.from(a ?? [], (_: any, i: number) => i).sort((i: number, j: number) => cmp(a[i], a[j]) || i - j);
+  L.reverse = (a: any) => (typeof a === 'string' ? a.split('').reverse().join('') : Array.from(a ?? []).reverse());
+  L.unique = (a: any[]) => Array.from(new Set(a ?? []));
+  L.uniquevals = (a: any[]) => L.sort(L.unique(a));
+  L.isvalidindex = (a: any, i: number) => a != null && Number.isInteger(i) && i >= 0 && i < a.length;
   L.reflect = (d: number[], n: number[]) => L.sub(d, L.mul(n, 2 * L.dot(d, n)));
   L.project = (a: number[], b: number[]) => L.mul(b, L.dot(a, b) / (L.dot(b, b) || 1));
 
@@ -336,6 +357,8 @@ export function installSnippetLib(g: any, host: any) {
     for (let c = 0; c < s; c++) d[o + c] = NaN;
   };
   L.__rd = (d: any, i: number, s: number) => { const o = i * s, a = new Array(s); for (let c = 0; c < s; c++) a[c] = d[o + c]; return a; };
+  // array attribute element i as a realm array (a copy; the kernel writes it back with attr.set)
+  L.__ga = (attr: any, i: number) => attr.getArray(i, []);
   L.__arr = toArr;
 
   for (const k of Object.keys(L)) g[k] = L[k];
