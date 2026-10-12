@@ -43,7 +43,7 @@ function selectAttribs(g: Geometry, o: ExportOptions, exclude: Set<string> = new
   for (const n of names) {
     if (exclude.has(n)) continue;
     const a = g.points.get(n);
-    if (a) out.push([n, a]);
+    if (a && (a.type === 'float' || a.type === 'int' || a.type === 'string')) out.push([n, a]); // array attributes are skipped
   }
   return out;
 }
@@ -135,12 +135,12 @@ function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: strin
     const p = [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]];
     if (tr && tr.size === 3) { const t = tr.get(i) as number[]; p[0] += t[0]; p[1] += t[1]; p[2] += t[2]; }
     const rot = unrealRotator(pointRotation(g, i));
-    const k = ps && ps.type !== 'string' ? (ps.get(i) as number) : 1;
+    const k = ps && (ps.type === 'float' || ps.type === 'int') ? (ps.get(i) as number) : 1;
     const sv = sc && sc.size === 3 ? (sc.get(i) as number[]) : [1, 1, 1];
     const c = cd && cd.size >= 3 ? (cd.get(i) as number[]) : [1, 1, 1];
-    const a = al && al.type !== 'string' ? (al.get(i) as number) : 1;
-    const seed = sd && sd.type !== 'string' ? Math.round(Array.isArray(sd.get(i)) ? (sd.get(i) as number[])[0] : (sd.get(i) as number)) : hash32(i) >>> 1;
-    const dens = de && de.type !== 'string' ? (de.get(i) as number) : 1;
+    const a = al && al.type === 'float' ? (al.get(i) as number) : 1;
+    const seed = sd && (sd.type === 'int' || sd.type === 'float') ? Math.round(Array.isArray(sd.get(i)) ? (sd.get(i) as number[])[0] : (sd.get(i) as number)) : hash32(i) >>> 1;
+    const dens = de && (de.type === 'float' || de.type === 'int') ? (de.get(i) as number) : 1;
     const pos = [p[0] * s, p[2] * s, p[1] * s], scl = [sv[0] * k, sv[2] * k, sv[1] * k];
     const row = struct
       ? [String(i), ue(XYZ, pos), ue(['Pitch', 'Yaw', 'Roll'], [rot.pitch, rot.yaw, rot.roll]), ue(XYZ, scl), fmtNum(dens), ue(['X', 'Y', 'Z', 'W'], [c[0], c[1], c[2], a]), String(seed)]
