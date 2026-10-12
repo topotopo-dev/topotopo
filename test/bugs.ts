@@ -208,5 +208,15 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(w.ok && w.geo!.bbox().min[1] > 0, 'a wrangle after timed-out scripts still cooks', errs(w));
 }
 
+// ------------------------------------------------------------------ 5. the boolean fixture has a real result
+
+{
+  const r = await engine.cook(fixtureGraphFor('boolean'));
+  const g = r.geo;
+  const count = (name: string) => g?.primGroups.get(name)?.reduce((s, x) => s + x, 0) ?? 0;
+  check(r.ok && g && g.numPrims > 0 && count('from_a') > 0 && count('from_b') > 0,
+    `boolean fixture cuts B out of A (${g?.numPrims} prims, from_a ${count('from_a')}, from_b ${count('from_b')})`, errs(r));
+}
+
 console.log(`bugs: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
