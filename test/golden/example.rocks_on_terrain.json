@@ -1,0 +1,40 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3", "height:float:1", "uv:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [15.635, 2.4767, 15.492],
+      "min": [-15.4507, -2.7923, -15.8344]
+    },
+    "counts": {
+      "points": 152395,
+      "prims": 277760,
+      "vertices": 858880,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "fe5ad9079b46b471",
+      "attributes": {
+        "point.Cd": "5e42f1a69e57ba20",
+        "point.N": "17b5117b193306c9",
+        "point.height": "0eecc31e5b6ceea4",
+        "point.uv": "cd6eae4de2844c87",
+        "prim.copynum": "fb685dc57b4c8d1f"
+      },
+      "topology": "3350d7a943a82407"
+    }
+  },
+  "name": "example.rocks_on_terrain",
+  "ok": true,
+  "source": "examples/rocks_on_terrain.json",
+  "warnings": []
+}

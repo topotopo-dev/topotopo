@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0, 1],
+      "min": [-1, 0, -1]
+    },
+    "counts": {
+      "points": 32,
+      "prims": 1,
+      "vertices": 32,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "f82d1321497c276b",
+      "attributes": {},
+      "topology": "f1e072272560c63d"
+    }
+  },
+  "name": "node.circle",
+  "ok": true,
+  "source": "fixture for node type \"circle\" (test/fixtures.ts)",
+  "warnings": []
+}

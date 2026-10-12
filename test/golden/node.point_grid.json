@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [2, 0, 2],
+      "min": [-2, 0, -2]
+    },
+    "counts": {
+      "points": 25,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "dcafec5dbabd8287",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.point_grid",
+  "ok": true,
+  "source": "fixture for node type \"point_grid\" (test/fixtures.ts)",
+  "warnings": []
+}

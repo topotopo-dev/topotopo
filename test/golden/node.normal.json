@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["N:float:3"]
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "9ec54b8e97d6dcdc",
+      "attributes": {
+        "vertex.N": "fecc06f9851c362b"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.normal",
+  "ok": true,
+  "source": "fixture for node type \"normal\" (test/fixtures.ts)",
+  "warnings": []
+}

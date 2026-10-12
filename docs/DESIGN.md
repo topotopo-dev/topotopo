@@ -103,6 +103,21 @@ These are the decisions that most affect how well an agent can work with it:
 9. **Incremental edits.** `edit` ops (`set`, `insert` after a node, `remove` with auto-rewire, `rename`, `vars`) keep
    iteration cheap in both tokens and time.
 
+## Quality
+
+The `NodeDef`s are the single source for validation, the MCP docs and the generated [node reference](nodes.md), and
+they also drive the tests: `test/fixtures.ts` gives every node type a fixture graph that all test layers share.
+
+- **Smoke**: every node cooks and passes structural invariants (`checkGeo`: CSR topology, table sizes, finite `P`).
+- **Golden**: every node fixture and example graph has a fingerprint in `test/golden/` (counts, bbox, attribute schema,
+  groups, quantised hashes of positions, topology and attributes, sampled SDFs). Fingerprints are deterministic and
+  tolerant to float noise, so any change in output, intended or not, is visible as a git diff and reviewed.
+- **Property**: random chains from the registry check the engine's contracts: errors are per node and never thrown,
+  cooks are deterministic, and the content-addressed cache gives the same result after a param is changed and
+  restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line.
+- **Docs staleness**: `docs/nodes.md` must match the registry.
+- **Benchmarks** (`npm run bench`) track the performance targets of the roadmap; they are informational.
+
 ## Sourced libraries
 
 | library | licence | used for |

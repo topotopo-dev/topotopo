@@ -1,0 +1,37 @@
+{
+  "env": {
+    "font": "arial.ttf"
+  },
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.4043, 0.7158, 0.1],
+      "min": [-0.3921, 0, -0.1]
+    },
+    "counts": {
+      "points": 40,
+      "prims": 68,
+      "vertices": 204,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "b8d6c749a76689fb",
+      "attributes": {},
+      "topology": "ea72dfacdeb25976"
+    }
+  },
+  "name": "node.text",
+  "ok": true,
+  "source": "fixture for node type \"text\" (test/fixtures.ts)",
+  "warnings": []
+}

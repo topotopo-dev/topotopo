@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["class:int:1", "name:string:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 620,
+      "prims": 1192,
+      "vertices": 3576,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["inside"]
+    },
+    "hashes": {
+      "P": "3c2877dea0cd1030",
+      "attributes": {
+        "group.prim.inside": "d426e7a98b17fb4b",
+        "prim.class": "e5fd55e55105e8df",
+        "prim.name": "ad3a2b21547b8ac3"
+      },
+      "topology": "615d122f5faabdad"
+    }
+  },
+  "name": "node.voronoi_fracture",
+  "ok": true,
+  "source": "fixture for node type \"voronoi_fracture\" (test/fixtures.ts)",
+  "warnings": []
+}

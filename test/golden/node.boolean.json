@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["from_a", "from_b"]
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {
+        "group.prim.from_a": "9be171658ea4219f",
+        "group.prim.from_b": "9be171658ea4219f"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.boolean",
+  "ok": true,
+  "source": "fixture for node type \"boolean\" (test/fixtures.ts)",
+  "warnings": []
+}

@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "5e7fa92eda54cd74",
+      "attributes": {
+        "vertex.uv": "28d520c5fe340eef"
+      },
+      "topology": "211195f53fcdbf2f"
+    }
+  },
+  "name": "node.uv_transform",
+  "ok": true,
+  "source": "fixture for node type \"uv_transform\" (test/fixtures.ts)",
+  "warnings": []
+}

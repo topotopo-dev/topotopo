@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "uv:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.9911, 1, 1.9879],
+      "min": [-1.9915, -1, -1.9922]
+    },
+    "counts": {
+      "points": 9720,
+      "prims": 19200,
+      "vertices": 57600,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "a8a8ff88c48f4e5a",
+      "attributes": {
+        "point.N": "7c07b8a5ad8dc47f",
+        "point.uv": "3414e0b5a784feb7",
+        "prim.copynum": "15b105c564ae091f"
+      },
+      "topology": "3279e083d40a3e65"
+    }
+  },
+  "name": "node.copy_to_points",
+  "ok": true,
+  "source": "fixture for node type \"copy_to_points\" (test/fixtures.ts)",
+  "warnings": []
+}

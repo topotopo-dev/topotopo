@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "class:int:1", "name:string:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.0138, 1.0122, 0.9631],
+      "min": [-1.0525, -0.9721, -1.0369]
+    },
+    "counts": {
+      "points": 4526,
+      "prims": 8956,
+      "vertices": 26868,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["inside"]
+    },
+    "hashes": {
+      "P": "4c2c404e28f6a930",
+      "attributes": {
+        "group.prim.inside": "29a22cad0d73f377",
+        "prim.Cd": "2a4ae6e4ae8bdcea",
+        "prim.class": "f6388325ddf7887f",
+        "prim.name": "5e923f05b46d08cf"
+      },
+      "topology": "cacff903803289f1"
+    }
+  },
+  "name": "example.fractured",
+  "ok": true,
+  "source": "examples/fractured.json",
+  "warnings": []
+}

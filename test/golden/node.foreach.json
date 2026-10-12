@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.67, 0.75, 0.83],
+      "min": [-0.63, -0.71, -0.79]
+    },
+    "counts": {
+      "points": 192,
+      "prims": 120,
+      "vertices": 480,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["front", "side"]
+    },
+    "hashes": {
+      "P": "c3544efd81e3280f",
+      "attributes": {
+        "group.prim.front": "cec41bcd5e96d1f7",
+        "group.prim.side": "a7c34dcd259ffcf7",
+        "vertex.uv": "50b4f805b78c6a0f"
+      },
+      "topology": "7d360664fdfa0ade"
+    }
+  },
+  "name": "node.foreach",
+  "ok": true,
+  "source": "fixture for node type \"foreach\" (test/fixtures.ts)",
+  "warnings": []
+}

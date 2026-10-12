@@ -4,3 +4,4 @@ tmp/
 out/
 *.log
 .claude/worktrees/
+bench/last.json
