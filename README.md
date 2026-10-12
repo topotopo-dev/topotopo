@@ -12,8 +12,11 @@ browser-ready, so it can sit under a future GUI.
 - **Built for agents**: one-call graph builds, did-you-mean validation, text summaries, a multi-view **render** the
   model can look at, incremental edits with content-hash caching, and JS escape hatches (`wrangle` with `@P` syntax,
   `script`, `sdf_expr`).
-- **Pipeline output**: GLB, OBJ, USDA, PLY, STL and lossless JSON, with Y/Z-up and scale. Mesh splitting follows the
-  `name` attribute, for Unreal, Blender and Houdini.
+- **Pipeline output**: glTF/GLB through gltf-transform (materials from the `material` node, vertex colours, uv,
+  custom attributes, polylines and points; optional meshopt compression and quantization), Houdini `.geo` (every
+  attribute and group), CSV point streams with Unreal PCG columns, points JSON, OBJ, USDA, PLY, STL and lossless JSON,
+  with Y/Z-up and scale. Mesh splitting follows the `name` attribute, for Unreal, Blender and Houdini. The `file` node
+  reads the same formats back (glTF with meshopt and external buffers, `.geo` and uncompressed `.bgeo`, CSV).
 - **Live preview**: a local three.js page that refreshes whenever a graph changes. Click any node to see its result.
 
 The design notes, including whether the browser is a limitation, are in [docs/DESIGN.md](docs/DESIGN.md).
@@ -125,7 +128,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | curve | `parametric_curve` `line` `circle` `curve` `spiral` `shape2d` `resample` `carve` `ends` `sweep` `polywire` `revolve` `extrude` `offset_curve` `boolean2d` `fill` `loft` `voronoi2d` `triangulate2d` |
 | transform | `transform` `match_size` `mirror` |
 | deform | `noise_displace` `twist` `bend` `taper` `smooth` `peak` `jitter` `ray` |
-| attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_noise` `color` `measure` `connectivity` |
+| attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_noise` `color` `material` `measure` `connectivity` |
 | group | `group` `delete` |
 | topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `grid_split` `fill_holes` `bound` `decimate` `remesh` |
 | copy | `copy_xform` `scatter` `copy_to_points` |
@@ -134,7 +137,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | uv | `uv_project` `uv_transform` |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
-| io | `file` (obj, stl, ply, glb/gltf, json) |
+| io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json) |
 
 Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated
 [node reference](docs/nodes.md).

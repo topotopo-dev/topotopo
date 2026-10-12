@@ -49,7 +49,8 @@ src/graph/     node system
   migrate.ts     graph format versions and migrations
 src/nodes/     ~95 node types, one defineNode() each
 src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision)
-src/io/        import (obj, stl, ply, glb/gltf, json) · export (glb, obj, usda, ply, stl, json)
+src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON
+               (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts
 src/host/      Node host: fs, vm sandbox (timeouts), fonts
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
@@ -160,7 +161,8 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 | library | licence | used for |
 |---|---|---|
 | manifold-3d | Apache-2.0 | booleans, convex hull, Minkowski, smoothing/refine, level-set meshing, 2D cross-sections (Clipper2): offset, 2D booleans, text fill, extrude |
-| meshoptimizer | MIT | decimation |
+| meshoptimizer | MIT | decimation; meshopt compression/decompression for glTF (EXT_meshopt_compression) |
+| @gltf-transform/core + extensions | MIT | glTF 2.0 document model, GLB/glTF reading and writing, KHR/EXT extensions (materials, quantization, meshopt, Draco, instancing) |
 | earcut | ISC | n-gon triangulation |
 | d3-delaunay | ISC | 2D Delaunay / Voronoi |
 | simplex-noise | MIT | simplex noise |
@@ -170,7 +172,14 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 
 Written in-house: the geometry model, attribute-preserving builder, Catmull-Clark, poly extrude/inset, sweep with
 rotation-minimising frames, L-systems, Voronoi fracture (manifold half-space trims), narrow-band mesh→SDF with fast
-sweeping, scatter with blue-noise sample elimination, BVH/KD-tree, renderer, exporters/importers.
+sweeping, scatter with blue-noise sample elimination, BVH/KD-tree, renderer, exporters/importers (OBJ/STL/PLY/USDA,
+Houdini `.geo` JSON and binary JSON, CSV/points JSON; glTF builds on gltf-transform). Tests validate every GLB with the
+Khronos `gltf-validator` (Apache-2.0, dev dependency only).
+
+**Material data.** A prim string attribute `material` names a material; the detail string attribute `materials` holds
+a JSON table `{name: {baseColor, metallic, roughness, emissive, alpha, doubleSided, unlit}}` (`src/core/materials.ts`).
+It carries names and PBR scalars to engines, not shading. `Geometry.merge` keeps the first detail value, so the `merge`
+node and the exporters union tables (`mergeMaterialTables`); other internal merges keep their first input's table.
 
 ## Roadmap
 
@@ -184,7 +193,8 @@ sweeping, scatter with blue-noise sample elimination, BVH/KD-tree, renderer, exp
 - Performance: move hot kernels (sdf sampling, rasteriser, subdivide) to Workers, WebGPU or WASM; add multithreaded cooking of
   independent branches.
 - Optional CAD context: an OpenCascade/replicad module for B-rep fillets and STEP export.
-- Houdini interop: `.bgeo`/`.geo` export, which keeps attributes and groups, and a USD layer writer with variants.
+- Houdini interop: `.geo` read/write and uncompressed `.bgeo` reading are in; still open are `.bgeo.sc` (Blosc)
+  and a USD layer writer with variants.
 
 **GUI (makes the app usable without an LLM)**
 - Browser app: a node editor (React Flow or LiteGraph), a three.js viewport, and parameter panels generated from

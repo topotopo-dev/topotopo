@@ -8,6 +8,10 @@
 //   Name (row key), Position.X/Y/Z, Rotation.Roll/Pitch/Yaw (degrees, from orient, else N + up, then rot),
 //   Scale.X/Y/Z (scale × pscale), Density (density or 1), Color.R/G/B/A (Cd, Alpha), Seed (seed or a hash of the
 //   point number), then the remaining attributes.
+//   pcgStruct: the same values as Unreal struct text in one cell each, the form Unreal's DataTable CSV importer and
+//   exporter use: Position "(X=…,Y=…,Z=…)", Rotation "(Pitch=…,Yaw=…,Roll=…)", Scale "(X=…,Y=…,Z=…)", Density,
+//   Color "(X=r,Y=g,Z=b,W=a)" (FVector4), Seed. A row struct {FVector Position; FRotator Rotation; FVector Scale;
+//   float Density; FVector4 Color; int32 Seed} imports it directly.
 // Points JSON: { format: "polyforge-points", version: 1, count, attributes: { P: { type, size, data } } }.
 import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
@@ -110,6 +114,8 @@ export function rotatorToHoudini(pitch: number, yaw: number, roll: number): Mat4
   return m;
 }
 
+const fmtFixed = (x: number) => (Number.isFinite(x) ? x.toFixed(6) : '0.000000');
+
 /** Attributes consumed by the PCG columns. */
 const PCG_USED = new Set(['P', 'N', 'v', 'up', 'orient', 'rot', 'pscale', 'scale', 'Cd', 'Alpha', 'density', 'seed', 'trans']);
 
@@ -117,7 +123,11 @@ function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: strin
   const s = o.scale ?? 100;
   const get = (n: string) => g.points.get(n);
   const extras = selectAttribs(g, { ...o, attributes: attributeList(o.attributes).filter((n) => !PCG_USED.has(n)) }, PCG_USED);
-  const header = ['Name', 'Position.X', 'Position.Y', 'Position.Z', 'Rotation.Roll', 'Rotation.Pitch', 'Rotation.Yaw', 'Scale.X', 'Scale.Y', 'Scale.Z', 'Density', 'Color.R', 'Color.G', 'Color.B', 'Color.A', 'Seed'];
+  const struct = !!o.pcgStruct;
+  const header = struct ? ['Name', 'Position', 'Rotation', 'Scale', 'Density', 'Color', 'Seed']
+    : ['Name', 'Position.X', 'Position.Y', 'Position.Z', 'Rotation.Roll', 'Rotation.Pitch', 'Rotation.Yaw', 'Scale.X', 'Scale.Y', 'Scale.Z', 'Density', 'Color.R', 'Color.G', 'Color.B', 'Color.A', 'Seed'];
+  const ue = (keys: string[], vals: number[]) => quote('(' + keys.map((k, j) => `${k}=${fmtFixed(vals[j])}`).join(',') + ')');
+  const XYZ = ['X', 'Y', 'Z'];
   for (const [n, a] of extras) header.push(...columnsFor(n, a));
   const P = g.P, tr = get('trans'), ps = get('pscale'), sc = get('scale'), cd = get('Cd'), al = get('Alpha'), de = get('density'), sd = get('seed');
   const rows: string[][] = [];
@@ -130,9 +140,12 @@ function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: strin
     const c = cd && cd.size >= 3 ? (cd.get(i) as number[]) : [1, 1, 1];
     const a = al && al.type !== 'string' ? (al.get(i) as number) : 1;
     const seed = sd && sd.type !== 'string' ? Math.round(Array.isArray(sd.get(i)) ? (sd.get(i) as number[])[0] : (sd.get(i) as number)) : hash32(i) >>> 1;
-    const row = [String(i), fmtNum(p[0] * s), fmtNum(p[2] * s), fmtNum(p[1] * s), fmtNum(rot.roll), fmtNum(rot.pitch), fmtNum(rot.yaw),
-      fmtNum(sv[0] * k), fmtNum(sv[2] * k), fmtNum(sv[1] * k), fmtNum(de && de.type !== 'string' ? (de.get(i) as number) : 1),
-      fmtNum(c[0]), fmtNum(c[1]), fmtNum(c[2]), fmtNum(a), String(seed)];
+    const dens = de && de.type !== 'string' ? (de.get(i) as number) : 1;
+    const pos = [p[0] * s, p[2] * s, p[1] * s], scl = [sv[0] * k, sv[2] * k, sv[1] * k];
+    const row = struct
+      ? [String(i), ue(XYZ, pos), ue(['Pitch', 'Yaw', 'Roll'], [rot.pitch, rot.yaw, rot.roll]), ue(XYZ, scl), fmtNum(dens), ue(['X', 'Y', 'Z', 'W'], [c[0], c[1], c[2], a]), String(seed)]
+      : [String(i), fmtNum(pos[0]), fmtNum(pos[1]), fmtNum(pos[2]), fmtNum(rot.roll), fmtNum(rot.pitch), fmtNum(rot.yaw),
+        fmtNum(scl[0]), fmtNum(scl[1]), fmtNum(scl[2]), fmtNum(dens), fmtNum(c[0]), fmtNum(c[1]), fmtNum(c[2]), fmtNum(a), String(seed)];
     for (const [n, at] of extras) {
       if (at.type === 'string') row.push(quote(String(at.get(i))));
       else for (const x of pointValue(n, at, i, {})) row.push(fmtNum(x));
@@ -189,7 +202,19 @@ export function parseCSV(text: string): string[][] {
   return rows;
 }
 
-const PCG_COLUMNS = /^(position|rotation|scale|color)\.(x|y|z|roll|pitch|yaw|r|g|b|a)$|^(density|seed)$/i;
+const PCG_COLUMNS = /^(position|rotation|scale|color)(\.(x|y|z|roll|pitch|yaw|r|g|b|a))?$|^(density|seed)$/i;
+
+/** Unreal struct text "(X=1.0,Y=2.0,Z=3.0)" → { X: 1, Y: 2, Z: 3 } (null when the cell is not struct text). */
+function ueStruct(cell: string): Record<string, number> | null {
+  const m = /^\s*\((.*)\)\s*$/.exec(cell);
+  if (!m) return null;
+  const out: Record<string, number> = {};
+  for (const part of m[1].split(',')) {
+    const kv = /^\s*([A-Za-z]+)\s*=\s*([-+\d.eE]+)\s*$/.exec(part);
+    if (kv) out[kv[1].toLowerCase()] = Number(kv[2]);
+  }
+  return out;
+}
 
 /** Column name → attribute base + component index (−1 = scalar). */
 function splitColumn(h: string): { base: string; comp: number } {
@@ -210,7 +235,8 @@ export function importCSV(text: string): Geometry {
   const header = rows[0];
   const body = rows.slice(1);
   const n = body.length;
-  const pcg = header.some((h) => /^position\.x$/i.test(h));
+  const posCol = header.findIndex((h) => /^position$/i.test(h.trim()));
+  const pcg = header.some((h) => /^position\.x$/i.test(h.trim())) || (posCol >= 0 && !!body.length && !!ueStruct(body[0][posCol] ?? ''));
   const col = (i: number) => body.map((r) => r[i] ?? '');
   const isNum = (s: string) => s === '' || Number.isFinite(Number(s));
   if (pcg) return importPCG(header, col, n);
@@ -248,33 +274,44 @@ export function importCSV(text: string): Geometry {
 }
 
 function importPCG(header: string[], col: (i: number) => string[], n: number): Geometry {
-  const idx = (name: string) => header.findIndex((h) => h.toLowerCase() === name.toLowerCase());
-  const num = (name: string, def: number) => { const i = idx(name); return i < 0 ? new Array(n).fill(def) : col(i).map((s) => (s === '' ? def : Number(s))); };
+  const idx = (name: string) => header.findIndex((h) => h.trim().toLowerCase() === name.toLowerCase());
+  const has = (base: string, comp: string) => idx(`${base}.${comp}`) >= 0 || idx(base) >= 0;
+  // a component from a flat column ("Position.X") or from a struct-text column ("Position" = "(X=…,Y=…,Z=…)")
+  const num = (base: string, comp: string, def: number, key = comp): number[] => {
+    const flat = idx(`${base}.${comp}`);
+    if (flat >= 0) return col(flat).map((v) => (v === '' ? def : Number(v)));
+    const st = idx(base);
+    if (st >= 0) return col(st).map((v) => { const o = ueStruct(v); const x = o?.[key.toLowerCase()]; return x === undefined ? def : x; });
+    return new Array(n).fill(def);
+  };
   const s = 100;
-  const X = num('Position.X', 0), Y = num('Position.Y', 0), Z = num('Position.Z', 0);
+  const X = num('Position', 'X', 0), Y = num('Position', 'Y', 0), Z = num('Position', 'Z', 0);
   const pos = new Float64Array(n * 3);
   for (let i = 0; i < n; i++) { pos[i * 3] = X[i] / s; pos[i * 3 + 1] = Z[i] / s; pos[i * 3 + 2] = Y[i] / s; }
   const g = new Geometry({ positions: pos });
   const t = g.points;
-  if (idx('Rotation.Roll') >= 0 || idx('Rotation.Pitch') >= 0 || idx('Rotation.Yaw') >= 0) {
-    const r = num('Rotation.Roll', 0), p = num('Rotation.Pitch', 0), y = num('Rotation.Yaw', 0);
+  if (has('Rotation', 'Roll') || has('Rotation', 'Pitch') || has('Rotation', 'Yaw')) {
+    const r = num('Rotation', 'Roll', 0), p = num('Rotation', 'Pitch', 0), y = num('Rotation', 'Yaw', 0);
     const o = t.add('orient', 'float', 4);
     for (let i = 0; i < n; i++) o.set(i, qFromMat(rotatorToHoudini(p[i], y[i], r[i])));
   }
-  if (idx('Scale.X') >= 0) {
-    const sx = num('Scale.X', 1), sy = num('Scale.Y', 1), sz = num('Scale.Z', 1);
+  if (has('Scale', 'X')) {
+    const sx = num('Scale', 'X', 1), sy = num('Scale', 'Y', 1), sz = num('Scale', 'Z', 1);
     const a = t.add('scale', 'float', 3);
     for (let i = 0; i < n; i++) a.set(i, [sx[i], sz[i], sy[i]]);
   }
-  if (idx('Density') >= 0) { const d = num('Density', 1), a = t.add('density', 'float', 1); d.forEach((v, i) => a.set(i, v)); }
-  if (idx('Color.R') >= 0) {
-    const r = num('Color.R', 1), gg = num('Color.G', 1), b = num('Color.B', 1), al = num('Color.A', 1);
+  if (idx('Density') >= 0) { const d = col(idx('Density')).map((v) => (v === '' ? 1 : Number(v))), a = t.add('density', 'float', 1); d.forEach((v, i) => a.set(i, v)); }
+  if (has('Color', 'R')) {
+    // flat Color.R/G/B/A, or FVector4 / FLinearColor struct text (X/Y/Z/W or R/G/B/A keys)
+    const st = idx('Color') >= 0 && idx('Color.R') < 0;
+    const r = num('Color', 'R', 1, st ? 'X' : 'R'), gg = num('Color', 'G', 1, st ? 'Y' : 'G'), b = num('Color', 'B', 1, st ? 'Z' : 'B'), al = num('Color', 'A', 1, st ? 'W' : 'A');
+    if (st) { const lc = col(idx('Color')).map((v) => ueStruct(v)); lc.forEach((o, i) => { if (o && o.r !== undefined) { r[i] = o.r; gg[i] = o.g ?? 1; b[i] = o.b ?? 1; al[i] = o.a ?? 1; } }); }
     const a = t.add('Cd', 'float', 3), aa = t.add('Alpha', 'float', 1);
     for (let i = 0; i < n; i++) { a.set(i, [r[i], gg[i], b[i]]); aa.set(i, al[i]); }
   }
-  if (idx('Seed') >= 0) { const d = num('Seed', 0), a = t.add('seed', 'int', 1); d.forEach((v, i) => a.set(i, Math.round(v))); }
+  if (idx('Seed') >= 0) { const d = col(idx('Seed')).map(Number), a = t.add('seed', 'int', 1); d.forEach((v, i) => a.set(i, Math.round(v || 0))); }
   // remaining columns as attributes (generic rules); the row-name column is dropped
-  const rest = header.map((h, i) => [h, i] as const).filter(([h, i]) => !PCG_COLUMNS.test(h) && !(i === 0 && /^(name|---|rowname)$/i.test(h)));
+  const rest = header.map((h, i) => [h.trim(), i] as const).filter(([h, i]) => !PCG_COLUMNS.test(h) && !(i === 0 && /^(name|---|rowname)$/i.test(h)));
   if (rest.length) {
     const sub = importCSVColumns(rest.map(([h]) => h), rest.map(([, i]) => col(i)), n);
     for (const [k, a] of sub.map) t.map.set(k, a);
