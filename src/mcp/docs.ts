@@ -8,7 +8,7 @@ WORKFLOW
 1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…).
 2. help {nodes:[...]} for exact params before using unfamiliar nodes; help {topic:"wrangle"|"graph"|"recipes"…} for concepts.
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
-4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs). inspect for numbers (bbox, attributes, watertightness).
+4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs; overlays for specific questions: wireframe "hard"/"boundary", views "section", glyphs "N", label_groups, shading "matcap", see help topic "render"). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, meshopt), geo (Houdini), csv (Unreal PCG points), points.json, obj/usda/ply/stl/json for Unreal, Blender, Houdini.
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
@@ -256,6 +256,36 @@ by chart/island colour, island borders yellow, overlapping uv in RED (footer/not
 render checker:true shades 3D views with an 8×8 uv checker: squares should look square and equal-sized
 (stretch = rectangles, density = cell size, mirrored charts flip the red/green gradient).
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
+
+  render: `RENDER (pick the overlay that answers your question; everything is off by default)
+render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
+overlays and notes pieces, open edges and back-facing % (also returned as text notes).
+VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
+  persp, front, back, left, right, top, bottom, uv, section, persp@<azimuth>. azimuth/elevation/zoom, look_at [x,y,z],
+  ortho_scale (world width of ortho views), size (pixels per view), scale 2 (a 2× image).
+QUESTION → OPTION
+  How dense / clean is the topology? Where are the triangles, poles, slivers?  wireframe:"all" (every edge, 1 px)
+  Which edges are creases?                         wireframe:"hard" (dihedral > hard_angle, default 30) + crease/hard/sharp edge groups
+  Is it watertight? Where are holes, non-manifold edges, winding flips?  wireframe:"boundary" (pink open, yellow non-manifold, violet flipped)
+  What do my edge groups contain?                  wireframe:"groups" (one colour per edge group, legend)
+  What is inside? How thick are the walls? Do parts overlap?  views:["persp","section"] + section_axis x|y|z, section_offset
+                   (bbox fraction, default 0.5; section_absolute:true = coordinate). The cut is filled RED; BLUE = an inside-out
+                   (flipped) solid; open sheets show as yellow lines; the far half is ghosted. Cavities stay empty.
+                   clip:{axis, offset} cuts the persp view instead, removing the camera's side (cap:false shows the inside).
+  Which way do normals / up / velocities / instances point?  glyphs:"N" | "up" | "v" | "orient" | "custom" (glyph_attrib),
+                   glyph_scale (default 5% of the bbox diagonal), max_glyphs (default 400, evenly subsampled). Lines start on
+                   the surface with a bright tip; parts behind the surface are dimmed. orient: X red, Y green, Z blue.
+                   N missing → computed face normals. Flipped normals: glyphs point into the surface (dimmed) + blue faces.
+  Which group is which? What is where?             label_groups:true (names on the group, prim-group borders and group points in
+                   the label colour, legend with counts) · label_pieces:true (#0, #1 … connected pieces) · label_attrib:"name"
+                   (each distinct value of a string/int attribute) · point_numbers / prim_numbers (visible ones, first max_labels)
+  What do the colours mean?                        color_by + legend:true (gradient bar with min/max, or categorical swatches)
+  What shape is it?                                shading:"matcap" (clay, reads form) · "ao" (ambient occlusion: creases and
+                   cavities darken; ao_radius px) · "flat" (facets, ignores N)
+Labels never overlap: ones without room are skipped (note says how many; raise size or lower max_labels).
+Examples: render {views:["persp","section"], section_axis:"z", wireframe:"hard", label_groups:true}
+          render {views:"turntable", shading:"matcap"} · render {glyphs:"N", clip:{axis:"x", offset:0.5}}
+CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2`,
 
   export: `EXPORT
 export {path:"exports/thing.glb"} — format from the extension:

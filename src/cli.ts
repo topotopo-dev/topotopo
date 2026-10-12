@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Command line: cook a graph JSON file, then render / export / inspect.
 //   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
-//                   [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb]
+//                   [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
+//                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
+//                   [--shading flat|matcap|ao] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--inspect summary|attributes|topology|all]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
@@ -17,7 +19,9 @@ import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { createNodeHost } from './host/node.ts';
 import { renderGeometry } from './render/raster.ts';
-import type { ViewName } from './render/raster.ts';
+import { parseViews } from './render/raster.ts';
+import type { RenderOptions } from './render/raster.ts';
+import { renderArgs } from './render/options.ts';
 import { encodePNG } from './render/png.ts';
 import { exportFormatFromPath, exportGeometryAsync } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
@@ -31,7 +35,10 @@ const fail = (msg: string): never => { console.error(msg); process.exit(1); };
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     'usage: node src/cli.ts <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]',
-    '         [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb] [--inspect all]',
+    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all]',
+    '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
+    '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
+    '                          [--shading flat|matcap|ao] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
     '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
@@ -90,15 +97,28 @@ function report(r: CookReport) {
   for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
 }
 
+/** Render overlay flags → render tool arguments → RenderOptions (src/render/options.ts). */
+function renderFlags(): RenderOptions {
+  const a: Record<string, unknown> = {};
+  for (const [f, k] of [['--wireframe', 'wireframe'], ['--hard-angle', 'hard_angle'], ['--section', 'section'], ['--clip', 'clip'], ['--glyphs', 'glyphs'],
+    ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
+    ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
+    ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale']]) if (opt(f) !== undefined) a[k] = opt(f);
+  for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate']]) if (argv.includes(f)) a[k] = true;
+  try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
+}
+
 async function writeOutputs(r: CookReport, frame?: number) {
   const geo = r.geo!;
   const out = opt('--render');
   const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
   if (out) {
-    const v = opt('--views') ?? 'quad';
-    const views = v === 'quad' ? undefined : v === 'quad_uv' ? (['persp', 'uv'] as ViewName[]) : (v.split(',') as ViewName[]);
+    const ro = renderFlags();
+    const v = opt('--views');
+    let views = v === undefined || v === 'quad' ? undefined : parseViews(v);
+    if (opt('--section') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('section') ? views : [...(views ?? parseViews('quad')!), 'section'];
     const title = path.basename(file, '.json') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
-    const img = renderGeometry(geo, { views, colorBy: opt('--color-by') ?? null, checker: argv.includes('--checker'), title });
+    const img = renderGeometry(geo, { ...ro, views, colorBy: opt('--color-by') ?? null, checker: argv.includes('--checker'), title });
     const p = at(out);
     fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
     fs.writeFileSync(p, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
