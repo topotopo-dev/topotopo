@@ -38,6 +38,7 @@ src/core/      geometry model + algorithms (no I/O)
   edges.ts       EdgeSet (unordered point pairs, integer keys), unique-edge list
   halfedge.ts    half-edge mesh derived on demand and cached per Geometry: loops, rings, one-rings, boundaries, dihedral angles
   topology.ts    normals (hard edges), triangulation (earcut), edges, connectivity, boundary loops, health report
+  bevel.ts       poly bevel on the half-edge fans: chamfer/round strips, mitres, corner patches, exact clamp, point bevel
   groups.ts      Houdini group patterns for all four classes ("top", "!top", "0-10", "@P.y>0", "p3-7", "angle>30", "border:top")
   groupconvert.ts  any/all conversion of selections between point, vertex, prim and edge
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)

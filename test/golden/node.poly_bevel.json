@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 150,
+      "prims": 152,
+      "vertices": 600,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": ["bevel_edges"],
+      "point": [],
+      "prim": ["bevel", "bevel_corner"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "e9e4819e3c93f9d4",
+      "attributes": {
+        "group.edge.bevel_edges": "c324422843d384ae",
+        "group.prim.bevel": "08498dfd4f749b07",
+        "group.prim.bevel_corner": "afb43dfde4fdf307",
+        "vertex.uv": "40f4a3ade3fb1457"
+      },
+      "topology": "4d39d2d877be3d92"
+    }
+  },
+  "name": "node.poly_bevel",
+  "ok": true,
+  "source": "fixture for node type \"poly_bevel\" (test/fixtures.ts)",
+  "warnings": []
+}

@@ -1,0 +1,23 @@
+{
+  "description": "poly_bevel: a box with every edge rounded (divisions 3, sphere-octant corners), a box with only its top edges chamfered (edge group from \"angle>80\" minus the lower edges), and an extruded star whose top rim is rounded (border of the extrude's top group).",
+  "nodes": {
+    "box_a": { "type": "box", "params": { "size": [1.4, 1.4, 1.4], "center": [0, 0.7, 0] } },
+    "round_all": { "type": "poly_bevel", "in": ["box_a"], "params": { "offset": 0.18, "divisions": 3 } },
+    "paint_a": { "type": "color", "in": ["round_all"], "params": { "color": "#d9a066" } },
+    "a": { "type": "transform", "in": ["paint_a"], "params": { "translate": [-2.6, 0, 0] } },
+
+    "box_b": { "type": "box", "params": { "size": [1.4, 1.4, 1.4], "center": [0, 0.7, 0] } },
+    "rim": { "type": "group", "in": ["box_b"], "params": { "class": "edge", "name": "rim", "pattern": "angle>80 ^@P.y<1" } },
+    "chamfer_top": { "type": "poly_bevel", "in": ["rim"], "params": { "group": "rim", "offset": 0.22 } },
+    "paint_b": { "type": "color", "in": ["chamfer_top"], "params": { "color": "#7fa8c9" } },
+
+    "star": { "type": "shape2d", "params": { "shape": "star", "radius": 1, "inner_radius": 0.55, "sides": 5 } },
+    "slab": { "type": "extrude", "in": ["star"], "params": { "height": 0.5 } },
+    "rounded_rim": { "type": "poly_bevel", "in": ["slab"], "params": { "group": "border:top", "offset": 0.08, "divisions": 3 } },
+    "paint_c": { "type": "color", "in": ["rounded_rim"], "params": { "color": "#9cc46b" } },
+    "c": { "type": "transform", "in": ["paint_c"], "params": { "translate": [2.7, 0, 0] } },
+
+    "out": { "type": "merge", "in": ["a", "paint_b", "c"] }
+  },
+  "output": "out"
+}

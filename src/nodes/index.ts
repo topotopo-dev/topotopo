@@ -5,6 +5,7 @@ import './transform.ts';
 import './attributes.ts';
 import './groups.ts';
 import './topology.ts';
+import './bevel.ts';
 import './copy.ts';
 import './solid.ts';
 import './sdf.ts';

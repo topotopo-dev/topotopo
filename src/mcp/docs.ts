@@ -141,14 +141,23 @@ CROSS-CLASS NAMES: a pattern may name a group of another class; it is converted:
 GROUP TOOLS: group_promote (from → to class, include any | all, e.g. point→prim all = prims entirely in the group,
   edge→prim any = prims using a grouped edge), group_expand (grow/shrink point/prim/edge groups by N steps; negative
   shrinks), group_combine ("a & !b | c", ^ xor, parentheses), group_delete, group_rename.
-EDGE GROUPS IN NODES: subdivide creases (+ creaseweight attribute), normal hard_edges. Edge groups follow points:
+SELECTING EDGES TO BEVEL (poly_bevel group; also subdivide creases, normal hard_edges):
+  "angle>80"            sharp edges only (box edges = 90, flat subdivision edges = 0)
+  "angle>80 ^@P.y<0.9"  sharp edges minus those low down (^ removes): e.g. only the top rim of a box of height 1
+  "border:top"          rim of a prim group (extrude's top cap, poly_extrude's front faces)
+  "p3-7" "p0-1-2-3-0"   explicit edges / closed chains of point numbers
+  "rim"                 an edge group made with {"type":"group","params":{"class":"edge","name":"rim","pattern":"..."}}
+  "bevel_edges"         poly_bevel's output group (where the bevel meets the faces): bevel again to soften the first
+  ""                    every edge shared by two polygons. Boundary and non-manifold edges are skipped with a warning.
+  mode "points" takes a point pattern instead ("0", "@P.y>0", a point group) and truncates those corners.
+EDGE GROUPS IN NODES: poly_bevel, subdivide creases (+ creaseweight attribute), normal hard_edges. Edge groups follow points:
   they survive transforms, fuse (remapped), merge (offset), copies, deletes (edges that no longer bound a prim
   drop out) and every node that rebuilds geometry where an edge's two points are copied 1:1; subdivide moves them to
   the child edges. Booleans, remesh and other solid ops drop them.
 WRANGLE: @group_x works in vertices mode too; invertexgroup(i,"g",v) inedgegroup(i,"g",pt0,pt1) setvertexgroup(0,"g",v,1)
   setedgegroup(0,"g",pt0,pt1,1). Scripts: lib.halfEdges(geo) (edge loops/rings, one-rings, boundaries), lib.EdgeSet,
   lib.evalEdgeGroup(geo, pattern), lib.convertSelection(geo, from, to, sel, include).
-Groups produced by nodes: poly_extrude front/side, extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides,
+Groups produced by nodes: poly_extrude front/side, poly_bevel bevel/bevel_corner (+ edge group bevel_edges), extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides,
 clip above/below/cap, fill_holes filled, lsystem leaves/J/K/M, voronoi_fracture inside. Create custom ones with "group".`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
@@ -229,7 +238,9 @@ Importing: the "file" node loads obj, stl, ply, glb/gltf, json (up_axis "z" conv
 6) Sign: text {text:"HELLO", depth:0.2} + box backing, merge.
 7) Organic blob: sdf_expr with smin of spheres + noise → sdf_to_mesh.
 8) Pipes: curve (smooth) → sweep (circle radius 0.05) or polywire.
-9) Panel greebles: grid → poly_extrude individual with group "@P.x>0" random → color by group via group/color nodes.`,
+9) Panel greebles: grid → poly_extrude individual with group "@P.x>0" random → color by group via group/color nodes.
+10) Rounded / chamfered hard-surface edges: box → poly_bevel {group:"angle>80", offset:0.05, divisions:3} (divisions 0 =
+ chamfer; shape 1 = squarer, -0.5 = flat, -1 = cove). Only the rim of a slab: extrude → poly_bevel {group:"border:top"}.`,
 };
 
 export function topicList() {
