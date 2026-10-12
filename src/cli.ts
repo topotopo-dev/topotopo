@@ -2,7 +2,7 @@
 // Command line: cook a graph JSON file, then render / export / inspect.
 //   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|persp|front,top] [--color-by attr] [--export out.glb]
-//                   [--compress meshopt] [--quantize] [--pcg] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
+//                   [--compress meshopt] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--inspect summary|attributes|topology|all]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
@@ -32,7 +32,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     'usage: node src/cli.ts <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]',
     '         [--render out.png] [--views quad|persp|front,top] [--color-by attr] [--export out.glb] [--inspect all]',
-    '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     '       node src/cli.ts --catalog | --help-node <type>',
@@ -113,7 +113,8 @@ async function writeOutputs(r: CookReport, frame?: number) {
       splitByName: true,
       compress: opt('--compress') as any,
       quantize: argv.includes('--quantize') || undefined,
-      pcg: argv.includes('--pcg') || undefined,
+      pcg: argv.includes('--pcg') || argv.includes('--pcg-struct') || undefined,
+      pcgStruct: argv.includes('--pcg-struct') || undefined,
       attributes: opt('--attributes'),
       upAxis: up === 'z' || up === 'y' ? up : undefined,
       scale: opt('--scale') !== undefined ? Number(opt('--scale')) : undefined,

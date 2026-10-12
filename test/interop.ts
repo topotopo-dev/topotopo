@@ -297,6 +297,18 @@ function encodeBinaryJSON(v: any): Uint8Array {
   check(close(pb.points.get('scale')!.get(3) as any as number[] ? (pb.points.get('scale')!.get(3) as number[])[0] : 0, pts.points.get('pscale')!.get(3) as number, 1e-6), 'pcg csv: Scale from pscale');
   check(pb.points.get('seed')!.get(5) === 35 && close(pb.points.get('density')!.get(0) as number, 0.75, 1e-9), 'pcg csv: Seed and Density');
 
+  // struct-text cells for Unreal DataTable import ("(X=…,Y=…,Z=…)"), then back
+  const pcgS = new TextDecoder().decode(exportGeometry(pts, 'csv', { pcg: true, pcgStruct: true }));
+  const sl = pcgS.split('\n');
+  check(sl[0].startsWith('Name,Position,Rotation,Scale,Density,Color,Seed') && /^0,"\(X=[-\d.]+,Y=[-\d.]+,Z=[-\d.]+\)","\(Pitch=[-\d.]+,Yaw=[-\d.]+,Roll=[-\d.]+\)"/.test(sl[1]), `pcg struct csv: ${sl[1].slice(0, 90)}`);
+  const sb = importGeometry(new TextEncoder().encode(pcgS), 'csv');
+  let serr = Math.max(...Array.from(pts.P, (x, i) => Math.abs(x - sb.P[i])));
+  for (let i = 0; i < pts.numPoints; i++) {
+    const R0 = lookAtBasis(pts.points.get('N')!.get(i) as any, [0, 1, 0]), R1 = m4fromQuat(sb.points.get('orient')!.get(i) as any);
+    for (const k of [0, 1, 2, 4, 5, 6, 8, 9, 10]) serr = Math.max(serr, Math.abs(R0[k] - R1[k]));
+  }
+  check(serr < 1e-5 && close((sb.points.get('Cd')!.get(2) as number[])[0], (pts.points.get('Cd')!.get(2) as number[])[0], 1e-6), `pcg struct csv re-import: position, rotation, colour (max error ${serr.toExponential(1)})`);
+
   // points JSON
   const pj = exportGeometry(pts, 'pointsjson');
   const pjb = importGeometry(pj, 'pointsjson');

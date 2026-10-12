@@ -29,6 +29,8 @@ export interface ExportOptions {
   attributes?: string[] | string;
   /** csv: Unreal PCG columns (Position/Rotation/Scale/Density/Color/Seed) in Unreal space (Z-up, left-handed, cm) */
   pcg?: boolean;
+  /** csv with pcg: one Unreal struct-text cell per vector ("(X=…,Y=…,Z=…)"), for DataTable import with a row struct */
+  pcgStruct?: boolean;
   /** geo: float storage, 64 (fpreal64, lossless, default) or 32 (fpreal32, Houdini's default) */
   precision?: 32 | 64;
 }
