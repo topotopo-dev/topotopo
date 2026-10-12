@@ -93,6 +93,12 @@ const near = (a: number[], b: number[], tol = 1e-9) => maxDiff(a, b) <= tol;
   const along = c + 10; // 10 cells (1 m) along the row: at the radius
   check(Math.abs(su.P[(c + 5) * 3 + 1] - 0.5) < 1e-9 && Math.abs(su.P[along * 3 + 1]) < 1e-12, 'soft_transform surface: edge distance along the grid');
 
+  // weight 1 is exactly the transform node (same srt / xyz conventions)
+  const xf = { translate: [0.3, -0.2, 0.5], rotate: [20, -35, 60], scale: [1.3, 0.7, 1.1], pivot: [0.4, 0.1, -0.2] };
+  const viaSoft = await geo({ g: grid, s: { type: 'soft_transform', in: ['g'], params: { ...xf, pivot_mode: 'param' } } }, 's');
+  const viaXf = await geo({ g: grid, s: { type: 'transform', in: ['g'], params: xf } }, 's');
+  check(maxDiff(viaSoft.P, viaXf.P) < 1e-12, 'soft_transform: full weight matches the transform node');
+
   // empty group = rigid transform about the centroid; vectors rotate
   const pts: NodeSpec = { type: 'points', params: { positions: [[1, 0, 0], [3, 0, 0]], attribs: { N: [[1, 0, 0], [0, 1, 0]], orient: [[0, 0, 0, 1], [0, 0, 0, 1]] } } };
   const rr = await geo({ p: pts, s: { type: 'soft_transform', in: ['p'], params: { rotate: [0, 0, 90] } } });
