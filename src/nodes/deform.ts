@@ -601,6 +601,7 @@ defineNode({
   cook: ({ input, hasInput, p, warn }) => {
     const src = input(0);
     if (!hasInput(1)) throw new NodeError('lattice needs a lattice in input 2 (the deformed lattice, or the rest lattice with the deformed one in input 3)');
+    if (!src.numPoints) return src;
     let R: ArrayLike<number>, D: ArrayLike<number>;
     if (hasInput(2)) {
       const rest = input(1), def = input(2);
@@ -614,7 +615,6 @@ defineNode({
     }
     if (!D.length) throw new NodeError('the lattice has no points');
     const g = src.clone();
-    if (!g.numPoints) return g;
     const L = buildLattice(R, D);
     const evalDisp = p.interp === 'bernstein' ? makeBernstein(L) : (x: number, y: number, z: number, o: number[]) => trilinear(L, x, y, z, o);
     const sel = mask(g, 'point', p.group);
