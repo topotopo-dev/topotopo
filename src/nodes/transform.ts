@@ -56,7 +56,7 @@ export function applyMatrix(src: Geometry, m: Mat4, ptMask: Uint8Array | null = 
       }
     }
   }
-  if (m4determinant3(m) < 0 && !ptMask) return reversePrims(g);
+  // volumes first: a mirroring matrix used to return before them, leaving SDFs and heightfields untransformed
   for (let k = 0; k < g.volumes.length; k++) {
     const v = g.volumes[k];
     if (ptMask) continue;
@@ -71,6 +71,7 @@ export function applyMatrix(src: Geometry, m: Mat4, ptMask: Uint8Array | null = 
     const f = v.sample;
     g.volumes[k] = { ...v, bounds: { min: mn, max: mx }, sample: (x, y, z) => { m4apply(inv, x, y, z, tmp); return f(tmp[0], tmp[1], tmp[2]) * sc; } };
   }
+  if (m4determinant3(m) < 0 && !ptMask) return reversePrims(g);
   return g;
 }
 
