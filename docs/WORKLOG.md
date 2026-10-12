@@ -71,7 +71,11 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P2-F | Asset shelf: 30+ curated graph assets (fence, rail, stairs, road, roof, window grid, tree, rock, cliff, pipes, cable, crate, barrel, bricks, tiles, hex grid, scaffold, pillar, arch) with golden renders | queued | after P2-B |
 | P2-G | Houdini parity tests through the Houdini MCP; Unreal round trip through the Unreal MCP | queued | needs apps running |
 
+## External track
+- An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
+
 ## Log
+- 2026-10-12: text node now defaults to the bundled DejaVu Sans with a glyph layout fallback (74db5c2); goldens no longer machine dependent. External-agent briefs written.
 - 2026-10-12: PC crashed with four agents running. P0-C1 was complete on disk and was merged (ddcd449); P1-C, P1-D, P2-E1 resumed from their transcripts (little on disk). `.gitattributes` added (LF).
 - 2026-10-12: roadmap written, decisions taken, LICENSE added, run started. P0-A, P0-B, P0-C1 launched.
 - 2026-10-12: CI failed on Linux: opentype.js rejects DejaVu Sans (GSUB lookup 6 format 2). Fixed by trying font candidates in order (`Host.fontCandidates`) and installing Liberation/FreeFont in CI.
