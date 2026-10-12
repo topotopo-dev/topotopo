@@ -241,16 +241,89 @@ export class TriBVH {
         const p = g.vertexPoint[tris[t * 3 + k]] * 3;
         this.T[t * 9 + k * 3] = P[p]; this.T[t * 9 + k * 3 + 1] = P[p + 1]; this.T[t * 9 + k * 3 + 2] = P[p + 2];
       }
-    this.order = Int32Array.from({ length: nt }, (_, i) => i);
+    this.order = new Int32Array(nt);
+    for (let t = 0; t < nt; t++) this.order[t] = t;
     this.nodes = new Float64Array(Math.max(1, nt * 2) * 6);
     this.child = new Int32Array(Math.max(1, nt * 2) * 2);
     const cen = new Float64Array(nt * 3);
     for (let t = 0; t < nt; t++) for (let c = 0; c < 3; c++) cen[t * 3 + c] = (this.T[t * 9 + c] + this.T[t * 9 + 3 + c] + this.T[t * 9 + 6 + c]) / 3;
-    if (nt) this.build(0, nt, cen);
+    let finite = true;
+    for (let k = 0; k < cen.length && finite; k++) if (!Number.isFinite(cen[k])) finite = false;
+    if (nt) { if (finite) this.buildSelect(0, nt, cen, -1, -1, -1); else this.build(0, nt, cen); }
   }
 
   get numTris() { return this.order.length; }
 
+  /**
+   * The tree build() makes (same nodes, numbering, bounds, splits and leaf order) without sorting at every node.
+   *
+   * build() stably sorts each node's range by the centroid on its split axis and halves it, so a node's range is
+   * ordered by (its axis, its parent's axis, ..., the root's axis, triangle index): a total order. Halving only needs
+   * the smaller half of that order, found by quickselect; a leaf (<= 4 triangles) keeps its parent's order, so leaves
+   * are sorted by the parent's key. (c0, c1, c2) = the axes of the key this range arrived in, most recent first (-1 =
+   * none; repeated axes add nothing). Centroids must be finite (build() is used otherwise).
+   */
+  private buildSelect(lo: number, hi: number, cen: Float64Array, c0: number, c1: number, c2: number): number {
+    const id = this.nodeCount++;
+    const T = this.T, o = this.order, nb = id * 6;
+    const leaf = hi - lo <= 4;
+    // a leaf keeps its arrival order: sort it by the arrival key
+    if (leaf)
+      for (let i = lo + 1; i < hi; i++) {
+        const t = o[i];
+        let j = i - 1;
+        while (j >= lo && keyLess(cen, t, o[j], c0, c1, c2)) { o[j + 1] = o[j]; j--; }
+        o[j + 1] = t;
+      }
+    // bounds; zs flags which signs of zero occur per axis (bit 2a: -0, bit 2a+1: +0)
+    let mn0 = Infinity, mn1 = Infinity, mn2 = Infinity, mx0 = -Infinity, mx1 = -Infinity, mx2 = -Infinity, zs = 0;
+    for (let i = lo; i < hi; i++) {
+      const b = o[i] * 9;
+      for (let k = 0; k < 9; k += 3) {
+        const x = T[b + k], y = T[b + k + 1], z = T[b + k + 2];
+        if (x < mn0) mn0 = x; if (x > mx0) mx0 = x;
+        if (y < mn1) mn1 = y; if (y > mx1) mx1 = y;
+        if (z < mn2) mn2 = z; if (z > mx2) mx2 = z;
+        if (x === 0) zs |= 1 / x < 0 ? 1 : 2;
+        if (y === 0) zs |= 1 / y < 0 ? 4 : 8;
+        if (z === 0) zs |= 1 / z < 0 ? 16 : 32;
+      }
+    }
+    // build() scans the range in arrival order, so a bound of zero takes the sign of the first zero in that order;
+    // an internal node's range is not in arrival order here, so settle that case explicitly (rare)
+    if (!leaf && zs) {
+      if ((zs & 3) === 3) { if (mn0 === 0) mn0 = firstZero(T, o, lo, hi, cen, 0, c0, c1, c2); if (mx0 === 0) mx0 = firstZero(T, o, lo, hi, cen, 0, c0, c1, c2); }
+      if ((zs & 12) === 12) { if (mn1 === 0) mn1 = firstZero(T, o, lo, hi, cen, 1, c0, c1, c2); if (mx1 === 0) mx1 = firstZero(T, o, lo, hi, cen, 1, c0, c1, c2); }
+      if ((zs & 48) === 48) { if (mn2 === 0) mn2 = firstZero(T, o, lo, hi, cen, 2, c0, c1, c2); if (mx2 === 0) mx2 = firstZero(T, o, lo, hi, cen, 2, c0, c1, c2); }
+    }
+    this.nodes[nb] = mn0; this.nodes[nb + 1] = mn1; this.nodes[nb + 2] = mn2;
+    this.nodes[nb + 3] = mx0; this.nodes[nb + 4] = mx1; this.nodes[nb + 5] = mx2;
+    if (leaf) {
+      this.child[id * 2] = -1 - lo;
+      this.child[id * 2 + 1] = hi - lo;
+      return id;
+    }
+    let cn0 = Infinity, cn1 = Infinity, cn2 = Infinity, cx0 = -Infinity, cx1 = -Infinity, cx2 = -Infinity;
+    for (let i = lo; i < hi; i++) {
+      const b = o[i] * 3, x = cen[b], y = cen[b + 1], z = cen[b + 2];
+      if (x < cn0) cn0 = x; if (x > cx0) cx0 = x;
+      if (y < cn1) cn1 = y; if (y > cx1) cx1 = y;
+      if (z < cn2) cn2 = z; if (z > cx2) cx2 = z;
+    }
+    const ex0 = cx0 - cn0, ex1 = cx1 - cn1, ex2 = cx2 - cn2;
+    const ax = ex0 >= ex1 && ex0 >= ex2 ? 0 : ex1 >= ex2 ? 1 : 2;
+    // this node's key: ax, then the arrival key's axes without ax
+    const d1 = c0 === ax ? c1 : c0, d2 = c0 === ax || c1 === ax ? c2 : c1;
+    const mid = (lo + hi) >> 1;
+    selectKey(o, lo, hi - 1, mid, cen, ax, d1, d2);
+    const l = this.buildSelect(lo, mid, cen, ax, d1, d2);
+    const r = this.buildSelect(mid, hi, cen, ax, d1, d2);
+    this.child[id * 2] = l;
+    this.child[id * 2 + 1] = r;
+    return id;
+  }
+
+  /** The original build: a stable sort per node (used when a centroid is not finite). */
   private build(lo: number, hi: number, cen: Float64Array): number {
     const id = this.nodeCount++;
     const T = this.T, o = this.order, nb = id * 6;
@@ -387,6 +460,59 @@ export class TriBVH {
       if (t0 > t1 * 1.0000001 + 1e-12) return false;
     }
     return true;
+  }
+}
+
+/** Does triangle a come before b in the order (centroid on k0, then k1, then k2, then index)? k = -1 skips. */
+function keyLess(cen: Float64Array, a: number, b: number, k0: number, k1: number, k2: number): boolean {
+  if (k0 >= 0) { const x = cen[a * 3 + k0], y = cen[b * 3 + k0]; if (x !== y) return x < y; }
+  if (k1 >= 0) { const x = cen[a * 3 + k1], y = cen[b * 3 + k1]; if (x !== y) return x < y; }
+  if (k2 >= 0) { const x = cen[a * 3 + k2], y = cen[b * 3 + k2]; if (x !== y) return x < y; }
+  return a < b;
+}
+
+/**
+ * The first zero coordinate on axis c in arrival order (triangles by keyLess, corners in order) among o[lo..hi): -0 or
+ * +0. Only called when the range has a zero on that axis.
+ */
+function firstZero(T: Float64Array, o: Int32Array, lo: number, hi: number, cen: Float64Array, c: number, k0: number, k1: number, k2: number): number {
+  let best = -1;
+  for (let i = lo; i < hi; i++) {
+    const t = o[i], b = t * 9;
+    if (T[b + c] !== 0 && T[b + 3 + c] !== 0 && T[b + 6 + c] !== 0) continue;
+    if (best < 0 || keyLess(cen, t, best, k0, k1, k2)) best = t;
+  }
+  const b = best * 9;
+  return T[b + c] === 0 ? T[b + c] : T[b + 3 + c] === 0 ? T[b + 3 + c] : T[b + 6 + c];
+}
+
+/**
+ * Quickselect on o[l..r] (inclusive) under keyLess: afterwards o[l..k-1] hold the k - l smallest. The key is a total
+ * order, so the halves are the same sets whatever the pivots. Falls back to a full sort after many rounds.
+ */
+function selectKey(o: Int32Array, l: number, r: number, k: number, cen: Float64Array, k0: number, k1: number, k2: number) {
+  const lo0 = l, hi0 = r;
+  let rounds = 0;
+  while (r > l) {
+    if (++rounds > 64) {
+      const sub = Array.from(o.subarray(lo0, hi0 + 1)).sort((a, b) => (keyLess(cen, a, b, k0, k1, k2) ? -1 : keyLess(cen, b, a, k0, k1, k2) ? 1 : 0));
+      o.set(sub, lo0);
+      return;
+    }
+    const m = (l + r) >> 1;
+    // median of three into o[m]
+    let t: number;
+    if (keyLess(cen, o[m], o[l], k0, k1, k2)) { t = o[m]; o[m] = o[l]; o[l] = t; }
+    if (keyLess(cen, o[r], o[l], k0, k1, k2)) { t = o[r]; o[r] = o[l]; o[l] = t; }
+    if (keyLess(cen, o[r], o[m], k0, k1, k2)) { t = o[r]; o[r] = o[m]; o[m] = t; }
+    const pv = o[m];
+    let i = l, j = r;
+    while (i <= j) {
+      while (keyLess(cen, o[i], pv, k0, k1, k2)) i++;
+      while (keyLess(cen, pv, o[j], k0, k1, k2)) j--;
+      if (i <= j) { t = o[i]; o[i] = o[j]; o[j] = t; i++; j--; }
+    }
+    if (k <= j) r = j; else if (k >= i) l = i; else break;
   }
 }
 
