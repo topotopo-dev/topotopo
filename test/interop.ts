@@ -128,7 +128,7 @@ for (const [label, opts] of variants) {
   check(!back.prims.has('material') && Object.keys(readMaterials(back)).length === 0, 'glb materials:false: default material only');
 }
 
-// EXT_mesh_gpu_instancing on import: instances are expanded (packed prims come later)
+// EXT_mesh_gpu_instancing on import: packed prims by default (one source per mesh), expanded with instancing "expand"
 {
   const { Document } = await import('@gltf-transform/core');
   const { EXTMeshGPUInstancing } = await import('@gltf-transform/extensions');
@@ -144,9 +144,12 @@ for (const [label, opts] of variants) {
   const { HostIO } = await import('../src/io/gltf.ts');
   const bytes = await new HostIO().registerExtensions([EXTMeshGPUInstancing]).writeBinary(doc);
   const warns: string[] = [];
-  const back = await importGeometryAsync(bytes, 'glb', { warn: (m) => warns.push(m) });
+  const back = await importGeometryAsync(bytes, 'glb', { warn: (m) => warns.push(m), instancing: 'expand' });
   const bb = back.bbox();
   check(back.numPrims === 3 && close(bb.max[0], 11, 1e-6) && close(bb.min[1], 2, 1e-6) && warns.some((w) => /instancing/.test(w)), `EXT_mesh_gpu_instancing: 3 instances expanded with the node transform (${back.numPrims} prims, bbox x ${bb.min[0]}..${bb.max[0]})`);
+  const packed = await importGeometryAsync(bytes, 'glb');
+  const pb = packed.bbox();
+  check(packed.numPacked === 3 && packed.packedSources.length === 1 && close(pb.max[0], 11, 1e-6) && close(pb.min[1], 2, 1e-6) && !checkGeo(packed).length, `EXT_mesh_gpu_instancing: 3 packed instances of one source by default (bbox x ${pb.min[0]}..${pb.max[0]})`);
 }
 
 // Draco is optional: without draco3dgltf, clear errors on export and import

@@ -34,7 +34,10 @@ the human side can be pure browser with no install. Every Node-specific capabili
 
 ```
 src/core/      geometry model + algorithms (no I/O)
-  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF volumes), GeoBuilder
+  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF volumes,
+                 packed prims), GeoBuilder
+  packed.ts      packed primitives: expansion (unpack, auto-unpack, render budget), transform composition, statistics
+  geohash.ts     content hash of a geometry (deduplicates packed sources)
   edges.ts       EdgeSet (unordered point pairs, integer keys), unique-edge list
   halfedge.ts    half-edge mesh derived on demand and cached per Geometry: loops, rings, one-rings, boundaries, dihedral angles
   topology.ts    normals (hard edges), triangulation (earcut), edges, connectivity, boundary loops, health report
@@ -94,6 +97,19 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   rather than thrown. Loops, rings, one-rings, boundary walks and dihedral angles are queries on it, and modelling
   operations such as bevel, polysplit and bridge build on it. Edge ids follow first occurrence while walking prims,
   which is the order that edge index ranges in patterns address.
+- **Packed primitives** (instances) are Houdini's packed prims: a prim of kind 1 (`primKind`) with one vertex on an
+  anchor point, a reference to a shared, immutable source `Geometry` (`packedSources[packedSource[p]]`) and a 3×3
+  rotation·scale (`packedXform`, column-major); world = translate(anchor `P`) · packedXform · source. The per-prim arrays
+  are allocated lazily (absent = none) and travel with `clone` (sources shared), `merge` (sources deduplicated by
+  identity and by a content hash, indices remapped, never copied), subsets (an instance lives while its anchor point and
+  vertex do; unused sources are dropped) and `GeoBuilder` (a one-vertex prim copied from a packed prim stays packed).
+  `bbox()` covers each instance's transformed source box, not the anchors. A `NodeDef` declares `packed: 'keep'` when
+  it handles instances (transform and point deformers move anchors, transform also composes into `packedXform`;
+  attribute, group, delete, merge and flow nodes work on the instance level); for all other nodes the engine expands
+  the inputs first (`expandPacked`, cached under the input signature) with one warning. Expansion copies sources
+  through `Geometry.merge` in instance order, transforms P/N/v/up/orient per instance and copies anchor attributes
+  where the source has none. The renderer expands within a triangle budget (an evenly spread subset beyond it); glTF
+  writes `EXT_mesh_gpu_instancing`, USD a `PointInstancer`; formats without instancing expand.
 - **SDF volumes** travel inside the geometry as lazy sample functions, so implicit modelling composes like any other node.
 - **GeoBuilder** records the *provenance* of each new element: a source index or a weighted blend. On `build()`,
   every attribute and group of the source is interpolated automatically. That is why subdivide, extrude, resample,
@@ -252,8 +268,9 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
 ## Roadmap
 
 **Next for the engine**
-- Packed primitives and instancing. Copies would stay as references, and export would use glTF `EXT_mesh_gpu_instancing`
-  or USD point instancers, so forests of a million trees stay cheap. This maps directly to Unreal ISM/HISM and PCG.
+- Packed primitives are in (copy_to_points `pack`, `pack`/`unpack`, glTF `EXT_mesh_gpu_instancing`, USD
+  `PointInstancer`). Still open: per-instance attributes in glTF/USD exports, a PCG point stream from instances, packed
+  disk references (Houdini packed disk prims), and instanced rendering in the rasteriser (it draws expanded copies).
 - PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
 - Heightfield node set: erosion, masks, scatter by mask, terrain → Unreal Landscape heightmap export.
 - Curve toolkit: NURBS/Bezier evaluation, fillet, curve booleans, path offset in 3D.

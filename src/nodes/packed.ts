@@ -180,13 +180,14 @@ defineNode({
     transfer_attributes: { type: 'string', default: DEFAULT_TRANSFER, desc: 'anchor point / packed prim attributes copied onto the unpacked points / prims (names or patterns, "*" = all, "" = none)', aliases: ['transfer', 'attributes'] },
     limit: { type: 'int', default: 0, min: 0, desc: 'unpack at most this many instances (in prim order) and drop the rest of the selection; 0 = all', aliases: ['max_instances'] },
     piece_attrib: { type: 'string', default: '', desc: 'prim int attribute receiving the packed prim number of every unpacked prim (-1 on prims that were not packed; "" = none)' },
+    recursive: { type: 'bool', default: false, desc: 'also unpack instances inside the sources (false = one level, as in Houdini: nested instances become packed prims)' },
   },
   outputs: 'unpacked geometry; transferred anchor attributes; optional prim int piece_attrib',
   example: { type: 'unpack', in: ['forest'], params: { transfer_attributes: 'Cd name', piece_attrib: 'piece' } },
   cook: ({ input, p, warn }) => {
     const g = input(0);
     if (!g.hasPacked()) return g;
-    const r = expandPacked(g, { group: mask(g, 'prim', p.group), transfer: p.transfer_attributes, limit: p.limit, pieceAttrib: p.piece_attrib });
+    const r = expandPacked(g, { group: mask(g, 'prim', p.group), transfer: p.transfer_attributes, limit: p.limit, pieceAttrib: p.piece_attrib, recursive: !!p.recursive });
     for (const n of r.notes) warn(n);
     return r.geo;
   },

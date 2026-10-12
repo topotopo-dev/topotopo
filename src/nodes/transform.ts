@@ -83,7 +83,7 @@ defineNode({
   type: 'transform',
   category: 'transform',
   packed: 'keep',
-  summary: 'Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, orient and SDF volumes.',
+  summary: 'Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, orient, SDF volumes and packed instances.',
   aliases: ['xform', 'move', 'rotate', 'scale'],
   inputs: [{ name: 'geo', desc: 'geometry to transform' }],
   params: {
