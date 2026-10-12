@@ -204,6 +204,21 @@ export function scanNodeRefs(def: NodeDef, raw: Record<string, any> | undefined)
 
 export const hasRefs = (r: ExprRefs) => r.geo.length > 0 || r.ch.length > 0;
 
+const FIRST_ARG = new RegExp(String.raw`((?<![\w$.])(?:${REF_FUNCS.join('|')})\s*\(\s*)(['"\x60])([^'"\x60\\$]*)\2`, 'g');
+
+/** Rewrite references to node `from` as `to` inside a param value's "=expr" strings (used by rename edits). */
+export function renameExprRefs(v: any, from: string, to: string): any {
+  if (typeof v === 'string' && v.length > 1 && v[0] === '=') {
+    return '=' + v.slice(1).replace(FIRST_ARG, (m, head: string, q: string, lit: string) => {
+      if (lit === from) return head + q + to + q;
+      if (/^ch\s*\(/.test(head) && lit.startsWith(from + '/')) return head + q + to + lit.slice(from.length) + q;
+      return m;
+    });
+  }
+  if (Array.isArray(v)) return v.map((x) => renameExprRefs(x, from, to));
+  return v;
+}
+
 /** Give a numeric array .x .y .z .w accessors (non-enumerable, so hashing and JSON see a plain array). */
 export function vecOut<T extends any[]>(a: T): T {
   ['x', 'y', 'z', 'w'].forEach((k, i) => {

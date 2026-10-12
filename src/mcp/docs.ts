@@ -13,7 +13,8 @@ WORKFLOW
 6. export to glb/obj/usda/ply/stl/json for Unreal, Blender, Houdini.
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
-GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5").
+GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
+TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.`;
 
 export const TOPICS: Record<string, string> = {
@@ -42,9 +43,41 @@ Any non-code param can be a string starting with "=": a JS expression evaluated 
   "vars": {"floors": 6, "h": 3}   →   "height": "=floors*h",  "count": "=floors*4"
 Helpers: sin cos tan asin acos atan atan2 sqrt pow exp log abs floor ceil round min max sign hypot PI TAU E
          clamp fit lerp smoothstep frac mod radians degrees rand(x, seed) pick(array, i)
+Time: frame, time (seconds), fps, timeInc. "=sin(time*2)" animates; the node then re-cooks per frame (see topic time).
 Inside foreach bodies: iteration, numiterations, value, attr (e.g. "=attr.height"), plus parent vars.
+Inside solver bodies: iteration (frames since start_frame), substep, plus the step's frame/time/timeInc.
+READING OTHER NODES (n = a node of the same graph or body, named by a string literal; single quotes avoid JSON escaping):
+  npoints('n') nprims('n') nvertices('n')         element counts of n's cooked geometry
+  bbox('n') → {min, max, size, center, empty}      vectors are arrays with .x .y .z: "=bbox('base').size.y"
+  centroid('n') → mean point position              (bbox('n').center is the box centre)
+  detail('n', 'attr'[, comp])                      detail attribute value
+  point('n', i, 'attr'[, comp])  prim('n', i, 'attr'[, comp])   (prim 'P' = centroid when no prim P exists)
+  ch('n', 'param') or ch('n/param')               another node's resolved param value (defaults included)
+  e.g. stack on top: "translate": [0, "=bbox('base').max.y", 0]    match a count: "count": "=npoints('pts')"
+Referenced nodes are dependencies: they cook first (even if not wired), changing them re-cooks this node, unknown
+names get did-you-mean errors, and reading a node downstream of yourself is a cycle error.
+Not supported: dynamic names (npoints(name) with a variable), and these functions inside graph "vars".
 Assets: their vars become node parameters.
 Expressions are per-node constants. For per-element logic use wrangle.`,
+
+  time: `TIME
+Every cook happens at a frame: build/edit/render/inspect/export accept "frame" (default 1). frame 1 = time 0; time = (frame-1)/fps, fps 24.
+CLI: --frame 12, or --frames 1-48[:step] with --render "out/f{frame:04}.png" / --export "out/f.glb" (→ f.0001.glb, f.0002.glb …).
+Only time-dependent nodes re-cook when the frame changes; everything else stays cached:
+  - "=expr" params reading frame, time, fps or timeInc       "rotate": [0, "=frame*3", 0]
+  - wrangles using @Frame, @Time or @TimeInc                  @P.y += sin(@Time*4 + @P.x) * 0.1;
+  - scripts reading lib.frame / lib.time / lib.fps / lib.timeInc
+  - solver, and loops/assets whose body is time-dependent, plus everything downstream of them.
+SOLVER (Houdini SOP Solver): feedback over frames.
+  {"type":"solver","in":["seed"],"params":{"start_frame":1,"body":{"nodes":{
+     "prev":{"type":"input","params":{"index":0}},
+     "grow":{"type":"poly_extrude","in":["prev"],"params":{"group":"@N.y>0.9","distance":0.1}}},"output":"grow"}}}
+  Body inputs: 0 = previous frame's result (initial geometry on start_frame), 1 = initial, 2/3 = solver inputs 2/3 at that frame.
+  Cooking frame N runs the body for frames start_frame..N (substeps times each); before start_frame the input passes through.
+  Each frame's state is cached, so stepping 10 → 11 runs the body once; jumping back is a cache hit.
+  Body vars: iteration (frames since start_frame, from 0), substep; frame/time/timeInc are the step's time.
+SOLVER vs FOREACH: foreach feedback:true is count-based (N iterations in one cook, no time, cached as a whole);
+  the solver's result depends on the frame you cook at and is advanced frame by frame.`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}
@@ -52,7 +85,7 @@ run_over: points | prims | vertices | detail (once). group: limits elements.
 @name reads/writes the current element's attribute. Unknown names are created on write.
   Type prefixes for new attributes: f@ float, i@ int, v@ vec3, p@ vec4/quaternion, u@ vec2, s@ string.
   Known names get Houdini types (Cd/N/v/up/scale/uv = vec3, orient = vec4, pscale/width = float, id/class = int, name = string).
-Specials: @ptnum @primnum @vtxnum @elemnum @numpt @numprim @numvtx @numelem @Frame
+Specials: @ptnum @primnum @vtxnum @elemnum @numpt @numprim @numvtx @numelem; time: @Frame @Time @TimeInc (only then is the wrangle re-cooked per frame)
 Groups: @group_top = 1 (membership of the current element). Inputs: @opinput1_P reads input 1 at the same index.
 Prim mode: @P = centroid (read-only), @N = face normal (read-only) when no prim attrib exists.
 VECTORS are JS arrays with .x .y .z .w (.r .g .b) accessors. NO operator overloading: use
@@ -125,7 +158,8 @@ Then: {"type":"sdf_to_mesh","in":["that"],"params":{"divisions":120}}. Set bound
 Modes: pieces (by piece_attrib or connectivity) · prims · points · count (N times; feedback:true chains results).
 Body input index 0 = current element/piece (or the previous result with feedback); 1 = whole input; 2 = foreach input 2.
 Vars in the body: iteration, numiterations, value, attr (the element's attributes, e.g. "=attr.height"), parent vars.
-Results are merged (or the last one with feedback). Identical iterations are cached.`,
+Results are merged (or the last one with feedback). Identical iterations are cached.
+For feedback over animation frames (growth, accumulation) use solver instead (help topic "time").`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
@@ -183,8 +217,11 @@ function paramLine(name: string, pd: ParamDef): string {
 }
 
 export function nodeDoc(def: NodeDef): string {
-  const out = [`## ${def.type} (${def.category})${def.aliases?.length ? ` aka ${def.aliases.join(', ')}` : ''}`, def.summary];
+  const out = [`## ${def.type} (${def.category})${def.aliases?.length ? ` aka ${def.aliases.join(', ')}` : ''}`];
+  if (def.deprecated) out.push(`DEPRECATED: ${def.deprecated}`);
+  out.push(def.summary);
   if (def.description) out.push(def.description);
+  if (def.usesTime) out.push('time-dependent: re-cooks when the frame changes (see help topic "time").');
   out.push(def.inputs.length ? 'inputs:' : 'inputs: none (generator)');
   def.inputs.forEach((i, k) => out.push(`  ${k} ${i.name}${i.optional ? ' (optional)' : ''}${i.multi ? ' (any number)' : ''} — ${i.desc}`));
   const ps = Object.entries(def.params);
@@ -195,8 +232,10 @@ export function nodeDoc(def: NodeDef): string {
   return out.join('\n');
 }
 
-export function catalogText(defs: NodeDef[], filter?: { category?: string; search?: string }): string {
+export function catalogText(defs: NodeDef[], filter?: { category?: string; search?: string; deprecated?: boolean }): string {
   let list = defs;
+  const hidden = filter?.deprecated ? 0 : list.filter((d) => d.deprecated).length;
+  if (!filter?.deprecated) list = list.filter((d) => !d.deprecated);
   if (filter?.category) list = list.filter((d) => d.category === filter.category);
   if (filter?.search) {
     const s = filter.search.toLowerCase();
@@ -208,8 +247,9 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     const items = list.filter((d) => d.category === c);
     if (!items.length) continue;
     out.push(`[${c}]`);
-    for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'} — ${d.summary}`);
+    for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}`);
   }
   out.push('(◦ = generator, no inputs). Use help {nodes:[...]} for params. Help topics: ' + topicList().join(', '));
+  if (hidden) out.push(`${hidden} deprecated node type(s) hidden (include_deprecated: true lists them).`);
   return out.join('\n');
 }

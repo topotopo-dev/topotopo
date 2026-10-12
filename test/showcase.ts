@@ -21,14 +21,14 @@ let failed = 0;
 for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && (!filter || x.includes(filter)))) {
   const name = path.basename(f, '.json');
   const graph = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-  const r = await engine.cook(graph);
+  const r = await engine.cook(graph, { frame: graph.meta?.frame }); // animated examples name their display frame
   if (!r.ok || !r.geo) {
     failed++;
     console.log(`FAIL ${name}: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
     continue;
   }
   const t0 = performance.now();
-  const img = renderGeometry(r.geo, { title: name });
+  const img = renderGeometry(r.geo, { title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name });
   fs.writeFileSync(path.join(outDir, name + '.png'), encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
   console.log(`ok   ${name}: cook ${r.ms.toFixed(0)} ms, render ${(performance.now() - t0).toFixed(0)} ms${r.warnings.length ? `, ${r.warnings.length} warnings: ${r.warnings.slice(0, 2).map((w) => `[${w.node}] ${w.message}`).join('; ')}` : ''}`);
   console.log('     ' + summarize(r.geo).split('\n').slice(0, 2).join('\n     '));

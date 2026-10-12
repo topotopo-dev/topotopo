@@ -423,7 +423,7 @@ export class Engine {
           errors.push({
             node: path + '(vars)',
             message: `var "${k}" uses a node reference function (${REF_FUNCS.join(', ')}); vars are graph constants and cannot read nodes`,
-            hint: 'put the expression in the node param that needs it, e.g. "height": "=bbox(\\"base\\").size.y"',
+            hint: `put the expression in the node param that needs it, e.g. "height": "=bbox('base').size.y"`,
           });
       }
     }
