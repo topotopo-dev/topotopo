@@ -313,16 +313,69 @@ export class Engine {
   maxDepth = 24;
   scriptTimeoutMs = 30000;
 
+  /** shelf assets as shipped (name → graph), kept so that deleting a workspace override restores them */
+  shelf = new Map<string, GraphSpec>();
+  /** problems found while loading the shelf (unreadable index or files, invalid graphs) */
+  shelfErrors: string[] = [];
+  private shelfLoaded = false;
+
   constructor(host: Host) {
     this.host = host;
   }
 
   async init() {
-    if (this.manifold) return;
-    const { loadManifold } = await import('../core/manifold.ts');
-    this.manifold = await loadManifold();
-    const { MeshoptSimplifier } = await import('meshoptimizer');
-    await MeshoptSimplifier.ready;
+    if (!this.manifold) {
+      const { loadManifold } = await import('../core/manifold.ts');
+      this.manifold = await loadManifold();
+      const { MeshoptSimplifier } = await import('meshoptimizer');
+      await MeshoptSimplifier.ready;
+    }
+    if (!this.shelfLoaded && this.host.shelfPath) await this.loadShelf(this.host.shelfPath);
+  }
+
+  /**
+   * Register the shipped asset shelf as node types of category "shelf". `<base>/index.json` lists the asset files
+   * ({"assets": [{"name", "file"}]}, dependencies first); everything is read through the Host, so a browser host
+   * serves the same directory over HTTP. Workspace assets with the same name take precedence: they replace the shelf
+   * entry when registered, and a (re)load of the shelf never replaces them.
+   */
+  async loadShelf(base: string): Promise<{ loaded: number; errors: string[] }> {
+    this.shelfLoaded = true;
+    const dec = new TextDecoder();
+    const at = (f: string) => base.replace(/[\\/]+$/, '') + '/' + f;
+    const errors: string[] = [];
+    let entries: { name: string; file: string }[] = [];
+    try {
+      const index = JSON.parse(dec.decode(await this.host.readFile(at('index.json'))));
+      entries = (Array.isArray(index) ? index : index.assets ?? []).map((e: any) =>
+        typeof e === 'string' ? { name: e.replace(/\.json$/, ''), file: e } : { name: e.name ?? String(e.file).replace(/\.json$/, ''), file: e.file ?? `${e.name}.json` });
+    } catch (e: any) {
+      errors.push(`shelf index ${at('index.json')}: ${e.message}`);
+    }
+    let pending: { name: string; graph: GraphSpec }[] = [];
+    for (const { name, file } of entries) {
+      try { pending.push({ name, graph: JSON.parse(dec.decode(await this.host.readFile(at(file)))) }); }
+      catch (e: any) { errors.push(`${file}: ${e.message}`); }
+    }
+    // register in index order; an asset that uses a shelf asset listed after it is retried until nothing changes
+    let loaded = 0;
+    for (let pass = 0; pending.length; pass++) {
+      const failed: { name: string; graph: GraphSpec; error: string }[] = [];
+      for (const { name, graph } of pending) {
+        this.shelf.set(name, graph);
+        const cur = this.assets.get(name);
+        if (cur && cur.def.category !== 'shelf') continue; // a workspace asset overrides it
+        try { this.registerAsset(name, graph, { category: 'shelf' }); loaded++; }
+        catch (e: any) { failed.push({ name, graph, error: e.message }); }
+      }
+      if (failed.length === pending.length || pass > 8) {
+        for (const f of failed) { this.shelf.delete(f.name); errors.push(`${f.name}: ${f.error}`); }
+        break;
+      }
+      pending = failed;
+    }
+    this.shelfErrors = errors;
+    return { loaded, errors };
   }
 
   resolveDef(type: string): NodeDef | undefined {
@@ -338,9 +391,11 @@ export class Engine {
 
   // ------------------------------------------------------------ assets
 
-  registerAsset(name: string, graph: GraphSpec): NodeDef {
+  /** Register a graph as a node type. category "shelf" marks shipped assets (see loadShelf); default "asset". */
+  registerAsset(name: string, graph: GraphSpec, opts: { category?: string } = {}): NodeDef {
     if (!/^[A-Za-z_][\w]*$/.test(name)) throw new Error(`asset name must be an identifier, got "${name}"`);
     if (getNodeDef(name) && !this.assets.has(name)) throw new Error(`"${name}" clashes with a built-in node type`);
+    const category = opts.category ?? 'asset';
     graph = migrateGraphDetailed(graph).graph;
     const issues = this.validate(graph);
     if (issues.errors.length) throw new Error(`asset graph invalid: ${issues.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
@@ -362,10 +417,13 @@ export class Engine {
         inputDescs[idx] = n.params?.label ?? n.note ?? '';
       }
     }
+    // shelf assets: the first sentence of the description is the catalog summary, the rest the long description
+    const shelfDoc = category === 'shelf' && graph.description ? /^(.+?[.!?])\s+(.+)$/s.exec(graph.description) : null;
     const def: NodeDef = {
       type: name,
-      category: 'asset',
-      summary: graph.description ?? `user asset "${name}"`,
+      category,
+      summary: shelfDoc?.[1] ?? graph.description ?? `${category === 'shelf' ? 'shelf' : 'user'} asset "${name}"`,
+      ...(shelfDoc ? { description: shelfDoc[2] } : {}),
       inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })),
       params,
       signatureExtra: () => hash,
@@ -381,6 +439,8 @@ export class Engine {
         return r.geo;
       },
     };
+    // results of other graphs (and assets) that used the previous definition are cached under unchanged keys
+    if (this.assets.has(name) && this.assets.get(name)!.hash !== hash) this.cache.clear();
     this.assets.set(name, { name, graph, def, hash });
     return def;
   }

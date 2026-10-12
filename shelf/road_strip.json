@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "description": "Road along a curve (input 0; without one, a gentle 24 m S-curve along X): an asphalt ribbon of `width` centred on the curve with solid white edge lines, dashed lane lines between `lanes` lanes, and kerbs with sidewalks on both sides. Follows the curve's height (drape the curve on a terrain first). Pivot = the curve. Pieces: road_surface (asphalt), road_markings (road_paint), road_kerbs (concrete), road_sidewalks (paving).",
+  "params": {
+    "width": { "type": "float", "default": 7, "min": 2, "max": 30, "desc": "asphalt width (m)" },
+    "lanes": {
+      "type": "int",
+      "default": 2,
+      "min": 1,
+      "max": 8,
+      "desc": "number of lanes (dashed lines between them)"
+    },
+    "edge_lines": { "type": "bool", "default": true, "desc": "solid lines 0.2 m inside both edges" },
+    "dash_length": {
+      "type": "float",
+      "default": 3,
+      "min": 0.5,
+      "max": 10,
+      "desc": "length of the lane dashes (gaps are as long) (m)"
+    },
+    "kerb_height": {
+      "type": "float",
+      "default": 0.15,
+      "min": 0,
+      "max": 0.4,
+      "desc": "kerb height above the asphalt (m); 0 = no kerbs or sidewalks"
+    },
+    "sidewalk_width": {
+      "type": "float",
+      "default": 2,
+      "min": 0,
+      "max": 8,
+      "desc": "sidewalk width behind each kerb (m); 0 = none"
+    }
+  },
+  "vars": {
+    "width": 7,
+    "lanes": 2,
+    "edge_lines": true,
+    "dash_length": 3,
+    "kerb_height": 0.15,
+    "sidewalk_width": 2
+  },
+  "nodes": {
+    "curve_in": { "type": "input", "params": { "index": 0, "label": "road centre line (polyline); optional" } },
+    "default_path": {
+      "type": "curve",
+      "params": {
+        "points": [[-12, 0, -2], [-4, 0, -2], [4, 0, 2], [12, 0, 2]],
+        "smooth": true,
+        "subdivisions": 12
+      }
+    },
+    "path_src": {
+      "type": "switch",
+      "in": ["default_path", "curve_in"],
+      "params": { "index": "=npoints('curve_in') > 1 ? 1 : 0" }
+    },
+    "path": { "type": "resample", "in": ["path_src"], "params": { "length": 0.5 } },
+    "asphalt_profile": {
+      "type": "line",
+      "params": {
+        "origin": ["=-width / 2", 0, 0],
+        "direction": [1, 0, 0],
+        "length": "=width",
+        "points": "=Math.max(2, Math.round(width / 1.5) + 1)"
+      }
+    },
+    "asphalt": { "type": "sweep", "in": ["path", "asphalt_profile"] },
+    "asphalt_up": {
+      "type": "wrangle",
+      "in": ["asphalt"],
+      "params": { "run_over": "prims", "code": "if (@N.y < 0) @group_flip = 1;" }
+    },
+    "asphalt_fix": { "type": "reverse", "in": ["asphalt_up"], "params": { "group": "flip" } },
+    "asphalt_name": {
+      "type": "attrib_create",
+      "in": ["asphalt_fix"],
+      "params": { "name": "name", "class": "prim", "value": "road_surface" }
+    },
+    "asphalt_mat": {
+      "type": "material",
+      "in": ["asphalt_name"],
+      "params": { "name": "asphalt", "base_color": "#3c3d42", "roughness": 0.9 }
+    },
+    "line_l": {
+      "type": "line",
+      "params": { "origin": ["=width / 2 - 0.35", 0.01, 0], "direction": [1, 0, 0], "length": 0.15, "points": 2 }
+    },
+    "line_r": {
+      "type": "line",
+      "params": { "origin": ["=-width / 2 + 0.2", 0.01, 0], "direction": [1, 0, 0], "length": 0.15, "points": 2 }
+    },
+    "edge_l": { "type": "sweep", "in": ["path", "line_l"] },
+    "edge_r": { "type": "sweep", "in": ["path", "line_r"] },
+    "edges": { "type": "merge", "in": ["edge_l", "edge_r"] },
+    "none": { "type": "points", "params": { "positions": [] } },
+    "edges_on": { "type": "switch", "in": ["none", "edges"], "params": { "index": "=edge_lines ? 1 : 0" } },
+    "dash_pts": {
+      "type": "points_along_curve",
+      "in": ["path"],
+      "params": { "spacing": "=dash_length * 2", "start_offset": "=dash_length / 2" }
+    },
+    "lane_pts": {
+      "type": "wrangle",
+      "in": ["dash_pts"],
+      "note": "copy each dash point sideways onto every lane boundary (local +X is the left of the direction of travel)",
+      "params": {
+        "run_over": "detail",
+        "code": "const n = Math.round(vars.lanes), W = vars.width;\nfor (let i = 0; i < npoints(0); i++) {\n  const P = point(0, 'P', i), q = point(0, 'orient', i), side = qrotate(q, [1, 0, 0]);\n  for (let k = 1; k < n; k++) {\n    const off = -W / 2 + k * W / n, p = addpoint(0, add(P, mul(side, off), [0, 0.01, 0]));\n    setpointattrib(0, 'orient', p, q);\n  }\n  removepoint(0, i);\n}"
+      }
+    },
+    "dash": { "type": "box", "params": { "size": [0.12, 0.004, "=dash_length"], "center": [0, 0.002, 0] } },
+    "dashes": { "type": "copy_to_points", "in": ["dash", "lane_pts"] },
+    "markings": { "type": "merge", "in": ["edges_on", "dashes"] },
+    "markings_name": {
+      "type": "attrib_create",
+      "in": ["markings"],
+      "params": { "name": "name", "class": "prim", "value": "road_markings" }
+    },
+    "markings_mat": {
+      "type": "material",
+      "in": ["markings_name"],
+      "params": { "name": "road_paint", "base_color": "#ecebe4", "roughness": 0.6 }
+    },
+    "kerb_l_profile": {
+      "type": "curve",
+      "params": {
+        "points": [["=width / 2", -0.05, 0], ["=width / 2 + 0.15", -0.05, 0], ["=width / 2 + 0.15", "=kerb_height", 0], ["=width / 2", "=kerb_height", 0]],
+        "closed": true
+      }
+    },
+    "kerb_r_profile": {
+      "type": "curve",
+      "params": {
+        "points": [["=-width / 2 - 0.15", -0.05, 0], ["=-width / 2", -0.05, 0], ["=-width / 2", "=kerb_height", 0], ["=-width / 2 - 0.15", "=kerb_height", 0]],
+        "closed": true
+      }
+    },
+    "kerb_l": { "type": "sweep", "in": ["path", "kerb_l_profile"] },
+    "kerb_r": { "type": "sweep", "in": ["path", "kerb_r_profile"] },
+    "kerbs": { "type": "merge", "in": ["kerb_l", "kerb_r"] },
+    "kerbs_name": {
+      "type": "attrib_create",
+      "in": ["kerbs"],
+      "params": { "name": "name", "class": "prim", "value": "road_kerbs" }
+    },
+    "kerbs_mat": {
+      "type": "material",
+      "in": ["kerbs_name"],
+      "params": { "name": "concrete", "base_color": "#aaa59c", "roughness": 0.9 }
+    },
+    "walk_l_profile": {
+      "type": "curve",
+      "params": {
+        "points": [["=width / 2 + 0.15", -0.05, 0], ["=width / 2 + 0.15 + sidewalk_width", -0.05, 0], ["=width / 2 + 0.15 + sidewalk_width", "=kerb_height - 0.01", 0], ["=width / 2 + 0.15", "=kerb_height - 0.01", 0]],
+        "closed": true
+      }
+    },
+    "walk_r_profile": {
+      "type": "curve",
+      "params": {
+        "points": [["=-width / 2 - 0.15 - sidewalk_width", -0.05, 0], ["=-width / 2 - 0.15", -0.05, 0], ["=-width / 2 - 0.15", "=kerb_height - 0.01", 0], ["=-width / 2 - 0.15 - sidewalk_width", "=kerb_height - 0.01", 0]],
+        "closed": true
+      }
+    },
+    "walk_l": { "type": "sweep", "in": ["path", "walk_l_profile"] },
+    "walk_r": { "type": "sweep", "in": ["path", "walk_r_profile"] },
+    "walks": { "type": "merge", "in": ["walk_l", "walk_r"] },
+    "walks_name": {
+      "type": "attrib_create",
+      "in": ["walks"],
+      "params": { "name": "name", "class": "prim", "value": "road_sidewalks" }
+    },
+    "walks_mat": {
+      "type": "material",
+      "in": ["walks_name"],
+      "params": { "name": "paving", "base_color": "#9b9488", "roughness": 0.85 }
+    },
+    "walks_on": {
+      "type": "switch",
+      "in": ["none", "walks_mat"],
+      "params": { "index": "=kerb_height > 0 && sidewalk_width > 0 ? 1 : 0" }
+    },
+    "kerbs_on": {
+      "type": "switch",
+      "in": ["none", "kerbs_mat"],
+      "params": { "index": "=kerb_height > 0 ? 1 : 0" }
+    },
+    "all": { "type": "merge", "in": ["asphalt_mat", "markings_mat", "kerbs_on", "walks_on"] },
+    "paint": {
+      "type": "wrangle",
+      "in": ["all"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": {
+      "type": "attrib_delete",
+      "in": ["paint"],
+      "params": { "names": "orient copynum curveu tangent N up curve_id", "groups": "*" }
+    }
+  },
+  "output": "out",
+  "meta": {
+    "shelf_group": "terrain",
+    "pivot": "curve",
+    "inputs": ["curve"],
+    "thumbnail_render": { "elevation": 40 }
+  }
+}

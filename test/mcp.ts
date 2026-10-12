@@ -33,6 +33,7 @@ check(tools.length >= 9, `tools: ${tools.map((t) => t.name).join(', ')}`);
 
 const cat = await call('catalog', {});
 check(cat.txt.includes('copy_to_points') && cat.txt.includes('[sdf]'), 'catalog lists nodes');
+check(cat.txt.includes('[shelf]') && cat.txt.includes('wall_segment'), 'catalog lists the shelf assets');
 const help = await call('help', { nodes: ['scatter', 'copytopoints', 'nope_node'], topic: 'wrangle' });
 check(help.txt.includes('## scatter') && help.txt.includes('## copy_to_points') && help.txt.includes('unknown node "nope_node"'), 'help resolves nodes + aliases');
 

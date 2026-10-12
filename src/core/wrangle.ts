@@ -59,7 +59,9 @@ interface Binding {
 
 export interface WrangleResult { geo: Geometry; log: string[] }
 
-const kernelCache = new Map<string, any>();
+// compiled kernels per host: a kernel belongs to the scripting realm it was compiled in (two engines with their own
+// hosts in one process must not share them)
+const kernelCaches = new WeakMap<object, Map<string, any>>();
 
 /** Rewrite @refs to locals and collect what is referenced. */
 export function scanRefs(code: string) {
@@ -223,6 +225,8 @@ export function runWrangle(
   src.push('}', '})');
   const source = src.join('\n');
 
+  let kernelCache = kernelCaches.get(opts.host);
+  if (!kernelCache) kernelCaches.set(opts.host, (kernelCache = new Map()));
   let kernel = kernelCache.get(source);
   if (!kernel) {
     // Parse the snippet on its own first (strict, like the kernel, same lines): its error positions are then the

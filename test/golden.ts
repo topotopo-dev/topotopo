@@ -1,4 +1,4 @@
-// Golden tests: every node type (on its fixture) and every example graph is cooked and fingerprinted
+// Golden tests: every node type (on its fixture), every example graph and every shelf asset is cooked and fingerprinted
 // (counts, bbox, attribute schema, groups, quantised hashes of positions, topology and attributes).
 // Fingerprints live in test/golden/<name>.json, one file per node or example, so changes show up in git diffs.
 //
@@ -11,7 +11,7 @@ import { Engine } from '../src/graph/engine.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent } from './fixtures.ts';
+import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, shelfFixtureGraph } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff, sortedJSON } from './fingerprint.ts';
 
 const args = process.argv.slice(2);
@@ -33,6 +33,10 @@ for (const def of allNodeDefs()) {
 for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json')).sort()) {
   const graph = JSON.parse(fs.readFileSync(path.join(examplesDir, f), 'utf8'));
   cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}` });
+}
+// shelf assets at their defaults (curve/surface assets on their fixture inputs)
+for (const name of [...engine.shelf.keys()].sort()) {
+  cases.push({ name: `shelf.${name}`, graph: shelfFixtureGraph(name), engine, source: `shelf/${name}.json at its defaults (test/fixtures.ts)` });
 }
 
 /** The machine-dependent inputs a graph's output depends on (currently: the default system font). */

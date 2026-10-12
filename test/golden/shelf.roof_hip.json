@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [4.5, 2.0761, 3.5],
+      "min": [-4.5, -0.2887, -3.5]
+    },
+    "counts": {
+      "points": 18,
+      "prims": 15,
+      "vertices": 58,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "4eb97ad26b7a5228",
+      "attributes": {
+        "detail.materials": "4007c5dd77113ec3",
+        "prim.Cd": "88d4dfdd5f551d23",
+        "prim.material": "2ddff062c5a36e74",
+        "prim.name": "ccd4b31b10d1c821",
+        "vertex.uv": "921ba5c5c4f9699f"
+      },
+      "topology": "9dd996e15eb9f89b"
+    }
+  },
+  "name": "shelf.roof_hip",
+  "ok": true,
+  "source": "shelf/roof_hip.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

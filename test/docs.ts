@@ -1,8 +1,8 @@
-// Docs staleness: docs/nodes.md must match what scripts/gen-docs.ts generates from the registry.
+// Docs staleness: docs/nodes.md must match what scripts/gen-docs.ts generates from the registry and the shelf.
 //   node test/docs.ts
-import { readNodesMd, renderNodeReference } from '../scripts/gen-docs.ts';
+import { readNodesMd, referenceMarkdown } from '../scripts/gen-docs.ts';
 
-const want = renderNodeReference();
+const want = await referenceMarkdown();
 const have = readNodesMd();
 if (have === want) {
   console.log('docs: docs/nodes.md is up to date');

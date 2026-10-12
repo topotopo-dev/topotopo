@@ -1,0 +1,180 @@
+{
+ "generated": "by scripts/gen-shelf.ts (npm run shelf); the engine registers these in order",
+ "assets": [
+  {
+   "name": "arch",
+   "file": "arch.json",
+   "group": "architecture"
+  },
+  {
+   "name": "barrel",
+   "file": "barrel.json",
+   "group": "props"
+  },
+  {
+   "name": "beam_truss",
+   "file": "beam_truss.json",
+   "group": "architecture"
+  },
+  {
+   "name": "bench",
+   "file": "bench.json",
+   "group": "props"
+  },
+  {
+   "name": "bollard",
+   "file": "bollard.json",
+   "group": "props"
+  },
+  {
+   "name": "brick_wall",
+   "file": "brick_wall.json",
+   "group": "architecture"
+  },
+  {
+   "name": "bush",
+   "file": "bush.json",
+   "group": "props"
+  },
+  {
+   "name": "cable",
+   "file": "cable.json",
+   "group": "props"
+  },
+  {
+   "name": "cliff_block",
+   "file": "cliff_block.json",
+   "group": "props"
+  },
+  {
+   "name": "crate",
+   "file": "crate.json",
+   "group": "props"
+  },
+  {
+   "name": "door_frame",
+   "file": "door_frame.json",
+   "group": "architecture"
+  },
+  {
+   "name": "fence",
+   "file": "fence.json",
+   "group": "architecture"
+  },
+  {
+   "name": "tree_lowpoly",
+   "file": "tree_lowpoly.json",
+   "group": "props"
+  },
+  {
+   "name": "forest_patch",
+   "file": "forest_patch.json",
+   "group": "terrain"
+  },
+  {
+   "name": "grass_clumps",
+   "file": "grass_clumps.json",
+   "group": "terrain"
+  },
+  {
+   "name": "hex_grid_floor",
+   "file": "hex_grid_floor.json",
+   "group": "architecture"
+  },
+  {
+   "name": "lamp_post",
+   "file": "lamp_post.json",
+   "group": "props"
+  },
+  {
+   "name": "log",
+   "file": "log.json",
+   "group": "props"
+  },
+  {
+   "name": "pallet",
+   "file": "pallet.json",
+   "group": "props"
+  },
+  {
+   "name": "pillar",
+   "file": "pillar.json",
+   "group": "architecture"
+  },
+  {
+   "name": "pipe_run",
+   "file": "pipe_run.json",
+   "group": "props"
+  },
+  {
+   "name": "railing",
+   "file": "railing.json",
+   "group": "architecture"
+  },
+  {
+   "name": "road_strip",
+   "file": "road_strip.json",
+   "group": "terrain"
+  },
+  {
+   "name": "rock",
+   "file": "rock.json",
+   "group": "props"
+  },
+  {
+   "name": "roof_gable",
+   "file": "roof_gable.json",
+   "group": "architecture"
+  },
+  {
+   "name": "roof_hip",
+   "file": "roof_hip.json",
+   "group": "architecture"
+  },
+  {
+   "name": "sandbag_wall",
+   "file": "sandbag_wall.json",
+   "group": "props"
+  },
+  {
+   "name": "scaffold",
+   "file": "scaffold.json",
+   "group": "architecture"
+  },
+  {
+   "name": "scatter_rocks",
+   "file": "scatter_rocks.json",
+   "group": "terrain"
+  },
+  {
+   "name": "sign_post",
+   "file": "sign_post.json",
+   "group": "props"
+  },
+  {
+   "name": "spiral_stairs",
+   "file": "spiral_stairs.json",
+   "group": "architecture"
+  },
+  {
+   "name": "stairs",
+   "file": "stairs.json",
+   "group": "architecture"
+  },
+  {
+   "name": "tile_floor",
+   "file": "tile_floor.json",
+   "group": "architecture"
+  },
+  {
+   "name": "window_frame",
+   "file": "window_frame.json",
+   "group": "architecture"
+  },
+  {
+   "name": "wall_segment",
+   "file": "wall_segment.json",
+   "group": "architecture"
+  }
+ ]
+}

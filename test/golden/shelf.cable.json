@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [10.1046, 5.35, 0.6],
+      "min": [-0.1046, 0, -0.6]
+    },
+    "counts": {
+      "points": 360,
+      "prims": 318,
+      "vertices": 1328,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "e0af59e4f79b8002",
+      "attributes": {
+        "detail.materials": "32ebd6f04ddcabfe",
+        "prim.Cd": "5ce29835601c44af",
+        "prim.material": "ffcd586d3067bd1f",
+        "prim.name": "ce3b220dbe2e19df",
+        "vertex.uv": "743515a97db5277b"
+      },
+      "topology": "a6a3e52fa3701e91"
+    }
+  },
+  "name": "shelf.cable",
+  "ok": true,
+  "source": "shelf/cable.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

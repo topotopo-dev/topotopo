@@ -1,0 +1,59 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3", "curve_id:int:1", "curveu:float:1", "side:int:1", "tangent:float:3"],
+      "prim": ["Cd:float:3", "copynum:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [24, 8.6535, 18.37],
+      "min": [-24.0017, -0.05, -20.5915]
+    },
+    "counts": {
+      "points": 24430,
+      "prims": 23291,
+      "vertices": 86338,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "6f0953ca4cff6fac",
+      "attributes": {
+        "detail.materials": "24e0c1099788c31b",
+        "point.curve_id": "76e28885fe30fc1f",
+        "point.curveu": "7a764635aa3ed66f",
+        "point.side": "605c09e58832595f",
+        "point.tangent": "78f33685edb1591f",
+        "prim.Cd": "2ff3e3566e9e0d90",
+        "prim.copynum": "1210a166f45ce25c",
+        "prim.material": "da1fef21a483e06b",
+        "prim.name": "96212445f82ac213",
+        "vertex.N": "3fb3a9b6260b02d0",
+        "vertex.uv": "7a2eff2763b1b791"
+      },
+      "topology": "7eba60588bdd3256"
+    },
+    "packed": {
+      "hash": "b08b5c8d4d8bc7a7",
+      "instances": 56,
+      "sources": [
+        "1555a95fdcce6035",
+        "b783edd4daf2a33e",
+        "8fac219f637ff8f1",
+        "598494b97a25066b",
+        "4feb679b5139431d"
+      ]
+    }
+  },
+  "name": "example.shelf_street",
+  "ok": true,
+  "source": "examples/shelf_street.json",
+  "warnings": []
+}
