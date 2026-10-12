@@ -45,7 +45,7 @@ Helpers: sin cos tan asin acos atan atan2 sqrt pow exp log abs floor ceil round 
          clamp fit lerp smoothstep frac mod radians degrees rand(x, seed) pick(array, i)
 Time: frame, time (seconds), fps, timeInc. "=sin(time*2)" animates; the node then re-cooks per frame (see topic time).
 Inside foreach bodies: iteration, numiterations, value, attr (e.g. "=attr.height"), plus parent vars.
-Inside solver bodies: iteration (frames since start_frame), substep, plus the step's frame/time/timeInc.
+Inside solver bodies: iteration (frames since start_frame), substep, and frame/time/timeInc are the step's time.
 READING OTHER NODES (n = a node of the same graph or body, named by a string literal; single quotes avoid JSON escaping):
   npoints('n') nprims('n') nvertices('n')         element counts of n's cooked geometry
   bbox('n') → {min, max, size, center, empty}      vectors are arrays with .x .y .z: "=bbox('base').size.y"
@@ -75,7 +75,7 @@ SOLVER (Houdini SOP Solver): feedback over frames.
   Body inputs: 0 = previous frame's result (initial geometry on start_frame), 1 = initial, 2/3 = solver inputs 2/3 at that frame.
   Cooking frame N runs the body for frames start_frame..N (substeps times each); before start_frame the input passes through.
   Each frame's state is cached, so stepping 10 → 11 runs the body once; jumping back is a cache hit.
-  Body vars: iteration (frames since start_frame, from 0), substep; frame/time/timeInc are the step's time.
+  Body vars: iteration (frames since start_frame, from 0), substep, and frame/time/timeInc = the step's time (fractional between substeps).
 SOLVER vs FOREACH: foreach feedback:true is count-based (N iterations in one cook, no time, cached as a whole);
   the solver's result depends on the frame you cook at and is advanced frame by frame.`,
 

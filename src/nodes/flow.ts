@@ -172,8 +172,8 @@ defineNode({
   description:
     'Cooking at frame N runs the body for every frame from start_frame to N (once per substep). Inside the body, {"type":"input","params":{"index":0}} ' +
     'is the previous frame\'s result (the initial geometry on start_frame), index 1 the initial geometry, 2 and 3 the extra inputs cooked at that frame. ' +
-    'Before start_frame the initial geometry passes through. "=expr" params and wrangles in the body see the step\'s time (frame, time, timeInc; ' +
-    '@Frame @Time @TimeInc; frames are fractional between substeps) and the vars iteration (frames since start_frame, from 0) and substep, plus parent vars. ' +
+    'Before start_frame the initial geometry passes through. The body sees the vars iteration (frames since start_frame, from 0), substep, ' +
+    'frame, time and timeInc (the step\'s time; frames are fractional between substeps), plus parent vars; wrangles also get @Frame @Time @TimeInc. ' +
     'Caching: the state after frame f has the signature S(f) = hash(S(f-1), f, extra-input signatures at f), starting from ' +
     'S(start_frame-1) = hash(params, vars, initial input at start_frame). Every frame\'s state is cached under S(f), so cooking frame 11 after frame 10 ' +
     'runs the body once, and going back to an earlier frame is a cache hit. ' +
@@ -250,10 +250,11 @@ defineNode({
       const f = start + j;
       const ex = extras[j];
       for (let sub = 0; sub < n; sub++) {
-        const fr = r9(f - 1 + (sub + 1) / n);
+        const fr = r9(f - 1 + (sub + 1) / n), time = r9((fr - 1) / fps);
         const r = await ctx.subcook(p.body, {
-          frame: fr, time: r9((fr - 1) / fps), timeInc, fps,
-          vars: { ...ctx.vars, iteration: j, substep: sub },
+          frame: fr, time, timeInc, fps,
+          // also as vars, so code can read vars.frame / vars.time / vars.timeInc like vars.iteration
+          vars: { ...ctx.vars, iteration: j, substep: sub, frame: fr, time, timeInc },
           inputs: [
             { geo: state, sig: stateSig },
             { geo: init.geo, sig: init.sig },
