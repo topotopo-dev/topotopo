@@ -225,6 +225,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 |---|---|---|
 | manifold-3d | Apache-2.0 | booleans, convex hull, Minkowski, smoothing/refine, level-set meshing, 2D cross-sections (Clipper2): offset, 2D booleans, text fill, extrude |
 | meshoptimizer | MIT | decimation |
+| xatlas-wasm (xatlas by Jonathan Young) | MIT | `uv_unwrap` / `uv_autoseam`: chart segmentation, parameterisation, atlas packing (single-file ES module, WASM embedded) |
 | earcut | ISC | n-gon triangulation |
 | d3-delaunay | ISC | 2D Delaunay / Voronoi |
 | simplex-noise | MIT | simplex noise |
@@ -233,7 +234,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 | @modelcontextprotocol/sdk | MIT | MCP transport |
 | DejaVu Sans (assets/fonts) | Bitstream Vera licence (redistributable) | bundled default font for `text`, so output is identical on every machine; system fonts are used only when named |
 
-Written in-house: the geometry model, attribute-preserving builder, Catmull-Clark, poly extrude/inset, sweep with
+Written in-house: the geometry model, attribute-preserving builder, Catmull-Clark, LSCM flattening with cut graphs, UV island packing, poly extrude/inset, sweep with
 rotation-minimising frames, L-systems, Voronoi fracture (manifold half-space trims), narrow-band mesh→SDF with fast
 sweeping, scatter with blue-noise sample elimination, BVH/KD-tree, renderer, exporters/importers.
 
@@ -242,7 +243,6 @@ sweeping, scatter with blue-noise sample elimination, BVH/KD-tree, renderer, exp
 **Next for the engine**
 - Packed primitives and instancing. Copies would stay as references, and export would use glTF `EXT_mesh_gpu_instancing`
   or USD point instancers, so forests of a million trees stay cheap. This maps directly to Unreal ISM/HISM and PCG.
-- UV unwrapping via xatlas (WASM), plus UV layout.
 - PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
 - Heightfield node set: erosion, masks, scatter by mask, terrain → Unreal Landscape heightmap export.
 - Curve toolkit: NURBS/Bezier evaluation, fillet, curve booleans, path offset in 3D.

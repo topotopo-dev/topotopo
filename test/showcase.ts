@@ -1,4 +1,5 @@
 // Cook and render every graph in examples/ to examples/renders/<name>.png.
+// A graph's meta.render (views, checker, color_by, azimuth, elevation, zoom) overrides the default quad view.
 //   node test/showcase.ts [filter]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +29,8 @@ for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && (!filte
     continue;
   }
   const t0 = performance.now();
-  const img = renderGeometry(r.geo, { title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name });
+  const ro = graph.meta?.render ?? {};
+  const img = renderGeometry(r.geo, { title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name, views: ro.views, checker: !!ro.checker, colorBy: ro.color_by ?? null, azimuth: ro.azimuth, elevation: ro.elevation, zoom: ro.zoom });
   fs.writeFileSync(path.join(outDir, name + '.png'), encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
   console.log(`ok   ${name}: cook ${r.ms.toFixed(0)} ms, render ${(performance.now() - t0).toFixed(0)} ms${r.warnings.length ? `, ${r.warnings.length} warnings: ${r.warnings.slice(0, 2).map((w) => `[${w.node}] ${w.message}`).join('; ')}` : ''}`);
   console.log('     ' + summarize(r.geo).split('\n').slice(0, 2).join('\n     '));

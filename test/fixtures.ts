@@ -49,7 +49,7 @@ export const INPUTS: Record<string, string[]> = {
   boolean: ['BOX', 'CUTTER'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],
   triangulate2d: ['PTS'], voronoi2d: ['PTS'], merge: ['MESH', 'BOX'], switch: ['MESH', 'BOX'],
-  uv_transform: ['BOX'], poly_extrude: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],
+  uv_transform: ['BOX'], uv_flatten: ['BOX'], uv_layout: ['BOX'], uv_unwrap: ['BOX'], uv_autoseam: ['MESH'], poly_extrude: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],
   scatter: ['MESH'], decimate: ['MESH'], remesh: ['BOX'], smooth_solid: ['BOX'], foreach: ['BOX'],
   soft_transform: ['GRID'], lattice: ['MESH', 'LATTICE_REST', 'LATTICE_DEF'], path_deform: ['ZBAR', 'CURVE'],
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],

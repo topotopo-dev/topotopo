@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "seam:int:1"],
+      "prim": ["chart:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "9ec54b8e97d6dcdc",
+      "attributes": {
+        "point.N": "3c28f9be0faf0b34",
+        "point.seam": "7191d825e462b1df",
+        "prim.chart": "d022dc8211ab1458"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.uv_autoseam",
+  "ok": true,
+  "source": "fixture for node type \"uv_autoseam\" (test/fixtures.ts)",
+  "warnings": []
+}

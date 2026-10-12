@@ -4,9 +4,11 @@
 import { Geometry } from '../core/geometry.ts';
 import { buildEdges, connectivity, primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { drawText, textWidth } from './font.ts';
+import { readUV, polygonSides, uvSeamPairs } from '../core/uv.ts';
 import type { Vec3 } from '../core/math.ts';
 
-export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
+/** 3D views, plus 'uv': the 0..1 UV square (UDIM tiles) with every polygon drawn at its uv. */
+export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'uv';
 
 export interface RenderOptions {
   views?: ViewName[];
@@ -22,6 +24,8 @@ export interface RenderOptions {
   target?: Vec3 | null;
   ssaa?: number;
   title?: string;
+  /** shade 3D views with an 8×8 procedural checker from uv (stretch and flips become visible) */
+  checker?: boolean;
 }
 
 export interface RenderResult { width: number; height: number; rgba: Uint8Array; notes: string[] }
@@ -183,6 +187,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     legend = (legend ? legend + '  ' : '') + `HIGHLIGHT ${hl.label ?? 'GROUP'}: ${n} ${hl.cls.toUpperCase()}S`;
   }
 
+  const colorByActive = !!o.colorBy || !!hl;
+
   // isolated points + polylines
   const used = new Uint8Array(np);
   for (let v = 0; v < g.numVertices; v++) used[g.vertexPoint[v]] = 1;
@@ -214,9 +220,31 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const out = new Float32Array(outW * outH * 3);
   for (let i = 0; i < out.length; i += 3) { out[i] = 0.12; out[i + 1] = 0.12; out[i + 2] = 0.13; }
 
+  // --- uv data (uv view, checker shading)
+  const uvd = views.includes('uv') || o.checker ? readUV(g) : null;
+  const checkerOn = !!(o.checker && uvd);
+  if (o.checker && !uvd) notes.push('checker: no uv attribute (run uv_project, uv_unwrap or uv_flatten first)');
+
   views.forEach((vname, vi) => {
     const W = tile * ss, H = tile * ss;
     const col = new Float32Array(W * H * 3);
+    // downsample a finished tile into the output and label it
+    const blit = (label: string) => {
+      const tx = (vi % cols) * (tile + 2), ty = Math.floor(vi / cols) * (tile + 2);
+      const inv = 1 / (ss * ss);
+      for (let y = 0; y < tile; y++)
+        for (let x = 0; x < tile; x++) {
+          let r = 0, gg = 0, b = 0;
+          for (let j = 0; j < ss; j++) for (let i = 0; i < ss; i++) { const k = ((y * ss + j) * W + x * ss + i) * 3; r += col[k]; gg += col[k + 1]; b += col[k + 2]; }
+          const k = ((ty + y) * outW + tx + x) * 3;
+          out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv;
+        }
+      drawText(out, outW, outH, tx + 6, ty + 6, label, [1, 1, 1], 2);
+    };
+    if (vname === 'uv') {
+      blit(drawUVView(g, col, W, H, ss, uvd, tris, colorOf, colorByActive, notes));
+      return;
+    }
     const zb = new Float32Array(W * H).fill(-Infinity);
     for (let y = 0; y < H; y++) {
       const t = y / H;
@@ -263,6 +291,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const H1 = norm3([L1[0], L1[1], L1[2] + 1]);
     const na = [0, 0, 0], nb = [0, 0, 0], nc = [0, 0, 0];
     const tn = [0, 0, 0];
+    const chk = [0, 0, 0];
     for (let t = 0; t < nTri; t++) {
       const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2];
       const a = g.vertexPoint[va], b = g.vertexPoint[vb], c = g.vertexPoint[vc];
@@ -318,9 +347,15 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           const rim = Math.pow(1 - Math.max(0, nz), 3) * 0.12;
           const k = amb + dif1 * 0.62 + dif2 * 0.22;
           const ci = zi * 3;
-          col[ci] = aces((colA[0] * w0 + colB[0] * w1 + colC[0] * w2) * k + spec + rim);
-          col[ci + 1] = aces((colA[1] * w0 + colB[1] * w1 + colC[1] * w2) * k + spec + rim);
-          col[ci + 2] = aces((colA[2] * w0 + colB[2] * w1 + colC[2] * w2) * k + spec + rim);
+          let fr = colA[0] * w0 + colB[0] * w1 + colC[0] * w2, fg = colA[1] * w0 + colB[1] * w1 + colC[1] * w2, fb = colA[2] * w0 + colB[2] * w1 + colC[2] * w2;
+          if (checkerOn) {
+            checkerColor(uvd![va * 2] * w0 + uvd![vb * 2] * w1 + uvd![vc * 2] * w2, uvd![va * 2 + 1] * w0 + uvd![vb * 2 + 1] * w1 + uvd![vc * 2 + 1] * w2, chk);
+            fr = chk[0]; fg = chk[1]; fb = chk[2];
+            if (suspicious) { fr = fr * 0.35 + 0.12; fg = fg * 0.35 + 0.22; fb = fb * 0.35 + 0.6; }
+          }
+          col[ci] = aces(fr * k + spec + rim);
+          col[ci + 1] = aces(fg * k + spec + rim);
+          col[ci + 2] = aces(fb * k + spec + rim);
         }
       }
     }
@@ -376,18 +411,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         drawText(col, W, H, Math.round(ex + 2 * ss), Math.round(ey - 4 * ss), lab, colr, ss, true);
       }
     }
-    // downsample into output
-    const tx = (vi % cols) * (tile + 2), ty = Math.floor(vi / cols) * (tile + 2);
-    const inv = 1 / (ss * ss);
-    for (let y = 0; y < tile; y++)
-      for (let x = 0; x < tile; x++) {
-        let r = 0, gg = 0, b = 0;
-        for (let j = 0; j < ss; j++) for (let i = 0; i < ss; i++) { const k = ((y * ss + j) * W + x * ss + i) * 3; r += col[k]; gg += col[k + 1]; b += col[k + 2]; }
-        const k = ((ty + y) * outW + tx + x) * 3;
-        out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv;
-      }
-    const label = vname === 'persp' ? `PERSP  AZ ${Math.round(o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}` : ORTHO[vname].label;
-    drawText(out, outW, outH, tx + 6, ty + 6, label, [1, 1, 1], 2);
+    blit((vname === 'persp' ? `PERSP  AZ ${Math.round(o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}` : ORTHO[vname].label) + (checkerOn ? '  CHECKER' : ''));
   });
 
   // footer
@@ -467,4 +491,138 @@ function drawDisc(col: Float32Array, zb: Float32Array, W: number, H: number, x: 
       const edge = d > r - 1.2 ? 0.35 : 1;
       col[i] = c[0] * edge; col[i + 1] = c[1] * edge; col[i + 2] = c[2] * edge;
     }
+}
+
+/** Procedural 8×8 uv checker; light cells are tinted by the position inside the tile (red = u, green = v). */
+function checkerColor(u: number, v: number, out: number[]) {
+  if (!Number.isFinite(u) || !Number.isFinite(v)) { out[0] = 1; out[1] = 0; out[2] = 1; return; }
+  const fu = u - Math.floor(u), fv = v - Math.floor(v);
+  if ((Math.floor(u * 8) + Math.floor(v * 8)) & 1) { out[0] = 0.5 + 0.45 * fu; out[1] = 0.5 + 0.45 * fv; out[2] = 0.78; }
+  else { out[0] = 0.1 + 0.2 * fu; out[1] = 0.1 + 0.2 * fv; out[2] = 0.22; }
+}
+
+/**
+ * The UV view: the 0..1 square (or the UDIM tiles in use) with a 0.1 grid, every polygon filled at its uv
+ * (chart/island colours, else the 3D face colour), overlaps in red, polygon edges, and island borders in yellow.
+ * Draws into col (W×H, SSAA scale ss) and returns the tile label.
+ */
+function drawUVView(
+  g: Geometry, col: Float32Array, W: number, H: number, ss: number, uv: Float64Array | null, tris: Uint32Array,
+  colorOf: (v: number) => number[], useColorOf: boolean, notes: string[],
+): string {
+  for (let i = 0; i < col.length; i += 3) { col[i] = 0.11; col[i + 1] = 0.115; col[i + 2] = 0.13; }
+  let u0 = 0, v0 = 0, span = 1;
+  if (uv) {
+    let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+    for (let i = 0; i < uv.length; i += 2) {
+      const x = uv[i], y = uv[i + 1];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < a) a = x; if (x > b) b = x; if (y < c) c = y; if (y > d) d = y;
+    }
+    if (a <= b) {
+      u0 = Math.min(0, Math.floor(a)); v0 = Math.min(0, Math.floor(c));
+      const u1 = Math.max(1, Math.ceil(b - 1e-9)), v1 = Math.max(1, Math.ceil(d - 1e-9));
+      span = Math.max(u1 - u0, v1 - v0);
+      if (span > 10) { notes.push(`uv view: uv spans ${span} tiles; showing 10×10 tiles from (${u0}, ${v0})`); span = 10; }
+    }
+  }
+  const sz = Math.min(W - 24 * ss, H - 44 * ss), ox = (W - sz) / 2, oy = 32 * ss;
+  const X = (u: number) => ox + ((u - u0) / span) * sz, Y = (v: number) => oy + sz - ((v - v0) / span) * sz;
+  // tiles, grid, borders, UDIM labels
+  const tilePx = sz / span;
+  for (let tv = v0; tv < v0 + span; tv++)
+    for (let tu = u0; tu < u0 + span; tu++) {
+      const udim = tu >= 0 && tu < 10 && tv >= 0;
+      const x0 = Math.round(X(tu)), x1 = Math.round(X(tu + 1)), y0 = Math.round(Y(tv + 1)), y1 = Math.round(Y(tv));
+      const bg = udim ? [0.2, 0.205, 0.225] : [0.15, 0.15, 0.165];
+      for (let y = Math.max(0, y0); y < Math.min(H, y1); y++)
+        for (let x = Math.max(0, x0); x < Math.min(W, x1); x++) { const i = (y * W + x) * 3; col[i] = bg[0]; col[i + 1] = bg[1]; col[i + 2] = bg[2]; }
+      if (tilePx * 0.1 >= 5 * ss)
+        for (let k = 1; k < 10; k++) {
+          const gx = X(tu + k / 10), gy = Y(tv + k / 10);
+          drawLine(col, null, W, H, gx, y0, 0, gx, y1, 0, [0.6, 0.62, 0.68], k === 5 ? 0.22 : 0.12, ss * 0.75, false, 0);
+          drawLine(col, null, W, H, x0, gy, 0, x1, gy, 0, [0.6, 0.62, 0.68], k === 5 ? 0.22 : 0.12, ss * 0.75, false, 0);
+        }
+    }
+  for (let k = 0; k <= span; k++) {
+    drawLine(col, null, W, H, X(u0 + k), Y(v0), 0, X(u0 + k), Y(v0 + span), 0, [0.85, 0.87, 0.92], 0.55, ss, false, 0);
+    drawLine(col, null, W, H, X(u0), Y(v0 + k), 0, X(u0 + span), Y(v0 + k), 0, [0.85, 0.87, 0.92], 0.55, ss, false, 0);
+  }
+  const tileLabels = () => {
+    const labelScale = tilePx > 160 * ss ? 2 * ss : ss;
+    for (let tv = v0; tv < v0 + span; tv++)
+      for (let tu = u0; tu < u0 + span; tu++)
+        if (tu >= 0 && tu < 10 && tv >= 0) drawText(col, W, H, Math.round(X(tu) + 4 * ss), Math.round(Y(tv + 1) + 4 * ss), String(1001 + tu + 10 * tv), [0.75, 0.78, 0.85], labelScale, true);
+  };
+  if (!uv) {
+    tileLabels();
+    notes.push('uv view: no uv attribute (run uv_project, uv_unwrap or uv_flatten)');
+    return 'UV  (NO UV ATTRIBUTE)';
+  }
+  // filled polygons, with per-pixel coverage by distinct prims (overlaps)
+  const vprim = g.vertexPrims();
+  const chartA = g.prims.get('island') ?? g.prims.get('chart');
+  const chartOf = !useColorOf && chartA && chartA.type === 'int' && chartA.size === 1 ? (chartA.data as Int32Array) : null;
+  const owner = new Int32Array(W * H).fill(-1);
+  const cnt = new Uint8Array(W * H);
+  for (let t = 0; t < tris.length; t += 3) {
+    const va = tris[t], vb = tris[t + 1], vc = tris[t + 2];
+    const prim = vprim[va];
+    const ax = X(uv[va * 2]), ay = Y(uv[va * 2 + 1]), bx = X(uv[vb * 2]), by = Y(uv[vb * 2 + 1]), cx = X(uv[vc * 2]), cy = Y(uv[vc * 2 + 1]);
+    if (![ax, ay, bx, by, cx, cy].every(Number.isFinite)) continue;
+    const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (Math.abs(area) < 1e-12) continue;
+    let c: number[];
+    if (chartOf) c = chartOf[prim] >= 0 ? catColor(chartOf[prim]) : [0.5, 0.5, 0.5];
+    else { const A = colorOf(va), B = colorOf(vb), C = colorOf(vc); c = [(A[0] + B[0] + C[0]) / 3, (A[1] + B[1] + C[1]) / 3, (A[2] + B[2] + C[2]) / 3]; }
+    const inv = 1 / area;
+    const minX = Math.max(0, Math.floor(Math.min(ax, bx, cx))), maxX = Math.min(W - 1, Math.ceil(Math.max(ax, bx, cx)));
+    const minY = Math.max(0, Math.floor(Math.min(ay, by, cy))), maxY = Math.min(H - 1, Math.ceil(Math.max(ay, by, cy)));
+    for (let py = minY; py <= maxY; py++) {
+      const yy = py + 0.5;
+      for (let px = minX; px <= maxX; px++) {
+        const xx = px + 0.5;
+        const w0 = ((bx - xx) * (cy - yy) - (by - yy) * (cx - xx)) * inv;
+        const w1 = ((cx - xx) * (ay - yy) - (cy - yy) * (ax - xx)) * inv;
+        if (w0 <= 0 || w1 <= 0 || 1 - w0 - w1 <= 0) continue;
+        const zi = py * W + px;
+        if (owner[zi] === prim) continue;
+        owner[zi] = prim;
+        if (cnt[zi] < 255) cnt[zi]++;
+        const i = zi * 3;
+        col[i] += (c[0] * 0.85 - col[i]) * 0.7; col[i + 1] += (c[1] * 0.85 - col[i + 1]) * 0.7; col[i + 2] += (c[2] * 0.85 - col[i + 2]) * 0.7;
+      }
+    }
+  }
+  let covered = 0, overlap = 0;
+  for (let i = 0; i < cnt.length; i++) {
+    if (!cnt[i]) continue;
+    covered++;
+    if (cnt[i] < 2) continue;
+    overlap++;
+    col[i * 3] += (1 - col[i * 3]) * 0.8; col[i * 3 + 1] += (0.12 - col[i * 3 + 1]) * 0.8; col[i * 3 + 2] += (0.12 - col[i * 3 + 2]) * 0.8;
+  }
+  // polygon edges, then island borders (uv seams and open borders) on top
+  if (g.numPrims <= 60000) {
+    const ew = Math.max(1, ss * 0.6);
+    for (let p = 0; p < g.numPrims; p++) {
+      if (!g.primClosed[p]) continue;
+      const s = g.primStart[p], e = g.primStart[p + 1];
+      for (let v = s; v < e; v++) {
+        const w = v + 1 < e ? v + 1 : s;
+        drawLine(col, null, W, H, X(uv[v * 2]), Y(uv[v * 2 + 1]), 0, X(uv[w * 2]), Y(uv[w * 2 + 1]), 0, [0.04, 0.04, 0.06], 0.45, ew, false, 0);
+      }
+    }
+  }
+  const S = polygonSides(g);
+  const seam = uvSeamPairs(S, uv);
+  const BC = [1, 0.84, 0.3], bw = Math.max(1, ss * 1.3);
+  const edge = (a: number, b: number) => drawLine(col, null, W, H, X(uv[a * 2]), Y(uv[a * 2 + 1]), 0, X(uv[b * 2]), Y(uv[b * 2 + 1]), 0, BC, 0.95, bw, false, 0);
+  for (let i = 0; i < S.count; i++) if (seam[i]) { edge(S.a1[i], S.b1[i]); edge(S.a2[i], S.b2[i]); }
+  for (let i = 0; i < S.bv.length; i++) edge(S.bv[i], S.bw[i]);
+  tileLabels();
+  const tiles = span === 1 && u0 === 0 && v0 === 0 ? '0..1' : `${span}×${span} TILES FROM ${u0},${v0}`;
+  const ov = covered ? (overlap / covered) * 100 : 0;
+  if (ov >= 0.05) notes.push(`uv view: ${ov.toFixed(1)}% of the covered uv area overlaps (red)`);
+  return `UV  ${tiles}${ov >= 0.05 ? `  OVERLAP ${ov.toFixed(1)}%` : ''}`;
 }
