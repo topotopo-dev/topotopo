@@ -7,7 +7,8 @@ import {
   boundaryLoops, buildEdges, connectivity, orientOutward, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, topologyReport, triangulate,
 } from '../core/topology.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
-import { P, mask } from './util.ts';
+import { edgeFromKey, edgeKey, forEachPrimEdge } from '../core/edges.ts';
+import { P, edgeMask, mask } from './util.ts';
 import { fusePoints, removeDegenerate } from './transform.ts';
 import { makeBox } from './generate.ts';
 import type { Vec3 } from '../core/math.ts';
@@ -126,6 +127,23 @@ defineNode({
 
 /** One level of Catmull–Clark (or linear) subdivision with full attribute interpolation. */
 export function subdivideOnce(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp'): Geometry {
+  return subdivideLevel(g, smooth, boundaryMode, null).geo;
+}
+
+/**
+ * One subdivision level with semi-sharp creases (DeRose, Kass, Truong 1998).
+ * `sharp` maps edgeKey(a, b) of g to a crease sharpness s > 0 (only edges shared by exactly two
+ * polygons count; boundaries already follow the `boundaryMode` rule):
+ *  - edge point: s >= 1 → midpoint (sharp rule); 0 < s < 1 → blend s·sharp + (1 - s)·smooth.
+ *  - vertex point, by the number k of incident crease edges and their mean sharpness σ (clamped to 1):
+ *    k < 2 → smooth rule (a single crease is a dart); k = 2 → crease rule 3/4·v + 1/8·(a + b) along the
+ *    crease; k >= 3 → corner (v stays). The sharp rule is blended with the smooth one by σ.
+ *  - boundary points with interior creases become corners (boundary edges act as infinitely sharp
+ *    creases), blended by σ with the regular boundary rule.
+ * Child edges of a crease edge carry s - 1 (dropped at 0); the returned map uses the output's point
+ * numbers. Edge groups of g propagate to the child edges (and to polyline segments).
+ */
+export function subdivideLevel(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): { geo: Geometry; sharp: Map<number, number> } {
   const E = buildEdges(g);
   const ne = E.a.length;
   // faces adjacent to each edge (only closed polygons)
@@ -151,14 +169,23 @@ export function subdivideOnce(g: Geometry, smooth: boolean, boundaryMode: 'smoot
     facePt[pr] = b.blendPoint(w.i, w.w);
   }
   const addW = (acc: Map<number, number>, i: number, w: number) => acc.set(i, (acc.get(i) ?? 0) + w);
+  const isBoundaryEdge = (e: number) => edgeFaces[e].length !== 2;
+  // crease sharpness per edge (interior edges only)
+  const es = new Float64Array(ne);
+  if (sharp && sharp.size)
+    for (let e = 0; e < ne; e++) if (!isBoundaryEdge(e)) es[e] = Math.max(0, sharp.get(edgeKey(E.a[e], E.b[e])) ?? 0);
   // edge points
   const edgePt = new Int32Array(ne).fill(-1);
-  const isBoundaryEdge = (e: number) => edgeFaces[e].length !== 2;
   for (let e = 0; e < ne; e++) {
     if (!edgeFaces[e].length) continue; // polyline-only edge
     const acc = new Map<number, number>();
-    if (!smooth || isBoundaryEdge(e)) { addW(acc, E.a[e], 0.5); addW(acc, E.b[e], 0.5); }
-    else {
+    if (!smooth || isBoundaryEdge(e) || es[e] >= 1) { addW(acc, E.a[e], 0.5); addW(acc, E.b[e], 0.5); }
+    else if (es[e] > 0) {
+      // semi-sharp: blend the smooth and the sharp (midpoint) rules
+      const s = es[e], t = 1 - s;
+      addW(acc, E.a[e], 0.25 * t + 0.5 * s); addW(acc, E.b[e], 0.25 * t + 0.5 * s);
+      for (const f of edgeFaces[e]) faceW[f].i.forEach((q, k) => addW(acc, q, 0.25 * faceW[f].w[k] * t));
+    } else {
       addW(acc, E.a[e], 0.25); addW(acc, E.b[e], 0.25);
       for (const f of edgeFaces[e]) faceW[f].i.forEach((q, k) => addW(acc, q, 0.25 * faceW[f].w[k]));
     }
@@ -170,11 +197,51 @@ export function subdivideOnce(g: Geometry, smooth: boolean, boundaryMode: 'smoot
   const ptEdges: number[][] = Array.from({ length: g.numPoints }, () => []);
   for (let pr = 0; pr < g.numPrims; pr++) if (g.primClosed[pr]) for (const q of new Set(g.primPoints(pr))) ptFaces[q].push(pr);
   for (let e = 0; e < ne; e++) if (edgeFaces[e].length) { ptEdges[E.a[e]].push(e); ptEdges[E.b[e]].push(e); }
+  const other = (e: number, i: number) => (E.a[e] === i ? E.b[e] : E.a[e]);
+  /** Weights of the regular (non-crease) vertex rule; null = the point stays where it is. */
+  const smoothRule = (i: number, faces: number[], bEdges: number[]): Map<number, number> | null => {
+    const acc = new Map<number, number>();
+    if (bEdges.length) {
+      if (boundaryMode === 'sharp' || bEdges.length !== 2) return null;
+      addW(acc, i, 0.75);
+      for (const e of bEdges) addW(acc, other(e, i), 0.125);
+      return acc;
+    }
+    const n = faces.length;
+    for (const f of faces) faceW[f].i.forEach((q, k) => addW(acc, q, faceW[f].w[k] / (n * n)));
+    for (const e of ptEdges[i]) { addW(acc, E.a[e], 1 / (n * n)); addW(acc, E.b[e], 1 / (n * n)); }
+    addW(acc, i, (n - 3) / n);
+    return acc;
+  };
+  /** Vertex point on creases: crease rule (2 creases) or corner (3+, or creases meeting a boundary), blended by sharpness. */
+  const creaseVertex = (i: number, faces: number[], bEdges: number[], cEdges: number[]): number => {
+    let sum = 0;
+    for (const e of cEdges) sum += es[e];
+    const sigma = Math.min(1, sum / cEdges.length);
+    const corner = bEdges.length > 0 || cEdges.length >= 3;
+    if (corner && sigma >= 1) return b.copyPoint(i);
+    const sharpW = new Map<number, number>();
+    if (corner) sharpW.set(i, 1);
+    else { addW(sharpW, i, 0.75); for (const e of cEdges) addW(sharpW, other(e, i), 0.125); }
+    let acc = sharpW;
+    if (sigma < 1) {
+      const sm = smoothRule(i, faces, bEdges) ?? new Map([[i, 1]]);
+      acc = new Map();
+      for (const [q, w] of sm) addW(acc, q, w * (1 - sigma));
+      for (const [q, w] of sharpW) addW(acc, q, w * sigma);
+    }
+    return b.blendPoint([...acc.keys()], [...acc.values()]);
+  };
   for (let i = 0; i < g.numPoints; i++) {
     const faces = ptFaces[i];
     if (!faces.length) continue;
     if (!smooth) { vtxPt[i] = b.copyPoint(i); continue; }
     const bEdges = ptEdges[i].filter(isBoundaryEdge);
+    const cEdges = ptEdges[i].filter((e) => es[e] > 0);
+    if (cEdges.length && (bEdges.length || cEdges.length >= 2)) {
+      vtxPt[i] = creaseVertex(i, faces, bEdges, cEdges);
+      continue;
+    }
     const acc = new Map<number, number>();
     if (bEdges.length) {
       if (boundaryMode === 'sharp' || bEdges.length !== 2) { vtxPt[i] = b.copyPoint(i); continue; }
@@ -208,24 +275,117 @@ export function subdivideOnce(g: Geometry, smooth: boolean, boundaryMode: 'smoot
       ]);
     }
   }
-  return b.build().removeUnusedPoints();
+  // edge groups → child edges; crease sharpness → child edges with s - 1 (builder point numbers)
+  const childSharp = new Map<number, number>();
+  const groups = b.keepSrcGroups ? [...g.edgeGroups].map(([k, set]) => [set, b.edgeGroup(k)] as const) : [];
+  for (let e = 0; e < ne; e++) {
+    const pa = vtxPt[E.a[e]], pb = vtxPt[E.b[e]], m = edgePt[e];
+    if (pa < 0 || pb < 0) continue;
+    for (const [src, dst] of groups) {
+      if (!src.has(E.a[e], E.b[e])) continue;
+      if (m >= 0) { dst.add(pa, m); dst.add(m, pb); } else dst.add(pa, pb);
+    }
+    if (m >= 0 && es[e] > 1) { childSharp.set(edgeKey(pa, m), es[e] - 1); childSharp.set(edgeKey(m, pb), es[e] - 1); }
+  }
+  const built = b.build();
+  const out = built.removeUnusedPoints();
+  if (!childSharp.size || out.numPoints === built.numPoints) return { geo: out, sharp: childSharp };
+  // removeUnusedPoints renumbered points: renumber the crease keys the same way
+  const used = new Uint8Array(built.numPoints);
+  for (let v = 0; v < built.numVertices; v++) used[built.vertexPoint[v]] = 1;
+  const remap = new Int32Array(built.numPoints).fill(-1);
+  for (let i = 0, k = 0; i < built.numPoints; i++) if (used[i]) remap[i] = k++;
+  const moved = new Map<number, number>();
+  for (const [k, s] of childSharp) {
+    const [x, y] = edgeFromKey(k);
+    if (remap[x] >= 0 && remap[y] >= 0) moved.set(edgeKey(remap[x], remap[y]), s);
+  }
+  return { geo: out, sharp: moved };
+}
+
+/**
+ * Initial crease sharpness of g for the subdivide node: edges matched by `creases` get `weight`,
+ * plus the crease attribute (vertex: an edge is creased when both of its corners in a polygon carry
+ * a weight, using the smaller one; point: both endpoints, smaller weight; prim: every side of the prim).
+ * The largest value wins. Returns null when nothing is creased.
+ */
+function creaseSharpness(g: Geometry, creases: string, weight: number, attrib: string) {
+  const sharp = new Map<number, number>();
+  const put = (k: number, s: number) => { if (s > 0 && s > (sharp.get(k) ?? 0)) sharp.set(k, s); };
+  if (creases && weight > 0) for (const k of edgeMask(g, creases).keyIterator()) put(k, weight);
+  const f = attrib ? g.findAttrib(attrib, ['vertex', 'point', 'prim']) : null;
+  const cls = f && f.attr.type !== 'string' ? f.cls : null;
+  if (cls) {
+    const d = f!.attr.data as Float64Array, sz = f!.attr.size;
+    forEachPrimEdge(g, (pr, v0, v1, a, bb) => {
+      if (!g.primClosed[pr]) return;
+      const s = cls === 'vertex' ? Math.min(d[v0 * sz], d[v1 * sz]) : cls === 'point' ? Math.min(d[a * sz], d[bb * sz]) : d[pr * sz];
+      put(edgeKey(a, bb), s);
+    });
+  }
+  return sharp.size || cls ? { sharp, attrCls: cls as 'vertex' | 'point' | 'prim' | null } : null;
+}
+
+/** Write the remaining crease sharpness back as a crease attribute (prim class becomes vertex class). */
+function writeCreaseAttrib(g: Geometry, name: string, cls: 'vertex' | 'point' | 'prim', sharp: Map<number, number>) {
+  const at = (a: number, b: number) => (a === b ? 0 : sharp.get(edgeKey(a, b)) ?? 0);
+  if (cls === 'point') {
+    const d = g.points.add(name, 'float', 1).data as Float64Array;
+    d.fill(0);
+    for (const [k, s] of sharp) { const [a, b] = edgeFromKey(k); if (a < g.numPoints && b < g.numPoints) { d[a] = Math.max(d[a], s); d[b] = Math.max(d[b], s); } }
+    return;
+  }
+  g.prims.delete(name);
+  const d = g.vertices.add(name, 'float', 1).data as Float64Array;
+  for (let p = 0; p < g.numPrims; p++) {
+    const s = g.primStart[p], e = g.primStart[p + 1], n = e - s;
+    for (let k = 0; k < n; k++) {
+      const v = s + k, pt = g.vertexPoint[v];
+      const nx = g.vertexPoint[s + ((k + 1) % n)], pv = g.vertexPoint[s + ((k - 1 + n) % n)];
+      d[v] = Math.max(at(pt, nx), at(pv, pt));
+    }
+  }
 }
 
 defineNode({
   type: 'subdivide',
   category: 'topology',
-  summary: 'Catmull-Clark (smooth) or linear subdivision; all attributes interpolated.',
+  summary: 'Catmull-Clark (smooth) or linear subdivision with semi-sharp creases; all attributes and groups interpolated.',
+  description:
+    'Creases (DeRose/Kass/Truong): edges in the "creases" edge group/pattern get crease_weight, and a crease attribute ' +
+    '(default "creaseweight", Houdini convention: vertex class = both corners of the edge carry the weight; point class = both ' +
+    'endpoints; prim class = every side of the prim) adds its values; the larger wins. Sharpness s >= 1 uses the sharp rules ' +
+    '(edge midpoint, crease vertex 3/4·v + 1/8·neighbours, corner where 3+ creases meet stays fixed), 0 < s < 1 blends with ' +
+    'the smooth rules, and s drops by 1 per level, so weight 1 is sharp for one level then smooths out; weight >= levels stays ' +
+    'fully sharp. Boundary points touched by an interior crease become corners. The output keeps edge groups on the child ' +
+    'edges and writes the remaining sharpness back to the crease attribute (prim class becomes vertex class).',
   aliases: ['subd', 'catmull_clark', 'subdivision'],
   inputs: [{ name: 'geo', desc: 'polygon mesh' }],
   params: {
     levels: { type: 'int', default: 1, min: 0, max: 6, desc: 'subdivision depth (each level ~4x faces)', aliases: ['depth', 'iterations'] },
     method: { type: 'enum', options: ['catmull_clark', 'linear'], default: 'catmull_clark', desc: 'smooth or flat subdivision' },
     boundary: { type: 'enum', options: ['smooth', 'sharp'], default: 'smooth', desc: 'open boundary rule' },
+    creases: { type: 'group', default: '', desc: 'edge group or edge pattern to crease ("" = none), e.g. "sharp", "angle>40", "p0-1-2-3-0"', aliases: ['crease_group', 'creasegroup'] },
+    crease_weight: { type: 'float', default: 10, min: 0, desc: 'sharpness for the creases edges (>= levels = fully sharp; 1 = sharp for one level; 0.5 = half way)', aliases: ['creaseweight', 'sharpness'] },
+    crease_attrib: { type: 'string', default: 'creaseweight', desc: 'vertex/point/prim attribute with crease weights ("" = ignore)' },
   },
+  example: { type: 'subdivide', params: { levels: 3, creases: 'p2-1-6-5-2', crease_weight: 10 } },
   cook: ({ input, p }) => {
     let g = input(0);
     if (g.numPrims && g.numVertices * Math.pow(4, p.levels) > 2e7) throw new NodeError(`subdivide: ${p.levels} levels would create ~${(g.numVertices * 4 ** p.levels / 1e6).toFixed(0)}M vertices; lower levels`);
-    for (let l = 0; l < p.levels; l++) g = subdivideOnce(g, p.method === 'catmull_clark', p.boundary);
+    const smooth = p.method === 'catmull_clark';
+    const cr = p.levels > 0 ? creaseSharpness(g, p.creases, p.crease_weight, p.crease_attrib) : null;
+    if (!cr) {
+      for (let l = 0; l < p.levels; l++) g = subdivideOnce(g, smooth, p.boundary);
+      return refreshNormals(g);
+    }
+    let sharp = cr.sharp;
+    for (let l = 0; l < p.levels; l++) {
+      const r = subdivideLevel(g, smooth, p.boundary, sharp);
+      g = r.geo;
+      sharp = r.sharp;
+    }
+    if (cr.attrCls) writeCreaseAttrib(g, p.crease_attrib, cr.attrCls, sharp);
     return refreshNormals(g);
   },
 });

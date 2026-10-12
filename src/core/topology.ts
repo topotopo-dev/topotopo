@@ -2,6 +2,8 @@
 import earcut from 'earcut';
 import { Geometry } from './geometry.ts';
 import type { Vec3 } from './math.ts';
+import type { EdgeSet } from './edges.ts';
+import { halfEdges } from './halfedge.ts';
 
 /** Newell normal (unnormalised; length = 2 * area). Robust for non-planar polygons. */
 export function primNewell(g: Geometry, p: number, out: number[] = [0, 0, 0]): number[] {
@@ -74,8 +76,13 @@ export function pointNormals(g: Geometry): Float64Array {
   return N;
 }
 
-/** Per-vertex normals; faces sharing a point are averaged only when within cuspDeg of each other. */
-export function vertexNormals(g: Geometry, cuspDeg = 60): Float64Array {
+/**
+ * Per-vertex normals; faces sharing a point are averaged only when within cuspDeg of each other.
+ * hardEdges (point pairs) additionally split the normals: around a point, faces are only averaged
+ * when they can be reached from each other across shared edges that are not hard.
+ */
+export function vertexNormals(g: Geometry, cuspDeg = 60, hardEdges: EdgeSet | null = null): Float64Array {
+  if (hardEdges && hardEdges.size) return vertexNormalsHard(g, cuspDeg, hardEdges);
   const fn = primNormals(g);
   const area = new Float64Array(g.numPrims);
   for (let p = 0; p < g.numPrims; p++) area[p] = primArea(g, p);
@@ -94,6 +101,57 @@ export function vertexNormals(g: Geometry, cuspDeg = 60): Float64Array {
         const w = area[q] + 1e-12;
         ax += qx * w; ay += qy * w; az += qz * w;
       }
+    }
+    const l = Math.hypot(ax, ay, az) || 1;
+    out[v * 3] = ax / l; out[v * 3 + 1] = ay / l; out[v * 3 + 2] = az / l;
+  }
+  return out;
+}
+
+/** vertexNormals with hard edges: smoothing fans around each point are cut at hard edges. */
+function vertexNormalsHard(g: Geometry, cuspDeg: number, hard: EdgeSet): Float64Array {
+  const fn = primNormals(g);
+  const area = new Float64Array(g.numPrims);
+  for (let p = 0; p < g.numPrims; p++) area[p] = primArea(g, p);
+  const he = halfEdges(g);
+  // union corners (half-edges) at the same point that are joined across a non-hard shared edge
+  const parent = new Int32Array(he.numHalfEdges);
+  for (let h = 0; h < parent.length; h++) parent[h] = h;
+  const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (let h = 0; h < he.numHalfEdges; h++) {
+    const t = he.heTwin[h];
+    if (t < 0 || t < h) continue;
+    const a = he.heOrigin[h], b = he.dest(h);
+    if (hard.has(a, b)) continue;
+    // corner at a in h's face joins the corner at a in t's face (t runs b→a, so next(t) starts at a); same for b
+    const r1 = find(h), r2 = find(he.heNext[t]);
+    if (r1 !== r2) parent[r1] = r2;
+    const r3 = find(he.heNext[h]), r4 = find(t);
+    if (r3 !== r4) parent[r3] = r4;
+  }
+  const vprim = g.vertexPrims();
+  const cosT = Math.cos((cuspDeg * Math.PI) / 180);
+  // vertices per point (CSR)
+  const start = new Int32Array(g.numPoints + 1);
+  for (let v = 0; v < g.numVertices; v++) start[g.vertexPoint[v] + 1]++;
+  for (let i = 0; i < g.numPoints; i++) start[i + 1] += start[i];
+  const list = new Int32Array(g.numVertices), fill = start.slice(0, g.numPoints);
+  for (let v = 0; v < g.numVertices; v++) list[fill[g.vertexPoint[v]]++] = v;
+  const out = new Float64Array(g.numVertices * 3);
+  for (let v = 0; v < g.numVertices; v++) {
+    const p = vprim[v], pt = g.vertexPoint[v], hv = he.vertexHalf[v];
+    const root = hv >= 0 ? find(hv) : -1;
+    const nx = fn[p * 3], ny = fn[p * 3 + 1], nz = fn[p * 3 + 2];
+    let ax = 0, ay = 0, az = 0;
+    for (let k = start[pt]; k < start[pt + 1]; k++) {
+      const u = list[k], q = vprim[u];
+      if (u !== v) {
+        const hu = he.vertexHalf[u];
+        if (root >= 0 ? hu < 0 || find(hu) !== root : false) continue;
+        if (q !== p && fn[q * 3] * nx + fn[q * 3 + 1] * ny + fn[q * 3 + 2] * nz < cosT) continue;
+      }
+      const w = area[q] + 1e-12;
+      ax += fn[q * 3] * w; ay += fn[q * 3 + 1] * w; az += fn[q * 3 + 2] * w;
     }
     const l = Math.hypot(ax, ay, az) || 1;
     out[v * 3] = ax / l; out[v * 3 + 1] = ay / l; out[v * 3 + 2] = az / l;
@@ -125,8 +183,8 @@ export function resolveVertexNormals(g: Geometry, cuspDeg = 60): Float64Array {
   return out;
 }
 
-/** After moving points: recompute any existing N so shading follows the new shape. */
-export function refreshNormals(g: Geometry, cuspDeg = 60): Geometry {
+/** After moving points: recompute any existing N so shading follows the new shape (vertex N keeps hardEdges hard). */
+export function refreshNormals(g: Geometry, cuspDeg = 60, hardEdges: EdgeSet | null = null): Geometry {
   const pN = g.points.get('N');
   if (pN && pN.size === 3 && pN.type === 'float') {
     // only points on polygons get new normals; isolated points (scatters, leaves) keep theirs
@@ -136,7 +194,7 @@ export function refreshNormals(g: Geometry, cuspDeg = 60): Geometry {
     for (let i = 0; i < g.numPoints; i++) if (onPoly[i]) { d[i * 3] = fresh[i * 3]; d[i * 3 + 1] = fresh[i * 3 + 1]; d[i * 3 + 2] = fresh[i * 3 + 2]; }
   }
   const vN = g.vertices.get('N');
-  if (vN && vN.size === 3 && vN.type === 'float') (vN.data as Float64Array).set(vertexNormals(g, cuspDeg));
+  if (vN && vN.size === 3 && vN.type === 'float') (vN.data as Float64Array).set(vertexNormals(g, cuspDeg, hardEdges));
   const prN = g.prims.get('N');
   if (prN && prN.size === 3 && prN.type === 'float') (prN.data as Float64Array).set(primNormals(g));
   return g;
@@ -342,6 +400,7 @@ export function reversePrims(g: Geometry, mask: ArrayLike<number> | null = null)
   }
   for (let v = 0; v < g.numVertices; v++) out.vertexPoint[v] = g.vertexPoint[order[v]];
   out.vertices = g.vertices.gather(order);
+  for (const [k, m] of g.vertexGroups) out.vertexGroups.set(k, Uint8Array.from(order, (v) => m[v]));
   const vn = out.vertices.get('N');
   if (vn && vn.type === 'float') {
     const d = vn.data as Float64Array;

@@ -4,6 +4,8 @@ import { Geometry } from './core/geometry.ts';
 import type { AttribClass, Attribute } from './core/geometry.ts';
 import { primArea, signedVolume, topologyReport } from './core/topology.ts';
 import { evalGroup } from './core/groups.ts';
+import { edgeList } from './core/edges.ts';
+import { halfEdges } from './core/halfedge.ts';
 import { fmtNum } from './render/raster.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
@@ -45,11 +47,12 @@ export function summarize(g: Geometry): string {
   }
   if (attrLines.length) lines.push('attributes:', ...attrLines);
   const grp: string[] = [];
-  for (const cls of ['point', 'prim'] as const) {
+  for (const cls of ['point', 'prim', 'vertex'] as const) {
     const m = g.groups(cls);
     if (!m.size) continue;
     grp.push(`${cls}[${[...m].map(([k, mask]) => `${k} ${n(mask.reduce((s, x) => s + x, 0))}`).join(', ')}]`);
   }
+  if (g.edgeGroups.size) grp.push(`edge[${[...g.edgeGroups].map(([k, set]) => `${k} ${n(set.size)}`).join(', ')}]`);
   if (grp.length) lines.push(`groups: ${grp.join('  ')}`);
   return lines.join('\n');
 }
@@ -86,7 +89,7 @@ function attribStats(a: Attribute, count: number, sel?: Uint8Array | null): stri
 
 export interface InspectOptions {
   detail?: 'summary' | 'attributes' | 'topology' | 'elements' | 'all';
-  cls?: 'point' | 'prim' | 'vertex' | 'detail';
+  cls?: 'point' | 'prim' | 'vertex' | 'detail' | 'edge';
   attribs?: string[];
   start?: number;
   count?: number;
@@ -96,7 +99,7 @@ export interface InspectOptions {
 export function inspect(g: Geometry, o: InspectOptions = {}): string {
   const out: string[] = [summarize(g)];
   const detail = o.detail ?? 'summary';
-  const sel = o.group && (o.cls === 'point' || o.cls === 'prim') ? evalGroup(g, o.cls, o.group) : null;
+  const sel = o.group && (o.cls === 'point' || o.cls === 'prim' || o.cls === 'vertex') ? evalGroup(g, o.cls, o.group) : null;
   if (detail === 'attributes' || detail === 'all') {
     out.push('attribute stats:');
     for (const cls of ['point', 'vertex', 'prim', 'detail'] as AttribClass[]) {
@@ -113,13 +116,16 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     out.push('topology:');
     out.push(`  ${r.closed ? 'CLOSED manifold surface (watertight)' : `open/non-manifold: ${r.boundaryEdges} boundary edges, ${r.nonManifoldEdges} non-manifold edges`}`);
     out.push(`  ${r.pieces} connected piece(s); ${r.edges} edges; ${r.degenerate} degenerate prims; ${r.unusedPoints} unused points`);
+    const flipped = halfEdges(g).flippedEdges.size;
+    if (flipped) out.push(`  ${flipped} edge(s) with inconsistent winding between neighbouring polygons (use reverse on part of the mesh or clean fix_winding)`);
     let area = 0;
     for (let p = 0; p < g.numPrims; p++) area += primArea(g, p);
     out.push(`  surface area ${fmtNum(area)}${r.closed ? `; volume ${fmtNum(signedVolume(g))}${signedVolume(g) < 0 ? ' (NEGATIVE: faces point inward — use reverse)' : ''}` : ''}`);
     if (r.closed && r.pieces === 1) out.push(`  euler ${r.euler} → genus ${(2 - r.euler) / 2}`);
   }
-  if (detail === 'elements' || detail === 'all') {
-    const cls = o.cls ?? 'point';
+  if ((detail === 'elements' || detail === 'all') && o.cls === 'edge') out.push(...edgeElements(g, o));
+  else if (detail === 'elements' || detail === 'all') {
+    const cls = (o.cls ?? 'point') as AttribClass;
     const t = g.table(cls);
     const total = cls === 'detail' ? 1 : t.count;
     const start = Math.max(0, o.start ?? 0), count = Math.min(o.count ?? 10, 200);
@@ -136,4 +142,25 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     }
   }
   return out.join('\n');
+}
+
+/** Edge listing: index, point pair, length, polygon count, dihedral angle, edge groups. */
+function edgeElements(g: Geometry, o: InspectOptions): string[] {
+  const L = edgeList(g);
+  const sel = o.group ? evalGroup(g, 'edge', o.group, L) : null;
+  const he = halfEdges(g);
+  const start = Math.max(0, o.start ?? 0), count = Math.min(o.count ?? 10, 200);
+  const out = [`edge elements ${start}..${Math.min(L.count, start + count) - 1} of ${L.count}${o.group ? ` (group ${o.group})` : ''}:`];
+  const groups = [...g.edgeGroups];
+  let shown = 0;
+  for (let i = start; i < L.count && shown < count; i++) {
+    if (sel && !sel[i]) continue;
+    const a = L.a[i], b = L.b[i], e = he.edgeId(a, b);
+    const P = g.P, len = Math.hypot(P[a * 3] - P[b * 3], P[a * 3 + 1] - P[b * 3 + 1], P[a * 3 + 2] - P[b * 3 + 2]);
+    const ang = e >= 0 ? he.dihedralAngle(e) : NaN;
+    const inG = groups.filter(([, s]) => s.has(a, b)).map(([k]) => k);
+    out.push(`  ${i}: p${a}-${b}  length=${fmtNum(len)}  polys=${L.polyCount[i]}${Number.isFinite(ang) ? `  angle=${fmtNum(ang)}` : ''}${inG.length ? `  groups=${inG.join(',')}` : ''}`);
+    shown++;
+  }
+  return out;
 }
