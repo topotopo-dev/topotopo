@@ -9,26 +9,33 @@ import { composePackedXforms } from '../core/packed.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { TriSurface, elementSeed, minDistanceSelect, relaxPoints } from '../core/pcg.ts';
 import type { TriPoint } from '../core/pcg.ts';
-import { lookAtBasis, m4apply, m4applyDir, m4basis, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize } from '../core/math.ts';
-import type { Mat4, Vec3 } from '../core/math.ts';
+import { lookAtBasis, m4apply, m4applyDir, m4basis, m4euler, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize, qAxisAngle, qFromMat, qMul, qNormalize } from '../core/math.ts';
+import type { Mat4, Quat, Vec3 } from '../core/math.ts';
 import { P, mask } from './util.ts';
 
 // ---------------------------------------------------------------- scatter
-
-/** Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. */
-export function sampleEliminate(pos: Float64Array, target: number, rmax: number): Int32Array {
+/**
+ * Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. With `scale`, candidate i has
+ * the radius rmax × scale[i] (pairs use the mean of their radii), so the spacing follows a varying density (smaller
+ * radii where points should be denser); without it every candidate has rmax.
+ */
+export function sampleEliminate(pos: Float64Array, target: number, rmax: number, scale?: ArrayLike<number>): Int32Array {
   const n = pos.length / 3;
   if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
   const kd = new KDTree(pos);
   const r2 = 2 * rmax;
+  let smax = 0;
+  if (scale) for (let i = 0; i < n; i++) if (scale[i] > smax) smax = scale[i];
+  // 2 × the pair radius (constant without scale)
+  const R = scale ? (i: number, j: number) => rmax * (scale[i] + scale[j]) : () => r2;
   const nbrs: Int32Array[] = new Array(n);
   const w = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    const list = kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], r2).filter((j) => j !== i);
+    const list = kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], scale ? rmax * (scale[i] + smax) : r2).filter((j) => j !== i);
     nbrs[i] = Int32Array.from(list);
     for (const j of list) {
-      const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-      w[i] += Math.pow(1 - Math.min(d, r2) / r2, 8);
+      const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]), rr = R(i, j);
+      w[i] += Math.pow(1 - Math.min(d, rr) / rr, 8);
     }
   }
   // max-heap on w
@@ -56,7 +63,8 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number)
     for (const j of nbrs[i]) {
       if (removed[j]) continue;
       const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-      w[j] -= Math.pow(1 - Math.min(d, r2) / r2, 8);
+      const rr = R(i, j);
+      w[j] -= Math.pow(1 - Math.min(d, rr) / rr, 8);
       const k = where[j];
       if (k < size) { down(k); up(where[j]); }
     }
@@ -262,7 +270,20 @@ defineNode({
         cand.push({ t, w, pos: q });
         pos.set(q, k * 3);
       }
-      let keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count))) : Int32Array.from({ length: ncand }, (_, i) => i);
+      // weight at a point of triangle t (barycentrics w)
+      const wAt = (t: number, w: number[]) => {
+        let s = 0;
+        for (let j = 0; j < 3; j++) { const v = tris[t * 3 + j]; s += w[j] * dw(v, vp[v], triPrim[t]); }
+        return s;
+      };
+      const wMean = total / area;
+      // spacing that follows the weights (sqrt(mean / local) of the uniform spacing); the legacy auto mode with only
+      // density_attrib keeps uniform radii, which even the density out
+      const adaptive = weighted && (!!mA || p.generate_by !== 'auto');
+      const rscale = adaptive && p.relax && count > 0
+        ? Float64Array.from(cand, (c) => { const wl = wAt(c.t, c.w); return wl > 0 ? Math.min(4, Math.max(0.25, Math.sqrt(wMean / wl))) : 4; })
+        : undefined;
+      let keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count)), rscale) : Int32Array.from({ length: ncand }, (_, i) => i);
       const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
       if (extra) {
         // the well-spaced selection first, the other candidates as refill; exact distance test and per-prim cap
@@ -280,12 +301,7 @@ defineNode({
         const n = pts.length;
         const RP = new Float64Array(n * 3);
         pts = pts.map((c, i) => { RP.set(c.pos, i * 3); return { t: c.t, w: c.w.slice(), pos: c.pos.slice() }; });
-        const wAt = (t: number, w: number[]) => {
-          let s = 0;
-          for (let j = 0; j < 3; j++) { const v = tris[t * 3 + j]; s += w[j] * dw(v, vp[v], triPrim[t]); }
-          return s;
-        };
-        const dBar = Math.sqrt((2 * area) / (Math.sqrt(3) * n)), wMean = total / area;
+        const dBar = Math.sqrt((2 * area) / (Math.sqrt(3) * n));
         const spacingAt = (t: number, w: number[]) => {
           if (p.relax_radius > 0) return p.relax_radius;
           if (!weighted) return dBar;
@@ -421,6 +437,39 @@ defineNode({
 
 const XFORM_ATTRIBS = new Set(['P', 'N', 'v', 'up', 'orient', 'pscale', 'scale', 'rot', 'trans', 'pivot', 'transform', 'Alpha', 'sourceprim', 'variant']);
 
+/**
+ * Template points with copy_to_points' scale_attrib / rotate_attrib folded into the standard attributes, so packed and
+ * real copies share one transform path: scale ← scale × factor (float = uniform, vec3 per axis), rot ← rot · extra
+ * (float = yaw degrees about +Y, vec3 = Euler XYZ degrees, vec4 = quaternion).
+ */
+function foldExtraXforms(t: Geometry, scaleAttrib: string, rotateAttrib: string): Geometry {
+  const numeric = (name: string, what: string) => {
+    const a = t.points.get(name);
+    if (!a || a.type === 'string' || a.isArray) throw new NodeError(`${what} "${name}" is not a numeric point attribute of the template points`, `point attributes: ${t.points.names().join(', ') || 'none'}`);
+    return a;
+  };
+  const sA = scaleAttrib ? numeric(scaleAttrib, 'scale_attrib') : null;
+  const rA = rotateAttrib ? numeric(rotateAttrib, 'rotate_attrib') : null;
+  const g = t.clone();
+  const n = g.numPoints;
+  if (sA) {
+    const sc = g.points.add('scale', 'float', 3).data as Float64Array, d = sA.data as Float64Array, s = sA.size;
+    for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) sc[i * 3 + c] *= s >= 3 ? d[i * s + c] : d[i * s];
+  }
+  if (rA) {
+    const rot = g.points.add('rot', 'float', 4).data as Float64Array, d = rA.data as Float64Array, s = rA.size;
+    for (let i = 0; i < n; i++) {
+      let e: Quat;
+      if (s === 4) e = qNormalize([d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]]);
+      else if (s === 3) e = qFromMat(m4euler([d[i * 3], d[i * 3 + 1], d[i * 3 + 2]]));
+      else e = qAxisAngle([0, 1, 0], d[i * s]);
+      const q = qMul([rot[i * 4], rot[i * 4 + 1], rot[i * 4 + 2], rot[i * 4 + 3]], e);
+      rot.set(q, i * 4);
+    }
+  }
+  return g;
+}
+
 /** Instance transform for template point i (Houdini attribute conventions). */
 export function pointTransform(t: Geometry, i: number): Mat4 {
   const Pd = t.P;
@@ -472,7 +521,9 @@ defineNode({
     'nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). ' +
     'Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; ' +
     'the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, ' +
-    'or the exact value, e.g. a string name); without that attribute the pieces cycle.',
+    'or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random ' +
+    'with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from ' +
+    'any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner.',
   inputs: [{ name: 'geo', desc: 'geometry to copy' }, { name: 'points', desc: 'template points' }],
   params: {
     group: P.group('point', 'template points to use ("" = all)'),
@@ -482,11 +533,16 @@ defineNode({
     variants: { type: 'enum', options: ['none', 'name', 'piece'], default: 'none', desc: 'split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set)' },
     piece_attrib: { type: 'string', default: '', desc: 'variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class")' },
     variant_attrib: { type: 'string', default: 'variant', desc: 'variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value)' },
+    variant_weights: { type: 'json', default: [], desc: 'variants: weights per piece (in piece order) for a seeded weighted random pick when the template has no variant_attrib attribute, e.g. [3, 1, 1]; missing weights are 0', aliases: ['weights', 'variant_probabilities'] },
+    seed: { type: 'float', default: 0, desc: 'variant_weights: random seed' },
+    scale_attrib: { type: 'string', default: '', desc: 'template point attribute multiplying the copy scale (float = uniform, vec3 = per axis), on top of pscale and scale', aliases: ['scale_by'] },
+    rotate_attrib: { type: 'string', default: '', desc: 'template point attribute adding a local rotation after orient/N/rot: float = degrees about +Y (yaw), vec3 = Euler degrees (XYZ), vec4 = quaternion', aliases: ['rotate_by'] },
   },
   outputs: 'prim copynum; template point attributes on copied points (pack: on the instance anchor points)',
   example: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_attrib: 'variant' } },
-  cook: ({ input, p }) => {
-    const src = input(0), t = input(1);
+  cook: ({ input, p, warn }) => {
+    const src = input(0);
+    const t = p.scale_attrib || p.rotate_attrib ? foldExtraXforms(input(1), p.scale_attrib, p.rotate_attrib) : input(1);
     const sel = mask(t, 'point', p.group);
     const tpts: number[] = [];
     for (let i = 0; i < t.numPoints; i++) if (!sel || sel[i]) tpts.push(i);
@@ -512,9 +568,25 @@ defineNode({
         values = [...new Set(Array.from({ length: src.numPrims }, (_, i) => pa.get(i) as any))].sort((a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0));
         for (const v of values) subsets.set(v, src.subsetPrims(Uint8Array.from({ length: src.numPrims }, (_, i) => (pa.get(i) === v ? 1 : 0))));
       }
-      const va = t.points.get(p.variant_attrib);
+      const va = p.variant_attrib ? t.points.get(p.variant_attrib) : undefined;
+      const wts = Array.isArray(p.variant_weights) ? p.variant_weights.map((x: any) => Math.max(0, Number(x) || 0)) : [];
+      let wcdf: Float64Array | null = null;
+      if (wts.length && va) warn(`variant_weights ignored: the template points have "${p.variant_attrib}", which picks the variants`);
+      else if (wts.length && values.length) {
+        if (wts.length !== values.length) warn(`variant_weights has ${wts.length} weight(s) for ${values.length} variant(s) (${values.join(', ')}); missing weights are 0`);
+        wcdf = new Float64Array(values.length);
+        let acc = 0;
+        for (let k = 0; k < values.length; k++) { acc += wts[k] ?? 0; wcdf[k] = acc; }
+        if (!(acc > 0)) throw new NodeError('variant_weights are all 0: no variant can be picked');
+      }
       pieceKey = (i) => {
         if (!values.length) return undefined;
+        if (!va && wcdf) {
+          const x = (elementSeed(p.seed, i) / 2147483648) * wcdf[wcdf.length - 1];
+          let k = 0;
+          while (k < wcdf.length - 1 && !(x < wcdf[k])) k++;
+          return values[k];
+        }
         if (!va) return values[i % values.length];
         const v = va.get(i) as any;
         if (subsets!.has(v)) return v;
@@ -522,7 +594,7 @@ defineNode({
         return undefined;
       };
       pieceOf = (i) => subsets!.get(pieceKey!(i)) ?? new Geometry();
-    }
+    } else if (Array.isArray(p.variant_weights) && p.variant_weights.length) warn('variant_weights needs variants ("name" or "piece") or piece_attrib to split the source into variants');
     const copyNames = new Set<string>();
     const pats = String(p.copy_attribs).split(/[\s,]+/).filter(Boolean);
     const matches = (n: string) => pats.some((pt) => !pt.startsWith('^') && new RegExp('^' + pt.replace(/\*/g, '.*') + '$').test(n)) && !pats.some((pt) => pt.startsWith('^') && new RegExp('^' + pt.slice(1).replace(/\*/g, '.*') + '$').test(n));
