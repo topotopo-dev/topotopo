@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-120 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+121 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -14,7 +14,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
-- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [normal](#normal) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
+- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
@@ -2341,6 +2341,47 @@ Compute normals N on points (smooth), vertices (hard edges above the cusp angle)
 | `class` | enum | `"vertex"` |  | `vertex`, `point`, `prim` |  | vertex = smooth with hard edges past cusp_angle |
 | `cusp_angle` | float | `60` | 0..180 |  |  | vertex mode: faces meeting sharper than this keep hard edges |
 | `hard_edges` | group | `""` |  |  | `hardedges`, `hard_edge_group` | vertex mode: edge group or edge pattern that is always hard, on top of cusp_angle ("" = none), e.g. "seams", "boundary", "angle>30", "p0-1-2" |
+
+### poly_bevel
+
+category: `topology` · aliases: `polybevel`, `bevel`, `chamfer`
+
+Bevel edges (chamfer strips or round profiles with corner patches) or points; watertight on closed meshes (Houdini PolyBevel).
+
+Edge mode: every edge in "group" becomes a strip of divisions+1 quads; the faces on both sides shrink by "offset" (measured across each face, Houdini "Distance"). Where bevelled edges meet, a corner patch fills the hole: a polygon for a chamfer (triangle at a box corner), rings of quads for round bevels (a sphere octant at a box corner). A bevelled edge ending at an unbevelled point slides its offset along the neighbouring edges and ends flush; two bevelled edges meeting at a point with one other edge (a cylinder rim) are mitred. Boundary and non-manifold edges are skipped with a warning (chamfering open-mesh boundary edges is out of scope). clamp scales all offsets down just enough that no face edge collapses past another (huge offsets stay clean). Point mode truncates the selected points: every edge at the point is cut at "offset", the corner becomes a polygon, or a dome of "divisions" rings. Faces keep their attributes (uv is interpolated inside each face), strips take prim attributes from the larger neighbouring face, corner patches from the first face around the point; N is recomputed if present. Select edges with patterns: "angle>80" (sharp edges), "border:top" (rim of a prim group), "p0-1-2-3-0" (chains), edge groups from the group node; the output edge group bevel_edges (where the bevel meets the faces) lets a second bevel soften the first.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon mesh (closed meshes stay watertight) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group | `""` |  |  | `edges`, `edge_group`, `points` | edges to bevel (edge pattern or group: "angle>80", "border:top", "p0-1", "rim"; "" = every edge shared by two polygons); with mode "points", a point pattern ("" = all points) |
+| `mode` | enum | `"edges"` |  | `edges`, `points` | `bevel_type`, `class` | bevel edges, or truncate points |
+| `offset` | float | `0.1` | 0.. |  | `distance`, `width`, `radius`, `size`, `amount` | distance from the edge across each adjacent face (points mode: along each edge) |
+| `offset_mode` | enum | `"distance"` |  | `distance`, `fraction` | `distance_mode`, `offsetmode` | distance = offset in scene units; fraction = offset x the shortest edge at the edge's points (stays proportional on small faces) |
+| `clamp` | bool | `true` |  |  | `clamp_offset`, `clamp_overlap` | scale all offsets down by one factor, just enough that no bevel crosses its neighbours (Houdini Clamp Offset); warns when it does |
+| `divisions` | int | `0` | 0..64 |  | `segments`, `divs`, `subdivisions` | 0 = flat chamfer (one strip of quads per edge); n = round profile with n+1 strips |
+| `shape` | float | `0` | -1..1 |  | `profile_shape`, `convexity`, `profile` | profile convexity for round bevels: 0 = circular arc, 1 = bulges out to a nearly square corner, -0.5 = straight, -1 = concave cove |
+
+**Writes:** prim groups bevel (strips and corner patches), bevel_corner (corner patches); edge group bevel_edges (edges where the bevel meets the original faces)
+
+**Example**
+
+```json
+{
+  "type": "poly_bevel",
+  "params": {
+    "group": "angle>80",
+    "offset": 0.1,
+    "divisions": 3
+  }
+}
+```
 
 ### poly_extrude
 

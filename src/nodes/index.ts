@@ -7,6 +7,7 @@ import './groups.ts';
 import './material.ts';
 import './topology.ts';
 import './polyedit.ts';
+import './bevel.ts';
 import './copy.ts';
 import './solid.ts';
 import './sdf.ts';

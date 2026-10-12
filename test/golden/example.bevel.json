@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.6511, 1.4, 0.809],
+      "min": [-3.3, 0, -1]
+    },
+    "counts": {
+      "points": 224,
+      "prims": 212,
+      "vertices": 860,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": ["bevel_edges", "rim"],
+      "point": [],
+      "prim": ["bevel", "bevel_corner", "bottom", "side", "top"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "def9b7e27607f878",
+      "attributes": {
+        "group.edge.bevel_edges": "c324422843d384ae",
+        "group.edge.rim": "c324422843d384ae",
+        "group.prim.bevel": "f3714a719a92746b",
+        "group.prim.bevel_corner": "479ef0717e75d0cb",
+        "group.prim.bottom": "4362e6fb8b91cce1",
+        "group.prim.side": "178f1490ff0f938a",
+        "group.prim.top": "e60187da9274c2c0",
+        "point.Cd": "3b321db52b89c9bf",
+        "vertex.uv": "1a0f1b99334cb0ab"
+      },
+      "topology": "e6cdad3a88080f8c"
+    }
+  },
+  "name": "example.bevel",
+  "ok": true,
+  "source": "examples/bevel.json",
+  "warnings": []
+}
