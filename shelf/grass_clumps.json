@@ -112,6 +112,6 @@
     "shelf_group": "terrain",
     "pivot": "surface",
     "inputs": ["surface"],
-    "thumbnail_render": { "elevation": 30 }
+    "thumbnail_render": { "elevation": 35, "zoom": 1.4 }
   }
 }
