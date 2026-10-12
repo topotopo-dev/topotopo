@@ -18,8 +18,9 @@
 //   scale of its columns, with a warning); the rest of the geometry as above. instancing 'expand' writes real copies.
 //   Per-instance attributes (custom, default on): the anchor point / packed prim attributes become extra instance
 //   accessors with the extension's "_" prefix: Cd (+ Alpha) → _COLOR (VEC3/VEC4 float), every other numeric attribute
-//   of size 1–4 → _NAME (float, or the smallest integer type), single strings → _NAME integer indices into a table in
-//   the node's extras; the transform inputs (N, up, orient, rot, scale, trans, pivot) are folded into TRS and skipped.
+//   of size 1–4 → _NAME, single strings → _NAME indices into a table in the node's extras; all as 32-bit floats (exact
+//   for integers below 2^24; 1- and 2-byte components break EXT_meshopt_compression's 4-byte instance strides); the
+//   transform inputs (N, up, orient, rot, scale, trans, pivot) are folded into TRS and skipped.
 //   Node extras (polyforge.instanceAttributes) keep names, classes, types and string tables for re-import.
 //   Node and mesh names are packedSourceNames() (the source's prim "name", else source_<i>), as in the instance stream.
 //   Textures: the material table's texture paths (base colour, normal, roughness) are read with options.readFile and
@@ -559,28 +560,16 @@ function instanceAttribSpecs(g: Geometry): InstanceAttribSpec[] {
   return out;
 }
 
-/** Accessor array of one per-instance attribute over the given packed prims. */
+/** Accessor array (32-bit float, see the module comment) of one per-instance attribute over the given packed prims. */
 function instanceAttribValues(g: Geometry, ia: InstanceAttribSpec, prims: number[]): TypedArray {
-  const n = prims.length, size = ia.size;
-  if (ia.type === 'float') {
-    const out = new Float32Array(n * size);
-    prims.forEach((p, i) => {
-      const v = anchorValue(g, ia.a, p) as number[];
-      for (let c = 0; c < ia.a.attr.size && c < size; c++) out[i * size + c] = v[c];
-      if (ia.alpha) out[i * size + 3] = (anchorValue(g, ia.alpha, p) as number[])[0];
-    });
-    return out;
-  }
-  const d: number[] = new Array(n * size);
+  const size = ia.size, out = new Float32Array(prims.length * size);
   prims.forEach((p, i) => {
-    if (ia.type === 'string') d[i] = ia.index!.get(anchorValue(g, ia.a, p) as string) ?? 0;
-    else { const v = anchorValue(g, ia.a, p) as number[]; for (let c = 0; c < size; c++) d[i * size + c] = v[c]; }
+    if (ia.type === 'string') { out[i] = ia.index!.get(anchorValue(g, ia.a, p) as string) ?? 0; return; }
+    const v = anchorValue(g, ia.a, p) as number[];
+    for (let c = 0; c < ia.a.attr.size && c < size; c++) out[i * size + c] = v[c];
+    if (ia.alpha) out[i * size + 3] = (anchorValue(g, ia.alpha, p) as number[])[0];
   });
-  let mn = Infinity, mx = -Infinity;
-  for (const x of d) { if (x < mn) mn = x; if (x > mx) mx = x; }
-  if (!n) return new Uint8Array(0);
-  return mn >= -128 && mx <= 127 ? Int8Array.from(d) : mn >= 0 && mx <= 255 ? Uint8Array.from(d)
-    : mn >= -32768 && mx <= 32767 ? Int16Array.from(d) : mn >= 0 && mx <= 65535 ? Uint16Array.from(d) : Float32Array.from(d);
+  return out;
 }
 
 /** Per-instance accessors of an EXT_mesh_gpu_instancing node → anchor point / packed prim attributes of `part`. */
