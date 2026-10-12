@@ -5,8 +5,8 @@
 import { Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
-import { DEG, cross, dot, m4apply, m4trs, normalize, perpendicular, qFromMat, qMul, qNormalize } from '../core/math.ts';
-import type { Mat4, Quat, Vec3 } from '../core/math.ts';
+import { DEG, cross, dot, normalize, perpendicular, qFromMat, qMul, qNormalize } from '../core/math.ts';
+import type { Quat, Vec3 } from '../core/math.ts';
 import { KDTree } from '../core/spatial.ts';
 import { pointNeighbors, refreshNormals } from '../core/topology.ts';
 import { rmFrames } from './curves.ts';
@@ -41,11 +41,6 @@ function m3invert(m: ArrayLike<number>): M3 | null {
     B * s, (a * i - c * g) * s, -(a * f - c * d) * s,
     C * s, -(a * h - b * g) * s, (a * e - b * d) * s,
   );
-}
-
-/** Row-major linear part of a column-major Mat4. */
-function m4linear(m: Mat4): M3 {
-  return Float64Array.of(m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]);
 }
 
 function quatToM3(q: Quat): M3 {
@@ -242,6 +237,19 @@ export function edgeDistance(g: Geometry, seeds: ArrayLike<number>, maxDist: num
   return dist;
 }
 
+/**
+ * Linear part of the weighted soft transform, row-major: Rz·Ry·Rx (angles r·w in degrees, x applied first, as
+ * m4euler 'xyz') times diag(1 + (s - 1)·w).
+ */
+function softMatrix(r: Vec3, s: Vec3, w: number, out: Float64Array) {
+  const ax = r[0] * w * DEG, ay = r[1] * w * DEG, az = r[2] * w * DEG;
+  const cx = Math.cos(ax), sx = Math.sin(ax), cy = Math.cos(ay), sy = Math.sin(ay), cz = Math.cos(az), sz = Math.sin(az);
+  const k0 = 1 + (s[0] - 1) * w, k1 = 1 + (s[1] - 1) * w, k2 = 1 + (s[2] - 1) * w;
+  out[0] = cz * cy * k0; out[1] = (cz * sy * sx - sz * cx) * k1; out[2] = (cz * sy * cx + sz * sx) * k2;
+  out[3] = sz * cy * k0; out[4] = (sz * sy * sx + cz * cx) * k1; out[5] = (sz * sy * cx - cz * sx) * k2;
+  out[6] = -sy * k0; out[7] = cy * sx * k1; out[8] = cy * cx * k2;
+}
+
 /** Straight-line distance to the nearest seed point within maxDist (Infinity beyond). */
 function nearestSeedDistance(g: Geometry, seeds: number[], maxDist: number): Float64Array {
   const Pd = g.P, n = g.numPoints;
@@ -313,18 +321,19 @@ defineNode({
       if (cnt) pivot = [c[0] / cnt, c[1] / cnt, c[2] / cnt];
     }
     const t = p.translate as Vec3, r = p.rotate as Vec3, s = p.scale as Vec3;
-    const full = m4trs(t, r, s, pivot);
-    const fullL = m4linear(full);
     const fa = frameAttribs(g);
+    // p' = pivot + t·w + R(r·w) · diag(lerp(1, s, w)) · (p - pivot), i.e. m4trs(t·w, r·w, s_w, pivot) without allocations
+    const L = new Float64Array(9);
+    let lastW = NaN;
     for (let i = 0; i < n; i++) {
       const wi = w[i];
       if (wi === 0) continue;
-      const m = wi === 1 ? full : m4trs(
-        [t[0] * wi, t[1] * wi, t[2] * wi], [r[0] * wi, r[1] * wi, r[2] * wi],
-        [1 + (s[0] - 1) * wi, 1 + (s[1] - 1) * wi, 1 + (s[2] - 1) * wi], pivot,
-      );
-      m4apply(m, Pd[i * 3], Pd[i * 3 + 1], Pd[i * 3 + 2], Pd, i * 3);
-      if (fa) transformFrameAttribs(fa, i, wi === 1 ? fullL : m4linear(m));
+      if (wi !== lastW) { softMatrix(r, s, wi, L); lastW = wi; }
+      const x = Pd[i * 3] - pivot[0], y = Pd[i * 3 + 1] - pivot[1], z = Pd[i * 3 + 2] - pivot[2];
+      Pd[i * 3] = pivot[0] + t[0] * wi + L[0] * x + L[1] * y + L[2] * z;
+      Pd[i * 3 + 1] = pivot[1] + t[1] * wi + L[3] * x + L[4] * y + L[5] * z;
+      Pd[i * 3 + 2] = pivot[2] + t[2] * wi + L[6] * x + L[7] * y + L[8] * z;
+      if (fa) transformFrameAttribs(fa, i, L);
     }
     if (p.weight_attrib) (g.points.add(p.weight_attrib, 'float', 1).data as Float64Array).set(w);
     return refreshNormals(g);
