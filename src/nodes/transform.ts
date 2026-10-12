@@ -1,5 +1,5 @@
 // Transforms and deformers.
-import { Geometry } from '../core/geometry.ts';
+import { Geometry, cloneVolumes } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import {
@@ -183,9 +183,92 @@ defineNode({
   },
 });
 
-/** Weld points closer than dist (optionally only candidates). Removes collapsed prims. */
-export function fusePoints(g: Geometry, dist: number, candidate?: (i: number) => boolean, average = false): Geometry {
-  const n = g.numPoints, Pd = g.P;
+/**
+ * Weld targets: target[i] = the point i merges into (or i). Points are visited in index order; a candidate point merges
+ * into the first kept point within dist found in its 3×3×3 neighbourhood of cells of size max(dist, 1e-12), scanning the
+ * cells dx, dy, dz from -1 to 1 and the points of a cell in index order; otherwise it is kept and enters its cell.
+ *
+ * Same decisions as weldTargetsSlow (the original string-keyed grid), much faster: typed arrays, a spatial hash over
+ * coarse cells of 2×2×2 fine cells (8 probes per point instead of 27) whose points are filtered back to the 27 fine cells,
+ * and the first match in scan order chosen as the smallest (cell order, point index). Returns null for non-finite or
+ * astronomically large cell coordinates (|c| >= 4e15, where c ± 1 is no longer exact); the caller then uses the slow path.
+ */
+function weldTargets(Pd: Float64Array, n: number, dist: number, candidate?: (i: number) => boolean): Int32Array | null {
+  const cell = Math.max(dist, 1e-12);
+  const target = new Int32Array(n);
+  const C = new Float64Array(n * 3);
+  const cand = new Uint8Array(n);
+  let nc = 0;
+  for (let i = 0; i < n; i++) {
+    target[i] = i;
+    if (candidate && !candidate(i)) continue;
+    const cx = Math.floor(Pd[i * 3] / cell), cy = Math.floor(Pd[i * 3 + 1] / cell), cz = Math.floor(Pd[i * 3 + 2] / cell);
+    if (!(Math.abs(cx) < 4e15 && Math.abs(cy) < 4e15 && Math.abs(cz) < 4e15)) return null;
+    C[i * 3] = cx + 0; C[i * 3 + 1] = cy + 0; C[i * 3 + 2] = cz + 0; // + 0 folds -0 (the string keys print it as 0)
+    cand[i] = 1;
+    nc++;
+  }
+  // open addressing: slot → coarse cell id (4 bytes per slot, so probes of empty cells stay in cache); each coarse
+  // cell keeps its coordinates and a linked list of its kept points in index order
+  let cap = 16;
+  while (cap < nc * 2) cap *= 2;
+  const mask = cap - 1;
+  const slotCell = new Int32Array(cap).fill(-1);
+  const KX = new Float64Array(nc), KY = new Float64Array(nc), KZ = new Float64Array(nc);
+  const head = new Int32Array(nc), tail = new Int32Array(nc);
+  const next = new Int32Array(n).fill(-1);
+  let ncell = 0;
+  for (let i = 0; i < n; i++) {
+    if (!cand[i]) continue;
+    const x = Pd[i * 3], y = Pd[i * 3 + 1], z = Pd[i * 3 + 2];
+    const cx = C[i * 3], cy = C[i * 3 + 1], cz = C[i * 3 + 2];
+    const X0 = Math.floor((cx - 1) * 0.5), Y0 = Math.floor((cy - 1) * 0.5), Z0 = Math.floor((cz - 1) * 0.5);
+    // the fine range c-1..c+1 spans exactly two coarse cells per axis
+    let bestO = 27, bestJ = -1;
+    for (let ax = 0; ax < 2; ax++) {
+      const qx = X0 + ax, hx = Math.imul(qx | 0, 0x8da6b343);
+      for (let ay = 0; ay < 2; ay++) {
+        const qy = Y0 + ay, hxy = hx ^ Math.imul(qy | 0, 0xd8163841);
+        for (let az = 0; az < 2; az++) {
+          const qz = Z0 + az;
+          let h = hxy ^ Math.imul(qz | 0, 0xcb1ab31f);
+          h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12;
+          h &= mask;
+          let c = slotCell[h];
+          while (c >= 0 && !(KX[c] === qx && KY[c] === qy && KZ[c] === qz)) { h = (h + 1) & mask; c = slotCell[h]; }
+          if (c < 0) continue;
+          for (let j = head[c]; j >= 0; j = next[j]) {
+            const ox = C[j * 3] - cx, oy = C[j * 3 + 1] - cy, oz = C[j * 3 + 2] - cz;
+            if (ox < -1 || ox > 1 || oy < -1 || oy > 1 || oz < -1 || oz > 1) continue;
+            const o = (ox + 1) * 9 + (oy + 1) * 3 + (oz + 1); // position of the fine cell in the dx, dy, dz scan
+            if (o > bestO || (o === bestO && j > bestJ)) continue;
+            const ex = Pd[j * 3] - x, ey = Pd[j * 3 + 1] - y, ez = Pd[j * 3 + 2] - z;
+            // hypot >= every |component|, so this pre-test never rejects a pair hypot would accept
+            if (ex > dist || ex < -dist || ey > dist || ey < -dist || ez > dist || ez < -dist) continue;
+            if (Math.hypot(ex, ey, ez) <= dist) { bestO = o; bestJ = j; }
+          }
+        }
+      }
+    }
+    if (bestJ >= 0) { target[i] = bestJ; continue; }
+    const qx = Math.floor(cx * 0.5), qy = Math.floor(cy * 0.5), qz = Math.floor(cz * 0.5);
+    let h = Math.imul(qx | 0, 0x8da6b343) ^ Math.imul(qy | 0, 0xd8163841) ^ Math.imul(qz | 0, 0xcb1ab31f);
+    h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12;
+    h &= mask;
+    let c = slotCell[h];
+    while (c >= 0 && !(KX[c] === qx && KY[c] === qy && KZ[c] === qz)) { h = (h + 1) & mask; c = slotCell[h]; }
+    if (c >= 0) { next[tail[c]] = i; tail[c] = i; }
+    else {
+      c = ncell++;
+      slotCell[h] = c;
+      KX[c] = qx; KY[c] = qy; KZ[c] = qz; head[c] = i; tail[c] = i;
+    }
+  }
+  return target;
+}
+
+/** weldTargets with string cell keys (the original implementation, kept for coordinates the hash cannot represent). */
+function weldTargetsSlow(Pd: Float64Array, n: number, dist: number, candidate?: (i: number) => boolean): Int32Array {
   const cell = Math.max(dist, 1e-12);
   const grid = new Map<string, number[]>();
   const target = new Int32Array(n);
@@ -212,16 +295,78 @@ export function fusePoints(g: Geometry, dist: number, candidate?: (i: number) =>
       if (lst) lst.push(i); else grid.set(k, [i]);
     }
   }
-  const out = g.clone();
+  return target;
+}
+
+/** Weld points closer than dist (optionally only candidates). Removes collapsed prims. */
+export function fusePoints(g: Geometry, dist: number, candidate?: (i: number) => boolean, average = false): Geometry {
+  const n = g.numPoints, Pd = g.P;
+  const target = weldTargets(Pd, n, dist, candidate) ?? weldTargetsSlow(Pd, n, dist, candidate);
+  let acc: Float64Array | null = null, cnt: Int32Array | null = null;
   if (average) {
-    const acc = new Float64Array(n * 3), cnt = new Int32Array(n);
+    acc = new Float64Array(n * 3); cnt = new Int32Array(n);
     for (let i = 0; i < n; i++) { const t = target[i]; acc[t * 3] += Pd[i * 3]; acc[t * 3 + 1] += Pd[i * 3 + 1]; acc[t * 3 + 2] += Pd[i * 3 + 2]; cnt[t]++; }
-    for (let i = 0; i < n; i++) if (cnt[i] > 1) for (let c = 0; c < 3; c++) out.P[i * 3 + c] = acc[i * 3 + c] / cnt[i];
   }
+  if (!g.primKind && !g.edgeGroups.size) return weldCompact(g, target, acc, cnt);
+  const out = g.clone();
+  if (acc && cnt) for (let i = 0; i < n; i++) if (cnt[i] > 1) for (let c = 0; c < 3; c++) out.P[i * 3 + c] = acc[i * 3 + c] / cnt[i];
   for (let v = 0; v < out.numVertices; v++) out.vertexPoint[v] = target[out.vertexPoint[v]];
   // edge groups follow the welded points (edges collapsing to one point drop out)
   if (g.edgeGroups.size) out.edgeGroups = new Map([...g.edgeGroups].map(([k, e]) => [k, e.remap(target)]));
   return removeDegenerate(out).removeUnusedPoints();
+}
+
+/**
+ * The tail of fusePoints for geometry without packed prims or edge groups, in one pass: the result of
+ * removeDegenerate(welded).removeUnusedPoints() (same elements, order, attributes and groups) without the intermediate
+ * clones. Vertices are renumbered to their weld targets, consecutive duplicates and collapsed prims dropped, then the
+ * points still referenced kept in index order (P averaged when acc/cnt are given).
+ */
+function weldCompact(g: Geometry, target: Int32Array, acc: Float64Array | null, cnt: Int32Array | null): Geometry {
+  const np = g.numPoints, nprim = g.numPrims, vp = g.vertexPoint, ps = g.primStart, closed = g.primClosed;
+  const keepV = new Int32Array(g.numVertices), keepP = new Int32Array(nprim), starts = new Int32Array(nprim + 1);
+  let nv = 0, npr = 0;
+  for (let p = 0; p < nprim; p++) {
+    const s = ps[p], e = ps[p + 1], v0 = nv;
+    for (let v = s; v < e; v++) {
+      const pt = target[vp[v]];
+      if (nv > v0 && target[vp[keepV[nv - 1]]] === pt) continue;
+      keepV[nv++] = v;
+    }
+    if (closed[p] && nv - v0 > 1 && target[vp[keepV[v0]]] === target[vp[keepV[nv - 1]]]) nv--;
+    if (nv - v0 < (closed[p] ? 3 : 2)) { nv = v0; continue; }
+    keepP[npr++] = p;
+    starts[npr] = nv;
+  }
+  const kv = keepV.subarray(0, nv), kp = keepP.subarray(0, npr);
+  const used = new Uint8Array(np);
+  for (let k = 0; k < nv; k++) used[target[vp[kv[k]]]] = 1;
+  const remap = new Int32Array(np).fill(-1);
+  let nk = 0;
+  for (let i = 0; i < np; i++) if (used[i]) remap[i] = nk++;
+  const ptIdx = new Int32Array(nk);
+  for (let i = 0; i < np; i++) if (used[i]) ptIdx[remap[i]] = i;
+  const out = Object.create(Geometry.prototype) as Geometry;
+  out.points = g.points.gather(ptIdx);
+  if (acc && cnt) {
+    const P = out.P;
+    for (let k = 0; k < nk; k++) { const i = ptIdx[k]; if (cnt[i] > 1) for (let c = 0; c < 3; c++) P[k * 3 + c] = acc[i * 3 + c] / cnt[i]; }
+  }
+  out.vertices = g.vertices.gather(kv);
+  out.prims = g.prims.gather(kp);
+  out.detail = g.detail.clone();
+  out.primStart = starts.slice(0, npr + 1);
+  out.vertexPoint = new Int32Array(nv);
+  for (let k = 0; k < nv; k++) out.vertexPoint[k] = remap[target[vp[kv[k]]]];
+  out.primClosed = new Uint8Array(npr);
+  for (let k = 0; k < npr; k++) out.primClosed[k] = closed[kp[k]];
+  const pick = (m: Uint8Array, idx: Int32Array) => { const o = new Uint8Array(idx.length); for (let k = 0; k < idx.length; k++) o[k] = m[idx[k]]; return o; };
+  out.pointGroups = new Map([...g.pointGroups].map(([k, m]) => [k, pick(m, ptIdx)]));
+  out.primGroups = new Map([...g.primGroups].map(([k, m]) => [k, pick(m, kp)]));
+  out.vertexGroups = new Map([...g.vertexGroups].map(([k, m]) => [k, pick(m, kv)]));
+  out.edgeGroups = new Map();
+  out.volumes = cloneVolumes(g.volumes);
+  return out;
 }
 
 /** Drop consecutive duplicate vertices and prims that collapse below 3 (polygons) or 2 (lines) points. */

@@ -254,7 +254,48 @@ const CASES: Case[] = [
       },
     }),
   },
+  {
+    name: 'scatter_relax_100k',
+    what: (q) => `scatter ${k(q ? 1e4 : 1e5)} points on a grid with relax (sample elimination of 5× candidates)`,
+    elements: (q) => (q ? 1e4 : 1e5), unit: 'points',
+    target: 3000, targetSource: 'goal (P0-F; relax is the scatter default)',
+    graph: (q) => ({
+      nodes: {
+        g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
+        target: { type: 'scatter', in: ['g'], params: { count: q ? 1e4 : 1e5, seed: 1 } },
+      },
+    }),
+  },
+  {
+    name: 'subdivide_sphere_100k',
+    what: (q) => `Catmull-Clark, 1 level, UV sphere with ${k(uvSphereFaces(q ? 71 : 224))} faces (vertex N, vertex uv)`,
+    elements: (q) => uvSphereFaces(q ? 71 : 224), unit: 'input faces',
+    target: 500, targetSource: 'goal (P0-F: attribute interpolation + normal refresh)',
+    graph: (q) => ({
+      nodes: {
+        s: { type: 'sphere', params: { rows: q ? 71 : 224, cols: q ? 142 : 448 } },
+        n: { type: 'normal', in: ['s'] },
+        target: { type: 'subdivide', in: ['n'], params: { levels: 1 } },
+      },
+    }),
+  },
+  {
+    name: 'ray_100k',
+    what: (q) => `ray node: project ${k((q ? 100 : 316) ** 2)} points onto a ${k(uvSphereTris(sphereRows(q ? 1e4 : 1e5)))}-triangle sphere (BVH build included)`,
+    elements: (q) => (q ? 100 : 316) ** 2, unit: 'rays',
+    target: 1000, targetSource: 'goal (P0-F)',
+    graph: (q) => ({
+      nodes: {
+        s: { type: 'sphere', params: { type: 'uv', rows: sphereRows(q ? 1e4 : 1e5), cols: 2 * sphereRows(q ? 1e4 : 1e5) } },
+        p: { type: 'point_grid', params: { counts: [q ? 100 : 316, 1, q ? 100 : 316], size: [1.6, 0, 1.6], center: [0, 3, 0] } },
+        target: { type: 'ray', in: ['p', 's'] },
+      },
+    }),
+  },
 ];
+
+/** Faces of a UV sphere with `rows` rows and 2·rows columns (triangle caps + quads). */
+function uvSphereFaces(rows: number) { return 2 * rows * rows; }
 
 function booleanGraph(rows: number): GraphSpec {
   return {

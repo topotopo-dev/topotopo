@@ -1,5 +1,5 @@
 // Polygon modelling / topology nodes.
-import { GeoBuilder, Geometry } from '../core/geometry.ts';
+import { AttribTable, Attribute, GeoBuilder, Geometry, cloneVolumes } from '../core/geometry.ts';
 import type { Src } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
@@ -7,7 +7,7 @@ import {
   boundaryLoops, buildEdges, connectivity, orientOutward, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, topologyReport, triangulate,
 } from '../core/topology.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
-import { edgeFromKey, edgeKey, forEachPrimEdge } from '../core/edges.ts';
+import { EdgeSet, edgeFromKey, edgeKey, forEachPrimEdge } from '../core/edges.ts';
 import { P, edgeMask, mask } from './util.ts';
 import { fusePoints, removeDegenerate } from './transform.ts';
 import { makeBox } from './generate.ts';
@@ -145,6 +145,11 @@ export function subdivideOnce(g: Geometry, smooth: boolean, boundaryMode: 'smoot
  * numbers. Edge groups of g propagate to the child edges (and to polyline segments).
  */
 export function subdivideLevel(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): { geo: Geometry; sharp: Map<number, number> } {
+  return subdivideLevelFast(g, smooth, boundaryMode, sharp) ?? subdivideLevelBuilder(g, smooth, boundaryMode, sharp);
+}
+
+/** subdivideLevel through GeoBuilder: the reference implementation, used for inputs the typed-array path does not take. */
+function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): { geo: Geometry; sharp: Map<number, number> } {
   const E = buildEdges(g);
   const ne = E.a.length;
   // faces adjacent to each edge (only closed polygons)
@@ -302,6 +307,385 @@ export function subdivideLevel(g: Geometry, smooth: boolean, boundaryMode: 'smoo
     if (remap[x] >= 0 && remap[y] >= 0) moved.set(edgeKey(remap[x], remap[y]), s);
   }
   return { geo: out, sharp: moved };
+}
+
+/**
+ * subdivideLevel on typed arrays, without GeoBuilder: the same output bit for bit as subdivideLevelBuilder (point,
+ * vertex and prim order, every blend weight, the order in which weights are accumulated and summed, attribute and
+ * group inheritance, edge groups and crease propagation), several times faster and with little garbage. Each new
+ * point's stencil (source points and weights, in the builder's insertion order) lives in a small scratch buffer and is
+ * applied to P and every float point attribute as soon as it is complete.
+ *
+ * Returns null (the caller falls back to the builder path) for packed prims and for closed polygons that are empty or
+ * repeat a point on consecutive corners; those degenerate inputs take builder-specific paths.
+ */
+function subdivideLevelFast(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): { geo: Geometry; sharp: Map<number, number> } | null {
+  if (g.primKind) return null;
+  const np = g.numPoints, nprim = g.numPrims, nv = g.numVertices;
+  const vp = g.vertexPoint, ps = g.primStart, closed = g.primClosed, P = g.P;
+  for (let pr = 0; pr < nprim; pr++) {
+    if (!closed[pr]) continue;
+    const s = ps[pr], e = ps[pr + 1];
+    if (e === s) return null;
+    for (let v = s; v < e; v++) if (vp[v] === vp[v + 1 < e ? v + 1 : s]) return null;
+  }
+  // ---- unique edges in order of first occurrence (as buildEdges), found through per-point lists keyed by the lower point
+  const EA = new Int32Array(nv), EB = new Int32Array(nv), nextE = new Int32Array(nv), headE = new Int32Array(np).fill(-1);
+  /** edge of the side that starts at corner v of a closed polygon */
+  const sideEdge = new Int32Array(nv).fill(-1);
+  let ne = 0;
+  for (let pr = 0; pr < nprim; pr++) {
+    const s = ps[pr], e = ps[pr + 1];
+    const last = closed[pr] ? e : e - 1;
+    for (let v = s; v < last; v++) {
+      const a = vp[v], b = vp[v + 1 < e ? v + 1 : s];
+      if (a === b) continue;
+      const lo = a < b ? a : b, hi = a < b ? b : a;
+      let id = headE[lo];
+      while (id >= 0 && EB[id] !== hi) id = nextE[id];
+      if (id < 0) { id = ne++; EA[id] = lo; EB[id] = hi; nextE[id] = headE[lo]; headE[lo] = id; }
+      sideEdge[v] = id;
+    }
+  }
+  // ---- faces per edge (closed polygons, once per side, prim order) and per point (each polygon once, prim order)
+  const efStart = new Int32Array(ne + 1);
+  for (let pr = 0; pr < nprim; pr++) if (closed[pr]) for (let v = ps[pr]; v < ps[pr + 1]; v++) efStart[sideEdge[v] + 1]++;
+  for (let e = 0; e < ne; e++) efStart[e + 1] += efStart[e];
+  const efList = new Int32Array(efStart[ne]), efFill = efStart.slice(0, ne);
+  for (let pr = 0; pr < nprim; pr++) if (closed[pr]) for (let v = ps[pr]; v < ps[pr + 1]; v++) efList[efFill[sideEdge[v]]++] = pr;
+  const efCount = (e: number) => efStart[e + 1] - efStart[e];
+  const lastPrim = new Int32Array(np).fill(-1);
+  const pfStart = new Int32Array(np + 1);
+  for (let pr = 0; pr < nprim; pr++) {
+    if (!closed[pr]) continue;
+    for (let v = ps[pr]; v < ps[pr + 1]; v++) { const q = vp[v]; if (lastPrim[q] !== pr) { lastPrim[q] = pr; pfStart[q + 1]++; } }
+  }
+  for (let i = 0; i < np; i++) pfStart[i + 1] += pfStart[i];
+  const pfList = new Int32Array(pfStart[np]), pfFill = pfStart.slice(0, np);
+  lastPrim.fill(-1);
+  for (let pr = 0; pr < nprim; pr++) {
+    if (!closed[pr]) continue;
+    for (let v = ps[pr]; v < ps[pr + 1]; v++) { const q = vp[v]; if (lastPrim[q] !== pr) { lastPrim[q] = pr; pfList[pfFill[q]++] = pr; } }
+  }
+  // edges with faces per point (edge order; each edge listed at both ends)
+  const peStart = new Int32Array(np + 1);
+  for (let e = 0; e < ne; e++) if (efCount(e)) { peStart[EA[e] + 1]++; peStart[EB[e] + 1]++; }
+  for (let i = 0; i < np; i++) peStart[i + 1] += peStart[i];
+  const peList = new Int32Array(peStart[np]), peFill = peStart.slice(0, np);
+  for (let e = 0; e < ne; e++) if (efCount(e)) { peList[peFill[EA[e]]++] = e; peList[peFill[EB[e]]++] = e; }
+  const isBoundaryEdge = (e: number) => efCount(e) !== 2;
+  const es = new Float64Array(ne);
+  if (sharp && sharp.size)
+    for (let e = 0; e < ne; e++) if (!isBoundaryEdge(e)) es[e] = Math.max(0, sharp.get(edgeKey(EA[e], EB[e])) ?? 0);
+
+  // ---- output points: face points, edge points, vertex points, then polyline points as the prims reach them
+  let nFace = 0, nEdge = 0, nVtx = 0, nCopy = 0;
+  for (let pr = 0; pr < nprim; pr++) if (closed[pr]) nFace++;
+  for (let e = 0; e < ne; e++) if (efCount(e)) nEdge++;
+  for (let i = 0; i < np; i++) if (pfStart[i + 1] > pfStart[i]) nVtx++;
+  const seen = new Uint8Array(np);
+  for (let pr = 0; pr < nprim; pr++) {
+    if (closed[pr]) continue;
+    for (let v = ps[pr]; v < ps[pr + 1]; v++) { const q = vp[v]; if (!seen[q] && pfStart[q + 1] === pfStart[q]) { seen[q] = 1; nCopy++; } }
+  }
+  const NP = nFace + nEdge + nVtx + nCopy;
+  const pos = new Float64Array(NP * 3);
+  /** source point a new point copies (-1 for blends) and the dominant source of every new point (int/string/array/groups) */
+  const dom = new Int32Array(NP);
+  const fl: { s: number; sd: ArrayLike<number>; dd: Float64Array }[] = [];
+  const ptAttrs: [string, Attribute, Attribute | null][] = [];
+  for (const [name, a] of g.points.map) {
+    if (name === 'P') continue;
+    if (a.isArray) { ptAttrs.push([name, a, null]); continue; }
+    const d = Attribute.create(a.type, a.size, NP, a.def);
+    ptAttrs.push([name, a, d]);
+    if (a.type === 'float') fl.push({ s: a.size, sd: a.data as Float64Array, dd: d.data as Float64Array });
+  }
+  // stencil scratch: source points and accumulated weights in first-insertion order (a JS Map's order in the builder path)
+  let SI = new Int32Array(64), SW = new Float64Array(64), sLen = 0, stamp = 0;
+  const mark = new Int32Array(np).fill(-1), slot = new Int32Array(np);
+  let NPi = 0;
+  const grow = () => {
+    const si = new Int32Array(SI.length * 2), sw = new Float64Array(SW.length * 2);
+    si.set(SI); sw.set(SW); SI = si; SW = sw;
+  };
+  /** GeoBuilder.copyPoint */
+  const copyPoint = (q: number): number => {
+    const i = NPi++;
+    pos[i * 3] = P[q * 3]; pos[i * 3 + 1] = P[q * 3 + 1]; pos[i * 3 + 2] = P[q * 3 + 2];
+    dom[i] = q;
+    for (const { s, sd, dd } of fl) for (let c = 0; c < s; c++) dd[i * s + c] = sd[q * s + c];
+    return i;
+  };
+  /** addW of the builder path: accumulate w onto q (a new entry starts at 0 + w) */
+  const addW = (q: number, w: number) => {
+    if (mark[q] === stamp) { SW[slot[q]] += w; return; }
+    if (sLen === SI.length) grow();
+    mark[q] = stamp; slot[q] = sLen; SI[sLen] = q; SW[sLen] = 0 + w; sLen++;
+  };
+  /** append an entry without merging (blendPoint called with explicit lists) */
+  const push = (q: number, w: number) => {
+    if (sLen === SI.length) grow();
+    SI[sLen] = q; SW[sLen] = w; sLen++;
+  };
+  /** GeoBuilder.blendPoint with the current stencil, then start a new one */
+  const blend = (): number => {
+    const i = NPi++;
+    let x = 0, y = 0, z = 0, best = -1, bw = -Infinity;
+    for (let k = 0; k < sLen; k++) {
+      const q = SI[k] * 3, w = SW[k];
+      x += P[q] * w; y += P[q + 1] * w; z += P[q + 2] * w;
+      if (w > bw) { bw = w; best = SI[k]; }
+    }
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    dom[i] = best;
+    for (const { s, sd, dd } of fl)
+      for (let c = 0; c < s; c++) {
+        let acc = 0;
+        for (let k = 0; k < sLen; k++) acc += sd[SI[k] * s + c] * SW[k];
+        dd[i * s + c] = acc;
+      }
+    sLen = 0;
+    stamp++;
+    return i;
+  };
+  /** emit a weight map built by the builder-path code (crease rules) */
+  const blendMap = (acc: Map<number, number>): number => {
+    for (const [q, w] of acc) push(q, w);
+    return blend();
+  };
+  // face points
+  const facePt = new Int32Array(nprim).fill(-1);
+  for (let pr = 0; pr < nprim; pr++) {
+    if (!closed[pr]) continue;
+    const s = ps[pr], m = ps[pr + 1] - s, w = 1 / m;
+    for (let k = 0; k < m; k++) push(vp[s + k], w);
+    facePt[pr] = blend();
+  }
+  // edge points
+  const edgePt = new Int32Array(ne).fill(-1);
+  for (let e = 0; e < ne; e++) {
+    if (!efCount(e)) continue; // polyline-only edge
+    if (!smooth || isBoundaryEdge(e) || es[e] >= 1) { addW(EA[e], 0.5); addW(EB[e], 0.5); }
+    else if (es[e] > 0) {
+      const s = es[e], t = 1 - s;
+      addW(EA[e], 0.25 * t + 0.5 * s); addW(EB[e], 0.25 * t + 0.5 * s);
+      for (let k = efStart[e]; k < efStart[e + 1]; k++) {
+        const f = efList[k], fs = ps[f], m = ps[f + 1] - fs, fw = 1 / m;
+        for (let j = 0; j < m; j++) addW(vp[fs + j], 0.25 * fw * t);
+      }
+    } else {
+      addW(EA[e], 0.25); addW(EB[e], 0.25);
+      for (let k = efStart[e]; k < efStart[e + 1]; k++) {
+        const f = efList[k], fs = ps[f], m = ps[f + 1] - fs, fw = 1 / m;
+        for (let j = 0; j < m; j++) addW(vp[fs + j], 0.25 * fw);
+      }
+    }
+    edgePt[e] = blend();
+  }
+  // vertex points
+  const vtxPt = new Int32Array(np).fill(-1);
+  const other = (e: number, i: number) => (EA[e] === i ? EB[e] : EA[e]);
+  const mapW = (acc: Map<number, number>, i: number, w: number) => acc.set(i, (acc.get(i) ?? 0) + w);
+  /** smoothRule of the builder path (crease vertices only) */
+  const smoothRule = (i: number, n: number, bEdges: number[]): Map<number, number> | null => {
+    const acc = new Map<number, number>();
+    if (bEdges.length) {
+      if (boundaryMode === 'sharp' || bEdges.length !== 2) return null;
+      mapW(acc, i, 0.75);
+      for (const e of bEdges) mapW(acc, other(e, i), 0.125);
+      return acc;
+    }
+    for (let k = pfStart[i]; k < pfStart[i + 1]; k++) {
+      const f = pfList[k], fs = ps[f], m = ps[f + 1] - fs, fw = 1 / m;
+      for (let j = 0; j < m; j++) mapW(acc, vp[fs + j], fw / (n * n));
+    }
+    for (let k = peStart[i]; k < peStart[i + 1]; k++) { const e = peList[k]; mapW(acc, EA[e], 1 / (n * n)); mapW(acc, EB[e], 1 / (n * n)); }
+    mapW(acc, i, (n - 3) / n);
+    return acc;
+  };
+  /** creaseVertex of the builder path */
+  const creaseVertex = (i: number, n: number, bEdges: number[], cEdges: number[]): number => {
+    let sum = 0;
+    for (const e of cEdges) sum += es[e];
+    const sigma = Math.min(1, sum / cEdges.length);
+    const corner = bEdges.length > 0 || cEdges.length >= 3;
+    if (corner && sigma >= 1) return copyPoint(i);
+    const sharpW = new Map<number, number>();
+    if (corner) sharpW.set(i, 1);
+    else { mapW(sharpW, i, 0.75); for (const e of cEdges) mapW(sharpW, other(e, i), 0.125); }
+    let acc = sharpW;
+    if (sigma < 1) {
+      const sm = smoothRule(i, n, bEdges) ?? new Map([[i, 1]]);
+      acc = new Map();
+      for (const [q, w] of sm) mapW(acc, q, w * (1 - sigma));
+      for (const [q, w] of sharpW) mapW(acc, q, w * sigma);
+    }
+    return blendMap(acc);
+  };
+  const bEdges: number[] = [], cEdges: number[] = [];
+  for (let i = 0; i < np; i++) {
+    const n = pfStart[i + 1] - pfStart[i];
+    if (!n) continue;
+    if (!smooth) { vtxPt[i] = copyPoint(i); continue; }
+    bEdges.length = 0; cEdges.length = 0;
+    for (let k = peStart[i]; k < peStart[i + 1]; k++) { const e = peList[k]; if (isBoundaryEdge(e)) bEdges.push(e); if (es[e] > 0) cEdges.push(e); }
+    if (cEdges.length && (bEdges.length || cEdges.length >= 2)) { vtxPt[i] = creaseVertex(i, n, bEdges, cEdges); continue; }
+    if (bEdges.length) {
+      if (boundaryMode === 'sharp' || bEdges.length !== 2) { vtxPt[i] = copyPoint(i); continue; }
+      addW(i, 0.75);
+      for (const e of bEdges) addW(other(e, i), 0.125);
+    } else {
+      for (let k = pfStart[i]; k < pfStart[i + 1]; k++) {
+        const f = pfList[k], fs = ps[f], m = ps[f + 1] - fs, fw = 1 / m;
+        for (let j = 0; j < m; j++) addW(vp[fs + j], fw / (n * n));
+      }
+      for (let k = peStart[i]; k < peStart[i + 1]; k++) { const e = peList[k]; addW(EA[e], 1 / (n * n)); addW(EB[e], 1 / (n * n)); }
+      addW(i, (n - 3) / n);
+    }
+    vtxPt[i] = blend();
+  }
+  // ---- new prims: a quad per corner of each closed polygon, polylines keep their points (copied when needed)
+  let NV = 0, NPR = 0;
+  for (let pr = 0; pr < nprim; pr++) {
+    const n = ps[pr + 1] - ps[pr];
+    if (closed[pr]) { NV += 4 * n; NPR += n; } else { NV += n; NPR++; }
+  }
+  const primStart = new Int32Array(NPR + 1), vertexPoint = new Int32Array(NV), primClosed = new Uint8Array(NPR), primSrc = new Int32Array(NPR);
+  let ov = 0, op = 0;
+  for (let pr = 0; pr < nprim; pr++) {
+    const s = ps[pr], e = ps[pr + 1], n = e - s;
+    if (!closed[pr]) {
+      primStart[op] = ov; primSrc[op] = pr; op++;
+      for (let v = s; v < e; v++) { const q = vp[v]; vertexPoint[ov++] = vtxPt[q] >= 0 ? vtxPt[q] : (vtxPt[q] = copyPoint(q)); }
+      continue;
+    }
+    for (let k = 0; k < n; k++) {
+      const v = s + k, vpv = s + ((k - 1 + n) % n);
+      primStart[op] = ov; primClosed[op] = 1; primSrc[op] = pr; op++;
+      vertexPoint[ov++] = vtxPt[vp[v]];
+      vertexPoint[ov++] = edgePt[sideEdge[v]];
+      vertexPoint[ov++] = facePt[pr];
+      vertexPoint[ov++] = edgePt[sideEdge[vpv]];
+    }
+  }
+  primStart[NPR] = NV;
+  if (NPi !== NP) throw new Error(`subdivide: made ${NPi} points, expected ${NP}`);
+
+  // ---- assemble (the builder's build() followed by removeUnusedPoints(), which keeps every point here)
+  const out = Object.create(Geometry.prototype) as Geometry;
+  out.points = new AttribTable(NP);
+  for (const [name, a, d] of ptAttrs) {
+    if (!d) { out.points.map.set(name, a.gather(dom)); continue; }
+    if (a.type !== 'float') copyDominant(a, d, dom);
+    out.points.map.set(name, d);
+  }
+  (out.points.add('P', 'float', 3).data as Float64Array).set(pos);
+  // vertices: corner = copy, edge midpoints = halves of the two corners, centre = mean of the polygon's corners
+  const vdom = new Int32Array(NV).fill(-1);
+  {
+    let o = 0;
+    for (let pr = 0; pr < nprim; pr++) {
+      const s = ps[pr], e = ps[pr + 1], n = e - s;
+      if (!closed[pr]) { o += n; continue; }
+      for (let k = 0; k < n; k++) { vdom[o] = s + k; vdom[o + 1] = s + k; vdom[o + 2] = s; vdom[o + 3] = s + ((k - 1 + n) % n); o += 4; }
+    }
+  }
+  out.vertices = new AttribTable(NV);
+  for (const [name, a] of g.vertices.map) {
+    if (a.isArray) { out.vertices.map.set(name, a.gather(vdom)); continue; }
+    const d = Attribute.create(a.type, a.size, NV, a.def);
+    if (a.type === 'float') {
+      const sd = a.data as Float64Array, dd = d.data as Float64Array, sz = a.size;
+      let o = 0;
+      for (let pr = 0; pr < nprim; pr++) {
+        const s = ps[pr], e = ps[pr + 1], n = e - s;
+        if (!closed[pr]) { o += n; continue; }
+        const wn = 1 / n;
+        for (let k = 0; k < n; k++) {
+          const v = s + k, vn = s + ((k + 1) % n), vq = s + ((k - 1 + n) % n);
+          for (let c = 0; c < sz; c++) {
+            dd[o * sz + c] = sd[v * sz + c];
+            let m1 = 0;
+            m1 += sd[v * sz + c] * 0.5; m1 += sd[vn * sz + c] * 0.5;
+            dd[(o + 1) * sz + c] = m1;
+            let ctr = 0;
+            for (let j = 0; j < n; j++) ctr += sd[(s + j) * sz + c] * wn;
+            dd[(o + 2) * sz + c] = ctr;
+            let m2 = 0;
+            m2 += sd[vq * sz + c] * 0.5; m2 += sd[v * sz + c] * 0.5;
+            dd[(o + 3) * sz + c] = m2;
+          }
+          o += 4;
+        }
+      }
+    } else copyDominant(a, d, vdom);
+    out.vertices.map.set(name, d);
+  }
+  out.prims = new AttribTable(NPR);
+  for (const [name, a] of g.prims.map) {
+    if (a.isArray) { out.prims.map.set(name, a.gather(primSrc)); continue; }
+    const d = Attribute.create(a.type, a.size, NPR, a.def);
+    if (a.type === 'float') {
+      const sd = a.data as Float64Array, dd = d.data as Float64Array, sz = a.size;
+      for (let i = 0; i < NPR; i++) for (let c = 0; c < sz; c++) dd[i * sz + c] = sd[primSrc[i] * sz + c];
+    } else copyDominant(a, d, primSrc);
+    out.prims.map.set(name, d);
+  }
+  out.detail = g.detail.clone();
+  out.primStart = primStart;
+  out.vertexPoint = vertexPoint;
+  out.primClosed = primClosed;
+  const pick = (m: Uint8Array, idx: Int32Array) => {
+    const o = new Uint8Array(idx.length);
+    for (let i = 0; i < idx.length; i++) { const j = idx[i]; if (j >= 0) o[i] = m[j]; }
+    return o;
+  };
+  out.pointGroups = new Map([...g.pointGroups].map(([k, m]) => [k, pick(m, dom)]));
+  out.primGroups = new Map([...g.primGroups].map(([k, m]) => [k, pick(m, primSrc)]));
+  // vertex groups: only corners copy a single source vertex
+  out.vertexGroups = new Map([...g.vertexGroups].map(([k, m]) => {
+    const o = new Uint8Array(NV);
+    let w = 0;
+    for (let pr = 0; pr < nprim; pr++) {
+      const s = ps[pr], e = ps[pr + 1], n = e - s;
+      if (!closed[pr]) { w += n; continue; }
+      for (let k = 0; k < n; k++) { if (s + k < m.length) o[w] = m[s + k]; w += 4; }
+    }
+    return [k, o];
+  }));
+  out.volumes = cloneVolumes(g.volumes);
+  // edge groups → child edges; crease sharpness → child edges with s - 1
+  const childSharp = new Map<number, number>();
+  const edgeGroups = new Map<string, EdgeSet>();
+  const groups = [...g.edgeGroups].map(([k, set]) => { const dst = new EdgeSet(); edgeGroups.set(k, dst); return [set, dst] as const; });
+  if (groups.length || (sharp && sharp.size))
+    for (let e = 0; e < ne; e++) {
+      const pa = vtxPt[EA[e]], pb = vtxPt[EB[e]], m = edgePt[e];
+      if (pa < 0 || pb < 0) continue;
+      for (const [src, dst] of groups) {
+        if (!src.has(EA[e], EB[e])) continue;
+        if (m >= 0) { dst.add(pa, m); dst.add(m, pb); } else dst.add(pa, pb);
+      }
+      if (m >= 0 && es[e] > 1) { childSharp.set(edgeKey(pa, m), es[e] - 1); childSharp.set(edgeKey(m, pb), es[e] - 1); }
+    }
+  out.edgeGroups = edgeGroups;
+  return { geo: out, sharp: childSharp };
+}
+
+/** The builder's int/string rule: element i takes the value of source element idx[i] (none when idx[i] < 0). */
+function copyDominant(a: Attribute, d: Attribute, idx: ArrayLike<number>) {
+  const n = idx.length, sz = a.size;
+  if (a.type === 'string') {
+    const sd = a.data as string[], dd = d.data as string[];
+    for (let i = 0; i < n; i++) { const j = idx[i]; if (j >= 0) dd[i] = String(sd[j]); }
+    return;
+  }
+  const sd = a.data as Int32Array, dd = d.data as Int32Array;
+  for (let i = 0; i < n; i++) {
+    const j = idx[i];
+    if (j >= 0) for (let c = 0; c < sz; c++) dd[i * sz + c] = sd[j * sz + c];
+  }
 }
 
 /**

@@ -1416,10 +1416,21 @@ function interpTable(t: AttribTable, srcs: Src[] | number[], skip: Set<string>, 
           }
         }
       }
-    } else {
+    } else if (a.type === 'string') {
+      // dst.set(i, a.get(j)) without the per-element calls
+      const sd = a.data as string[], dd = dst.data as string[];
       for (let i = 0; i < n; i++) {
         const j = dominant(srcs[i]);
-        if (j >= 0) dst.set(i, a.get(j));
+        if (j >= 0) dd[i] = String(sd[j]);
+      }
+    } else {
+      // int tuples: copy the dominant source's components (what set(i, get(j)) writes, without allocating a tuple)
+      const sd = a.data as Int32Array, dd = dst.data as Int32Array, cnt = a.count;
+      for (let i = 0; i < n; i++) {
+        const j = dominant(srcs[i]);
+        if (j < 0) continue;
+        if (j < cnt && (j | 0) === j) for (let c = 0; c < s; c++) dd[i * s + c] = sd[j * s + c];
+        else dst.set(i, a.get(j));
       }
     }
     out.map.set(name, dst);
