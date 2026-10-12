@@ -2,6 +2,7 @@
 import { Attribute, AttribTable, Geometry, baseType, isArrayType } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
+import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
 
 function tableToJSON(t: AttribTable) {
   const out: Record<string, any> = {};
@@ -65,6 +66,9 @@ export function geoToJSON(g: Geometry) {
     for (let p = 0; p < k.length; p++) if (k[p]) { prims.push(p); source.push(S[p]); for (let c = 0; c < 9; c++) xform.push(X[p * 9 + c]); }
     out.packed = { prims, source, xform, sources: g.packedSources.map(geoToJSON) };
   }
+  // heightfield volumes (written only when present): grid + layers (SDF volumes are functions and are not stored)
+  const hfs = heightfieldsOf(g);
+  if (hfs.length) out.heightfields = hfs.map((h) => ({ name: h.name, width: h.width, height: h.height, cellSize: h.cellSize, origin: h.origin, layers: Object.fromEntries([...h.layers].map(([k, a]) => [k, Array.from(a)])) }));
   return out;
 }
 
@@ -106,6 +110,15 @@ export function geoFromJSON(j: any): Geometry {
     });
     g.packedSources = sources;
     g.compactPackedSources();
+  }
+  for (const h of j.heightfields ?? []) {
+    const hf = new Heightfield(h.width, h.height, h.cellSize, h.origin, undefined, h.name);
+    for (const [k, a] of Object.entries(h.layers ?? {})) {
+      const arr = Float32Array.from(a as number[]);
+      if (arr.length !== hf.count) throw new Error(`heightfield "${h.name}" layer "${k}": ${arr.length} values, expected ${hf.count}`);
+      hf.layers.set(k, arr);
+    }
+    g.volumes.push(hf);
   }
   return g;
 }

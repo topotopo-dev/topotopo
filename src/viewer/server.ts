@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import type { Workspace } from '../workspace.ts';
 import { exportGeometryAsync } from '../io/export.ts';
 import { summarize } from '../inspect.ts';
+import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { wiringOf } from '../graph/engine.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -66,7 +67,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.POLYF
         const r = await ws.engine.cook(g, { target: node });
         if (!r.ok || !r.geo) return send(500, JSON.stringify({ error: r.errors.map((e) => `[${e.node}] ${e.message}`).join('\n') }), MIME['.json']);
         if (u.pathname === '/api/info') return send(200, JSON.stringify({ target: r.target, summary: summarize(r.geo), ms: r.ms }), MIME['.json']);
-        return send(200, await exportGeometryAsync(r.geo, 'glb', { splitByName: false, lineMode: 'lines', custom: false }), MIME['.glb']);
+        return send(200, await exportGeometryAsync(withHeightfieldPreview(r.geo), 'glb', { splitByName: false, lineMode: 'lines', custom: false }), MIME['.glb']);
       }
       send(404, 'not found');
     } catch (e: any) {

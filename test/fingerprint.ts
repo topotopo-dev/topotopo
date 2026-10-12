@@ -69,7 +69,14 @@ export interface Fingerprint {
     topology: string;
     attributes: Record<string, string>;
   };
-  volumes?: { name: string; kind: string; bounds: { min: number[]; max: number[] }; samples: string }[];
+  /**
+   * SDFs: bounds + a hash of a 9³ sample lattice. Heightfields: grid (samples, cell size, origin), bounds and a hash
+   * of each layer's quantised values.
+   */
+  volumes?: {
+    name: string; kind: string; bounds: { min: number[]; max: number[] }; samples?: string;
+    grid?: { width: number; height: number; cellSize: number; origin: number[] }; layers?: Record<string, string>;
+  }[];
   /** packed instances (only present when there are some): count, per-source fingerprint hashes, per-prim source + xform hash */
   packed?: { instances: number; sources: string[]; hash: string };
 }
@@ -98,7 +105,10 @@ function hashGroupMembership(h: Hasher, m: any) {
   } else h.str(JSON.stringify(m));
 }
 
-/** Fingerprint a cooked geometry. Volumes (SDFs) are sampled on a fixed 9³ lattice inside their bounds. */
+/**
+ * Fingerprint a cooked geometry. SDF volumes are sampled on a fixed 9³ lattice inside their bounds; heightfields
+ * record their grid and a hash of every layer (values quantised like attributes).
+ */
 export function fingerprint(g: Geometry): Fingerprint {
   const bb = g.bbox();
   const fp: Fingerprint = {
@@ -175,6 +185,24 @@ export function fingerprint(g: Geometry): Fingerprint {
 
   if (g.volumes.length) {
     fp.volumes = g.volumes.map((vol) => {
+      if (vol.kind === 'heightfield') {
+        const { min, max } = vol.bounds;
+        const layers: Record<string, string> = {};
+        for (const name of [...vol.layers.keys()].sort()) {
+          const h = new Hasher();
+          const a = vol.layers.get(name)!;
+          h.int(a.length);
+          for (let i = 0; i < a.length; i++) h.float(a[i], ATTR_Q);
+          layers[name] = h.hex();
+        }
+        return {
+          name: vol.name,
+          kind: vol.kind,
+          bounds: { min: Array.from(min, (v) => round(v, BBOX_Q)), max: Array.from(max, (v) => round(v, BBOX_Q)) },
+          grid: { width: vol.width, height: vol.height, cellSize: round(vol.cellSize, 1e6), origin: vol.origin.map((v) => round(v, BBOX_Q)) },
+          layers,
+        };
+      }
       const h = new Hasher();
       const { min, max } = vol.bounds;
       const N = 9;

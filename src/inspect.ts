@@ -8,6 +8,7 @@ import { edgeList } from './core/edges.ts';
 import { halfEdges } from './core/halfedge.ts';
 import { fmtNum } from './render/raster.ts';
 import { packedSummaryLine } from './core/packed.ts';
+import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
@@ -74,9 +75,10 @@ export function summarize(g: Geometry): string {
   if (polys) kinds.push(`${n(polys)} polygons (${n(tris)} tri, ${n(quads)} quad, ${n(polys - tris - quads)} ngon)`);
   if (lines_) kinds.push(`${n(lines_)} polylines`);
   if (packed) kinds.push(`${n(packed)} packed`);
-  lines.push(`geometry: ${parts.join(', ')}${kinds.length ? ' = ' + kinds.join(' + ') : ''}, ${n(g.numVertices)} vertices${g.volumes.length ? `, ${g.volumes.length} SDF volume(s)` : ''}`);
+  lines.push(`geometry: ${parts.join(', ')}${kinds.length ? ' = ' + kinds.join(' + ') : ''}, ${n(g.numVertices)} vertices${g.volumes.length ? `, ${volumeCounts(g)}` : ''}`);
   const pk = packedSummaryLine(g);
   if (pk) lines.push(pk);
+  lines.push(...heightfieldSummary(g));
   if (g.numPoints || g.volumes.length) {
     const b = g.bbox(true);
     const size = [0, 1, 2].map((a) => b.max[a] - b.min[a]);

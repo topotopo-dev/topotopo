@@ -2,7 +2,7 @@
 // (geo.volumes) as sample functions, so they merge/transform like any other data;
 // sdf_to_mesh polygonises them with manifold-3d's level-set mesher.
 import { Geometry } from '../core/geometry.ts';
-import type { Volume } from '../core/geometry.ts';
+import type { SdfVolume as Volume, Volume as AnyVolume } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
@@ -22,10 +22,13 @@ function vol(name: string, bounds: Box, sample: Fn): Volume {
   return { name, kind: 'sdf', bounds, sample };
 }
 
+/** The SDF volumes of a geometry (heightfields are skipped; heightfield_to_sdf converts them). */
+const sdfsOf = (g: Geometry): Volume[] => g.volumes.filter((v: AnyVolume): v is Volume => v.kind === 'sdf');
+
 function unionVolumes(g: Geometry, what: string): Volume {
-  if (!g.volumes.length) throw new NodeError(`${what}: input has no SDF volume (create one with sdf_shape, sdf_expr or sdf_from_mesh)`);
-  if (g.volumes.length === 1) return g.volumes[0];
-  const vs = g.volumes;
+  const vs = sdfsOf(g);
+  if (!vs.length) throw new NodeError(`${what}: input has no SDF volume (create one with sdf_shape, sdf_expr or sdf_from_mesh${g.volumes.length ? '; heightfields convert with heightfield_to_sdf' : ''})`);
+  if (vs.length === 1) return vs[0];
   const b = boxUnion(vs.map((v) => v.bounds));
   return vol('union', b, (x, y, z) => { let d = Infinity; for (const v of vs) d = Math.min(d, v.sample(x, y, z)); return d; });
 }
@@ -150,7 +153,7 @@ defineNode({
   usesVars: true,
   example: { type: 'sdf_expr', params: { code: 'const q = opTwist(p, 2.0);\nreturn sdTorus(q, 0.8, 0.2);' } },
   cook: ({ inputs, p, engine, vars }) => {
-    const ins = inputs.map((g) => (g && g.volumes.length ? unionVolumes(g, 'sdf_expr').sample : null));
+    const ins = inputs.map((g) => (g && sdfsOf(g).length ? unionVolumes(g, 'sdf_expr').sample : null));
     const body = /\breturn\b/.test(p.code) ? p.code : `return (${p.code});`;
     let make;
     try {
@@ -163,7 +166,7 @@ defineNode({
     catch (e: any) { throw new NodeError(`sdf_expr: ${e.message}`); }
     let bounds: Box = { min: p.bounds_min, max: p.bounds_max };
     if (p.auto_bounds) {
-      const vs = inputs.flatMap((g) => (g ? g.volumes.map((v) => v.bounds) : []));
+      const vs = inputs.flatMap((g) => (g ? sdfsOf(g).map((v) => v.bounds) : []));
       if (vs.length) bounds = pad(boxUnion(vs), 0.1);
     }
     const g = new Geometry();
@@ -186,7 +189,7 @@ defineNode({
     const A = input(0);
     let vs: Volume[];
     if (hasInput(1)) vs = [unionVolumes(A, 'sdf_combine'), unionVolumes(input(1), 'sdf_combine')];
-    else { if (A.volumes.length < 2) throw new NodeError('sdf_combine needs input B or at least 2 volumes in A'); vs = A.volumes; }
+    else { vs = sdfsOf(A); if (vs.length < 2) throw new NodeError('sdf_combine needs input B or at least 2 volumes in A'); }
     const op = p.operation, k = p.k;
     const f2 = (a: number, b: number) => {
       switch (op) {

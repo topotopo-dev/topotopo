@@ -241,6 +241,19 @@ const CASES: Case[] = [
       },
     }),
   },
+  {
+    name: 'heightfield_erode_512',
+    what: (q) => `erosion (droplets + thermal), ${q ? 256 : 512}² samples × 100 iterations`,
+    elements: (q) => (q ? 256 : 512) ** 2 * 100, unit: 'sample-iterations',
+    target: 3000, targetSource: 'P2-C brief (512² × 100 iterations under 3 s)',
+    graph: (q) => ({
+      nodes: {
+        hf: { type: 'heightfield', params: { size: [51.1, 51.1], samples: [q ? 256 : 512, q ? 256 : 512] } },
+        n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 5, element_size: 10, range: 'positive', seed: 1 } },
+        target: { type: 'heightfield_erode', in: ['n'], params: { iterations: 100, seed: 1 } },
+      },
+    }),
+  },
 ];
 
 function booleanGraph(rows: number): GraphSpec {

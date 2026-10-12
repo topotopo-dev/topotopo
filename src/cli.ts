@@ -8,6 +8,8 @@
 //                   [--instancing packed|expand]
 //                   [--inspect summary|attributes|topology|all]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
+//   Heightfields: --export terrain.png (16-bit heightmap + terrain.json sidecar for Unreal), .r16/.raw, or
+//                 --format mask_png --layers mask,flow; --layer picks the layer.
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter
@@ -26,6 +28,8 @@ import { renderArgs } from './render/options.ts';
 import { encodePNG } from './render/png.ts';
 import { exportFormatFromPath, exportGeometryAsync } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
+import { HEIGHTMAP_FORMATS, heightmapExport, heightmapPaths } from './io/heightmap.ts';
+import type { HeightmapFormat } from './io/heightmap.ts';
 import { inspect } from './inspect.ts';
 import { catalogText, nodeDoc } from './mcp/docs.ts';
 
@@ -129,7 +133,17 @@ async function writeOutputs(r: CookReport, frame?: number) {
   const ex = opt('--export');
   if (ex) {
     const p = at(ex);
-    const fmt = exportFormatFromPath(ex) as ExportFormat;
+    const raw = (opt('--format') ?? exportFormatFromPath(ex)).toLowerCase();
+    const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
+    if (HEIGHTMAP_FORMATS.includes(fmt as HeightmapFormat)) {
+      // heightfield -> heightmap + JSON sidecar (png16/r16) or one PNG per mask layer
+      fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
+      const res = heightmapExport(geo, fmt as HeightmapFormat, { layer: opt('--layer'), layers: opt('--layers')?.split(','), deflate: (d) => zlib.deflateSync(d) });
+      const paths = heightmapPaths(p, res.files);
+      res.files.forEach((f, i) => fs.writeFileSync(paths[i], f.bytes));
+      console.log(`exported ${paths.join(', ')}: ${res.summary}`);
+      return;
+    }
     const up = opt('--up-axis');
     const bytes = await exportGeometryAsync(geo, fmt, {
       splitByName: true,

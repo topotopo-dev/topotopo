@@ -1,5 +1,5 @@
 // Houdini-style geometry: points / vertices / primitives / detail, each with attribute
-// tables, plus named point, vertex, primitive and edge groups and optional SDF volumes.
+// tables, plus named point, vertex, primitive and edge groups and optional volumes (SDFs, heightfields).
 //
 //  points    – positions (P) and per-point attributes
 //  prims     – polygons (closed) or polylines (open), stored CSR-style:
@@ -383,11 +383,49 @@ export class AttribTable {
 }
 
 /** A signed distance field: negative inside, positive outside. */
-export interface Volume {
+export interface SdfVolume {
   name: string;
   kind: 'sdf';
   bounds: { min: Vec3; max: Vec3 };
   sample: (x: number, y: number, z: number) => number;
+}
+
+/**
+ * A heightfield (Houdini's model): a regular grid of samples in the XZ plane, Y up, with named float layers
+ * (height, mask, flow, sediment, debris, water and any user layer). Sample (i, j) sits at world
+ * X = origin[0] + i * cellSize, Z = origin[1] + j * cellSize; layers are row-major (index j * width + i), and the
+ * height layer holds absolute world Y. Layer arrays are shared between cooked geometries (clone() copies the layer
+ * map, not the arrays): copy an array before writing to it. Implemented by Heightfield in core/heightfield.ts.
+ */
+export interface HeightfieldVolume {
+  name: string;
+  kind: 'heightfield';
+  /** samples along X */
+  width: number;
+  /** samples along Z */
+  height: number;
+  /** distance between neighbouring samples (metres) */
+  cellSize: number;
+  /** world X and Z of sample (0, 0) */
+  origin: [number, number];
+  /** world X and Z of the field centre */
+  readonly center: [number, number];
+  layers: Map<string, Float32Array>;
+  /** X/Z extent of the samples and the Y range of the height layer */
+  readonly bounds: { min: Vec3; max: Vec3 };
+  /** bilinear height at world (x, z), clamped to the field */
+  sample(x: number, z: number): number;
+  /** bilinear value of a layer at world (x, z), clamped to the field (0 when the layer is missing) */
+  sampleLayer(name: string, x: number, z: number): number;
+  /** a copy with its own layer map that shares the layer arrays */
+  clone(): HeightfieldVolume;
+}
+
+export type Volume = SdfVolume | HeightfieldVolume;
+
+/** Volumes for a new geometry: heightfields get their own layer map (the arrays stay shared), SDFs are immutable. */
+export function cloneVolumes(vs: Volume[]): Volume[] {
+  return vs.map((v) => (v.kind === 'heightfield' ? v.clone() : v));
 }
 
 export interface GeoInit {
@@ -517,7 +555,7 @@ export class Geometry {
     g.primGroups = new Map([...this.primGroups].map(([k, v]) => [k, v.slice()]));
     g.vertexGroups = new Map([...this.vertexGroups].map(([k, v]) => [k, v.slice()]));
     g.edgeGroups = new Map([...this.edgeGroups].map(([k, v]) => [k, v.clone()]));
-    g.volumes = this.volumes.slice();
+    g.volumes = cloneVolumes(this.volumes);
     if (this.primKind) {
       // sources are shared (immutable), the per-prim arrays are copied
       g.primKind = this.primKind.slice();
@@ -782,7 +820,7 @@ export class Geometry {
     g.primGroups = new Map([...this.primGroups].map(([k, m]) => [k, Uint8Array.from(primIdx, (p) => m[p])]));
     g.vertexGroups = gatherGroups(this.vertexGroups, vtxIdx);
     if (this.edgeGroups.size) g.edgeGroups = pruneEdgeGroups(g, new Map([...this.edgeGroups].map(([k, e]) => [k, e.remap(remap)])));
-    g.volumes = this.volumes.slice();
+    g.volumes = cloneVolumes(this.volumes);
     if (this.primKind) g.gatherPacked(this, primIdx);
     return g;
   }
@@ -823,7 +861,7 @@ export class Geometry {
     out.primGroups = mergeGroups(geos.map((g) => [g.primGroups, g.numPrims] as const), nprim);
     out.vertexGroups = mergeGroups(geos.map((g) => [g.vertexGroups, g.numVertices] as const), nv);
     out.edgeGroups = mergeEdgeGroups(geos.map((g) => [g.edgeGroups, g.numPoints] as const));
-    out.volumes = geos.flatMap((g) => g.volumes);
+    out.volumes = cloneVolumes(geos.flatMap((g) => g.volumes));
     if (geos.some((g) => g.primKind)) mergePacked(out, geos);
     return out;
   }

@@ -12,6 +12,7 @@ import './copy.ts';
 import './packed.ts';
 import './solid.ts';
 import './sdf.ts';
+import './heightfield.ts';
 import './procedural.ts';
 import './code.ts';
 import './flow.ts';

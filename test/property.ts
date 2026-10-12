@@ -33,7 +33,7 @@ const VERBOSE = args.includes('--verbose');
 const STRICT = args.includes('--strict');
 
 /** Fixtures a chain may start from. */
-const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'PACKED'];
+const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'PACKED', 'HFN'];
 
 /** Per-node param ranges that keep cooks fast ('keep' = leave the default). Vector ranges apply per component. */
 const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
@@ -61,6 +61,11 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   uv_unwrap: { max_iterations: [1, 2], resolution: 'keep', texels_per_unit: 'keep', padding: [0, 8], bruteforce: 'keep', max_boundary_length: 'keep' },
   uv_autoseam: { max_cost: [0.5, 4] },
   uv_layout: { iterations: [1, 4], udims: [1, 4] },
+  heightfield_from_mesh: { resolution: [0.02, 0.5] },
+  heightfield_erode: { iterations: [0, 6] },
+  heightfield_resample: { factor: [0.25, 3] },
+  heightfield_scatter: { density: [0, 20], count: [0, 200] },
+  heightfield_mask_by_feature: { occlusion_radius: [0, 2] },
 };
 
 /** Node types that get slow on big inputs: only chained when the incoming geometry has at most this many prims. */

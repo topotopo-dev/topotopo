@@ -12,6 +12,8 @@ import { exportCSV, exportPointsJSON } from './points.ts';
 import { decomposeXform, expandForExport, isolatedMask, pieces, xf, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, stripPacked } from '../core/packed.ts';
+import { heightmapBytes } from './heightmap.ts';
+import type { HeightmapFormat } from './heightmap.ts';
 
 export type { ExportOptions } from './common.ts';
 export { exportGLB, exportGLTF } from './gltf.ts';
@@ -261,9 +263,9 @@ function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, o
   }
 }
 
-export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson';
+export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson' | HeightmapFormat;
 
-export const EXPORT_FORMATS: ExportFormat[] = ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'pointsjson'];
+export const EXPORT_FORMATS: ExportFormat[] = ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'pointsjson', 'png16', 'r16', 'mask_png'];
 
 /** Format from a file name: the extension, with ".points.json" → pointsjson. */
 export function exportFormatFromPath(path: string): string {
@@ -277,6 +279,8 @@ export function exportFormatFromPath(path: string): string {
 export function exportGeometry(g: Geometry, format: ExportFormat, o: ExportOptions = {}): Uint8Array {
   const enc = new TextEncoder();
   switch (format) {
+    // heightfield -> Unreal heightmap (main file only; heightmapExport also returns the JSON sidecar and mask layers)
+    case 'png16': case 'r16': case 'mask_png': return heightmapBytes(g, format, o);
     case 'obj': return enc.encode(exportOBJ(g, o));
     case 'stl': return exportSTL(g, o);
     case 'ply': return exportPLY(g, o);

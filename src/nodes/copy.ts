@@ -14,7 +14,7 @@ import { P, mask } from './util.ts';
 // ---------------------------------------------------------------- scatter
 
 /** Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. */
-function sampleEliminate(pos: Float64Array, target: number, rmax: number): Int32Array {
+export function sampleEliminate(pos: Float64Array, target: number, rmax: number): Int32Array {
   const n = pos.length / 3;
   if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
   const kd = new KDTree(pos);
