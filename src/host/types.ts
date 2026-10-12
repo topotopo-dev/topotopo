@@ -14,6 +14,11 @@ export interface Host {
    * installed) and return the resulting value (usually a function).
    */
   compile(source: string): any;
+  /**
+   * Parse `body` as a function body without running it. Returns the first syntax error, with its 1-based line in
+   * `body`, or null when it parses. A body that parses is complete: it cannot close a wrapper it is pasted into.
+   */
+  checkSyntax?(body: string): { message: string; line: number } | null;
   /** Run fn with a wall-clock limit; throws on timeout. */
   runGuarded<T>(fn: () => T, timeoutMs?: number): T;
   /**

@@ -121,9 +121,16 @@ const MALFORMED: { code: string; line?: number; knownGap?: string }[] = [
   { code: '@P.y += 1;\nnull.foo;', line: 2 },
   { code: 'error("boom at " + @ptnum);', line: 1 },
   { code: '@P.y += 1;\nconst q = @P;\nq.nope.deeper = 1;', line: 3 },
-  // the parser only notices these at the end of the generated kernel, past the snippet's last line
-  { code: '@Cd = [1, 0, 0', knownGap: 'unclosed bracket: error is reported after the snippet ends' },
-  { code: '}', knownGap: 'stray closing brace closes the generated kernel early' },
+  // bracket mistakes: inside the kernel the parser only noticed these past the snippet's end, and a stray `}` closed
+  // the kernel's wrapper; the snippet is now parsed on its own first, unclosed brackets point at the opening line
+  { code: '@Cd = [1, 0, 0', line: 1 },
+  { code: '}', line: 1 },
+  { code: '@P.y += 1;\n}\n@Cd = [1, 0, 0];', line: 2 },
+  { code: 'if (@P.x > 0) {\n  @P.y += 1;\n', line: 1 },
+  { code: '@P.y += 1; // [\n@Cd = [1,\n0,\n0', line: 2 },
+  { code: 'const s = `${@P.x}`;\nif (s) {\n  @P.y += /[{]/.test(s) ? 1 : 0;\n', line: 2 },
+  // balanced the other way round: this compiled inside the kernel before (closing the wrapper and reopening it)
+  { code: '}, __x = function(){', line: 1 },
 ];
 
 const HANGS = ['while(true){}', 'for(;;){ @P.y += 0; }', 'while (@P.y < 1e9) { @Cd = [0, 0, 0]; }', 'let k = 0;\nwhile (k >= 0) { k++; }'];

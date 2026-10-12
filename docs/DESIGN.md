@@ -156,6 +156,10 @@ call and inside that call's timeout.
   0.2 ms each (a `vm` timeout starts a watchdog thread per call).
 - Unhandled rejections of realm promises (an un-awaited `lib.run` that fails, an async callback that throws) are
   dropped instead of taking the process down; any other unhandled rejection is re-thrown as Node does by default.
+- `checkSyntax(body)` parses a function body without running it (`vm.compileFunction`). Wrangle snippets go
+  through it before their kernel is generated: error positions are then the user's own lines (an unclosed `[`
+  points at the line that opened it), and only a complete function body is pasted into the kernel, so a stray `}`
+  can no longer close the kernel's wrapper.
 
 Measured (i7-10700K): the wrangle benchmark (`wrangle_1m`) and the `script` fixture cook in the same time as before
 (within noise; 1M points 90–116 ms, fixture script ~0.7 ms), 500 `await lib.run('box')` in one script ~9 ms both

@@ -117,6 +117,16 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
       }
       return v;
     },
+    checkSyntax(body) {
+      try {
+        vm.compileFunction(body, [], { filename: 'check.js', parsingContext: ctx });
+        return null;
+      } catch (e: any) {
+        if (!(e instanceof SyntaxError) && e?.name !== 'SyntaxError') throw e;
+        const m = /check\.js:(\d+)/.exec(String(e.stack ?? ''));
+        return { message: String(e.message), line: m ? Number(m[1]) : 1 };
+      }
+    },
     runGuarded(fn, timeoutMs = 30000) {
       return guarded(fn, timeoutMs);
     },
