@@ -3,3 +3,4 @@ workspace/
 tmp/
 out/
 *.log
+.claude/worktrees/

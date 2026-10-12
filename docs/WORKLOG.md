@@ -41,9 +41,9 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 ### Phase 0: foundation
 | id | item | status | notes |
 |---|---|---|---|
-| P0-A | Test infrastructure: shared fixtures, golden tests per node + per example, property tests (random graphs, determinism, cache correctness), wrangle fuzz, benchmark harness, node reference generator (`docs/nodes.md`), GitHub Actions CI | queued | |
-| P0-B | Engine: time/frame in cook options, `usesTime`, `solver` node, expression functions reading upstream geometry (`npoints`, `bbox`, `detail`, `point`, `prim`, `centroid`) and `ch()` references, graph `version` + migrations, node deprecation, CLI `--frame/--frames`, MCP `frame` | queued | |
-| P0-C1 | Geometry model: vertex groups, edge groups (point-pair canonical form), half-edge structure with cache, edge/vertex group patterns, `group` node for all classes, `group_promote`, `group_expand`, crease-aware `subdivide`, `normal` hard edges, JSON IO round trip, inspect/summary output | queued | |
+| P0-A | Test infrastructure: shared fixtures, golden tests per node + per example, property tests (random graphs, determinism, cache correctness), wrangle fuzz, benchmark harness, node reference generator (`docs/nodes.md`), GitHub Actions CI | running (agent) | started 2026-10-12 |
+| P0-B | Engine: time/frame in cook options, `usesTime`, `solver` node, expression functions reading upstream geometry (`npoints`, `bbox`, `detail`, `point`, `prim`, `centroid`) and `ch()` references, graph `version` + migrations, node deprecation, CLI `--frame/--frames`, MCP `frame` | running (agent) | started 2026-10-12 |
+| P0-C1 | Geometry model: vertex groups, edge groups (point-pair canonical form), half-edge structure with cache, edge/vertex group patterns, `group` node for all classes, `group_promote`, `group_expand`, crease-aware `subdivide`, `normal` hard edges, JSON IO round trip, inspect/summary output | running (agent) | started 2026-10-12 |
 | P0-C2 | Array attributes (`float[]`, `int[]`, `string[]`) through builder, merge, wrangle, JSON IO | queued | after C1 |
 | P0-D | Worker pool behind `Host` (parallel branches, chunked wrangles) + benchmarks gate | queued | after A, B |
 
