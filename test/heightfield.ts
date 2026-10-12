@@ -342,6 +342,11 @@ section('project, path, scatter, resample, transform, to_sdf');
   check(Math.abs(rot.sample(0.7, -0.4) - n.sample(0.4, 0.7)) < 1e-6, 'transform rotate 90° re-grids the layers');
   const gen = await field({ ...nodes, t: { type: 'transform', in: ['n'], params: { translate: [1, 2, 3], scale: [2, 1, 2] } } }, 't');
   check(Math.abs(gen.cellSize - 0.2) < 1e-12 && Math.abs(gen.center[0] - 1) < 1e-9 && Math.abs(gen.sample(1 + 0.6, 3 + 0.8) - (n.sample(0.3, 0.4) + 2)) < 1e-5, 'the generic transform node moves and scales heightfields');
+  const mir = await field({ ...nodes, t: { type: 'transform', in: ['n'], params: { scale: [-1, 1, 1] } } }, 't');
+  check(Math.abs(mir.sample(0.7, 0.3) - n.sample(-0.7, 0.3)) < 1e-6, 'a mirroring transform mirrors the heightfield (volumes are no longer skipped)');
+  const sdfMir = await geo({ s: { type: 'sdf_shape', params: { shape: 'sphere', radius: 0.5, center: [1, 0, 0] } }, t: { type: 'transform', in: ['s'], params: { scale: [-1, 1, 1] } } }, 't');
+  const sv = sdfMir.volumes[0];
+  check(sv.kind === 'sdf' && sv.sample(-1, 0, 0) < -0.4 && sv.sample(1, 0, 0) > 0.4, 'a mirroring transform mirrors SDF volumes too');
 
   const sdf = await geo({ ...nodes, s: { type: 'heightfield_to_sdf', in: ['n'] } }, 's');
   const vol = sdf.volumes[0];
