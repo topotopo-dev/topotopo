@@ -724,7 +724,7 @@ defineNode({
     direction: { type: 'float', default: 0, desc: 'direction: downhill facing in degrees (0 = +X, 90 = +Z, 180 = −X, 270 = −Z)', aliases: ['facing', 'aspect'] },
     direction_spread: { type: 'float', default: 45, min: 0, max: 180, desc: 'direction: half-width of the facing band (degrees)' },
     flow_layer: { type: 'string', default: 'flow', desc: 'flow: layer to read' },
-    min_flow: { type: 'float', default: 0.2, desc: 'flow: value where the mask starts' },
+    min_flow: { type: 'float', default: 0.5, desc: 'flow: value where the mask starts (erode\'s flow: ~0.3 sheet flow, > 0.6 channels)' },
     flow_falloff: { type: 'float', default: 0.2, min: 0, desc: 'flow: soft edge above min_flow' },
     occlusion_radius: { type: 'float', default: 5, min: 0, desc: 'occlusion: how far to look for the horizon (metres)' },
     ramp: { type: 'ramp', default: [[0, 0], [1, 1]], desc: 'reshape the feature mask (0..1 → 0..1) before combining' },

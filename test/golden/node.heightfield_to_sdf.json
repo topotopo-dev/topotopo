@@ -1,0 +1,44 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [2, 0.6659, 2],
+          "min": [-2, -1.5265, -2]
+        },
+        "kind": "sdf",
+        "name": "terrain_sdf",
+        "samples": "b0813da5c9720797"
+      }
+    ]
+  },
+  "name": "node.heightfield_to_sdf",
+  "ok": true,
+  "source": "fixture for node type \"heightfield_to_sdf\" (test/fixtures.ts)",
+  "warnings": []
+}

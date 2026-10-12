@@ -143,7 +143,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, group, topology, copy, solid, sdf, uv, code, flow, io, asset). Optional filter by category or search text.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, asset). Optional filter by category or search text.',
       inputSchema: {
         type: 'object',
         properties: {

@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "height:float:1", "mask:float:1", "uv:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [2, 0.5659, 2],
+      "min": [-2, -0.5265, -2]
+    },
+    "counts": {
+      "points": 1681,
+      "prims": 1600,
+      "vertices": 6400,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "724ec5a2a975c600",
+      "attributes": {
+        "point.N": "1e9945e972f68793",
+        "point.height": "1c4b63404847578a",
+        "point.mask": "e783db65dbca299f",
+        "point.uv": "d84819559fdaca0f"
+      },
+      "topology": "b77b3e6020f0b812"
+    }
+  },
+  "name": "node.heightfield_to_mesh",
+  "ok": true,
+  "source": "fixture for node type \"heightfield_to_mesh\" (test/fixtures.ts)",
+  "warnings": []
+}
