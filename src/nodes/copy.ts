@@ -24,19 +24,33 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number,
   if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
   const kd = new KDTree(pos);
   const r2 = 2 * rmax;
-  let smax = 0;
-  if (scale) for (let i = 0; i < n; i++) if (scale[i] > smax) smax = scale[i];
-  // 2 × the pair radius (constant without scale)
-  const R = scale ? (i: number, j: number) => rmax * (scale[i] + scale[j]) : () => r2;
   const nbrs: Int32Array[] = new Array(n);
   const w = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const list = kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], scale ? rmax * (scale[i] + smax) : r2).filter((j) => j !== i);
-    nbrs[i] = Int32Array.from(list);
-    for (const j of list) {
-      const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]), rr = R(i, j);
-      w[i] += Math.pow(1 - Math.min(d, rr) / rr, 8);
+  if (!scale) {
+    for (let i = 0; i < n; i++) {
+      const list = kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], r2).filter((j) => j !== i);
+      nbrs[i] = Int32Array.from(list);
+      for (const j of list) {
+        const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
+        w[i] += Math.pow(1 - Math.min(d, r2) / r2, 8);
+      }
     }
+  } else {
+    // a pair interacts below rmax × (s_i + s_j) ≤ 2 rmax × max(s_i, s_j): it is found from the side with the larger radius
+    const lists: number[][] = Array.from({ length: n }, () => []);
+    for (let i = 0; i < n; i++) {
+      const si = scale[i];
+      for (const j of kd.within(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 2 * rmax * si)) {
+        if (j === i || scale[j] > si || (scale[j] === si && j < i)) continue;
+        const rr = rmax * (si + scale[j]);
+        const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
+        if (d >= rr) continue;
+        const f = Math.pow(1 - d / rr, 8);
+        w[i] += f; w[j] += f;
+        lists[i].push(j); lists[j].push(i);
+      }
+    }
+    for (let i = 0; i < n; i++) nbrs[i] = Int32Array.from(lists[i]);
   }
   // max-heap on w
   const heap = Int32Array.from({ length: n }, (_, i) => i);
@@ -63,7 +77,7 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number,
     for (const j of nbrs[i]) {
       if (removed[j]) continue;
       const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-      const rr = R(i, j);
+      const rr = scale ? rmax * (scale[i] + scale[j]) : r2;
       w[j] -= Math.pow(1 - Math.min(d, rr) / rr, 8);
       const k = where[j];
       if (k < size) { down(k); up(where[j]); }
