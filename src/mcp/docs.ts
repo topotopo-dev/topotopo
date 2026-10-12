@@ -121,6 +121,7 @@ EDITS (applied after the loop, geohandle 0 optional):
   setvertexgroup(0,"g",v,1) setedgegroup(0,"g",pt0,pt1,1)  (0 removes)
 DEBUG: print(...) (shows as warnings), error("msg") aborts. Use 'return' to skip the rest for the current element.
 Vars: vars.name (graph vars), iteration/numiterations inside foreach.
+SPEED: a point wrangle over 64k+ points that calls no geometry query/edit/print function runs in parallel on worker threads (same result).
 SDF helpers are also available (see topic sdf).`,
 
   groups: `GROUP PATTERNS (any "group" param; also delete/group nodes)

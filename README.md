@@ -62,6 +62,12 @@ To browse the examples in the live 3D viewer without an MCP client:
 npm run preview
 ```
 
+**Threads.** Heavy per-element work (noise displacement, attribute noise, occlusion rays, point wrangles) runs in
+chunks on a pool of worker threads, and independent graph branches cook concurrently. The output is the same bit for
+bit with or without it. `POLYFORGE_WORKERS` sets the number of threads (default: CPU threads − 1; `0` turns the pool
+off). Threads start on first use and stop after 30 s idle (`POLYFORGE_WORKERS_IDLE_MS`); small inputs stay on the main
+thread. Details in [docs/DESIGN.md](docs/DESIGN.md#worker-pool).
+
 ### Connect to Claude Code
 The repository includes [.mcp.json](.mcp.json), so opening a Claude Code session in this folder offers the `polyforge` server.
 To register it from anywhere, use an absolute path:
@@ -81,8 +87,8 @@ claude mcp add polyforge -- node /absolute/path/to/polyforge/src/mcp/server.ts -
   }
 }
 ```
-Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT`, `POLYFORGE_WORKSPACE` and
-`POLYFORGE_SCRIPT_TIMEOUT_MS`.
+Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT`, `POLYFORGE_WORKSPACE`,
+`POLYFORGE_SCRIPT_TIMEOUT_MS` and `POLYFORGE_WORKERS`. The server exits when the client closes its stdin.
 
 ## MCP tools
 
@@ -212,6 +218,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, erosion determinism and mass conservation, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
+| pool | `npm run test:pool` | worker pool: lazy start, close, transfer round trips, every ported node bit-identical with the pool on and off, concurrent branches and shared in-flight cooks, the lazy switch, kernel errors, crashes and timeouts, the size threshold, the CLI and MCP server exiting; `test:pool` also runs the golden layer with every kernel forced onto the pool. `npm test` passes with `POLYFORGE_WORKERS=0` and with the default |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.
@@ -240,7 +247,7 @@ node or param change; `npm test` fails while it is stale.
 **Benchmarks.** `npm run bench` times named cooks (scatter, copy, packed copy, unpack, subdivide, boolean, noise,
 wrangle, SDF meshing, triangulate, merge, fuse) against targets from the roadmap and prints a Markdown table. `--quick` uses smaller sizes,
 `--filter name` selects cases. Results go to `bench/last.json`; `bench/baseline.json` is a reference run (informational,
-never failing).
+never failing). Compare with the thread pool off: `POLYFORGE_WORKERS=0 npm run bench -- --filter noise`.
 
 CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test` on Node 22 and 24 for every push and pull request.
 
