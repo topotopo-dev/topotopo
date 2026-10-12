@@ -234,9 +234,115 @@ export function pointTransform(t: Geometry, i: number): Mat4 {
   return M;
 }
 
+/**
+ * pointTransform + m4normalMatrix for many template points without allocating: xf(i) fills xf.M and xf.Nm with the
+ * values pointTransform(t, i) and m4normalMatrix of it would return, by the same arithmetic in the same order (the
+ * products with the identity's zeros and ones included, so signed zeros match too). Returns null when an attribute
+ * pointTransform would read is not a plain numeric tuple (string, array, a pscale that is not a scalar); callers then
+ * use pointTransform.
+ */
+function pointXformer(t: Geometry): ({ (i: number): void; M: Float64Array; Nm: Float64Array }) | null {
+  const get = (n: string) => t.points.get(n);
+  const numeric = (a: Attribute | undefined | null) => !!a && a.type !== 'string' && !a.isArray;
+  const Pd = t.P;
+  const trA = get('trans'), oA = get('orient'), NA = get('N') ?? get('v'), upA = get('up'), rotA = get('rot'), psA = get('pscale'), scA = get('scale'), pvA = get('pivot');
+  const tr = trA && trA.size === 3 ? trA : null, orient = oA && oA.size === 4 ? oA : null;
+  const N = !orient && NA && NA.size === 3 ? NA : null, up = N && upA && upA.size === 3 ? upA : null;
+  const rot = rotA && rotA.size === 4 ? rotA : null, sc = scA && scA.size === 3 ? scA : null, pv = pvA && pvA.size === 3 ? pvA : null;
+  for (const a of [tr, orient, N, up, rot, sc, pv]) if (a && !numeric(a)) return null;
+  if (psA && (!numeric(psA) || psA.size !== 1)) return null;
+  const trD = tr?.data as Float64Array, oD = orient?.data as Float64Array, nD = N?.data as Float64Array, upD = up?.data as Float64Array;
+  const rotD = rot?.data as Float64Array, psD = psA?.data as Float64Array, scD = sc?.data as Float64Array, pvD = pv?.data as Float64Array;
+  let R = new Float64Array(16), R2 = new Float64Array(16), M = new Float64Array(16), M2 = new Float64Array(16);
+  const Q = new Float64Array(16), S = new Float64Array(16), RS = new Float64Array(16), T = new Float64Array(16), inv = new Float64Array(16);
+  const Nm = new Float64Array(16);
+  const identity = (m: Float64Array) => { m.fill(0); m[0] = m[5] = m[10] = m[15] = 1; };
+  // m4mul(a, b) into o (o is neither a nor b)
+  const mul = (a: Float64Array, b: Float64Array, o: Float64Array) => {
+    for (let c = 0; c < 4; c++)
+      for (let r = 0; r < 4; r++)
+        o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  };
+  // m4fromQuat
+  const quat = (d: Float64Array, o: number, m: Float64Array) => {
+    const x = d[o], y = d[o + 1], z = d[o + 2], w = d[o + 3];
+    identity(m);
+    m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y + z * w); m[2] = 2 * (x * z - y * w);
+    m[4] = 2 * (x * y - z * w); m[5] = 1 - 2 * (x * x + z * z); m[6] = 2 * (y * z + x * w);
+    m[8] = 2 * (x * z + y * w); m[9] = 2 * (y * z - x * w); m[10] = 1 - 2 * (x * x + y * y);
+  };
+  // lookAtBasis(dir, up)
+  const lookAt = (d0: number, d1: number, d2: number, u0: number, u1: number, u2: number, m: Float64Array) => {
+    const l = Math.hypot(d0, d1, d2);
+    let z0 = 0, z1 = 0, z2 = 0;
+    if (l > 1e-20) { z0 = d0 / l; z1 = d1 / l; z2 = d2 / l; }
+    identity(m);
+    if (Math.hypot(z0, z1, z2) === 0) return;
+    let x0 = u1 * z2 - u2 * z1, x1 = u2 * z0 - u0 * z2, x2 = u0 * z1 - u1 * z0;
+    if (Math.hypot(x0, x1, x2) < 1e-8) {
+      const a0 = Math.abs(z1) < 0.9 ? 0 : 1, a1 = Math.abs(z1) < 0.9 ? 1 : 0, a2 = 0;
+      x0 = a1 * z2 - a2 * z1; x1 = a2 * z0 - a0 * z2; x2 = a0 * z1 - a1 * z0;
+    }
+    const xl = Math.hypot(x0, x1, x2);
+    if (xl > 1e-20) { x0 = x0 / xl; x1 = x1 / xl; x2 = x2 / xl; } else { x0 = 0; x1 = 0; x2 = 0; }
+    m[0] = x0; m[1] = x1; m[2] = x2;
+    m[4] = z1 * x2 - z2 * x1; m[5] = z2 * x0 - z0 * x2; m[6] = z0 * x1 - z1 * x0;
+    m[8] = z0; m[9] = z1; m[10] = z2;
+    m[12] = 0; m[13] = 0; m[14] = 0;
+  };
+  const xf = (i: number) => {
+    let px = Pd[i * 3], py = Pd[i * 3 + 1], pz = Pd[i * 3 + 2];
+    if (tr) { px += trD[i * 3]; py += trD[i * 3 + 1]; pz += trD[i * 3 + 2]; }
+    if (orient) quat(oD, i * 4, R);
+    else if (N) {
+      const d0 = nD[i * 3], d1 = nD[i * 3 + 1], d2 = nD[i * 3 + 2];
+      if (Math.hypot(d0, d1, d2) > 1e-12) lookAt(d0, d1, d2, up ? upD[i * 3] : 0, up ? upD[i * 3 + 1] : 1, up ? upD[i * 3 + 2] : 0, R);
+      else identity(R);
+    } else identity(R);
+    if (rot) { quat(rotD, i * 4, Q); mul(R, Q, R2); const sw = R; R = R2; R2 = sw; }
+    const s = psA ? psD[i] : 1;
+    identity(S);
+    S[0] = s * (sc ? scD[i * 3] : 1); S[5] = s * (sc ? scD[i * 3 + 1] : 1); S[10] = s * (sc ? scD[i * 3 + 2] : 1);
+    mul(R, S, RS);
+    identity(T); T[12] = px; T[13] = py; T[14] = pz;
+    mul(T, RS, M);
+    if (pv) { identity(T); T[12] = -pvD[i * 3]; T[13] = -pvD[i * 3 + 1]; T[14] = -pvD[i * 3 + 2]; mul(M, T, M2); const sw = M; M = M2; M2 = sw; }
+    xf.M = M;
+    // m4normalMatrix(M): m4invert (identity when singular), upper 3×3 transposed
+    const a = M;
+    inv[0] = a[5] * a[10] * a[15] - a[5] * a[11] * a[14] - a[9] * a[6] * a[15] + a[9] * a[7] * a[14] + a[13] * a[6] * a[11] - a[13] * a[7] * a[10];
+    inv[4] = -a[4] * a[10] * a[15] + a[4] * a[11] * a[14] + a[8] * a[6] * a[15] - a[8] * a[7] * a[14] - a[12] * a[6] * a[11] + a[12] * a[7] * a[10];
+    inv[8] = a[4] * a[9] * a[15] - a[4] * a[11] * a[13] - a[8] * a[5] * a[15] + a[8] * a[7] * a[13] + a[12] * a[5] * a[11] - a[12] * a[7] * a[9];
+    inv[12] = -a[4] * a[9] * a[14] + a[4] * a[10] * a[13] + a[8] * a[5] * a[14] - a[8] * a[6] * a[13] - a[12] * a[5] * a[10] + a[12] * a[6] * a[9];
+    inv[1] = -a[1] * a[10] * a[15] + a[1] * a[11] * a[14] + a[9] * a[2] * a[15] - a[9] * a[3] * a[14] - a[13] * a[2] * a[11] + a[13] * a[3] * a[10];
+    inv[5] = a[0] * a[10] * a[15] - a[0] * a[11] * a[14] - a[8] * a[2] * a[15] + a[8] * a[3] * a[14] + a[12] * a[2] * a[11] - a[12] * a[3] * a[10];
+    inv[9] = -a[0] * a[9] * a[15] + a[0] * a[11] * a[13] + a[8] * a[1] * a[15] - a[8] * a[3] * a[13] - a[12] * a[1] * a[11] + a[12] * a[3] * a[9];
+    inv[13] = a[0] * a[9] * a[14] - a[0] * a[10] * a[13] - a[8] * a[1] * a[14] + a[8] * a[2] * a[13] + a[12] * a[1] * a[10] - a[12] * a[2] * a[9];
+    inv[2] = a[1] * a[6] * a[15] - a[1] * a[7] * a[14] - a[5] * a[2] * a[15] + a[5] * a[3] * a[14] + a[13] * a[2] * a[7] - a[13] * a[3] * a[6];
+    inv[6] = -a[0] * a[6] * a[15] + a[0] * a[7] * a[14] + a[4] * a[2] * a[15] - a[4] * a[3] * a[14] - a[12] * a[2] * a[7] + a[12] * a[3] * a[6];
+    inv[10] = a[0] * a[5] * a[15] - a[0] * a[7] * a[13] - a[4] * a[1] * a[15] + a[4] * a[3] * a[13] + a[12] * a[1] * a[7] - a[12] * a[3] * a[5];
+    inv[14] = -a[0] * a[5] * a[14] + a[0] * a[6] * a[13] + a[4] * a[1] * a[14] - a[4] * a[2] * a[13] - a[12] * a[1] * a[6] + a[12] * a[2] * a[5];
+    inv[3] = -a[1] * a[6] * a[11] + a[1] * a[7] * a[10] + a[5] * a[2] * a[11] - a[5] * a[3] * a[10] - a[9] * a[2] * a[7] + a[9] * a[3] * a[6];
+    inv[7] = a[0] * a[6] * a[11] - a[0] * a[7] * a[10] - a[4] * a[2] * a[11] + a[4] * a[3] * a[10] + a[8] * a[2] * a[7] - a[8] * a[3] * a[6];
+    inv[11] = -a[0] * a[5] * a[11] + a[0] * a[7] * a[9] + a[4] * a[1] * a[11] - a[4] * a[3] * a[9] - a[8] * a[1] * a[7] + a[8] * a[3] * a[5];
+    inv[15] = a[0] * a[5] * a[10] - a[0] * a[6] * a[9] - a[4] * a[1] * a[10] + a[4] * a[2] * a[9] + a[8] * a[1] * a[6] - a[8] * a[2] * a[5];
+    let det = a[0] * inv[0] + a[1] * inv[4] + a[2] * inv[8] + a[3] * inv[12];
+    if (Math.abs(det) < 1e-30) identity(inv);
+    else { det = 1 / det; for (let k = 0; k < 16; k++) inv[k] *= det; }
+    identity(Nm);
+    Nm[0] = inv[0]; Nm[1] = inv[4]; Nm[2] = inv[8];
+    Nm[4] = inv[1]; Nm[5] = inv[5]; Nm[6] = inv[9];
+    Nm[8] = inv[2]; Nm[9] = inv[6]; Nm[10] = inv[10];
+  };
+  xf.M = M;
+  xf.Nm = Nm;
+  return xf;
+}
+
 function repeatTable(t: AttribTable, reps: { src: Int32Array }[]): AttribTable {
   let total = 0;
   for (const r of reps) total += r.src.length;
+  if (!t.map.size) return new AttribTable(total); // nothing to gather: skip the index list
   const idx = new Int32Array(total);
   let o = 0;
   for (const r of reps) { idx.set(r.src, o); o += r.src.length; }
@@ -323,7 +429,11 @@ defineNode({
       // fast path: one source repeated
       const np = src.numPoints, nv = src.numVertices, npr = src.numPrims, nc = tpts.length;
       const out = Object.create(Geometry.prototype) as Geometry;
-      const rep = (n: number) => tpts.map(() => ({ src: Int32Array.from({ length: n }, (_, i) => i) }));
+      const rep = (n: number) => {
+        const ident = new Int32Array(n); // one identity index list shared by every copy
+        for (let i = 0; i < n; i++) ident[i] = i;
+        return tpts.map(() => ({ src: ident }));
+      };
       out.points = repeatTable(src.points, rep(np));
       out.vertices = repeatTable(src.vertices, rep(nv));
       out.prims = repeatTable(src.prims, rep(npr));
@@ -353,8 +463,10 @@ defineNode({
       const vecA = ['v', 'up'].map((n) => out.points.get(n)).filter((a) => a && a.size === 3) as Attribute[];
       const cn = p.copy_attrib ? (out.prims.add(p.copy_attrib, 'int', 1).data as Int32Array) : null;
       const tmp = [0, 0, 0];
+      const xf = pointXformer(t);
       tpts.forEach((ti, c) => {
-        const M = pointTransform(t, ti), Nm = m4normalMatrix(M);
+        let M: Mat4, Nm: Mat4;
+        if (xf) { xf(ti); M = xf.M; Nm = xf.Nm; } else { M = pointTransform(t, ti); Nm = m4normalMatrix(M); }
         for (let i = 0; i < np; i++) m4apply(M, sP[i * 3], sP[i * 3 + 1], sP[i * 3 + 2], Pd, (c * np + i) * 3);
         for (const [A, cnt] of [[NA, np], [VNA, nv]] as [Attribute | undefined, number][]) {
           if (!A || A.size !== 3) continue;
@@ -375,7 +487,15 @@ defineNode({
       for (const n of copyNames) {
         const ta = t.points.get(n)!;
         const a = out.points.add(n, ta.type, ta.size);
-        tpts.forEach((ti, c) => { const v = ta.get(ti); for (let i = c * np; i < (c + 1) * np; i++) a.set(i, v); });
+        if (a.type !== 'string' && !a.isArray && !ta.isArray && a.size === ta.size) {
+          // numeric tuple: the values a.set(i, ta.get(ti)) writes, filled per copy
+          const d = a.data as Float64Array, sz = a.size, tup = new Float64Array(sz);
+          tpts.forEach((ti, c) => {
+            const v = ta.get(ti);
+            for (let k = 0; k < sz; k++) tup[k] = typeof v === 'number' ? v : k < (v as number[]).length ? Number((v as number[])[k]) : 0;
+            for (let i = c * np; i < (c + 1) * np; i++) for (let k = 0; k < sz; k++) d[i * sz + k] = tup[k];
+          });
+        } else tpts.forEach((ti, c) => { const v = ta.get(ti); for (let i = c * np; i < (c + 1) * np; i++) a.set(i, v); });
         if (n === 'Cd') { out.prims.delete('Cd'); out.vertices.delete('Cd'); }
       }
       return out;
