@@ -1,0 +1,24 @@
+{
+  "description": "Heightfield terrain: a ridged massif on a 20 × 20 m field (0.1 m cells), hydraulic + thermal erosion (gullies, sediment fans), a road cut along a curve, rocks scattered on steep slopes away from the road, converted to a coloured mesh. Export the eroded field (node \"road\") as png16 for an Unreal Landscape.",
+  "nodes": {
+    "field": { "type": "heightfield", "params": { "size": [20, 20], "resolution": 0.1 } },
+    "massif": { "type": "heightfield_layer", "in": ["field"], "params": { "expression": "2.2 * (1 - smoothstep(1, 11, sqrt(x * x + (z + 1) * (z + 1))))" } },
+    "ridges": { "type": "heightfield_noise", "in": ["massif"], "params": { "fractal": "ridged", "amplitude": 2.4, "element_size": 8, "range": "positive", "seed": 11 } },
+    "detail": { "type": "heightfield_noise", "in": ["ridges"], "params": { "amplitude": 0.35, "element_size": 2.5, "seed": 5 } },
+    "falloff": { "type": "heightfield_layer", "in": ["detail"], "params": { "expression": "height * (0.35 + 0.65 * (1 - smoothstep(3, 10.5, sqrt(x * x + (z + 1) * (z + 1)))))" } },
+    "eroded": { "type": "heightfield_erode", "in": ["falloff"], "params": { "iterations": 60, "seed": 1 } },
+    "road_curve": { "type": "curve", "params": { "points": [[-10, 0, 6], [-5, 0, 3.5], [0, 0, 5.5], [5, 0, 3], [10, 0, 6.5]], "smooth": true } },
+    "road": { "type": "heightfield_path", "in": ["eroded", "road_curve"], "params": { "width": 1.4, "shoulder": 1.2, "smooth": 3, "bank": 4 } },
+    "steep": { "type": "heightfield_mask_by_feature", "in": ["road"], "params": { "feature": "slope", "min_angle": 33, "angle_falloff": 6 } },
+    "rock_zone": { "type": "heightfield_layer", "in": ["steep"], "params": { "layer": "mask", "expression": "mask * (1 - path)" } },
+    "rock_pts": { "type": "heightfield_scatter", "in": ["rock_zone"], "params": { "density": 0.6, "seed": 4 } },
+    "rock_size": { "type": "attrib_randomize", "in": ["rock_pts"], "params": { "name": "pscale", "min": 0.08, "max": 0.26, "seed": 2 } },
+    "rock": { "type": "sphere", "params": { "type": "ico", "level": 2, "radius": 1 } },
+    "rock_shape": { "type": "noise_displace", "in": ["rock"], "params": { "amplitude": 0.35, "frequency": 1.3 } },
+    "rock_col": { "type": "color", "in": ["rock_shape"], "params": { "color": [0.42, 0.4, 0.38] } },
+    "rocks": { "type": "copy_to_points", "in": ["rock_col", "rock_size"] },
+    "ground": { "type": "heightfield_to_mesh", "in": ["road"], "params": { "color": "terrain" } },
+    "out": { "type": "merge", "in": ["ground", "rocks"] }
+  },
+  "output": "out"
+}

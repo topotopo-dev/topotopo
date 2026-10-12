@@ -538,8 +538,8 @@ defineNode({
 defineNode({
   type: 'terrain',
   category: 'generate',
-  summary: 'Heightfield terrain: a ground grid displaced by fractal noise, with height attribute and normals.',
-  aliases: ['heightfield', 'landscape'],
+  summary: 'Terrain mesh: a ground grid displaced by fractal noise, with height attribute and normals (for erosion, masks and Unreal heightmaps use the heightfield nodes).',
+  aliases: ['landscape'],
   inputs: [],
   params: {
     size: { type: 'vec2', default: [20, 20], desc: 'extent in X and Z' },

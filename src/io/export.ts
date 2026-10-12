@@ -2,6 +2,8 @@
 import { Geometry } from '../core/geometry.ts';
 import { primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { geoToJSON } from './json.ts';
+import { heightmapBytes } from './heightmap.ts';
+import type { HeightmapFormat } from './heightmap.ts';
 
 export interface ExportOptions {
   /** multiply positions (e.g. 100 for metres → centimetres) */
@@ -361,11 +363,13 @@ export function exportUSDA(g: Geometry, o: ExportOptions = {}): string {
   return out.join('\n');
 }
 
-export type ExportFormat = 'glb' | 'obj' | 'stl' | 'ply' | 'usda' | 'json';
+export type ExportFormat = 'glb' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | HeightmapFormat;
 
 export function exportGeometry(g: Geometry, format: ExportFormat, o: ExportOptions = {}): Uint8Array {
   const enc = new TextEncoder();
   switch (format) {
+    // heightfield → Unreal heightmap (main file only; heightmapExport also returns the JSON sidecar and mask layers)
+    case 'png16': case 'r16': case 'mask_png': return heightmapBytes(g, format, o);
     case 'glb': return exportGLB(g, o);
     case 'obj': return enc.encode(exportOBJ(g, o));
     case 'stl': return exportSTL(g, o);
