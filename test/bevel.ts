@@ -7,6 +7,8 @@ import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { primArea, primCentroid, primNormals, signedVolume, topologyReport } from '../src/core/topology.ts';
 import { bevelEdges, profilePoint, shapeExponent } from '../src/core/bevel.ts';
+import { EdgeSet } from '../src/core/edges.ts';
+import { halfEdges } from '../src/core/halfedge.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 import { checkGeo } from './fixtures.ts';
 
@@ -274,6 +276,50 @@ const d = 0.1;
   check(!flatShaded(rd, members(rd, 'bevel')), 'vertex N, round bevel: strips are smooth shaded');
   const a = (await bevel(BOX, { offset: 0.13, divisions: 3 })).geo, b = (await cookR({ b: { type: 'box' }, x: { type: 'poly_bevel', in: ['b'], params: { offset: 0.13, divisions: 3, shape: 0 } } }, 'x')).geo;
   check(a.numPoints === b.numPoints && a.P.every((x, i) => x === b.P[i]), 'deterministic');
+}
+
+// ---------------------------------------------------------------- every local configuration
+// Every subset of the edges around every point of meshes with flat, convex, concave, saddle, pole (valence 8) and
+// boundary points, chamfered and round: stays closed (or as open as the input) and manifold, with no zero-area prims;
+// on convex inputs no strip or face turns inward.
+{
+  const meshes: Record<string, Record<string, NodeSpec>> = {
+    box3: { b: { type: 'box', params: { divisions: [3, 2, 2] } } },
+    sphere: { b: { type: 'sphere', params: { rows: 6, cols: 8 } } },
+    tribox: { a: { type: 'box', params: { divisions: [2, 2, 2] } }, b: { type: 'triangulate', in: ['a'] } },
+    cone: { b: { type: 'tube', params: { cols: 6, radius_top: 0 } } },
+    star: { s: { type: 'shape2d', params: { shape: 'star', sides: 5, inner_radius: 0.4 } }, b: { type: 'extrude', in: ['s'], params: { height: 0.3 } } },
+    torus: { b: { type: 'torus', params: { rows: 5, cols: 7 } } },
+    open: { a: { type: 'box', params: { divisions: [2, 2, 2] } }, b: { type: 'delete', in: ['a'], params: { group: '@P.y<-0.4' } } },
+  };
+  const convex = new Set(['box3', 'sphere', 'tribox', 'cone']);
+  for (const [name, nodes] of Object.entries(meshes)) {
+    const { geo: g } = await cookR(nodes, Object.keys(nodes).pop());
+    const closed0 = topologyReport(g).closed, he = halfEdges(g);
+    let runs = 0, bad = '';
+    for (let v = 0; v < g.numPoints && !bad; v++) {
+      const ring = he.pointOneRing(v);
+      for (let mask = 1; mask < 1 << ring.length && !bad; mask++) {
+        const sel = new EdgeSet();
+        ring.forEach((w, i) => { if (mask & (1 << i)) sel.add(v, w); });
+        for (const divisions of [0, 2]) {
+          const r = bevelEdges(g, sel, { offset: 0.03, divisions });
+          runs++;
+          const t = topologyReport(r.geo), h = r.geo;
+          if (t.nonManifoldEdges || t.degenerate || (closed0 && !t.closed)) { bad = `point ${v} edges ${mask.toString(2)} divisions ${divisions}`; break; }
+          if (convex.has(name)) {
+            const N = primNormals(h), cor = h.primGroups.get('bevel_corner');
+            for (let p = 0; p < h.numPrims && !bad; p++) {
+              if (cor?.[p]) continue; // end caps of strips stopping at unbevelled points can face sideways or down
+              const c = primCentroid(h, p);
+              if ((c[0] * N[p * 3] + c[1] * N[p * 3 + 1] + c[2] * N[p * 3 + 2]) / Math.hypot(c[0], c[1], c[2]) < -0.3) bad = `inward prim ${p} at point ${v} edges ${mask.toString(2)}`;
+            }
+          }
+        }
+      }
+    }
+    check(!bad, `every edge subset around every point of ${name} (${runs} bevels): ${closed0 ? 'watertight' : 'manifold'}, no degenerate prims${bad ? ' — ' + bad : ''}`);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
