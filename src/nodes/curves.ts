@@ -7,7 +7,7 @@ import { NodeError } from '../graph/types.ts';
 import { add, cross, dot, length, normalize, scale, sub } from '../core/math.ts';
 import type { Vec3 } from '../core/math.ts';
 import { orientOutward, topologyReport } from '../core/topology.ts';
-import { M, crossSectionFaces, detectPlane, fromManifold, planeMatrix, polygonsToGeo, propLayout, toPolygons } from '../core/manifold.ts';
+import { crossSection, crossSectionFaces, detectPlane, fromManifold, planeMatrix, polygonsToGeo, propLayout, toPolygons } from '../core/manifold.ts';
 import type { Plane } from '../core/manifold.ts';
 import { FRAMES, P, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
@@ -642,8 +642,7 @@ defineNode({
       for (let j = 0; j < polys.length; j++) if (i !== j && pointInPoly(polys[i][0], polys[j])) { nested = true; break; }
     const pyramid = p.scale_top[0] === 0 && p.scale_top[1] === 0;
     if (nested || pyramid) {
-      const W = M();
-      const cs = new W.CrossSection(polys, 'EvenOdd');
+      const cs = crossSection(polys, 'EvenOdd');
       let m = cs.extrude(Math.abs(p.height), p.divisions - 1, p.twist, p.scale_top, p.center);
       cs.delete();
       if (p.height < 0) { const mm = m.mirror([0, 0, 1]); m.delete(); m = mm; }
@@ -685,6 +684,8 @@ defineNode({
   },
 });
 
+const NO_SHAPES = 'no closed shapes in the input (polygons, or polylines whose ends meet, with 3+ points): output is empty';
+
 defineNode({
   type: 'offset_curve',
   category: 'curve',
@@ -698,12 +699,12 @@ defineNode({
     output: { type: 'enum', options: ['outlines', 'faces'], default: 'outlines', desc: 'outlines = closed polygons per contour; faces = filled with holes cut' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'shape plane' },
   },
-  cook: ({ input, p }) => {
+  cook: ({ input, p, warn }) => {
     const g = input(0);
     const plane: Plane = p.plane === 'auto' ? detectPlane(g) : p.plane;
     const { polys, offset } = toPolygons(g, plane);
-    const W = M();
-    const cs = new W.CrossSection(polys, 'EvenOdd');
+    if (!polys.length && g.numPoints) warn(NO_SHAPES);
+    const cs = crossSection(polys, 'EvenOdd');
     const jt = p.join === 'round' ? 'Round' : p.join === 'miter' ? 'Miter' : 'Square';
     const o = cs.offset(p.distance, jt, 2, p.segments);
     cs.delete();
@@ -724,20 +725,21 @@ defineNode({
     output: { type: 'enum', options: ['outlines', 'faces'], default: 'faces', desc: 'faces = filled (holes cut, triangulated where needed); outlines = closed contour polygons' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'shape plane' },
   },
-  cook: ({ input, hasInput, p }) => {
+  cook: ({ input, hasInput, p, warn }) => {
     const A = input(0), B = hasInput(1) ? input(1) : null;
     const plane: Plane = p.plane === 'auto' ? detectPlane(B ? Geometry.merge([A, B]) : A) : p.plane;
-    const W = M();
-    const ta = toPolygons(A, plane);
-    const csA = new W.CrossSection(ta.polys, 'NonZero');
+    const ta = toPolygons(A, plane), tb = B ? toPolygons(B, plane) : null;
+    if (!ta.polys.length && !tb?.polys.length && (A.numPoints || B?.numPoints)) warn(NO_SHAPES);
+    const offset = ta.polys.length || !tb ? ta.offset : tb.offset;
+    const csA = crossSection(ta.polys, 'NonZero');
     let r;
-    if (!B) r = csA;
+    if (!tb) r = csA;
     else {
-      const csB = new W.CrossSection(toPolygons(B, plane).polys, 'NonZero');
+      const csB = crossSection(tb.polys, 'NonZero');
       r = p.operation === 'union' ? csA.add(csB) : p.operation === 'subtract' ? csA.subtract(csB) : p.operation === 'intersect' ? csA.intersect(csB) : csA.add(csB).subtract(csA.intersect(csB));
       csB.delete();
     }
-    const out = p.output === 'faces' ? crossSectionFaces(r, plane, ta.offset) : polygonsToGeo(r.toPolygons(), plane, ta.offset);
+    const out = p.output === 'faces' ? crossSectionFaces(r, plane, offset) : polygonsToGeo(r.toPolygons(), plane, offset);
     r.delete();
     if (r !== csA) csA.delete();
     return out;
@@ -754,11 +756,12 @@ defineNode({
     rule: { type: 'enum', options: ['EvenOdd', 'NonZero'], default: 'EvenOdd', desc: 'fill rule for overlapping contours' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'plane' },
   },
-  cook: ({ input, p }) => {
+  cook: ({ input, p, warn }) => {
     const g = input(0);
     const plane: Plane = p.plane === 'auto' ? detectPlane(g) : p.plane;
     const { polys, offset } = toPolygons(g, plane);
-    const cs = new (M().CrossSection)(polys, p.rule);
+    if (!polys.length && g.numPoints) warn(NO_SHAPES);
+    const cs = crossSection(polys, p.rule);
     const out = crossSectionFaces(cs, plane, offset);
     cs.delete();
     return out;
