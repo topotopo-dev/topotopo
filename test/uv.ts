@@ -6,8 +6,8 @@ import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { triangulate } from '../src/core/topology.ts';
 import { buildCharts, lscm, polygonSides, readUV, uvSeamPairs } from '../src/core/uv.ts';
-import { exportGeometry } from '../src/io/export.ts';
-import { importGeometry } from '../src/io/import.ts';
+import { exportGeometryAsync } from '../src/io/export.ts';
+import { importGeometryAsync } from '../src/io/import.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { encodePNG } from '../src/render/png.ts';
 import zlib from 'node:zlib';
@@ -230,7 +230,7 @@ const sameTopology = (a: Geometry, b: Geometry) =>
 // ---------------------------------------------------------------- GLB round trip
 {
   const { geo: g } = await cook({ b: { type: 'box', params: { divisions: [2, 1, 1] } }, out: { type: 'uv_unwrap', in: ['b'] } });
-  const back = importGeometry(exportGeometry(g, 'glb'), 'glb');
+  const back = await importGeometryAsync(await exportGeometryAsync(g, 'glb'), 'glb');
   const uvA = readUV(g)!, uvB = readUV(back);
   const key = (P: Float64Array, pt: number, u: number, v: number) => [P[pt * 3], P[pt * 3 + 1], P[pt * 3 + 2], u, v].map((x) => Math.round(x * 1e4)).join(',');
   const A = new Set<string>(), B = new Set<string>();

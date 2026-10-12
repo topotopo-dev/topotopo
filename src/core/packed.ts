@@ -180,6 +180,11 @@ export interface ExpandOptions {
   origins?: boolean;
   /** replace each (flattened) source before it is copied, e.g. to add shading normals once per source */
   prepare?: (src: Geometry) => Geometry;
+  /**
+   * expand instances of packed sources too (default true; nested levels transfer DEFAULT_TRANSFER). false = one
+   * level, like Houdini's Unpack: instances inside a source become packed prims of the result.
+   */
+  recursive?: boolean;
 }
 
 export interface ExpandResult {
@@ -195,22 +200,26 @@ export interface ExpandResult {
   pointOrigin?: Int32Array;
 }
 
-const flatMemo = new WeakMap<Geometry, Geometry>();
+const flatMemo = new WeakMap<Geometry, Geometry>(), oneLevelMemo = new WeakMap<Geometry, Geometry>();
 
-/** A source ready to be copied: nested instances expanded, volumes dropped. Memoised (sources are immutable). */
-function flatSource(src: Geometry, notes: Set<string>): Geometry {
-  let f = flatMemo.get(src);
+/**
+ * A source ready to be copied: nested instances expanded (unless oneLevel), volumes dropped. Memoised (sources are
+ * immutable).
+ */
+function flatSource(src: Geometry, notes: Set<string>, oneLevel = false): Geometry {
+  const memo = oneLevel ? oneLevelMemo : flatMemo;
+  let f = memo.get(src);
   if (f) {
     if (src.volumes.length) notes.add('SDF volumes inside packed sources are not expanded');
     return f;
   }
-  f = src.hasPacked() ? expandPacked(src).geo : src;
+  f = src.hasPacked() && !oneLevel ? expandPacked(src, { transfer: DEFAULT_TRANSFER }).geo : src;
   if (f.volumes.length) {
     notes.add('SDF volumes inside packed sources are not expanded');
     f = f === src ? src.clone() : f;
     f.volumes = [];
   }
-  flatMemo.set(src, f);
+  memo.set(src, f);
   return f;
 }
 
@@ -269,7 +278,7 @@ export function expandPacked(g: Geometry, o: ExpandOptions = {}): ExpandResult {
   const usedSrc: number[] = [];
   const seen = new Int32Array(sources.length).fill(-1);
   for (const p of drawn) if (seen[S[p]] < 0) { seen[S[p]] = usedSrc.length; usedSrc.push(S[p]); }
-  const uni = unifyDisplayAttribs([base, ...usedSrc.map((s) => { const f = flatSource(sources[s], noteSet); return o.prepare ? o.prepare(f) : f; })]);
+  const uni = unifyDisplayAttribs([base, ...usedSrc.map((s) => { const f = flatSource(sources[s], noteSet, o.recursive === false); return o.prepare ? o.prepare(f) : f; })]);
   base = uni[0];
   const flat: Geometry[] = new Array(sources.length);
   usedSrc.forEach((s, k) => { flat[s] = uni[k + 1]; });
@@ -341,6 +350,8 @@ export function expandPacked(g: Geometry, o: ExpandOptions = {}): ExpandResult {
         d[i * 3 + 2] = m[2] * x + m[6] * y + m[10] * z;
       }
     }
+    // one-level expansion: instances inside the source compose this instance's transform
+    if (out.primKind) composePackedXforms(out, m, null, offs[j * 3 + 2], offs[j * 3 + 5]);
     if (orient) {
       const rot = new Float64Array(m);
       for (let c = 0; c < 3; c++) {

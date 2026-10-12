@@ -3,6 +3,7 @@
 //   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
+//                   [--instancing packed|expand]
 //                   [--inspect summary|attributes|topology|all]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
@@ -33,6 +34,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     'usage: node src/cli.ts <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]',
     '         [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb] [--inspect all]',
     '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '                         [--instancing packed|expand] (packed instances: glb/usda keep them by default)',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     '       node src/cli.ts --catalog | --help-node <type>',
@@ -118,6 +120,8 @@ async function writeOutputs(r: CookReport, frame?: number) {
       attributes: opt('--attributes'),
       upAxis: up === 'z' || up === 'y' ? up : undefined,
       scale: opt('--scale') !== undefined ? Number(opt('--scale')) : undefined,
+      instancing: opt('--instancing') === 'expand' ? 'expand' : undefined,
+      warn: (m) => console.warn(`warning: ${m}`),
     });
     fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
     fs.writeFileSync(p, bytes);

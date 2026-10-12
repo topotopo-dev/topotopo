@@ -41,6 +41,9 @@ export const SRC: Record<string, NodeSpec> = {
   NBRS: { type: 'attrib_array', in: ['GRID'], params: { mode: 'from_neighbours' } },
   CUBE: { type: 'box' },
   OPENTUBE: { type: 'tube', params: { cols: 12, caps: false } },
+  // packed prims (P2-A): three identical boxes (pack shares one source), and packed copies of a coloured sphere
+  PIECES: { type: 'copy_xform', in: ['BOX'], params: { count: 3, translate: [1.5, 0, 0], copy_attrib: '' } },
+  PACKED: { type: 'copy_to_points', in: ['COLORED', 'PTS'], params: { pack: true } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -57,6 +60,7 @@ export const INPUTS: Record<string, string[]> = {
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
   attrib_array: ['NBRS'],
   polysplit: ['BOX'], edge_divide: ['BOX'], dissolve: ['GRID'], polybridge: ['CUBE'], polyfill: ['OPENTUBE'],
+  pack: ['PIECES'], unpack: ['PACKED'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */

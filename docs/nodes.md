@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-120 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+122 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -15,7 +15,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [normal](#normal) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
-- [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
+- [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
 - [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
@@ -851,7 +851,7 @@ Mirror across a plane; optionally keep the original and weld the seam.
 
 category: `transform` · aliases: `xform`, `move`, `rotate`, `scale`
 
-Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, orient and SDF volumes.
+Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, orient, SDF volumes and packed instances.
 
 **Inputs**
 
@@ -2606,7 +2606,9 @@ Split polygons into triangles (ear clipping for concave n-gons).
 
 category: `copy` · aliases: `copytopoints`, `instance`, `copy_to_pts`
 
-Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over.
+Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over. pack:true makes packed instances (cheap at millions).
+
+pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, or the exact value, e.g. a string name); without that attribute the pieces cycle.
 
 **Inputs**
 
@@ -2620,12 +2622,31 @@ Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot,
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `group` | group (point) | `""` |  |  |  | template points to use ("" = all) |
+| `pack` | bool | `false` |  |  | `pack_and_instance`, `packed` | output packed instances (one point + one packed prim per copy, sharing the source) instead of real copies |
 | `copy_attribs` | string | `"*"` |  |  |  | template point attributes copied onto the copies (pattern; transform attributes are always excluded) |
 | `copy_attrib` | string | `"copynum"` |  |  |  | prim int attribute with the copy index ("" = none) |
+| `variants` | enum | `"none"` |  | `none`, `name`, `piece` |  | split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set) |
 | `piece_attrib` | string | `""` |  |  |  | variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class") |
 | `variant_attrib` | string | `"variant"` |  |  |  | variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value) |
 
-**Writes:** prim copynum; template point attributes on copied points
+**Writes:** prim copynum; template point attributes on copied points (pack: on the instance anchor points)
+
+**Example**
+
+```json
+{
+  "type": "copy_to_points",
+  "in": [
+    "trees",
+    "pts"
+  ],
+  "params": {
+    "pack": true,
+    "variants": "name",
+    "variant_attrib": "variant"
+  }
+}
+```
 
 ### copy_xform
 
@@ -2651,6 +2672,47 @@ Make N copies, each transformed cumulatively (Houdini Copy and Transform): stair
 | `copy_attrib` | string | `"copynum"` |  |  |  | prim int attribute storing the copy index ("" = none) |
 
 **Writes:** prim copynum
+
+### pack
+
+category: `copy` · aliases: `packgeometry`, `pack_geometry`, `assemble`
+
+Turn pieces into packed instances: one anchor point + packed prim per piece, referencing a shared source (identical pieces share one source).
+
+Each piece becomes a source geometry moved so its pivot is at the origin; the anchor point sits at the pivot, so nothing moves. Attributes listed in "carry" go onto the instance (prim attributes onto the packed prim, point/vertex attributes onto the anchor point): a value that is constant over the piece moves out of the source (so pieces that differ only by colour or name share a source), otherwise the anchor gets the average (floats) or first value and the source keeps its own. Points not used by any prim stay unpacked unless by = "all". Packed prims are drawn, transformed, merged and exported as instances; unpack turns them back into polygons.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry to pack |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `by` | enum | `"connectivity"` |  | `connectivity`, `name`, `attrib`, `all` |  | pieces: connected parts, prim "name" values, values of a prim attribute ("attrib"), or everything as one instance ("all", Houdini Pack) |
+| `attrib` | string | `""` |  |  |  | by = attrib: prim attribute whose values define the pieces |
+| `pivot` | enum | `"centroid"` |  | `centroid`, `origin`, `bbox_min`, `bbox_center_bottom` |  | instance pivot per piece: bbox centre, world origin, bbox minimum, or centre of the bbox bottom (trees, buildings) |
+| `carry` | string | `"name Cd material"` |  |  |  | attributes carried onto the instances (names or patterns) |
+| `source_dedup` | bool | `true` |  |  |  | pieces with identical content (after moving to their pivot) share one source |
+
+**Writes:** packed prims (one per piece) on anchor points; carried attributes on the anchor point / packed prim
+
+**Example**
+
+```json
+{
+  "type": "pack",
+  "in": [
+    "fractured"
+  ],
+  "params": {
+    "by": "connectivity",
+    "pivot": "centroid"
+  }
+}
+```
 
 ### scatter
 
@@ -2678,6 +2740,47 @@ Scatter points on surfaces (area-weighted, optional blue-noise relax), along cur
 | `keep_attribs` | bool | `true` |  |  |  | interpolate source point attributes onto scattered points |
 
 **Writes:** point N (surface normal), sourceprim; interpolated source attributes
+
+### unpack
+
+category: `copy` · aliases: `unpackgeometry`, `unpack_geometry`, `unpack_packed`
+
+Expand packed instances into real geometry (transformed copies of their sources); anchor attributes such as Cd and name carry over.
+
+Instances are expanded in prim order after the other prims; source attributes and groups come along, N/v/up/orient are rotated. transfer_attributes copies anchor point / packed prim attributes onto the unpacked points / prims where the source does not define them (Cd and Alpha: in any class), so a source's own colours win and an anchor colour tints sources without colour. Prim and point groups of the packed prims / anchors extend over the unpacked elements. Nodes that need polygons unpack automatically (with a warning); use this node to choose what is transferred, to unpack a subset, or to limit the count while previewing.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry with packed prims |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (prim) | `""` |  |  |  | packed prims to unpack ("" = all); the others stay packed |
+| `transfer_attributes` | string | `"name Cd material piece"` |  |  | `transfer`, `attributes` | anchor point / packed prim attributes copied onto the unpacked points / prims (names or patterns, "*" = all, "" = none) |
+| `limit` | int | `0` | 0.. |  | `max_instances` | unpack at most this many instances (in prim order) and drop the rest of the selection; 0 = all |
+| `piece_attrib` | string | `""` |  |  |  | prim int attribute receiving the packed prim number of every unpacked prim (-1 on prims that were not packed; "" = none) |
+| `recursive` | bool | `false` |  |  |  | also unpack instances inside the sources (false = one level, as in Houdini: nested instances become packed prims) |
+
+**Writes:** unpacked geometry; transferred anchor attributes; optional prim int piece_attrib
+
+**Example**
+
+```json
+{
+  "type": "unpack",
+  "in": [
+    "forest"
+  ],
+  "params": {
+    "transfer_attributes": "Cd name",
+    "piece_attrib": "piece"
+  }
+}
+```
 
 ## solid nodes
 
@@ -3517,4 +3620,5 @@ None (generator).
 | `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `json`, `geo`, `bgeo`, `csv`, `pointsjson` |  | file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
-| `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans) |
+| `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances) |
+| `instancing` | enum | `"packed"` |  | `packed`, `expand` |  | glTF EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry |
