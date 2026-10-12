@@ -538,7 +538,7 @@ export interface RaySampleOptions {
 
 /**
  * Per-point ray-cast measure. Directions are cosine-weighted inside a cone around N (around -N for thickness),
- * stratified on a sqrt(samples) grid with a seeded jitter and a random rotation per point.
+ * from a Fibonacci lattice shifted per point by a seeded random offset; rays go in packets of 32 (one BVH walk each).
  *  occlusion: fraction of rays hitting within maxDistance (0 = open sky, 1 = enclosed)
  *  cavity:    like occlusion but each hit weighs 1 - t/maxDistance (nearby walls count most)
  *  thickness: mean distance to the first hit along the inward rays (misses count as maxDistance), in metres
@@ -551,7 +551,6 @@ export function rayMeasure(P: ArrayLike<number>, N: ArrayLike<number>, scene: Ra
     return out;
   }
   const S = Math.max(1, Math.floor(o.samples));
-  const gx = Math.ceil(Math.sqrt(S)), gy = Math.ceil(S / gx);
   const sinA = Math.sin((Math.max(0, Math.min(90, o.coneAngle)) * Math.PI) / 180);
   const seedH = hash32(hashNumber(o.seed) ^ 0x2c1b3c6d);
   const maxD = o.maxDistance > 0 ? o.maxDistance : Infinity;

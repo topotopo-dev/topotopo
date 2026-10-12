@@ -214,7 +214,7 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   const pr = pieceReport(tb);
   check(pr.pieces.length === 1 && pr.pieces[0].genus === 1 && pr.pieces[0].closed, 'pieceReport: a torus is one closed piece of genus 1');
   const scene = RayScene.of(await geo({ b: { type: 'box' } }));
-  check(scene.inside(0, 0, 0) && !scene.inside(0.6, 0, 0) && Math.abs(scene.nearest(0, 0, 0, 1, 0, 0) - 0.5) < 1e-12, 'RayScene: inside test and nearest hit');
+  check(scene.inside(0, 0, 0) && !scene.inside(0.6, 0, 0) && Math.abs(scene.nearest(0, 0, 0, 1, 0, 0) - 0.5) < 1e-12 && scene.occluded(0, 0, 0, 0, 1, 0, 1) && !scene.occluded(0, 0, 0, 0, 1, 0, 0.4), 'RayScene: inside test, nearest hit, occluded within a distance');
   const si = selfIntersections(await geo({ b: { type: 'box', params: { divisions: [3, 3, 3] } } }));
   check(si.pairs === 0 && !si.capped, 'selfIntersections: none on a subdivided box (adjacent triangles excluded)');
 }
