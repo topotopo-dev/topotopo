@@ -641,6 +641,7 @@ defineNode({
       out.vertexPoint = Int32Array.from(vtx, (v) => g.vertexPoint[v]);
       out.primClosed = Uint8Array.from(order, (pr) => g.primClosed[pr]);
       out.primGroups = new Map([...g.primGroups].map(([k, m]) => [k, Uint8Array.from(order, (pr) => m[pr])]));
+      out.vertexGroups = new Map([...g.vertexGroups].map(([k, m]) => [k, Uint8Array.from(vtx, (v) => m[v])]));
       return out;
     }
     const inv = new Int32Array(n);
@@ -649,6 +650,7 @@ defineNode({
     out.points = g.points.gather(order);
     for (let v = 0; v < out.numVertices; v++) out.vertexPoint[v] = inv[g.vertexPoint[v]];
     out.pointGroups = new Map([...g.pointGroups].map(([k, m]) => [k, Uint8Array.from(order, (i) => m[i])]));
+    out.edgeGroups = new Map([...g.edgeGroups].map(([k, e]) => [k, e.remap(inv)]));
     return out;
   },
 });

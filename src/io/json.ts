@@ -1,6 +1,7 @@
 // Lossless native format: all attributes, groups and topology.
 import { Attribute, AttribTable, Geometry } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
+import { EdgeSet } from '../core/edges.ts';
 
 function tableToJSON(t: AttribTable) {
   const out: Record<string, any> = {};
@@ -24,7 +25,18 @@ const groupsToJSON = (m: Map<string, Uint8Array>) => {
   return o;
 };
 
+/** Edge groups as flat sorted point-pair lists [a0, b0, a1, b1, ...] (a < b). */
+const edgeGroupsToJSON = (m: Map<string, EdgeSet>) => {
+  const o: Record<string, number[]> = {};
+  for (const [k, set] of m) o[k] = Array.from(set.toPairs());
+  return o;
+};
+
 export function geoToJSON(g: Geometry) {
+  const groups: Record<string, Record<string, number[]>> = { point: groupsToJSON(g.pointGroups), prim: groupsToJSON(g.primGroups) };
+  // written only when present, so files without them are unchanged
+  if (g.vertexGroups.size) groups.vertex = groupsToJSON(g.vertexGroups);
+  if (g.edgeGroups.size) groups.edge = edgeGroupsToJSON(g.edgeGroups);
   return {
     format: 'polyforge-geo',
     version: 1,
@@ -32,7 +44,7 @@ export function geoToJSON(g: Geometry) {
     vertices: { count: g.numVertices, points: Array.from(g.vertexPoint), attribs: tableToJSON(g.vertices) },
     prims: { count: g.numPrims, start: Array.from(g.primStart), closed: Array.from(g.primClosed), attribs: tableToJSON(g.prims) },
     detail: { attribs: tableToJSON(g.detail) },
-    groups: { point: groupsToJSON(g.pointGroups), prim: groupsToJSON(g.primGroups) },
+    groups,
   };
 }
 
@@ -47,11 +59,18 @@ export function geoFromJSON(j: any): Geometry {
   g.vertexPoint = Int32Array.from(j.vertices.points);
   g.primStart = Int32Array.from(j.prims.start);
   g.primClosed = Uint8Array.from(j.prims.closed);
-  for (const [cls, n] of [['point', g.numPoints], ['prim', g.numPrims]] as const)
+  for (const [cls, n] of [['point', g.numPoints], ['prim', g.numPrims], ['vertex', g.numVertices]] as const)
     for (const [k, idx] of Object.entries(j.groups?.[cls] ?? {})) {
       const m = new Uint8Array(n);
       for (const i of idx as number[]) m[i] = 1;
       g.groups(cls).set(k, m);
     }
+  for (const [k, pairs] of Object.entries(j.groups?.edge ?? {})) {
+    const set = new EdgeSet();
+    const arr = pairs as number[];
+    for (let i = 0; i + 1 < arr.length; i += 2)
+      if (arr[i] >= 0 && arr[i] < g.numPoints && arr[i + 1] >= 0 && arr[i + 1] < g.numPoints) set.add(arr[i], arr[i + 1]);
+    g.edgeGroups.set(k, set);
+  }
   return g;
 }

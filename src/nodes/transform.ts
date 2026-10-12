@@ -209,6 +209,8 @@ export function fusePoints(g: Geometry, dist: number, candidate?: (i: number) =>
     for (let i = 0; i < n; i++) if (cnt[i] > 1) for (let c = 0; c < 3; c++) out.P[i * 3 + c] = acc[i * 3 + c] / cnt[i];
   }
   for (let v = 0; v < out.numVertices; v++) out.vertexPoint[v] = target[out.vertexPoint[v]];
+  // edge groups follow the welded points (edges collapsing to one point drop out)
+  if (g.edgeGroups.size) out.edgeGroups = new Map([...g.edgeGroups].map(([k, e]) => [k, e.remap(target)]));
   return removeDegenerate(out).removeUnusedPoints();
 }
 
@@ -237,6 +239,7 @@ export function removeDegenerate(g: Geometry): Geometry {
   out.vertexPoint = Int32Array.from(keepV, (v) => g.vertexPoint[v]);
   out.primClosed = Uint8Array.from(keepP, (p) => g.primClosed[p]);
   out.primGroups = new Map([...g.primGroups].map(([k, m]) => [k, Uint8Array.from(keepP, (p) => m[p])]));
+  out.vertexGroups = new Map([...g.vertexGroups].map(([k, m]) => [k, Uint8Array.from(keepV, (v) => m[v])]));
   return out;
 }
 

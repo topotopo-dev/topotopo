@@ -1,5 +1,5 @@
 // Houdini-style geometry: points / vertices / primitives / detail, each with attribute
-// tables, plus named point & primitive groups and optional SDF volumes.
+// tables, plus named point, vertex, primitive and edge groups and optional SDF volumes.
 //
 //  points    – positions (P) and per-point attributes
 //  prims     – polygons (closed) or polylines (open), stored CSR-style:
@@ -8,8 +8,13 @@
 //              per-corner attributes (uv seams, hard normals) live here
 //  detail    – one value per geometry (metadata)
 //
+// Groups: point, vertex and prim groups are byte masks (one byte per element). Edge groups are
+// EdgeSets of unordered point pairs (see edges.ts): they survive every operation that keeps
+// point numbers and are remapped wherever points are renumbered or deleted.
+//
 // Cooked geometry is treated as immutable: nodes clone() before modifying.
 import type { Vec3 } from './math.ts';
+import { EdgeSet, EDGE_KEY_LIMIT } from './edges.ts';
 
 export type AttribClass = 'point' | 'vertex' | 'prim' | 'detail';
 export type AttribType = 'float' | 'int' | 'string';
@@ -17,6 +22,11 @@ export type AttribData = Float64Array | Int32Array | string[];
 export type AttribValue = number | number[] | string;
 
 export const ATTRIB_CLASSES: AttribClass[] = ['point', 'vertex', 'prim', 'detail'];
+
+/** Element classes that can hold groups. Point, vertex and prim groups are masks; edge groups are EdgeSets. */
+export type GroupClass = 'point' | 'vertex' | 'prim' | 'edge';
+export type MaskGroupClass = 'point' | 'vertex' | 'prim';
+export const GROUP_CLASSES: GroupClass[] = ['point', 'vertex', 'prim', 'edge'];
 
 /** Houdini-compatible default values for well-known attribute names. */
 export function defaultValueFor(name: string, size: number, type: AttribType): number[] | string {
@@ -177,6 +187,17 @@ export class Geometry {
   pointGroups = new Map<string, Uint8Array>();
   primGroups = new Map<string, Uint8Array>();
   volumes: Volume[] = [];
+  // Vertex and edge groups are created lazily, so geometry assembled with
+  // Object.create(Geometry.prototype) (fast paths in nodes) never sees them undefined.
+  private _vertexGroups?: Map<string, Uint8Array>;
+  private _edgeGroups?: Map<string, EdgeSet>;
+
+  /** Vertex groups: one byte per vertex. */
+  get vertexGroups(): Map<string, Uint8Array> { return this._vertexGroups ?? (this._vertexGroups = new Map()); }
+  set vertexGroups(m: Map<string, Uint8Array>) { this._vertexGroups = m; }
+  /** Edge groups: sets of unordered point pairs. */
+  get edgeGroups(): Map<string, EdgeSet> { return this._edgeGroups ?? (this._edgeGroups = new Map()); }
+  set edgeGroups(m: Map<string, EdgeSet>) { this._edgeGroups = m; }
 
   constructor(init: GeoInit = {}) {
     const pos = init.positions ?? [];
@@ -214,7 +235,20 @@ export class Geometry {
     return cls === 'point' ? this.points : cls === 'vertex' ? this.vertices : cls === 'prim' ? this.prims : this.detail;
   }
 
-  groups(cls: 'point' | 'prim') { return cls === 'point' ? this.pointGroups : this.primGroups; }
+  /** Mask groups of a class (edge groups live in edgeGroups as EdgeSets). */
+  groups(cls: MaskGroupClass): Map<string, Uint8Array> {
+    return cls === 'point' ? this.pointGroups : cls === 'prim' ? this.primGroups : this.vertexGroups;
+  }
+
+  /** Number of elements of a mask-group class. */
+  count(cls: MaskGroupClass): number {
+    return cls === 'point' ? this.numPoints : cls === 'prim' ? this.numPrims : this.numVertices;
+  }
+
+  /** Names of the groups of a class. */
+  groupNames(cls: GroupClass): string[] {
+    return [...(cls === 'edge' ? this.edgeGroups.keys() : this.groups(cls).keys())];
+  }
 
   /** Find an attribute by name, searching classes in Houdini precedence order (vertex, point, prim, detail). */
   findAttrib(name: string, order: AttribClass[] = ['vertex', 'point', 'prim', 'detail']) {
@@ -251,6 +285,8 @@ export class Geometry {
     g.primClosed = this.primClosed.slice();
     g.pointGroups = new Map([...this.pointGroups].map(([k, v]) => [k, v.slice()]));
     g.primGroups = new Map([...this.primGroups].map(([k, v]) => [k, v.slice()]));
+    g.vertexGroups = new Map([...this.vertexGroups].map(([k, v]) => [k, v.slice()]));
+    g.edgeGroups = new Map([...this.edgeGroups].map(([k, v]) => [k, v.clone()]));
     g.volumes = this.volumes.slice();
     return g;
   }
@@ -274,12 +310,48 @@ export class Geometry {
     return empty ? { min: [0, 0, 0], max: [0, 0, 0], empty } : { min, max, empty };
   }
 
-  addGroup(cls: 'point' | 'prim', name: string, mask?: Uint8Array): Uint8Array {
-    const n = cls === 'point' ? this.numPoints : this.numPrims;
+  addGroup(cls: MaskGroupClass, name: string, mask?: Uint8Array): Uint8Array {
+    const n = this.count(cls);
     const m = mask ?? new Uint8Array(n);
     if (m.length !== n) throw new Error(`group mask size ${m.length} != ${n}`);
     this.groups(cls).set(name, m);
     return m;
+  }
+
+  /** Create or replace an edge group. */
+  addEdgeGroup(name: string, edges?: EdgeSet): EdgeSet {
+    const s = edges ?? new EdgeSet();
+    this.edgeGroups.set(name, s);
+    return s;
+  }
+
+  /**
+   * Delete vertices where keep[v] is falsy, with the subsetPoints rules: closed polygons that
+   * lose a vertex are deleted; open polylines lose those vertices (and are deleted if fewer than
+   * 2 remain). Points stay unless removeUnusedPoints.
+   */
+  subsetVertices(keep: ArrayLike<number | boolean>, removeUnusedPoints = false): Geometry {
+    const primIdx: number[] = [], vtxIdx: number[] = [], starts = [0];
+    for (let p = 0; p < this.numPrims; p++) {
+      const s = this.primStart[p], e = this.primStart[p + 1];
+      let missing = 0;
+      for (let v = s; v < e; v++) if (!keep[v]) missing++;
+      if (missing && this.primClosed[p]) continue;
+      if (e - s - missing < (this.primClosed[p] ? 1 : 2)) continue;
+      primIdx.push(p);
+      for (let v = s; v < e; v++) if (keep[v]) vtxIdx.push(v);
+      starts.push(vtxIdx.length);
+    }
+    const g = this.clone();
+    g.prims = this.prims.gather(primIdx);
+    g.vertices = this.vertices.gather(vtxIdx);
+    g.primClosed = Uint8Array.from(primIdx, (p) => this.primClosed[p]);
+    g.primStart = Int32Array.from(starts);
+    g.vertexPoint = Int32Array.from(vtxIdx, (v) => this.vertexPoint[v]);
+    g.primGroups = new Map([...this.primGroups].map(([k, m]) => [k, Uint8Array.from(primIdx, (p) => m[p])]));
+    g.vertexGroups = gatherGroups(this.vertexGroups, vtxIdx);
+    g.edgeGroups = pruneEdgeGroups(g, this.edgeGroups);
+    return removeUnusedPoints ? g.removeUnusedPoints() : g;
   }
 
   /** Keep only primitives where keep[p] is truthy. Optionally drop points no longer referenced. */
@@ -299,6 +371,9 @@ export class Geometry {
     g.primStart = Int32Array.from(starts);
     g.vertexPoint = Int32Array.from(vtxIdx, (v) => this.vertexPoint[v]);
     g.primGroups = new Map([...this.primGroups].map(([k, m]) => [k, Uint8Array.from(primIdx, (p) => m[p])]));
+    g.vertexGroups = gatherGroups(this.vertexGroups, vtxIdx);
+    // edges that no longer bound any primitive leave their edge groups
+    g.edgeGroups = pruneEdgeGroups(g, this.edgeGroups);
     return removeUnusedPoints ? g.removeUnusedPoints() : g;
   }
 
@@ -339,6 +414,8 @@ export class Geometry {
     g.primClosed = Uint8Array.from(primIdx, (p) => this.primClosed[p]);
     g.pointGroups = new Map([...this.pointGroups].map(([k, m]) => [k, Uint8Array.from(ptIdx, (i) => m[i])]));
     g.primGroups = new Map([...this.primGroups].map(([k, m]) => [k, Uint8Array.from(primIdx, (p) => m[p])]));
+    g.vertexGroups = gatherGroups(this.vertexGroups, vtxIdx);
+    if (this.edgeGroups.size) g.edgeGroups = pruneEdgeGroups(g, new Map([...this.edgeGroups].map(([k, e]) => [k, e.remap(remap)])));
     g.volumes = this.volumes.slice();
     return g;
   }
@@ -377,9 +454,52 @@ export class Geometry {
     out.primStart[nprim] = nv;
     out.pointGroups = mergeGroups(geos.map((g) => [g.pointGroups, g.numPoints] as const), np);
     out.primGroups = mergeGroups(geos.map((g) => [g.primGroups, g.numPrims] as const), nprim);
+    out.vertexGroups = mergeGroups(geos.map((g) => [g.vertexGroups, g.numVertices] as const), nv);
+    out.edgeGroups = mergeEdgeGroups(geos.map((g) => [g.edgeGroups, g.numPoints] as const));
     out.volumes = geos.flatMap((g) => g.volumes);
     return out;
   }
+}
+
+function gatherGroups(groups: Map<string, Uint8Array>, idx: ArrayLike<number>): Map<string, Uint8Array> {
+  const out = new Map<string, Uint8Array>();
+  for (const [k, m] of groups) out.set(k, Uint8Array.from(idx, (i) => (i >= 0 ? m[i] : 0)));
+  return out;
+}
+
+/** Keep only pairs that are still an edge of some prim of g (used after primitives were deleted). */
+function pruneEdgeGroups(g: Geometry, groups: Map<string, EdgeSet>): Map<string, EdgeSet> {
+  const out = new Map<string, EdgeSet>();
+  if (!groups.size) return out;
+  const live = new Set<number>();
+  for (let p = 0; p < g.numPrims; p++) {
+    const s = g.primStart[p], e = g.primStart[p + 1];
+    const last = g.primClosed[p] ? e : e - 1;
+    for (let v = s; v < last; v++) {
+      const a = g.vertexPoint[v], b = g.vertexPoint[v + 1 < e ? v + 1 : s];
+      if (a !== b) live.add(a < b ? a * EDGE_KEY_LIMIT + b : b * EDGE_KEY_LIMIT + a);
+    }
+  }
+  for (const [k, set] of groups) {
+    const ns = new EdgeSet();
+    for (const key of set.keyIterator()) if (live.has(key)) ns.addKey(key);
+    out.set(k, ns);
+  }
+  return out;
+}
+
+function mergeEdgeGroups(list: (readonly [Map<string, EdgeSet>, number])[]): Map<string, EdgeSet> {
+  const out = new Map<string, EdgeSet>();
+  let off = 0;
+  for (const [m, np] of list) {
+    for (const [k, set] of m) {
+      let dst = out.get(k);
+      if (!dst) { dst = new EdgeSet(); out.set(k, dst); }
+      for (const [a, b] of set) dst.add(a + off, b + off);
+    }
+    off += np;
+  }
+  return out;
 }
 
 const DISPLAY_ATTRIBS = ['Cd', 'Alpha', 'N', 'uv'];
@@ -484,6 +604,16 @@ class GrowAttr {
  * Incrementally builds new geometry. Elements can carry provenance (which source
  * point / vertex / prim they came from, or a weighted blend) and every attribute and
  * group of the source geometry is interpolated onto the result automatically.
+ *
+ * Group inheritance on build():
+ *  - point / prim groups: membership of the dominant source (largest blend weight).
+ *  - vertex groups: a new vertex is a member only if it copies a single source vertex
+ *    (a number, or a blend with one non-zero weight) that is a member. Blended corners drop out.
+ *  - edge groups: a new edge (two consecutive vertices of a new prim) is a member if each of its
+ *    two points copies a single source point and those two source points form a grouped edge.
+ *    Edges touching blended points drop out (nodes that split edges, like subdivide, add their
+ *    child edges explicitly with edgeGroup()).
+ * Groups the node creates with group()/edgeGroup() replace same-named inherited groups.
  */
 export class GeoBuilder {
   src: Geometry | null;
@@ -497,6 +627,8 @@ export class GeoBuilder {
   private grow = { point: new Map<string, GrowAttr>(), vertex: new Map<string, GrowAttr>(), prim: new Map<string, GrowAttr>() };
   private grpPoint = new Map<string, Set<number>>();
   private grpPrim = new Map<string, Set<number>>();
+  private grpVertex = new Map<string, Set<number>>();
+  private grpEdge = new Map<string, EdgeSet>();
   /** Source attribute names to skip when interpolating. */
   skip = { point: new Set<string>(), vertex: new Set<string>(), prim: new Set<string>() };
   keepSrcGroups = true;
@@ -556,10 +688,18 @@ export class GeoBuilder {
     return a;
   }
 
-  group(cls: 'point' | 'prim', name: string): Set<number> {
-    const m = cls === 'point' ? this.grpPoint : this.grpPrim;
+  /** A point, prim or vertex group created by the node (indices of new elements). */
+  group(cls: MaskGroupClass, name: string): Set<number> {
+    const m = cls === 'point' ? this.grpPoint : cls === 'prim' ? this.grpPrim : this.grpVertex;
     let s = m.get(name);
     if (!s) { s = new Set(); m.set(name, s); }
+    return s;
+  }
+
+  /** An edge group created by the node (pairs of new point indices). */
+  edgeGroup(name: string): EdgeSet {
+    let s = this.grpEdge.get(name);
+    if (!s) { s = new EdgeSet(); this.grpEdge.set(name, s); }
     return s;
   }
 
@@ -596,9 +736,61 @@ export class GeoBuilder {
       for (const i of s) m[i] = 1;
       g.primGroups.set(k, m);
     }
+    g.vertexGroups = new Map();
+    g.edgeGroups = new Map();
+    if (src && this.keepSrcGroups) {
+      if (src.vertexGroups.size) {
+        const single = Int32Array.from(this.vtxSrc, singleSource);
+        for (const [k, m] of src.vertexGroups) {
+          const out = new Uint8Array(nv);
+          for (let v = 0; v < nv; v++) if (single[v] >= 0 && single[v] < m.length) out[v] = m[single[v]];
+          g.vertexGroups.set(k, out);
+        }
+      }
+      if (src.edgeGroups.size) for (const [k, s] of inheritEdgeGroups(src.edgeGroups, this.ptSrc, g)) g.edgeGroups.set(k, s);
+    }
+    for (const [k, s] of this.grpVertex) {
+      const m = new Uint8Array(nv);
+      for (const i of s) m[i] = 1;
+      g.vertexGroups.set(k, m);
+    }
+    for (const [k, s] of this.grpEdge) g.edgeGroups.set(k, s.clone());
     g.volumes = this.volumes;
     return g;
   }
+}
+
+/** The single source element of a provenance record, or -1 for blends of several sources / none. */
+function singleSource(s: Src): number {
+  if (s === null || s === undefined) return -1;
+  if (typeof s === 'number') return s >= 0 ? s : -1;
+  let found = -1;
+  for (let k = 0; k < s.i.length; k++) {
+    if (!(s.w[k] !== 0)) continue;
+    if (found >= 0 && s.i[k] !== found) return -1;
+    found = s.i[k];
+  }
+  return found;
+}
+
+/** Edge-group inheritance rule of GeoBuilder.build (see the class comment). */
+function inheritEdgeGroups(groups: Map<string, EdgeSet>, ptSrc: Src[], g: Geometry): Map<string, EdgeSet> {
+  const single = Int32Array.from(ptSrc, singleSource);
+  const out = new Map<string, EdgeSet>();
+  const list = [...groups];
+  for (const [k] of list) out.set(k, new EdgeSet());
+  for (let p = 0; p < g.numPrims; p++) {
+    const s = g.primStart[p], e = g.primStart[p + 1];
+    const last = g.primClosed[p] ? e : e - 1;
+    for (let v = s; v < last; v++) {
+      const a = g.vertexPoint[v], b = g.vertexPoint[v + 1 < e ? v + 1 : s];
+      if (a === b) continue;
+      const sa = single[a], sb = single[b];
+      if (sa < 0 || sb < 0 || sa === sb) continue;
+      for (const [k, set] of list) if (set.has(sa, sb)) out.get(k)!.add(a, b);
+    }
+  }
+  return out;
 }
 
 function dominant(s: Src): number {
