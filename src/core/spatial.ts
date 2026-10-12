@@ -229,6 +229,10 @@ export class TriBVH {
   nodes: Float64Array; // per node: minx miny minz maxx maxy maxz
   child: Int32Array; // per node: left (or -1-leafStart), right (or leafCount)
   nodeCount = 0;
+  /** point index of each triangle corner (3 per triangle) */
+  private triPt: Int32Array;
+  /** per triangle edge k (corner k → k+1): the triangle across it, -1 = none (boundary), -2 = several; built on demand */
+  private edgeNbr: Int32Array | null = null;
 
   constructor(g: Geometry) {
     const { tris, triPrim } = triangulate(g);
@@ -236,9 +240,11 @@ export class TriBVH {
     this.T = new Float64Array(nt * 9);
     this.triPrim = triPrim;
     this.triVtx = tris;
+    this.triPt = new Int32Array(nt * 3);
     for (let t = 0; t < nt; t++)
       for (let k = 0; k < 3; k++) {
-        const p = g.vertexPoint[tris[t * 3 + k]] * 3;
+        const pt = g.vertexPoint[tris[t * 3 + k]], p = pt * 3;
+        this.triPt[t * 3 + k] = pt;
         this.T[t * 9 + k * 3] = P[p]; this.T[t * 9 + k * 3 + 1] = P[p + 1]; this.T[t * 9 + k * 3 + 2] = P[p + 2];
       }
     this.order = new Int32Array(nt);
@@ -361,6 +367,86 @@ export class TriBVH {
     return id;
   }
 
+  /** Triangles across each triangle edge, from the corner point indices (welded edges only). */
+  private neighbours(): Int32Array {
+    if (this.edgeNbr) return this.edgeNbr;
+    const tp = this.triPt, ne = tp.length, nbr = new Int32Array(ne).fill(-1);
+    let np = 0;
+    for (let i = 0; i < ne; i++) if (tp[i] >= np) np = tp[i] + 1;
+    // half-edges listed under their lower point; a match links the two triangles
+    const head = new Int32Array(np).fill(-1), next = new Int32Array(ne).fill(-1);
+    for (let h = 0; h < ne; h++) {
+      const t = (h / 3) | 0, k = h - t * 3;
+      const a = tp[h], b = tp[t * 3 + (k + 1) % 3];
+      if (a === b) continue;
+      const lo = a < b ? a : b, hi = a < b ? b : a;
+      let m = head[lo];
+      while (m >= 0) {
+        const mt = (m / 3) | 0, mk = m - mt * 3, ma = tp[m], mb = tp[mt * 3 + (mk + 1) % 3];
+        if ((ma < mb ? mb : ma) === hi) break;
+        m = next[m];
+      }
+      if (m < 0) { next[h] = head[lo]; head[lo] = h; continue; }
+      const mt = (m / 3) | 0;
+      if (nbr[m] === -1) { nbr[m] = t; nbr[h] = mt; }
+      else {
+        // a third triangle on the edge: non-manifold, no single neighbour
+        if (nbr[m] >= 0) { const o = nbr[m]; for (let q = o * 3; q < o * 3 + 3; q++) if (nbr[q] === mt) nbr[q] = -2; }
+        nbr[m] = -2; nbr[h] = -2;
+      }
+    }
+    return (this.edgeNbr = nbr);
+  }
+
+  /** Sign of triangle t's normal along d (+1, -1, or 0 when the triangle is edge-on or degenerate). */
+  private facing(t: number, dx: number, dy: number, dz: number): number {
+    const T = this.T, o = t * 9;
+    const ux = T[o + 3] - T[o], uy = T[o + 4] - T[o + 1], uz = T[o + 5] - T[o + 2];
+    const vx = T[o + 6] - T[o], vy = T[o + 7] - T[o + 1], vz = T[o + 8] - T[o + 2];
+    const f = (uy * vz - uz * vy) * dx + (uz * vx - ux * vz) * dy + (ux * vy - uy * vx) * dz;
+    return f > 0 ? 1 : f < 0 ? -1 : 0;
+  }
+
+  /**
+   * Watertight test of the ray o + t·d against triangle t (Woop, Benthin, Wald 2013, two-sided). The vertices are sheared
+   * into the ray's frame and each edge function is a 2D cross product of the edge's two vertices, so the edge function of
+   * a shared edge is computed from the same two numbers in both triangles and is the exact negative in a consistently
+   * wound neighbour: no ray slips between them. An edge function of exactly 0 (the ray meets the edge or a vertex):
+   *  - on an edge shared with a triangle that faces the same way along the ray, it takes the sign it would have with the
+   *    ray moved by a fixed infinitesimal offset (simulation of simplicity), so such a ray is inside exactly one of the
+   *    triangles around the edge or vertex;
+   *  - on a boundary edge, or one whose neighbour faces the other way or is edge-on (a silhouette), it does not
+   *    constrain: boundaries and silhouettes stay closed, as before.
+   * A ray in the triangle's plane is the caller's (parallel) case.
+   */
+  crossesTri(t: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): boolean {
+    const T = this.T, o = t * 9;
+    const ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy, az = dz < 0 ? -dz : dz;
+    let kx: number, ky: number, kz: number;
+    if (ax >= ay && ax >= az) { kz = 0; kx = 1; ky = 2; } else if (ay >= az) { kz = 1; kx = 2; ky = 0; } else { kz = 2; kx = 0; ky = 1; }
+    const dk = axisOf(kz, dx, dy, dz);
+    if (dk < 0) { const s = kx; kx = ky; ky = s; }
+    const sx = axisOf(kx, dx, dy, dz) / dk, sy = axisOf(ky, dx, dy, dz) / dk;
+    const okx = axisOf(kx, ox, oy, oz), oky = axisOf(ky, ox, oy, oz), okz = axisOf(kz, ox, oy, oz);
+    const az0 = T[o + kz] - okz, bz0 = T[o + 3 + kz] - okz, cz0 = T[o + 6 + kz] - okz;
+    const Ax = T[o + kx] - okx - sx * az0, Ay = T[o + ky] - oky - sy * az0;
+    const Bx = T[o + 3 + kx] - okx - sx * bz0, By = T[o + 3 + ky] - oky - sy * bz0;
+    const Cx = T[o + 6 + kx] - okx - sx * cz0, Cy = T[o + 6 + ky] - oky - sy * cz0;
+    // edge functions at the 2D origin (the ray) of the edges C→B (triangle edge 1), A→C (edge 2), B→A (edge 0)
+    let U = Cx * By - Cy * Bx, V = Ax * Cy - Ay * Cx, W = Bx * Ay - By * Ax;
+    if (U === 0 || V === 0 || W === 0) {
+      const nbr = this.neighbours(), face = this.facing(t, dx, dy, dz);
+      const shared = (k: number) => { const n = nbr[t * 3 + k]; return n === -2 || (n >= 0 && face !== 0 && this.facing(n, dx, dy, dz) === face); };
+      // sign for the ray moved by (ε, ε²): -(Qy - Py), or (Qx - Px) for an edge along x; NaN = unconstrained
+      if (U === 0) U = shared(1) ? (By !== Cy ? Cy - By : Bx - Cx) : NaN;
+      if (V === 0) V = shared(2) ? (Cy !== Ay ? Ay - Cy : Cx - Ax) : NaN;
+      if (W === 0) W = shared(0) ? (Ay !== By ? By - Ay : Ax - Bx) : NaN;
+      const pos = U > 0 || V > 0 || W > 0, neg = U < 0 || V < 0 || W < 0;
+      return pos !== neg;
+    }
+    return (U > 0 && V > 0 && W > 0) || (U < 0 && V < 0 && W < 0);
+  }
+
   private boxDist2(n: number, x: number, y: number, z: number) {
     const b = this.nodes, i = n * 6;
     const dx = Math.max(b[i] - x, 0, x - b[i + 3]);
@@ -408,7 +494,7 @@ export class TriBVH {
         const s = -1 - c0;
         for (let i = s; i < s + c1; i++) {
           const t = this.order[i];
-          const r = rayTri(this.T, t * 9, ox, oy, oz, dx, dy, dz);
+          const r = rayTri(this, this.T, t * 9, ox, oy, oz, dx, dy, dz);
           if (r && r[0] > tmin && r[0] < bestT) { bestT = r[0]; bestTri = t; bu = r[1]; bv = r[2]; }
         }
       } else stack.push(c0, c1);
@@ -430,7 +516,7 @@ export class TriBVH {
       if (c0 < 0) {
         const s = -1 - c0;
         for (let i = s; i < s + c1; i++) {
-          const r = rayTri(this.T, this.order[i] * 9, ox, oy, oz, dx, dy, dz);
+          const r = rayTri(this, this.T, this.order[i] * 9, ox, oy, oz, dx, dy, dz);
           if (r && r[0] > 0) hits.push(r[0]);
         }
       } else stack.push(c0, c1);
@@ -516,8 +602,17 @@ function selectKey(o: Int32Array, l: number, r: number, k: number, cen: Float64A
   }
 }
 
-/** Möller–Trumbore, two-sided. Returns [t, u, v] or null. */
-function rayTri(T: Float64Array, o: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number) {
+/**
+ * Barycentric margin around a triangle's edges: a Möller–Trumbore hit whose coordinates are within it of an edge (or
+ * outside by less) is decided by TriBVH.crossesTri instead, so rays through shared edges and vertices are handled
+ * watertight; everywhere else the Möller–Trumbore verdict stands (it agrees there).
+ */
+export const EDGE_BAND = 1e-9;
+
+const axisOf = (k: number, x: number, y: number, z: number) => (k === 0 ? x : k === 1 ? y : z);
+
+/** Möller–Trumbore, two-sided, watertight on edges (see EDGE_BAND). Returns [t, u, v] or null. */
+function rayTri(bvh: TriBVH, T: Float64Array, o: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number) {
   const e1x = T[o + 3] - T[o], e1y = T[o + 4] - T[o + 1], e1z = T[o + 5] - T[o + 2];
   const e2x = T[o + 6] - T[o], e2y = T[o + 7] - T[o + 1], e2z = T[o + 8] - T[o + 2];
   const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
@@ -526,10 +621,11 @@ function rayTri(T: Float64Array, o: number, ox: number, oy: number, oz: number, 
   const inv = 1 / det;
   const tx = ox - T[o], ty = oy - T[o + 1], tz = oz - T[o + 2];
   const u = (tx * px + ty * py + tz * pz) * inv;
-  if (u < 0 || u > 1) return null;
+  if (u < -EDGE_BAND || u > 1 + EDGE_BAND) return null;
   const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
   const v = (dx * qx + dy * qy + dz * qz) * inv;
-  if (v < 0 || u + v > 1) return null;
+  if (v < -EDGE_BAND || u + v > 1 + EDGE_BAND) return null;
+  if ((u < EDGE_BAND || v < EDGE_BAND || u + v > 1 - EDGE_BAND) && !bvh.crossesTri(o / 9, ox, oy, oz, dx, dy, dz)) return null;
   const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
   return [t, u, v];
 }

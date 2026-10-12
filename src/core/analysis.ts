@@ -12,7 +12,7 @@ import { Geometry } from './geometry.ts';
 import type { Vec3 } from './math.ts';
 import { buildEdges, connectivity, pointNeighbors, triangulate } from './topology.ts';
 import { halfEdges } from './halfedge.ts';
-import { KDTree, TriBVH } from './spatial.ts';
+import { EDGE_BAND, KDTree, TriBVH } from './spatial.ts';
 import { hash32, hashNumber } from './random.ts';
 
 // ---------------------------------------------------------------- small helpers
@@ -269,7 +269,7 @@ export class RayScene {
     return tn < 0 ? 0 : tn;
   }
 
-  /** Möller–Trumbore against triangle tri: t or -1. */
+  /** Möller–Trumbore against triangle tri, watertight on edges (EDGE_BAND, TriBVH.crossesTri): t or -1. */
   private hitTri(tri: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): number {
     const T = this.T, o = tri * 9;
     const e1x = T[o + 3] - T[o], e1y = T[o + 4] - T[o + 1], e1z = T[o + 5] - T[o + 2];
@@ -280,10 +280,11 @@ export class RayScene {
     const inv = 1 / det;
     const tx = ox - T[o], ty = oy - T[o + 1], tz = oz - T[o + 2];
     const u = (tx * px + ty * py + tz * pz) * inv;
-    if (u < 0 || u > 1) return -1;
+    if (u < -EDGE_BAND || u > 1 + EDGE_BAND) return -1;
     const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
     const v = (dx * qx + dy * qy + dz * qz) * inv;
-    if (v < 0 || u + v > 1) return -1;
+    if (v < -EDGE_BAND || u + v > 1 + EDGE_BAND) return -1;
+    if ((u < EDGE_BAND || v < EDGE_BAND || u + v > 1 - EDGE_BAND) && !this.bvh.crossesTri(tri, ox, oy, oz, dx, dy, dz)) return -1;
     return (e2x * qx + e2y * qy + e2z * qz) * inv;
   }
 
@@ -426,9 +427,10 @@ export class RayScene {
           if (det > -1e-30 && det < 1e-30) continue;
           const inv = 1 / det;
           const u = (tx * px + ty * py + tz * pz) * inv;
-          if (u < 0 || u > 1) continue;
+          if (u < -EDGE_BAND || u > 1 + EDGE_BAND) continue;
           const v = (dx * qx + dy * qy + dz * qz) * inv;
-          if (v < 0 || u + v > 1) continue;
+          if (v < -EDGE_BAND || u + v > 1 + EDGE_BAND) continue;
+          if ((u < EDGE_BAND || v < EDGE_BAND || u + v > 1 - EDGE_BAND) && !this.bvh.crossesTri(order[i], ox, oy, oz, dx, dy, dz)) continue;
           const t = tnum * inv;
           if (t > 0 && t < tmax) { hit |= bit; mm &= ~bit; }
         }
@@ -500,9 +502,10 @@ export class RayScene {
             if (det > -1e-30 && det < 1e-30) continue;
             const inv = 1 / det;
             const u = (tx * px + ty * py + tz * pz) * inv;
-            if (u < 0 || u > 1) continue;
+            if (u < -EDGE_BAND || u > 1 + EDGE_BAND) continue;
             const v = (dx * qx + dy * qy + dz * qz) * inv;
-            if (v < 0 || u + v > 1) continue;
+            if (v < -EDGE_BAND || u + v > 1 + EDGE_BAND) continue;
+            if ((u < EDGE_BAND || v < EDGE_BAND || u + v > 1 - EDGE_BAND) && !this.bvh.crossesTri(order[i], ox, oy, oz, dx, dy, dz)) continue;
             const t = tnum * inv;
             if (t > 0 && t < best[k]) best[k] = t;
           }

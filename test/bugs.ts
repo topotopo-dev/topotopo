@@ -218,5 +218,100 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
     `boolean fixture cuts B out of A (${g?.numPrims} prims, from_a ${count('from_a')}, from_b ${count('from_b')})`, errs(r));
 }
 
+// ------------------------------------------------------------------ 6. watertight ray-triangle tests (P0-F)
+// A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
+// `ray` node lost points on seams and inside/outside parity counts went wrong.
+
+{
+  const { Geometry } = await import('../src/core/geometry.ts');
+  const { TriBVH } = await import('../src/core/spatial.ts');
+  const { RayScene } = await import('../src/core/analysis.ts');
+  const { rng } = await import('../src/core/random.ts');
+  const D = new Float64Array(96), ID = new Float64Array(96);
+  /** Every query of one ray: raycast hits, raycastAll / countHits count, nearest is finite, the packet test hits. */
+  const probe = (g: InstanceType<typeof Geometry>, o: number[], d: number[]) => {
+    const bvh = new TriBVH(g), sc = new RayScene(bvh);
+    D[0] = d[0]; D[1] = d[1]; D[2] = d[2];
+    for (let c = 0; c < 3; c++) ID[c] = 1 / (d[c] || 1e-300);
+    return {
+      hit: !!bvh.raycast(o[0], o[1], o[2], d[0], d[1], d[2], Infinity, 0),
+      all: bvh.raycastAll(o[0], o[1], o[2], d[0], d[1], d[2]).length,
+      count: sc.countHits(o[0], o[1], o[2], d[0], d[1], d[2]),
+      near: sc.nearest(o[0], o[1], o[2], d[0], d[1], d[2]) < Infinity,
+      packet: sc.occludedPacket(o[0], o[1], o[2], D, ID, 1, Infinity) === 1,
+    };
+  };
+  const once = (r: ReturnType<typeof probe>) => r.hit && r.near && r.packet && r.all === 1 && r.count === 1;
+  const show = (r: ReturnType<typeof probe>) => JSON.stringify(r);
+
+  // two-triangle quads (shared diagonal 0-2), tilted and non-planar but not folded along the ray, rays through the seam
+  const r = rng(11);
+  let rays = 0, bad = 0, firstBad = '';
+  for (let k = 0; k < 3000; k++) {
+    const pts = Array.from({ length: 12 }, () => r() * 2 - 1);
+    const g = new Geometry({ positions: pts, prims: [[0, 1, 2], [0, 2, 3]] });
+    const t = r(), q = [0, 1, 2].map((c) => pts[c] + (pts[6 + c] - pts[c]) * t);
+    const o = [q[0] + r() * 4 - 2, q[1] + 3, q[2] + r() * 4 - 2], d = [q[0] - o[0], q[1] - o[1], q[2] - o[2]];
+    const facing = (i: number, j: number, l: number) => {
+      const u = [0, 1, 2].map((c) => pts[j * 3 + c] - pts[i * 3 + c]), v = [0, 1, 2].map((c) => pts[l * 3 + c] - pts[i * 3 + c]);
+      return Math.sign((u[1] * v[2] - u[2] * v[1]) * d[0] + (u[2] * v[0] - u[0] * v[2]) * d[1] + (u[0] * v[1] - u[1] * v[0]) * d[2]);
+    };
+    if (facing(0, 1, 2) !== facing(0, 2, 3)) continue; // a folded silhouette may rightly give 0 or 2
+    rays++;
+    const res = probe(g, o, d);
+    if (!once(res)) { bad++; firstBad ||= `quad ${k}: ${show(res)}`; }
+  }
+  check(rays > 1000 && bad === 0, `rays down the seam of ${rays} two-triangle quads hit exactly one triangle`, `${bad} wrong; first: ${firstBad}`);
+
+  // exact seam of an axis-aligned quad: vertical rays through the diagonal
+  const quad = new Geometry({ positions: [-1, 0, -1, 1, 0, -1, 1, 0, 1, -1, 0, 1], prims: [[0, 1, 2], [0, 2, 3]] });
+  bad = 0; firstBad = '';
+  for (let k = 0; k <= 40; k++) {
+    const t = -1 + k / 20 + (k % 3) * 1e-3;
+    const res = probe(quad, [t, 2, t], [0, -1, 0]);
+    if (!(t > -1 && t < 1) || once(res)) continue;
+    bad++; firstBad ||= `t ${t}: ${show(res)}`;
+  }
+  check(bad === 0, 'vertical rays through the diagonal of a quad hit exactly one triangle', firstBad);
+
+  // a fan of 7 triangles around a vertex: rays through the centre vertex, vertical and tilted
+  const ring = [[1, 0.1], [0.6, 0.9], [-0.3, 1.1], [-1.2, 0.2], [-0.8, -0.9], [0.1, -1.3], [0.9, -0.7]];
+  const fanPos = [0.05, 0.02, -0.03, ...ring.flatMap(([x, z], i) => [x, 0.1 * Math.sin(i), z])];
+  const fan = new Geometry({ positions: fanPos, prims: ring.map((_, i) => [0, 1 + i, 1 + ((i + 1) % ring.length)]) });
+  bad = 0; firstBad = '';
+  for (const d of [[0, -1, 0], [0.3, -1, 0.2], [-0.5, -1, 0.1], [0.01, -1, -0.7], [1e-9, -1, 0]]) {
+    const o = [0.05 - d[0] * 2, 0.02 - d[1] * 2, -0.03 - d[2] * 2];
+    const res = probe(fan, o, d);
+    if (!once(res)) { bad++; firstBad ||= `dir ${d}: ${show(res)}`; }
+  }
+  check(bad === 0, 'rays through the centre vertex of a triangle fan hit exactly one triangle', firstBad);
+
+  // interior vertices and edge midpoints of a triangulated grid, and box corners seen from inside
+  const grid = (await engine.cook({ nodes: { g: { type: 'grid', params: { size: [3, 3], divisions: [5, 5] } }, t: { type: 'triangulate', in: ['g'] } }, output: 't' })).geo!;
+  bad = 0; firstBad = '';
+  for (let i = 0; i < grid.numPoints; i++) {
+    const x = grid.P[i * 3], z = grid.P[i * 3 + 2];
+    if (Math.abs(x) > 1.4 || Math.abs(z) > 1.4) continue;
+    const res = probe(grid, [x, 1, z], [0, -1, 0]);
+    if (!once(res)) { bad++; firstBad ||= `point ${i}: ${show(res)}`; }
+  }
+  check(bad === 0, 'vertical rays through the interior vertices of a triangulated grid hit exactly one triangle', firstBad);
+  const box = (await engine.cook({ nodes: { b: { type: 'box', params: { divisions: [2, 2, 2] } } }, output: 'b' })).geo!;
+  bad = 0; firstBad = '';
+  for (let i = 0; i < box.numPoints; i++) {
+    const res = probe(box, [0, 0, 0], [box.P[i * 3], box.P[i * 3 + 1], box.P[i * 3 + 2]]);
+    if (!once(res)) { bad++; firstBad ||= `point ${i}: ${show(res)}`; }
+  }
+  check(bad === 0, 'rays from inside a box through its vertices cross the surface exactly once', firstBad);
+
+  // the ray node projects every point above a grid's vertices, seams and boundary (boundaries stay closed)
+  const pr = await engine.cook({ nodes: {
+    g: { type: 'grid', params: { size: [2, 2], divisions: [4, 4] } }, t: { type: 'triangulate', in: ['g'] },
+    p: { type: 'point_grid', params: { counts: [9, 1, 9], size: [2, 0, 2], center: [0, 1, 0] } },
+    r: { type: 'ray', in: ['p', 't'], params: { delete_misses: true } },
+  }, output: 'r' });
+  check(pr.ok && pr.geo!.numPoints === 81, `ray node keeps all 81 points above a grid's vertices, seams and border (${pr.geo?.numPoints})`, errs(pr));
+}
+
 console.log(`bugs: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
