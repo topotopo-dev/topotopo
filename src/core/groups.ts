@@ -22,6 +22,7 @@
 //             angle>30  angle<=10          dihedral angle between the two polygons (degrees; boundary edges never match)
 //             length>0.5                   edge length
 //             border:top                   border of a prim group/pattern (sides used by exactly one selected polygon)
+//             loop:p3-7  ring:p3-7         edge loop / edge ring through each edge of the token after the colon
 //             group:name  edge:name        edge groups only; prim:name point:name vertex:name convert those groups
 //           @attr tests use the average of the two endpoints' point attributes; @edgenum.
 //           A bare name is an edge group first, then a keyword above, then a group of another class.
@@ -262,6 +263,17 @@ function edgeTokenMask(g: Geometry, t: string, L: EdgeList): Uint8Array {
     return m;
   }
   if (t.startsWith('@')) return adhocEdge(g, t.slice(1), L);
+  // edge loops / rings through the edges of another token: loop:p3-7, ring:rim
+  const walk = /^(loop|ring):(.+)$/i.exec(t);
+  if (walk) {
+    const seeds = edgeTokenMask(g, walk[2], L), he = halfEdges(g), loop = walk[1].toLowerCase() === 'loop';
+    for (let i = 0; i < n; i++) {
+      if (!seeds[i]) continue;
+      const w = loop ? he.edgeLoop(L.a[i], L.b[i]) : he.edgeRing(L.a[i], L.b[i]);
+      if (w) for (const e of w.edges) { const k = L.index.get(edgeKey(he.edgeA[e], he.edgeB[e])); if (k !== undefined) m[k] = 1; }
+    }
+    return m;
+  }
   const cmp = CMP_RE.exec(t);
   if (cmp) {
     const kind = cmp[1].toLowerCase(), op = cmp[2], val = Number(cmp[3]);
@@ -311,7 +323,7 @@ function edgeTokenMask(g: Geometry, t: string, L: EdgeList): Uint8Array {
   }
   if (!hit && !/[*?]/.test(name)) {
     const e = unknownGroup(g, 'edge', t);
-    e.message += '. Edge selectors: p3-7, p3-7-12 (chains), 2e1 (prim side), boundary, shared, angle>30, length<0.1, border:primgroup, 0-10 (edge index)';
+    e.message += '. Edge selectors: p3-7, p3-7-12 (chains), 2e1 (prim side), boundary, shared, angle>30, length<0.1, border:primgroup, loop:p3-7, ring:p3-7, 0-10 (edge index)';
     throw e;
   }
   return m;

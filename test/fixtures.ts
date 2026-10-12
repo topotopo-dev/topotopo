@@ -39,6 +39,8 @@ export const SRC: Record<string, NodeSpec> = {
   PROXY: { type: 'point_grid', params: { counts: [3, 3, 3], size: [1.2, 1.2, 1.2] } },
   PROXY_DEF: { type: 'bend', in: ['PROXY'], params: { angle: 60 } },
   NBRS: { type: 'attrib_array', in: ['GRID'], params: { mode: 'from_neighbours' } },
+  CUBE: { type: 'box' },
+  OPENTUBE: { type: 'tube', params: { cols: 12, caps: false } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -54,6 +56,7 @@ export const INPUTS: Record<string, string[]> = {
   soft_transform: ['GRID'], lattice: ['MESH', 'LATTICE_REST', 'LATTICE_DEF'], path_deform: ['ZBAR', 'CURVE'],
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
   attrib_array: ['NBRS'],
+  polysplit: ['BOX'], edge_divide: ['BOX'], dissolve: ['GRID'], polybridge: ['CUBE'], polyfill: ['OPENTUBE'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -77,6 +80,12 @@ export const PARAMS: Record<string, any> = {
   // input already has point int[] nbrs (from_neighbours); the fixture adds prim int[] pts
   attrib_array: { mode: 'from_group_points' },
   graph_ref: null,
+  knife: { origin: [0, 0.1, 0], direction: [0.3, 1, 0.2] },
+  polysplit: { count: 2 },
+  edge_divide: { group: 'ring:0', divisions: 3, connect: true },
+  dissolve: { group: '@P.x>0.1' },
+  edge_collapse: { group: '0-40:8' },
+  polybridge: { source: '@P.y>0.4', target: '@P.y<-0.4', divisions: 2, blend: 0.5, delete_inner_faces: true },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */

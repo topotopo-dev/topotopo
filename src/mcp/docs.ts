@@ -138,6 +138,8 @@ EDGE patterns (index ranges address the unique-edge list: first occurrence walki
   angle>30  angle<=5    dihedral angle between the two polygons in degrees (box edges = 90; boundary edges never match)
   length<0.1            edge length
   border:top            border of a prim group or pattern (sides used by exactly one selected polygon)
+  loop:p3-7  ring:p3-7  edge loop (straight through 4-valent quad points) / edge ring (opposite sides of quads) through
+                        each edge of the token after the colon, e.g. loop:rim, ring:0
   @P.y>0                attribute test on the average of the two endpoints' point attributes; @edgenum
   group:x edge:x        only edge groups      prim:x point:x vertex:x   convert a group of that class
   A bare name is an edge group first, then a keyword above, then a group of another class.
@@ -156,7 +158,9 @@ WRANGLE: @group_x works in vertices mode too; invertexgroup(i,"g",v) inedgegroup
   setedgegroup(0,"g",pt0,pt1,1). Scripts: lib.halfEdges(geo) (edge loops/rings, one-rings, boundaries), lib.EdgeSet,
   lib.evalEdgeGroup(geo, pattern), lib.convertSelection(geo, from, to, sel, include).
 Groups produced by nodes: poly_extrude front/side, extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides,
-clip above/below/cap, fill_holes filled, lsystem leaves/J/K/M, voronoi_fracture inside. Create custom ones with "group".`,
+clip above/below/cap, fill_holes filled, lsystem leaves/J/K/M, voronoi_fracture inside, knife cut (edge + point) and
+above/below, polysplit split (edge + point), edge_divide divided, polybridge bridge, polyfill fill, dissolve dissolved,
+edge_collapse collapsed. Create custom ones with "group".`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
 Classes: point (P and per-point data), vertex (per polygon corner: uv seams, hard normals), prim (per face/curve), detail (global).
@@ -274,6 +278,11 @@ Importing: the "file" node loads obj, stl, ply, glb/gltf, json (up_axis "z" conv
 8) Pipes: curve (smooth) → sweep (circle radius 0.05) or polywire.
 9) Panel greebles: grid → poly_extrude individual with group "@P.x>0" random → color by group via group/color nodes.
 10) Deformers: bend with a cage: geo → bound {divisions:[1,6,1]} → bend → lattice(geo, bent cage, divisions [1,6,1]); wrap along a curve: geo laid along +Z → path_deform(geo, curve) {stretch:true}; pull a spot: soft_transform {group, translate, radius}; drive a mesh by a coarse proxy: point_deform(geo, rest pts, deformed pts). Add rest before deforming so noise_displace/attrib_noise patterns stick.`,
+11) Hard-surface block-out: box → polysplit {edge:"length>1.2", count:2} (loop cuts; new points in point group "split")
+ → group_promote {group:"split", from:"point", to:"prim", include:"all", new_name:"band", delete_source:false}
+ → poly_extrude {group:"band", distance:0.1, inset:0.03} → bevel the rims (polybevel) or subdivide with creases. knife splits along a
+ plane with the cut in edge group "cut"; polybridge {source:"border:a", target:"border:b", delete_inner_faces:true} tunnels
+ between two face groups; polyfill {mode:"grid"} caps holes with quads; dissolve {group:"split"} removes loops again.`,
 };
 
 export function topicList() {

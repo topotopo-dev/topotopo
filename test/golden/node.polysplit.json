@@ -1,0 +1,40 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 42,
+      "prims": 40,
+      "vertices": 160,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": ["split"],
+      "point": ["split"],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "28f3540a116c0ce0",
+      "attributes": {
+        "group.edge.split": "c324422843d384ae",
+        "group.point.split": "ef71054f594980f5",
+        "vertex.uv": "dca1b1e5daa4671f"
+      },
+      "topology": "526eac35acf9832f"
+    }
+  },
+  "name": "node.polysplit",
+  "ok": true,
+  "source": "fixture for node type \"polysplit\" (test/fixtures.ts)",
+  "warnings": []
+}

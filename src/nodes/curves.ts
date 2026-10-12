@@ -750,7 +750,7 @@ defineNode({
   type: 'fill',
   category: 'curve',
   summary: 'Fill closed outlines into faces, cutting holes (even-odd), e.g. text outlines or nested shapes.',
-  aliases: ['polyfill', 'fill_curves'],
+  aliases: ['fill_curves', 'fill_outlines'],
   inputs: [{ name: 'outlines', desc: 'closed polygons/polylines in a plane' }],
   params: {
     rule: { type: 'enum', options: ['EvenOdd', 'NonZero'], default: 'EvenOdd', desc: 'fill rule for overlapping contours' },
