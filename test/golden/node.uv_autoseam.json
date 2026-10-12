@@ -18,12 +18,15 @@
       "volumes": 0
     },
     "groups": {
+      "edge": ["seams"],
       "point": [],
-      "prim": []
+      "prim": [],
+      "vertex": []
     },
     "hashes": {
       "P": "9ec54b8e97d6dcdc",
       "attributes": {
+        "group.edge.seams": "c324422843d384ae",
         "point.N": "3c28f9be0faf0b34",
         "point.seam": "7191d825e462b1df",
         "prim.chart": "d022dc8211ab1458"
