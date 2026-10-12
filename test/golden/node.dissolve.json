@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "uv:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0, 1],
+      "min": [-1, 0, -1]
+    },
+    "counts": {
+      "points": 30,
+      "prims": 19,
+      "vertices": 81,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["dissolved"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "e11deec3e4847bf9",
+      "attributes": {
+        "group.prim.dissolved": "861b6035ae5542af",
+        "point.uv": "8d8118f6ce61f538"
+      },
+      "topology": "bd3f960aeb2e1110"
+    }
+  },
+  "name": "node.dissolve",
+  "ok": true,
+  "source": "fixture for node type \"dissolve\" (test/fixtures.ts)",
+  "warnings": []
+}

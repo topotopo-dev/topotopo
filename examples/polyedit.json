@@ -1,0 +1,37 @@
+{
+  "description": "Polygon modelling with topology: a box with two loop cuts (polysplit), the band between them extruded and the result cut by a knife (both sides kept, coloured by side); a tube with a tunnel bridged between two holes (polybridge); a star-shaped hole filled with quads (polyfill); a grid whose central edges are dissolved before every face is extruded (dissolve).",
+  "nodes": {
+    "block": { "type": "box", "params": { "size": [1.4, 1, 1], "center": [-3, 0.5, 0] } },
+    "loops": { "type": "polysplit", "in": ["block"], "params": { "edge": "length>1.2", "count": 2 } },
+    "band": { "type": "group_promote", "in": ["loops"], "params": { "group": "split", "from": "point", "to": "prim", "include": "all", "new_name": "band", "delete_source": false } },
+    "raise": { "type": "poly_extrude", "in": ["band"], "params": { "group": "band", "distance": 0.12, "inset": 0.04 } },
+    "cut": { "type": "knife", "in": ["raise"], "params": { "origin": [-3, 0.5, 0], "direction": [0.8, 1, 0.3] } },
+    "paint_low": { "type": "color", "in": ["cut"], "params": { "class": "prim", "color": "#8d99ae" } },
+    "paint_high": { "type": "color", "in": ["paint_low"], "params": { "class": "prim", "color": "#ef8354", "group": "above" } },
+
+    "tube": { "type": "tube", "params": { "radius": 0.6, "height": 1.2, "rows": 3, "cols": 16, "center": [0, 0.6, 0] } },
+    "hole_a": { "type": "group", "in": ["tube"], "params": { "name": "hole_a", "pattern": "16" } },
+    "hole_b": { "type": "group", "in": ["hole_a"], "params": { "name": "hole_b", "pattern": "24" } },
+    "tunnel": { "type": "polybridge", "in": ["hole_b"], "params": { "source": "border:hole_a", "target": "border:hole_b", "divisions": 4, "delete_inner_faces": true } },
+    "tube_paint": { "type": "color", "in": ["tunnel"], "params": { "class": "prim", "color": "#4f9d69" } },
+    "tunnel_paint": { "type": "color", "in": ["tube_paint"], "params": { "class": "prim", "color": "#f6d55c", "group": "bridge" } },
+
+    "star_shape": { "type": "shape2d", "params": { "shape": "star", "radius": 0.8, "inner_radius": 0.4, "sides": 5 } },
+    "star_solid": { "type": "extrude", "in": ["star_shape"], "params": { "height": 0.4 } },
+    "star_open": { "type": "delete", "in": ["star_solid"], "params": { "group": "top" } },
+    "star_fill": { "type": "polyfill", "in": ["star_open"], "params": { "mode": "quads" } },
+    "star_move": { "type": "transform", "in": ["star_fill"], "params": { "translate": [3, 0, 0] } },
+    "star_paint": { "type": "color", "in": ["star_move"], "params": { "class": "prim", "color": "#5c7aea" } },
+    "fill_paint": { "type": "color", "in": ["star_paint"], "params": { "class": "prim", "color": "#e0e7ff", "group": "fill" } },
+
+    "plate": { "type": "grid", "params": { "size": [2, 2], "divisions": [8, 8], "center": [6, 0, 0] } },
+    "middle": { "type": "group", "in": ["plate"], "params": { "name": "middle", "bbox_min": [5.3, -1, -0.7], "bbox_max": [6.7, 1, 0.2] } },
+    "merge_faces": { "type": "dissolve", "in": ["middle"], "params": { "group": "prim:middle ^border:middle" } },
+    "tiles": { "type": "poly_extrude", "in": ["merge_faces"], "params": { "mode": "individual", "distance": 0.2, "inset": 0.03 } },
+    "tile_paint": { "type": "color", "in": ["tiles"], "params": { "class": "prim", "color": "#c9ada7" } },
+    "big_paint": { "type": "color", "in": ["tile_paint"], "params": { "class": "prim", "color": "#9a8c98", "group": "dissolved" } },
+
+    "out": { "type": "merge", "in": ["paint_high", "tunnel_paint", "fill_paint", "big_paint"] }
+  },
+  "output": "out"
+}

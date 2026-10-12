@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 156,
+      "prims": 308,
+      "vertices": 924,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": ["collapsed"],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "2f3a85f92e014fff",
+      "attributes": {
+        "group.point.collapsed": "9cd260c6709056bc",
+        "point.N": "eb479fa012870146"
+      },
+      "topology": "d7469504a4d0c872"
+    }
+  },
+  "name": "node.edge_collapse",
+  "ok": true,
+  "source": "fixture for node type \"edge_collapse\" (test/fixtures.ts)",
+  "warnings": []
+}

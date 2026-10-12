@@ -18,7 +18,7 @@ export interface ParamDef {
   options?: string[];
   aliases?: string[];
   /** for 'group' params: which element class the pattern selects */
-  groupClass?: 'point' | 'prim';
+  groupClass?: 'point' | 'prim' | 'vertex' | 'edge';
   /** GUI hint: hide behind an "advanced" fold */
   advanced?: boolean;
 }

@@ -40,6 +40,8 @@ src/core/      geometry model + algorithms (no I/O)
   topology.ts    normals (hard edges), triangulation (earcut), edges, connectivity, boundary loops, health report
   groups.ts      Houdini group patterns for all four classes ("top", "!top", "0-10", "@P.y>0", "p3-7", "angle>30", "border:top")
   groupconvert.ts  any/all conversion of selections between point, vertex, prim and edge
+  polyedit.ts    polygon-editing kernels: edge-point insertion + face splits (knife, polysplit, edge divide), plane chords,
+                 quad rings, chain ordering, bridge, hole fill (quad fan, Coons grid), dissolve, collapse
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
