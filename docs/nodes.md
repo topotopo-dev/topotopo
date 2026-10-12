@@ -569,7 +569,7 @@ Houdini Orient Along Curve plus the measure/attribute parts of Resample. Per poi
 | `frame` | bool | `false` |  |  | `orient`, `frames` | write point N (= tangent) and up (rotation-minimising), for copy_to_points/sweep |
 | `curvature` | bool | `false` |  |  |  | write point curvature (1/radius) |
 | `segment` | bool | `false` |  |  |  | write point int segment (edge / span index) |
-| `up` | vec3 | `[0,1,0]` |  |  |  | initial up of the frames (point attribute up is not overridden) |
+| `up` | vec3 | `[0,1,0]` |  |  |  | initial up of the rotation-minimising frames (an input point attribute up steers them per point instead) |
 | `ramp_attrib` | string | `""` |  |  | `attrib`, `name` | float point attribute to fill with ramp(curveu), e.g. "width" ("" = none) |
 | `ramp` | ramp | `[[0,1],[1,1]]` |  |  |  | value along the curve (u 0..1) for ramp_attrib |
 | `ramp_scale` | float | `1` |  |  |  | multiplier of the ramp values |
@@ -832,7 +832,7 @@ category: `curve` · aliases: `curve_offset`, `offset3d`, `polyoffset`
 
 Offset curves sideways in 3D (rotation-minimising frame or a fixed plane normal): rails, kerbs, parallel paths.
 
-Each edge moves by distance along its side vector up × direction (positive = left when looking down `up` with the curve heading away), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.
+Each edge moves by distance along its side vector up × direction (positive = to the left of the direction of travel, up being up), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.
 
 **Inputs**
 
@@ -844,11 +844,11 @@ Each edge moves by distance along its side vector up × direction (positive = le
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `distance` | float | `0.25` |  |  | `offset`, `dist`, `width` | side offset (negative = other side) |
+| `distance` | float | `0.25` |  |  | `offset`, `dist` | side offset, positive = left of the direction of travel (negative = right) |
 | `lift` | float | `0` |  |  | `height`, `up_offset` | offset along up (e.g. rail height) |
 | `frame` | enum | `"rmf"` |  | `rmf`, `plane` |  | rmf = rotation-minimising frame along each curve; plane = fixed up normal |
 | `up` | vec3 | `[0,1,0]` |  |  | `normal`, `plane_normal` | initial up (rmf) or the plane normal (plane) |
-| `corner` | enum | `"mitre"` |  | `mitre`, `round`, `bevel` | `join`, `miter` | outer corner style |
+| `corner` | enum | `"mitre"` |  | `mitre`, `round`, `bevel` | `join`, `corners` | outer corner style |
 | `mitre_limit` | float | `4` | 1.. |  | `miter_limit` | mitres longer than this × distance are bevelled |
 | `round_segments` | int | `4` | 1.. |  |  | segments per 90° of round corners |
 | `both` | bool | `false` |  |  | `both_sides`, `double` | also output the -distance offset (two rails; prim int side = +1 / -1) |
