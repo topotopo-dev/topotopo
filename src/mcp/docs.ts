@@ -233,7 +233,7 @@ MEASURE NODES (category measure) turn shape into attributes for masks and colour
   curvature   type mean|gaussian|principal_min|principal_max|convexity (1/m; normalize → 0..1) — wear on convex edges
   occlusion   mode occlusion → ao 0..1 | cavity → cavity 0..1 | thickness → metres (rays inward; closed meshes);
               optional occluder input — dirt in crevices, scatter masks under overhangs, thin-wall checks
-  distance    to a mesh surface, curves or points (input 2); signed (inside < 0), max_distance, extra → nearest_prim/uv/P
+  distance    to a mesh surface, curves or points (second input); signed (inside < 0), max_distance, extra → nearest_prim/uv/P
   e.g. {"type":"occlusion","in":["rock"]} → {"type":"color","params":{"mode":"ramp","attrib":"ao","range":[0,1]}}`,
 
   recipes: `RECIPES (copy, then adapt)

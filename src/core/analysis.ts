@@ -1029,11 +1029,30 @@ function segmentCrossesTri(T: Float64Array, ax: number, ay: number, az: number, 
 export function duplicatePoints(g: Geometry, tol: number): { count: number; mask: Uint8Array } {
   const n = g.numPoints, mask = new Uint8Array(n);
   if (n < 2) return { count: 0, mask };
-  const kd = new KDTree(g.P), P = g.P;
+  // grid of cells at least tol wide (and at most 1e5 per axis, so cell keys are exact integers): a point within
+  // tol of another lies in the same or a neighbouring cell
+  const P = g.P, t = Math.max(0, tol), t2 = t * t, b = g.bbox();
+  const R = 100000, ext = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
+  const cell = Math.max(t, ext / R, 1e-300), M = R + 3;
+  const key = (x: number, y: number, z: number) => (x * M + y) * M + z;
+  const head = new Map<number, number>(), next = new Int32Array(n).fill(-1);
+  const cx = new Int32Array(n), cy = new Int32Array(n), cz = new Int32Array(n);
   for (let i = 0; i < n; i++) {
-    if (mask[i]) continue;
-    const near = kd.within(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], Math.max(0, tol), 3);
-    for (const j of near) if (j !== i) { mask[i] = 1; mask[j] = 1; }
+    cx[i] = 1 + Math.floor((P[i * 3] - b.min[0]) / cell); cy[i] = 1 + Math.floor((P[i * 3 + 1] - b.min[1]) / cell); cz[i] = 1 + Math.floor((P[i * 3 + 2] - b.min[2]) / cell);
+    const k = key(cx[i], cy[i], cz[i]);
+    const h = head.get(k);
+    if (h !== undefined) next[i] = h;
+    head.set(k, i);
+  }
+  for (let i = 0; i < n; i++) {
+    const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      for (let j = head.get(key(cx[i] + dx, cy[i] + dy, cz[i] + dz)) ?? -1; j >= 0; j = next[j]) {
+        if (j <= i) break; // chains run from the highest index down
+        const ex = P[j * 3] - x, ey = P[j * 3 + 1] - y, ez = P[j * 3 + 2] - z;
+        if (ex * ex + ey * ey + ez * ez <= t2) { mask[i] = 1; mask[j] = 1; }
+      }
+    }
   }
   let count = 0;
   for (let i = 0; i < n; i++) count += mask[i];
