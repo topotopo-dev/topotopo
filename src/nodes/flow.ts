@@ -5,17 +5,24 @@ import { NodeError } from '../graph/types.ts';
 import { connectivity } from '../core/topology.ts';
 import { stableStringify } from '../graph/engine.ts';
 import { hashString } from '../core/random.ts';
-import { importGeometry } from '../io/import.ts';
+import { importFormatFromPath, importGeometryAsync } from '../io/import.ts';
+import { mergeMaterialTables, writeMaterials } from '../core/materials.ts';
 import { fusePoints } from './transform.ts';
 
 defineNode({
   type: 'merge',
   category: 'flow',
-  summary: 'Combine any number of inputs into one geometry (attributes and groups are unioned).',
+  summary: 'Combine any number of inputs into one geometry (attributes, groups and material tables are unioned).',
   aliases: ['combine', 'join'],
   inputs: [{ name: 'inputs', desc: 'any number of geometries', multi: true }],
   params: {},
-  cook: ({ inputs }) => Geometry.merge(inputs.filter((g): g is Geometry => !!g)),
+  cook: ({ inputs }) => {
+    const geos = inputs.filter((g): g is Geometry => !!g);
+    const out = Geometry.merge(geos);
+    const table = mergeMaterialTables(geos);
+    if (Object.keys(table).length) writeMaterials(out, table);
+    return out;
+  },
 });
 
 defineNode({
@@ -306,22 +313,22 @@ defineNode({
 defineNode({
   type: 'file',
   category: 'io',
-  summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, or polyforge JSON. Z-up files can be converted.',
+  summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON or polyforge JSON. Z-up files can be converted.',
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {
     path: { type: 'path', default: '', desc: 'file path (relative to the workspace) or URL', aliases: ['file', 'filename'] },
-    format: { type: 'enum', options: ['auto', 'obj', 'stl', 'ply', 'glb', 'gltf', 'json'], default: 'auto', desc: 'file format (auto = by extension)' },
+    format: { type: 'enum', options: ['auto', 'obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'csv', 'pointsjson'], default: 'auto', desc: 'file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
     weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans)' },
   },
   signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
-  async cook({ p, engine }) {
+  async cook({ p, engine, warn }) {
     if (!p.path) throw new NodeError('path is empty');
     const bytes = await engine.host.readFile(p.path).catch((e: any) => { throw new NodeError(`cannot read "${p.path}": ${e.message}`); });
-    const fmt = p.format === 'auto' ? (String(p.path).split('?')[0].split('.').pop() ?? '').toLowerCase() : p.format;
-    const g = importGeometry(bytes, fmt);
+    const fmt = p.format === 'auto' ? importFormatFromPath(p.path) : p.format;
+    const g = await importGeometryAsync(bytes, fmt, { path: p.path, readFile: (f) => engine.host.readFile(f), warn });
     if (p.up_axis === 'z' || p.scale !== 1) {
       const P = g.P;
       for (let i = 0; i < P.length; i += 3) {
