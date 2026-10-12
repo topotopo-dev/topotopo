@@ -34,9 +34,12 @@ the human side can be pure browser with no install. Every Node-specific capabili
 
 ```
 src/core/      geometry model + algorithms (no I/O)
-  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, groups, SDF volumes), GeoBuilder
-  topology.ts    normals, triangulation (earcut), edges, connectivity, boundary loops, health report
-  groups.ts      Houdini group patterns ("top", "!top", "0-10", "@P.y>0", "@name=piece*")
+  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF volumes), GeoBuilder
+  edges.ts       EdgeSet (unordered point pairs, integer keys), unique-edge list
+  halfedge.ts    half-edge mesh derived on demand and cached per Geometry: loops, rings, one-rings, boundaries, dihedral angles
+  topology.ts    normals (hard edges), triangulation (earcut), edges, connectivity, boundary loops, health report
+  groups.ts      Houdini group patterns for all four classes ("top", "!top", "0-10", "@P.y>0", "p3-7", "angle>30", "border:top")
+  groupconvert.ts  any/all conversion of selections between point, vertex, prim and edge
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
@@ -63,11 +66,27 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   CSR (`primStart`, `vertexPoint`). **vertices** are polygon corners, which carry UV seams and hard normals.
   **detail** holds one value per geometry.
 - Attributes are typed arrays (float/int with tuple size 1–16, or strings) with Houdini default values.
-- **Point and prim groups** are byte masks.
+- **Groups exist for all four Houdini classes.** Point, vertex and prim groups are byte masks (one byte per element).
+  **Edge groups** are `EdgeSet`s of unordered point pairs (`edgeKey(a, b) = min·2^26 + max`, a safe integer), the
+  representation Houdini uses. An edge needs no id of its own, so edge groups survive anything that keeps point
+  numbers (transforms, deformers, attribute nodes). Point renumbering remaps them: `subsetPoints`, `fuse` and `sort`
+  remap, `merge` and copies offset, and deleting prims drops the pairs that no longer bound a prim. Group patterns cover all four
+  classes (`p3-7`, chains, `boundary`, `angle>30`, `border:grp` for edges), and naming a group of another class
+  converts it with Houdini's any/all incidence rules (`groupconvert.ts`).
+- **Half-edge structure.** `halfEdges(g)` derives a half-edge mesh from the closed polygons as typed arrays: origin,
+  face, next, prev, twin, per-point and per-face entry points, and an undirected edge index. It is built lazily and
+  cached per `Geometry` object in a `WeakMap`. Geometry is immutable once cooked, so the cache stays valid; it is also
+  revalidated against the identity of the topology arrays. Non-manifold edges and inconsistent winding are recorded
+  rather than thrown. Loops, rings, one-rings, boundary walks and dihedral angles are queries on it, and modelling
+  operations such as bevel, polysplit and bridge build on it. Edge ids follow first occurrence while walking prims,
+  which is the order that edge index ranges in patterns address.
 - **SDF volumes** travel inside the geometry as lazy sample functions, so implicit modelling composes like any other node.
 - **GeoBuilder** records the *provenance* of each new element: a source index or a weighted blend. On `build()`,
   every attribute and group of the source is interpolated automatically. That is why subdivide, extrude, resample,
-  clip, sweep and the rest preserve `uv`, `Cd` and custom attributes without per-node code.
+  clip, sweep and the rest preserve `uv`, `Cd` and custom attributes without per-node code. Point and prim groups
+  follow the dominant source. A vertex group follows corners that copy a single source vertex. An edge group follows
+  new edges whose two points each copy a single source point when those two points formed a grouped edge; blended
+  points drop out. Nodes that split edges add the child edges explicitly (subdivide does).
 
 ### Cooking
 - Graphs are pulled lazily from the output node, so unconnected branches cost nothing.
@@ -126,7 +145,7 @@ sweeping, scatter with blue-noise sample elimination, BVH/KD-tree, renderer, exp
 - Packed primitives and instancing. Copies would stay as references, and export would use glTF `EXT_mesh_gpu_instancing`
   or USD point instancers, so forests of a million trees stay cheap. This maps directly to Unreal ISM/HISM and PCG.
 - UV unwrapping via xatlas (WASM), plus UV layout.
-- PolyBevel (edge chamfer/fillet) and edge groups, and PolySplit/knife.
+- PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
 - Heightfield node set: erosion, masks, scatter by mask, terrain → Unreal Landscape heightmap export.
 - Curve toolkit: NURBS/Bezier evaluation, fillet, curve booleans, path offset in 3D.
 - Performance: move hot kernels (sdf sampling, rasteriser, subdivide) to Workers, WebGPU or WASM; add multithreaded cooking of

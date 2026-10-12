@@ -369,7 +369,7 @@ defineNode({
     crease_weight: { type: 'float', default: 10, min: 0, desc: 'sharpness for the creases edges (>= levels = fully sharp; 1 = sharp for one level; 0.5 = half way)', aliases: ['creaseweight', 'sharpness'] },
     crease_attrib: { type: 'string', default: 'creaseweight', desc: 'vertex/point/prim attribute with crease weights ("" = ignore)' },
   },
-  example: { type: 'subdivide', params: { levels: 3, creases: 'p2-3-7-6-2', crease_weight: 10 } },
+  example: { type: 'subdivide', params: { levels: 3, creases: 'p2-1-6-5-2', crease_weight: 10 } },
   cook: ({ input, p }) => {
     let g = input(0);
     if (g.numPrims && g.numVertices * Math.pow(4, p.levels) > 2e7) throw new NodeError(`subdivide: ${p.levels} levels would create ~${(g.numVertices * 4 ** p.levels / 1e6).toFixed(0)}M vertices; lower levels`);
