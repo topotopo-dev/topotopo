@@ -1,13 +1,13 @@
 {
   "name": "polyforge",
   "version": "0.1.0",
-  "description": "LLM-native procedural geometry engine: Houdini-SOP-style node graphs, headless core, MCP server",
+  "description": "A procedural geometry engine: Houdini-style node graphs, headless, deterministic, exports to Unreal, Blender and Houdini",
   "main": "src/index.ts",
   "scripts": {
     "mcp": "node src/mcp/server.ts",
     "preview": "node scripts/preview.ts --examples",
     "cook": "node src/cli.ts",
-    "test": "node test/smoke.ts && node test/golden.ts && node test/property.ts && node test/fuzz.ts && node test/docs.ts && node test/io.ts && node test/interop.ts && node test/mcp.ts && node test/engine.ts && node test/topology.ts && node test/deform.ts && node test/arrays.ts && node test/bugs.ts && node test/uv.ts && node test/polyedit.ts && node test/bevel.ts && node test/measure.ts && node test/render.ts && node test/packed.ts && node test/heightfield.ts && node test/remesh.ts",
+    "test": "node test/smoke.ts && node test/golden.ts && node test/property.ts && node test/fuzz.ts && node test/docs.ts && node scripts/gen-notice.ts --check && node test/io.ts && node test/interop.ts && node test/mcp.ts && node test/engine.ts && node test/topology.ts && node test/deform.ts && node test/arrays.ts && node test/bugs.ts && node test/uv.ts && node test/polyedit.ts && node test/bevel.ts && node test/measure.ts && node test/render.ts && node test/packed.ts && node test/heightfield.ts && node test/remesh.ts",
     "test:uv": "node test/uv.ts",
     "test:render": "node test/render.ts",
     "test:remesh": "node test/remesh.ts",
@@ -20,7 +20,9 @@
     "showcase": "node test/showcase.ts",
     "bench": "node bench/bench.ts",
     "docs": "node scripts/gen-docs.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "notice": "node scripts/gen-notice.ts",
+    "notice:check": "node scripts/gen-notice.ts --check"
   },
   "keywords": [
     "procedural",
@@ -30,7 +32,7 @@
     "sop",
     "llm"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
     "@gltf-transform/core": "^4.5.1",

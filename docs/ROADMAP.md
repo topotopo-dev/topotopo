@@ -244,9 +244,9 @@ MeshFix (GPL). They would change Polyforge's licence. LGPL code such as OpenCasc
 loaded, replaceable WASM module, never bundled into the core.
 
 ### Commercial use
-Polyforge is MIT. Every dependency in use is MIT, Apache-2.0 or ISC, so commercial use, hosting and selling derived
-products are all permitted; the obligations are keeping the licence notices (Apache-2.0 also wants its NOTICE file, if
-the project ships one). The geometry a user produces is theirs. Relicensing Polyforge itself stays simple while there are
+Polyforge is Apache-2.0 (switched from MIT on 2026-10-12 while the author was the sole contributor). Every dependency
+in use is MIT, Apache-2.0 or ISC, so commercial use, hosting and selling derived products are all permitted; the
+obligations are keeping the licence notices, which the generated NOTICE file carries. The geometry a user produces is theirs. Relicensing Polyforge itself stays simple while there are
 no outside contributors; adopt a CLA or DCO before accepting external pull requests if relicensing should remain possible.
 
 ---

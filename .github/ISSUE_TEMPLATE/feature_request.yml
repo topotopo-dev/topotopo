@@ -1,0 +1,28 @@
+name: Feature request
+description: A node, option, format or workflow you need
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want to do
+      description: Describe the geometry or pipeline result, not the implementation. A Houdini / Blender / PCG node name that does it is helpful.
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you tried
+      description: Graph JSON, a wrangle snippet or a script node that gets close, if any.
+      render: json
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: Large changes need an issue discussion before a pull request.
+      options:
+        - Small (an option on an existing node, a doc fix)
+        - Medium (a new node)
+        - Large (a node family, engine change, new format or dependency)
+    validations:
+      required: true

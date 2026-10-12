@@ -1,0 +1,50 @@
+name: Bug report
+description: Something cooks wrong, crashes, or exports badly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. A bug report needs the graph that reproduces it; without one it will be closed.
+  - type: textarea
+    id: graph
+    attributes:
+      label: Graph JSON that reproduces the bug
+      description: The smallest graph you can make. Paste the JSON as sent to `build` or saved in `workspace/graphs`.
+      render: json
+      placeholder: |
+        {"nodes": {"b": {"type": "box"}, "x": {"type": "poly_bevel", "in": ["b"], "params": {"offset": 0.2}}}, "output": "x"}
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: The error text, the `inspect` output, or a render.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `git rev-parse --short HEAD` or the npm version, plus `node --version` and your OS.
+      placeholder: 7715c68, Node 24.14, Windows 11
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How were you driving it?
+      options:
+        - MCP (Claude Code / Claude Desktop / other client)
+        - CLI
+        - Library (import from src/index.ts)
+        - Live viewer
+    validations:
+      required: true

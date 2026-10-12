@@ -8,7 +8,7 @@ expected impact. Package 1 is the one to start with; packages 2 and 3 are indepe
 Polyforge is an LLM-native procedural geometry engine: Houdini-SOP-style node graphs in JSON, cooked by a
 TypeScript core that runs unchanged in Node 22+ and in browsers (WebAssembly for heavy libraries: manifold-3d,
 meshoptimizer). It exposes an MCP server so LLM agents can build geometry. Repository: `github.com/faxlab/polyforge`
-(MIT). Read `README.md`, `docs/DESIGN.md`, `docs/ROADMAP.md` (the gap analysis and the library survey) and
+(Apache-2.0). Read `README.md`, `docs/DESIGN.md`, `docs/ROADMAP.md` (the gap analysis and the library survey) and
 `docs/WORKLOG.md` (what is in flight; do not duplicate it).
 
 Hard constraints for anything that lands in the repo:
