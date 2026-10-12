@@ -13,6 +13,7 @@ WORKFLOW
 6. export to glb/gltf (materials, meshopt), geo (Houdini), csv (Unreal PCG points), points.json, obj/usda/ply/stl/json for Unreal, Blender, Houdini.
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb and usda export them as instances). See help topic "instancing".
+PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
@@ -296,8 +297,46 @@ Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, TRANSL
   orientations, scales); json keeps them losslessly; obj/ply/stl/geo/csv/points.json expand them (warned).
   instancing:"expand" (export option) always writes real geometry. Unreal: glb instances import as instanced meshes
   where the importer supports EXT_mesh_gpu_instancing; USD PointInstancer → HISM.
-Example (forest): terrain → scatter → attrib_randomize {name:"variant", distribution:"choice", values:["pine","fir","oak"]}
-  → copy_to_points {pack:true, variants:"name"} with trees = merge of three meshes named pine/fir/oak (examples/forest.json).`,
+Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
+  with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
+
+  pcg: `PCG: SCATTERING AND INSTANCING (Houdini scatter/copy toolkit, Unreal PCG point filters)
+THE CHAIN
+  mask (0..1 point attribute from features) → scatter {density_mask:"mask"} → orient (frames, random yaw/tilt/scale)
+  → prune (overlaps, density, expression, keep-out geometry) → copy_to_points {pack:true, variants, variant_weights}
+  → export glb (EXT_mesh_gpu_instancing) / usda (PointInstancer) / csv {pcg:true} (Unreal PCG point stream, help "export").
+  Points carry everything as Houdini attributes: P, N, up, orient, pscale, scale, Cd, name, variant, seed, mask, cluster.
+mask {by, min, max, falloff, ramp, invert, combine, name:"mask"}: v = feature; 1 inside [min, max], linear fade over falloff.
+  by slope (degrees from up; default 0..30 = gentle) | height (metres along up) | curvature (1/m, + convex, − concave)
+  | occlusion (0..1 AO, samples) | distance (metres to input 1: mesh, curve or points) | direction (degrees between N and
+  direction) | noise (0..1, frequency, octaves) | attribute (source_attrib) | group (pattern) | inside (input 1 closed mesh;
+  falloff = soft edge outside). combine replace | multiply (and) | max (or) | add | subtract | min with the existing mask.
+  Chain masks: {by:"slope", max:25, falloff:10} → {by:"distance", min:5, max:1e9, falloff:3, combine:"multiply"} (input 1 = road).
+  Point clouds without N take slope/direction/curvature/occlusion from the surface in input 1.
+attribute_from_map {path, projection:"uv"|"xz"|"xy"|"yz", size, center, channel, remap, name}: PNG → point attribute
+  (density maps, masks, Cd). xz = top view, image spans size × size around center (same layout as heightfield png16).
+scatter: generate_by count (exactly count) | density (density × density_scale per m² × weight) | auto (legacy: density > 0 →
+  density, else count). weight = density_attrib (point/vertex/prim, ≥ 0) × density_mask (0..1). relax (blue noise, follows
+  the weights), relax_iterations (Lloyd-style push-apart on the surface), min_distance (exact), max_per_prim,
+  emit_attributes ("*": point/vertex attributes interpolated, prim attributes copied; "^uv" excludes), write_primuv
+  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume.
+orient {mode, align_axis, upright, random_yaw, tilt, scale_min/max, scale_attrib}: writes orient + N + up (+Z = N, +Y = up,
+  as copy_to_points reads them). mode normal_up (point N/up) | surface (normal of input 1; snap) | curve_tangent (nearest
+  curve of input 1, rotation-minimising up) | direction | look_at (target) | random (axis, max_angle).
+  Trees/rocks on terrain: {mode:"surface", align_axis:"y"} (up follows the slope) or {mode:"direction", random_yaw:[0,360]}
+  (upright). Posts along a sloped road: {mode:"normal_up", upright:true} after points_along_curve.
+points_along_curve {spacing | count | mode subdivision/at_points, start_offset, end_offset, jitter, side_offset, both_sides}:
+  curveu, tangent = N, up (RMF), orient, curve_id, side; Unreal PCG Spline Sampler.
+prune {mode}: overlap (spheres radius × pscale, priority largest | smallest | random | order | attribute: none overlap) |
+  density (keep with probability attrib × fraction) | expression ("@mask<0.5" removed) | near_geometry (within distance
+  of input 1, inside its closed polygons). invert keeps the others.
+cluster {method kmeans (count, iterations) | radius, center, color}: int cluster per point; color:true for a debug render.
+copy_to_points: variants "name"/"piece" + variant_attrib (exact pick) or variant_weights [3, 1, 1] (seeded weighted pick);
+  scale_attrib (e.g. "mask": bigger where the mask is high), rotate_attrib (float yaw degrees, vec3 Euler, vec4 quaternion).
+  pack:true for anything above a few thousand copies.
+Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatter ≈ Surface/Spline/Volume Sampler; orient ≈
+  Transform Points; prune ≈ Self Pruning / Density Filter / Difference; copy_to_points pack ≈ Static Mesh Spawner.
+Example: examples/forest.json (30k candidates → pruned packed forest) and examples/pcg_scatter.json (road, lamps, rocks).`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.

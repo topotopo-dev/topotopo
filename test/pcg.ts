@@ -415,6 +415,14 @@ section('orient');
   check(svOk, 'per-axis scale range → scale');
   const sa = await geo({ p: { type: 'points', params: { positions: [[0, 0, 0], [1, 0, 0], [2, 0, 0]], attribs: { mask: [0, 0.5, 1] } } }, o: { type: 'orient', in: ['p'], params: { scale_min: 1, scale_max: 3, scale_attrib: 'mask' } } }, 'o');
   check(eq(Array.from(attr(sa, 'pscale')), [1, 2, 3]), 'scale_attrib picks the scale from a 0..1 attribute (scale ramp by mask)');
+  // upright: posts along a climbing road keep +Y up and only take the heading
+  const up = await geo({ c: { type: 'curve', params: { points: [[0, 0, 0], [10, 3, 0], [10, 6, 10]] } }, p: { type: 'points_along_curve', in: ['c'], params: { spacing: 2 } }, o: { type: 'orient', in: ['p'], params: { mode: 'normal_up', upright: true } } }, 'o');
+  let eU = 0;
+  for (let i = 0; i < up.numPoints; i++) {
+    const t = vec(attr(up, 'tangent'), i), h = unitV([t[0], 0, t[2]]);
+    eU = Math.max(eU, maxDiff(vec(attr(up, 'up'), i), [0, 1, 0]), maxDiff(vec(attr(up, 'N'), i), h));
+  }
+  check(eU < 1e-9, 'upright: up = +Y, N = the horizontal heading of the curve tangent');
   // group: unselected points keep the frame copy_to_points would use
   const part = await geo({ p: { type: 'points', params: { positions: [[0, 0, 0], [1, 0, 0]], attribs: { N: [[1, 0, 0], [1, 0, 0]] } } }, o: { type: 'orient', in: ['p'], params: { mode: 'direction', direction: [0, 0, 1], group: '0' } } }, 'o');
   check(maxDiff(qRotate(vec(attr(part, 'orient'), 1, 4) as Quat, [0, 0, 1]), [1, 0, 0]) < 1e-9 && maxDiff(vec(attr(part, 'N'), 0), [0, 0, 1]) < 1e-9, 'group: other points get the orient of their own N/up');

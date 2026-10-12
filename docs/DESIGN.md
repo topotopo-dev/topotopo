@@ -51,6 +51,8 @@ src/core/      geometry model + algorithms (no I/O)
   remesh.ts      isotropic remeshing kernel (typed arrays in/out: the swap point for a native remesher), closest-point BVH,
                  Geometry wrapper (features, seams, provenance); decimate.ts meshoptimizer decimation; repair.ts mesh repair
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
+  pcg.ts         PCG kernels: incremental point grid, exact min-distance and sphere-overlap selection, surface relaxation,
+                 k-means / radius clusters, mask bands and combination, image sampling, instance frames (scatter v2, pcg nodes)
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
