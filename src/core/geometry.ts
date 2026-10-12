@@ -194,7 +194,7 @@ export class Attribute {
     return r;
   }
 
-  set(i: number, v: AttribValue | string[]) {
+  set(i: number, v: AttribValue | string[] | ArrayLike<number>) {
     if (this.offsets) {
       this.setArray(i, v);
       return;
