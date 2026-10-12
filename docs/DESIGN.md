@@ -59,12 +59,14 @@ src/core/      geometry model + algorithms (no I/O)
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
-  wrangle.ts     @-syntax compiler → per-element kernels; deferred addpoint/addprim/remove
+  wrangle.ts     @-syntax compiler → per-element kernels; deferred addpoint/addprim/remove; chunked point wrangles
+  kernels.ts     kernel registry for the worker pool: pure per-element functions over typed arrays (noise, rays)
   snippet-lib.ts VEX-like helper library installed into the script realm (vectors, quaternions, noise, SDF ops)
 src/graph/     node system
   types.ts       NodeDef / ParamDef / GraphSpec — the schema that drives docs, validation and (later) GUI widgets
   params.ts      name resolution (aliases, case-insensitive, did-you-mean), "=expr" evaluation and reference scanning, coercion
-  engine.ts      validation, lazy pull cooking, content-addressed cache, time, subgraphs/assets
+  engine.ts      validation, lazy pull cooking, content-addressed cache, time, subgraphs/assets, concurrent branches
+  parallel.ts    CookContext.parallelMap: a kernel in chunks on the host's worker pool, or in one piece without it
   migrate.ts     graph format versions and migrations
 src/nodes/     ~95 node types, one defineNode() each
 src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision)
@@ -72,7 +74,7 @@ src/inspect.ts, src/explain.ts  text views of geometry: summaries, statistics, a
 src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON and the
                instance stream (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts ·
                heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts)
-src/host/      Node host: fs, vm sandbox (timeouts), fonts
+src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts)
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
 src/workspace.ts  named graphs persisted as JSON, edit operations, assets
@@ -178,6 +180,24 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   foreach, solver, …) include the vars.
 - Errors are per node, with hints. Downstream nodes report "input failed" instead of cascading noise.
 - Cooked geometry is immutable by convention. Nodes `clone()` before writing.
+- `switch` cooks only the selected candidate (`NodeDef.inputsUsed`: params are resolved first, the unused inputs are
+  not cooked and count as `unused` in the signature), so an unselected branch costs nothing and may even fail.
+
+**Concurrency.** When the host has a worker pool (`Engine.concurrent`), `cookOne` starts the pulls of all inputs of a
+node at once, together with its params (and the nodes their expressions reference), and `foreach` runs a window of
+independent iterations at a time. Node cooks still run on the main thread (they need the realm and the registry), so
+branches overlap where a cook awaits: a chunked kernel on the pool, file I/O. Two rules keep this invisible:
+- **One cook per signature in flight.** `Engine.inflight` maps a signature being cooked to its promise; a second cook
+  of it (an identical node in another branch, an identical foreach iteration) waits and reports a cache hit, as it
+  would after a sequential cook. If the shared cook fails, the waiter cooks itself. A nested cook does not wait for an
+  ancestor (`CookOptions.ancestors`, passed by `subcook` and `inputAt`), so a recursive asset still hits the depth
+  limit instead of deadlocking.
+- **Sequential reports.** After the target is cooked, `cook()` waits for every pull it started and rebuilds
+  `report.results` in the order a one-input-at-a-time cook visits nodes, dropping nodes such a cook would not have
+  reached (it stops at a node's first failed input or reference); results that shared an in-flight cook swap roles so
+  the first one in that order is the one that cooked. Results, errors and warnings are therefore the same with and
+  without the pool (test/pool.ts compares them; the golden and property layers pass in both modes).
+Without a pool (`POLYFORGE_WORKERS=0`) inputs are pulled one at a time, exactly as before.
 
 **Time.** A cook happens at a frame (`CookOptions.frame`/`time`/`fps`; frame 1 = time 0, 24 fps by default), exposed
 to nodes as `ctx.frame`, `ctx.time`, `ctx.fps`, `ctx.timeInc`. Time enters a signature only for nodes that depend on
@@ -247,7 +267,74 @@ Measured (i7-10700K): the wrangle benchmark (`wrangle_1m`) and the `script` fixt
 before and after. The alternative, running scripts in a `worker_threads` Worker and terminating it on timeout,
 costs ~300 ms per worker start (engine modules plus manifold WASM), would need geometry to be serialised for every
 input, output and `lib.run` call, and could not share the engine cache; it was not used. The browser host can use a
-Worker realm, where `terminate()` is the timeout.
+Worker realm, where `terminate()` is the timeout. (Point wrangles do run in workers now, see the worker pool below:
+there only the attribute arrays travel, the workers are already running, and the snippet cannot reach the engine.)
+
+### Worker pool
+
+`Host.pool` (a `WorkerPool`: `size`, `threads`, `run(task)`, `warm()`, `close()`, `stats()`) runs registered kernels on
+worker threads. A `PoolTask` names a kernel and carries typed arrays (shared, copied, or moved with `transfer: true`), a
+small JSON argument, an element range, optional `shared` read-only data under a content key, and an optional
+`timeoutMs`. The Node implementation (`src/host/pool.ts`, workers load `src/host/worker.ts`):
+- `POLYFORGE_WORKERS` threads (default `availableParallelism() - 1`; `0` = no pool, everything as before). Every host
+  created with the environment's settings shares one pool; `createNodeHost({ workers })` gives a host its own.
+- Lazy: no thread exists before the first task, and a cold pool runs that first job on the calling thread while its
+  threads start in the background (~0.3 s for 15 threads, mostly module loading), so a one-shot CLI cook is not
+  slower. Threads stop after `POLYFORGE_WORKERS_IDLE_MS` (30 s) idle and keep the process alive only while busy.
+- One task per worker at a time. A kernel error rejects the task with the kernel's name ("kernel "x" failed: …"); a
+  wrangle error comes back as the same message the main thread would give (with the snippet line). A worker that
+  crashes, or runs past the task's `timeoutMs` (it is terminated), fails only its task and is replaced on demand.
+  Workers that cannot start at all make the pool reject with `POOL_UNAVAILABLE`; `parallelMap` then runs here.
+- Shared data is sent to a worker once and cached there (LRU of 8 keys); a worker that dropped it asks again.
+- The MCP server closes the pool when its client closes stdin (or on SIGINT/SIGTERM), the CLI when it is done.
+
+**Kernel registry** (`src/core/kernels.ts`). Pure functions over typed arrays, no Geometry objects, no realm. A kernel
+processes elements `[start, end)` with global indices and writes only their slots of its outputs; per-element
+randomness is seeded by the element index, and it does the same floating-point operations in the same order as the
+serial code it came from, so any chunking gives the same bits. Each kernel has a size threshold (`minElements`) and
+optionally more chunks per worker for uneven work (rays). `selftest.*` kernels exist for test/pool.ts.
+
+**`ctx.parallelMap(kernel, job, opts)`** (`src/graph/parallel.ts`). Without a pool, below the threshold, or with a
+cold pool it runs the kernel once over all elements, synchronously, on the node's own arrays (the result is not a
+promise, so a node using it stays synchronous). Otherwise inputs, `outputs` (copied in, so skipped elements keep their
+values) and `results` (fresh arrays: zeroed) are copied once into SharedArrayBuffers, the range is split into
+contiguous chunks (default one per thread), and when every chunk has finished the outputs are copied back. The error of
+the first failing chunk in element order is the node's error. `Engine.poolStats` counts pool and serial runs.
+`POLYFORGE_POOL_MIN` overrides every threshold (`1` forces the pool: `npm run test:pool` runs the golden layer so).
+
+What runs in chunks:
+| node | kernel | notes |
+|---|---|---|
+| `noise_displace` | `noise_displace`: the noise values per point (1, or 3 for 3d/curl) | the displacement arithmetic stays on the main thread; when the normals have to be computed from the polygons, that happens on the main thread while four chunks sample the noise |
+| `attrib_noise` | `attrib_noise`: the attribute values | |
+| `occlusion` (occlusion, cavity, thickness) | `occlusion`: the rays of each point | the BVH is built once on the main thread and shared as arrays (`RayScene.toArrays`), keyed by a content hash; threshold by ray count (32k rays); 4 chunks per thread |
+| `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
+
+Not in chunks, and why:
+- `heightfield_erode`: droplets run one after another over the terrain the previous ones left; a split would change
+  the result (no deterministic decomposition of the droplet model).
+- `sdf_to_mesh`: manifold's level-set mesher calls the SDF from WASM at grid positions it chooses. Evaluating the SDF
+  is ~10% of the cook (128³ torus: 1.83M calls, ~0.1 s of ~1 s); precomputing it would need manifold's grid
+  positions bit for bit and still pay the per-call crossing. The rest is the mesher.
+- `scatter`: the surface sampling stage is separable (mulberry32 jumps ahead in O(1): the state after k draws is
+  a0 + k·0x6d2b79f5, and each candidate takes exactly three draws), but it is ~30% of the node and builds candidate
+  objects that the GeoBuilder output stage (the larger part) consumes; that code belongs to the performance item
+  (P0-F). Port it after that lands.
+- `script` (whole geometry, async `lib.run`, engine cache), prim/vertex/detail wrangles, wrangles that read other
+  elements or edit the geometry, and every node without a ported kernel run on the main thread as before.
+
+Measured (i7-10700K, 8 cores / 16 threads, 15 workers; serial = `POLYFORGE_WORKERS=0`; node cook time, best of the
+bench runs; the machine was shared with other jobs, so ±15%):
+
+| case | serial | pool | speed-up | the serial remainder |
+|---|---|---|---|---|
+| `occlusion_50k` (32 rays/point) | 2081–2349 ms | 614–722 ms | 3.2–3.8× | BVH build (~0.33 s) |
+| `noise_displace_1m` (normal mode, normals from the polygons) | 296–334 ms | 129–171 ms | 1.9–2.4× | point normals (~0.09 s), clone, copies |
+| `noise_displace` 1M, direction mode | 217 ms | 81 ms | 2.7× | clone, copies, displacement |
+| `attrib_noise` 1M, size 3 | 608 ms | 136 ms | 4.5× | copies |
+| `wrangle_1m` (one sin per point) | 84–106 ms | 84–97 ms | ~1.1× | attribute copies, bindings |
+| `wrangle` 1M with `noise()` | 255 ms | 110 ms | 2.3× | as above |
+| `sdf_to_mesh_128`, others | unchanged | unchanged | — | not ported |
 
 ## What makes it LLM-friendly
 
