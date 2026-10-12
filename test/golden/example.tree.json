@@ -1,0 +1,48 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3", "depth:int:1", "pscale:float:1", "width:float:1"],
+      "prim": ["copynum:int:1", "depth:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.6091, 2.9448, 1.5859],
+      "min": [-1.7795, 0, -1.4944]
+    },
+    "counts": {
+      "points": 12014,
+      "prims": 5694,
+      "vertices": 26560,
+      "volumes": 0
+    },
+    "groups": {
+      "point": ["J", "K", "M", "leaves"],
+      "prim": ["caps", "sides"]
+    },
+    "hashes": {
+      "P": "20c36b54cb7ef8c6",
+      "attributes": {
+        "group.point.J": "c14dade52c4bde9f",
+        "group.point.K": "c14dade52c4bde9f",
+        "group.point.M": "c14dade52c4bde9f",
+        "group.point.leaves": "c14dade52c4bde9f",
+        "group.prim.caps": "962add93d189e951",
+        "group.prim.sides": "c7094dcbdc1923d9",
+        "point.Cd": "f8fe2735072982ef",
+        "point.depth": "34a8714584d24ddf",
+        "point.pscale": "6c2fde250c32eadf",
+        "point.width": "58d22c03af73b8c5",
+        "prim.copynum": "259498d889f8cb22",
+        "prim.depth": "4b17b4c25af18dd8",
+        "vertex.uv": "50aed93944a1db3b"
+      },
+      "topology": "2897a245febbaa93"
+    }
+  },
+  "name": "example.tree",
+  "ok": true,
+  "source": "examples/tree.json",
+  "warnings": []
+}

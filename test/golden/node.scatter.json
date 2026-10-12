@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "sourceprim:int:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9897, 0.9863, 0.9888],
+      "min": [-0.9916, -0.9887, -0.992]
+    },
+    "counts": {
+      "points": 500,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "c8b89464f4a42daa",
+      "attributes": {
+        "point.N": "3ee388858b537773",
+        "point.sourceprim": "dea16ffd2186018f"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.scatter",
+  "ok": true,
+  "source": "fixture for node type \"scatter\" (test/fixtures.ts)",
+  "warnings": []
+}

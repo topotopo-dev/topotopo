@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.05, 1.05, 1.05],
+      "min": [-1.05, -1.05, -1.05]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "ad93e88ea29e650c",
+      "attributes": {
+        "point.N": "9a48b33ef3aef904"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.peak",
+  "ok": true,
+  "source": "fixture for node type \"peak\" (test/fixtures.ts)",
+  "warnings": []
+}

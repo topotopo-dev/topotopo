@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 482,
+      "prims": 512,
+      "vertices": 1984,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "cb28651a626f8ec0",
+      "attributes": {
+        "point.N": "0350389e6505711c",
+        "vertex.uv": "b4095fe93e92cfeb"
+      },
+      "topology": "bff0b699fd7e09c7"
+    }
+  },
+  "name": "node.sphere",
+  "ok": true,
+  "source": "fixture for node type \"sphere\" (test/fixtures.ts)",
+  "warnings": []
+}

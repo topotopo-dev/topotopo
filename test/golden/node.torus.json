@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.25, 0.25, 1.25],
+      "min": [-1.25, -0.25, -1.25]
+    },
+    "counts": {
+      "points": 768,
+      "prims": 768,
+      "vertices": 3072,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "b6eadd9dc0b07cc7",
+      "attributes": {
+        "vertex.uv": "5ecf57053e21a0ff"
+      },
+      "topology": "a2355e04358f827e"
+    }
+  },
+  "name": "node.torus",
+  "ok": true,
+  "source": "fixture for node type \"torus\" (test/fixtures.ts)",
+  "warnings": []
+}

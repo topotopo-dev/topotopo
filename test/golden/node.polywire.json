@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.0277, 0.55, 0.5492],
+      "min": [-0.0234, -0.0492, -0.0491]
+    },
+    "counts": {
+      "points": 200,
+      "prims": 194,
+      "vertices": 784,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["caps", "sides"]
+    },
+    "hashes": {
+      "P": "1700339b4942e7f5",
+      "attributes": {
+        "group.prim.caps": "11152786c73a6bfc",
+        "group.prim.sides": "3fca10e732601fdd",
+        "vertex.uv": "7c2b87510d99c633"
+      },
+      "topology": "28cf0bbc2fd0c316"
+    }
+  },
+  "name": "node.polywire",
+  "ok": true,
+  "source": "fixture for node type \"polywire\" (test/fixtures.ts)",
+  "warnings": []
+}

@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "hitdist:float:1", "hitprim:int:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.5, 1, 0.5],
+      "min": [-0.5, 0.6864, -0.5]
+    },
+    "counts": {
+      "points": 25,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "7e8f74da536d06b8",
+      "attributes": {
+        "point.N": "e6d016a3b09ebd05",
+        "point.hitdist": "9c95811fc212187d",
+        "point.hitprim": "a88b50f203e22ac8"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.ray",
+  "ok": true,
+  "source": "fixture for node type \"ray\" (test/fixtures.ts)",
+  "warnings": []
+}

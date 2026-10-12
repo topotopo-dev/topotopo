@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9511, 1, 0.809],
+      "min": [-0.9511, 0, -1]
+    },
+    "counts": {
+      "points": 20,
+      "prims": 12,
+      "vertices": 60,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["bottom", "side", "top"]
+    },
+    "hashes": {
+      "P": "c6b7fb75de08026f",
+      "attributes": {
+        "group.prim.bottom": "0a8ee7430c18e499",
+        "group.prim.side": "edf90408e5732bd2",
+        "group.prim.top": "ad2d88221f3df1f8"
+      },
+      "topology": "18d435baf6d5bb40"
+    }
+  },
+  "name": "node.extrude",
+  "ok": true,
+  "source": "fixture for node type \"extrude\" (test/fixtures.ts)",
+  "warnings": []
+}

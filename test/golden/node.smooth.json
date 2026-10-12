@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.0021, 1.0021, 1.0021],
+      "min": [-1.0021, -1.0021, -1.0021]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "f13dbbf8d07371a2",
+      "attributes": {
+        "point.N": "2fb2cf62c9514ab8"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.smooth",
+  "ok": true,
+  "source": "fixture for node type \"smooth\" (test/fixtures.ts)",
+  "warnings": []
+}

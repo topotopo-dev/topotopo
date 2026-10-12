@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9799, 1, 0.9799],
+      "min": [-0.9799, -1, -0.9799]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "acc04ce29f5b6800",
+      "attributes": {
+        "point.N": "b2be6f128b393078"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.twist",
+  "ok": true,
+  "source": "fixture for node type \"twist\" (test/fixtures.ts)",
+  "warnings": []
+}

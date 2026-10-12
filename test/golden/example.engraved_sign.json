@@ -1,0 +1,44 @@
+{
+  "env": {
+    "font": "arial.ttf"
+  },
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["Cd:float:3"]
+    },
+    "bbox": {
+      "max": [3.5, 0.8, 0.7],
+      "min": [-3.5, -1.25, -0.7]
+    },
+    "counts": {
+      "points": 1954,
+      "prims": 3822,
+      "vertices": 11544,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["bottom", "from_a", "from_b", "side", "top"]
+    },
+    "hashes": {
+      "P": "d7a8a91d0a7a6157",
+      "attributes": {
+        "group.prim.bottom": "918929cf81aec29d",
+        "group.prim.from_a": "0bdd4bb81a8a8d52",
+        "group.prim.from_b": "80df51d80ca2a332",
+        "group.prim.side": "205e8158fd374052",
+        "group.prim.top": "6d926dbe34deea7c",
+        "vertex.Cd": "6314cd298f4c727b"
+      },
+      "topology": "21e827066c1b81bc"
+    }
+  },
+  "name": "example.engraved_sign",
+  "ok": true,
+  "source": "examples/engraved_sign.json",
+  "warnings": []
+}

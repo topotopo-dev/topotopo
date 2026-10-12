@@ -29,8 +29,10 @@ npm install
 npm test
 ```
 
-`npm test` cooks every node type and checks geometry invariants. It also round-trips every file format and runs the
-MCP server end to end, the way a real client would. To re-render the examples into `examples/renders`:
+`npm test` cooks every node type and checks geometry invariants, compares golden fingerprints, runs random-graph
+property tests and a wrangle fuzz, checks the node reference is current, round-trips every file format and runs the
+MCP server end to end, the way a real client would. See [Testing](#testing). To re-render the examples into
+`examples/renders`:
 
 ```bash
 npm run showcase
@@ -123,6 +125,9 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | flow | `merge` `switch` `null` `input` `foreach` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, json) |
 
+Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated
+[node reference](docs/nodes.md).
+
 ## Examples
 
 [examples/](examples) has ten graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
@@ -135,6 +140,50 @@ To cook a graph from the command line:
 ```bash
 node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
 ```
+
+## Testing
+
+`npm test` runs these layers in order; each can also run alone.
+
+| layer | command | what it checks |
+|---|---|---|
+| smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
+| golden | `npm run test:golden [-- filter]` | every node fixture and every `examples/*.json` graph matches its fingerprint in `test/golden/` |
+| property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) |
+| docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions |
+| io | `node test/io.ts` | export → import round trips for every format |
+| mcp | `node test/mcp.ts` | the MCP server end to end over stdio |
+
+Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
+graph every layer uses to cook a node.
+
+**Golden fingerprints.** A fingerprint holds counts, the bbox (rounded to 1e-4), the attribute schema and group names
+per class, and hashes of positions (quantised to 1e-5), topology and every attribute (1e-4). They are stable across runs
+and tolerant to float noise, and there is one JSON file per node or example, so a change shows up as a readable git
+diff. When a change to geometry output is intended:
+
+```bash
+npm run test:update            # rewrite test/golden/*.json (removes files for deleted nodes)
+npm run test:update -- sweep   # only names containing "sweep"
+git diff test/golden           # review what changed, then commit it with the code
+```
+
+A failing golden prints each changed field with its old and new value. Outputs that depend on the machine (the
+`text` node's system font) record it and are skipped where a different font is found.
+
+**Property tests and fuzz.** `node test/property.ts --count 1000 --seed 7` explores more graphs; a failure prints
+the graph JSON and the `--seed S --only I` flags to reproduce it. `--strict` also fails on node errors that look like
+internal JS errors. `node test/fuzz.ts --count 500` runs more wrangle snippets.
+
+**Node reference.** `npm run docs` regenerates [docs/nodes.md](docs/nodes.md) from the `NodeDef`s. Commit it with any
+node or param change; `npm test` fails while it is stale.
+
+**Benchmarks.** `npm run bench` times named cooks (scatter, copy, subdivide, boolean, noise, wrangle, SDF meshing,
+triangulate, merge, fuse) against targets from the roadmap and prints a Markdown table. `--quick` uses smaller sizes,
+`--filter name` selects cases. Results go to `bench/last.json`; `bench/baseline.json` is a reference run (informational,
+never failing).
+
+CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test` on Node 22 and 24 for every push and pull request.
 
 ## Layout
 

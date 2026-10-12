@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["height:float:1", "slice:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9793, 0.999, 0.9845],
+      "min": [-0.9793, -0.999, -0.9845]
+    },
+    "counts": {
+      "points": 316,
+      "prims": 10,
+      "vertices": 316,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "581ff0fd8b175ddf",
+      "attributes": {
+        "prim.height": "c43f020642c4743c",
+        "prim.slice": "d91bdee4d21c115e"
+      },
+      "topology": "5dad8c96b04a4f0c"
+    }
+  },
+  "name": "node.slice",
+  "ok": true,
+  "source": "fixture for node type \"slice\" (test/fixtures.ts)",
+  "warnings": []
+}

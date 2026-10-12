@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 0.9999],
+      "min": [-0.9995, 0, -0.9999]
+    },
+    "counts": {
+      "points": 100,
+      "prims": 1,
+      "vertices": 100,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "055656f9fe4ee983",
+      "attributes": {},
+      "topology": "1d8eb3c6c61ca0bc"
+    }
+  },
+  "name": "node.parametric_curve",
+  "ok": true,
+  "source": "fixture for node type \"parametric_curve\" (test/fixtures.ts)",
+  "warnings": []
+}

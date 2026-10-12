@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "uv:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0, 1],
+      "min": [-1, 0, -1]
+    },
+    "counts": {
+      "points": 49,
+      "prims": 37,
+      "vertices": 168,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["filled"]
+    },
+    "hashes": {
+      "P": "2987a0e5c4b49e4f",
+      "attributes": {
+        "group.prim.filled": "b8696e444cc0e51e",
+        "point.uv": "caf95c61b10871bb"
+      },
+      "topology": "175443378bf34b0d"
+    }
+  },
+  "name": "node.fill_holes",
+  "ok": true,
+  "source": "fixture for node type \"fill_holes\" (test/fixtures.ts)",
+  "warnings": []
+}
