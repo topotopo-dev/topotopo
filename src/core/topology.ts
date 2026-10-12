@@ -30,6 +30,19 @@ export function primNormals(g: Geometry): Float64Array {
   return out;
 }
 
+/** primNormals and primArea of every prim from one Newell pass (the same values as calling both). */
+function primNormalsAreas(g: Geometry): { fn: Float64Array; area: Float64Array } {
+  const n = g.numPrims, fn = new Float64Array(n * 3), area = new Float64Array(n), t = [0, 0, 0];
+  for (let p = 0; p < n; p++) {
+    if (!g.primClosed[p]) continue;
+    primNewell(g, p, t);
+    const h = Math.hypot(t[0], t[1], t[2]), l = h || 1;
+    fn[p * 3] = t[0] / l; fn[p * 3 + 1] = t[1] / l; fn[p * 3 + 2] = t[2] / l;
+    area[p] = h / 2;
+  }
+  return { fn, area };
+}
+
 export function primArea(g: Geometry, p: number): number {
   if (!g.primClosed[p]) return 0;
   const t = primNewell(g, p);
@@ -83,9 +96,7 @@ export function pointNormals(g: Geometry): Float64Array {
  */
 export function vertexNormals(g: Geometry, cuspDeg = 60, hardEdges: EdgeSet | null = null): Float64Array {
   if (hardEdges && hardEdges.size) return vertexNormalsHard(g, cuspDeg, hardEdges);
-  const fn = primNormals(g);
-  const area = new Float64Array(g.numPrims);
-  for (let p = 0; p < g.numPrims; p++) area[p] = primArea(g, p);
+  const { fn, area } = primNormalsAreas(g);
   const pp = pointPrims(g);
   const vprim = g.vertexPrims();
   const cosT = Math.cos((cuspDeg * Math.PI) / 180);
@@ -110,9 +121,7 @@ export function vertexNormals(g: Geometry, cuspDeg = 60, hardEdges: EdgeSet | nu
 
 /** vertexNormals with hard edges: smoothing fans around each point are cut at hard edges. */
 function vertexNormalsHard(g: Geometry, cuspDeg: number, hard: EdgeSet): Float64Array {
-  const fn = primNormals(g);
-  const area = new Float64Array(g.numPrims);
-  for (let p = 0; p < g.numPrims; p++) area[p] = primArea(g, p);
+  const { fn, area } = primNormalsAreas(g);
   const he = halfEdges(g);
   // union corners (half-edges) at the same point that are joined across a non-hard shared edge
   const parent = new Int32Array(he.numHalfEdges);
