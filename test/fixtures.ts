@@ -30,6 +30,12 @@ export const SRC: Record<string, NodeSpec> = {
   LOFT: { type: 'merge', in: ['CIRCLE', 'CIRCLE_UP'] },
   CIRCLE_UP: { type: 'circle', params: { radius: 0.3, segments: 24, center: [0, 1, 0] } },
   COLORED: { type: 'color', in: ['MESH'], params: { mode: 'random' } },
+  // deformers (P1-C): lattice cages, a bar along +Z for path_deform, a point proxy for point_deform
+  LATTICE_REST: { type: 'bound', in: ['MESH'], params: { divisions: [2, 2, 2] } },
+  LATTICE_DEF: { type: 'twist', in: ['LATTICE_REST'], params: { angle: 60 } },
+  ZBAR: { type: 'box', params: { size: [0.2, 0.2, 2], center: [0, 0, 1], divisions: [1, 1, 10] } },
+  PROXY: { type: 'point_grid', params: { counts: [3, 3, 3], size: [1.2, 1.2, 1.2] } },
+  PROXY_DEF: { type: 'bend', in: ['PROXY'], params: { angle: 60 } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -42,6 +48,8 @@ export const INPUTS: Record<string, string[]> = {
   triangulate2d: ['PTS'], voronoi2d: ['PTS'], merge: ['MESH', 'BOX'], switch: ['MESH', 'BOX'],
   uv_transform: ['BOX'], poly_extrude: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],
   scatter: ['MESH'], decimate: ['MESH'], remesh: ['BOX'], smooth_solid: ['BOX'], foreach: ['BOX'],
+  soft_transform: ['GRID'], lattice: ['MESH', 'LATTICE_REST', 'LATTICE_DEF'], path_deform: ['ZBAR', 'CURVE'],
+  point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -60,6 +68,8 @@ export const PARAMS: Record<string, any> = {
   measure: { measure: 'volume' },
   text: { text: 'Hi', depth: 0.2 },
   lsystem: { generations: 3 },
+  soft_transform: { group: '24', translate: [0, 0.5, 0], rotate: [0, 0, 20], radius: 0.8, weight_attrib: 'softweight' },
+  path_deform: { stretch: true, twist: 90 },
   graph_ref: null,
 };
 

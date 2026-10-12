@@ -311,13 +311,15 @@ defineNode({
     octaves: { type: 'int', default: 3, min: 1, max: 12, desc: 'octaves' },
     contrast: { type: 'float', default: 1, desc: 'contrast around the midpoint' },
     seed: P.seed(),
+    rest_attrib: { type: 'string', default: 'rest', desc: 'sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P)' },
   },
   cook: ({ input, p }) => {
     const g = input(0).clone();
+    const ra = p.rest_attrib ? g.points.get(p.rest_attrib) : undefined;
+    const Pd = ra && ra.type === 'float' && ra.size === 3 ? (ra.data as Float64Array).slice() : g.P;
     const a = g.points.add(p.name, 'float', p.size);
     const d = a.data as Float64Array;
     const fns = Array.from({ length: p.size }, (_, c) => fractal(makeNoise(p.noise, p.seed + c * 101), { octaves: p.octaves, fractal: p.fractal }));
-    const Pd = g.P;
     for (let i = 0; i < g.numPoints; i++) {
       const x = Pd[i * 3] * p.frequency[0] + p.offset[0], y = Pd[i * 3 + 1] * p.frequency[1] + p.offset[1], z = Pd[i * 3 + 2] * p.frequency[2] + p.offset[2];
       for (let c = 0; c < p.size; c++) {
