@@ -416,10 +416,13 @@ export class Engine {
         inputDescs[idx] = n.params?.label ?? n.note ?? '';
       }
     }
+    // shelf assets: the first sentence of the description is the catalog summary, the rest the long description
+    const shelfDoc = category === 'shelf' && graph.description ? /^(.+?[.!?])\s+(.+)$/s.exec(graph.description) : null;
     const def: NodeDef = {
       type: name,
       category,
-      summary: graph.description ?? `${category === 'shelf' ? 'shelf' : 'user'} asset "${name}"`,
+      summary: shelfDoc?.[1] ?? graph.description ?? `${category === 'shelf' ? 'shelf' : 'user'} asset "${name}"`,
+      ...(shelfDoc ? { description: shelfDoc[2] } : {}),
       inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })),
       params,
       signatureExtra: () => hash,

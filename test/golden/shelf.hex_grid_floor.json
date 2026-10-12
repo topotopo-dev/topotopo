@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [2.5385, 0.0946, 2.5881],
+      "min": [-2.5385, 0, -2.5881]
+    },
+    "counts": {
+      "points": 1260,
+      "prims": 840,
+      "vertices": 3780,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "d3b1d1a1f44afa1b",
+      "attributes": {
+        "detail.materials": "27e43692952fab34",
+        "prim.Cd": "18467505ba7cc19f",
+        "prim.material": "3de5f1a5d3460b1f",
+        "prim.name": "8dbf94c53d9b3bdf",
+        "vertex.uv": "58c413cd27765be7"
+      },
+      "topology": "5a4a7107da736fe1"
+    }
+  },
+  "name": "shelf.hex_grid_floor",
+  "ok": true,
+  "source": "shelf/hex_grid_floor.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

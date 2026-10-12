@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [12.2917, 0.15, 9.6202],
+      "min": [-12.2917, -0.05, -5.1644]
+    },
+    "counts": {
+      "points": 1176,
+      "prims": 1021,
+      "vertices": 4084,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "38558a7264dd9dc4",
+      "attributes": {
+        "detail.materials": "c1b2ed1063bb2142",
+        "prim.Cd": "9b78543ab5a5ca50",
+        "prim.material": "631d97e4a1a5bf5e",
+        "prim.name": "59ecd6d2186b2600",
+        "vertex.uv": "b907de89d0e92cab"
+      },
+      "topology": "a2100ee29c236cdc"
+    }
+  },
+  "name": "shelf.road_strip",
+  "ok": true,
+  "source": "shelf/road_strip.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

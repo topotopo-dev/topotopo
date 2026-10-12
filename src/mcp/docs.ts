@@ -343,7 +343,18 @@ Any graph with vars can be saved as a node type: assets {action:"save", name:"ro
 The graph's vars become parameters (add "params": {"var": {"desc": "...", "min": 0, "max": 1}} for docs/ranges).
 Inputs: put {"type":"input","params":{"index":0,"label":"surface"}} nodes in the graph.
 Then use it like any node: {"type": "rock_cluster", "in": ["terrain"], "params": {"count": 50}}.
-Assets are stored as JSON in workspace/assets and load on startup.`,
+Assets are stored as JSON in workspace/assets and load on startup.
+SHELF: 35 shipped assets (catalog {category:"shelf"}; help {nodes:["stairs"]} for params), used like nodes:
+  {"type": "stairs", "params": {"steps": 12, "style": "open"}}   {"type": "wall_segment", "params": {"windows": 3, "door": true}}
+  architecture: wall_segment window_frame door_frame stairs spiral_stairs railing fence pillar arch roof_gable roof_hip
+    brick_wall tile_floor hex_grid_floor scaffold beam_truss
+  props: crate barrel pallet log rock cliff_block tree_lowpoly bush lamp_post bollard bench sign_post sandbag_wall cable pipe_run
+  terrain/PCG: road_strip scatter_rocks forest_patch grass_clumps
+  Pivots sit at the base (y = 0, Y up, metres; walls start at x = 0, roofs at the wall top); every piece has prim name and
+  material. Curve assets (railing, fence, pipe_run, road_strip) take the curve as input 0, surface assets (scatter_rocks,
+  forest_patch, grass_clumps) the surface; unconnected they build a default one. The PCG ones output packed instances.
+  To change one: assets {action:"fork", name:"stairs", to:"my_stairs"} copies its graph into the workspace; edit it, then
+  assets {action:"save", name:"stairs", from_graph:"my_stairs"} overrides the shelf asset (delete restores the original).`,
 
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
@@ -541,7 +552,7 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     const s = filter.search.toLowerCase();
     list = list.filter((d) => (d.type + ' ' + (d.aliases ?? []).join(' ') + ' ' + d.summary + ' ' + (d.description ?? '')).toLowerCase().includes(s));
   }
-  const cats = [...new Set([...CATEGORY_ORDER, 'asset', ...list.map((d) => d.category)])];
+  const cats = [...new Set([...CATEGORY_ORDER, 'shelf', 'asset', ...list.map((d) => d.category)])];
   const out: string[] = [];
   for (const c of cats) {
     const items = list.filter((d) => d.category === c);

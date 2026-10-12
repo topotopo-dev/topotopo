@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.308, 3, 0.308],
+      "min": [-0.308, 0, -0.308]
+    },
+    "counts": {
+      "points": 240,
+      "prims": 130,
+      "vertices": 720,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "919867e5855342ff",
+      "attributes": {
+        "detail.materials": "fffed43e54943f00",
+        "prim.Cd": "de5f1205cfccf7ef",
+        "prim.material": "38a69ccdff9b77f7",
+        "prim.name": "535567552e992117",
+        "vertex.N": "5f510f05e8900a6f",
+        "vertex.uv": "bdb563f526dbab1f"
+      },
+      "topology": "a89d14f9bd2f527f"
+    }
+  },
+  "name": "shelf.pillar",
+  "ok": true,
+  "source": "shelf/pillar.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

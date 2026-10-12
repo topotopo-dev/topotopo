@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.3229, 0.9, 0.318],
+      "min": [-0.3229, 0, -0.318]
+    },
+    "counts": {
+      "points": 416,
+      "prims": 368,
+      "vertices": 1548,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "c63941fa7b060d2c",
+      "attributes": {
+        "detail.materials": "e160fdb249cd1020",
+        "prim.Cd": "8e6755e95e152e1b",
+        "prim.material": "ebc2f28561b85bdf",
+        "prim.name": "94befbc50fc8eedf",
+        "vertex.uv": "56100c38fa4631b6"
+      },
+      "topology": "76f7e3ec98aeb656"
+    }
+  },
+  "name": "shelf.barrel",
+  "ok": true,
+  "source": "shelf/barrel.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

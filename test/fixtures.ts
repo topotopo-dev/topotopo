@@ -56,7 +56,27 @@ export const SRC: Record<string, NodeSpec> = {
   // mesh_repair (P1-E): a box with a missing face and four reversed faces
   HOLED: { type: 'delete', in: ['BOX'], params: { group: '0' } },
   BROKEN: { type: 'reverse', in: ['HOLED'], params: { group: '1-4' } },
+  // shelf assets (P2-F): a rising smooth path, a polyline with corners for pipes, a road centre line, a hilly ground
+  SHELF_PATH: { type: 'curve', params: { points: [[0, 0, 0], [3, 0, 1], [6, 0.3, 0.5], [8, 0.6, -1]], smooth: true } },
+  SHELF_PIPE: { type: 'curve', params: { points: [[0, 0.6, 0], [2, 0.6, 0], [2, 1.5, 0], [2, 1.5, 2], [4.5, 1.5, 2]] } },
+  SHELF_ROAD: { type: 'curve', params: { points: [[-10, 0, 0], [0, 0, 4], [10, 0, 0]], smooth: true, subdivisions: 8 } },
+  SHELF_GROUND: { type: 'terrain', params: { size: [16, 16], divisions: [24, 24], height: 1.5, frequency: 0.12, octaves: 3, seed: 3 } },
 };
+
+/** Fixture inputs of the shelf assets that take one (curve input 0 or surface input 0); test/shelf.ts checks coverage. */
+export const SHELF_INPUTS: Record<string, string[]> = {
+  railing: ['SHELF_PATH'], fence: ['SHELF_PATH'], pipe_run: ['SHELF_PIPE'], road_strip: ['SHELF_ROAD'],
+  scatter_rocks: ['SHELF_GROUND'], forest_patch: ['SHELF_GROUND'], grass_clumps: ['SHELF_GROUND'],
+};
+
+/** A graph that cooks the shelf asset `name` at its defaults (on its fixture inputs, if it takes any) as node `target`. */
+export function shelfFixtureGraph(name: string, params: Record<string, any> = {}): GraphSpec {
+  const ins = SHELF_INPUTS[name] ?? [];
+  const nodes: Record<string, NodeSpec> = {};
+  ins.forEach((k) => addFixture(nodes, k));
+  nodes.target = { type: name, ...(ins.length ? { in: ins } : {}), params: structuredClone(params) };
+  return { nodes, output: 'target' };
+}
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
 export const INPUTS: Record<string, string[]> = {

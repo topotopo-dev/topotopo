@@ -23,7 +23,7 @@
       "type": "float",
       "default": 4,
       "min": 0.5,
-      "max": 200,
+      "max": 20,
       "desc": "size of the ground patch used when nothing is connected (m)"
     },
     "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed" }
