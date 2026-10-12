@@ -15,6 +15,7 @@ import {
 } from '../core/analysis.ts';
 import type { PieceReport, RayMode } from '../core/analysis.ts';
 import { P, getPointNormals, mask } from './util.ts';
+import { then } from '../graph/parallel.ts';
 
 const hasPolygons = (g: Geometry) => {
   for (let p = 0; p < g.numPrims; p++) if (g.primClosed[p] && g.primSize(p) >= 3) return true;
@@ -118,7 +119,7 @@ defineNode({
     },
     output: 'out',
   },
-  cook: ({ input, hasInput, p, warn, stat }) => {
+  cook: ({ input, hasInput, p, warn, stat, parallelMap }) => {
     const src = input(0);
     const g = src.clone();
     const mode = p.mode as RayMode;
@@ -131,19 +132,29 @@ defineNode({
     const sel = mask(g, 'point', p.group);
     const a = g.points.add(p.name || RAY_NAMES[mode], 'float', 1).data as Float64Array;
     if (scene.empty) warn(`nothing for the rays to hit: geo has no polygons${hasInput(1) ? ' and neither has the occluder' : ' (connect an occluder as the second input)'}`);
-    const v = rayMeasure(g.P, getPointNormals(g), scene, { mode, samples: p.samples, maxDistance: maxD, bias, coneAngle: cone, seed: p.seed }, sel);
-    const range = mode === 'thickness' ? maxD : 1;
-    let measured = 0;
-    for (let i = 0; i < g.numPoints; i++) {
-      if (sel && !sel[i]) continue;
-      measured++;
-      let x = v[i];
-      if (mode === 'thickness' && p.normalize) x = Math.min(1, x / maxD);
-      if (p.invert) x = (mode === 'thickness' && !p.normalize ? range : 1) - x;
-      a[i] = x;
-    }
-    stat('rays', measured * p.samples);
-    return g;
+    const opts = { mode, samples: p.samples, maxDistance: maxD, bias, coneAngle: cone, seed: p.seed };
+    const finish = (v: Float64Array) => {
+      const range = mode === 'thickness' ? maxD : 1;
+      let measured = 0;
+      for (let i = 0; i < g.numPoints; i++) {
+        if (sel && !sel[i]) continue;
+        measured++;
+        let x = v[i];
+        if (mode === 'thickness' && p.normalize) x = Math.min(1, x / maxD);
+        if (p.invert) x = (mode === 'thickness' && !p.normalize ? range : 1) - x;
+        a[i] = x;
+      }
+      stat('rays', measured * p.samples);
+      return g;
+    };
+    if (scene.empty) return finish(rayMeasure(g.P, getPointNormals(g), scene, opts, sel));
+    // kernel "occlusion": the points in chunks on the worker pool, the BVH shared with the workers as arrays
+    const v = new Float64Array(g.numPoints);
+    const run = parallelMap('occlusion', {
+      count: g.numPoints, args: opts,
+      inputs: { P: g.P, N: getPointNormals(g), sel }, results: { out: v }, shared: scene.toArrays(),
+    }, { minElements: Math.ceil(32768 / Math.max(1, p.samples)) });
+    return then(run, () => finish(v));
   },
 });
 

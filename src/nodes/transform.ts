@@ -7,13 +7,13 @@ import {
 } from '../core/math.ts';
 import type { Mat4, Vec3 } from '../core/math.ts';
 import { pointNeighbors, reversePrims, buildEdges, refreshNormals } from '../core/topology.ts';
-import { fractal, makeCurl, makeNoise } from '../core/noise.ts';
 import { rng, rand } from '../core/random.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { primNormals } from '../core/topology.ts';
 import { transformHeightfield } from '../core/heightfield.ts';
 import { AXES, P, getPointNormals, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
+import { then } from '../graph/parallel.ts';
 import { composePackedXforms } from '../core/packed.ts';
 
 /**
@@ -454,47 +454,55 @@ defineNode({
     rest_attrib: { type: 'string', default: 'rest', desc: 'sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P)' },
     group: P.group('point'),
   },
-  cook: ({ input, p }) => {
+  cook: ({ input, p, parallelMap, engine }) => {
     const g = input(0).clone();
     const sel = mask(g, 'point', p.group);
-    const base = makeNoise(p.noise, p.seed);
-    const n = fractal(base, { octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity, fractal: p.fractal });
-    const f = p.frequency, o = p.offset;
     const Pd = g.P, np = g.numPoints;
     const ra = p.rest_attrib ? g.points.get(p.rest_attrib) : undefined;
-    const Q = ra && ra.type === 'float' && ra.size === 3 ? (ra.data as Float64Array).slice() : Pd;
-    const N = p.mode === 'normal' ? getPointNormals(g).slice() : null;
-    const dir = normalize(p.direction);
+    const Q = ra && ra.type === 'float' && ra.size === 3 ? (ra.data as Float64Array) : Pd;
     const ma = p.mask_attrib ? g.points.get(p.mask_attrib) : null;
     if (p.mask_attrib && !ma) throw new NodeError(`mask_attrib "${p.mask_attrib}" not found on points`);
+    // the noise values (kernel "noise_displace", chunked on the worker pool): one per point, three for 3d and curl
+    const k = p.mode === '3d' || p.mode === 'curl' ? 3 : 1;
+    const V = new Float64Array(np * k);
+    // Normals computed from the polygons are this thread's work while the workers sample. The noise costs about twice
+    // as much: in four chunks it is done first, and the other cores stay free so this thread is not slowed down.
+    const pn = g.points.get('N');
+    const ownNormals = p.mode === 'normal' && !(pn && pn.size === 3 && pn.type === 'float');
+    const pool = engine.host.pool;
+    const run = parallelMap('noise_displace', {
+      count: np,
+      args: {
+        noise: p.noise, seed: p.seed, fopts: { octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity, fractal: p.fractal },
+        mode: p.mode, centered: p.centered, freq: p.frequency, offset: p.offset,
+      },
+      inputs: { Q, sel }, results: { V },
+    }, ownNormals && pool ? { chunks: Math.min(4, pool.size) } : {});
+    // meanwhile (while workers sample the noise): normals, then the displacement in the same arithmetic as before
+    const N = p.mode === 'normal' ? getPointNormals(g) : null; // read only
+    const dir = normalize(p.direction);
     const st = p.store ? (g.points.add(p.store, 'float', 1).data as Float64Array) : null;
-    const curl = p.mode === 'curl' ? makeCurl(n) : null;
-    const n2 = p.mode === '3d' ? fractal(makeNoise(p.noise, p.seed + 1), { octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity, fractal: p.fractal }) : null;
-    const n3 = p.mode === '3d' ? fractal(makeNoise(p.noise, p.seed + 2), { octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity, fractal: p.fractal }) : null;
-    const center = (v: number) => (p.noise === 'worley' ? v * 2 - 1 : v);
-    for (let i = 0; i < np; i++) {
-      if (sel && !sel[i]) continue;
-      const x = Q[i * 3] * f[0] + o[0], y = Q[i * 3 + 1] * f[1] + o[1], z = Q[i * 3 + 2] * f[2] + o[2];
-      const amp = p.amplitude * (ma ? (ma.get(i) as number) : 1);
-      if (curl) {
-        const c = curl(x, y, z);
-        Pd[i * 3] += c[0] * amp; Pd[i * 3 + 1] += c[1] * amp; Pd[i * 3 + 2] += c[2] * amp;
-        if (st) st[i] = Math.hypot(c[0], c[1], c[2]);
-        continue;
+    return then(run, () => {
+      for (let i = 0; i < np; i++) {
+        if (sel && !sel[i]) continue;
+        const amp = p.amplitude * (ma ? (ma.get(i) as number) : 1);
+        if (p.mode === 'curl') {
+          const c0 = V[i * 3], c1 = V[i * 3 + 1], c2 = V[i * 3 + 2];
+          Pd[i * 3] += c0 * amp; Pd[i * 3 + 1] += c1 * amp; Pd[i * 3 + 2] += c2 * amp;
+          if (st) st[i] = Math.hypot(c0, c1, c2);
+          continue;
+        }
+        const v = V[i * k];
+        if (st) st[i] = v;
+        if (k === 3) {
+          Pd[i * 3] += v * amp; Pd[i * 3 + 1] += V[i * 3 + 1] * amp; Pd[i * 3 + 2] += V[i * 3 + 2] * amp;
+        } else {
+          const d0 = N ? N[i * 3] : dir[0], d1 = N ? N[i * 3 + 1] : dir[1], d2 = N ? N[i * 3 + 2] : dir[2];
+          Pd[i * 3] += d0 * v * amp; Pd[i * 3 + 1] += d1 * v * amp; Pd[i * 3 + 2] += d2 * v * amp;
+        }
       }
-      let v = center(n(x, y, z));
-      if (!p.centered) v = v * 0.5 + 0.5;
-      if (st) st[i] = v;
-      if (n2 && n3) {
-        let v2 = center(n2(x, y, z)), v3 = center(n3(x, y, z));
-        if (!p.centered) { v2 = v2 * 0.5 + 0.5; v3 = v3 * 0.5 + 0.5; }
-        Pd[i * 3] += v * amp; Pd[i * 3 + 1] += v2 * amp; Pd[i * 3 + 2] += v3 * amp;
-      } else {
-        const d = N ? [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]] : dir;
-        Pd[i * 3] += d[0] * v * amp; Pd[i * 3 + 1] += d[1] * v * amp; Pd[i * 3 + 2] += d[2] * v * amp;
-      }
-    }
-    return refreshNormals(g);
+      return refreshNormals(g);
+    });
   },
 });
 

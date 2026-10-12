@@ -189,3 +189,5 @@ if (framesArg) {
   console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary' }));
   await writeOutputs(r);
 }
+// stop the kernel worker threads (idle ones would not hold the process, but a clean exit should not wait on them)
+await engine.host.pool?.close();
