@@ -40,7 +40,7 @@ export const INPUTS: Record<string, string[]> = {
   boolean: ['BOX', 'MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],
   triangulate2d: ['PTS'], voronoi2d: ['PTS'], merge: ['MESH', 'BOX'], switch: ['MESH', 'BOX'],
-  uv_transform: ['BOX'], poly_extrude: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],
+  uv_transform: ['BOX'], poly_extrude: ['BOX'], poly_bevel: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],
   scatter: ['MESH'], decimate: ['MESH'], remesh: ['BOX'], smooth_solid: ['BOX'], foreach: ['BOX'],
 };
 
@@ -54,6 +54,7 @@ export const PARAMS: Record<string, any> = {
   attrib_promote: { name: 'N', from: 'point', to: 'prim' },
   attrib_delete: { names: 'N' },
   delete: { group: '@P.y>0' },
+  poly_bevel: { group: 'angle>80', offset: 0.1, divisions: 2 },
   group: { name: 'top', expr: '@P.y > 0.2' },
   sdf_expr: { code: 'smin(sdSphere(p, 0.5), sdBox(sub(p, [0.5, 0, 0]), [0.3, 0.3, 0.3]), 0.2)' },
   copy_xform: { count: 3, translate: [1.5, 0, 0], rotate: [0, 30, 0] },
