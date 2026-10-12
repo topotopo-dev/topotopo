@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "description": "Planar truss in the XY plane: top and bottom chords, verticals and diagonals in Warren, Pratt or Howe layout, swept with a steel I-section or a square timber section. Spans x = -length/2 … length/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.",
+  "params": {
+    "length": { "type": "float", "default": 8, "min": 1, "max": 40, "desc": "span along X (m)" },
+    "height": {
+      "type": "float",
+      "default": 1.2,
+      "min": 0.2,
+      "max": 6,
+      "desc": "depth of the truss, chord centre to chord centre (m)"
+    },
+    "panels": {
+      "type": "int",
+      "default": 6,
+      "min": 2,
+      "max": 30,
+      "desc": "panels along the span (even counts are symmetric)"
+    },
+    "member_size": { "type": "float", "default": 0.12, "min": 0.03, "max": 0.6, "desc": "member section size (m)" },
+    "layout": {
+      "type": "enum",
+      "default": "warren",
+      "options": ["warren", "pratt", "howe"],
+      "desc": "web layout"
+    },
+    "steel": { "type": "bool", "default": true, "desc": "steel I-sections (false = square timber)" }
+  },
+  "vars": { "length": 8, "height": 1.2, "panels": 6, "member_size": 0.12, "layout": "warren", "steel": true },
+  "nodes": {
+    "none": { "type": "points", "params": { "positions": [] } },
+    "chord_lines": {
+      "type": "wrangle",
+      "in": ["none"],
+      "params": {
+        "run_over": "detail",
+        "code": "const L = vars.length, H = vars.height, y0 = vars.member_size / 2;\nfor (const y of [y0, y0 + H]) addprim(0, 'polyline', [addpoint(0, [-L / 2, y, 0]), addpoint(0, [L / 2, y, 0])]);"
+      }
+    },
+    "web_lines": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "warren: alternating diagonals; pratt: verticals + diagonals sloping down to the middle; howe: verticals + diagonals sloping up to the middle",
+      "params": {
+        "run_over": "detail",
+        "code": "const L = vars.length, H = vars.height, n = Math.max(2, Math.round(vars.panels)), y0 = vars.member_size / 2, y1 = y0 + H, p = L / n;\nconst line = (x0, ya, x1, yb) => addprim(0, 'polyline', [addpoint(0, [x0, ya, 0]), addpoint(0, [x1, yb, 0])]);\nconst X = (i) => -L / 2 + i * p;\nif (vars.layout === 'warren') {\n  for (let i = 0; i < n; i++) i % 2 === 0 ? line(X(i), y0, X(i + 1), y1) : line(X(i), y1, X(i + 1), y0);\n} else {\n  for (let i = 0; i <= n; i++) line(X(i), y0, X(i), y1);\n  for (let i = 0; i < n; i++) {\n    const left = X(i) + p / 2 < 0;\n    const downToMiddle = vars.layout === 'pratt';\n    if (left === downToMiddle) line(X(i), y1, X(i + 1), y0); else line(X(i), y0, X(i + 1), y1);\n  }\n}"
+      }
+    },
+    "i_section": {
+      "type": "curve",
+      "note": "unit I-section (flange width 1, depth 1) in the XY plane",
+      "params": {
+        "points": [[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, -0.38, 0], [0.08, -0.38, 0], [0.08, 0.38, 0], [0.5, 0.38, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0], [-0.5, 0.38, 0], [-0.08, 0.38, 0], [-0.08, -0.38, 0], [-0.5, -0.38, 0]],
+        "closed": true
+      }
+    },
+    "box_section": { "type": "shape2d", "params": { "shape": "rect", "size": [1, 1], "plane": "xy" } },
+    "section_src": { "type": "switch", "in": ["box_section", "i_section"], "params": { "index": "=steel ? 1 : 0" } },
+    "section": {
+      "type": "transform",
+      "in": ["section_src"],
+      "note": "sweep maps profile x to the in-plane side of the member and profile y to +Z: turn the I so its depth lies in the truss plane",
+      "params": { "scale": ["=member_size * 0.8", "=member_size", 1], "rotate": [0, 0, 90] }
+    },
+    "chords": { "type": "sweep", "in": ["chord_lines", "section"], "params": { "up": [0, 0, 1], "caps": true } },
+    "chords_name": {
+      "type": "attrib_create",
+      "in": ["chords"],
+      "params": { "name": "name", "class": "prim", "value": "truss_chords" }
+    },
+    "web_section": { "type": "transform", "in": ["section"], "params": { "uniform_scale": 0.75 } },
+    "web": {
+      "type": "sweep",
+      "in": ["web_lines", "web_section"],
+      "params": { "up": [0, 0, 1], "caps": true }
+    },
+    "web_name": {
+      "type": "attrib_create",
+      "in": ["web"],
+      "params": { "name": "name", "class": "prim", "value": "truss_web" }
+    },
+    "all": { "type": "merge", "in": ["chords_name", "web_name"] },
+    "mat": {
+      "type": "material",
+      "in": ["all"],
+      "params": {
+        "name": "=steel ? 'steel' : 'wood_dark'",
+        "base_color": "=steel ? '#5f6d78' : '#5e4129'",
+        "metallic": "=steel ? 0.8 : 0",
+        "roughness": "=steel ? 0.45 : 0.85"
+      }
+    },
+    "paint": {
+      "type": "wrangle",
+      "in": ["mat"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
+  },
+  "output": "out",
+  "meta": {
+    "shelf_group": "architecture",
+    "watertight": true,
+    "thumbnail_render": { "azimuth": 20, "elevation": 20, "zoom": 1.3 }
+  }
+}
