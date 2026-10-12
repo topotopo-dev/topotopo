@@ -106,35 +106,19 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number,
   const heap = new Int32Array(n), where = new Int32Array(n), hw = new Float64Array(n);
   for (let i = 0; i < n; i++) { const a = labelOf ? labelOf[i] : i; heap[i] = a; where[a] = i; hw[i] = w[a]; }
   let size = n;
-  const swap = (x: number, y: number) => {
-    const t = heap[x]; heap[x] = heap[y]; heap[y] = t;
-    const tw = hw[x]; hw[x] = hw[y]; hw[y] = tw;
-    where[heap[x]] = x; where[heap[y]] = y;
-  };
-  const up = (k: number) => { while (k > 0) { const p = (k - 1) >> 1; if (hw[p] >= hw[k]) break; swap(p, k); k = p; } };
-  const down = (k: number) => {
-    for (;;) {
-      const l = 2 * k + 1, r = l + 1;
-      let m = k;
-      if (l < size && hw[l] > hw[m]) m = l;
-      if (r < size && hw[r] > hw[m]) m = r;
-      if (m === k) break;
-      swap(k, m); k = m;
-    }
-  };
-  for (let k = (size >> 1) - 1; k >= 0; k--) down(k);
+  for (let k = (size >> 1) - 1; k >= 0; k--) heapDown(heap, hw, where, size, k);
   const removed = new Uint8Array(n);
   while (size > target) {
     const a = heap[0];
     removed[a] = 1;
-    swap(0, size - 1); size--; down(0);
+    heapSwap(heap, hw, where, 0, size - 1); size--; heapDown(heap, hw, where, size, 0);
     for (let e = start[a]; e < start[a + 1]; e++) {
       const b = nbr[e];
       if (removed[b]) continue;
       w[b] -= con[e];
       const k = where[b];
       hw[k] = w[b];
-      if (k < size) { down(k); up(where[b]); }
+      if (k < size) { heapDown(heap, hw, where, size, k); heapUp(heap, hw, where, where[b]); }
     }
   }
   let kept = 0;
@@ -142,6 +126,27 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number,
   const out = new Int32Array(kept);
   for (let i = 0, o = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) out[o++] = i;
   return out;
+}
+
+// max-heap of sampleEliminate on weights hw (by heap position): module functions, so the optimised code keeps its call
+// targets from one call to the next (per-call closures made every later call deoptimise)
+function heapSwap(heap: Int32Array, hw: Float64Array, where: Int32Array, x: number, y: number) {
+  const t = heap[x]; heap[x] = heap[y]; heap[y] = t;
+  const tw = hw[x]; hw[x] = hw[y]; hw[y] = tw;
+  where[heap[x]] = x; where[heap[y]] = y;
+}
+function heapUp(heap: Int32Array, hw: Float64Array, where: Int32Array, k: number) {
+  while (k > 0) { const p = (k - 1) >> 1; if (hw[p] >= hw[k]) break; heapSwap(heap, hw, where, p, k); k = p; }
+}
+function heapDown(heap: Int32Array, hw: Float64Array, where: Int32Array, size: number, k: number) {
+  for (;;) {
+    const l = 2 * k + 1, r = l + 1;
+    let m = k;
+    if (l < size && hw[l] > hw[m]) m = l;
+    if (r < size && hw[r] > hw[m]) m = r;
+    if (m === k) break;
+    heapSwap(heap, hw, where, k, m); k = m;
+  }
 }
 
 /**
