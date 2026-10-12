@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3", "softweight:float:1"],
+      "prim": ["copynum:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [5, 2.9009, 1.5],
+      "min": [-3.9154, -0.0104, -1.5]
+    },
+    "counts": {
+      "points": 3251,
+      "prims": 3084,
+      "vertices": 12336,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["caps", "sides"]
+    },
+    "hashes": {
+      "P": "70f448854115ebff",
+      "attributes": {
+        "group.prim.caps": "401179fd11b8c4d7",
+        "group.prim.sides": "47ad063db30ebf77",
+        "point.Cd": "283e8796f4805158",
+        "point.softweight": "b3d402d8f2d42506",
+        "prim.copynum": "798aec255b6590df",
+        "vertex.uv": "7691977d3823dde7"
+      },
+      "topology": "8403396d801dd95f"
+    }
+  },
+  "name": "example.deformers",
+  "ok": true,
+  "source": "examples/deformers.json",
+  "warnings": []
+}

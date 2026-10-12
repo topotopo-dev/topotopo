@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.0782, 0.6234, 0.6194],
+      "min": [-0.066, -0.1147, -0.1117]
+    },
+    "counts": {
+      "points": 44,
+      "prims": 42,
+      "vertices": 168,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "cfdc13db17952605",
+      "attributes": {
+        "vertex.uv": "c94c0ee5aab8fc6f"
+      },
+      "topology": "68cfe3205044fa3a"
+    }
+  },
+  "name": "node.path_deform",
+  "ok": true,
+  "source": "fixture for node type \"path_deform\" (test/fixtures.ts)",
+  "warnings": []
+}
