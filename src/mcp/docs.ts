@@ -179,8 +179,9 @@ export {path:"exports/thing.glb"} — format from the extension:
   obj usda ply stl json (lossless polyforge)
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
-  ~3× smaller) | "draco" (only with the optional draco3dgltf package), quantize (KHR_mesh_quantization alone),
-  attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv), precision 64 | 32 (geo).
+  ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
+  quantize (KHR_mesh_quantization alone), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
+  precision 64 | 32 (geo). For Unreal and Blender keep the default uncompressed GLB.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. N → NORMAL (else computed, 60° cusp),
   uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. Custom attributes: every other numeric point/vertex attribute
@@ -199,7 +200,7 @@ UNREAL: import the GLB (Interchange): meshes, materials and vertex colours. PCG 
   properties ($Position …) with Attribute Rename/Copy if your version keeps them as attributes; spawn with Static Mesh Spawner.
 HOUDINI: File SOP reads .geo (and glb/obj/usd). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
   A material name becomes a Houdini material path with a wrangle: s@shop_materialpath = "/mat/" + s@material;
-BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME; meshopt files import).
+BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME).
 IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; external .bin; node transforms and
   EXT_mesh_gpu_instancing expanded; names → "name", materials → "material" + table), geo and uncompressed bgeo
   (Houdini; not .bgeo.sc; volumes skipped), csv (P.x | x,y,z | P[x] | Unreal Position.X or struct cells), points.json,
