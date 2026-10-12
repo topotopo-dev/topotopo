@@ -249,13 +249,19 @@ export class RayScene {
   static of(g: Geometry): RayScene { return new RayScene(new TriBVH(g)); }
 
   /** The arrays the ray queries read, for sharing the scene with worker threads (rebuilt there with fromArrays). */
-  toArrays(): { T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array } {
-    return { T: this.T, nodes: this.nodes, child: this.child, order: this.order };
+  toArrays(): { T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array; triPt: Int32Array } {
+    return { T: this.T, nodes: this.nodes, child: this.child, order: this.order, triPt: this.bvh.triPt };
   }
 
-  /** A scene over arrays from toArrays() (no BVH build). Supports the ray queries, not the BVH's own methods. */
-  static fromArrays(a: { T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array }): RayScene {
-    return new RayScene({ T: a.T, nodes: a.nodes, child: a.child, order: a.order, numTris: a.order.length } as unknown as TriBVH);
+  /**
+   * A scene over arrays from toArrays() (no BVH build). The BVH is a real TriBVH instance over the shared arrays, so
+   * the ray queries and the watertight edge test (crossesTri → neighbours/facing, which need T and triPt) work; the
+   * closest-point and attribute lookups that need the source geometry are not available here.
+   */
+  static fromArrays(a: { T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array; triPt?: Int32Array }): RayScene {
+    const bvh = Object.create(TriBVH.prototype) as TriBVH;
+    Object.assign(bvh as any, { T: a.T, nodes: a.nodes, child: a.child, order: a.order, triPt: a.triPt ?? new Int32Array(0), nodeCount: a.nodes.length / 6, edgeNbr: null });
+    return new RayScene(bvh);
   }
 
   get empty() { return this.bvh.numTris === 0; }

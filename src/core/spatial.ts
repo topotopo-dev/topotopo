@@ -229,8 +229,8 @@ export class TriBVH {
   nodes: Float64Array; // per node: minx miny minz maxx maxy maxz
   child: Int32Array; // per node: left (or -1-leafStart), right (or leafCount)
   nodeCount = 0;
-  /** point index of each triangle corner (3 per triangle) */
-  private triPt: Int32Array;
+  /** point index of each triangle corner (3 per triangle); shared with worker threads by RayScene.toArrays */
+  triPt: Int32Array;
   /** per triangle edge k (corner k → k+1): the triangle across it, -1 = none (boundary), -2 = several; built on demand */
   private edgeNbr: Int32Array | null = null;
 
