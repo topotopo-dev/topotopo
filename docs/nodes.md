@@ -1705,7 +1705,7 @@ Edge mode: every edge in "group" becomes a strip of divisions+1 quads; the faces
 | `mode` | enum | `"edges"` |  | `edges`, `points` | `bevel_type`, `class` | bevel edges, or truncate points |
 | `offset` | float | `0.1` | 0.. |  | `distance`, `width`, `radius`, `size`, `amount` | distance from the edge across each adjacent face (points mode: along each edge) |
 | `offset_mode` | enum | `"distance"` |  | `distance`, `fraction` | `distance_mode`, `offsetmode` | distance = offset in scene units; fraction = offset x the shortest edge at the edge's points (stays proportional on small faces) |
-| `clamp` | bool | `true` |  |  | `clamp_offset`, `clamp_overlap` | scale offsets down where neighbouring bevels would cross (Houdini Clamp Offset) |
+| `clamp` | bool | `true` |  |  | `clamp_offset`, `clamp_overlap` | scale all offsets down by one factor, just enough that no bevel crosses its neighbours (Houdini Clamp Offset); warns when it does |
 | `divisions` | int | `0` | 0..64 |  | `segments`, `divs`, `subdivisions` | 0 = flat chamfer (one strip of quads per edge); n = round profile with n+1 strips |
 | `shape` | float | `0` | -1..1 |  | `profile_shape`, `convexity`, `profile` | profile convexity for round bevels: 0 = circular arc, 1 = bulges out to a nearly square corner, -0.5 = straight, -1 = concave cove |
 
