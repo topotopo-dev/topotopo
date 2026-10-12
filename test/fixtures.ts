@@ -41,6 +41,9 @@ export const SRC: Record<string, NodeSpec> = {
   NBRS: { type: 'attrib_array', in: ['GRID'], params: { mode: 'from_neighbours' } },
   CUBE: { type: 'box' },
   OPENTUBE: { type: 'tube', params: { cols: 12, caps: false } },
+  // packed prims (P2-A): three identical boxes (pack shares one source), and packed copies of a coloured sphere
+  PIECES: { type: 'copy_xform', in: ['BOX'], params: { count: 3, translate: [1.5, 0, 0], copy_attrib: '' } },
+  PACKED: { type: 'copy_to_points', in: ['COLORED', 'PTS'], params: { pack: true } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -59,6 +62,7 @@ export const INPUTS: Record<string, string[]> = {
   polysplit: ['BOX'], edge_divide: ['BOX'], dissolve: ['GRID'], polybridge: ['CUBE'], polyfill: ['OPENTUBE'],
   // measure (P1-F): curvature on the box (flat faces, sharp edges), distance from grid points to the sphere
   curvature: ['BOX'], distance: ['GRID', 'MESH'],
+  pack: ['PIECES'], unpack: ['PACKED'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -120,6 +124,24 @@ export function checkGeo(g: Geometry): string[] {
   for (const [k, m] of g.pointGroups) if (m.length !== g.numPoints) errs.push(`point group ${k} size`);
   for (const [k, m] of g.primGroups) if (m.length !== g.numPrims) errs.push(`prim group ${k} size`);
   for (let i = 0; i < g.P.length; i++) if (!Number.isFinite(g.P[i])) { errs.push('non-finite P'); break; }
+  // packed prims: arrays sized to the prims, one vertex each, valid source, finite transform; sources consistent
+  if (g.primKind) {
+    const n = g.numPrims;
+    if (g.primKind.length !== n || g.packedSource?.length !== n || g.packedXform?.length !== n * 9) errs.push('packed array sizes');
+    else {
+      let bad = '';
+      for (let p = 0; p < n && !bad; p++) {
+        if (!g.primKind[p]) { if (g.packedSource[p] !== -1) bad = `prim ${p}: not packed but has source ${g.packedSource[p]}`; continue; }
+        if (g.primSize(p) !== 1) bad = `packed prim ${p} has ${g.primSize(p)} vertices`;
+        else if (!(g.packedSource[p] >= 0 && g.packedSource[p] < g.packedSources.length)) bad = `packed prim ${p}: source ${g.packedSource[p]} of ${g.packedSources.length}`;
+        else if (g.primClosed[p]) bad = `packed prim ${p} is closed`;
+        else for (let c = 0; c < 9; c++) if (!Number.isFinite(g.packedXform[p * 9 + c])) { bad = `packed prim ${p}: non-finite transform`; break; }
+      }
+      if (bad) errs.push(bad);
+      if (!g.primKind.includes(1)) errs.push('packed arrays without packed prims');
+      for (const [i, src] of g.packedSources.entries()) for (const e of checkGeo(src)) errs.push(`packed source ${i}: ${e}`);
+    }
+  }
   return errs;
 }
 

@@ -5,6 +5,7 @@
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
 //                   [--shading flat|matcap|ao] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
+//                   [--instancing packed|expand]
 //                   [--inspect summary|attributes|topology|all]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
@@ -40,6 +41,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
     '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '                         [--instancing packed|expand] (packed instances: glb/usda keep them by default)',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     '       node src/cli.ts --catalog | --help-node <type>',
@@ -138,6 +140,8 @@ async function writeOutputs(r: CookReport, frame?: number) {
       attributes: opt('--attributes'),
       upAxis: up === 'z' || up === 'y' ? up : undefined,
       scale: opt('--scale') !== undefined ? Number(opt('--scale')) : undefined,
+      instancing: opt('--instancing') === 'expand' ? 'expand' : undefined,
+      warn: (m) => console.warn(`warning: ${m}`),
     });
     fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
     fs.writeFileSync(p, bytes);

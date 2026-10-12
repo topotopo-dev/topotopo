@@ -31,6 +31,7 @@ function elemCount(g: Geometry, cls: AttribClass) {
 defineNode({
   type: 'attrib_create',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Create/set an attribute to a constant value (type inferred from the value; float[]/int[]/string[] make array attributes).',
   description:
     'A list value is a fixed-size TUPLE by default: [1,2,3] with type auto/float is a vector (float, size 3). ' +
@@ -65,6 +66,7 @@ defineNode({
 defineNode({
   type: 'attrib_randomize',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Random attribute values: uniform range, normal distribution, unit directions, or random choice from a list.',
   aliases: ['attribrandomize', 'randomize'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -118,6 +120,7 @@ defineNode({
 defineNode({
   type: 'attrib_promote',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Move an attribute between classes (point ↔ prim ↔ vertex ↔ detail) with average/min/max/sum/first.',
   aliases: ['attribpromote', 'promote'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -184,6 +187,7 @@ defineNode({
 defineNode({
   type: 'attrib_delete',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Delete attributes by name pattern (wildcards, "^name" to keep).',
   aliases: ['attribdelete', 'delete_attrib'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -210,6 +214,7 @@ defineNode({
 defineNode({
   type: 'attrib_rename',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Rename an attribute.',
   aliases: ['attribrename', 'rename_attrib'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -232,6 +237,7 @@ defineNode({
 defineNode({
   type: 'attrib_copy',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Copy attributes from the second input by element index (or by matching an id attribute).',
   aliases: ['attribcopy', 'copy_attrib'],
   inputs: [{ name: 'dest', desc: 'geometry receiving attributes' }, { name: 'source', desc: 'geometry providing attributes' }],
@@ -266,6 +272,7 @@ defineNode({
 defineNode({
   type: 'attrib_transfer',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Transfer point attributes from the nearest points (or surface) of the second input, with distance falloff.',
   aliases: ['attribtransfer', 'transfer'],
   inputs: [{ name: 'dest', desc: 'geometry receiving attributes' }, { name: 'source', desc: 'geometry providing attributes' }],
@@ -334,6 +341,7 @@ function listAttribs(names: string[], spec: string): string[] {
 defineNode({
   type: 'attrib_array',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Build or inspect array attributes (int[]/float[]/string[]): point neighbour lists, prim point lists, pack/unpack scalar attributes, array lengths.',
   description:
     'Array attributes hold a variable-length list per element (Houdini i[]@/f[]@/s[]@). Modes: ' +
@@ -447,6 +455,7 @@ defineNode({
 defineNode({
   type: 'attrib_noise',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Write fractal noise into a float or vector attribute (e.g. for masks, colour variation, weights).',
   aliases: ['attribnoise'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -486,6 +495,7 @@ defineNode({
 defineNode({
   type: 'color',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Set Cd: constant, random per element/piece, or a ramp driven by an attribute (auto-ranged).',
   aliases: ['colour', 'cd'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -585,6 +595,7 @@ defineNode({
 defineNode({
   type: 'group',
   category: 'group',
+  packed: 'keep',
   summary: 'Create/modify a point, prim, vertex or edge group by pattern, JS expression, bounding box, normal direction or random %.',
   description:
     'Edge groups are sets of point pairs. Edge patterns add selectors: "boundary" (unshared edges), "shared", "angle>30" ' +
@@ -722,6 +733,8 @@ function groupVertexEdge(g: Geometry, cls: 'vertex' | 'edge', p: Record<string, 
 defineNode({
   type: 'delete',
   category: 'group',
+  // dissolving edges rebuilds faces: instances are expanded first
+  packed: (p) => (p.class === 'edge' && p.edge_mode === 'dissolve' ? 'unpack' : 'keep'),
   summary: 'Delete (or keep only) points/prims/vertices matching a group pattern, or the prims using an edge group (Houdini Blast).',
   aliases: ['blast', 'remove', 'keep'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -859,6 +872,7 @@ defineNode({
 defineNode({
   type: 'sort',
   category: 'topology',
+  packed: 'keep',
   summary: 'Reorder points or prims: by axis, random, attribute value, or reverse.',
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
@@ -893,6 +907,7 @@ defineNode({
       out.primClosed = Uint8Array.from(order, (pr) => g.primClosed[pr]);
       out.primGroups = new Map([...g.primGroups].map(([k, m]) => [k, Uint8Array.from(order, (pr) => m[pr])]));
       out.vertexGroups = new Map([...g.vertexGroups].map(([k, m]) => [k, Uint8Array.from(vtx, (v) => m[v])]));
+      if (g.primKind) out.gatherPacked(g, order);
       return out;
     }
     const inv = new Int32Array(n);

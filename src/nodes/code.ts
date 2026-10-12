@@ -17,11 +17,14 @@ import { halfEdges } from '../core/halfedge.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { convertSelection } from '../core/groupconvert.ts';
 import { appendElements } from '../core/wrangle.ts';
+import { composePackedXforms, expandPacked, packedInfo } from '../core/packed.ts';
 import { mask, wrangleTime } from './util.ts';
 
 defineNode({
   type: 'wrangle',
   category: 'code',
+  // points/prims/detail work on instances (anchors, packed prims); vertices are the instances' corners
+  packed: (p) => (p.run_over === 'vertices' ? 'unpack' : 'keep'),
   summary: 'Run a JS snippet per point / prim / vertex (or once) with VEX-style @attributes. The universal escape hatch.',
   aliases: ['attribwrangle', 'pointwrangle', 'primwrangle', 'vex', 'snippet', 'attribute_wrangle'],
   description:
@@ -76,6 +79,8 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
     Geometry, GeoBuilder, math, topology, random,
     noise: { makeNoise, fractal, makeCurl },
     KDTree, TriBVH, evalGroup, appendElements,
+    // packed prims: expand instances, compose a matrix into instance transforms, statistics
+    packed: { expand: expandPacked, compose: composePackedXforms, info: packedInfo },
     // topology: half-edge mesh (cached per geometry), edge sets, edge patterns, group conversion
     halfEdges, EdgeSet, evalEdgeGroup, convertSelection,
     manifold: { wasm: engine.manifold, toManifold, fromManifold, propLayout },
@@ -109,6 +114,7 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
 defineNode({
   type: 'script',
   category: 'code',
+  packed: 'keep',
   summary: 'Arbitrary JS over the whole geometry with the engine library (builder, math, noise, BVH, manifold, lib.run any node). Return a Geometry.',
   aliases: ['python', 'js', 'javascript', 'python_sop'],
   description:

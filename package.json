@@ -7,7 +7,7 @@
     "mcp": "node src/mcp/server.ts",
     "preview": "node scripts/preview.ts --examples",
     "cook": "node src/cli.ts",
-    "test": "node test/smoke.ts && node test/golden.ts && node test/property.ts && node test/fuzz.ts && node test/docs.ts && node test/io.ts && node test/interop.ts && node test/mcp.ts && node test/engine.ts && node test/topology.ts && node test/deform.ts && node test/arrays.ts && node test/bugs.ts && node test/uv.ts && node test/polyedit.ts && node test/bevel.ts && node test/measure.ts && node test/render.ts",
+    "test": "node test/smoke.ts && node test/golden.ts && node test/property.ts && node test/fuzz.ts && node test/docs.ts && node test/io.ts && node test/interop.ts && node test/mcp.ts && node test/engine.ts && node test/topology.ts && node test/deform.ts && node test/arrays.ts && node test/bugs.ts && node test/uv.ts && node test/polyedit.ts && node test/bevel.ts && node test/measure.ts && node test/render.ts && node test/packed.ts",
     "test:uv": "node test/uv.ts",
     "test:render": "node test/render.ts",
     "test:smoke": "node test/smoke.ts",

@@ -8,6 +8,7 @@ import { P, mask } from './util.ts';
 defineNode({
   type: 'material',
   category: 'attribute',
+  packed: 'keep',
   summary: 'Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims; exporters write it as a glTF material.',
   description:
     'Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail ' +

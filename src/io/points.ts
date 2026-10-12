@@ -18,7 +18,7 @@ import type { AttribType } from '../core/geometry.ts';
 import { hash32 } from '../core/random.ts';
 import { lookAtBasis, m4fromQuat, m4identity, m4mul, qFromMat } from '../core/math.ts';
 import type { Mat4, Quat, Vec3 } from '../core/math.ts';
-import { attributeList, xf, xfDir } from './common.ts';
+import { attributeList, expandForExport, xf, xfDir } from './common.ts';
 import type { ExportOptions } from './common.ts';
 
 const COMP = ['x', 'y', 'z', 'w'];
@@ -159,6 +159,7 @@ function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: strin
 
 /** CSV text, one row per point. */
 export function exportCSV(g: Geometry, o: ExportOptions = {}): string {
+  g = expandForExport(g, o, 'csv');
   let header: string[], rows: string[][];
   if (o.pcg) ({ header, rows } = pcgRows(g, o));
   else {
@@ -332,6 +333,7 @@ function importCSVColumns(header: string[], cols: string[][], n: number): Attrib
 
 /** Compact JSON point stream (all or `attributes` point attributes; prims ignored). */
 export function exportPointsJSON(g: Geometry, o: ExportOptions = {}): string {
+  g = expandForExport(g, o, 'points json');
   const attributes: Record<string, { type: AttribType; size: number; data: (number | string)[] }> = {};
   for (const [n, a] of selectAttribs(g, o)) {
     const data: (number | string)[] = [];

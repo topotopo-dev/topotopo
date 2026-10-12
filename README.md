@@ -17,6 +17,10 @@ browser-ready, so it can sit under a future GUI.
   attribute and group), CSV point streams with Unreal PCG columns, points JSON, OBJ, USDA, PLY, STL and lossless JSON,
   with Y/Z-up and scale. Mesh splitting follows the `name` attribute, for Unreal, Blender and Houdini. The `file` node
   reads the same formats back (glTF with meshopt and external buffers, `.geo` and uncompressed `.bgeo`, CSV).
+- **Instancing**: packed primitives (Houdini's packed prims) keep a million copies as a million points plus one shared
+  mesh: `copy_to_points {pack: true}` (with variants), `pack`, `unpack`. Transforms, merges, deletes and attribute nodes
+  work on the instances; other nodes unpack them automatically with a warning. GLB export writes
+  `EXT_mesh_gpu_instancing`, USDA a `PointInstancer`, and the renderer draws them within a triangle budget.
 - **Live preview**: a local three.js page that refreshes whenever a graph changes. Click any node to see its result.
 
 The design notes, including whether the browser is a limitation, are in [docs/DESIGN.md](docs/DESIGN.md).
@@ -77,7 +81,7 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, assets, uv, render, export, verify, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, instancing, assets, uv, render, export, verify, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
@@ -134,7 +138,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | measure | `curvature` `occlusion` (ambient occlusion, cavity, thickness) `distance` `assert` (in-graph checks: watertight, counts, bbox, edge length, degenerate, self-intersections, attributes, groups, expression) |
 | group | `group` `delete` `group_promote` `group_expand` `group_combine` `group_delete` `group_rename` (point, vertex, prim and edge groups) |
 | topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `poly_bevel` `grid_split` `fill_holes` `bound` `decimate` `remesh` `knife` `polysplit` `edge_divide` `dissolve` `edge_collapse` `polybridge` `polyfill` |
-| copy | `copy_xform` `scatter` `copy_to_points` |
+| copy | `copy_xform` `scatter` `copy_to_points` (real copies or packed instances) `pack` `unpack` |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
 | uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
@@ -147,13 +151,13 @@ Every node's inputs, parameters (types, defaults, ranges, options, aliases) and 
 
 ## Examples
 
-[examples/](examples) has fifteen graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
+[examples/](examples) has sixteen graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
 rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
 grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
 bracket, a solver growth animation (rendered at the frame named by its `meta.frame`), polygon editing (loop cuts, knife,
 bridge, quad fill, dissolve), bevels (rounded box, chamfered top edges, a star with a rounded rim), a UV toolkit demo, and a
 render-overlay demo (`render_modes`: section view, hard edges, normal glyphs, group labels, matcap). A graph's `meta.render`
-takes any `render` tool option.
+takes any `render` tool option. The forest example places 30,000 packed tree instances in three variants.
 
 To cook a graph from the command line:
 
@@ -184,6 +188,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | render | `node test/render.ts` | every render option renders at the expected size; pixel probes for edge overlays, section caps (incl. inside-out), clip, glyphs, labels, legends, shading, the footer line; default output unchanged by the new code paths |
 | mcp | `node test/mcp.ts` | the MCP server end to end over stdio |
 | arrays | `node test/arrays.ts` | array attributes: storage, merge and builder rules, wrangle `f[]@`/`i[]@`/`s[]@` and helpers, `attrib_array`, JSON, inspect, fingerprints, every node type fed array attributes |
+| packed | `node test/packed.ts` | packed prims: model (clone, subsets, merge dedup, builder, bbox), pack/unpack round trips, packed copies equal real copies, transforms, auto-unpack, JSON/GLB/USD, render budget, every node type fed instances |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.
@@ -209,8 +214,8 @@ internal JS errors. `node test/fuzz.ts --count 500` runs more wrangle snippets.
 **Node reference.** `npm run docs` regenerates [docs/nodes.md](docs/nodes.md) from the `NodeDef`s. Commit it with any
 node or param change; `npm test` fails while it is stale.
 
-**Benchmarks.** `npm run bench` times named cooks (scatter, copy, subdivide, boolean, noise, wrangle, SDF meshing,
-triangulate, merge, fuse) against targets from the roadmap and prints a Markdown table. `--quick` uses smaller sizes,
+**Benchmarks.** `npm run bench` times named cooks (scatter, copy, packed copy, unpack, subdivide, boolean, noise,
+wrangle, SDF meshing, triangulate, merge, fuse) against targets from the roadmap and prints a Markdown table. `--quick` uses smaller sizes,
 `--filter name` selects cases. Results go to `bench/last.json`; `bench/baseline.json` is a reference run (informational,
 never failing).
 

@@ -12,6 +12,7 @@ WORKFLOW
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, meshopt), geo (Houdini), csv (Unreal PCG points), points.json, obj/usda/ply/stl/json for Unreal, Blender, Houdini.
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
+INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb and usda export them as instances). See help topic "instancing".
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
@@ -230,6 +231,38 @@ Vars in the body: iteration, numiterations, value, attr (the element's attribute
 Results are merged (or the last one with feedback). Identical iterations are cached.
 For feedback over animation frames (growth, accumulation) use solver instead (help topic "time").`,
 
+  instancing: `PACKED PRIMITIVES (instances)
+A packed prim is one point (the anchor: P = instance position) + one prim that references a shared source geometry with a
+3×3 rotation·scale. A million trees = a million points + one small mesh. world = translate(anchor P) · transform · source.
+Make them:
+  copy_to_points {pack:true}   one instance per template point (orient | N+up, rot, pscale, scale, pivot, trans as usual);
+                               template point attributes go onto the anchors. Variants: variants "name" (split the source
+                               by prim name) or "piece" (connectivity), the point attribute variant_attrib picks one
+                               (string name or int index), e.g. trees = merge of named tree meshes.
+  pack {by: connectivity|name|attrib|all, pivot}   pieces → instances; identical pieces share one source;
+                               constant name/Cd/material per piece move onto the instance.
+  file *.glb                   EXT_mesh_gpu_instancing comes in packed (instancing:"expand" for real geometry).
+Nodes that KEEP instances (work on anchors / packed prims): transform (also rotates/scales each instance), match_size,
+  copy_xform, copy_to_points, merge, switch, null, foreach (pieces/prims/points: one iteration per instance), solver,
+  graph_ref, file, delete (not edge dissolve), group, group_*, attrib_* (create, randomize, promote, delete, rename,
+  copy, transfer, array, noise), color, material, sort, wrangle (points/prims/detail; vertices unpacks), script, pack,
+  unpack, bound (box of the instances), rest, and deformers that move points (noise_displace, jitter, twist, bend,
+  taper, soft_transform, lattice, path_deform, point_deform): they move the anchors, i.e. whole instances.
+Every other node (boolean, subdivide, scatter, normal, measure, uv_*, …) gets the instances UNPACKED automatically,
+  with a warning "unpacked N instances for <node>" (cached, so it happens once). Add an unpack node yourself to choose:
+  unpack {group, transfer_attributes:"name Cd material piece", limit, piece_attrib, recursive}.
+  Anchor attributes are copied onto the unpacked geometry only where the source has none (Cd: in any class), so a
+  source's own colours win and an anchor Cd tints colourless sources.
+See them: render draws instances (an evenly spread subset above 600k triangles, with a note "rendering 9.5k of 30k
+  instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
+Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, TRANSLATION/ROTATION/SCALE per instance; shear
+  is approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices, positions,
+  orientations, scales); json keeps them losslessly; obj/ply/stl/geo/csv/points.json expand them (warned).
+  instancing:"expand" (export option) always writes real geometry. Unreal: glb instances import as instanced meshes
+  where the importer supports EXT_mesh_gpu_instancing; USD PointInstancer → HISM.
+Example (forest): terrain → scatter → attrib_randomize {name:"variant", distribution:"choice", values:["pine","fir","oak"]}
+  → copy_to_points {pack:true, variants:"name"} with trees = merge of three meshes named pine/fir/oak (examples/forest.json).`,
+
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
 The graph's vars become parameters (add "params": {"var": {"desc": "...", "min": 0, "max": 1}} for docs/ranges).
@@ -318,8 +351,10 @@ UNREAL: import the GLB (Interchange): meshes, materials and vertex colours. PCG 
 HOUDINI: File SOP reads .geo (and glb/obj/usd). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
   A material name becomes a Houdini material path with a wrangle: s@shop_materialpath = "/mat/" + s@material;
 BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME).
-IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; external .bin; node transforms and
-  EXT_mesh_gpu_instancing expanded; names → "name", materials → "material" + table), geo and uncompressed bgeo
+PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing, usda a PointInstancer, json keeps
+  them; obj/ply/stl/geo/csv/points.json expand them. Option instancing "expand" writes real geometry everywhere.
+IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; external .bin; node transforms;
+  EXT_mesh_gpu_instancing as packed prims, instancing:"expand" for geometry; names → "name", materials → "material" + table), geo and uncompressed bgeo
   (Houdini; not .bgeo.sc; volumes skipped), csv (P.x | x,y,z | P[x] | Unreal Position.X or struct cells), points.json,
   json (polyforge, points stream or Houdini geo, detected). up_axis "z" converts Z-up sources.`,
 
