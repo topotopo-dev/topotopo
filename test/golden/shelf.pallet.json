@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.6, 0.144, 0.4],
+      "min": [-0.6, 0, -0.4]
+    },
+    "counts": {
+      "points": 160,
+      "prims": 120,
+      "vertices": 480,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "6f8d178d6862cf0f",
+      "attributes": {
+        "detail.materials": "282a64bbfa4827e9",
+        "prim.Cd": "c8c75e4d1fb0c607",
+        "prim.material": "6e8cb1a1cb41cc2b",
+        "prim.name": "0df4473d50131ea7",
+        "vertex.uv": "b7f1eac5d945bb1f"
+      },
+      "topology": "c3ea1a6482fe699e"
+    }
+  },
+  "name": "shelf.pallet",
+  "ok": true,
+  "source": "shelf/pallet.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

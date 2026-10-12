@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "Hexagonal paving: flat-topped hexagonal prisms on a hex lattice filling a rectangle (tiles whose centre lies inside), with gaps and random height and tint. Pivot at the centre of the base. Piece: hex_tiles (paving). Every tile is a closed prism.",
+  "params": {
+    "size_x": { "type": "float", "default": 5, "min": 0.5, "max": 40, "desc": "area size along X (m)" },
+    "size_z": { "type": "float", "default": 5, "min": 0.5, "max": 40, "desc": "area size along Z (m)" },
+    "radius": {
+      "type": "float",
+      "default": 0.3,
+      "min": 0.05,
+      "max": 3,
+      "desc": "hexagon circumradius including the gap (m)"
+    },
+    "gap": { "type": "float", "default": 0.02, "min": 0, "max": 0.2, "desc": "gap between tiles (m)" },
+    "height": { "type": "float", "default": 0.08, "min": 0.01, "max": 1, "desc": "tile height (m)" },
+    "height_jitter": { "type": "float", "default": 0.015, "min": 0, "max": 0.5, "desc": "random height variation (m)" },
+    "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed" }
+  },
+  "vars": {
+    "size_x": 5,
+    "size_z": 5,
+    "radius": 0.3,
+    "gap": 0.02,
+    "height": 0.08,
+    "height_jitter": 0.015,
+    "seed": 0
+  },
+  "nodes": {
+    "none": { "type": "points", "params": { "positions": [] } },
+    "hex_pts": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "flat-topped hex lattice: columns 1.5 r apart, rows sqrt(3) r apart, odd columns shifted half a row",
+      "params": {
+        "run_over": "detail",
+        "code": "const X = vars.size_x, Z = vars.size_z, r = vars.radius, g = Math.min(vars.gap, r), s = vars.seed;\nconst dx = 1.5 * r, dz = Math.sqrt(3) * r, nx = Math.floor(X / 2 / dx) + 1, nz = Math.floor(Z / 2 / dz) + 1;\nconst k = (r - g / Math.sqrt(3)) / r;\nfor (let i = -nx; i <= nx; i++) for (let j = -nz - 1; j <= nz; j++) {\n  const x = i * dx, z = j * dz + (Math.abs(i) % 2 ? dz / 2 : 0);\n  if (Math.abs(x) > X / 2 || Math.abs(z) > Z / 2) continue;\n  const h = Math.max(0.005, vars.height + (rand(i, j, s) - 0.5) * 2 * vars.height_jitter);\n  const q = addpoint(0, [x, 0, z]);\n  setpointattrib(0, 'scale', q, [r * k, h, r * k]);\n  setpointattrib(0, 'tint', q, 0.78 + 0.35 * rand(i, j, s, 2));\n}"
+      }
+    },
+    "hex": {
+      "type": "tube",
+      "params": { "radius": 1, "height": 1, "center": [0, 0.5, 0], "cols": 6, "caps": true }
+    },
+    "tiles": { "type": "copy_to_points", "in": ["hex", "hex_pts"] },
+    "name": {
+      "type": "attrib_create",
+      "in": ["tiles"],
+      "params": { "name": "name", "class": "prim", "value": "hex_tiles" }
+    },
+    "mat": {
+      "type": "material",
+      "in": ["name"],
+      "params": { "name": "paving", "base_color": "#9b9488", "roughness": 0.85 }
+    },
+    "paint": {
+      "type": "wrangle",
+      "in": ["mat"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (!m) return; const k = haspointattrib(0, 'tint') ? point(0, 'tint', primpoints(0, @primnum)[0]) || 1 : 1; @Cd = mul(m.baseColor, k);"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint scale copynum" } }
+  },
+  "output": "out",
+  "meta": { "shelf_group": "architecture", "watertight": true, "thumbnail_render": { "elevation": 40 } }
+}

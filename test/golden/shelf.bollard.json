@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.125, 0.9, 0.125],
+      "min": [-0.125, 0, -0.125]
+    },
+    "counts": {
+      "points": 262,
+      "prims": 226,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "1930ffc81d4f5f1e",
+      "attributes": {
+        "detail.materials": "024ac473115ab1d9",
+        "prim.Cd": "f01d76753df3bd9f",
+        "prim.material": "1751ca9d0562217f",
+        "prim.name": "969692658fb2ff3f",
+        "vertex.N": "58c34f352d9cc6bf",
+        "vertex.uv": "7377e069bcd0dbfb"
+      },
+      "topology": "fd5cc39edc78d544"
+    }
+  },
+  "name": "shelf.bollard",
+  "ok": true,
+  "source": "shelf/bollard.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

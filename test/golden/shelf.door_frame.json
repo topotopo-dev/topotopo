@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 2.1, 0.08],
+      "min": [-0.5, 0, -0.08]
+    },
+    "counts": {
+      "points": 80,
+      "prims": 60,
+      "vertices": 240,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "47b089a5bbf8dd5f",
+      "attributes": {
+        "detail.materials": "6bd95fb244e7c440",
+        "prim.Cd": "fb2967919301c403",
+        "prim.material": "028c8e0552cae447",
+        "prim.name": "c956a351869a2893",
+        "vertex.uv": "f1aec4452aae0c1f"
+      },
+      "topology": "91b7360413a7b01e"
+    }
+  },
+  "name": "shelf.door_frame",
+  "ok": true,
+  "source": "shelf/door_frame.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

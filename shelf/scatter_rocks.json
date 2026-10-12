@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "description": "Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (the shelf rock asset) sunk slightly into the ground. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).",
+  "params": {
+    "density": {
+      "type": "float",
+      "default": 0.4,
+      "min": 0.01,
+      "max": 5,
+      "desc": "rocks per square metre before pruning"
+    },
+    "min_scale": { "type": "float", "default": 0.35, "min": 0.05, "max": 5, "desc": "smallest rock width (m)" },
+    "max_scale": { "type": "float", "default": 1.1, "min": 0.05, "max": 8, "desc": "largest rock width (m)" },
+    "max_slope": {
+      "type": "float",
+      "default": 40,
+      "min": 0,
+      "max": 90,
+      "desc": "no rocks on faces steeper than this (degrees)"
+    },
+    "ground_size": {
+      "type": "float",
+      "default": 8,
+      "min": 1,
+      "max": 60,
+      "desc": "size of the ground patch used when nothing is connected (m)"
+    },
+    "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed" }
+  },
+  "vars": {
+    "density": 0.4,
+    "min_scale": 0.35,
+    "max_scale": 1.1,
+    "max_slope": 40,
+    "ground_size": 8,
+    "seed": 0
+  },
+  "nodes": {
+    "surface_in": {
+      "type": "input",
+      "params": { "index": 0, "label": "surface to scatter on (polygons); optional" }
+    },
+    "patch": { "type": "grid", "params": { "size": ["=ground_size", "=ground_size"], "divisions": [12, 12] } },
+    "surface": {
+      "type": "switch",
+      "in": ["patch", "surface_in"],
+      "params": { "index": "=nprims('surface_in') > 0 ? 1 : 0" }
+    },
+    "flat_enough": {
+      "type": "mask",
+      "in": ["surface"],
+      "params": { "by": "slope", "min": 0, "max": "=max_slope", "falloff": 5 }
+    },
+    "pts": {
+      "type": "scatter",
+      "in": ["flat_enough"],
+      "params": {
+        "generate_by": "density",
+        "density": "=density",
+        "density_mask": "mask",
+        "min_distance": "=min_scale * 0.8",
+        "seed": "=seed"
+      }
+    },
+    "xf": {
+      "type": "orient",
+      "in": ["pts", "surface"],
+      "params": {
+        "mode": "surface",
+        "align_axis": "y",
+        "random_yaw": [0, 360],
+        "tilt": [0, 10],
+        "scale_min": "=min_scale",
+        "scale_max": "=max_scale",
+        "seed": "=seed"
+      }
+    },
+    "keep": { "type": "prune", "in": ["xf"], "params": { "mode": "overlap", "radius": 0.45 } },
+    "rock_a": { "type": "rock", "params": { "size": 1, "seed": 1, "sink": 0.15 } },
+    "rock_b": { "type": "rock", "params": { "size": 1, "seed": 2, "flatness": 0.5, "sink": 0.15 } },
+    "rock_c": {
+      "type": "rock",
+      "params": { "size": 1, "seed": 3, "flatness": 0.8, "roughness": 0.5, "sink": 0.15 }
+    },
+    "variants": { "type": "merge", "in": ["rock_a", "rock_b", "rock_c"] },
+    "rocks": {
+      "type": "copy_to_points",
+      "in": ["variants", "keep"],
+      "params": { "pack": true, "variants": "piece", "variant_weights": [1, 1, 1], "seed": "=seed" }
+    },
+    "out": {
+      "type": "attrib_delete",
+      "in": ["rocks"],
+      "params": { "names": "mask sourceprim N up orient pscale copynum variant", "class": "point" }
+    }
+  },
+  "output": "out",
+  "meta": {
+    "shelf_group": "terrain",
+    "pivot": "surface",
+    "inputs": ["surface"],
+    "thumbnail_render": { "elevation": 35 }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.6, 3.1964, 3.3829],
+      "min": [-0.6, 0, -0.0229]
+    },
+    "counts": {
+      "points": 172,
+      "prims": 112,
+      "vertices": 516,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "10bdd23909afef93",
+      "attributes": {
+        "detail.materials": "4b711ac6fe63ef84",
+        "prim.Cd": "e6628e6d383ee387",
+        "prim.material": "1b784b3582634adf",
+        "prim.name": "9b19bf8563edefaf",
+        "vertex.uv": "861a56258266f6df"
+      },
+      "topology": "5e937d8542eb1e23"
+    }
+  },
+  "name": "shelf.stairs",
+  "ok": true,
+  "source": "shelf/stairs.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

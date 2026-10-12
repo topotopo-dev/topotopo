@@ -96,7 +96,7 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `scale: 2`; a footer line names what is shown (help topic `render`) |
 | `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json (packed instances: instance rows + meshes sidecar + one GLB per source); heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png / unreal_landscape (a directory bundle) |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
-| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete |
+| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a shelf asset into the workspace to edit |
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
@@ -155,6 +155,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json) |
+| shelf | 35 graph assets used like nodes (see [Shelf](#shelf)): `wall_segment` `window_frame` `door_frame` `stairs` `spiral_stairs` `railing` `fence` `pillar` `arch` `roof_gable` `roof_hip` `brick_wall` `tile_floor` `hex_grid_floor` `scaffold` `beam_truss` `crate` `barrel` `pallet` `log` `rock` `cliff_block` `tree_lowpoly` `bush` `lamp_post` `bollard` `bench` `sign_post` `sandbag_wall` `cable` `pipe_run` `road_strip` `scatter_rocks` `forest_patch` `grass_clumps` |
 
 Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated
 [node reference](docs/nodes.md).
@@ -172,7 +173,8 @@ heightfield with a road and rocks on its steep slopes. `unreal_demo` is the Unre
 Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with variants and materials; `npm run export:demo` writes its file set
 (landscape bundle, `scene.glb`, `scene.usda`, `scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`.
 `splines` shows the curve toolkit: a NURBS road projected onto bumpy ground, a boardwalk with filleted corners and
-offset handrails, and a Bezier letter extruded.
+offset handrails, and a Bezier letter extruded. `shelf_street` is a street block built only from shelf assets (see
+[Shelf](#shelf)).
 
 To cook a graph from the command line:
 
@@ -191,6 +193,56 @@ Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`,
 node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{frame:04}.png" --export out/growth.glb
 ```
 
+## Shelf
+
+[shelf/](shelf) holds 35 ready-made graph assets (Polyforge's answer to a shelf of HDAs): walls with windows and doors,
+roofs, stairs, railings and fences, bricks and tiles, props, trees and rocks, and PCG helpers that dress a road or a
+terrain. The engine registers them on startup as node types of category `shelf`, so a graph uses one like any node:
+
+```json
+{ "nodes": { "stairs": { "type": "stairs", "params": { "steps": 16, "style": "open" } } } }
+```
+
+Each asset documents its typed parameters (`help {nodes: ["stairs"]}`, or [docs/nodes.md](docs/nodes.md#shelf-nodes)),
+puts its pivot at the base (Y up, metres), and tags every piece with `name` and `material` attributes, so exports split
+and shade cleanly. Assets that follow a curve (`railing`, `fence`, `pipe_run`, `road_strip`) take it as input 0 and
+those that dress a surface (`scatter_rocks`, `forest_patch`, `grass_clumps`) take the surface as input 0; without an
+input they build a default one, which is what the thumbnails show. A workspace asset with the same name overrides a
+shelf asset; `assets {action: "fork", name: "stairs"}` copies one into the workspace as a graph to edit and save back.
+[examples/shelf_street.json](examples/shelf_street.json) builds a street block from shelf assets only (transform, merge
+and copy nodes just place them):
+
+![shelf street](examples/renders/shelf_street.png)
+
+`npm run shelf` rewrites `shelf/index.json` (the list the engine loads, also over HTTP), the thumbnails and the table
+below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of every numeric range.
+
+<!-- shelf:start (generated by npm run shelf) -->
+
+**architecture**
+
+| | | | | | |
+|---|---|---|---|---|---|
+| <img src="shelf/thumbs/arch.png" width="120" alt="arch"><br>`arch` | <img src="shelf/thumbs/beam_truss.png" width="120" alt="beam_truss"><br>`beam_truss` | <img src="shelf/thumbs/brick_wall.png" width="120" alt="brick_wall"><br>`brick_wall` | <img src="shelf/thumbs/door_frame.png" width="120" alt="door_frame"><br>`door_frame` | <img src="shelf/thumbs/fence.png" width="120" alt="fence"><br>`fence` | <img src="shelf/thumbs/hex_grid_floor.png" width="120" alt="hex_grid_floor"><br>`hex_grid_floor` |
+| <img src="shelf/thumbs/pillar.png" width="120" alt="pillar"><br>`pillar` | <img src="shelf/thumbs/railing.png" width="120" alt="railing"><br>`railing` | <img src="shelf/thumbs/roof_gable.png" width="120" alt="roof_gable"><br>`roof_gable` | <img src="shelf/thumbs/roof_hip.png" width="120" alt="roof_hip"><br>`roof_hip` | <img src="shelf/thumbs/scaffold.png" width="120" alt="scaffold"><br>`scaffold` | <img src="shelf/thumbs/spiral_stairs.png" width="120" alt="spiral_stairs"><br>`spiral_stairs` |
+| <img src="shelf/thumbs/stairs.png" width="120" alt="stairs"><br>`stairs` | <img src="shelf/thumbs/tile_floor.png" width="120" alt="tile_floor"><br>`tile_floor` | <img src="shelf/thumbs/wall_segment.png" width="120" alt="wall_segment"><br>`wall_segment` | <img src="shelf/thumbs/window_frame.png" width="120" alt="window_frame"><br>`window_frame` |  |  |
+
+**props**
+
+| | | | | | |
+|---|---|---|---|---|---|
+| <img src="shelf/thumbs/barrel.png" width="120" alt="barrel"><br>`barrel` | <img src="shelf/thumbs/bench.png" width="120" alt="bench"><br>`bench` | <img src="shelf/thumbs/bollard.png" width="120" alt="bollard"><br>`bollard` | <img src="shelf/thumbs/bush.png" width="120" alt="bush"><br>`bush` | <img src="shelf/thumbs/cable.png" width="120" alt="cable"><br>`cable` | <img src="shelf/thumbs/cliff_block.png" width="120" alt="cliff_block"><br>`cliff_block` |
+| <img src="shelf/thumbs/crate.png" width="120" alt="crate"><br>`crate` | <img src="shelf/thumbs/lamp_post.png" width="120" alt="lamp_post"><br>`lamp_post` | <img src="shelf/thumbs/log.png" width="120" alt="log"><br>`log` | <img src="shelf/thumbs/pallet.png" width="120" alt="pallet"><br>`pallet` | <img src="shelf/thumbs/pipe_run.png" width="120" alt="pipe_run"><br>`pipe_run` | <img src="shelf/thumbs/rock.png" width="120" alt="rock"><br>`rock` |
+| <img src="shelf/thumbs/sandbag_wall.png" width="120" alt="sandbag_wall"><br>`sandbag_wall` | <img src="shelf/thumbs/sign_post.png" width="120" alt="sign_post"><br>`sign_post` | <img src="shelf/thumbs/tree_lowpoly.png" width="120" alt="tree_lowpoly"><br>`tree_lowpoly` |  |  |  |
+
+**terrain**
+
+| | | | | | |
+|---|---|---|---|---|---|
+| <img src="shelf/thumbs/forest_patch.png" width="120" alt="forest_patch"><br>`forest_patch` | <img src="shelf/thumbs/grass_clumps.png" width="120" alt="grass_clumps"><br>`grass_clumps` | <img src="shelf/thumbs/road_strip.png" width="120" alt="road_strip"><br>`road_strip` | <img src="shelf/thumbs/scatter_rocks.png" width="120" alt="scatter_rocks"><br>`scatter_rocks` |  |  |
+
+<!-- shelf:end -->
+
 ## Testing
 
 `npm test` runs these layers in order; each can also run alone.
@@ -198,7 +250,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | layer | command | what it checks |
 |---|---|---|
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
-| golden | `npm run test:golden [-- filter]` | every node fixture and every `examples/*.json` graph matches its fingerprint in `test/golden/` |
+| golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every shelf asset matches its fingerprint in `test/golden/` |
 | property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions |
 | io | `node test/io.ts` | export → import round trips for every format |
@@ -212,6 +264,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, erosion determinism and mass conservation, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
+| shelf | `npm run test:shelf [-- filter]` | every shelf asset: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; index, thumbnails and README table current; workspace override precedence; `assets` list / delete / fork |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.

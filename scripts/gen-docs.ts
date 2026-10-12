@@ -1,4 +1,4 @@
-// Generate docs/nodes.md (the node reference) from the registered NodeDefs.
+// Generate docs/nodes.md (the node reference) from the registered NodeDefs and the shelf assets.
 //   node scripts/gen-docs.ts            write docs/nodes.md
 //   node scripts/gen-docs.ts --check    exit 1 if docs/nodes.md is stale
 // test/docs.ts runs the same check inside `npm test`, so the reference cannot drift from the registry.
@@ -7,6 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { CATEGORY_ORDER, allNodeDefs } from '../src/graph/registry.ts';
+import { Engine } from '../src/graph/engine.ts';
+import { SHELF_DIR, createNodeHost } from '../src/host/node.ts';
 import type { NodeDef, ParamDef } from '../src/graph/types.ts';
 
 export const NODES_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'nodes.md');
@@ -48,6 +50,7 @@ function nodeSection(def: NodeDef): string[] {
   const meta = [`category: ${code(def.category)}`];
   if (def.aliases?.length) meta.push(`aliases: ${def.aliases.map(code).join(', ')}`);
   out.push(meta.join(' · '), '', def.summary, '');
+  if (def.category === 'shelf') out.push(`![${def.type}](../shelf/thumbs/${def.type}.png)`, '');
   if (def.description) out.push(def.description, '');
 
   out.push('**Inputs**', '');
@@ -77,8 +80,25 @@ function nodeSection(def: NodeDef): string[] {
   return out;
 }
 
-/** The full Markdown reference for the given node definitions (default: every registered node type). */
-export function renderNodeReference(defs: NodeDef[] = allNodeDefs()): string {
+/** The shelf assets (shelf/*.json, loaded the way the engine loads them at startup) as node definitions. */
+export async function shelfDefs(): Promise<NodeDef[]> {
+  const engine = new Engine(createNodeHost({ shelf: false }));
+  const r = await engine.loadShelf(SHELF_DIR);
+  if (r.errors.length) throw new Error(`shelf: ${r.errors.join('; ')}`);
+  return [...engine.assets.values()].map((a) => a.def);
+}
+
+/** docs/nodes.md as it should be: every node type and every shelf asset. */
+export async function referenceMarkdown(): Promise<string> {
+  return renderNodeReference(allNodeDefs(), await shelfDefs());
+}
+
+/**
+ * The full Markdown reference for the given node definitions (default: every registered node type), followed by the
+ * shelf assets (category "shelf") when given.
+ */
+export function renderNodeReference(nodes: NodeDef[] = allNodeDefs(), shelf: NodeDef[] = []): string {
+  const defs = [...nodes, ...shelf];
   const cats = categoriesOf(defs);
   const byCat = new Map(cats.map((c) => [c, defs.filter((d) => d.category === c).sort((a, b) => a.type.localeCompare(b.type))]));
   const out: string[] = [
@@ -86,7 +106,7 @@ export function renderNodeReference(defs: NodeDef[] = allNodeDefs()): string {
     '',
     '# Polyforge node reference',
     '',
-    `${defs.length} node types. Node types and parameter names are case- and underscore-insensitive and accept the listed`,
+    `${nodes.length} node types${shelf.length ? ` and ${shelf.length} shelf assets` : ''}. Node types and parameter names are case- and underscore-insensitive and accept the listed`,
     'aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive',
     'validation, the MCP `catalog`/`help` tools and this page.',
     '',
@@ -97,6 +117,11 @@ export function renderNodeReference(defs: NodeDef[] = allNodeDefs()): string {
   out.push('');
   for (const c of cats) {
     out.push(`## ${c} nodes`, '');
+    if (c === 'shelf') {
+      out.push('Graph assets shipped in [shelf/](../shelf) and registered as node types on startup (see the README section',
+        '"Shelf"). Their parameters are the assets\' typed vars; their inputs are the graphs\' `input` nodes. A workspace asset',
+        'with the same name overrides one; `assets {action: "fork"}` copies one into the workspace to edit.', '');
+    }
     for (const def of byCat.get(c)!) out.push(...nodeSection(def));
   }
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
@@ -108,7 +133,7 @@ export function readNodesMd(): string | null {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const md = renderNodeReference();
+  const md = await referenceMarkdown();
   if (process.argv.includes('--check')) {
     const ok = readNodesMd() === md;
     console.log(ok ? 'docs/nodes.md is up to date' : 'docs/nodes.md is stale: run npm run docs');
@@ -116,5 +141,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   const changed = readNodesMd() !== md;
   if (changed) fs.writeFileSync(NODES_MD, md);
-  console.log(`${changed ? 'wrote' : 'unchanged'} docs/nodes.md (${allNodeDefs().length} node types, ${md.length} bytes)`);
+  console.log(`${changed ? 'wrote' : 'unchanged'} docs/nodes.md (${allNodeDefs().length} node types + shelf assets, ${md.length} bytes)`);
 }

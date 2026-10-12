@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.55, 1.3, 0.14],
+      "min": [-0.55, -0.05, -0.06]
+    },
+    "counts": {
+      "points": 64,
+      "prims": 48,
+      "vertices": 192,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "c46d41d55a3f146f",
+      "attributes": {
+        "detail.materials": "427fb89a7d205350",
+        "prim.Cd": "3a0a72097b42ac83",
+        "prim.material": "b519f8d5d46ece37",
+        "prim.name": "0f863e4d3da2192f",
+        "vertex.uv": "4545efc53df4e91f"
+      },
+      "topology": "a6054fc431635d9e"
+    }
+  },
+  "name": "shelf.window_frame",
+  "ok": true,
+  "source": "shelf/window_frame.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

@@ -29,7 +29,11 @@ function filterRealmRejections() {
   });
 }
 
-export function createNodeHost(opts: { baseDir?: string } = {}): Host {
+/** The repository's asset shelf (shelf/index.json + one graph per asset). */
+export const SHELF_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../shelf');
+
+/** opts.shelf: shelf directory (default SHELF_DIR), or false for an engine without the shelf. */
+export function createNodeHost(opts: { baseDir?: string; shelf?: string | false } = {}): Host {
   const baseDir = opts.baseDir ?? process.cwd();
   const noiseCache = new Map<string, Noise3>();
   const curlCache = new Map<number, (x: number, y: number, z: number) => [number, number, number]>();
@@ -95,6 +99,7 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
 
   return {
     name: 'node',
+    shelfPath: opts.shelf === false ? undefined : opts.shelf ?? SHELF_DIR,
     resolvePath: (p) => (/^https?:\/\//.test(p) || path.isAbsolute(p) ? p : path.resolve(baseDir, p)),
     async readFile(p) {
       const rp = this.resolvePath(p);

@@ -26,7 +26,7 @@ if (process.env.POLYFORGE_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(pro
 await engine.init();
 const ws = new Workspace(wsDir, engine);
 const loaded = ws.load();
-log(`workspace ${wsDir}: ${loaded.graphs} graphs, ${loaded.assets} assets`);
+log(`workspace ${wsDir}: ${loaded.graphs} graphs, ${loaded.assets} assets, ${loaded.shelf} shelf assets`);
 for (const e of loaded.assetErrors) log('asset error:', e);
 
 let viewer: { url: string } | null = null;

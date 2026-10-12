@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "description": "Hanging cable between two points: a catenary that sags by `sag` below the straight line at mid-span, swept as a tube, with optional wooden poles (with a cross arm and insulators) standing on y = 0 under the ends. With the default end points the pivot is the foot of the first pole. Pieces: cable (rubber), cable_poles (wood_dark), cable_insulators (ceramic). Every piece is closed.",
+  "params": {
+    "start": { "type": "vec3", "default": [0, 5, 0], "desc": "first end point (m)" },
+    "end": { "type": "vec3", "default": [10, 4.6, 0], "desc": "second end point (m)" },
+    "sag": {
+      "type": "float",
+      "default": 0.8,
+      "min": 0,
+      "max": 10,
+      "desc": "drop below the straight line at mid-span (m)"
+    },
+    "radius": { "type": "float", "default": 0.015, "min": 0.003, "max": 0.2, "desc": "cable radius (m)" },
+    "segments": { "type": "int", "default": 32, "min": 2, "max": 200, "desc": "segments along the cable" },
+    "poles": { "type": "bool", "default": true, "desc": "poles under both ends" }
+  },
+  "vars": {
+    "start": [0, 5, 0],
+    "end": [10, 4.6, 0],
+    "sag": 0.8,
+    "radius": 0.015,
+    "segments": 32,
+    "poles": true
+  },
+  "nodes": {
+    "none": { "type": "points", "params": { "positions": [] } },
+    "curve": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "linear interpolation of the ends minus sag × a normalised catenary shape (1 at mid-span, 0 at the ends)",
+      "params": {
+        "run_over": "detail",
+        "code": "const A = vars.start, B = vars.end, n = Math.max(2, Math.round(vars.segments)), k = 1.5, ck = Math.cosh(k), pts = [];\nfor (let i = 0; i <= n; i++) {\n  const t = i / n, f = (Math.cosh(k * (2 * t - 1)) - ck) / (1 - ck);\n  pts.push(addpoint(0, [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t - vars.sag * f, A[2] + (B[2] - A[2]) * t]));\n}\naddprim(0, 'polyline', pts);"
+      }
+    },
+    "wire": {
+      "type": "sweep",
+      "in": ["curve"],
+      "params": { "radius": "=radius", "divisions": 8, "caps": true }
+    },
+    "wire_name": {
+      "type": "attrib_create",
+      "in": ["wire"],
+      "params": { "name": "name", "class": "prim", "value": "cable" }
+    },
+    "wire_mat": {
+      "type": "material",
+      "in": ["wire_name"],
+      "params": { "name": "rubber", "base_color": "#222427", "roughness": 0.7 }
+    },
+    "pole_pts": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "one point per end above the ground, facing the other end; scale = pole height",
+      "params": {
+        "run_over": "detail",
+        "code": "const E = [vars.start, vars.end];\nfor (let i = 0; i < 2; i++) {\n  const p = E[i], o = E[1 - i];\n  if (p[1] < 0.5) continue;\n  const d = normalize([o[0] - p[0], 0, o[2] - p[2]]);\n  const q = addpoint(0, [p[0], 0, p[2]]);\n  setpointattrib(0, 'scale', q, [1, p[1] + 0.35, 1]);\n  if (length(d) > 0.5) setpointattrib(0, 'orient', q, lookat(d, [0, 1, 0]));\n}"
+      }
+    },
+    "pole_unit": {
+      "type": "tube",
+      "params": { "radius": 0.11, "radius_top": 0.085, "height": 1, "center": [0, 0.5, 0], "cols": 10 }
+    },
+    "poles_geo": { "type": "copy_to_points", "in": ["pole_unit", "pole_pts"] },
+    "arm_pts": {
+      "type": "wrangle",
+      "in": ["pole_pts"],
+      "params": { "code": "@P.y = point(0, 'scale', @ptnum)[1] - 0.2; v@scale = [1, 1, 1];" }
+    },
+    "arm": { "type": "box", "params": { "size": [1.2, 0.1, 0.1] } },
+    "arms": { "type": "copy_to_points", "in": ["arm", "arm_pts"] },
+    "poles_all": { "type": "merge", "in": ["poles_geo", "arms"] },
+    "poles_name": {
+      "type": "attrib_create",
+      "in": ["poles_all"],
+      "params": { "name": "name", "class": "prim", "value": "cable_poles" }
+    },
+    "poles_mat": {
+      "type": "material",
+      "in": ["poles_name"],
+      "params": { "name": "wood_dark", "base_color": "#5e4129", "roughness": 0.9 }
+    },
+    "ins_pts": {
+      "type": "wrangle",
+      "in": ["none"],
+      "params": {
+        "run_over": "detail",
+        "code": "for (const p of [vars.start, vars.end]) if (p[1] >= 0.5) addpoint(0, [p[0], p[1] - 0.12, p[2]]);"
+      }
+    },
+    "insulator": {
+      "type": "tube",
+      "params": { "radius": 0.035, "radius_top": 0.02, "height": 0.14, "center": [0, 0, 0], "cols": 10 }
+    },
+    "insulators": { "type": "copy_to_points", "in": ["insulator", "ins_pts"] },
+    "ins_name": {
+      "type": "attrib_create",
+      "in": ["insulators"],
+      "params": { "name": "name", "class": "prim", "value": "cable_insulators" }
+    },
+    "ins_mat": {
+      "type": "material",
+      "in": ["ins_name"],
+      "params": { "name": "ceramic", "base_color": "#e9e4d6", "roughness": 0.2 }
+    },
+    "poles_set": { "type": "merge", "in": ["poles_mat", "ins_mat"] },
+    "poles_on": { "type": "switch", "in": ["none", "poles_set"], "params": { "index": "=poles ? 1 : 0" } },
+    "all": { "type": "merge", "in": ["wire_mat", "poles_on"] },
+    "paint": {
+      "type": "wrangle",
+      "in": ["all"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": {
+      "type": "attrib_delete",
+      "in": ["paint"],
+      "params": { "names": "scale orient copynum", "groups": "*" }
+    }
+  },
+  "output": "out",
+  "meta": {
+    "shelf_group": "props",
+    "watertight": true,
+    "thumbnail_render": { "azimuth": 15, "elevation": 12, "zoom": 1.2 }
+  }
+}
