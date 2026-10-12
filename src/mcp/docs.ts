@@ -277,7 +277,7 @@ Importing: the "file" node loads obj, stl, ply, glb/gltf, json (up_axis "z" conv
 7) Organic blob: sdf_expr with smin of spheres + noise → sdf_to_mesh.
 8) Pipes: curve (smooth) → sweep (circle radius 0.05) or polywire.
 9) Panel greebles: grid → poly_extrude individual with group "@P.x>0" random → color by group via group/color nodes.
-10) Deformers: bend with a cage: geo → bound {divisions:[1,6,1]} → bend → lattice(geo, bent cage, divisions [1,6,1]); wrap along a curve: geo laid along +Z → path_deform(geo, curve) {stretch:true}; pull a spot: soft_transform {group, translate, radius}; drive a mesh by a coarse proxy: point_deform(geo, rest pts, deformed pts). Add rest before deforming so noise_displace/attrib_noise patterns stick.`,
+10) Deformers: bend with a cage: geo → bound {divisions:[1,6,1]} → bend → lattice(geo, bent cage, divisions [1,6,1]); wrap along a curve: geo laid along +Z → path_deform(geo, curve) {stretch:true}; pull a spot: soft_transform {group, translate, radius}; drive a mesh by a coarse proxy: point_deform(geo, rest pts, deformed pts). Add rest before deforming so noise_displace/attrib_noise patterns stick.
 11) Hard-surface block-out: box → polysplit {edge:"length>1.2", count:2} (loop cuts; new points in point group "split")
  → group_promote {group:"split", from:"point", to:"prim", include:"all", new_name:"band", delete_source:false}
  → poly_extrude {group:"band", distance:0.1, inset:0.03} → bevel the rims (polybevel) or subdivide with creases. knife splits along a
