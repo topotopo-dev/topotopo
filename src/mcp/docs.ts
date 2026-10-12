@@ -510,7 +510,11 @@ MEASURE NODES (category measure) turn shape into attributes for masks and colour
 13) Clean asset pipeline: imported/broken mesh → mesh_repair (fuse, winding, small holes; report in detail repair_report)
  → remesh_isotropic {target_length, feature_angle:40} (even triangles before uv_unwrap or simulation; target_attrib for
  adaptive size) → uv_unwrap → lod {levels:4, ratios:[1,0.5,0.25,0.1]} (prim lod + name _LOD0…, export split_by_name) or
- decimate {ratio, attributes:"uv N"} for one level. remesh (voxel) only when the input is beyond repair (it drops attributes).`,
+ decimate {ratio, attributes:"uv N"} for one level. remesh (voxel) only when the input is beyond repair (it drops attributes).
+14) Street from shelf assets (help topic assets): road_strip on a line → lamp_post packed onto points_along_curve
+ {side_offset, both_sides}; a house = four wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true
+ on the front) + roof_gable/roof_hip translated to the wall top; fence, bench, crate, tree_lowpoly placed with transform
+ or copy_to_points; forest_patch on a grid for a park. Whole graph: examples/shelf_street.json.`,
 };
 
 export function topicList() {
