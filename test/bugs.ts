@@ -164,5 +164,49 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(!internal.length, `edge-case sweep: ${cooks} cooks on empty / point / line / degenerate inputs, no raw JS errors (${((performance.now() - t0) / 1000).toFixed(1)}s)`, internal.join('\n'));
 }
 
+// ------------------------------------------------------------------ 3. script continuations are inside the timeout
+
+{
+  const script = async (code: string, src = 'b') => {
+    engine.cache.clear();
+    const nodes: Record<string, NodeSpec> = { b: { type: 'box' }, s: { type: 'script', in: [src], params: { code } } };
+    const t = performance.now();
+    const r = await engine.cook({ nodes, output: 's' });
+    return { r, ms: performance.now() - t };
+  };
+  const saved = engine.scriptTimeoutMs;
+  engine.scriptTimeoutMs = 400;
+  for (const code of ['await 0; while (true) {}', "await lib.run('sphere');\nwhile (true) {}", "await lib.run('script', { code: 'return geo;' });\nwhile (true) {}", 'await new Promise(() => {});']) {
+    const { r, ms } = await script(code);
+    check(!r.ok && /script exceeded 400 ms/.test(r.errors[0]?.message ?? '') && ms < 2000, `script timeout covers ${JSON.stringify(code)} (${ms.toFixed(0)} ms)`, errs(r));
+  }
+  engine.scriptTimeoutMs = saved;
+
+  // lib.run keeps working across awaits, for synchronous nodes and for async ones (script, file), also in parallel
+  const fileObj = (await engine.cook(fixtureGraphFor('file'))).geo!;
+  const ok = [
+    ["const a = await lib.run('box');\nawait 0;\nconst b = await lib.run('sphere', { radius: 0.5 });\nreturn lib.merge([a, b]);", 6 + 512],
+    ["const s = await lib.run('script', { code: 'await 0; return lib.run(\"box\");' });\nreturn s;", 6],
+    [`const f = await lib.run('file', { path: ${JSON.stringify(fixtureGraphFor('file').nodes.target.params!.path)} });\nreturn f;`, fileObj.numPrims],
+    ["const ps = [];\nfor (let i = 0; i < 10; i++) ps.push(lib.run('script', { code: 'await 0; return lib.run(\"box\", { center: [' + i + ', 0, 0] });' }));\nreturn lib.merge(await Promise.all(ps));", 60],
+    ["const parts = [];\nfor (let i = 0; i < 50; i++) parts.push(await lib.run('script', { code: 'return lib.run(\"box\");' }));\nreturn lib.merge(parts);", 300],
+  ] as const;
+  for (const [code, prims] of ok) {
+    const { r, ms } = await script(code);
+    check(r.ok && r.geo!.numPrims === prims, `script with lib.run after await cooks (${ms.toFixed(0)} ms): ${JSON.stringify(code).slice(0, 70)}`, errs(r) || `prims ${r.geo?.numPrims}, want ${prims}`);
+  }
+  const { r: err } = await script("await lib.run('nope');");
+  check(!err.ok && /unknown node type "nope"/.test(err.errors[0]?.message ?? ''), 'lib.run errors still reject the awaiting script', errs(err));
+
+  // stray rejections inside a script must not take the process down (they used to: unhandled rejection)
+  for (const code of ["lib.run('nope'); return geo;", "Promise.reject(new Error('x')); return geo;", "[1, 2].forEach(async () => { throw new Error('cb'); }); return geo;"]) {
+    const { r } = await script(code);
+    await new Promise((res) => setTimeout(res, 20));
+    check(r.ok, `stray rejection does not crash the process: ${code}`, errs(r));
+  }
+  const w = await engine.cook({ nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P.y += 1;' } } }, output: 'w' });
+  check(w.ok && w.geo!.bbox().min[1] > 0, 'a wrangle after timed-out scripts still cooks', errs(w));
+}
+
 console.log(`bugs: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

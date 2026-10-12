@@ -16,6 +16,14 @@ export interface Host {
   compile(source: string): any;
   /** Run fn with a wall-clock limit; throws on timeout. */
   runGuarded<T>(fn: () => T, timeoutMs?: number): T;
+  /**
+   * Run an async fn from the scripting realm with a wall-clock limit that also covers its continuations: code the
+   * realm runs after an `await` is time-limited like synchronous code, and the whole run (including time spent in
+   * engine calls it awaits) must finish within timeoutMs. fn receives `wake`: call it when a promise from outside
+   * the realm that the code may be awaiting settles, so the realm continues without polling delay.
+   * Rejects with a "timed out" error on timeout.
+   */
+  runGuardedAsync<T>(fn: (wake: () => void) => T | Promise<T>, timeoutMs?: number): Promise<T>;
   /** Locate a font file: explicit path, family name, or a platform default. */
   findFont(name?: string): string | null;
   /**
