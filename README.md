@@ -5,15 +5,16 @@ geometry. It runs headless (Node + WebAssembly, no GPU) and plugs into LLM agent
 browser-ready, so it can sit under a future GUI.
 
 - **over 100 node types**: generators, curves and sweeps, deformers, attributes and groups, polygon modelling, scattering and
-  instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit, L-systems, text, loops, a frame solver, assets,
-  and code nodes.
+  instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit, heightfield terrain (masks, hydraulic and
+  thermal erosion, roads, scattering), L-systems, text, loops, a frame solver, assets, and code nodes.
 - **Time**: every cook happens at a frame. Only time-dependent nodes re-cook when the frame changes, and the `solver`
   node advances a simulation frame by frame from its cached previous state.
 - **Built for agents**: one-call graph builds, did-you-mean validation, text summaries, a multi-view **render** the
   model can look at, incremental edits with content-hash caching, and JS escape hatches (`wrangle` with `@P` syntax,
   `script`, `sdf_expr`).
 - **Pipeline output**: GLB, OBJ, USDA, PLY, STL and lossless JSON, with Y/Z-up and scale. Mesh splitting follows the
-  `name` attribute, for Unreal, Blender and Houdini.
+  `name` attribute, for Unreal, Blender and Houdini. Heightfields export as Unreal Landscape heightmaps (16-bit PNG or
+  RAW `.r16` with a JSON sidecar holding the import scale) and 8-bit weight layers.
 - **Live preview**: a local three.js page that refreshes whenever a graph changes. Click any node to see its result.
 
 The design notes, including whether the browser is a limitation, are in [docs/DESIGN.md](docs/DESIGN.md).
@@ -74,12 +75,12 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, assets, export, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, heightfield, loops, assets, export, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
 | `render` | PNG with persp/front/right/top views, colour by attribute, group highlight, flipped normals in blue |
-| `export` | glb / obj / usda / ply / stl / json |
+| `export` | glb / obj / usda / ply / stl / json; heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete |
 | `preview` | start the live viewer and return its URL |
@@ -131,6 +132,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | copy | `copy_xform` `scatter` `copy_to_points` |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
+| heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
 | uv | `uv_project` `uv_transform` |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
@@ -141,15 +143,17 @@ Every node's inputs, parameters (types, defaults, ranges, options, aliases) and 
 
 ## Examples
 
-[examples/](examples) has eleven graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
+[examples/](examples) has thirteen graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
 rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
 grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
-bracket, and a solver growth animation (rendered at the frame named by its `meta.frame`).
+bracket, deformers, an eroded heightfield terrain with a road and rocks on its steep slopes, and a solver growth
+animation (rendered at the frame named by its `meta.frame`).
 
 To cook a graph from the command line:
 
 ```bash
 node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
+node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
 ```
 
 Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`, output paths may contain `{frame}` or
@@ -172,6 +176,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | io | `node test/io.ts` | export → import round trips for every format |
 | mcp | `node test/mcp.ts` | the MCP server end to end over stdio |
 | arrays | `node test/arrays.ts` | array attributes: storage, merge and builder rules, wrangle `f[]@`/`i[]@`/`s[]@` and helpers, `attrib_array`, JSON, inspect, fingerprints, every node type fed array attributes |
+| heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, erosion determinism and mass conservation, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.

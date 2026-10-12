@@ -1,0 +1,62 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "debris:float:1",
+        "flow:float:1",
+        "height:float:1",
+        "mask:float:1",
+        "path:float:1",
+        "sediment:float:1",
+        "slope:float:1",
+        "uv:float:3",
+        "water:float:1"
+      ],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [10.0011, 3.7592, 10.1307],
+      "min": [-10, -0.0138, -10.1615]
+    },
+    "counts": {
+      "points": 50445,
+      "prims": 59840,
+      "vertices": 219520,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "edd9d997581ff19d",
+      "attributes": {
+        "point.Cd": "c039a56929a5b577",
+        "point.N": "8d7e2fb7d24656dd",
+        "point.debris": "d3cb85d5c644d247",
+        "point.flow": "f2c99a9d34f417f7",
+        "point.height": "7a9c7c5a65f9f044",
+        "point.mask": "e59ae4fdd7de8bbf",
+        "point.path": "4769582d609f5e9b",
+        "point.sediment": "f7726c79d6e8140f",
+        "point.slope": "5e9745f544e3f997",
+        "point.uv": "7174ca0d5d7d5477",
+        "point.water": "f69036abf2b17345",
+        "prim.copynum": "5d7651c5c1ad011f"
+      },
+      "topology": "26d8a6f1c5445ddb"
+    }
+  },
+  "name": "example.terrain_erosion",
+  "ok": true,
+  "source": "examples/terrain_erosion.json",
+  "warnings": []
+}

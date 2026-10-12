@@ -33,7 +33,7 @@ const VERBOSE = args.includes('--verbose');
 const STRICT = args.includes('--strict');
 
 /** Fixtures a chain may start from. */
-const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE'];
+const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'HFN'];
 
 /** Per-node param ranges that keep cooks fast ('keep' = leave the default). Vector ranges apply per component. */
 const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
@@ -58,6 +58,11 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   slice: { count: [1, 10] },
   bound: { divisions: [1, 3] },
   sdf_modify: { count: [1, 3], octaves: [1, 4] },
+  heightfield_from_mesh: { resolution: [0.02, 0.5] },
+  heightfield_erode: { iterations: [0, 6] },
+  heightfield_resample: { factor: [0.25, 3] },
+  heightfield_scatter: { density: [0, 20], count: [0, 200] },
+  heightfield_mask_by_feature: { occlusion_radius: [0, 2] },
 };
 
 /** Node types that get slow on big inputs: only chained when the incoming geometry has at most this many prims. */
