@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "description": "Frame-by-frame growth with a solver: every frame the body stacks a new slab on the previous frame's result, placed with bbox('prev').max.y, turned a little further, slightly smaller and lighter. Cook at any frame (CLI --frame 40, MCP frame: 40); the showcase renders meta.frame.",
+  "meta": { "frame": 40 },
+  "vars": { "turn": 7, "slab_h": 0.22 },
+  "nodes": {
+    "ground": { "type": "grid", "params": { "size": [7, 7], "divisions": [7, 7] } },
+    "ground_col": { "type": "color", "in": ["ground"], "params": { "color": "#9aa0a6" } },
+    "seed": { "type": "box", "params": { "size": [2, 0.3, 2], "center": [0, 0.15, 0] } },
+    "seed_col": { "type": "color", "in": ["seed"], "params": { "color": "#3d405b" } },
+    "grow": {
+      "type": "solver",
+      "in": ["seed_col"],
+      "params": {
+        "start_frame": 2,
+        "body": {
+          "nodes": {
+            "prev": { "type": "input", "params": { "index": 0 } },
+            "slab": {
+              "type": "box",
+              "params": { "size": ["=1.8 * pow(0.98, iteration)", "=slab_h", "=0.6 * pow(0.99, iteration)"] }
+            },
+            "tint": {
+              "type": "color",
+              "in": ["slab"],
+              "params": { "color": "=[0.92 - iteration * 0.01, 0.42 + iteration * 0.011, 0.28 + iteration * 0.013]" }
+            },
+            "place": {
+              "type": "transform",
+              "in": ["tint"],
+              "params": { "rotate": [0, "=iteration * turn", 0], "translate": [0, "=bbox('prev').max.y + slab_h / 2", 0] }
+            },
+            "stack": { "type": "merge", "in": ["prev", "place"] }
+          },
+          "output": "stack"
+        }
+      }
+    },
+    "out": { "type": "merge", "in": ["ground_col", "grow"] }
+  }
+}
