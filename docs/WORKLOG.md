@@ -85,11 +85,11 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | id | item | status | notes |
 |---|---|---|---|
 | P2-A | Packed primitives: `packed` prim kind, packed `copy_to_points`, `unpack`, auto-unpack, instanced rendering | merged | 7715c68, 2026-10-12. 127 nodes. 1M packed copies 0.23 s; unpack 100k×100 tris 0.4 s. Limits: no per-instance attributes in glTF/USD; renderer expands within a 600k-triangle budget; .glb import now packed by default |
-| P2-B | `copy_to_points` variants, scatter v2 (density attr/map/mask, relax, min distance, collision prune), masks by slope/height/curvature/occlusion/distance, `attribute_from_map` (PNG/EXR), orient helpers, points along splines, clustering | running (agent) | started 2026-10-12 from 202ef7a |
+| P2-B | `copy_to_points` variants, scatter v2 (density attr/map/mask, relax, min distance, collision prune), masks by slope/height/curvature/occlusion/distance, `attribute_from_map` (PNG/EXR), orient helpers, points along splines, clustering | merged | 2026-10-12. 159 nodes; new category pcg. Limits: blue-noise relax ≈ 10 s/100k (P0-F); curve mode has no relaxation; PNG maps only |
 | P2-C | Heightfield prim + suite: create/from mesh/from image/noise/remap/blur/terrace/cutout/mask by feature/project/path/scatter/to mesh/to sdf, erosion, 16-bit PNG/RAW export | merged | fa4b59d, 2026-10-12. 23 heightfield nodes, droplet + thermal erosion (512²×100 ≈ 2.3 s), png16/r16/mask export with Unreal sidecar. Limits: fields stay axis-aligned; Unreal axis convention not yet verified in the editor; no pipe-model erosion |
 | P2-D | Spline toolkit: bezier/nurbs prims, fillet, 3D offset, spline fit, project to surface, curveu/ramp attributes | running (agent) | started 2026-10-12 from 202ef7a |
 | P2-E | Exports: gltf-transform writer with instancing/materials/compression/LOD, USD PointInstancer + materials, Houdini `.geo` JSON read/write, PCG point stream, CSV/JSON points, material attribute + table | part 1 merged, part 2 running (agent) | 0d1ec15, 2026-10-12. gltf-transform GLB/glTF (validated), Houdini .geo/.bgeo read + .geo write (verified on SideFX Labs files), CSV/points JSON with PCG columns, material node + table. Open: external checks in Houdini/Blender/Unreal (scratchpad verify/ files); .geo key layout unconfirmed against a Houdini-written ASCII file; part 2 (packed instancing, USD PointInstancer) after P2-A |
-| P2-F | Asset shelf: 30+ curated graph assets (fence, rail, stairs, road, roof, window grid, tree, rock, cliff, pipes, cable, crate, barrel, bricks, tiles, hex grid, scaffold, pillar, arch) with golden renders | queued | after P2-B |
+| P2-F | Asset shelf: 30+ curated graph assets (fence, rail, stairs, road, roof, window grid, tree, rock, cliff, pipes, cable, crate, barrel, bricks, tiles, hex grid, scaffold, pillar, arch) with golden renders | running (agent) | started 2026-10-12 after P2-B |
 | P2-G | Houdini parity tests through the Houdini MCP; Unreal round trip through the Unreal MCP | queued | needs apps running |
 
 ### Release and outreach (after Phase 2)
@@ -106,6 +106,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-12: P2-B merged cleanly. P2-F launched.
 - 2026-10-12: R-1..R-3 done (202ef7a). Launched P2-B, P2-D, P2-E2, P0-F.
 - 2026-10-12: P2-C and P1-E merged (fa4b59d, 9eea4c9). All Phase 0–2 agents reported; no agent running. Decisions 1–5 recorded; availability check done. Running next: R-1..R-3 (orchestrator), then P2-B, P2-D, P2-E2, P2-F, P0-D, P0-F.
 - 2026-10-12: P2-A merged (7715c68). Found that test/uv.ts had been failing on main since P2-E1 (sync GLB export) and my summary grep hid it: from now on every test run checks the exit code. Fixed by P2-A.
