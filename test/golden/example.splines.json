@@ -24,7 +24,7 @@
       "vertex": []
     },
     "hashes": {
-      "P": "a46352a87fcd1c42",
+      "P": "66f7e640feeb9f9a",
       "attributes": {
         "group.point.fillet": "ac3b19d0b36b847a",
         "group.prim.caps": "f43960056844c367",
@@ -34,7 +34,7 @@
         "point.hit": "b0bbaa25d63d561f",
         "prim.copynum": "8e8b1c4587283e1f",
         "prim.side": "ac986415a7a2bc2f",
-        "vertex.uv": "de67096de6c7a787"
+        "vertex.uv": "ecc1708da7a61b47"
       },
       "topology": "1be7d7cb6d1429ed"
     }

@@ -21,3 +21,4 @@ import './flow.ts';
 import './deform.ts';
 import './uv.ts';
 import './measure.ts';
+import './pcg.ts';

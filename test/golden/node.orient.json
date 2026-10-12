@@ -1,0 +1,51 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "N:float:3",
+        "P:float:3",
+        "orient:float:4",
+        "pscale:float:1",
+        "sourceprim:int:1",
+        "up:float:3",
+        "uv:float:3"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9911, 0, 0.9879],
+      "min": [-0.9915, 0, -0.9922]
+    },
+    "counts": {
+      "points": 60,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "4f30b0d01f743312",
+      "attributes": {
+        "point.N": "ddaec73db9580bb7",
+        "point.orient": "fe4ee5886c101676",
+        "point.pscale": "ff138e1398660085",
+        "point.sourceprim": "0b0b34b5b73b936f",
+        "point.up": "655f96b6ec418ffc",
+        "point.uv": "999d7901d2ac009f"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.orient",
+  "ok": true,
+  "source": "fixture for node type \"orient\" (test/fixtures.ts)",
+  "warnings": []
+}

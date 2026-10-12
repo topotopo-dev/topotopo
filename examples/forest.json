@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Packed instancing: 30,000 trees of three low-poly variants (pine, fir, oak) scattered on a terrain where the slope is gentle, copied as packed instances chosen by a random 'variant' name, then the whole scene rotated (instances compose the rotation). Stays a point cloud plus three small meshes until it is rendered or exported (glb: EXT_mesh_gpu_instancing, usda: PointInstancer).",
+  "description": "The PCG chain with packed instancing: a slope mask times a height mask on a terrain (mask), 30,000 candidate points spread by that mask (scatter density_mask), upright random headings and sizes (orient), trees whose trunks would collide removed (prune overlap), then packed copies of three low-poly variants (pine, fir, oak) picked with weights (copy_to_points pack + variant_weights), and the whole scene rotated (instances compose the rotation). Stays a point cloud plus three small meshes until it is rendered or exported (glb: EXT_mesh_gpu_instancing, usda: PointInstancer, csv pcg: an Unreal PCG point stream).",
   "vars": { "tree_count": 30000, "seed": 4 },
   "nodes": {
     "terrain": {
@@ -12,25 +12,30 @@
       "in": ["terrain"],
       "params": { "mode": "ramp", "attrib": "height", "ramp": [[0, "#4d6b2f"], [0.55, "#6f7f3c"], [0.8, "#8a7b5a"], [1, "#d9d6cf"]] }
     },
-    "slope": {
-      "type": "wrangle",
+    "gentle": {
+      "type": "mask",
       "in": ["terrain"],
-      "params": { "code": "// trees on gentle slopes and below the rocky tops\n@density = fit(@N.y, 0.86, 0.97, 0, 1) * fit(@height, 0.6, 0.8, 1, 0);" }
+      "params": { "by": "slope", "min": 0, "max": 14, "falloff": 17 }
+    },
+    "below_tops": {
+      "type": "mask",
+      "in": ["gentle"],
+      "params": { "by": "attribute", "source_attrib": "height", "min": -1, "max": 0.6, "falloff": 0.2, "combine": "multiply" }
     },
     "pts": {
       "type": "scatter",
-      "in": ["slope"],
-      "params": { "count": "=tree_count", "density_attrib": "density", "relax": false, "seed": "=seed" }
+      "in": ["below_tops"],
+      "params": { "count": "=tree_count", "density_mask": "mask", "relax": false, "seed": "=seed" }
     },
-    "variant": {
-      "type": "attrib_randomize",
+    "upright": {
+      "type": "orient",
       "in": ["pts"],
-      "params": { "name": "variant", "distribution": "choice", "values": ["pine", "fir", "oak"], "seed": "=seed + 1" }
+      "params": { "mode": "direction", "random_yaw": [0, 360], "tilt": [0, 4], "scale_min": 0.65, "scale_max": 1.35, "seed": "=seed" }
     },
-    "orient": {
-      "type": "wrangle",
-      "in": ["variant"],
-      "params": { "code": "// upright trees with a random heading and size: N = heading (+Z), up = +Y\nconst a = rand(@ptnum + 0.37) * 6.2832;\n@N = [Math.sin(a), 0, Math.cos(a)];\n@up = [0, 1, 0];\n@pscale = fit(rand(@ptnum + 7.1), 0, 1, 0.65, 1.35);" }
+    "spaced": {
+      "type": "prune",
+      "in": ["upright"],
+      "params": { "mode": "overlap", "radius": 0.14, "priority": "largest", "seed": "=seed" }
     },
     "pine_trunk": { "type": "tube", "params": { "radius": 0.12, "height": 0.7, "center": [0, 0.35, 0], "cols": 5, "caps": false } },
     "pine_crown": { "type": "tube", "params": { "radius": 0.75, "radius_top": 0, "height": 2.6, "center": [0, 1.9, 0], "cols": 6 } },
@@ -55,8 +60,8 @@
     "trees": { "type": "merge", "in": ["pine", "fir", "oak"] },
     "forest": {
       "type": "copy_to_points",
-      "in": ["trees", "orient"],
-      "params": { "pack": true, "variants": "name", "variant_attrib": "variant" }
+      "in": ["trees", "spaced"],
+      "params": { "pack": true, "variants": "name", "variant_weights": [3, 2, 3], "seed": "=seed" }
     },
     "scene": { "type": "merge", "in": ["tint", "forest"] },
     "out": { "type": "transform", "in": ["scene"], "params": { "rotate": [0, 25, 0] } }

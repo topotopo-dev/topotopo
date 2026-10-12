@@ -53,6 +53,8 @@ src/core/      geometry model + algorithms (no I/O)
   remesh.ts      isotropic remeshing kernel (typed arrays in/out: the swap point for a native remesher), closest-point BVH,
                  Geometry wrapper (features, seams, provenance); decimate.ts meshoptimizer decimation; repair.ts mesh repair
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
+  pcg.ts         PCG kernels: incremental point grid, exact min-distance and sphere-overlap selection, surface relaxation,
+                 k-means / radius clusters, mask bands and combination, image sampling, instance frames (scatter v2, pcg nodes)
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
@@ -67,8 +69,9 @@ src/graph/     node system
 src/nodes/     ~95 node types, one defineNode() each
 src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision)
 src/inspect.ts, src/explain.ts  text views of geometry: summaries, statistics, a "reads as" description, diffs
-src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON
-               (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts · heightmaps (png16, r16, mask_png) · PNG decoder
+src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON and the
+               instance stream (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts ·
+               heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts)
 src/host/      Node host: fs, vm sandbox (timeouts), fonts
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
@@ -119,7 +122,12 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   the inputs first (`expandPacked`, cached under the input signature) with one warning. Expansion copies sources
   through `Geometry.merge` in instance order, transforms P/N/v/up/orient per instance and copies anchor attributes
   where the source has none. The renderer expands within a triangle budget (an evenly spread subset beyond it); glTF
-  writes `EXT_mesh_gpu_instancing`, USD a `PointInstancer`; formats without instancing expand.
+  writes `EXT_mesh_gpu_instancing` (anchor attributes as `_NAME` instance accessors), USD a `PointInstancer` (ids,
+  velocities, per-instance primvars), Houdini `.geo` `PackedGeometry` prims whose sources are stored once in
+  `sharedprimitivedata`; CSV and points JSON write the **instance stream**: one row per instance with the decomposed
+  transform (P, orient, scale; Unreal Position/Rotation/Scale for PCG), a `Mesh` column naming the source and the
+  anchor attributes, plus a sidecar mapping `Mesh` to one GLB per source. Sources are named alike in every format
+  (`packedSourceNames`: the source's single prim `name`, else `source_<i>`). Formats without instancing expand.
 - **Spline primitives** are the prim kinds 2 (Bezier curve) and 3 (NURBS curve) in the same `primKind` array as packed
   prims (Houdini's BezierCurve / NURBCurve). The prim's vertices are its control points (CVs) in order and `primClosed`
   says whether the curve is closed; everything else is ordinary attributes, so it survives every generic operation:
@@ -309,16 +317,19 @@ Houdini `.geo` JSON and binary JSON, CSV/points JSON; glTF builds on gltf-transf
 Khronos `gltf-validator` (Apache-2.0, dev dependency only).
 
 **Material data.** A prim string attribute `material` names a material; the detail string attribute `materials` holds
-a JSON table `{name: {baseColor, metallic, roughness, emissive, alpha, doubleSided, unlit}}` (`src/core/materials.ts`).
-It carries names and PBR scalars to engines, not shading. `Geometry.merge` keeps the first detail value, so the `merge`
+a JSON table `{name: {baseColor, metallic, roughness, emissive, alpha, doubleSided, unlit, textures?}}`
+(`src/core/materials.ts`). It carries names, PBR scalars and texture file paths (base colour, normal, roughness) to
+engines, not shading: glTF embeds the images (read through `Host.readFile`), USD references them from `UsdUVTexture`
+shaders, `.geo` and JSON keep the paths. The renderer shows a material's base colour where a prim has no colour. `Geometry.merge` keeps the first detail value, so the `merge`
 node and the exporters union tables (`mergeMaterialTables`); other internal merges keep their first input's table.
 
 ## Roadmap
 
 **Next for the engine**
-- Packed primitives are in (copy_to_points `pack`, `pack`/`unpack`, glTF `EXT_mesh_gpu_instancing`, USD
-  `PointInstancer`). Still open: per-instance attributes in glTF/USD exports, a PCG point stream from instances, packed
-  disk references (Houdini packed disk prims), and instanced rendering in the rasteriser (it draws expanded copies).
+- Packed primitives are in (copy_to_points `pack`, `pack`/`unpack`, glTF `EXT_mesh_gpu_instancing` and USD
+  `PointInstancer` with per-instance attributes, Houdini `PackedGeometry`, the instance stream for Unreal PCG, the
+  `unreal_landscape` bundle). Still open: packed disk references (Houdini packed disk prims), USD variants and
+  per-frame layers, and instanced rendering in the rasteriser (it draws expanded copies).
 - PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
 - Heightfields (done in P2-C: 23 nodes, erosion, Unreal heightmap export). Next: a grid (pipe-model) erosion variant
   and the WASM erosion kernel behind `erodeStep`, heightfield tiles, and Unreal weight-layer import presets.
