@@ -306,7 +306,9 @@ section('project, path, scatter, resample, transform, to_sdf');
   check(rough1(prof(along)) < rough1(prof(n)) * 0.7, `path (terrain): the road profile is smoothed along the curve (${rough1(prof(n)).toFixed(3)} → ${rough1(prof(along)).toFixed(3)})`);
   const bank = await field({ ...nodes, c: { type: 'circle', params: { radius: 1.2, segments: 64, open: true } }, r: { type: 'heightfield_path', in: ['n', 'c'], params: { width: 0.6, shoulder: 0.2, height_mode: 'curve', bank: 10, smooth: 0 } } }, 'r');
   const inner = bank.sample(0, 1.0), outer = bank.sample(0, 1.4);
-  check(Math.abs(outer - inner) > 0.03, `bank tilts the road across a bend (inner ${inner.toFixed(3)}, outer ${outer.toFixed(3)})`);
+  check(outer - inner > 0.03, `bank raises the outer edge of a bend (inner ${inner.toFixed(3)}, outer ${outer.toFixed(3)})`);
+  const bankRev = await field({ ...nodes, c: { type: 'circle', params: { radius: 1.2, segments: 64, open: true } }, rv: { type: 'reverse', in: ['c'] }, r: { type: 'heightfield_path', in: ['n', 'rv'], params: { width: 0.6, shoulder: 0.2, height_mode: 'curve', bank: 10, smooth: 0 } } }, 'r');
+  check(bankRev.sample(0, 1.4) - bankRev.sample(0, 1.0) > 0.03, 'bank raises the outer edge whichever way the curve runs');
 
   const half: Record<string, NodeSpec> = { ...nodes, m: { type: 'heightfield_layer', in: ['n'], params: { layer: 'mask', expression: 'x < 0 ? 1 : 0' } }, s: { type: 'heightfield_scatter', in: ['m'], params: { density: 6, seed: 3 } } };
   const pts = await geo(half, 's');
