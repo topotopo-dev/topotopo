@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["lod:string:1", "lod_tris:int[]:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["lod:int:1", "name:string:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 286,
+      "prims": 560,
+      "vertices": 1680,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "fb97a5d20d0789ac",
+      "attributes": {
+        "detail.lod": "5d32ca97e15db959",
+        "detail.lod_tris": "b5a5768fe4799571",
+        "point.N": "4d35c59884e74246",
+        "prim.lod": "76dfabc597eb0d1f",
+        "prim.name": "36f32fc56e6bb15f"
+      },
+      "topology": "2dca8d6fbbea6275"
+    }
+  },
+  "name": "node.lod",
+  "ok": true,
+  "source": "fixture for node type \"lod\" (test/fixtures.ts)",
+  "warnings": []
+}

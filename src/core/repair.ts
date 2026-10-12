@@ -728,20 +728,21 @@ export function repairMesh(g: Geometry, o: RepairOptions): { geo: Geometry; repo
 /** One line naming what repairMesh changed or found ('' when the mesh was clean). */
 export function repairSummary(rep: RepairReport): string {
   const parts: string[] = [];
-  const add = (n: number, s: string) => { if (n) parts.push(`${n} ${s}`); };
-  add(rep.fused_points, 'points fused');
-  add(rep.degenerate_faces, 'degenerate faces removed');
-  add(rep.slivers_merged, 'slivers merged into neighbours');
-  add(rep.duplicate_faces, 'duplicate faces removed');
-  add(rep.non_manifold_edges, 'non-manifold edges');
-  add(rep.non_manifold_faces_removed, 'faces removed at non-manifold edges');
-  add(rep.split_points, 'points split');
-  add(rep.flipped_faces, 'faces flipped');
-  add(rep.flipped_pieces, 'pieces turned outward');
-  add(rep.holes_filled, 'holes filled');
-  add(rep.holes_left, 'holes left open');
-  add(rep.self_intersecting_faces, 'self-intersecting faces');
-  add(rep.self_intersecting_removed, 'self-intersecting faces removed');
-  add(rep.isolated_points, 'isolated points removed');
+  // "{n} point{s} fused": {s} is dropped for 1
+  const add = (n: number, s: string) => { if (n) parts.push(`${n} ${s.replace('{s}', n === 1 ? '' : 's')}`); };
+  add(rep.fused_points, 'point{s} fused');
+  add(rep.degenerate_faces, 'degenerate face{s} removed');
+  add(rep.slivers_merged, 'sliver{s} merged into neighbours');
+  add(rep.duplicate_faces, 'duplicate face{s} removed');
+  add(rep.non_manifold_edges, 'non-manifold edge{s}');
+  add(rep.non_manifold_faces_removed, 'face{s} removed at non-manifold edges');
+  add(rep.split_points, 'point{s} split');
+  add(rep.flipped_faces, 'face{s} flipped');
+  add(rep.flipped_pieces, 'piece{s} turned outward');
+  add(rep.holes_filled, 'hole{s} filled');
+  add(rep.holes_left, 'hole{s} left open');
+  add(rep.self_intersecting_faces, 'self-intersecting face{s}');
+  add(rep.self_intersecting_removed, 'self-intersecting face{s} removed');
+  add(rep.isolated_points, 'isolated point{s} removed');
   return parts.join(', ');
 }
