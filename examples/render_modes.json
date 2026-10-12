@@ -1,0 +1,38 @@
+{
+  "description": "Render overlays demo: a hollow box with a window, crossed by a solid rod and a hollow pipe. meta.render asks for a persp + section view, hard-edge overlay, normal glyphs, group labels and matcap shading.",
+  "nodes": {
+    "outer": { "type": "box", "params": { "size": [2, 1.2, 1.4], "center": [0, 0.6, 0] } },
+    "inner": { "type": "box", "params": { "size": [1.8, 1.0, 1.2], "center": [0, 0.6, 0] } },
+    "hollow": { "type": "boolean", "in": ["outer", "inner"], "params": { "operation": "subtract" } },
+    "window_cut": { "type": "tube", "params": { "radius": 0.26, "height": 0.6, "axis": "z", "center": [0.45, 0.62, 0.6], "cols": 32 } },
+    "shell": { "type": "boolean", "in": ["hollow", "window_cut"], "params": { "operation": "subtract" } },
+    "shell_clean": { "type": "group_delete", "in": ["shell"], "params": { "groups": "*" } },
+    "walls": { "type": "group", "in": ["shell_clean"], "params": { "name": "walls" } },
+    "rod": { "type": "tube", "params": { "radius": 0.09, "height": 2.6, "axis": "x", "center": [0, 0.64, -0.3], "cols": 20 } },
+    "pipe_outer": { "type": "tube", "params": { "radius": 0.17, "height": 1.7, "axis": "y", "center": [-0.5, 0.65, 0.15], "cols": 32 } },
+    "pipe_bore": { "type": "tube", "params": { "radius": 0.11, "height": 1.9, "axis": "y", "center": [-0.5, 0.65, 0.15], "cols": 32 } },
+    "pipe": { "type": "boolean", "in": ["pipe_outer", "pipe_bore"], "params": { "operation": "subtract" } },
+    "pipes": { "type": "merge", "in": ["rod", "pipe"] },
+    "pipes_clean": { "type": "group_delete", "in": ["pipes"], "params": { "groups": "*" } },
+    "pipes_grp": { "type": "group", "in": ["pipes_clean"], "params": { "name": "pipes" } },
+    "pipe_top": { "type": "group", "in": ["pipes_grp"], "params": { "name": "pipe_top", "class": "point", "pattern": "@P.y>1.45" } },
+    "all": { "type": "merge", "in": ["walls", "pipe_top"] },
+    "lid": { "type": "group", "in": ["all"], "params": { "name": "lid", "pattern": "walls", "normal": [0, 1, 0], "spread_angle": 5, "bbox_min": [-2, 1.15, -2], "bbox_max": [2, 2, 2] } },
+    "out": { "type": "normal", "in": ["lid"], "params": { "class": "vertex", "cusp_angle": 40 } }
+  },
+  "output": "out",
+  "meta": {
+    "render": {
+      "views": ["persp", "section"],
+      "wireframe": "hard",
+      "glyphs": "N",
+      "max_glyphs": 160,
+      "label_groups": true,
+      "shading": "matcap",
+      "section_axis": "y",
+      "section_offset": 0.5,
+      "azimuth": 30,
+      "elevation": 32
+    }
+  }
+}

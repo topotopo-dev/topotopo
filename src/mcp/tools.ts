@@ -12,7 +12,8 @@ import { migrateGraph } from '../graph/migrate.ts';
 import { catalogText, nodeDoc, TOPICS, topicList, INSTRUCTIONS } from './docs.ts';
 import { summarize, inspect } from '../inspect.ts';
 import { renderGeometry } from '../render/raster.ts';
-import type { RenderOptions, ViewName } from '../render/raster.ts';
+import type { RenderOptions } from '../render/raster.ts';
+import { renderArgs } from '../render/options.ts';
 import { encodePNG } from '../render/png.ts';
 import { exportGeometry } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
@@ -67,14 +68,8 @@ function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: strin
   return { img: { type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, notes: r.notes, png };
 }
 
-const VIEW_ENUM = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', 'uv'];
-const VIEW_PRESETS: Record<string, ViewName[]> = { quad: ['persp', 'front', 'right', 'top'], quad_uv: ['persp', 'uv'] };
-
 function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
-  let views: ViewName[] | undefined;
-  if (typeof a.views === 'string') views = VIEW_PRESETS[a.views] ?? (a.views.split(/[\s,]+/) as ViewName[]);
-  else if (Array.isArray(a.views)) views = a.views;
-  if (views) for (const v of views) if (!VIEW_ENUM.includes(v)) throw new Error(`unknown view "${v}" (use ${VIEW_ENUM.join(', ')}, "quad" or "quad_uv")`);
+  const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
   let highlight: RenderOptions['highlight'] = null;
   if (a.highlight) {
     const cls = a.highlight_class === 'point' ? 'point' : 'prim';
@@ -82,25 +77,49 @@ function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
     if (m) highlight = { cls, mask: m, label: a.highlight };
   }
   return {
-    views, size: a.size, wireframe: a.wireframe ?? 'auto', colorBy: a.color_by ?? null, highlight,
-    points: a.points ?? 'auto', grid: a.grid ?? true, azimuth: a.azimuth, elevation: a.elevation, zoom: a.zoom,
-    target: a.target ?? null, title: label, checker: !!a.checker,
+    ...ro, wireframe: ro.wireframe ?? 'auto', colorBy: ro.colorBy ?? null, highlight,
+    points: ro.points ?? 'auto', grid: ro.grid ?? true, target: ro.target ?? null, title: label, checker: !!ro.checker,
   };
 }
 
 const RENDER_PROPS = {
-  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), a single view, or a list of persp/front/back/left/right/top/bottom/uv. "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), "turntable" (persp at azimuth 0/90/180/270), a single view, or a list of persp/front/back/left/right/top/bottom/uv/section/persp@<azimuth>. "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red. "section" slices along section_axis and looks along it: the cut filled red (blue = inside-out solid), open sheets as yellow lines, the far half ghosted', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
   checker: { type: 'boolean', description: 'shade 3D views with an 8×8 uv checker (light cells tinted red along u, green along v) to see stretch, seams and flips' },
-  size: { type: 'number', description: 'pixels per view tile (default 512 for quad, 800 single)' },
+  size: { type: 'number', description: 'pixels per view tile (default 512 for multi-view, 800 single); scale 2 doubles it' },
   color_by: { type: 'string', description: 'colour by attribute (e.g. "height", "class", "N", "P.y"); ints/strings get categorical colours' },
   highlight: { type: 'string', description: 'group pattern to highlight in orange (e.g. "front", "@P.y>1")' },
   highlight_class: { type: 'string', enum: ['prim', 'point'] },
-  wireframe: { type: 'boolean', description: 'polygon edges (default auto: on for < 6000 polys)' },
-  points: { type: 'boolean', description: 'draw all points (default: only loose points)' },
+  wireframe: { description: 'true/false/"auto" (polygon edges, auto = on below 6000 polys), or a crisp 1 px edge overlay: "all" (every edge: topology density), "hard" (dihedral > hard_angle in cyan + crease/hard/sharp edge groups), "boundary" (open edges pink, non-manifold yellow, winding flips violet), "groups" (each edge group in its colour, with legend), "none"', anyOf: [{ type: 'boolean' }, { type: 'string', enum: ['auto', 'none', 'all', 'hard', 'boundary', 'groups'] }] },
+  points: { type: 'boolean', description: 'draw all points, sized by pscale when present (default: only loose points)' },
   azimuth: { type: 'number', description: 'persp camera azimuth degrees (default 35)' },
   elevation: { type: 'number', description: 'persp camera elevation degrees (default 25)' },
   zoom: { type: 'number', description: 'zoom factor (1 = fit bbox)' },
   target: { type: 'array', items: { type: 'number' }, description: 'look-at point override [x,y,z]' },
+  hard_angle: { type: 'number', description: 'wireframe "hard": dihedral angle threshold in degrees (default 30)' },
+  point_numbers: { type: 'boolean', description: 'label visible point numbers (the first max_labels points)' },
+  prim_numbers: { type: 'boolean', description: 'label visible prim numbers at prim centroids (the first max_labels prims)' },
+  max_labels: { type: 'number', description: 'at most this many labels per kind (default 200); the rest are skipped with a note' },
+  section_axis: { type: 'string', enum: ['x', 'y', 'z'], description: 'plane normal of the "section" view (default y)' },
+  section_offset: { type: 'number', description: 'section plane position as a fraction of the bbox along the axis (default 0.5), or a coordinate with section_absolute' },
+  section_absolute: { type: 'boolean', description: 'section_offset is a world coordinate' },
+  clip: {
+    type: 'object', description: 'cut the persp view(s) by a plane and remove the camera side to reveal interiors: {axis, offset (bbox fraction, default 0.5), absolute, cap (default true: fill the cut red, blue where a solid is inside-out; false: see the inside, back faces blue)}',
+    properties: { axis: { type: 'string', enum: ['x', 'y', 'z'] }, offset: { type: 'number' }, absolute: { type: 'boolean' }, cap: { type: 'boolean' } },
+  },
+  glyphs: { type: 'string', enum: ['none', 'N', 'up', 'orient', 'v', 'custom'], description: 'per-element vectors as lines with a bright tip (parts behind the surface dimmed): N (normals; computed face normals if absent), up, v (length by magnitude), orient (X red, Y green, Z blue axes), custom (glyph_attrib)' },
+  glyph_attrib: { type: 'string', description: 'attribute for glyphs "custom": 3 floats = vector, 4 floats = quaternion' },
+  glyph_scale: { type: 'number', description: 'glyph length in world units (default 5% of the bbox diagonal)' },
+  max_glyphs: { type: 'number', description: 'evenly subsample to at most this many glyphs (default 400)' },
+  label_groups: { type: 'boolean', description: 'name each point/prim group on a visible member near its centroid, outline prim groups / mark group points in the label colour, legend with counts' },
+  label_pieces: { type: 'boolean', description: 'number connected pieces (#0, #1, … in connectivity order)' },
+  label_attrib: { type: 'string', description: 'label each distinct value of a string/int attribute (e.g. "name") on its elements; colours match color_by' },
+  legend: { type: 'boolean', description: 'legend for color_by (gradient bar with min/max, or categorical swatches) and highlight' },
+  shading: { type: 'string', enum: ['default', 'flat', 'matcap', 'ao'], description: 'flat: facets (ignores N); matcap: clay that reads form; ao: screen-space ambient occlusion darkens creases and cavities' },
+  ao_radius: { type: 'number', description: 'shading "ao": sample radius in pixels (default 10)' },
+  look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x,y,z] (same as target)' },
+  ortho_scale: { type: 'number', description: 'ortho/section views: world width across a view (default: fit the bbox)' },
+  scale: { type: 'number', description: '2 (up to 4) for a 2× image: tiles, text, lines and markers scaled' },
+  annotate: { type: 'boolean', description: 'second footer line naming the active overlays plus geometry notes (pieces, open edges, back-facing %); default on whenever an overlay option is used' },
 };
 
 export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<string> } = {}): ToolDef[] {
@@ -243,7 +262,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'render',
-      description: 'Render a node\'s output to a PNG you can see: labelled orthographic + perspective views, smooth shading, wireframe, curves and points; back-faces show BLUE (flipped normals). color_by maps an attribute to colours; highlight shows a group in orange.',
+      description: 'Render a node\'s output to a PNG you can see: labelled orthographic + perspective views, smooth shading, wireframe, curves and points; back-faces show BLUE (flipped normals). color_by maps an attribute to colours; highlight shows a group in orange. Overlays that answer questions (help topic "render"): wireframe "all"/"hard"/"boundary"/"groups" (topology, creases, holes), views "section" or clip (interiors, wall thickness), glyphs N/up/orient/v (orientation), label_groups/label_pieces/label_attrib/point_numbers/prim_numbers (what is where), shading matcap/ao (form), legend, views "turntable".',
       inputSchema: {
         type: 'object',
         properties: {
