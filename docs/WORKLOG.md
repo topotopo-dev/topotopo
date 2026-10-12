@@ -47,7 +47,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P0-C2 | Array attributes (`float[]`, `int[]`, `string[]`) through builder, merge, wrangle, JSON IO | merged | 3506ba8, 2026-10-12. 108 nodes. CSR storage, never blended; no vector arrays; index arrays not renumbered by topology ops. Also fixed setpointattrib & co. |
 | P0-D | Worker pool behind `Host` (parallel branches, chunked wrangles) + benchmarks gate | queued | after A, B |
 | P0-E | Bugs from P0-A: (1) `subdivide levels:0` mutates its input via `refreshNormals` on the uncloned input, audit all 8 `refreshNormals` callers; (2) `fill`/`offset_curve`/`boolean2d` throw raw TypeError on empty input; (3) `script` node can hang the process: vm timeout covers only the synchronous part, `await 0; while(true){}` hangs the MCP server; (4) wrangle syntax errors after the snippet end (unclosed `[`, stray `}`) have no line hint and a stray `}` escapes the kernel wrapper; (5) `boolean` fixture is empty (sphere encloses box); (6) only 7/96 NodeDefs have `example` | merged | 5b11ce0, 2026-10-12. Script sandbox: microtaskMode afterEvaluate + Host.runGuardedAsync; wrangle line hints via Host.checkSyntax; test/bugs.ts sweeps. Open: script syntax errors have no line hint; boolean2d xor leaks CrossSections; vm realm is not a security boundary |
-| P0-F | Performance: `fuse` (5.0 s at 500k, superlinear), `subdivide` (1.4 s/level at 100k), `copy_to_points` (3.1 s for 10M tris), `scatter` (1.4 s/1M) | queued | after C1 and P2-A (packed copies change the copy case) |
+| P0-F | Performance: `fuse` (5.0 s at 500k, superlinear), `subdivide` (1.4 s/level at 100k), `copy_to_points` (3.1 s for 10M tris), `scatter` (1.4 s/1M) | queued | after P2-A. Add: TriBVH build (Array sort per node) flagged by P1-F; occlusion 50k×32 over target; uv_unwrap 2.7 s/20k tris |
 
 ### Phase 1: modelling parity
 | id | item | status | notes |
@@ -57,7 +57,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P1-C | Deformers: `soft_transform` with falloff ramps, `lattice`, `path_deform`, `point_deform`, `rest` | merged | 553beb1, 2026-10-12. 107 nodes. Limits: lattice cage must be axis-aligned; path_deform polylines only; point_deform max_points 4 default (8 measured better) |
 | P1-D | UVs: `uv_unwrap` (xatlas), `uv_layout`, `uv_flatten` (LSCM), UV view in render | merged | 522dc77, 2026-10-12. xatlas-wasm 0.1.3 (MIT). Limits: uv_layout packs bounding rects; unwrap 2.7 s/20k tris; autoseam rough |
 | P1-E | `remesh_isotropic`, attribute-preserving `decimate` (meshopt), `mesh_repair`, `lod` | running (agent) | started 2026-10-12 from 2e787d2 |
-| P1-F | Measures: `curvature`, `occlusion`/`thickness` bake, `distance`, `assert`/`expect`, `explain` + `diff` MCP tools | running (agent) | started 2026-10-12 from 72576bd |
+| P1-F | Measures: `curvature`, `occlusion`/`thickness` bake, `distance`, `assert`/`expect`, `explain` + `diff` MCP tools | merged | b55cdd2, 2026-10-12. 125 nodes. Limits: occlusion 50k×32 ≈ 2.3 s (TriBVH build sorts arrays; P0-F); `thickness` alias still runs occlusion mode because nodes cannot see the alias used (engine could pass ctx.alias); self-intersection test misses coplanar overlaps; assert expr cannot read vars |
 | P1-G | Render upgrades: wireframe/edge overlay, cross-section, normal/up glyphs, group/piece labels | running (agent) | started 2026-10-12 from 2e787d2 |
 
 ### Phase 2: PCG and instancing
@@ -75,6 +75,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-12: P1-F merged (b55cdd2): curvature, occlusion, distance, assert; explain and diff tools. Running: P2-C, P1-E, P1-G, P2-A.
 - 2026-10-12: P1-A merged (db74e85). GitHub Actions stopped: the account budget for the private repo is exhausted; tests run locally at every merge. Running: P1-F, P2-C, P1-E, P1-G, P2-A.
 - 2026-10-12: P2-E1 merged (0d1ec15). Dependency note: manifold-3d pulls @gltf-transform/functions → sharp (LGPL libvips, optional native, unused by us). Blender addon not reachable for the GLB check.
 - 2026-10-12: P0-E, P1-D, P1-B merged (5b11ce0, 522dc77, 80ed39a). P2-C, P1-E, P1-G launched. Running: P2-E1, P1-A, P1-F, P2-C, P1-E, P1-G.
