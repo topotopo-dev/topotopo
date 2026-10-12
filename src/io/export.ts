@@ -49,7 +49,7 @@ export function triangleBuffers(g: Geometry, o: ExportOptions = {}): MeshBuffers
     const c = a.get(i);
     return Array.isArray(c) ? c : [c as number, c as number, c as number];
   };
-  const customAttrs = o.custom ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && a.type !== 'string' && a.size <= 4) : [];
+  const customAttrs = o.custom ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && (a.type === 'float' || a.type === 'int') && a.size <= 4) : [];
   const fastKey = !vN && !!pN && !uvVtx && (!cdF || cdF.cls === 'point' || cdF.cls === 'detail');
   const map = new Map<string | number, number>();
   const P: number[] = [], N: number[] = [], UV: number[] = [], C: number[] = [];
@@ -257,7 +257,7 @@ export function exportSTL(g: Geometry, o: ExportOptions = {}): Uint8Array {
 export function exportPLY(g: Geometry, o: ExportOptions = {}): Uint8Array {
   const np = g.numPoints;
   const N = g.points.get('N'), Cd = g.points.get('Cd');
-  const custom = o.custom !== false ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && a.type !== 'string' && a.size <= 4) : [];
+  const custom = o.custom !== false ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && (a.type === 'float' || a.type === 'int') && a.size <= 4) : [];
   const props: string[] = ['property float x', 'property float y', 'property float z'];
   if (N && N.size === 3) props.push('property float nx', 'property float ny', 'property float nz');
   if (Cd && Cd.size >= 3) props.push('property uchar red', 'property uchar green', 'property uchar blue');

@@ -67,6 +67,16 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   CSR (`primStart`, `vertexPoint`). **vertices** are polygon corners, which carry UV seams and hard normals.
   **detail** holds one value per geometry.
 - Attributes are typed arrays (float/int with tuple size 1–16, or strings) with Houdini default values.
+- **Array attributes** (`float[]`, `int[]`, `string[]`) hold a variable-length list per element: neighbour lists,
+  piece membership, per-point samples. Storage is CSR, like prims: `offsets` (count + 1) into one flat
+  `Float64Array`/`Int32Array`/`string[]`, so a million short arrays cost two typed arrays rather than a million
+  objects. `Attribute.get(i)` returns a copy as a JS array and `set(i, list)` takes any length. A set that changes a
+  length does not shift the tail: the attribute switches to a loose layout (per-element start and length, entries
+  appended to storage that grows geometrically), and `compact()` restores canonical CSR. Clone, gather, merge, IO
+  and fingerprints compact first. Arrays are never interpolated: `GeoBuilder` copies the single source's array, or
+  the heaviest source's for a blend; `merge` gives inputs without the attribute empty arrays and unifies the entry
+  type (string over float over int; a fixed tuple in another input becomes an array of its components). Wrangles bind
+  them with `f[]@`/`i[]@`/`s[]@`, reading a copy and writing it back after each element.
 - **Groups exist for all four Houdini classes.** Point, vertex and prim groups are byte masks (one byte per element).
   **Edge groups** are `EdgeSet`s of unordered point pairs (`edgeKey(a, b) = min·2^26 + max`, a safe integer), the
   representation Houdini uses. An edge needs no id of its own, so edge groups survive anything that keeps point

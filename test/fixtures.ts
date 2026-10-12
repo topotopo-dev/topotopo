@@ -36,6 +36,7 @@ export const SRC: Record<string, NodeSpec> = {
   ZBAR: { type: 'box', params: { size: [0.2, 0.2, 2], center: [0, 0, 1], divisions: [1, 1, 10] } },
   PROXY: { type: 'point_grid', params: { counts: [3, 3, 3], size: [1.2, 1.2, 1.2] } },
   PROXY_DEF: { type: 'bend', in: ['PROXY'], params: { angle: 60 } },
+  NBRS: { type: 'attrib_array', in: ['GRID'], params: { mode: 'from_neighbours' } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -50,6 +51,7 @@ export const INPUTS: Record<string, string[]> = {
   scatter: ['MESH'], decimate: ['MESH'], remesh: ['BOX'], smooth_solid: ['BOX'], foreach: ['BOX'],
   soft_transform: ['GRID'], lattice: ['MESH', 'LATTICE_REST', 'LATTICE_DEF'], path_deform: ['ZBAR', 'CURVE'],
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
+  attrib_array: ['NBRS'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -70,6 +72,8 @@ export const PARAMS: Record<string, any> = {
   lsystem: { generations: 3 },
   soft_transform: { group: '24', translate: [0, 0.5, 0], rotate: [0, 0, 20], radius: 0.8, weight_attrib: 'softweight' },
   path_deform: { stretch: true, twist: 90 },
+  // input already has point int[] nbrs (from_neighbours); the fixture adds prim int[] pts
+  attrib_array: { mode: 'from_group_points' },
   graph_ref: null,
 };
 

@@ -10,12 +10,55 @@ import { fmtNum } from './render/raster.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
-const typeCode = (a: Attribute) => (a.type === 'float' ? 'f' : a.type === 'int' ? 'i' : 's') + a.size;
+const typeCode = (a: Attribute) => (a.isArray ? a.type : (a.type === 'float' ? 'f' : a.type === 'int' ? 'i' : 's') + a.size);
 
 function fmtVal(v: any): string {
   if (typeof v === 'string') return JSON.stringify(v);
   if (Array.isArray(v)) return '(' + v.map((x) => fmtNum(x)).join(', ') + ')';
   return fmtNum(v);
+}
+
+/** An array attribute's element as [a, b, …] (long arrays are cut after 16 entries). */
+function fmtArr(v: any[], ints: boolean): string {
+  const f = (x: any) => (typeof x === 'string' ? JSON.stringify(x) : ints ? String(x) : fmtNum(x));
+  return '[' + v.slice(0, 16).map(f).join(', ') + (v.length > 16 ? `, … +${v.length - 16}` : '') + ']';
+}
+
+/** Value of element i of a, formatted (arrays in brackets, tuples in parentheses). */
+const fmtAttr = (a: Attribute, i: number) => (a.isArray ? fmtArr(a.getArray(i), a.type === 'int[]') : fmtVal(a.get(i)));
+
+/** Array length range and mean over the (selected) elements: "len 0–12, avg 4.1". */
+function arrayLens(a: Attribute, count: number, sel?: Uint8Array | null): string {
+  let lo = Infinity, hi = -Infinity, sum = 0, k = 0;
+  for (let i = 0; i < count; i++) {
+    if (sel && !sel[i]) continue;
+    const n = a.arrayLength(i);
+    if (n < lo) lo = n; if (n > hi) hi = n; sum += n; k++;
+  }
+  if (!k) return 'no elements';
+  return `len ${lo === hi ? lo : `${lo}–${hi}`}, avg ${+(sum / k).toFixed(2)}`;
+}
+
+/** Stats of an array attribute: lengths, then entry range (numbers) or most frequent entries (strings). */
+function arrayStats(a: Attribute, count: number, sel?: Uint8Array | null): string {
+  const lens = arrayLens(a, count, sel);
+  if (lens === 'no elements') return lens;
+  a.compact();
+  const o = a.offsets!, d = a.data;
+  if (a.type === 'string[]') {
+    const freq = new Map<string, number>();
+    for (let i = 0; i < count; i++) if (!sel || sel[i]) for (let k = o[i]; k < o[i + 1]; k++) freq.set((d as string[])[k], (freq.get((d as string[])[k]) ?? 0) + 1);
+    const top = [...freq].sort((x, y) => y[1] - x[1]).slice(0, 8).map(([s, c]) => `${JSON.stringify(s)}×${c}`);
+    return `${lens}; ${freq.size} unique entries${top.length ? ': ' + top.join(', ') : ''}${freq.size > 8 ? ', …' : ''}`;
+  }
+  let mn = Infinity, mx = -Infinity, sum = 0, k = 0;
+  for (let i = 0; i < count; i++) if (!sel || sel[i]) for (let j = o[i]; j < o[i + 1]; j++) {
+    const x = (d as Float64Array)[j];
+    if (!Number.isFinite(x)) continue;
+    if (x < mn) mn = x; if (x > mx) mx = x; sum += x; k++;
+  }
+  const f = (x: number) => (a.type === 'int[]' ? String(x) : fmtNum(x));
+  return k ? `${lens}; entries min ${f(mn)} max ${f(mx)} mean ${fmtNum(sum / k)}` : `${lens}; no entries`;
 }
 
 export function summarize(g: Geometry): string {
@@ -39,7 +82,8 @@ export function summarize(g: Geometry): string {
     const t = g.table(cls);
     if (!t.map.size) continue;
     const items = [...t.map].map(([k, a]) => {
-      if (cls === 'detail') return `${k} ${typeCode(a)} = ${fmtVal(a.get(0))}`;
+      if (cls === 'detail') return `${k} ${typeCode(a)} = ${fmtAttr(a, 0)}`;
+      if (a.isArray) return `${k} ${a.type} (${arrayLens(a, t.count)})`;
       if (a.type === 'string') { const u = new Set(a.data as string[]); return `${k} s (${u.size} unique)`; }
       return `${k} ${typeCode(a)}`;
     });
@@ -58,6 +102,7 @@ export function summarize(g: Geometry): string {
 }
 
 function attribStats(a: Attribute, count: number, sel?: Uint8Array | null): string {
+  if (a.isArray) return arrayStats(a, count, sel);
   if (a.type === 'string') {
     const freq = new Map<string, number>();
     for (let i = 0; i < count; i++) if (!sel || sel[i]) freq.set((a.data as string[])[i], (freq.get((a.data as string[])[i]) ?? 0) + 1);
@@ -107,7 +152,7 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
       const t = g.table(cls);
       for (const [k, a] of t.map) {
         if (o.attribs && !o.attribs.includes(k)) continue;
-        out.push(`  ${cls} ${k} ${typeCode(a)}: ${cls === 'detail' ? fmtVal(a.get(0)) : attribStats(a, t.count, cls === o.cls ? sel : null)}`);
+        out.push(`  ${cls} ${k} ${typeCode(a)}: ${cls === 'detail' ? fmtAttr(a, 0) : attribStats(a, t.count, cls === o.cls ? sel : null)}`);
       }
     }
   }
@@ -134,7 +179,7 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     let shown = 0;
     for (let i = start; i < total && shown < count; i++) {
       if (sel && !sel[i]) continue;
-      const vals = names.map((k) => `${k}=${fmtVal(t.get(k)!.get(i))}`);
+      const vals = names.map((k) => `${k}=${fmtAttr(t.get(k)!, i)}`);
       if (cls === 'prim') vals.unshift(`${g.primClosed[i] ? 'poly' : 'line'} pts[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
       if (cls === 'vertex') vals.unshift(`pt ${g.vertexPoint[i]}`);
       out.push(`  ${i}: ${vals.join('  ')}`);

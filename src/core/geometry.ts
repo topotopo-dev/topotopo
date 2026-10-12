@@ -8,6 +8,9 @@
 //              per-corner attributes (uv seams, hard normals) live here
 //  detail    – one value per geometry (metadata)
 //
+// Attributes: fixed-size float/int tuples or strings, or variable-length arrays (float[], int[],
+// string[]) stored CSR-style (offsets + flat entries), see Attribute.
+//
 // Groups: point, vertex and prim groups are byte masks (one byte per element). Edge groups are
 // EdgeSets of unordered point pairs (see edges.ts): they survive every operation that keeps
 // point numbers and are remapped wherever points are renumbered or deleted.
@@ -17,11 +20,50 @@ import type { Vec3 } from './math.ts';
 import { EdgeSet, EDGE_KEY_LIMIT } from './edges.ts';
 
 export type AttribClass = 'point' | 'vertex' | 'prim' | 'detail';
-export type AttribType = 'float' | 'int' | 'string';
+/** Element types: fixed-size tuples (float/int with tuple size 1-16, or string) and variable-length arrays. */
+export type AttribBaseType = 'float' | 'int' | 'string';
+export type AttribArrayType = 'float[]' | 'int[]' | 'string[]';
+export type AttribType = AttribBaseType | AttribArrayType;
 export type AttribData = Float64Array | Int32Array | string[];
+/**
+ * A value as returned by Attribute.get: a number (size 1), a tuple, a string, or the array of an
+ * array attribute (string[] attributes return string arrays; use getArray() for a precise type).
+ */
 export type AttribValue = number | number[] | string;
 
 export const ATTRIB_CLASSES: AttribClass[] = ['point', 'vertex', 'prim', 'detail'];
+export const ARRAY_TYPES: AttribArrayType[] = ['float[]', 'int[]', 'string[]'];
+
+/** Is t an array attribute type ('float[]', 'int[]', 'string[]')? */
+export function isArrayType(t: string): t is AttribArrayType {
+  return t === 'float[]' || t === 'int[]' || t === 'string[]';
+}
+/** Entry type of an attribute type: 'float[]' → 'float'; fixed types map to themselves. */
+export function baseType(t: AttribType): AttribBaseType {
+  return (isArrayType(t) ? t.slice(0, -2) : t) as AttribBaseType;
+}
+/** The array type whose entries have type t: 'float' → 'float[]'. */
+export function arrayType(t: AttribType): AttribArrayType {
+  return (isArrayType(t) ? t : t + '[]') as AttribArrayType;
+}
+
+/** Flat entry storage for n entries of an array type. */
+function arrayStore(t: AttribType, n: number): AttribData {
+  return t === 'string[]' ? new Array<string>(n).fill('') : t === 'int[]' ? new Int32Array(n) : new Float64Array(n);
+}
+
+/** Write vals into flat array storage at pos, converted to the entry type (Int32Array storage truncates ints). */
+function writeEntries(t: AttribType, d: AttribData, pos: number, vals: ArrayLike<any>) {
+  if (t === 'string[]') for (let k = 0; k < vals.length; k++) (d as string[])[pos + k] = String(vals[k] ?? '');
+  else for (let k = 0; k < vals.length; k++) (d as Float64Array)[pos + k] = Number(vals[k]);
+}
+
+/** A value assigned to an array element: arrays/typed arrays as they are, null/undefined = empty, a scalar = one entry. */
+function asEntries(v: any): ArrayLike<any> {
+  if (v === null || v === undefined) return [];
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) return v as ArrayLike<any>;
+  return [typeof v === 'boolean' ? +v : v];
+}
 
 /** Element classes that can hold groups. Point, vertex and prim groups are masks; edge groups are EdgeSets. */
 export type GroupClass = 'point' | 'vertex' | 'prim' | 'edge';
@@ -30,6 +72,7 @@ export const GROUP_CLASSES: GroupClass[] = ['point', 'vertex', 'prim', 'edge'];
 
 /** Houdini-compatible default values for well-known attribute names. */
 export function defaultValueFor(name: string, size: number, type: AttribType): number[] | string {
+  if (isArrayType(type)) return []; // array attributes default to the empty array
   if (type === 'string') return '';
   const ones = (n: number) => new Array(n).fill(1);
   switch (name) {
@@ -41,20 +84,47 @@ export function defaultValueFor(name: string, size: number, type: AttribType): n
   }
 }
 
+/**
+ * One attribute: a value per element of a class.
+ *
+ * Fixed-size attributes (float/int tuples of `size` components, or strings) store `data` flat,
+ * element i at data[i*size .. i*size+size).
+ *
+ * Array attributes ('float[]', 'int[]', 'string[]'; `size` is always 1) hold a variable-length list
+ * per element in CSR form: `offsets` (count + 1 entries) and flat entry storage `data`
+ * (Float64Array, Int32Array or string[]), element i = data[offsets[i] .. offsets[i+1]). A million
+ * short arrays therefore cost two typed arrays, not a million objects. `get(i)` returns a fresh JS
+ * array (a copy), `set(i, arr)` accepts any length (a scalar is a one-entry array, null/undefined
+ * empty). A set that changes an element's length switches the attribute to a "loose" layout (entries
+ * appended to amortised-growing storage, per-element start + length) instead of shifting everything
+ * after it; `compact()` restores canonical CSR. Code reading `offsets`/`data` of an array attribute
+ * directly must call `compact()` first (clone, gather, IO and fingerprints do).
+ */
 export class Attribute {
   type: AttribType;
   size: number;
   data: AttribData;
   def: number[] | string;
+  /** Array attributes only: CSR offsets, count + 1 entries (starts of the elements while loose). */
+  offsets: Int32Array | undefined;
+  /** Array attributes in loose layout: per-element entry counts (undefined when compact). */
+  private lens: Int32Array | undefined;
+  /** Array attributes in loose layout: entries used in data (the rest is growth room). */
+  private used = 0;
 
-  constructor(type: AttribType, size: number, data: AttribData, def?: number[] | string) {
+  constructor(type: AttribType, size: number, data: AttribData, def?: number[] | string, offsets?: Int32Array) {
+    const arr = isArrayType(type);
+    if (arr && !offsets) throw new Error(`array attribute (${type}) needs offsets`);
     this.type = type;
-    this.size = size;
+    this.size = arr ? 1 : size;
     this.data = data;
-    this.def = def ?? (type === 'string' ? '' : new Array(size).fill(0));
+    this.def = arr ? [] : def ?? (type === 'string' ? '' : new Array(size).fill(0));
+    this.offsets = arr ? offsets : undefined;
+    this.lens = undefined;
   }
 
   static create(type: AttribType, size: number, count: number, def?: number[] | string): Attribute {
+    if (isArrayType(type)) return new Attribute(type, 1, arrayStore(type, 0), [], new Int32Array(count + 1));
     const d = def ?? (type === 'string' ? '' : new Array(size).fill(0));
     let data: AttribData;
     if (type === 'string') data = new Array(count).fill(d as string);
@@ -66,11 +136,37 @@ export class Attribute {
     return new Attribute(type, size, data, d);
   }
 
+  /**
+   * An array attribute from one list per element (plain arrays or typed arrays), e.g.
+   * Attribute.fromArrays('int[]', [[1, 2], [], [3]]).
+   */
+  static fromArrays(type: AttribArrayType, lists: ArrayLike<ArrayLike<any> | null | undefined>): Attribute {
+    const n = lists.length, off = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) off[i + 1] = off[i] + asEntries(lists[i]).length;
+    const data = arrayStore(type, off[n]);
+    for (let i = 0; i < n; i++) writeEntries(type, data, off[i], asEntries(lists[i]));
+    return new Attribute(type, 1, data, [], off);
+  }
+
+  /** True for 'float[]', 'int[]' and 'string[]' attributes. */
+  get isArray(): boolean {
+    return this.offsets !== undefined;
+  }
+
   get count(): number {
+    if (this.offsets) return this.offsets.length - 1;
     return this.type === 'string' ? this.data.length : this.data.length / this.size;
   }
 
+  /** Array attributes: number of entries of element i (no allocation). Fixed attributes: the tuple size. */
+  arrayLength(i: number): number {
+    const o = this.offsets;
+    if (!o) return this.size;
+    return this.lens ? this.lens[i] : o[i + 1] - o[i];
+  }
+
   get(i: number): AttribValue {
+    if (this.offsets) return this.getArray(i) as number[];
     if (this.type === 'string') return (this.data as string[])[i];
     if (this.size === 1) return (this.data as Float64Array)[i];
     const o = i * this.size, out = new Array(this.size);
@@ -78,7 +174,31 @@ export class Attribute {
     return out;
   }
 
-  set(i: number, v: AttribValue) {
+  /**
+   * Array attributes: a copy of element i's list (numbers, or strings for string[]), written into `out`
+   * when given (lets the wrangle realm receive its own arrays). Fixed attributes: the value as an array.
+   */
+  getArray(i: number, out?: any[]): number[] | string[] {
+    const o = this.offsets;
+    if (!o) {
+      const v = this.get(i);
+      if (!out) return Array.isArray(v) ? v : [v as any];
+      out.length = 0;
+      if (Array.isArray(v)) for (const x of v) out.push(x); else out.push(v);
+      return out;
+    }
+    const s = o[i], n = this.lens ? this.lens[i] : o[i + 1] - s, d = this.data;
+    const r = out ?? new Array(n);
+    r.length = n;
+    for (let k = 0; k < n; k++) r[k] = d[s + k];
+    return r;
+  }
+
+  set(i: number, v: AttribValue | string[] | ArrayLike<number>) {
+    if (this.offsets) {
+      this.setArray(i, v);
+      return;
+    }
     if (this.type === 'string') {
       (this.data as string[])[i] = String(v);
       return;
@@ -92,13 +212,80 @@ export class Attribute {
     }
   }
 
+  /** Array attributes: replace element i's list (any length). */
+  private setArray(i: number, v: any) {
+    const vals = asEntries(v), n = vals.length, o = this.offsets!;
+    if (!this.lens) {
+      if (o[i + 1] - o[i] === n) { writeEntries(this.type, this.data, o[i], vals); return; }
+      this.loosen();
+    }
+    const lens = this.lens!;
+    if (n <= lens[i]) { writeEntries(this.type, this.data, o[i], vals); lens[i] = n; return; }
+    // append at the end of the used storage (typed storage grows geometrically; string storage by push)
+    const need = this.used + n;
+    if (this.type === 'string[]') {
+      const d = this.data as string[];
+      d.length = this.used;
+      for (let k = 0; k < n; k++) d.push(String(vals[k] ?? ''));
+    } else {
+      if (need > this.data.length) {
+        const grown = this.type === 'int[]' ? new Int32Array(Math.max(need, this.data.length * 2, 16)) : new Float64Array(Math.max(need, this.data.length * 2, 16));
+        grown.set((this.data as Float64Array).subarray(0, this.used));
+        this.data = grown;
+      }
+      writeEntries(this.type, this.data, this.used, vals);
+    }
+    o[i] = this.used;
+    lens[i] = n;
+    this.used = need;
+  }
+
+  /** Switch an array attribute to the loose layout (offsets become starts, lengths kept separately). */
+  private loosen() {
+    const o = this.offsets!, n = o.length - 1, lens = new Int32Array(n);
+    for (let i = 0; i < n; i++) lens[i] = o[i + 1] - o[i];
+    this.lens = lens;
+    this.used = o[n];
+  }
+
+  /** Restore canonical CSR storage for an array attribute after length-changing sets (no-op otherwise). */
+  compact(): this {
+    const lens = this.lens;
+    if (!lens) return this;
+    const starts = this.offsets!, n = lens.length, off = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) off[i + 1] = off[i] + lens[i];
+    const src = this.data, dst = arrayStore(this.type, off[n]);
+    if (this.type === 'string[]') {
+      for (let i = 0; i < n; i++) for (let k = 0; k < lens[i]; k++) (dst as string[])[off[i] + k] = (src as string[])[starts[i] + k];
+    } else {
+      for (let i = 0; i < n; i++) (dst as Float64Array).set((src as Float64Array).subarray(starts[i], starts[i] + lens[i]), off[i]);
+    }
+    this.offsets = off;
+    this.data = dst;
+    this.lens = undefined;
+    this.used = 0;
+    return this;
+  }
+
+  /** Approximate memory footprint in bytes (cache accounting). */
+  bytes(): number {
+    const d = this.data;
+    const b = Array.isArray(d) ? d.length * 24 : (d as Float64Array).byteLength;
+    return this.offsets ? b + this.offsets.byteLength + (this.lens ? this.lens.byteLength : 0) : b;
+  }
+
   clone(): Attribute {
+    if (this.offsets) {
+      this.compact();
+      return new Attribute(this.type, 1, this.data.slice() as AttribData, [], this.offsets.slice());
+    }
     const data = this.type === 'string' ? (this.data as string[]).slice() : (this.data as Float64Array).slice();
     return new Attribute(this.type, this.size, data, Array.isArray(this.def) ? this.def.slice() : this.def);
   }
 
-  /** New attribute whose element i is this[indices[i]] (index < 0 → default). */
+  /** New attribute whose element i is this[indices[i]] (index < 0 → default; the empty array for array attributes). */
   gather(indices: ArrayLike<number>): Attribute {
+    if (this.offsets) return this.gatherArrays(indices);
     const n = indices.length, s = this.size;
     const out = Attribute.create(this.type, s, n, this.def);
     if (this.type === 'string') {
@@ -113,6 +300,20 @@ export class Attribute {
       }
     }
     return out;
+  }
+
+  private gatherArrays(indices: ArrayLike<number>): Attribute {
+    const n = indices.length, o = this.offsets!, off = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) off[i + 1] = off[i] + (indices[i] >= 0 ? this.arrayLength(indices[i]) : 0);
+    const src = this.data, dst = arrayStore(this.type, off[n]);
+    for (let i = 0; i < n; i++) {
+      const j = indices[i];
+      if (j < 0) continue;
+      const s = o[j], len = off[i + 1] - off[i];
+      if (Array.isArray(dst)) for (let k = 0; k < len; k++) dst[off[i] + k] = (src as string[])[s + k];
+      else dst.set((src as Float64Array).subarray(s, s + len), off[i]);
+    }
+    return new Attribute(this.type, 1, dst, [], off);
   }
 }
 
@@ -129,13 +330,25 @@ export class AttribTable {
   names() { return [...this.map.keys()]; }
   delete(name: string) { return this.map.delete(name); }
 
-  /** Create (or replace if type/size differ) an attribute. Existing compatible attributes are kept. */
+  /**
+   * Create (or replace if type/size differ) an attribute. Existing compatible attributes are kept.
+   * Array types ('float[]', 'int[]', 'string[]') always have size 1. Replacing a numeric attribute
+   * keeps the overlapping components; replacing to or from an array type converts the values
+   * (a tuple becomes an array of its components, an array's entries change type).
+   */
   add(name: string, type: AttribType = 'float', size = 1, def?: number[] | string): Attribute {
+    if (isArrayType(type)) size = 1;
     const ex = this.map.get(name);
     if (ex && ex.type === type && ex.size === size) return ex;
     const a = Attribute.create(type, size, this.count, def ?? defaultValueFor(name, size, type));
-    // preserve overlapping components when changing size of a numeric attribute
-    if (ex && ex.type !== 'string' && type !== 'string') {
+    if (ex && (ex.isArray || a.isArray)) {
+      for (let i = 0; i < this.count; i++) {
+        const v = ex.get(i);
+        a.set(i, a.isArray && !Array.isArray(v) ? [v as any] : v);
+      }
+      a.compact();
+    } else if (ex && ex.type !== 'string' && type !== 'string') {
+      // preserve overlapping components when changing size of a numeric attribute
       const m = Math.min(ex.size, size);
       for (let i = 0; i < this.count; i++)
         for (let c = 0; c < m; c++) (a.data as Float64Array)[i * size + c] = (ex.data as Float64Array)[i * ex.size + c];
@@ -526,6 +739,39 @@ function unifyDisplayAttribs(geos: Geometry[]): Geometry[] {
   return out;
 }
 
+/** Common entry type of two attribute types: string wins over float, float over int. */
+function unifyBase(a: AttribType, b: AttribType): AttribBaseType {
+  const x = baseType(a), y = baseType(b);
+  return x === 'string' || y === 'string' ? 'string' : x === 'float' || y === 'float' ? 'float' : 'int';
+}
+
+/**
+ * Concatenate array attribute k of the tables (an input that lacks it contributes empty arrays; one that has
+ * it as a fixed-size attribute contributes its tuple, or its string, as an array).
+ */
+function mergeArrayAttrib(tables: AttribTable[], k: string, type: AttribArrayType, count: number): Attribute {
+  const off = new Int32Array(count + 1);
+  let o = 0;
+  for (const t of tables) {
+    const src = t.map.get(k);
+    for (let i = 0; i < t.count; i++) off[o + i + 1] = off[o + i] + (src ? src.arrayLength(i) : 0);
+    o += t.count;
+  }
+  const data = arrayStore(type, off[count]);
+  o = 0;
+  for (const t of tables) {
+    const src = t.map.get(k);
+    if (src?.isArray) {
+      // compact CSR keeps the entries of consecutive elements contiguous: copy the block
+      const sd = src.compact().data;
+      if (src.type === type && !Array.isArray(sd)) (data as Float64Array).set(sd as Float64Array, off[o]);
+      else writeEntries(type, data, off[o], sd);
+    } else if (src) for (let i = 0; i < t.count; i++) writeEntries(type, data, off[o + i], asEntries(src.get(i)));
+    o += t.count;
+  }
+  return new Attribute(type, 1, data, [], off);
+}
+
 function mergeTables(tables: AttribTable[], count: number): AttribTable {
   const out = new AttribTable(count);
   const schema = new Map<string, { type: AttribType; size: number; def: number[] | string }>();
@@ -533,13 +779,21 @@ function mergeTables(tables: AttribTable[], count: number): AttribTable {
     for (const [k, a] of t.map) {
       const s = schema.get(k);
       if (!s) schema.set(k, { type: a.type, size: a.size, def: a.def });
-      else {
+      else if (a.isArray || isArrayType(s.type)) {
+        // an array in any input makes the merged attribute an array
+        s.type = arrayType(unifyBase(s.type, a.type));
+        s.size = 1; s.def = [];
+      } else {
         if (a.type === 'string' || s.type === 'string') s.type = 'string';
         else if (a.type === 'float') s.type = 'float';
         if (a.size > s.size) { s.size = a.size; s.def = a.def; }
       }
     }
   for (const [k, s] of schema) {
+    if (isArrayType(s.type)) {
+      out.map.set(k, mergeArrayAttrib(tables, k, s.type, count));
+      continue;
+    }
     const def = s.type === 'string' ? '' : padDef(s.def, s.size);
     const dst = Attribute.create(s.type, s.size, count, def);
     let off = 0;
@@ -595,7 +849,7 @@ class GrowAttr {
   type: AttribType; size: number; def: number[] | string;
   vals: (number[] | string | undefined)[] = [];
   constructor(type: AttribType, size: number, def: number[] | string) { this.type = type; this.size = size; this.def = def; }
-  set(i: number, v: number | number[] | string) {
+  set(i: number, v: number | number[] | string | string[]) {
     this.vals[i] = typeof v === 'number' ? new Array(this.size).fill(v) : (v as any);
   }
 }
@@ -604,6 +858,11 @@ class GrowAttr {
  * Incrementally builds new geometry. Elements can carry provenance (which source
  * point / vertex / prim they came from, or a weighted blend) and every attribute and
  * group of the source geometry is interpolated onto the result automatically.
+ *
+ * Attribute rules on build(): float attributes are blended with the provenance weights; int and
+ * string attributes take the dominant source's value (largest weight). Array attributes are never
+ * blended: an element with a single source copies its array, a blended element takes the array of
+ * its heaviest source (first one on ties); elements without provenance get the empty array.
  *
  * Group inheritance on build():
  *  - point / prim groups: membership of the dominant source (largest blend weight).
@@ -679,6 +938,7 @@ export class GeoBuilder {
 
   /** Explicitly set attribute values on new elements (overrides interpolated values). */
   attrib(cls: 'point' | 'vertex' | 'prim', name: string, size = 1, type: AttribType = 'float', def?: number[] | string): GrowAttr {
+    if (isArrayType(type)) size = 1;
     const m = this.grow[cls];
     let a = m.get(name);
     if (!a) {
@@ -806,6 +1066,11 @@ function interpTable(t: AttribTable, srcs: Src[] | number[], skip: Set<string>, 
   const out = new AttribTable(n);
   for (const [name, a] of t.map) {
     if (skip.has(name) || alsoSkip.includes(name)) continue;
+    if (a.isArray) {
+      // arrays are not interpolated: copy the single source's array, or the heaviest source's for a blend
+      out.map.set(name, a.gather(Int32Array.from(srcs as Src[], dominant)));
+      continue;
+    }
     const dst = Attribute.create(a.type, a.size, n, a.def);
     const s = a.size;
     if (a.type === 'float') {
@@ -851,5 +1116,6 @@ function applyGrow(t: AttribTable, grow: Map<string, GrowAttr>) {
       const v = ga.vals[i];
       if (v !== undefined) a.set(i, v as any);
     }
+    a.compact();
   }
 }
