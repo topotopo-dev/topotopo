@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "hit:int:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.8982, 0.0442, 0.7016],
+      "min": [-0.9007, -0.0114, -0.7997]
+    },
+    "counts": {
+      "points": 25,
+      "prims": 1,
+      "vertices": 25,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "9bcac4fae460a940",
+      "attributes": {
+        "point.N": "a11ae70869ecf582",
+        "point.hit": "c1c773c429d9f7de"
+      },
+      "topology": "0a3c7c9e632e17a4"
+    }
+  },
+  "name": "node.project_curve",
+  "ok": true,
+  "source": "fixture for node type \"project_curve\" (test/fixtures.ts)",
+  "warnings": []
+}

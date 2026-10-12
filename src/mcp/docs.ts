@@ -14,6 +14,7 @@ WORKFLOW
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
+CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
@@ -346,6 +347,45 @@ Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatte
   Transform Points; prune ≈ Self Pruning / Density Filter / Difference; copy_to_points pack ≈ Static Mesh Spawner.
 Example: examples/forest.json (30k candidates → pruned packed forest) and examples/pcg_scatter.json (road, lamps, rocks).`,
 
+  curves: `CURVES (polylines and Bezier / NURBS spline prims)
+Polylines are open prims of points; closed curves are polygons (faces). Spline prims are Houdini's Bezier/NURBS curves:
+  the prim's points are its CONTROL POINTS (CVs) and the curve is evaluated exactly wherever it is needed.
+  bezier {points, order, closed, weights}   segments of order CVs sharing their ends: 7 CVs of order 4 = 2 cubic segments
+                                            (CVs 0-3, 3-6); closed: segments × (order-1) CVs. order 4 = cubic.
+  nurbs {points, order, closed, knots, parameterization, weights, fit}   clamped open curves start/end on their end CVs;
+                                            fit:true passes THROUGH the points (CVs computed). knots [] = automatic.
+  Attributes: prim spline_order, prim float[] knots (NURBS), point Pw (weights, default 1). Point attributes on CVs
+  (Cd, width, pscale) blend along the curve with its basis weights.
+Which nodes see the spline itself: transform and every deformer move the CVs (the curve follows, like Houdini);
+  attribute/group/delete/merge/copy/wrangle/script/pack nodes work on the CV points; resample samples the TRUE curve
+  evenly by arc length (treat_splines "control_polygon" = the CV hull); carve, ends, sweep, polywire, offset_curve_3d,
+  project_curve, curve_attribs evaluate it themselves. EVERY OTHER node gets polylines automatically, with a warning
+  "converted N spline curves to polylines for <node>" (adaptive: chords within 1/2000 of the curve size). To choose the
+  resolution put convert_curve {to:"polyline", tolerance | segments per span} or resample before such nodes.
+  render draws the evaluated curves; export writes polylines (json keeps splines).
+Nodes:
+  convert_curve {to: polyline|bezier|nurbs, order, fit, tolerance, segments}   spline → polyline evaluates; bezier ⇄
+      nurbs is exact; polyline → spline uses the points as CVs, or passes through them with fit:true.
+  spline_fit {tolerance | cv_count, smoothing, order, output nurbs|polyline}   least-squares NURBS through ordered points:
+      denoise GPS-like / jittered polylines, compress dense curves (prim fit_error = largest deviation).
+  fillet_curve {radius, type round|chamfer|bezier, segments, group (corner points), angle_min, clamp}   rounds polyline
+      corners in 3D (new points in point group "fillet").
+  offset_curve_3d {distance, lift, frame rmf|plane, up, corner mitre|round|bevel, both}   parallel curves in 3D:
+      rails, kerbs, lanes (both:true = two rails, prim side ±1; frame "plane" keeps them level). offset_curve is the
+      2D (Clipper) grow/shrink of CLOSED flat shapes; use offset_curve_3d for open paths or anything not flat.
+  project_curve (curves, surface | heightfield) {mode direction|closest, direction, spacing, lift, misses}   drapes a
+      curve onto terrain; spacing resamples first so it follows the bumps; writes point hit and N (smooth normals).
+  curve_attribs {curveu, arclength, tangent (tangentu), frame (N = tangent, up), curvature, segment, ramp_attrib + ramp}
+      e.g. ramp_attrib "width" + ramp [[0,0.3],[1,0.05]] → polywire tapers; frame:true → copy_to_points aligns copies.
+Recipes:
+  Road on terrain: nurbs {points, fit:true} → project_curve (terrain) {spacing:0.3, lift:0.1} → wrangle "@up = @N;"
+    → sweep {shape:"ribbon", radius:1.2}. (On a heightfield: heightfield_path cuts the road into the terrain.)
+  Handrails: curve (corners) → fillet_curve {radius:1.5} → offset_curve_3d {distance:0.7, lift:0.9, both:true,
+    frame:"plane"} → sweep {radius:0.04}; posts: resample the rails {length:1.5} → copy_to_points a thin box.
+  Letter / logo outline: bezier {closed:true, points} (+ inner contours for holes) → convert_curve → extrude.
+  Cable with sag: nurbs {points:[a, mid lowered, b]} → resample {length:0.05} → polywire; taper with curve_attribs.
+See examples/splines.json.`,
+
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
 The graph's vars become parameters (add "params": {"var": {"desc": "...", "min": 0, "max": 1}} for docs/ranges).
@@ -467,6 +507,8 @@ BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes n
 PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing with per-instance attributes, usda a
   PointInstancer with per-instance primvars, geo PackedGeometry prims, csv/points.json the instance stream, json keeps
   them; obj/ply/stl expand them. Option instancing "expand" writes real geometry everywhere.
+SPLINES (Bezier/NURBS prims, help topic "curves"): every format but json writes the evaluated polylines (closed curves as
+  polygons), with a note; json keeps the spline prims. convert_curve first to choose the resolution.
 Heightfields: png16 (.png) / r16 (.r16, .raw) heightmaps with a .json sidecar (range + Unreal Landscape scale/location),
 mask_png (8-bit weight layers; layers: [...]); height_min/height_max fix the range. See help topic "heightfield".
 IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; external .bin; node transforms;

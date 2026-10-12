@@ -58,6 +58,12 @@ export interface NodeDef {
    * engine expands them before cooking the node, with a warning. A function decides per cook from the resolved params.
    */
   packed?: 'keep' | 'unpack' | ((p: Record<string, any>) => 'keep' | 'unpack');
+  /**
+   * Spline prims (Bezier/NURBS curves): 'keep' = the node handles them (moves CVs, edits attributes or evaluates the
+   * curves itself); 'polyline' = the engine converts them to polylines before cooking the node, with a warning. Default:
+   * 'keep' when the node keeps packed prims (it works on elements and points, not on polygon shapes), else 'polyline'.
+   */
+  splines?: 'keep' | 'polyline' | ((p: Record<string, any>) => 'keep' | 'polyline');
   /** extra cache-key material (e.g. file mtime) */
   signatureExtra?: (p: Record<string, any>, engine: Engine) => string;
   cook(ctx: CookContext): Geometry | Promise<Geometry>;

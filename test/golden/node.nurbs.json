@@ -1,0 +1,45 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "Pw:float:1"],
+      "prim": ["knots:float[]:1", "spline_order:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [5.5, 1, 1.5],
+      "min": [0, 0, -0.5]
+    },
+    "counts": {
+      "points": 6,
+      "prims": 1,
+      "vertices": 6,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "57e9c0a5ef37ff27",
+      "attributes": {
+        "point.Pw": "96fd3c9f96bbe2d5",
+        "prim.knots": "6f97bd9aa90ed7f4",
+        "prim.spline_order": "265bf4e19742f21b"
+      },
+      "topology": "9ab775677220ec1d"
+    },
+    "splines": {
+      "bezier": 0,
+      "hash": "c6ca7826448438bc",
+      "nurbs": 1
+    }
+  },
+  "name": "node.nurbs",
+  "ok": true,
+  "source": "fixture for node type \"nurbs\" (test/fixtures.ts)",
+  "warnings": []
+}
