@@ -410,6 +410,7 @@ UNREAL LANDSCAPE BUNDLE: export {format:"unreal_landscape", path:"exports/level"
   names the manifest) of a geometry with a heightfield, plus the meshes/instances to place on it (merge them):
   landscape.json (manifest), heightmap.png + heightmap.json (png16 + sidecar), layers/<layer>.png (every other layer, 8-bit;
   layers outside 0..1 normalised, the range in the manifest), objects.glb (meshes + EXT_mesh_gpu_instancing instances),
+  objects_expanded.glb (the same with real copies, for importers without the extension),
   instances.csv + instances.meshes.json + meshes/<Mesh>.glb (the instance stream). landscape.* in the manifest gives
   Unreal's import layout for the heightmap (section size, sections per component, components, overall resolution: exact
   for 127/253/505/1009/2017/4033 samples), scale, new_landscape_location_cm (the centre: the New Landscape panel centres
