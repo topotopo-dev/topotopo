@@ -225,6 +225,11 @@ export function runWrangle(
 
   let kernel = kernelCache.get(source);
   if (!kernel) {
+    // Parse the snippet on its own first (strict, like the kernel, same lines): its error positions are then the
+    // user's lines, and only a complete function body reaches the kernel, so a stray `}` cannot close the kernel's
+    // wrapper and an unclosed `[` cannot swallow it.
+    const bad = opts.host.checkSyntax?.(`"use strict";${body}`);
+    if (bad) throw new Error(`wrangle syntax error: ${bad.message}${syntaxLine(bad.line, bad.message, body, opts.code)}`);
     try {
       kernel = opts.host.compile(source);
     } catch (e: any) {
@@ -285,6 +290,81 @@ function userLine(e: any, bodyLine: number, code: string): string {
   const lines = code.split('\n');
   if (line < 1 || line > lines.length) return '';
   return ` (line ${line}: ${lines[line - 1].trim().slice(0, 80)})`;
+}
+
+/**
+ * " (line N: text)" for a syntax error the parser reported at `line` of the snippet (`src` is the snippet after the
+ * @-rewrite, same lines as `code`). At the end of input the culprit is the innermost bracket left open, so the hint
+ * names it and points at its line (": '[' is never closed (line 1: …)"); a line past the end (or blank) moves up to
+ * the last line with code.
+ */
+function syntaxLine(line: number, message: string, src: string, code: string): string {
+  const lines = code.split('\n');
+  let note = '';
+  if (/end of input/i.test(message)) {
+    const open = unclosedBracket(src);
+    if (open) { line = open.line; note = `: '${open.ch}' is never closed`; }
+  }
+  line = Math.min(Math.max(1, line), lines.length);
+  while (line > 1 && !lines[line - 1].trim()) line--;
+  return `${note} (line ${line}: ${lines[line - 1].trim().slice(0, 80)})`;
+}
+
+/** The innermost bracket left open at the end of JS source (strings, comments, templates and regex literals skipped). */
+function unclosedBracket(src: string): { ch: string; line: number } | null {
+  const stack: { ch: string; line: number }[] = [];
+  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  let line = 1, prev = '', word = '', gap = false, inTemplate = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '\n') line++;
+    if (inTemplate) {
+      if (c === '\\') i++;
+      else if (c === '`') inTemplate = false;
+      else if (c === '$' && src[i + 1] === '{') { stack.push({ ch: '${', line }); inTemplate = false; i++; }
+      continue;
+    }
+    if (/\s/.test(c)) { gap = true; continue; }
+    if (c === '/' && src[i + 1] === '/') { while (i + 1 < src.length && src[i + 1] !== '\n') i++; continue; }
+    if (c === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      if (end < 0) return null;
+      for (let k = i; k < end; k++) if (src[k] === '\n') line++;
+      i = end + 1;
+      continue;
+    }
+    // a slash starts a regex literal after an operator, an opening bracket or a keyword like return
+    if (c === '/' && (!prev || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev) || /^(return|typeof|case|do|else|in|of|new|delete|void|throw)$/.test(word))) {
+      let cls = false;
+      for (i++; i < src.length && src[i] !== '\n'; i++) {
+        if (src[i] === '\\') i++;
+        else if (src[i] === '[') cls = true;
+        else if (src[i] === ']') cls = false;
+        else if (src[i] === '/' && !cls) break;
+      }
+      if (src[i] === '\n') line++;
+      prev = '/'; word = ''; gap = false;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      for (i++; i < src.length && src[i] !== c && src[i] !== '\n'; i++) if (src[i] === '\\') i++;
+      if (src[i] === '\n') line++;
+      prev = c; word = ''; gap = false;
+      continue;
+    }
+    if (c === '`') { inTemplate = true; prev = c; word = ''; gap = false; continue; }
+    if (c === '(' || c === '[' || c === '{') stack.push({ ch: c, line });
+    else if (c === ')' || c === ']' || c === '}') {
+      const top = stack.pop();
+      if (top?.ch === '${' && c === '}') inTemplate = true;
+      else if (!top || top.ch !== pairs[c]) return null; // mismatched: the parser's own position is better
+    }
+    const w = /[\w$]/.test(c);
+    word = w ? (!gap && /[\w$]/.test(prev) ? word + c : c) : '';
+    prev = c; gap = false;
+  }
+  const top = stack[stack.length - 1];
+  return top && top.ch !== '${' ? top : null;
 }
 
 /** Geometry functions available to wrangles (queries read inputs; edits are deferred). */

@@ -10,6 +10,25 @@ import { makeCurl, makeNoise } from '../core/noise.ts';
 import type { Noise3 } from '../core/noise.ts';
 import { randN } from '../core/random.ts';
 
+/** Promise.prototype of every script realm (async functions in a realm create promises with it). */
+const realmPromiseProtos = new WeakSet<object>();
+let rejectionFilter = false;
+
+/**
+ * A stray rejected promise of a script (an un-awaited lib.run that fails, an async callback that throws, a
+ * continuation stopped by a timeout) must not take the process down, which is what Node does with unhandled
+ * rejections by default: the MCP server would die. Rejections of realm promises are dropped; any other one is
+ * re-thrown as Node would (unless the application listens for them itself).
+ */
+function filterRealmRejections() {
+  if (rejectionFilter) return;
+  rejectionFilter = true;
+  process.on('unhandledRejection', (reason, promise) => {
+    if (realmPromiseProtos.has(Object.getPrototypeOf(promise))) return;
+    if (process.listenerCount('unhandledRejection') === 1) throw reason;
+  });
+}
+
 export function createNodeHost(opts: { baseDir?: string } = {}): Host {
   const baseDir = opts.baseDir ?? process.cwd();
   const noiseCache = new Map<string, Noise3>();
@@ -32,13 +51,29 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
 
   // DONT_CONTEXTIFY gives the realm an ordinary global object: no interceptors, so global
   // lookups (sdSphere, add, noise …) in hot loops stay fast. Falls back on older Node.
+  // microtaskMode 'afterEvaluate' gives the realm its own microtask queue, drained at the end of every
+  // runInContext call and inside its timeout: continuations of awaits in script code can only run there, so
+  // `await 0; while (true) {}` is stopped like a synchronous loop (see runGuardedAsync).
   const fast = (vm as any).constants?.DONT_CONTEXTIFY;
-  const ctx: any = fast ? vm.createContext(fast, { name: 'polyforge-scripts' }) : vm.createContext({}, { name: 'polyforge-scripts' });
+  const ctxOpts = { name: 'polyforge-scripts', microtaskMode: 'afterEvaluate' as const };
+  const ctx: any = fast ? vm.createContext(fast, ctxOpts) : vm.createContext({}, ctxOpts);
   const realmGlobal = vm.runInContext('globalThis', ctx);
   realmGlobal.__hostApi = hostApi;
   realmGlobal.console = { log: () => {} };
   vm.runInContext(`(${installSnippetLib.toString()})(globalThis, __hostApi); delete globalThis.__hostApi;`, ctx);
   const scriptCache = new Map<string, any>();
+  realmPromiseProtos.add(realmGlobal.Promise.prototype);
+  filterRealmRejections();
+  const guarded = (fn: () => any, timeoutMs: number) => {
+    realmGlobal.__job = fn;
+    try {
+      return vm.runInContext('__job()', ctx, { timeout: Math.max(1, timeoutMs) });
+    } finally {
+      realmGlobal.__job = undefined;
+    }
+  };
+  // running any script drains the realm's microtask queue afterwards (inside the timeout)
+  const drain = new vm.Script('undefined', { filename: 'drain.js' });
 
   const fontDirs =
     process.platform === 'win32'
@@ -85,13 +120,47 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
       }
       return v;
     },
-    runGuarded(fn, timeoutMs = 30000) {
-      realmGlobal.__job = fn;
+    checkSyntax(body) {
       try {
-        return vm.runInContext('__job()', ctx, { timeout: Math.max(1, timeoutMs) });
-      } finally {
-        realmGlobal.__job = undefined;
+        vm.compileFunction(body, [], { filename: 'check.js', parsingContext: ctx });
+        return null;
+      } catch (e: any) {
+        if (!(e instanceof SyntaxError) && e?.name !== 'SyntaxError') throw e;
+        const m = /check\.js:(\d+)/.exec(String(e.stack ?? ''));
+        return { message: String(e.message), line: m ? Number(m[1]) : 1 };
       }
+    },
+    runGuarded(fn, timeoutMs = 30000) {
+      return guarded(fn, timeoutMs);
+    },
+    async runGuardedAsync(fn, timeoutMs = 30000) {
+      // The synchronous part and every continuation queued inside the realm run in the first timed call. A promise
+      // from outside (lib.run of an async node) settles in the main queue; the realm continuation it releases then
+      // waits in the realm queue until a timed drain below. `wake` (called when such a promise settles) triggers
+      // the drain at once; a slow poll covers promises nobody announced. The whole run has a wall-clock deadline.
+      const t0 = Date.now(), limit = Math.max(1, timeoutMs);
+      let state = 0, value: any, woken = false, wakeUp: (() => void) | null = null;
+      const wake = () => { woken = true; wakeUp?.(); };
+      const res = guarded(() => fn(wake), limit);
+      if (!res || typeof res.then !== 'function') return res;
+      // handlers created out here run in the main queue (also after a drain that settled res)
+      res.then((v: any) => { state = 1; value = v; wake(); }, (e: any) => { state = 2; value = e; wake(); });
+      while (!state) {
+        if (!woken) await null; // a promise already settled by the last call needs no timer
+        if (!woken && !state) {
+          await new Promise<void>((r) => {
+            const timer = setTimeout(() => { wakeUp = null; r(); }, 15);
+            wakeUp = () => { wakeUp = null; clearTimeout(timer); r(); };
+          });
+        }
+        woken = false;
+        if (state) break;
+        const left = limit - (Date.now() - t0);
+        if (left <= 0) throw new Error(`Script execution timed out after ${limit}ms`);
+        drain.runInContext(ctx, { timeout: left });
+      }
+      if (state === 2) throw value;
+      return value;
     },
     findFont(name) {
       if (name) {

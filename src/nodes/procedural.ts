@@ -408,8 +408,11 @@ defineNode({
     const prims: number[][] = [];
     const Pd = g.P;
     const el = (a: number, b: number) => Math.hypot(Pd[a * 3] - Pd[b * 3], Pd[a * 3 + 1] - Pd[b * 3 + 1], Pd[a * 3 + 2] - Pd[b * 3 + 2]);
-    for (let t = 0; t < d.triangles.length; t += 3) {
+    // collinear points: d3-delaunay jitters them into zero-area slivers; fewer than 3 distinct points: -1 / repeated ids
+    const flat = !!(d as any).collinear;
+    for (let t = 0; t < d.triangles.length && !flat; t += 3) {
       const a = d.triangles[t], b = d.triangles[t + 1], c = d.triangles[t + 2];
+      if (a < 0 || b < 0 || c < 0 || a === b || b === c || a === c) continue;
       if (p.max_edge > 0 && Math.max(el(a, b), el(b, c), el(c, a)) > p.max_edge) continue;
       prims.push([a, c, b]);
     }

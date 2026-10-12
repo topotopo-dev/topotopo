@@ -17,6 +17,8 @@ export const SRC: Record<string, NodeSpec> = {
   MESH: { type: 'sphere', params: { type: 'ico', level: 2 } },
   BOX: { type: 'box', params: { divisions: [2, 2, 2] } },
   SMALLSPHERE: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.1 } },
+  // boolean cutter: bites the +x+y+z corner off BOX (the unit MESH sphere would enclose the box and leave nothing)
+  CUTTER: { type: 'sphere', params: { type: 'ico', level: 2, radius: 0.6, center: [0.5, 0.5, 0.5] } },
   GRID: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
   CURVE: { type: 'curve', params: { points: [[0, 0, 0], [1, 0.5, 0.2], [2, 0, 0.5], [3, 0.4, 0]], smooth: true } },
   CIRCLE: { type: 'circle', params: { radius: 0.6, segments: 24 } },
@@ -44,7 +46,7 @@ export const INPUTS: Record<string, string[]> = {
   resample: ['CURVE'], carve: ['CURVE'], ends: ['CIRCLE'], sweep: ['CURVE', 'PROFILEXY'], polywire: ['CURVE'], revolve: ['PROFILE'],
   extrude: ['SHAPE'], offset_curve: ['SHAPE'], boolean2d: ['SHAPE', 'CIRCLE'], fill: ['SHAPE'], loft: ['LOFT'],
   copy_to_points: ['MESH', 'PTS'], ray: ['PTS_ABOVE', 'MESH'], attrib_copy: ['MESH', 'COLORED'], attrib_transfer: ['MESH', 'COLORED'],
-  boolean: ['BOX', 'MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
+  boolean: ['BOX', 'CUTTER'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],
   triangulate2d: ['PTS'], voronoi2d: ['PTS'], merge: ['MESH', 'BOX'], switch: ['MESH', 'BOX'],
   uv_transform: ['BOX'], poly_extrude: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],

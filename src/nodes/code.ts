@@ -62,9 +62,16 @@ defineNode({
   },
 });
 
-/** Library object handed to script nodes. */
-function scriptLib(ctx: CookContext) {
+/**
+ * Library object handed to script nodes. `wake` tells the host that a promise the script may await has settled;
+ * `run.stopped` turns lib.run into an error once the script has finished or timed out (a stray continuation must
+ * not keep cooking nodes).
+ */
+function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }) {
   const engine = ctx.engine;
+  // compiled in the script realm: a synchronous node's result resolves a realm promise, so `await lib.run(...)`
+  // continues inside the same time-limited call; only async nodes hand back an outside promise (then: wake)
+  const realmAsync = engine.host.compile('(function(f){ return async function run(...a) { return f(...a); }; })');
   return {
     Geometry, GeoBuilder, math, topology, random,
     noise: { makeNoise, fractal, makeCurl },
@@ -79,7 +86,8 @@ function scriptLib(ctx: CookContext) {
     get fps() { return ctx.fps; },
     get timeInc() { return ctx.timeInc; },
     /** Run any node type directly: await lib.run('sphere', {radius: 2}) */
-    async run(type: string, params: Record<string, any> = {}, ...inputs: Geometry[]) {
+    run: realmAsync((type: string, params: Record<string, any> = {}, ...inputs: Geometry[]) => {
+      if (run.stopped) throw new Error(`lib.run(${type}): the script has already finished or timed out`);
       const def = engine.resolveDef(type);
       if (!def) throw new Error(`lib.run: unknown node type "${type}"`);
       // "=frame" etc. read the script's own time (and mark it time-dependent)
@@ -90,8 +98,10 @@ function scriptLib(ctx: CookContext) {
         node: `${ctx.node}/${type}`, type: def.type, p: rp.values, inputs,
         input: (i: number) => inputs[i] ?? new Geometry(), hasInput: (i: number) => !!inputs[i], inputSigs: inputs.map(() => 'script'),
       });
-      return await def.cook(sub);
-    },
+      const r = def.cook(sub);
+      if (r && typeof (r as any).then === 'function') (r as Promise<Geometry>).then(wake, wake);
+      return r;
+    }),
     warn: (m: string) => ctx.warn(String(m)),
   };
 }
@@ -130,11 +140,16 @@ defineNode({
     }
     const geo = (inputs[0] ?? new Geometry()).clone();
     let res: any;
+    const run = { stopped: false };
     try {
-      const pr = engine.host.runGuarded(() => fn(geo, inputs.map((g) => g ?? new Geometry()), scriptLib(ctx), ctx.vars), engine.scriptTimeoutMs);
-      res = await pr;
+      // the host limits the whole run, awaited continuations included (an `await` must not escape the timeout)
+      res = await engine.host.runGuardedAsync((wake) => fn(geo, inputs.map((g) => g ?? new Geometry()), scriptLib(ctx, wake, run), ctx.vars), engine.scriptTimeoutMs);
     } catch (e: any) {
-      throw new NodeError(`script error: ${e?.message ?? e}`);
+      const msg = String(e?.message ?? e);
+      if (/timed out/i.test(msg)) throw new NodeError(`script exceeded ${engine.scriptTimeoutMs} ms (infinite loop?)`);
+      throw new NodeError(`script error: ${msg}`);
+    } finally {
+      run.stopped = true;
     }
     if (!(res instanceof Geometry)) throw new NodeError(`script must return a Geometry (got ${res === undefined ? 'undefined — add "return geo;"' : typeof res})`);
     return res;
