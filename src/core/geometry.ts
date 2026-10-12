@@ -221,17 +221,20 @@ export class Attribute {
     }
     const lens = this.lens!;
     if (n <= lens[i]) { writeEntries(this.type, this.data, o[i], vals); lens[i] = n; return; }
-    // append at the end of the used storage, growing it geometrically
+    // append at the end of the used storage (typed storage grows geometrically; string storage by push)
     const need = this.used + n;
-    if (need > this.data.length) {
-      if (this.type === 'string[]') (this.data as string[]).length = need;
-      else {
+    if (this.type === 'string[]') {
+      const d = this.data as string[];
+      d.length = this.used;
+      for (let k = 0; k < n; k++) d.push(String(vals[k] ?? ''));
+    } else {
+      if (need > this.data.length) {
         const grown = this.type === 'int[]' ? new Int32Array(Math.max(need, this.data.length * 2, 16)) : new Float64Array(Math.max(need, this.data.length * 2, 16));
         grown.set((this.data as Float64Array).subarray(0, this.used));
         this.data = grown;
       }
+      writeEntries(this.type, this.data, this.used, vals);
     }
-    writeEntries(this.type, this.data, this.used, vals);
     o[i] = this.used;
     lens[i] = n;
     this.used = need;
