@@ -111,5 +111,22 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
       }
       return null;
     },
+    fontCandidates(name) {
+      if (name) { const f = this.findFont(name); return f ? [f] : []; }
+      const out: string[] = [];
+      const push = (f: string | null) => { if (f && !out.includes(f)) out.push(f); };
+      for (const f of defaults) for (const d of fontDirs) push(findIn(d, (x) => x === f));
+      // then any other TrueType fonts, a handful per directory, as a last resort
+      for (const d of fontDirs) {
+        const seen = new Set<string>();
+        for (let i = 0; i < 8; i++) {
+          const hit = findIn(d, (f) => /\.ttf$/i.test(f) && !seen.has(f));
+          if (!hit) break;
+          seen.add(path.basename(hit));
+          push(hit);
+        }
+      }
+      return out;
+    },
   };
 }

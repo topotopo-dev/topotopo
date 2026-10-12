@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-96 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+97 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -20,7 +20,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
 - [uv](#uv-nodes): [uv_project](#uv_project) · [uv_transform](#uv_transform)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
-- [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [switch](#switch)
+- [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file)
 
 ## generate nodes
@@ -2079,7 +2079,7 @@ category: `code` · aliases: `python`, `js`, `javascript`, `python_sop`
 
 Arbitrary JS over the whole geometry with the engine library (builder, math, noise, BVH, manifold, lib.run any node). Return a Geometry.
 
-The body of `async function(geo, inputs, lib, vars)`. geo is a writable clone of input 0; inputs[i] are the raw inputs. lib: Geometry, GeoBuilder, math, topology, random, noise, KDTree, TriBVH, manifold, merge(geos), run(type, params, ...inputs), warn(msg). Must return a Geometry (e.g. `return geo;`).
+The body of `async function(geo, inputs, lib, vars)`. geo is a writable clone of input 0; inputs[i] are the raw inputs. lib: Geometry, GeoBuilder, math, topology, random, noise, KDTree, TriBVH, manifold, merge(geos), run(type, params, ...inputs), warn(msg), frame, time, fps, timeInc (reading them makes the script re-cook per frame). Must return a Geometry (e.g. `return geo;`).
 
 **Inputs**
 
@@ -2113,7 +2113,7 @@ category: `code` · aliases: `attribwrangle`, `pointwrangle`, `primwrangle`, `ve
 
 Run a JS snippet per point / prim / vertex (or once) with VEX-style @attributes. The universal escape hatch.
 
-Code runs once per element with @attr bound to the current element. Read/write any attribute: @P, @N, @Cd, @pscale, @orient... New attributes are created on write (type from prefix f@ i@ v@ p@ u@ s@, a known name, or the first assigned value). Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.
+Code runs once per element with @attr bound to the current element. Read/write any attribute: @P, @N, @Cd, @pscale, @orient... New attributes are created on write (type from prefix f@ i@ v@ p@ u@ s@, a known name, or the first assigned value). Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.
 
 **Inputs**
 
@@ -2152,7 +2152,7 @@ category: `flow` · aliases: `for_each`, `loop`, `foreach_piece`, `for_loop`
 
 Loop a subgraph over connected pieces, attribute values, points, prims, or N times (with optional feedback).
 
-The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} node yields the current piece (or the previous iteration's result in feedback mode); index 1 yields the whole input; index 2 the foreach's second input. Vars available to "=expr" params and code: iteration, numiterations, value (piece attribute value / element number), attr (object of the element's attributes, e.g. attr.height), plus all parent vars.
+The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} node yields the current piece (or the previous iteration's result in feedback mode); index 1 yields the whole input; index 2 the foreach's second input. Vars available to "=expr" params and code: iteration, numiterations, value (piece attribute value / element number), attr (object of the element's attributes, e.g. attr.height), plus all parent vars. feedback:true is count-based and runs all iterations in one cook at the current time; for feedback over frames use solver.
 
 **Inputs**
 
@@ -2232,7 +2232,7 @@ None (generator).
 
 category: `flow` · aliases: `subnet_input`, `loop_input`
 
-Inside a subgraph (foreach body or asset): receives the parent input with this index.
+Inside a subgraph (foreach/solver body or asset): receives the parent input with this index.
 
 **Inputs**
 
@@ -2242,7 +2242,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `index` | int | `0` | 0.. |  |  | foreach: 0 = current piece/feedback, 1 = whole input, 2 = foreach second input. assets: input number |
+| `index` | int | `0` | 0.. |  |  | foreach: 0 = current piece/feedback, 1 = whole input, 2 = foreach second input. solver: 0 = previous frame, 1 = initial, 2/3 = extra inputs. assets: input number |
 | `label` | string | `""` |  |  |  | documentation label for asset inputs |
 
 ### merge
@@ -2276,6 +2276,65 @@ Pass-through. Use as a named output/marker (e.g. "OUT").
 **Parameters**
 
 None.
+
+### solver
+
+category: `flow` · aliases: `sop_solver`, `sopsolver`
+
+Feedback over frames (Houdini SOP Solver): run a body graph once per frame on the previous frame's result, for growth, accumulation and settling.
+
+Cooking at frame N runs the body for every frame from start_frame to N (once per substep). Inside the body, {"type":"input","params":{"index":0}} is the previous frame's result (the initial geometry on start_frame), index 1 the initial geometry, 2 and 3 the extra inputs cooked at that frame. Before start_frame the initial geometry passes through. The body sees the vars iteration (frames since start_frame, from 0), substep, frame, time and timeInc (the step's time; frames are fractional between substeps), plus parent vars; wrangles also get @Frame @Time @TimeInc. Caching: the state after frame f has the signature S(f) = hash(S(f-1), f, extra-input signatures at f), starting from S(start_frame-1) = hash(params, vars, initial input at start_frame). Every frame's state is cached under S(f), so cooking frame 11 after frame 10 runs the body once, and going back to an earlier frame is a cache hit. foreach with feedback:true is different: it is count-based (N iterations in one cook, no notion of time) and is cached as a whole.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `initial` | no | no | geometry the solve starts from (cooked at start_frame) |
+| 1 | `extra1` | yes | no | available in the body as input 2, cooked at each simulated frame |
+| 2 | `extra2` | yes | no | available in the body as input 3, cooked at each simulated frame |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `body` | graph | {nodes, output} |  |  |  | subgraph {nodes, output} run per frame (and substep): input 0 = previous frame, 1 = initial, 2/3 = extra inputs (default: pass through) |
+| `start_frame` | int | `1` |  |  |  | first frame the body runs on; earlier frames output the initial geometry |
+| `substeps` | int | `1` | 1..1000 |  |  | body runs per frame; timeInc = 1 / (fps * substeps) |
+| `max_frames` | int | `1000` | 1.. |  |  | safety limit: most frames simulated from start_frame |
+
+**Example**
+
+```json
+{
+  "type": "solver",
+  "in": [
+    "seed"
+  ],
+  "params": {
+    "body": {
+      "nodes": {
+        "prev": {
+          "type": "input",
+          "params": {
+            "index": 0
+          }
+        },
+        "grow": {
+          "type": "poly_extrude",
+          "in": [
+            "prev"
+          ],
+          "params": {
+            "group": "@N.y>0.9",
+            "distance": 0.1
+          }
+        }
+      },
+      "output": "grow"
+    }
+  }
+}
+```
 
 ### switch
 

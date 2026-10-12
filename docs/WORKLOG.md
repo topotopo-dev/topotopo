@@ -42,7 +42,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | id | item | status | notes |
 |---|---|---|---|
 | P0-A | Test infrastructure: shared fixtures, golden tests per node + per example, property tests (random graphs, determinism, cache correctness), wrangle fuzz, benchmark harness, node reference generator (`docs/nodes.md`), GitHub Actions CI | merged | cc5fb0a, 2026-10-12. Baseline bench on i7-10700K: fuse 500k = 5.0 s, subdivide 100k×2 = 7.4 s, copy_to_points 100k = 3.1 s, scatter 1M = 1.4 s are over target |
-| P0-B | Engine: time/frame in cook options, `usesTime`, `solver` node, expression functions reading upstream geometry (`npoints`, `bbox`, `detail`, `point`, `prim`, `centroid`) and `ch()` references, graph `version` + migrations, node deprecation, CLI `--frame/--frames`, MCP `frame` | running (agent) | started 2026-10-12 |
+| P0-B | Engine: time/frame in cook options, `usesTime`, `solver` node, expression functions reading upstream geometry (`npoints`, `bbox`, `detail`, `point`, `prim`, `centroid`) and `ch()` references, graph `version` + migrations, node deprecation, CLI `--frame/--frames`, MCP `frame` | merged | acfabed, 2026-10-12. Also fixed foreach not re-cooking on parent var change. Limits: viewer cooks frame 1, MCP export single frame, sdf_expr/parametric code cannot read time |
 | P0-C1 | Geometry model: vertex groups, edge groups (point-pair canonical form), half-edge structure with cache, edge/vertex group patterns, `group` node for all classes, `group_promote`, `group_expand`, crease-aware `subdivide`, `normal` hard edges, JSON IO round trip, inspect/summary output | running (agent) | started 2026-10-12 |
 | P0-C2 | Array attributes (`float[]`, `int[]`, `string[]`) through builder, merge, wrangle, JSON IO | queued | after C1 |
 | P0-D | Worker pool behind `Host` (parallel branches, chunked wrangles) + benchmarks gate | queued | after A, B |
@@ -73,4 +73,6 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 
 ## Log
 - 2026-10-12: roadmap written, decisions taken, LICENSE added, run started. P0-A, P0-B, P0-C1 launched.
+- 2026-10-12: CI failed on Linux: opentype.js rejects DejaVu Sans (GSUB lookup 6 format 2). Fixed by trying font candidates in order (`Host.fontCandidates`) and installing Liberation/FreeFont in CI.
+- 2026-10-12: P0-B merged (acfabed): time, solver, expression references, versioning. 97 nodes.
 - 2026-10-12: P0-A merged (cc5fb0a). `npm test` now has seven layers; goldens must be updated after geometry changes. Six bugs filed as P0-E, four slow cases as P0-F. P1-C and P1-D launched.
