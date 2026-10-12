@@ -229,7 +229,8 @@ Importing: the "file" node loads obj, stl, ply, glb/gltf, json (up_axis "z" conv
 6) Sign: text {text:"HELLO", depth:0.2} + box backing, merge.
 7) Organic blob: sdf_expr with smin of spheres + noise → sdf_to_mesh.
 8) Pipes: curve (smooth) → sweep (circle radius 0.05) or polywire.
-9) Panel greebles: grid → poly_extrude individual with group "@P.x>0" random → color by group via group/color nodes.`,
+9) Panel greebles: grid → poly_extrude individual with group "@P.x>0" random → color by group via group/color nodes.
+10) Deformers: bend with a cage: geo → bound {divisions:[1,6,1]} → bend → lattice(geo, bent cage, divisions [1,6,1]); wrap along a curve: geo laid along +Z → path_deform(geo, curve) {stretch:true}; pull a spot: soft_transform {group, translate, radius}; drive a mesh by a coarse proxy: point_deform(geo, rest pts, deformed pts). Add rest before deforming so noise_displace/attrib_noise patterns stick.`,
 };
 
 export function topicList() {

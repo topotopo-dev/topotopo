@@ -11,3 +11,4 @@ import './sdf.ts';
 import './procedural.ts';
 import './code.ts';
 import './flow.ts';
+import './deform.ts';

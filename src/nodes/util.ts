@@ -4,6 +4,7 @@ import type { EdgeSet } from '../core/edges.ts';
 import { evalEdgeGroup, evalGroup, GroupError } from '../core/groups.ts';
 import { pointNormals } from '../core/topology.ts';
 import { NodeError } from '../graph/types.ts';
+import { evalRamp } from '../graph/params.ts';
 import type { CookContext, ParamDef } from '../graph/types.ts';
 import type { Vec3 } from '../core/math.ts';
 import { referencesTime } from '../core/wrangle.ts';
@@ -69,6 +70,33 @@ export function getPointNormals(g: Geometry): Float64Array {
     return out;
   }
   return pointNormals(g);
+}
+
+/** Soft-selection falloff shapes (soft_transform and friends). */
+export const FALLOFF_KINDS = ['smooth', 'linear', 'ease_in', 'ease_out', 'sharp', 'ramp'];
+
+/**
+ * Falloff weight at normalised distance d (0 = on the selection, 1 = at the soft radius): 1 at d <= 0, 0 at d >= 1.
+ * smooth = smoothstep, linear, ease_in = (1-d)^2 (peaked), ease_out = 1-d^2 (dome), sharp = (1-sqrt d)^2 (spike),
+ * ramp = the ramp evaluated at d.
+ */
+export function falloffWeight(kind: string, d: number, ramp?: { pos: number; value: any }[] | null): number {
+  if (!(d > 0)) return 1;
+  if (d >= 1) return 0;
+  const t = 1 - d;
+  switch (kind) {
+    case 'linear': return t;
+    case 'ease_in': return t * t;
+    case 'ease_out': return 1 - d * d;
+    case 'sharp': { const s = 1 - Math.sqrt(d); return s * s; }
+    case 'ramp': {
+      if (!ramp || !ramp.length) return t;
+      const v = evalRamp(ramp, d);
+      const x = Array.isArray(v) ? Number(v[0]) : Number(v);
+      return Number.isFinite(x) ? x : 0;
+    }
+    default: return t * t * (3 - 2 * t);
+  }
 }
 
 /** Common param definitions. */
