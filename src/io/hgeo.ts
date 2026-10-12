@@ -18,6 +18,11 @@
 // rawpagedata layout. Read: the same, plus the alternatives above. Prims of other types (volumes/VDB, packed,
 // spheres, NURBS…) are skipped with a warning.
 // Uncompressed binary .bgeo (Houdini's binary JSON encoding of the same tree) is read too; .bgeo.sc (Blosc) is not.
+//
+// Winding: Houdini polygons wind clockwise seen from the front (left-hand rule), polyforge counter-clockwise (like
+// OBJ and glTF). Closed polygons are therefore written and read with their vertex order reversed, keeping the first
+// vertex ([v0, v1, v2, v3] ⇄ [v0, v3, v2, v1]); vertex attributes and vertex groups follow their vertices. Open
+// polylines keep their direction.
 import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
 import { materialBasename } from '../core/materials.ts';
@@ -108,9 +113,15 @@ export function exportHoudiniGeo(g: Geometry, o: ExportOptions = {}): string {
     while (p < g.numPrims && g.primClosed[p] === closed) { counts.push(g.primSize(p)); p++; }
     prims.push([['type', closed ? 'Polygon_run' : 'PolygonCurve_run'], ['startvertex', g.primStart[start], 'nprimitives', counts.length, 'nvertices_rle', rle(counts)]]);
   }
+  // file vertex k ← our vertex fileVtx[k] (closed polygons reversed, first vertex kept)
+  const fileVtx = new Int32Array(g.numVertices);
+  for (let p = 0; p < g.numPrims; p++) {
+    const s0 = g.primStart[p], e = g.primStart[p + 1];
+    for (let v = s0; v < e; v++) fileVtx[v] = g.primClosed[p] && v > s0 ? e - (v - s0) : v;
+  }
   const attributes: any[] = [];
   const add = (key: string, t: AttribTable) => { const l = tableJSON(t, prec); if (l.length) attributes.push(key, l); };
-  add('vertexattributes', g.vertices);
+  add('vertexattributes', g.vertices.gather(fileVtx));
   add('pointattributes', g.points);
   add('primitiveattributes', g.prims);
   add('globalattributes', g.detail);
@@ -120,14 +131,14 @@ export function exportHoudiniGeo(g: Geometry, o: ExportOptions = {}): string {
     'fileversion', '20.0.0', 'hasindex', false,
     'pointcount', g.numPoints, 'vertexcount', g.numVertices, 'primitivecount', g.numPrims,
     'info', { software: 'polyforge', bounds: [bb.min[0], bb.max[0], bb.min[1], bb.max[1], bb.min[2], bb.max[2]], primcount_summary: summary + '\n' },
-    'topology', ['pointref', ['indices', Array.from(g.vertexPoint)]],
+    'topology', ['pointref', ['indices', Array.from(fileVtx, (v) => g.vertexPoint[v])]],
     'attributes', attributes,
     'primitives', prims,
   ];
   if (g.pointGroups.size) out.push('pointgroups', groupsJSON(g.pointGroups));
   if (g.primGroups.size) out.push('primitivegroups', groupsJSON(g.primGroups));
   const vg = (g as any).vertexGroups as GroupMap | undefined;
-  if (vg && vg.size) out.push('vertexgroups', groupsJSON(vg));
+  if (vg && vg.size) out.push('vertexgroups', groupsJSON(new Map([...vg].map(([k, m]) => [k, Uint8Array.from(fileVtx, (v) => m[v])]))));
   const eg = (g as any).edgeGroups as Map<string, any> | undefined;
   if (eg && eg.size) out.push('edgegroups', [...eg].map(([name, e]) => [['name', name], ['points', edgePairs(e)]]));
   return JSON.stringify(out);
@@ -384,7 +395,9 @@ export function importHoudiniGeo(src: string | any, warn: (m: string) => void = 
   primList.forEach((verts, i) => {
     if (!verts) return;
     keptPrims.push(i);
-    for (const v of verts) {
+    // Houdini winds closed polygons clockwise: reverse, keeping the first vertex
+    const ordered = closedList[i] && verts.length > 2 ? [verts[0], ...verts.slice(1).reverse()] : verts;
+    for (const v of ordered) {
       if (!(v >= 0 && v < nvFile)) throw new Error(`Houdini geo: primitive ${i} references vertex ${v} (vertexcount ${nvFile})`);
       vtxSrc.push(v);
     }

@@ -12,6 +12,7 @@ import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import type { AttribClass } from '../src/core/geometry.ts';
 import { readMaterials } from '../src/core/materials.ts';
+import { primNormals, signedVolume } from '../src/core/topology.ts';
 import { exportGeometry, exportGeometryAsync } from '../src/io/export.ts';
 import type { ExportFormat, ExportOptions } from '../src/io/export.ts';
 import { importGeometry, importGeometryAsync } from '../src/io/import.ts';
@@ -224,6 +225,9 @@ function sameGeo(a: Geometry, b: Geometry, label: string, tol = 0) {
     check(Array.isArray(j) && j[0] === 'fileversion' && text.includes('"Polygon_run"') && text.includes('"PolygonCurve_run"'), `geo ${prec}: Houdini key/value layout with Polygon_run and PolygonCurve_run`);
     const back = importGeometry(bytes, 'geo');
     sameGeo(src, back, `geo fpreal${prec}: every attribute, group, string and polyline round trips`, prec === 64 ? 0 : 1e-6);
+    const idx = j[j.indexOf('topology') + 1][1][1] as number[];
+    const p0 = src.primPoints(0);
+    check(idx.slice(0, 4).join() === [p0[0], p0[3], p0[2], p0[1]].join(), `geo ${prec}: polygons written clockwise for Houdini (${idx.slice(0, 4).join(',')} from ${p0.join(',')})`);
   }
   // json auto-detects Houdini geo
   const viaJson = importGeometry(exportGeometry(src, 'geo'), 'json');
@@ -249,6 +253,10 @@ function sameGeo(a: Geometry, b: Geometry, label: string, tol = 0) {
   check(g.pointGroups.get('top')?.join('') === '00110011000' && g.primGroups.get('caps')?.join('') === '10100000', 'houdini_box.geo: point and prim groups (i8 + boolRLE)');
   check(warns.some((w) => /Volume/.test(w)), `houdini_box.geo: volume prim skipped with a warning (${warns.join('; ')})`);
   check(checkGeo(g).length === 0, 'houdini_box.geo: valid geometry');
+  const boxOnly = g.subsetPrims(Uint8Array.from({ length: g.numPrims }, (_, p) => g.primClosed[p]));
+  const fN = primNormals(boxOnly), vN = boxOnly.vertices.get('N')!;
+  check(close(signedVolume(boxOnly), 1, 1e-9) && [...Array(6).keys()].every((p) => (vN.get(boxOnly.primStart[p]) as number[]).every((x, c) => close(x, fN[p * 3 + c], 1e-9))),
+    'houdini_box.geo: clockwise Houdini polygons read outward-facing (volume +1, stored N = face normals)');
   // the same tree in Houdini's binary JSON encoding (.bgeo, uncompressed) reads identically
   const tree = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'data', 'houdini_box.geo'), 'utf8'));
   const gb = importGeometry(encodeBinaryJSON(tree), 'bgeo');
