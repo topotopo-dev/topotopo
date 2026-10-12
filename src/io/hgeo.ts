@@ -71,7 +71,8 @@ function attribJSON(name: string, a: Attribute, count: number, prec: 32 | 64): a
 function tableJSON(t: AttribTable, prec: 32 | 64): any[] {
   const out: any[] = [];
   for (const [k, a] of t.map) {
-    if (a.type === 'string' && a.size !== 1) continue;
+    // fixed-size float/int and single strings; other kinds (array attributes) are not written yet
+    if (!(a.type === 'float' || a.type === 'int' || (a.type === 'string' && a.size === 1))) continue;
     out.push(attribJSON(k, a, t.count, prec));
   }
   return out;

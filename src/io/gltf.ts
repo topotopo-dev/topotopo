@@ -127,7 +127,7 @@ interface PrimOut {
 /** Reader for a numeric attribute with Houdini lookup precedence; elements without that class read the default. */
 function attribChannel(g: Geometry, name: string, semantic: string, order: AttribClass[], map?: (src: number[], out: number[], o: number) => void, size?: number): Channel | null {
   const f = g.findAttrib(name, order);
-  if (!f || f.attr.type === 'string') return null;
+  if (!f || (f.attr.type !== 'float' && f.attr.type !== 'int')) return null; // strings and array attributes have no glTF form
   const a = f.attr, s = a.size, d = a.data as Float64Array | Int32Array, cls = f.cls;
   const def = (Array.isArray(a.def) ? a.def : []) as number[];
   const tmp = new Array(s).fill(0);
@@ -171,7 +171,7 @@ interface CustomInfo { name: string; type: 'float' | 'int' }
 function customChannels(g: Geometry, used: Set<string>, info: Record<string, CustomInfo>, only?: string[]): Channel[] {
   const out: Channel[] = [];
   const names = new Set<string>();
-  for (const t of [g.vertices, g.points]) for (const [n, a] of t.map) if (!RESERVED.has(n) && a.type !== 'string' && a.size >= 1 && a.size <= 4 && (!only || only.includes(n))) names.add(n);
+  for (const t of [g.vertices, g.points]) for (const [n, a] of t.map) if (!RESERVED.has(n) && (a.type === 'float' || a.type === 'int') && a.size >= 1 && a.size <= 4 && (!only || only.includes(n))) names.add(n);
   for (const n of names) {
     const ch = attribChannel(g, n, '', ['vertex', 'point']);
     if (!ch || ch.size > 4) continue;
