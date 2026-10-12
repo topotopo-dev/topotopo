@@ -178,8 +178,10 @@ ARRAY ATTRIBUTES: float[] int[] string[] hold a variable-length list per element
   wrangle i[]@nbrs = nearpoints(0, @P, 0.5).  Read them: attrib_array to_attributes (name_0, name_1 …) or length.
   Rules: new elements copy their source's array (a blended element takes the heaviest source's, never an average);
   merge gives inputs without the array empty arrays; attrib_promote copies (many → one needs method first/last);
-  attrib_transfer copies the nearest point's array; group patterns, color_by and booleans do not use arrays;
-  exporters (glb obj usda ply stl) skip them; json export keeps them.
+  attrib_transfer copies the nearest point's array; render color_by an array colours by its length; group patterns
+  do not test arrays (unpack with attrib_array first); exporters (glb obj usda ply stl) skip them; json keeps them.
+  Arrays of point/prim numbers (nbrs, pts) are not renumbered when topology changes: rebuild them after fuse, sort,
+  delete, booleans, subdivide …
   Wrangle: i[]@a f[]@a s[]@a declare/bind arrays; plain @a binds an existing array. @a is a JS array copy that is
   written back after the element, so @a.push(x) persists. Helpers: len append concat slice find sort argsort reverse
   unique uniquevals isvalidindex sum avg, min/max of ONE array = its smallest/largest entry. Vector arrays (v[]@) are

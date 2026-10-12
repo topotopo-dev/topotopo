@@ -8,6 +8,7 @@ import { allNodeDefs } from '../src/graph/registry.ts';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
 import { exportGeometry } from '../src/io/export.ts';
 import { summarize, inspect } from '../src/inspect.ts';
+import { renderGeometry } from '../src/render/raster.ts';
 import { fingerprint } from './fingerprint.ts';
 import { SKIP, checkGeo, createFixtureEngine, fixtureGraphFor } from './fixtures.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
@@ -328,6 +329,9 @@ const WITH_ARRAYS = (input: string): Record<string, NodeSpec> => ({
     } catch (e: any) { ok = false; console.log(`  ${fmt} custom=${custom} threw ${e.message}`); }
   }
   check(ok, 'exporters skip array attributes (glb/obj/usda/ply/stl, custom on and off)');
+  let notes: string[] = [];
+  try { for (const cb of ['nbrs', 'tags', 'w.x', 'hist']) notes = notes.concat(renderGeometry(g, { colorBy: cb, size: 96, views: ['persp'] } as any).notes); } catch (e: any) { notes = ['threw ' + e.message]; }
+  check(notes.some((n) => /color by tags \[0\.00 \.\. 2\.00\]/.test(n)) && !notes.some((n) => /threw/.test(n)), 'render color_by an array attribute colours by its length');
 }
 
 // ---------------------------------------------------------------- every node type with array inputs
