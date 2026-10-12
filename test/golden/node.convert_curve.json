@@ -1,0 +1,45 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "Pw:float:1"],
+      "prim": ["knots:float[]:1", "spline_order:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [5, 0.6, 1.0667],
+      "min": [0, 0, -0.5]
+    },
+    "counts": {
+      "points": 10,
+      "prims": 1,
+      "vertices": 10,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "35c9d57c78471e7a",
+      "attributes": {
+        "point.Pw": "82a990d7fe126465",
+        "prim.knots": "3c3fe767723a671d",
+        "prim.spline_order": "265bf4e19742f21b"
+      },
+      "topology": "c3f8a66788c1b9fd"
+    },
+    "splines": {
+      "bezier": 1,
+      "hash": "242bd747a9151f9d",
+      "nurbs": 0
+    }
+  },
+  "name": "node.convert_curve",
+  "ok": true,
+  "source": "fixture for node type \"convert_curve\" (test/fixtures.ts)",
+  "warnings": []
+}
