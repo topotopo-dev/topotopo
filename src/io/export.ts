@@ -277,6 +277,8 @@ function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => strin
       out.push(`        vector3f[] velocities = [${num.map((v) => { const d = xfDir(v[0] * sc, v[1] * sc, v[2] * sc, o); return tup(d, 0, 3); }).join(', ')}]`);
       continue;
     }
+    // display colour / opacity only when they say something (merged geometry gives anchors Houdini's white default)
+    if ((a.name === 'Cd' || a.name === 'Alpha') && t === 'float' && num.every((v) => v.every((x) => x === 1))) continue;
     if (a.name === 'Cd' && t === 'float' && sz >= 3) { out.push(`        color3f[] primvars:displayColor = [${num.map((v) => tup(v, 0, 3)).join(', ')}] (`, ...vertex); continue; }
     if (a.name === 'Alpha' && t === 'float' && sz === 1) { out.push(`        float[] primvars:displayOpacity = [${num.map((v) => fmt(v[0])).join(', ')}] (`, ...vertex); continue; }
     if (o.custom === false) continue;

@@ -18,6 +18,7 @@
     "test:docs": "node test/docs.ts",
     "test:interop": "node test/interop.ts",
     "showcase": "node test/showcase.ts",
+    "export:demo": "node scripts/export-demo.ts",
     "bench": "node bench/bench.ts",
     "docs": "node scripts/gen-docs.ts",
     "typecheck": "tsc --noEmit",

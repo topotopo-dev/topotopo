@@ -1759,7 +1759,7 @@ category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, 
 
 Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). Vertex colours (Cd) still win in exports: a material then supplies the PBR scalars. Assign several materials by chaining material nodes with different groups.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). Vertex colours (Cd) still win in exports: a material then supplies the PBR scalars. Assign several materials by chaining material nodes with different groups. Texture maps are file paths (PNG or JPEG, relative to the graph/workspace): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.
 
 **Inputs**
 
@@ -1780,6 +1780,9 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `alpha` | float | `1` | 0..1 |  | `opacity`, `opac` | opacity; below 1 exports with alphaMode BLEND |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
+| `base_color_map` | path | `""` |  |  | `basecolor_map`, `albedo_map`, `diffuse_map`, `color_map`, `basecolor_texture`, `base_color_texture` | base colour texture (sRGB PNG/JPEG path; "" = none); uses the uv attribute |
+| `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path, OpenGL convention: +Y up; "" = none) |
+| `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path; "" = none); glTF reads its green channel |
 
 **Writes:** prim "material" (string), detail "materials" (JSON table)
 
