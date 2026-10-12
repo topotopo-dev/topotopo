@@ -384,7 +384,10 @@ export function importHoudiniGeo(src: string | any, warn: (m: string) => void = 
   primList.forEach((verts, i) => {
     if (!verts) return;
     keptPrims.push(i);
-    for (const v of verts) vtxSrc.push(v);
+    for (const v of verts) {
+      if (!(v >= 0 && v < nvFile)) throw new Error(`Houdini geo: primitive ${i} references vertex ${v} (vertexcount ${nvFile})`);
+      vtxSrc.push(v);
+    }
     starts.push(vtxSrc.length);
     closed.push(closedList[i] ? 1 : 0);
   });

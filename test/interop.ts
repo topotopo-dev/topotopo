@@ -127,6 +127,41 @@ for (const [label, opts] of variants) {
   check(!back.prims.has('material') && Object.keys(readMaterials(back)).length === 0, 'glb materials:false: default material only');
 }
 
+// EXT_mesh_gpu_instancing on import: instances are expanded (packed prims come later)
+{
+  const { Document } = await import('@gltf-transform/core');
+  const { EXTMeshGPUInstancing } = await import('@gltf-transform/extensions');
+  const doc = new Document();
+  const buf = doc.createBuffer();
+  const pos = doc.createAccessor().setType('VEC3').setBuffer(buf).setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]));
+  const prim = doc.createPrimitive().setAttribute('POSITION', pos);
+  const mesh = doc.createMesh('tri').addPrimitive(prim);
+  const ext = doc.createExtension(EXTMeshGPUInstancing).setRequired(true);
+  const tr = doc.createAccessor().setType('VEC3').setBuffer(buf).setArray(new Float32Array([0, 0, 0, 5, 0, 0, 10, 0, 0]));
+  const node = doc.createNode('inst').setMesh(mesh).setTranslation([0, 2, 0]).setExtension('EXT_mesh_gpu_instancing', ext.createInstancedMesh().setAttribute('TRANSLATION', tr));
+  doc.createScene().addChild(node);
+  const { HostIO } = await import('../src/io/gltf.ts');
+  const bytes = await new HostIO().registerExtensions([EXTMeshGPUInstancing]).writeBinary(doc);
+  const warns: string[] = [];
+  const back = await importGeometryAsync(bytes, 'glb', { warn: (m) => warns.push(m) });
+  const bb = back.bbox();
+  check(back.numPrims === 3 && close(bb.max[0], 11, 1e-6) && close(bb.min[1], 2, 1e-6) && warns.some((w) => /instancing/.test(w)), `EXT_mesh_gpu_instancing: 3 instances expanded with the node transform (${back.numPrims} prims, bbox x ${bb.min[0]}..${bb.max[0]})`);
+}
+
+// Draco is optional: without draco3dgltf, clear errors on export and import
+{
+  let hasDraco = true;
+  try { const spec = 'draco3dgltf'; await import(spec); } catch { hasDraco = false; }
+  if (!hasDraco) {
+    let e1 = '', e2 = '';
+    try { await exportGeometryAsync(scene, 'glb', { compress: 'draco' }); } catch (e: any) { e1 = e.message; }
+    const j = JSON.parse(new TextDecoder().decode(await exportGeometryAsync(scene, 'gltf')));
+    j.extensionsUsed = [...(j.extensionsUsed ?? []), 'KHR_draco_mesh_compression'];
+    try { await importGeometryAsync(new TextEncoder().encode(JSON.stringify(j)), 'gltf'); } catch (e: any) { e2 = e.message; }
+    check(/draco3dgltf/.test(e1) && /draco3dgltf/.test(e2), `Draco without draco3dgltf: clear errors (${e1.slice(0, 60)}…)`);
+  } else console.log('SKIP Draco error checks: draco3dgltf is installed');
+}
+
 // existing GLB example in the repo still imports
 for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter((x) => x.endsWith('.glb'))) {
   const back = await importGeometryAsync(new Uint8Array(fs.readFileSync(path.join(ROOT, 'examples', f))), 'glb');
