@@ -1,5 +1,5 @@
 // Cook and render every graph in examples/ to examples/renders/<name>.png.
-// A graph's meta.render (views, checker, color_by, azimuth, elevation, zoom) overrides the default quad view.
+// A graph's meta.render (any render tool option: views, checker, color_by, azimuth, wireframe, section_axis, glyphs, …) overrides the default quad view.
 //   node test/showcase.ts [filter]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { renderGeometry } from '../src/render/raster.ts';
+import { renderArgs } from '../src/render/options.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
 
@@ -30,7 +31,7 @@ for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && (!filte
   }
   const t0 = performance.now();
   const ro = graph.meta?.render ?? {};
-  const img = renderGeometry(r.geo, { title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name, views: ro.views, checker: !!ro.checker, colorBy: ro.color_by ?? null, azimuth: ro.azimuth, elevation: ro.elevation, zoom: ro.zoom });
+  const img = renderGeometry(r.geo, { ...renderArgs(ro), title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name, views: ro.views, checker: !!ro.checker, colorBy: ro.color_by ?? null, azimuth: ro.azimuth, elevation: ro.elevation, zoom: ro.zoom });
   fs.writeFileSync(path.join(outDir, name + '.png'), encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
   console.log(`ok   ${name}: cook ${r.ms.toFixed(0)} ms, render ${(performance.now() - t0).toFixed(0)} ms${r.warnings.length ? `, ${r.warnings.length} warnings: ${r.warnings.slice(0, 2).map((w) => `[${w.node}] ${w.message}`).join('; ')}` : ''}`);
   console.log('     ' + summarize(r.geo).split('\n').slice(0, 2).join('\n     '));
