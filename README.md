@@ -163,7 +163,8 @@ bracket, a solver growth animation (rendered at the frame named by its `meta.fra
 bridge, quad fill, dissolve), bevels (rounded box, chamfered top edges, a star with a rounded rim), a UV toolkit demo, and a
 render-overlay demo (`render_modes`: section view, hard edges, normal glyphs, group labels, matcap). A graph's `meta.render`
 takes any `render` tool option. The forest example is the PCG chain (mask → scatter → orient → prune → packed copies of three weighted tree variants from 30,000 candidates), `pcg_scatter` puts lamp posts along a road and cluster-coloured rocks away from it, and `terrain_erosion` is an eroded
-heightfield with a road and rocks on its steep slopes.
+heightfield with a road and rocks on its steep slopes. `shelf_street` is a street block built only from shelf assets
+(see below).
 
 ## Shelf
 
@@ -181,7 +182,11 @@ and shade cleanly. Assets that follow a curve (`railing`, `fence`, `pipe_run`, `
 those that dress a surface (`scatter_rocks`, `forest_patch`, `grass_clumps`) take the surface as input 0; without an
 input they build a default one, which is what the thumbnails show. A workspace asset with the same name overrides a
 shelf asset; `assets {action: "fork", name: "stairs"}` copies one into the workspace as a graph to edit and save back.
-[examples/shelf_street.json](examples/shelf_street.json) builds a street block from shelf assets only.
+[examples/shelf_street.json](examples/shelf_street.json) builds a street block from shelf assets only (transform, merge
+and copy nodes just place them):
+
+![shelf street](examples/renders/shelf_street.png)
+
 `npm run shelf` rewrites `shelf/index.json` (the list the engine loads, also over HTTP), the thumbnails and the table
 below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of every numeric range.
 
