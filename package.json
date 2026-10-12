@@ -29,6 +29,8 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
     "@modelcontextprotocol/sdk": "^1.32.0",
     "d3-delaunay": "^6.0.4",
     "earcut": "^3.2.4",
@@ -42,6 +44,7 @@
     "@types/d3-delaunay": "^6.0.4",
     "@types/node": "^26.6.4",
     "@types/three": "^0.186.0",
+    "gltf-validator": "^2.0.0-dev.3.10",
     "typescript": "^7.0.2"
   },
   "engines": {
