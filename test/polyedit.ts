@@ -10,6 +10,8 @@ import { halfEdges } from '../src/core/halfedge.ts';
 import { evalEdgeGroup } from '../src/core/groups.ts';
 import { primArea, primNewell, topologyReport } from '../src/core/topology.ts';
 import { orderChain, planeChords, quadQuality } from '../src/core/polyedit.ts';
+import type { Chain } from '../src/core/polyedit.ts';
+import type { EdgeSet } from '../src/core/edges.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
 const engine = new Engine(createNodeHost());
@@ -31,6 +33,8 @@ async function cookErr(nodes: Record<string, NodeSpec>, output?: string): Promis
   return r.ok ? '' : r.errors.map((e) => e.message).join('; ');
 }
 const sum = (m: Uint8Array | null | undefined) => (m ? m.reduce((s, x) => s + x, 0) : -1);
+/** The edges as one ordered chain, or null when they are not a single chain. */
+const tryChain = (s: EdgeSet): Chain | null => { try { return orderChain(s); } catch { return null; } };
 
 /** Closed (no boundary, no non-manifold edge), consistently wound, every polygon has >= 3 distinct points. */
 function watertight(g: Geometry): boolean {
@@ -77,16 +81,14 @@ const BOX: NodeSpec = { type: 'box' };
   const g = await cook({ b: BOX, k: { type: 'knife', in: ['b'], params: { origin: [0, 0.1, 0], direction: [0, 1, 0] } } }, 'k');
   check(g.numPrims === 10 && watertight(g), `knife both on a box: 6 → 10 prims (4 crossed faces doubled), watertight (${g.numPrims})`);
   const cut = g.edgeGroups.get('cut')!;
-  let loop = null;
-  try { loop = orderChain(cut); } catch { /* not a chain */ }
+  const loop = tryChain(cut);
   check(cut.size === 4 && loop?.closed && loop.points.length === 4, `knife: cut edge group is a closed loop of 4 edges (${cut.size})`);
   check(sum(g.pointGroups.get('cut')) === 4 && [...cut].every(([a, b]) => Math.abs(g.P[a * 3 + 1] - 0.1) < 1e-12 && Math.abs(g.P[b * 3 + 1] - 0.1) < 1e-12), 'knife: cut points lie on the plane');
   check(groupPrims(g, 'above').length === 5 && groupPrims(g, 'below').length === 5, 'knife: prim groups above/below');
   const above = await cook({ b: BOX, k: { type: 'knife', in: ['b'], params: { origin: [0, 0.1, 0], keep: 'above' } } }, 'k');
   check(above.numPrims === 5 && above.bbox().min[1] > 0.1 - 1e-12 && topologyReport(above).boundaryEdges === 4 && above.edgeGroups.get('cut')?.size === 4, 'knife keep above: 5 prims above the plane, cut edges = the open border');
   const tilted = await cook({ b: { type: 'box', params: { divisions: [3, 3, 3] } }, k: { type: 'knife', in: ['b'], params: { origin: [0.05, 0.02, 0], direction: [0.4, 1, 0.3] } } }, 'k');
-  let cl = null;
-  try { cl = orderChain(tilted.edgeGroups.get('cut')!); } catch { /* */ }
+  const cl = tryChain(tilted.edgeGroups.get('cut')!);
   check(watertight(tilted) && cl?.closed, `knife tilted plane on a divided box: watertight, cut is one closed loop (${tilted.edgeGroups.get('cut')?.size} edges)`);
   const two = await cook({ b: BOX, k: { type: 'knife', in: ['b'], params: { planes: [[[0, 0, 0], [1, 0, 0]], [[0, 0, 0], [0, 0, 1]]] } } }, 'k');
   check(two.numPrims === 16 && watertight(two) && two.edgeGroups.get('cut')?.size === 12 && sum(two.pointGroups.get('cut')) === 10, `knife with two planes: 16 prims, watertight, 12 cut edges, 10 cut points (${two.numPrims}, ${two.edgeGroups.get('cut')?.size}, ${sum(two.pointGroups.get('cut'))})`);
@@ -118,8 +120,7 @@ const BOX: NodeSpec = { type: 'box' };
 {
   const g = await cook({ b: BOX, s: { type: 'polysplit', in: ['b'], params: { edge: 'p0-1' } } }, 's');
   check(g.numPrims === 10 && watertight(g), `polysplit loop on a box ring: 6 → 10 prims, watertight (${g.numPrims})`);
-  let l = null;
-  try { l = orderChain(g.edgeGroups.get('split')!); } catch { /* */ }
+  const l = tryChain(g.edgeGroups.get('split')!);
   check(l?.closed && l.points.length === 4 && sum(g.pointGroups.get('split')) === 4, 'polysplit: edge group split is a closed loop of 4 edges, 4 new points');
   const b0 = await cook({ b: BOX }, 'b');
   const q = await cook({ b: BOX, s: { type: 'polysplit', in: ['b'], params: { edge: 'p0-1', fraction: 0.25 } } }, 's');

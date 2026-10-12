@@ -841,7 +841,7 @@ export interface DissolveResult { geo: Geometry; merged: number; boundarySkipped
  * region); edges whose two faces end up in the same region vanish too. Boundary and non-manifold edges cannot be
  * dissolved and are skipped, as are regions whose outline is not a single loop (a ring of faces, a whole closed
  * surface). Points are copied 1:1, so groups and attributes carry over; merged polygons take the prim attributes
- * of their lowest-numbered face.
+ * of their lowest-numbered face and go to prim group "dissolved".
  */
 export function dissolveEdges(g: Geometry, edges: EdgeSet, o: DissolveOptions): DissolveResult {
   const he = halfEdges(g);

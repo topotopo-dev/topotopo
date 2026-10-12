@@ -127,7 +127,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | deform | `noise_displace` `twist` `bend` `taper` `smooth` `peak` `jitter` `ray` |
 | attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_noise` `color` `measure` `connectivity` |
 | group | `group` `delete` `group_promote` `group_expand` `group_combine` `group_delete` `group_rename` (point, vertex, prim and edge groups) |
-| topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `grid_split` `fill_holes` `bound` `decimate` `remesh` |
+| topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `grid_split` `fill_holes` `bound` `decimate` `remesh` `knife` `polysplit` `edge_divide` `dissolve` `edge_collapse` `polybridge` `polyfill` |
 | copy | `copy_xform` `scatter` `copy_to_points` |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
@@ -141,10 +141,11 @@ Every node's inputs, parameters (types, defaults, ranges, options, aliases) and 
 
 ## Examples
 
-[examples/](examples) has eleven graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
+[examples/](examples) has twelve graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
 rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
 grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
-bracket, and a solver growth animation (rendered at the frame named by its `meta.frame`).
+bracket, a solver growth animation (rendered at the frame named by its `meta.frame`), and polygon editing (loop cuts, knife,
+bridge, quad fill, dissolve).
 
 To cook a graph from the command line:
 
