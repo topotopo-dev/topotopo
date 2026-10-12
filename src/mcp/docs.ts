@@ -85,6 +85,13 @@ run_over: points | prims | vertices | detail (once). group: limits elements.
 @name reads/writes the current element's attribute. Unknown names are created on write.
   Type prefixes for new attributes: f@ float, i@ int, v@ vec3, p@ vec4/quaternion, u@ vec2, s@ string.
   Known names get Houdini types (Cd/N/v/up/scale/uv = vec3, orient = vec4, pscale/width = float, id/class = int, name = string).
+ARRAYS (variable length per element): f[]@ float[], i[]@ int[], s[]@ string[]; plain @name binds an existing array.
+  i[]@nbrs = nearpoints(0, @P, 0.5);   i[]@pts = primpoints(0, @primnum);   s[]@tags = ["wall"]; @tags.push("red");
+  Reads are JS array copies written back after each element (so push/splice/assignment all persist). Without a []
+  prefix a new attribute assigned arrays becomes a fixed-size TUPLE, so declare arrays with f[]@/i[]@/s[]@.
+  len(a) append(a, v) (one entry) concat(a, b) slice(a, start, end) find(a, v) (-1 = missing) sort argsort reverse
+  unique (first-occurrence order) uniquevals (sorted) isvalidindex(a, i) sum avg; min(a)/max(a) of ONE array = its
+  smallest/largest entry (min(a, b) stays component-wise). All return new arrays. point(0,"nbrs",pt) reads arrays too.
 Specials: @ptnum @primnum @vtxnum @elemnum @numpt @numprim @numvtx @numelem; time: @Frame @Time @TimeInc (only then is the wrangle re-cooked per frame)
 Groups: @group_top = 1 (membership of the current element: point, prim or vertex group by run_over). Inputs: @opinput1_P reads input 1 at the same index.
 Prim mode: @P = centroid (read-only), @N = face normal (read-only) when no prim attrib exists.
@@ -162,7 +169,21 @@ Common names:
   id int · piece · variant int (copy_to_points variants) · height (terrain 0-1)
 Instancing transform: P + trans, rotation from orient, else N (+Z axis) and up (+Y axis), then rot; scale = pscale * scale.
 Types: float/int with tuple size 1-4 (up to 16), or string. Merging unions attributes; missing values take defaults
-(Cd/pscale/scale default 1, orient identity).`,
+(Cd/pscale/scale default 1, orient identity).
+ARRAY ATTRIBUTES: float[] int[] string[] hold a variable-length list per element (neighbour lists, piece membership,
+  per-point samples). A TUPLE has a fixed size for every element (P, Cd, uv); an ARRAY's length differs per element.
+  Default = empty array. Inspect/summaries show "nbrs int[] (len 2–6, avg 4.1)".
+  Make them: attrib_array (from_neighbours: point int[] nbrs; from_group_points: prim int[] pts; from_attributes packs
+  attributes), attrib_create {"type":"float[]","value":[1,2,3]} (with type auto [1,2,3] is a float TUPLE of size 3),
+  wrangle i[]@nbrs = nearpoints(0, @P, 0.5).  Read them: attrib_array to_attributes (name_0, name_1 …) or length.
+  Rules: new elements copy their source's array (a blended element takes the heaviest source's, never an average);
+  merge gives inputs without the array empty arrays; attrib_promote copies (many → one needs method first/last);
+  attrib_transfer copies the nearest point's array; group patterns, color_by and booleans do not use arrays;
+  exporters (glb obj usda ply stl) skip them; json export keeps them.
+  Wrangle: i[]@a f[]@a s[]@a declare/bind arrays; plain @a binds an existing array. @a is a JS array copy that is
+  written back after the element, so @a.push(x) persists. Helpers: len append concat slice find sort argsort reverse
+  unique uniquevals isvalidindex sum avg, min/max of ONE array = its smallest/largest entry. Vector arrays (v[]@) are
+  not supported: use f[]@ with flattened components. Script: geo.points.add("a", "int[]"), a.get(i) → array, a.set(i, [..]).`,
 
   sdf: `SDF / IMPLICIT MODELLING
 Volumes are signed distance functions (negative inside) carried in geometry; nodes compose them lazily.

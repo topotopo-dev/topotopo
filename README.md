@@ -125,7 +125,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | curve | `parametric_curve` `line` `circle` `curve` `spiral` `shape2d` `resample` `carve` `ends` `sweep` `polywire` `revolve` `extrude` `offset_curve` `boolean2d` `fill` `loft` `voronoi2d` `triangulate2d` |
 | transform | `transform` `match_size` `mirror` |
 | deform | `noise_displace` `twist` `bend` `taper` `smooth` `peak` `jitter` `ray` |
-| attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_noise` `color` `measure` `connectivity` |
+| attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_array` `attrib_noise` `color` `measure` `connectivity` (float/int tuples, strings, and float[]/int[]/string[] array attributes) |
 | group | `group` `delete` `group_promote` `group_expand` `group_combine` `group_delete` `group_rename` (point, vertex, prim and edge groups) |
 | topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `grid_split` `fill_holes` `bound` `decimate` `remesh` |
 | copy | `copy_xform` `scatter` `copy_to_points` |
@@ -171,6 +171,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions |
 | io | `node test/io.ts` | export → import round trips for every format |
 | mcp | `node test/mcp.ts` | the MCP server end to end over stdio |
+| arrays | `node test/arrays.ts` | array attributes: storage, merge and builder rules, wrangle `f[]@`/`i[]@`/`s[]@` and helpers, `attrib_array`, JSON, inspect, fingerprints, every node type fed array attributes |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.

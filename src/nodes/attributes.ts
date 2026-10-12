@@ -124,7 +124,7 @@ defineNode({
     name: { type: 'string', default: 'Cd', desc: 'attribute name' },
     from: { type: 'enum', options: ['point', 'prim', 'vertex', 'detail'], default: 'point', desc: 'source class', aliases: ['inclass', 'from_class'] },
     to: { type: 'enum', options: ['point', 'prim', 'vertex', 'detail'], default: 'prim', desc: 'destination class', aliases: ['outclass', 'to_class'] },
-    method: { type: 'enum', options: ['average', 'min', 'max', 'sum', 'first', 'last'], default: 'average', desc: 'how to combine multiple sources' },
+    method: { type: 'enum', options: ['average', 'min', 'max', 'sum', 'first', 'last'], default: 'average', desc: 'how to combine multiple sources (array attributes are copied: first or last only)' },
     new_name: { type: 'string', default: '', desc: 'rename on promotion ("" = same name)' },
     keep_original: { type: 'bool', default: false, desc: 'keep the source attribute' },
   },
