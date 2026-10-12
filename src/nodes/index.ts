@@ -14,3 +14,4 @@ import './code.ts';
 import './flow.ts';
 import './deform.ts';
 import './uv.ts';
+import './remesh.ts';
