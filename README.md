@@ -4,8 +4,11 @@ A procedural geometry engine in the spirit of Houdini SOPs. You build JSON node 
 geometry. It runs headless (Node + WebAssembly, no GPU) and plugs into LLM agents as an **MCP server**. The core is
 browser-ready, so it can sit under a future GUI.
 
-- **96 node types**: generators, curves and sweeps, deformers, attributes and groups, polygon modelling, scattering and
-  instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit, L-systems, text, loops, assets, and code nodes.
+- **97 node types**: generators, curves and sweeps, deformers, attributes and groups, polygon modelling, scattering and
+  instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit, L-systems, text, loops, a frame solver, assets,
+  and code nodes.
+- **Time**: every cook happens at a frame. Only time-dependent nodes re-cook when the frame changes, and the `solver`
+  node advances a simulation frame by frame from its cached previous state.
 - **Built for agents**: one-call graph builds, did-you-mean validation, text summaries, a multi-view **render** the
   model can look at, incremental edits with content-hash caching, and JS escape hatches (`wrangle` with `@P` syntax,
   `script`, `sdf_expr`).
@@ -69,8 +72,8 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, wrangle, groups, attributes, sdf, loops, assets, export, recipes |
-| `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render` |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, assets, export, recipes |
+| `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
 | `render` | PNG with persp/front/right/top views, colour by attribute, group highlight, flipped normals in blue |
@@ -96,6 +99,14 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 ```
 
 The conventions are Houdini's: Y-up, metres, degrees, and attributes such as `P N Cd uv pscale orient up width name class`.
+
+Any param can be an expression: a string starting with `=` is evaluated as JavaScript with the graph `vars`
+(`"=count * 2"`), the cook time (`frame`, `time`, `fps`, `timeInc`) and functions that read other nodes of the same
+graph: `npoints('pts')`, `nprims`, `nvertices`, `bbox('base').size.y` (also `min`, `max`, `center`), `centroid`,
+`detail('n', 'attr')`, `point('n', i, 'P')`, `prim('n', i, 'attr')` and `ch('box1/size')` for another node's param.
+Referenced nodes become dependencies: they are cooked first, editing them re-cooks the reader, and unknown names or
+cycles are reported before cooking. Node names must be string literals; these functions are not available in `vars`.
+
 Group patterns look like `top`, `!top`, `0-10` or `@P.y>0.5`. A wrangle snippet looks like this:
 
 ```js
@@ -120,20 +131,27 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
 | uv | `uv_project` `uv_transform` |
 | code | `wrangle` `script` |
-| flow | `merge` `switch` `null` `input` `foreach` `graph_ref` (plus saved assets) |
+| flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, json) |
 
 ## Examples
 
-[examples/](examples) has ten graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
+[examples/](examples) has eleven graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
 rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
-grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, and a CSG
-bracket.
+grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
+bracket, and a solver growth animation (rendered at the frame named by its `meta.frame`).
 
 To cook a graph from the command line:
 
 ```bash
 node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
+```
+
+Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`, output paths may contain `{frame}` or
+`{frame:04}`; without a pattern, `.0001`-style frame numbers are inserted before the extension:
+
+```bash
+node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{frame:04}.png" --export out/growth.glb
 ```
 
 ## Layout
