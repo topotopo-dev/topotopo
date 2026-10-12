@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [2, 2.4, 1],
+      "min": [-2, 0, -1]
+    },
+    "counts": {
+      "points": 360,
+      "prims": 740,
+      "vertices": 2220,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["bottom", "from_a", "from_b", "side", "top"]
+    },
+    "hashes": {
+      "P": "a4825de1dd1add63",
+      "attributes": {
+        "group.prim.bottom": "c71379fefbfcc794",
+        "group.prim.from_a": "36db4952292cdd68",
+        "group.prim.from_b": "df90aa3242a6a368",
+        "group.prim.side": "136c468014bfdf2a",
+        "group.prim.top": "93b1d42ba0e0ade1",
+        "point.Cd": "10067b05ed20829f",
+        "prim.copynum": "9c9b35654336f11f",
+        "vertex.uv": "28fa6270e49daa56"
+      },
+      "topology": "cb2a7aa79ef38995"
+    }
+  },
+  "name": "example.csg_bracket",
+  "ok": true,
+  "source": "examples/csg_bracket.json",
+  "warnings": []
+}

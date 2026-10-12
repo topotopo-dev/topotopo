@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.5, 0.5, 1.5],
+      "min": [-1.5, -0.5, -1.5]
+    },
+    "counts": {
+      "points": 1225,
+      "prims": 1152,
+      "vertices": 4608,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "30e8f5dbb9381ed5",
+      "attributes": {
+        "vertex.uv": "077ffc956db4b56f"
+      },
+      "topology": "a0c0023408846cd6"
+    }
+  },
+  "name": "node.parametric_surface",
+  "ok": true,
+  "source": "fixture for node type \"parametric_surface\" (test/fixtures.ts)",
+  "warnings": []
+}

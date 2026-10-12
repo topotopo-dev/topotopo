@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 188,
+      "prims": 344,
+      "vertices": 1056,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "d40f2ec5e9c28a07",
+      "attributes": {
+        "point.N": "6d683a3ef2b78d74",
+        "vertex.uv": "c95968c56d3caeef"
+      },
+      "topology": "7840f268d7557f4e"
+    }
+  },
+  "name": "node.merge",
+  "ok": true,
+  "source": "fixture for node type \"merge\" (test/fixtures.ts)",
+  "warnings": []
+}

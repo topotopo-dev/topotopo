@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 308,
+      "prims": 640,
+      "vertices": 1920,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "ac62c7151277fea7",
+      "attributes": {
+        "point.N": "6b5ca2dd6b29e48f"
+      },
+      "topology": "9f8e9cdab979aeb0"
+    }
+  },
+  "name": "node.mirror",
+  "ok": true,
+  "source": "fixture for node type \"mirror\" (test/fixtures.ts)",
+  "warnings": []
+}

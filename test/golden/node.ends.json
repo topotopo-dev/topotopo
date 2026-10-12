@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.6, 0, 0.6],
+      "min": [-0.6, 0, -0.6]
+    },
+    "counts": {
+      "points": 24,
+      "prims": 1,
+      "vertices": 25,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "69db4c192036a183",
+      "attributes": {},
+      "topology": "d7f69b8673bc49bc"
+    }
+  },
+  "name": "node.ends",
+  "ok": true,
+  "source": "fixture for node type \"ends\" (test/fixtures.ts)",
+  "warnings": []
+}

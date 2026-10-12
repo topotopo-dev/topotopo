@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 97,
+      "prims": 168,
+      "vertices": 504,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "c0902d67e8447a35",
+      "attributes": {
+        "point.N": "602ff4f18acde267"
+      },
+      "topology": "de4b8132fa24f158"
+    }
+  },
+  "name": "node.clip",
+  "ok": true,
+  "source": "fixture for node type \"clip\" (test/fixtures.ts)",
+  "warnings": []
+}

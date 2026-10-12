@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.6, 0.6, 0.6],
+      "min": [-0.6, -0.6, -0.6]
+    },
+    "counts": {
+      "points": 33494,
+      "prims": 66984,
+      "vertices": 200952,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "91c62c7a72918628",
+      "attributes": {
+        "point.N": "70f992de43c5a554"
+      },
+      "topology": "dff86ee8f46de80e"
+    }
+  },
+  "name": "node.sdf_to_mesh",
+  "ok": true,
+  "source": "fixture for node type \"sdf_to_mesh\" (test/fixtures.ts)",
+  "warnings": []
+}

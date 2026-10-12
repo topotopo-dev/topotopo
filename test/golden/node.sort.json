@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "dae1588a981d3eb0",
+      "attributes": {
+        "point.N": "2910c6dad65e5b98"
+      },
+      "topology": "5c9e578949e25b97"
+    }
+  },
+  "name": "node.sort",
+  "ok": true,
+  "source": "fixture for node type \"sort\" (test/fixtures.ts)",
+  "warnings": []
+}

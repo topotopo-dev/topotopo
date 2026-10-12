@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.2732, 0.9782, 1],
+      "min": [-0.705, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "e4f4da2a4c30d574",
+      "attributes": {
+        "point.N": "32c0b3324985aad8"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.bend",
+  "ok": true,
+  "source": "fixture for node type \"bend\" (test/fixtures.ts)",
+  "warnings": []
+}

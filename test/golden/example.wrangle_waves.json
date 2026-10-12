@@ -1,0 +1,40 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3", "h:float:1"],
+      "prim": ["copynum:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [8, 0.5784, 8],
+      "min": [-8, -0.4175, -8]
+    },
+    "counts": {
+      "points": 20175,
+      "prims": 19888,
+      "vertices": 79552,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "58f6bad8c77d1e16",
+      "attributes": {
+        "point.Cd": "a7ea6e62d5389120",
+        "point.N": "cee529e658b81cbc",
+        "point.h": "b7a278b673f4cb40",
+        "prim.copynum": "223631c52129c11f",
+        "vertex.uv": "a3a343cdcee34777"
+      },
+      "topology": "9049ac6734a387d5"
+    }
+  },
+  "name": "example.wrangle_waves",
+  "ok": true,
+  "source": "examples/wrangle_waves.json",
+  "warnings": []
+}

@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [0.51, 0.51, 0.51],
+          "min": [-0.51, -0.51, -0.51]
+        },
+        "kind": "sdf",
+        "name": "sdf",
+        "samples": "698fbf27ea09f701"
+      }
+    ]
+  },
+  "name": "node.sdf_shape",
+  "ok": true,
+  "source": "fixture for node type \"sdf_shape\" (test/fixtures.ts)",
+  "warnings": []
+}

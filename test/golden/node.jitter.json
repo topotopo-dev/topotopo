@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9744, 1.0276, 1.0009],
+      "min": [-1.0009, -0.9932, -0.9999]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "2d7c832b59017ab9",
+      "attributes": {
+        "point.N": "2221459ea9f16c28"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.jitter",
+  "ok": true,
+  "source": "fixture for node type \"jitter\" (test/fixtures.ts)",
+  "warnings": []
+}

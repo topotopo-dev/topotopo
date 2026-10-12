@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "cell_u:int:1", "cell_v:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [7.4, 22.9, 5.4],
+      "min": [-7.4, 0, -5.4]
+    },
+    "counts": {
+      "points": 1482,
+      "prims": 1345,
+      "vertices": 5412,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["bottom", "front", "side", "top", "walls"]
+    },
+    "hashes": {
+      "P": "8b274051d9ea746b",
+      "attributes": {
+        "group.prim.bottom": "3880824413283fa6",
+        "group.prim.front": "a3da893041fb30fe",
+        "group.prim.side": "2f1625954b022677",
+        "group.prim.top": "f4dd240874c58aea",
+        "group.prim.walls": "9d117af361886d99",
+        "prim.Cd": "9f77021c9393275e",
+        "prim.cell_u": "3702cca6fabe80bc",
+        "prim.cell_v": "7b94f96546d5c19f"
+      },
+      "topology": "9beefb7449de7052"
+    }
+  },
+  "name": "example.building",
+  "ok": true,
+  "source": "examples/building.json",
+  "warnings": []
+}

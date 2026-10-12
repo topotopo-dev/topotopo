@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.6, 1.4, 0.6],
+      "min": [-0.6, 0, -0.6]
+    },
+    "counts": {
+      "points": 97,
+      "prims": 96,
+      "vertices": 352,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "112d97dd06835d07",
+      "attributes": {
+        "vertex.uv": "6a44f225dac799ff"
+      },
+      "topology": "ae95ee4425b03a1e"
+    }
+  },
+  "name": "node.revolve",
+  "ok": true,
+  "source": "fixture for node type \"revolve\" (test/fixtures.ts)",
+  "warnings": []
+}

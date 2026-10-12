@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 2, 1],
+      "min": [-1, 0, -1]
+    },
+    "counts": {
+      "points": 97,
+      "prims": 1,
+      "vertices": 97,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "7ffd9abf103dfc8d",
+      "attributes": {},
+      "topology": "0faf10267ef06bdc"
+    }
+  },
+  "name": "node.spiral",
+  "ok": true,
+  "source": "fixture for node type \"spiral\" (test/fixtures.ts)",
+  "warnings": []
+}
