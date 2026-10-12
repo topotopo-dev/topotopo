@@ -241,7 +241,7 @@ section('solver');
           body: {
             nodes: {
               prev: { type: 'input', params: { index: 0 } },
-              w: { type: 'wrangle', in: ['prev'], params: { run_over: 'detail', code: 'f@runs = (@runs || 0) + 1; f@f = @Frame; f@dt = @TimeInc; f@it = iteration; f@sub = vars.substep;' } },
+              w: { type: 'wrangle', in: ['prev'], params: { run_over: 'detail', code: 'f@runs = (@runs || 0) + 1; f@f = @Frame; f@dt = @TimeInc; f@it = iteration; f@sub = vars.substep; f@vf = vars.frame; f@vt = vars.time;' } },
             },
             output: 'w',
           },
@@ -252,6 +252,7 @@ section('solver');
   const s3 = await cook(sub, { frame: 3 }, e2);
   const d = (k: string) => s3.geo!.detail.get(k)!.get(0) as number;
   check(d('runs') === 6 && d('f') === 3 && near(d('dt'), 1 / 48) && d('it') === 2 && d('sub') === 1, `substeps 2 at frame 3: 6 runs, @Frame ${d('f')}, @TimeInc ${d('dt').toFixed(4)}, iteration ${d('it')}, substep ${d('sub')}`);
+  check(d('vf') === 3 && near(d('vt'), 2 / 24), 'body vars frame/time match the step time');
 
   // extra inputs are cooked at each simulated frame
   const extra: GraphSpec = {
