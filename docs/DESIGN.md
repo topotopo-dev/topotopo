@@ -133,6 +133,37 @@ workspace load and save, MCP build, asset registration); nested bodies belong to
 walk into them (`forEachNode`). `NodeDef.deprecated` names the replacement: the catalog hides such nodes unless asked,
 `help` shows the notice, and cooking warns.
 
+### Host and script sandbox
+
+User code (wrangle kernels, `script`, `sdf_expr`, parametric expressions) is compiled into one scripting realm per
+host (`Host.compile`), which has the snippet library installed. In the Node host it is a `vm` context created with
+`DONT_CONTEXTIFY` (an ordinary global object, so global lookups in hot loops stay fast) and
+`microtaskMode: 'afterEvaluate'`: the realm has its own microtask queue, drained at the end of every `runInContext`
+call and inside that call's timeout.
+- `runGuarded(fn, ms)` runs synchronous code (wrangles, SDF and parametric expressions) in a timed call.
+- `runGuardedAsync(fn, ms)` runs the `script` node. Its synchronous part and every continuation queued inside the
+  realm (`await 0`, `await` on a realm promise) run in the first timed call, so `await 0; while (true) {}` is stopped
+  like a synchronous loop. With the default shared microtask queue, continuations ran after `runInContext` had
+  returned, outside the timeout, and such a script hung the process (and the MCP server). A promise from outside the
+  realm (`lib.run` of an async node such as `script`, `file` or `foreach`) settles in the main queue, and the realm
+  continuation it releases waits in the realm queue until the host drains it with another timed call: `lib.run`
+  calls `wake` when such a promise settles, and a 15 ms poll covers anything else. The whole run, time spent in
+  awaited engine calls included, has a wall-clock deadline, so `await new Promise(() => {})` or an endless chain of
+  awaits also fails the node. After the run, `lib.run` refuses to cook, so a continuation left over from a timed-out
+  script dies at its next call.
+- `lib.run` is wrapped in a realm-side async function: a synchronous node's result resolves a realm promise, so
+  `await lib.run('box')` continues inside the same timed call with no drain. Only async nodes cost a drain, about
+  0.2 ms each (a `vm` timeout starts a watchdog thread per call).
+- Unhandled rejections of realm promises (an un-awaited `lib.run` that fails, an async callback that throws) are
+  dropped instead of taking the process down; any other unhandled rejection is re-thrown as Node does by default.
+
+Measured (i7-10700K): the wrangle benchmark (`wrangle_1m`) and the `script` fixture cook in the same time as before
+(within noise; 1M points 90–116 ms, fixture script ~0.7 ms), 500 `await lib.run('box')` in one script ~9 ms both
+before and after. The alternative, running scripts in a `worker_threads` Worker and terminating it on timeout,
+costs ~300 ms per worker start (engine modules plus manifold WASM), would need geometry to be serialised for every
+input, output and `lib.run` call, and could not share the engine cache; it was not used. The browser host can use a
+Worker realm, where `terminate()` is the timeout.
+
 ## What makes it LLM-friendly
 
 These are the decisions that most affect how well an agent can work with it:
