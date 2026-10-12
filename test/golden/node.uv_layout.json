@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["island:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "5e7fa92eda54cd74",
+      "attributes": {
+        "prim.island": "9349e10509ff00df",
+        "vertex.uv": "616bcc0586f97b0f"
+      },
+      "topology": "211195f53fcdbf2f"
+    }
+  },
+  "name": "node.uv_layout",
+  "ok": true,
+  "source": "fixture for node type \"uv_layout\" (test/fixtures.ts)",
+  "warnings": []
+}

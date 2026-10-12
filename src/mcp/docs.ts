@@ -134,6 +134,26 @@ Inputs: put {"type":"input","params":{"index":0,"label":"surface"}} nodes in the
 Then use it like any node: {"type": "rock_cluster", "in": ["terrain"], "params": {"count": 50}}.
 Assets are stored as JSON in workspace/assets and load on startup.`,
 
+  uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
+Which node:
+  uv_project   planar/box/cylindrical/spherical projection. Fast, no packing; boxes and simple shapes.
+  uv_unwrap    automatic (xatlas): cuts charts by angle/cost, flattens and packs into 0..1. Default for props and
+               hard-surface. Keeps polygons; writes prim chart. use_seams:true keeps existing seams as chart borders.
+               Big smooth meshes chart slowly: max_chart_area -1 (auto) caps chart size above ~1000 triangles.
+  uv_flatten   LSCM (conformal) per chart, charts bounded by YOUR seams: uv discontinuities (use_seams), the
+               "seams" edge group, point pairs ({"seams": [[a,b],[b,c]]}), a prim chart attribute, the group border.
+               Closed charts / handles are cut open automatically (cut_closed). pins: [a,b] fixes orientation.
+  uv_autoseam  experimental: proposes charts (xatlas or normal clustering) → prim chart + point seam; then uv_flatten.
+  uv_layout    (re)pack islands: min-area rotation, uniform texel density (scale_mode), padding in texels at
+               resolution, udims N for UDIM tiles 1001.. ; island_attrib "chart" packs by chart. Writes prim island.
+  uv_transform translate/scale/rotate existing uv.
+Typical: geo → uv_unwrap → render {views:"quad_uv", checker:true}.  Manual: delete uv → uv_flatten {seams:[...]} → uv_layout.
+SEE IT: render views "uv" (or "quad_uv" = persp + uv): the 0..1 square with a 0.1 grid and UDIM labels, polygons filled
+by chart/island colour, island borders yellow, overlapping uv in RED (footer/notes give the overlap %).
+render checker:true shades 3D views with an 8×8 uv checker: squares should look square and equal-sized
+(stretch = rectangles, density = cell size, mirrored charts flip the red/green gradient).
+Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
+
   export: `EXPORT
 export {path:"exports/thing.glb"} — format from extension: glb (glTF binary, recommended), obj, usda, ply, stl, json (lossless polyforge).
 Options: up_axis "y" (default, glTF/Houdini/Maya) or "z" (Blender/Unreal-style data), scale (e.g. 100 for cm), split_by_name

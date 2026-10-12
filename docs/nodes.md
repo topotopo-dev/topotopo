@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-96 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+100 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -18,7 +18,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
-- [uv](#uv-nodes): [uv_project](#uv_project) · [uv_transform](#uv_transform)
+- [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [switch](#switch)
 - [io](#io-nodes): [file](#file)
@@ -2026,6 +2026,149 @@ Polygonise SDF volumes into a watertight triangle mesh (all volumes are unioned)
 
 ## uv nodes
 
+### uv_autoseam
+
+category: `uv` · aliases: `uvautoseam`, `autoseam`, `uv_seams`
+
+Experimental: propose UV seams. Writes prim chart (disk-like regions) and point seam = 1 on chart borders, for uv_flatten.
+
+method xatlas uses the xatlas chart segmentation (same weights as uv_unwrap); method normal grows charts over faces within `angle` of the chart seed normal. Charts without a border (closed) or with handles are split by growing two halves from far-apart faces, so every chart can be flattened. Also writes the "seams" edge group when the geometry supports edge groups. Follow with uv_flatten (chart_attrib "chart").
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `method` | enum | `"xatlas"` |  | `xatlas`, `normal` |  | xatlas = chart segmentation by cost; normal = normal clustering by angle |
+| `angle` | float | `45` | 1..180 |  |  | normal method: max angle between a face and its chart seed normal (degrees) |
+| `max_chart_area` | float | `-1` | -1.. |  |  | xatlas method: as in uv_unwrap (-1 auto, 0 unlimited) |
+| `normal_deviation` | float | `2` | 0.. |  |  | xatlas method: weight of normal deviation |
+| `max_cost` | float | `2` | 0.01.. |  |  | xatlas method: lower = more charts |
+
+**Writes:** prim chart, point seam, edge group seams (when available)
+
+**Example**
+
+```json
+{
+  "type": "uv_autoseam",
+  "in": [
+    "geo"
+  ],
+  "params": {
+    "method": "normal",
+    "angle": 50
+  }
+}
+```
+
+### uv_flatten
+
+category: `uv` · aliases: `uvflatten`, `lscm`, `uv_lscm`, `flatten_uv`
+
+Flatten charts with LSCM (least squares conformal maps): angle-preserving UVs per chart, then pack them.
+
+Charts are the polygon regions bounded by seams: edges where the input uv is discontinuous (use_seams), the "seams" edge group, extra point pairs (seams param), changes of a prim chart attribute (e.g. from uv_autoseam or uv_unwrap), and the border of the group. Each chart is pinned at two far-apart border points (or the pins param) and solved by conjugate gradients. Closed charts (no border) and charts with handles are opened by a cut graph first (cut_closed). Each chart is scaled into 0..1, then laid out with uv_layout rules when layout is on.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon geometry, optionally with uv seams or a chart attribute |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `method` | enum | `"lscm"` |  | `lscm`, `abf` |  | parameterisation: lscm (conformal, implemented); abf (angle-based flattening) is reserved and not implemented yet |
+| `group` | group (prim) | `""` |  |  |  | prims to flatten (others keep their uv); the group border is a seam |
+| `use_seams` | bool | `true` |  |  |  | cut where the input uv is discontinuous |
+| `seams` | json | `[]` |  |  |  | extra seam edges as point pairs [[a, b], ...] |
+| `chart_attrib` | string | `"chart"` |  |  |  | prim attribute whose changes are seams (ignored when missing; "" = off) |
+| `pins` | json | `[]` |  |  |  | two point numbers to pin in every chart that contains both, e.g. [0, 12]; [] = the two farthest-apart border points |
+| `cut_closed` | bool | `true` |  |  |  | open closed charts and charts with handles with a cut graph (otherwise they fold) |
+| `layout` | bool | `true` |  |  |  | pack the charts into the 0..1 square (uniform texel density); off = every chart fills 0..1 on its own |
+| `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv") |
+| `units` | enum | `"texels"` |  | `texels`, `uv` |  | unit of padding |
+| `resolution` | int | `1024` | 16..16384 |  |  | texture size the padding is measured against |
+
+**Writes:** vertex uv, prim chart
+
+**Example**
+
+```json
+{
+  "type": "uv_flatten",
+  "in": [
+    "geo"
+  ],
+  "params": {
+    "seams": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ]
+    ]
+  }
+}
+```
+
+### uv_layout
+
+category: `uv` · aliases: `uvlayout`, `uvpack`, `uv_pack`, `pack_uv`
+
+Pack UV islands into the 0..1 square (or UDIM tiles): rotate to minimal bounds, equalise texel density, skyline packing.
+
+Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is rotated to its minimum-area bounding rectangle (rotate), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area) and packed bottom-left on a skyline; iterations tries perturbed orders and keeps the tightest. UDIM tiles fill 1001, 1002, … (u offset), ten per row.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry with uv |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `island_attrib` | string | `""` |  |  |  | prim attribute defining islands (e.g. "chart"); "" = connected uv regions |
+| `group` | group (prim) | `""` |  |  |  | prims to lay out (others keep their uv) |
+| `rotate` | bool | `true` |  |  |  | rotate islands to their minimum bounding rectangle and allow 90° turns |
+| `scale_mode` | enum | `"uniform"` |  | `uniform`, `keep` |  | uniform = same texel density on every island (by 3D area); keep = keep the relative uv scale |
+| `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv") |
+| `units` | enum | `"texels"` |  | `texels`, `uv` |  | unit of padding |
+| `resolution` | int | `1024` | 16..16384 |  |  | texture size the padding is measured against |
+| `udims` | int | `1` | 1..100 |  |  | number of UDIM tiles to fill (1 = the 0..1 square) |
+| `iterations` | int | `4` | 1..64 |  |  | packing orders tried (the first is sorted by size); the tightest wins |
+| `seed` | float | `0` |  |  |  | random seed |
+| `write_island` | bool | `true` |  |  |  | write prim int attribute island |
+
+**Writes:** vertex uv, prim island
+
+**Example**
+
+```json
+{
+  "type": "uv_layout",
+  "in": [
+    "geo"
+  ],
+  "params": {
+    "padding": 8,
+    "resolution": 2048
+  }
+}
+```
+
 ### uv_project
 
 category: `uv` · aliases: `uvproject`, `texture`, `uv_texture`
@@ -2070,6 +2213,59 @@ Translate / scale / rotate existing UVs (vertex or point uv).
 | `scale` | vec2 | `[1,1]` |  |  | `s` | scale |
 | `rotate` | float | `0` |  |  | `r` | degrees |
 | `pivot` | vec2 | `[0.5,0.5]` |  |  |  | pivot |
+
+### uv_unwrap
+
+category: `uv` · aliases: `uvunwrap`, `autouv`, `xatlas`, `uv_auto`, `unwrap`
+
+Automatic UV unwrap with xatlas: cut into charts, flatten each, pack into the 0..1 square. Polygons are kept.
+
+Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho) and packed. Polygons are triangulated for xatlas internally; the output keeps the original polygons, with per-corner uv (seams split vertices, not points). Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles. Writes prim chart (and atlas when several atlases are made).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon geometry (polylines are skipped) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `use_seams` | bool | `false` |  |  |  | keep existing seams: edges where uv is discontinuous, and a "seams" edge group, become chart borders xatlas never crosses (seams that do not cut a region apart are hints only) |
+| `max_chart_area` | float | `-1` | -1.. |  |  | largest chart area in world units²; 0 = unlimited (xatlas default), -1 = auto (unlimited below ~1000 triangles, then total area * 1000 / triangles to keep charting fast) |
+| `max_boundary_length` | float | `0` | 0.. |  |  | longest chart boundary in world units (0 = unlimited) |
+| `normal_deviation` | float | `2` | 0.. |  | `normal_deviation_weight` | weight of the angle between a face and the chart average normal |
+| `roundness` | float | `0.01` | 0.. |  | `roundness_weight` | weight of chart roundness |
+| `straightness` | float | `6` | 0.. |  | `straightness_weight` | weight of straight chart boundaries |
+| `normal_seam_weight` | float | `4` | 0.. |  |  | weight of normal seams (hard edges); > 1000 always cuts there |
+| `texture_seam_weight` | float | `0.5` | 0.. |  |  | weight of existing texture seams |
+| `max_cost` | float | `2` | 0.01.. |  |  | a chart stops growing when the weighted cost exceeds this; lower = more, flatter charts |
+| `max_iterations` | int | `1` | 1..16 |  |  | chart growing/seeding iterations (higher = better charts, slower) |
+| `padding` | int | `2` | 0..64 |  |  | texels between charts |
+| `resolution` | int | `0` | 0..16384 |  |  | atlas size in texels; 0 = automatic from texels_per_unit (or about 1024 when both are 0). With texels_per_unit set, charts that do not fit spill into more atlases |
+| `texels_per_unit` | float | `0` | 0.. |  |  | texel density (texels per world unit); 0 = derived from resolution |
+| `bruteforce` | bool | `false` |  |  |  | slower, tighter packing |
+| `rotate_charts` | bool | `true` |  |  |  | rotate charts to pack tighter (and to the axis of their convex hull) |
+| `block_align` | bool | `false` |  |  |  | align charts to 4×4 texel blocks (faster packing, for block-compressed textures) |
+| `udim` | bool | `true` |  |  |  | when xatlas makes several atlases, place atlas k in UDIM tile 1001+k (u offset k); off = all atlases overlap in 0..1 (see prim atlas) |
+
+**Writes:** vertex uv, prim chart, prim atlas (several atlases only)
+
+**Example**
+
+```json
+{
+  "type": "uv_unwrap",
+  "in": [
+    "geo"
+  ],
+  "params": {
+    "padding": 4,
+    "resolution": 1024
+  }
+}
+```
 
 ## code nodes
 
