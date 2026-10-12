@@ -3,7 +3,8 @@ import { GeoBuilder, Geometry } from '../core/geometry.ts';
 import { defineNode, getNodeDef } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
-import { runWrangle } from '../core/wrangle.ts';
+import { runWrangleParallel } from '../core/wrangle.ts';
+import { then } from '../graph/parallel.ts';
 import type { RunOver } from '../core/wrangle.ts';
 import { resolveParams } from '../graph/params.ts';
 import * as math from '../core/math.ts';
@@ -19,6 +20,9 @@ import { convertSelection } from '../core/groupconvert.ts';
 import { appendElements } from '../core/wrangle.ts';
 import { composePackedXforms, expandPacked, packedInfo } from '../core/packed.ts';
 import { mask, wrangleTime } from './util.ts';
+
+/** points below which a wrangle stays on the cooking thread (copying the attributes would cost more than it saves) */
+const WRANGLE_MIN_POINTS = 65536;
 
 defineNode({
   type: 'wrangle',
@@ -54,14 +58,22 @@ defineNode({
     const ro = p.run_over as RunOver;
     const m = ro === 'points' ? mask(g, 'point', p.group) : ro === 'prims' ? mask(g, 'prim', p.group) : ro === 'vertices' ? mask(g, 'vertex', p.group) : null;
     if (!p.code.trim()) return g;
-    const r = runWrangle(g.clone(), {
+    // point wrangles without cross-element calls run in chunks on the worker pool (each worker compiles the same
+    // kernel in its own realm); everything else runs here
+    const res = runWrangleParallel(g.clone(), {
       code: p.code, runOver: ro, mask: m, vars, host: engine.host, timeoutMs: engine.scriptTimeoutMs,
       inputs: [g, ...inputs.slice(1).map((x) => x ?? (null as any))],
       time: wrangleTime(ctx, p.code),
+    }, (job, serial) => ctx.parallelMap('wrangle', job, {
+      serial, minElements: WRANGLE_MIN_POINTS,
+      // the worker's realm stops the snippet at scriptTimeoutMs; the pool's limit only catches a stuck worker
+      timeoutMs: engine.scriptTimeoutMs + 10000,
+    }));
+    return then(res, (r) => {
+      for (const l of r.log.slice(0, 20)) warn(l.startsWith('warning') || l.startsWith('note') ? l : `print: ${l}`);
+      if (r.log.length > 20) warn(`(${r.log.length - 20} more log lines)`);
+      return r.geo;
     });
-    for (const l of r.log.slice(0, 20)) warn(l.startsWith('warning') || l.startsWith('note') ? l : `print: ${l}`);
-    if (r.log.length > 20) warn(`(${r.log.length - 20} more log lines)`);
-    return r.geo;
   },
 });
 

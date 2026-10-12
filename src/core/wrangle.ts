@@ -13,6 +13,8 @@ import { Attribute, Geometry, defaultValueFor, isArrayType } from './geometry.ts
 import type { AttribClass, AttribType } from './geometry.ts';
 import { primCentroid, primNormals, pointNeighbors, pointPrims } from './topology.ts';
 import { KDTree, TriBVH } from './spatial.ts';
+import { GEOMETRY_FUNCTIONS } from './snippet-lib.ts';
+import type { TypedArray } from './kernels.ts';
 import type { Host } from '../host/types.ts';
 
 export type RunOver = 'points' | 'prims' | 'vertices' | 'detail';
@@ -59,7 +61,8 @@ interface Binding {
 
 export interface WrangleResult { geo: Geometry; log: string[] }
 
-const kernelCache = new Map<string, any>();
+/** compiled kernels per host: a kernel belongs to its host's realm (its library globals and __cur live there) */
+const kernelCaches = new WeakMap<Host, Map<string, any>>();
 
 /** Rewrite @refs to locals and collect what is referenced. */
 export function scanRefs(code: string) {
@@ -83,14 +86,100 @@ export function referencesTime(code: string): boolean {
 
 export interface WrangleTime { frame: number; time: number; timeInc: number }
 
-export function runWrangle(
-  geo: Geometry,
-  opts: {
-    code: string; runOver: RunOver; mask: Uint8Array | null; inputs: Geometry[]; vars: Record<string, any>; host: Host; timeoutMs: number;
-    /** values of @Frame @Time @TimeInc (pass them only when referencesTime(code), so other wrangles stay time-independent) */
-    time?: WrangleTime;
-  },
-): WrangleResult {
+export interface WrangleOptions {
+  code: string; runOver: RunOver; mask: Uint8Array | null; inputs: Geometry[]; vars: Record<string, any>; host: Host; timeoutMs: number;
+  /** values of @Frame @Time @TimeInc (pass them only when referencesTime(code), so other wrangles stay time-independent) */
+  time?: WrangleTime;
+}
+
+/** A prepared wrangle run: bindings, compiled kernel and its environment. */
+interface WrangleRun {
+  g: Geometry;
+  n: number;
+  runOver: RunOver;
+  bindings: Binding[];
+  log: string[];
+  kernel: any;
+  source: string;
+  /** the snippet after the @-rewrite */
+  body: string;
+  bodyLine: number;
+  env: any;
+  api: WrangleAPI;
+}
+
+export function runWrangle(geo: Geometry, opts: WrangleOptions): WrangleResult {
+  const w = prepareWrangle(geo, opts);
+  execWrangle(w, opts);
+  return finishWrangle(w);
+}
+
+/**
+ * The work of a point wrangle as a kernel job for the worker pool (CookContext.parallelMap('wrangle', …)), or null
+ * when the snippet cannot run in chunks: it must run over points, bind only numeric attributes and groups, and call
+ * nothing that reads other elements or edits the geometry (point(), neighbours(), nearpoints(), addpoint(),
+ * setpointattrib(), print() … see GEOMETRY_FUNCTIONS), nor touch shared state (globalThis, writes to vars).
+ */
+export interface WrangleJob {
+  count: number;
+  args: any;
+  inputs: Record<string, TypedArray>;
+  outputs: Record<string, TypedArray>;
+}
+
+const CROSS_ELEMENT = new RegExp(String.raw`\b(${GEOMETRY_FUNCTIONS.join('|')}|globalThis|this|eval|Function)\b`);
+const WRITES_VARS = /\bvars\b[^;\n]*?((?<![=!<>])=(?!=)|\+\+|--)/;
+
+/**
+ * Run a wrangle, letting `par` execute a point wrangle in chunks: par(job, serial) runs the job on worker threads
+ * (or calls serial() to run it here) and may return a promise. Same result as runWrangle, bit for bit: chunks run the
+ * same kernel source in a realm with the same library, each element writing only its own slots.
+ */
+export function runWrangleParallel(
+  geo: Geometry, opts: WrangleOptions, par: (job: WrangleJob, serial: () => void) => unknown,
+): WrangleResult | Promise<WrangleResult> {
+  const w = prepareWrangle(geo, opts);
+  const job = wrangleJob(w, opts);
+  if (!job) {
+    execWrangle(w, opts);
+    return finishWrangle(w);
+  }
+  const r = par(job, () => execWrangle(w, opts));
+  return r instanceof Promise ? r.then(() => finishWrangle(w)) : finishWrangle(w);
+}
+
+function wrangleJob(w: WrangleRun, opts: WrangleOptions): WrangleJob | null {
+  if (w.runOver !== 'points' || w.n < 2) return null;
+  if (CROSS_ELEMENT.test(w.body) || WRITES_VARS.test(w.body)) return null;
+  const inputs: Record<string, TypedArray> = {}, outputs: Record<string, TypedArray> = {};
+  for (let i = 0; i < w.bindings.length; i++) {
+    const b = w.bindings[i];
+    if (b.kind !== 'attr' && b.kind !== 'group' && b.kind !== 'input') return null;
+    if (!ArrayBuffer.isView(b.data)) return null; // string and array attributes
+    if (b.readonly || b.kind === 'input') inputs['b' + i] = b.data as TypedArray;
+    else outputs['b' + i] = b.data as TypedArray;
+  }
+  let vars: any;
+  try { vars = structuredClone(opts.vars); } catch { return null; }
+  if (opts.mask) inputs.mask = opts.mask;
+  const e = w.env;
+  return {
+    count: w.n, inputs, outputs,
+    args: {
+      source: w.source, bindings: w.bindings.length, n: w.n, numpt: e.numpt, numprim: e.numprim, numvtx: e.numvtx,
+      frame: e.frame, time: e.time, timeInc: e.timeInc, vars, timeoutMs: opts.timeoutMs, bodyLine: w.bodyLine, code: opts.code,
+    },
+  };
+}
+
+/** The node error for an exception thrown by a wrangle kernel (timeouts, runtime errors with the snippet line). */
+export function wrangleRunError(e: any, bodyLine: number, code: string, timeoutMs: number): Error {
+  const msg = String(e?.message ?? e);
+  if (/timed out/i.test(msg)) return new Error(`wrangle exceeded ${timeoutMs} ms (infinite loop?)`);
+  return new Error(`wrangle error: ${msg}${userLine(e, bodyLine, code)}`);
+}
+
+function prepareWrangle(geo: Geometry, opts: WrangleOptions): WrangleRun {
   const g = geo; // caller passes a clone we may mutate
   const runOver = opts.runOver;
   const cls = CLASS_OF[runOver];
@@ -181,7 +270,8 @@ export function runWrangle(
   // ---- generate kernel source
   const src: string[] = [];
   src.push('(function(__env){', '"use strict";');
-  src.push('const __n=__env.n, __mask=__env.mask, __vp=__env.vp, __vprim=__env.vprim, __B=__env.B;');
+  // __s/__e: the element range of a chunk (the whole range when absent); numelem stays the total
+  src.push('const __n=__env.n, __s=__env.s|0, __e=__env.e===undefined?__env.n:__env.e, __mask=__env.mask, __vp=__env.vp, __vprim=__env.vprim, __B=__env.B;');
   src.push('const numpt=__env.numpt, numprim=__env.numprim, numvtx=__env.numvtx, numelem=__n, Frame=__env.frame, Time=__env.time, TimeInc=__env.timeInc;');
   src.push('const vars=__env.vars, iteration=vars.iteration, numiterations=vars.numiterations;');
   src.push('let ptnum=0, primnum=0, vtxnum=0, elemnum=0;');
@@ -190,7 +280,7 @@ export function runWrangle(
   const body = opts.code.replace(REF, (_m, _p, name) => (SPECIAL.has(name) ? name : '__a_' + name));
   const bodyLine = src.join('\n').split('\n').length + 2; // kernel line holding the snippet's first line
   src.push('const __body=()=>{', body, '\n};');
-  src.push('for (let __i=0; __i<__n; __i++) {', 'if (__mask && !__mask[__i]) continue;', 'elemnum=__i;');
+  src.push('for (let __i=__s; __i<__e; __i++) {', 'if (__mask && !__mask[__i]) continue;', 'elemnum=__i;');
   if (runOver === 'points') src.push('ptnum=__i;');
   if (runOver === 'prims') src.push('primnum=__i;');
   if (runOver === 'vertices') src.push('vtxnum=__i; ptnum=__vp[__i]; primnum=__vprim[__i];');
@@ -223,6 +313,8 @@ export function runWrangle(
   src.push('}', '})');
   const source = src.join('\n');
 
+  let kernelCache = kernelCaches.get(opts.host);
+  if (!kernelCache) kernelCaches.set(opts.host, (kernelCache = new Map()));
   let kernel = kernelCache.get(source);
   if (!kernel) {
     // Parse the snippet on its own first (strict, like the kernel, same lines): its error positions are then the
@@ -248,18 +340,25 @@ export function runWrangle(
     timeInc: opts.time?.timeInc ?? opts.vars.timeInc ?? 1 / 24, vars: opts.vars,
     centroid: (p: number) => primCentroid(g, p),
   };
+  return { g, n, runOver, bindings, log, kernel, source, body, bodyLine, env, api };
+}
+
+/** Run the kernel over all elements in the host's realm. */
+function execWrangle(w: WrangleRun, opts: WrangleOptions) {
   const realm = opts.host.compile('globalThis');
-  realm.__cur = api;
+  realm.__cur = w.api;
   try {
-    opts.host.runGuarded(() => kernel(env), opts.timeoutMs);
+    opts.host.runGuarded(() => w.kernel(w.env), opts.timeoutMs);
   } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    if (/timed out/i.test(msg)) throw new Error(`wrangle exceeded ${opts.timeoutMs} ms (infinite loop?)`);
-    throw new Error(`wrangle error: ${msg}${userLine(e, bodyLine, opts.code)}`);
+    throw wrangleRunError(e, w.bodyLine, opts.code, opts.timeoutMs);
   } finally {
     realm.__cur = null;
   }
+}
 
+/** Materialise untyped new attributes and apply the deferred edits. */
+function finishWrangle(w: WrangleRun): WrangleResult {
+  const { g, bindings, log, api } = w;
   // ---- materialise untyped new attributes
   for (const b of bindings) {
     if (b.kind !== 'new') continue;

@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import type { Host } from './types.ts';
+import type { Host, WorkerPool } from './types.ts';
+import { createNodePool, poolOptionsFromEnv } from './pool.ts';
+import type { NodePoolOptions } from './pool.ts';
 import { installSnippetLib } from '../core/snippet-lib.ts';
 import { makeCurl, makeNoise } from '../core/noise.ts';
 import type { Noise3 } from '../core/noise.ts';
@@ -29,8 +31,27 @@ function filterRealmRejections() {
   });
 }
 
-export function createNodeHost(opts: { baseDir?: string } = {}): Host {
+/** The process-wide pool of hosts created with the environment's settings (created lazily: no thread until used). */
+let envPool: WorkerPool | undefined | null = null;
+
+export interface NodeHostOptions {
+  baseDir?: string;
+  /**
+   * Worker threads for Host.pool. Default: POLYFORGE_WORKERS (availableParallelism() - 1 when unset), shared by every
+   * host of the process; a number gives this host its own pool (0 = none).
+   */
+  workers?: number;
+  /** further pool settings for a host with its own pool (idleMs, minElements) */
+  pool?: Partial<NodePoolOptions>;
+}
+
+export function createNodeHost(opts: NodeHostOptions = {}): Host {
   const baseDir = opts.baseDir ?? process.cwd();
+  let pool: WorkerPool | undefined;
+  if (opts.workers === undefined && !opts.pool) {
+    if (envPool === null) envPool = createNodePool(poolOptionsFromEnv());
+    pool = envPool;
+  } else pool = createNodePool({ ...poolOptionsFromEnv(), ...opts.pool, size: opts.workers ?? opts.pool?.size ?? poolOptionsFromEnv().size });
   const noiseCache = new Map<string, Noise3>();
   const curlCache = new Map<number, (x: number, y: number, z: number) => [number, number, number]>();
   const getNoise = (type: string, seed: number) => {
@@ -95,6 +116,7 @@ export function createNodeHost(opts: { baseDir?: string } = {}): Host {
 
   return {
     name: 'node',
+    pool,
     resolvePath: (p) => (/^https?:\/\//.test(p) || path.isAbsolute(p) ? p : path.resolve(baseDir, p)),
     async readFile(p) {
       const rp = this.resolvePath(p);
