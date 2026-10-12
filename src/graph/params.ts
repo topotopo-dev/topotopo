@@ -1,5 +1,6 @@
 // Parameter schema handling: name resolution (aliases, case/underscore-insensitive,
-// did-you-mean), "=expression" evaluation against graph vars, and type coercion.
+// did-you-mean), "=expression" evaluation against graph vars, time and upstream
+// geometry, static scanning of expression references, and type coercion.
 import type { NodeDef, ParamDef } from './types.ts';
 import { rand } from '../core/random.ts';
 import { clamp, fit, lerp, smoothstep } from '../core/math.ts';
@@ -63,9 +64,32 @@ const EXPR_LIB: Record<string, any> = {
 const exprCache = new Map<string, Function>();
 
 export class ExprError extends Error {}
+/** Thrown by reference functions while validating without cooking (dry run): the value is only known at cook time. */
+export class DeferredExpr extends Error {}
 
-/** Evaluate "=..." expressions. Identifiers resolve to graph vars, then math helpers. */
-export function evalExpr(src: string, vars: Record<string, any>): any {
+/** The time a graph is cooked at. frame 1 = time 0 (Houdini convention). */
+export interface TimeState { frame: number; time: number; fps: number; timeInc: number }
+export const TIME_KEYS = new Set(['frame', 'time', 'fps', 'timeInc']);
+export const DEFAULT_TIME: TimeState = { frame: 1, time: 0, fps: 24, timeInc: 1 / 24 };
+
+/** Functions of "=expr" params that read other nodes: upstream geometry, or another node's parameter. */
+export const REF_FUNCS = ['npoints', 'nprims', 'nvertices', 'bbox', 'centroid', 'detail', 'point', 'prim', 'ch'];
+
+/** Per-evaluation context for expressions: the cook time and node-reference functions. */
+export interface ExprEnv {
+  time?: TimeState;
+  /** implementations of REF_FUNCS bound to the current cook */
+  fns?: Record<string, (...a: any[]) => any>;
+  /** called when an expression reads frame, time, fps or timeInc (and no var of that name shadows it) */
+  onTime?: () => void;
+}
+
+const NO_COOK_FNS: Record<string, (...a: any[]) => any> = Object.fromEntries(
+  REF_FUNCS.map((f) => [f, () => { throw new ExprError(`${f}() only works in node params of a cooked graph`); }]),
+);
+
+/** Evaluate "=..." expressions. Identifiers resolve to graph vars, then time (frame, time, fps, timeInc), then helpers. */
+export function evalExpr(src: string, vars: Record<string, any>, env: ExprEnv = {}): any {
   let fn = exprCache.get(src);
   if (!fn) {
     try {
@@ -76,13 +100,23 @@ export function evalExpr(src: string, vars: Record<string, any>): any {
     }
     exprCache.set(src, fn);
   }
-  const scope = new Proxy({ ...EXPR_LIB, ...vars }, {
-    has: (t, k) => typeof k === 'string' && k in t,
-    get: (t, k) => (t as any)[k],
+  const base: Record<string, any> = { ...EXPR_LIB, ...(env.fns ?? NO_COOK_FNS), ...vars };
+  const time = env.time ?? DEFAULT_TIME;
+  // time identifiers are read lazily so that a read can be recorded (it makes the node time-dependent)
+  const scope = new Proxy(base, {
+    has: (t, k) => typeof k === 'string' && (k in t || TIME_KEYS.has(k)),
+    get: (t, k) => {
+      if (typeof k === 'string' && !(k in t) && TIME_KEYS.has(k)) {
+        env.onTime?.();
+        return (time as any)[k];
+      }
+      return (t as any)[k];
+    },
   });
   try {
     return fn(scope);
   } catch (e: any) {
+    if (e instanceof DeferredExpr) throw e;
     const names = Object.keys(vars);
     throw new ExprError(
       `expression "=${src}" failed: ${e.message}. Vars in scope: ${names.length ? names.join(', ') : '(none)'}`,
@@ -91,10 +125,106 @@ export function evalExpr(src: string, vars: Record<string, any>): any {
 }
 
 /** Recursively evaluate "=expr" strings inside a param value (arrays/objects too). */
-export function evalDeep(v: any, vars: Record<string, any>): any {
-  if (typeof v === 'string' && v.length > 1 && v[0] === '=') return evalExpr(v.slice(1), vars);
-  if (Array.isArray(v)) return v.map((x) => evalDeep(x, vars));
+export function evalDeep(v: any, vars: Record<string, any>, env?: ExprEnv): any {
+  if (typeof v === 'string' && v.length > 1 && v[0] === '=') return evalExpr(v.slice(1), vars, env);
+  if (Array.isArray(v)) return v.map((x) => evalDeep(x, vars, env));
   return v;
+}
+
+// ---------------------------------------------------------------- reference scanning
+
+export interface ExprRefs {
+  /** nodes whose cooked geometry is read (npoints, bbox, point, ...) */
+  geo: string[];
+  /** other nodes' params read with ch() */
+  ch: { node: string; param: string }[];
+  /** problems found while scanning (dynamic names, malformed ch paths) */
+  errors: string[];
+}
+
+// a string literal without escapes or ${} interpolation: '...' "..." `...`
+const STR = String.raw`(?:'([^'\\]*)'|"([^"\\]*)"|\x60([^\x60\\$]*)\x60)`;
+const REF_CALL = new RegExp(String.raw`(?<![\w$.])(${REF_FUNCS.join('|')})\s*\(\s*(?:${STR}\s*(?:(\))|,\s*(?:${STR})?))?`, 'g');
+
+/** Find node references in one expression string (without the leading "="). No evaluation needed. */
+export function scanExpr(src: string, into: ExprRefs = { geo: [], ch: [], errors: [] }): ExprRefs {
+  for (const m of src.matchAll(REF_CALL)) {
+    const fn = m[1];
+    const first = m[2] ?? m[3] ?? m[4];
+    if (first === undefined) {
+      into.errors.push(`${fn}(...) in "=${src}" needs the node name as a string literal, e.g. ${fn}("box1"${fn === 'ch' ? ', "size"' : ''}) (dynamic node names are not supported)`);
+      continue;
+    }
+    if (fn !== 'ch') {
+      if (!into.geo.includes(first)) into.geo.push(first);
+      continue;
+    }
+    const second = m[6] ?? m[7] ?? m[8];
+    let node: string, param: string;
+    if (m[5] !== undefined) {
+      // ch("node/param")
+      const i = first.lastIndexOf('/');
+      if (i <= 0 || i === first.length - 1) {
+        into.errors.push(`ch("${first}") in "=${src}": use ch("node/param") or ch("node", "param")`);
+        continue;
+      }
+      node = first.slice(0, i);
+      param = first.slice(i + 1);
+    } else if (second !== undefined) {
+      node = first;
+      param = second;
+    } else {
+      into.errors.push(`ch("${first}", ...) in "=${src}" needs the param name as a string literal (dynamic names are not supported)`);
+      continue;
+    }
+    if (!into.ch.some((c) => c.node === node && c.param === param)) into.ch.push({ node, param });
+  }
+  return into;
+}
+
+/** Walk a param value the way evalDeep does and scan every "=expr" string in it. */
+export function scanValue(v: any, into: ExprRefs = { geo: [], ch: [], errors: [] }): ExprRefs {
+  if (typeof v === 'string' && v.length > 1 && v[0] === '=') scanExpr(v.slice(1), into);
+  else if (Array.isArray(v)) for (const x of v) scanValue(x, into);
+  return into;
+}
+
+/** All node references in a node's params (code and graph params are not expressions and are skipped). */
+export function scanNodeRefs(def: NodeDef, raw: Record<string, any> | undefined): ExprRefs {
+  const into: ExprRefs = { geo: [], ch: [], errors: [] };
+  if (!raw || typeof raw !== 'object') return into;
+  for (const [k, v] of Object.entries(raw)) {
+    const name = resolveParamName(def, k);
+    const pd = name ? def.params[name] : undefined;
+    if (!pd || pd.type === 'code' || pd.type === 'graph') continue;
+    scanValue(v, into);
+  }
+  return into;
+}
+
+export const hasRefs = (r: ExprRefs) => r.geo.length > 0 || r.ch.length > 0;
+
+const FIRST_ARG = new RegExp(String.raw`((?<![\w$.])(?:${REF_FUNCS.join('|')})\s*\(\s*)(['"\x60])([^'"\x60\\$]*)\2`, 'g');
+
+/** Rewrite references to node `from` as `to` inside a param value's "=expr" strings (used by rename edits). */
+export function renameExprRefs(v: any, from: string, to: string): any {
+  if (typeof v === 'string' && v.length > 1 && v[0] === '=') {
+    return '=' + v.slice(1).replace(FIRST_ARG, (m, head: string, q: string, lit: string) => {
+      if (lit === from) return head + q + to + q;
+      if (/^ch\s*\(/.test(head) && lit.startsWith(from + '/')) return head + q + to + lit.slice(from.length) + q;
+      return m;
+    });
+  }
+  if (Array.isArray(v)) return v.map((x) => renameExprRefs(x, from, to));
+  return v;
+}
+
+/** Give a numeric array .x .y .z .w accessors (non-enumerable, so hashing and JSON see a plain array). */
+export function vecOut<T extends any[]>(a: T): T {
+  ['x', 'y', 'z', 'w'].forEach((k, i) => {
+    if (i < a.length) Object.defineProperty(a, k, { get: () => a[i], enumerable: false, configurable: true });
+  });
+  return a;
 }
 
 // ---------------------------------------------------------------- coercion
@@ -221,12 +351,18 @@ export interface ResolvedParams {
   values: Record<string, any>;
   errors: string[];
   notes: string[];
+  /** an expression read frame, time, fps or timeInc */
+  usesTime: boolean;
+  /** params whose value is only known at cook time (dry run with reference functions) */
+  deferred: string[];
 }
 
 /** Validate names, evaluate expressions and coerce types. */
-export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined, vars: Record<string, any>): ResolvedParams {
+export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined, vars: Record<string, any>, env: ExprEnv = {}): ResolvedParams {
   const values: Record<string, any> = {};
-  const errors: string[] = [], notes: string[] = [];
+  const errors: string[] = [], notes: string[] = [], deferred: string[] = [];
+  let usesTime = false;
+  const ev: ExprEnv = { ...env, onTime: () => { usesTime = true; env.onTime?.(); } };
   const given: Record<string, any> = {};
   for (const [k, v] of Object.entries(raw ?? {})) {
     const name = resolveParamName(def, k);
@@ -244,15 +380,15 @@ export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined
   for (const [name, pd] of Object.entries(def.params)) {
     let v = name in given ? given[name] : pd.default;
     try {
-      if (pd.type !== 'code' && pd.type !== 'graph' && pd.type !== 'json') v = evalDeep(v, vars);
-      else if (pd.type === 'json') v = evalDeep(v, vars);
+      if (pd.type !== 'code' && pd.type !== 'graph') v = evalDeep(v, vars, ev);
       values[name] = v === undefined ? undefined : coerce(name, pd, v);
     } catch (e: any) {
-      errors.push(e.message);
+      if (e instanceof DeferredExpr) deferred.push(name);
+      else errors.push(e.message);
       values[name] = pd.default;
     }
   }
-  return { values, errors, notes };
+  return { values, errors, notes, usesTime, deferred };
 }
 
 /** Evaluate a ramp at t. Values may be numbers or arrays. */

@@ -5,7 +5,8 @@ import path from 'node:path';
 import { Engine, wiringOf } from './graph/engine.ts';
 import type { CookReport } from './graph/engine.ts';
 import type { GraphSpec, NodeSpec } from './graph/types.ts';
-import { didYouMean } from './graph/params.ts';
+import { didYouMean, renameExprRefs } from './graph/params.ts';
+import { migrateGraph } from './graph/migrate.ts';
 
 export interface EditOp {
   op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert';
@@ -48,12 +49,13 @@ export class Workspace {
     const assetErrors: string[] = [];
     for (const f of fs.readdirSync(this.assetDir).filter((f) => f.endsWith('.json'))) {
       try {
-        const spec = JSON.parse(fs.readFileSync(path.join(this.assetDir, f), 'utf8'));
+        const spec = migrateGraph(JSON.parse(fs.readFileSync(path.join(this.assetDir, f), 'utf8')));
         this.engine.registerAsset(path.basename(f, '.json'), spec);
       } catch (e: any) { assetErrors.push(`${f}: ${e.message}`); }
     }
     for (const f of fs.readdirSync(this.graphDir).filter((f) => f.endsWith('.json'))) {
-      try { this.graphs.set(path.basename(f, '.json'), JSON.parse(fs.readFileSync(path.join(this.graphDir, f), 'utf8'))); }
+      // migrated in memory; the file is rewritten (with its version) on the next save
+      try { this.graphs.set(path.basename(f, '.json'), migrateGraph(JSON.parse(fs.readFileSync(path.join(this.graphDir, f), 'utf8')))); }
       catch { /* skip unreadable */ }
     }
     return { graphs: this.graphs.size, assets: this.engine.assets.size, assetErrors };
@@ -83,7 +85,7 @@ export class Workspace {
 
   setGraph(name: string, spec: GraphSpec) {
     if (!NAME_RE.test(name)) throw new Error(`graph name must match ${NAME_RE}`);
-    this.graphs.set(name, spec);
+    this.graphs.set(name, migrateGraph(spec));
     this.persist(name);
   }
 
@@ -95,6 +97,7 @@ export class Workspace {
 
   /** Merge nodes/vars/output of `patch` into an existing graph (upsert). */
   mergeGraph(name: string, patch: GraphSpec): GraphSpec {
+    patch = migrateGraph(patch);
     const base = structuredClone(this.graphs.get(name) ?? { nodes: {} });
     Object.assign(base.nodes, patch.nodes ?? {});
     if (patch.vars) base.vars = { ...(base.vars ?? {}), ...patch.vars };
@@ -187,6 +190,15 @@ export class Workspace {
           delete g.nodes[n];
           for (const r of refsTo(n)) setRef(r.node, r.idx, op.to);
           if (g.output === n) g.output = op.to;
+          // expression references: npoints("old"), ch("old/param") …
+          const touched: string[] = [];
+          for (const [k, spec] of Object.entries(g.nodes)) {
+            if (!spec.params) continue;
+            const before = JSON.stringify(spec.params);
+            spec.params = Object.fromEntries(Object.entries(spec.params).map(([pk, pv]) => [pk, renameExprRefs(pv, n, op.to!)]));
+            if (JSON.stringify(spec.params) !== before) touched.push(k);
+          }
+          if (touched.length) notes.push(`updated expression references to "${n}" in ${touched.join(', ')}`);
           break;
         }
         case 'output': g.output = need(op.node, where); break;
@@ -213,9 +225,9 @@ export class Workspace {
     return { graph: g, notes };
   }
 
-  async cook(name: string, target?: string) {
+  async cook(name: string, target?: string, frame?: number) {
     const g = this.getGraph(name);
-    const r = await this.engine.cook(g, { target });
+    const r = await this.engine.cook(g, { target, frame });
     if (!target) this.lastReport.set(name, r);
     return r;
   }

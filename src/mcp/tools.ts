@@ -8,6 +8,7 @@ import type { CookReport } from '../graph/engine.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
+import { migrateGraph } from '../graph/migrate.ts';
 import { catalogText, nodeDoc, TOPICS, topicList, INSTRUCTIONS } from './docs.ts';
 import { summarize, inspect } from '../inspect.ts';
 import { renderGeometry } from '../render/raster.ts';
@@ -30,12 +31,15 @@ export interface ToolDef {
   run: (args: any) => Promise<ToolResult>;
 }
 
+/** " at frame N" when the cook was not at frame 1. */
+const atFrame = (r: { frame: number }) => (r.frame !== 1 ? ` at frame ${r.frame}` : '');
+
 function reportText(name: string, r: CookReport, extraNotes: string[] = []): string {
   const lines: string[] = [];
   const nodes = [...r.results.values()];
   const cooked = nodes.filter((n) => !n.cached && !n.error).length;
-  if (r.ok) lines.push(`✓ graph "${name}" → "${r.target}" cooked in ${r.ms.toFixed(0)} ms (${nodes.length} nodes: ${cooked} cooked, ${nodes.length - cooked} cached/skipped)`);
-  else lines.push(`✗ graph "${name}" failed${r.target ? ` at "${r.target}"` : ''} — ${r.errors.length} error(s):`);
+  if (r.ok) lines.push(`✓ graph "${name}" → "${r.target}" cooked${atFrame(r)} in ${r.ms.toFixed(0)} ms (${nodes.length} nodes: ${cooked} cooked, ${nodes.length - cooked} cached/skipped)`);
+  else lines.push(`✗ graph "${name}" failed${r.target ? ` at "${r.target}"` : ''}${atFrame(r)} — ${r.errors.length} error(s):`);
   for (const e of r.errors) lines.push(`  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`);
   for (const n of [...r.notes, ...extraNotes]) lines.push(`note: ${n}`);
   if (r.warnings.length) {
@@ -46,8 +50,16 @@ function reportText(name: string, r: CookReport, extraNotes: string[] = []): str
   if (r.geo) lines.push(summarize(r.geo));
   const slow = nodes.filter((n) => n.ms > 50).sort((a, b) => b.ms - a.ms).slice(0, 4);
   if (slow.length) lines.push(`slowest: ${slow.map((n) => `${n.node} ${n.ms.toFixed(0)}ms`).join(', ')}`);
+  const stats = nodes.filter((n) => n.stats);
+  if (stats.length) lines.push(`stats: ${stats.slice(0, 6).map((n) => `${n.node} ${Object.entries(n.stats!).map(([k, v]) => `${k}=${v}`).join(' ')}`).join('; ')}`);
+  const timed = nodes.filter((n) => n.timeDependent).map((n) => n.node);
+  if (timed.length) lines.push(`time-dependent: ${timed.slice(0, 12).join(', ')}${timed.length > 12 ? ', …' : ''}`);
   return lines.join('\n');
 }
+
+const FRAME_PROP = {
+  frame: { type: 'number', description: 'frame to cook at (default 1; frame 1 = time 0, 24 fps). Only time-dependent nodes (solver, @Frame wrangles, "=frame" params) change between frames.' },
+};
 
 function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: string[]; png: Uint8Array } {
   const r = renderGeometry(g, o);
@@ -93,11 +105,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const engine = ws.engine;
 
   const cookAndReport = async (name: string, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
-    const r = await ws.cook(name);
+    const r = await ws.cook(name, undefined, a.frame);
     ws.bump(name);
     const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) }];
     if (r.geo && a.render) {
-      const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}`);
+      const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
       const { img, notes } = pngContent(r.geo, ro);
       content.push(img);
       if (notes.length) content.push({ type: 'text', text: 'render: ' + notes.join('; ') });
@@ -109,7 +121,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     const name = a.graph ?? 'main';
     const g = ws.getGraph(name);
     const target = a.node || undefined;
-    const r = await engine.cook(g, { target });
+    const r = await engine.cook(g, { target, frame: a.frame });
     if (!r.ok || !r.geo) throw new Error(reportText(name, r));
     return { r, name, geo: r.geo };
   };
@@ -118,8 +130,15 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     {
       name: 'catalog',
       description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, group, topology, copy, solid, sdf, uv, code, flow, io, asset). Optional filter by category or search text.',
-      inputSchema: { type: 'object', properties: { category: { type: 'string' }, search: { type: 'string', description: 'substring match on names/descriptions, e.g. "scatter" or "bevel"' } } },
-      run: async (a) => text(catalogText([...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)], a)),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          category: { type: 'string' },
+          search: { type: 'string', description: 'substring match on names/descriptions, e.g. "scatter" or "bevel"' },
+          include_deprecated: { type: 'boolean', description: 'also list deprecated node types (hidden by default)' },
+        },
+      },
+      run: async (a) => text(catalogText([...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)], { category: a.category, search: a.search, deprecated: a.include_deprecated })),
     },
     {
       name: 'help',
@@ -153,12 +172,14 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           mode: { type: 'string', enum: ['replace', 'merge'] },
           dry_run: { type: 'boolean' },
           render: { description: 'true or render options (views, color_by, …)', anyOf: [{ type: 'boolean' }, { type: 'object' }] },
+          ...FRAME_PROP,
         },
       },
       run: async (a) => {
         const name = a.name ?? 'main';
         let spec: GraphSpec = a.graph;
         if (typeof spec === 'string') spec = JSON.parse(spec);
+        spec = migrateGraph(spec);
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
         if (a.dry_run) {
           const d = engine.dryRun(spec);
@@ -182,6 +203,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           name: { type: 'string', description: 'graph name (default "main")' },
           ops: { type: 'array', items: { type: 'object' } },
           render: { anyOf: [{ type: 'boolean' }, { type: 'object' }] },
+          ...FRAME_PROP,
         },
       },
       run: async (a) => {
@@ -206,13 +228,14 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           attribs: { type: 'array', items: { type: 'string' } },
           start: { type: 'number' }, count: { type: 'number' },
           group: { type: 'string', description: 'restrict elements/stats to a group pattern (with class point/prim)' },
+          ...FRAME_PROP,
         },
       },
       run: async (a) => {
         const { geo, r, name } = await resolveNodeGeo(a);
         const node = r.target;
         const res = r.results.get(node);
-        const head = `${name}/${node}${res ? ` (${res.cached ? 'cached' : res.ms.toFixed(0) + ' ms'})` : ''}`;
+        const head = `${name}/${node}${atFrame(r)}${res ? ` (${res.cached ? 'cached' : res.ms.toFixed(0) + ' ms'})` : ''}`;
         return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group }));
       },
     },
@@ -225,11 +248,12 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           graph: { type: 'string' }, node: { type: 'string' },
           ...RENDER_PROPS,
           save_to: { type: 'string', description: 'also write the PNG to this path (relative to the workspace)' },
+          ...FRAME_PROP,
         },
       },
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
-        const { img, notes, png } = pngContent(geo, renderOpts(a, geo, `${name}/${r.target}`));
+        const { img, notes, png } = pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`));
         const content: Content[] = [img];
         const info: string[] = [];
         if (a.save_to) {
@@ -257,6 +281,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres)' },
           split_by_name: { type: 'boolean', description: 'separate meshes per prim "name" (default true)' },
           custom_attribs: { type: 'boolean', description: 'include extra float point attributes' },
+          ...FRAME_PROP,
         },
       },
       run: async (a) => {
@@ -267,7 +292,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const bytes = exportGeometry(geo, ext, { upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs });
         fs.mkdirSync(path.dirname(p), { recursive: true });
         fs.writeFileSync(p, bytes);
-        return text(`wrote ${p} (${ext}, ${(bytes.byteLength / 1024).toFixed(1)} KB) from ${name}/${r.target}: ${geo.numPoints} points, ${geo.numPrims} prims`);
+        return text(`wrote ${p} (${ext}, ${(bytes.byteLength / 1024).toFixed(1)} KB) from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims`);
       },
     },
     {
@@ -330,7 +355,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           }
           case 'save': {
             if (!a.name) throw new Error('"name" is required');
-            const g: GraphSpec = structuredClone(a.graph ?? ws.getGraph(a.from_graph ?? 'main'));
+            const g: GraphSpec = migrateGraph(structuredClone(a.graph ?? ws.getGraph(a.from_graph ?? 'main')));
             if (a.description) g.description = a.description;
             if (a.params) g.params = { ...(g.params ?? {}), ...a.params };
             const def = engine.registerAsset(a.name, g);

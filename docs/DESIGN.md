@@ -44,8 +44,9 @@ src/core/      geometry model + algorithms (no I/O)
   snippet-lib.ts VEX-like helper library installed into the script realm (vectors, quaternions, noise, SDF ops)
 src/graph/     node system
   types.ts       NodeDef / ParamDef / GraphSpec — the schema that drives docs, validation and (later) GUI widgets
-  params.ts      name resolution (aliases, case-insensitive, did-you-mean), "=expr" evaluation, coercion
-  engine.ts      validation, lazy pull cooking, content-addressed cache, subgraphs/assets
+  params.ts      name resolution (aliases, case-insensitive, did-you-mean), "=expr" evaluation and reference scanning, coercion
+  engine.ts      validation, lazy pull cooking, content-addressed cache, time, subgraphs/assets
+  migrate.ts     graph format versions and migrations
 src/nodes/     ~95 node types, one defineNode() each
 src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision)
 src/io/        import (obj, stl, ply, glb/gltf, json) · export (glb, obj, usda, ply, stl, json)
@@ -71,11 +72,47 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
 
 ### Cooking
 - Graphs are pulled lazily from the output node, so unconnected branches cost nothing.
-- Every result is cached by a **content signature**: `hash(type, resolved params, input signatures[, vars])`. Editing a
-  parameter re-cooks only what is downstream. Foreach iterations with identical inputs, and repeated asset
-  instances, are cached for free.
+- Every result is cached by a **content signature**: `hash(type, resolved params, input signatures[, vars][, references])`.
+  Editing a parameter re-cooks only what is downstream. Foreach iterations with identical inputs, and repeated asset
+  instances, are cached for free. Nodes whose code or nested bodies read graph vars (`usesVars`: wrangle, script,
+  foreach, solver, …) include the vars.
 - Errors are per node, with hints. Downstream nodes report "input failed" instead of cascading noise.
 - Cooked geometry is immutable by convention. Nodes `clone()` before writing.
+
+**Time.** A cook happens at a frame (`CookOptions.frame`/`time`/`fps`; frame 1 = time 0, 24 fps by default), exposed
+to nodes as `ctx.frame`, `ctx.time`, `ctx.fps`, `ctx.timeInc`. Time enters a signature only for nodes that depend on
+it, so everything else stays cached across frames:
+- `NodeDef.usesTime` nodes (the solver) always;
+- nodes whose `"=expr"` params read `frame`, `time`, `fps` or `timeInc` (the expression scope records the read);
+- nodes whose cook reads `ctx.frame` & co. The context getters record the read: a wrangle passes time only when its code
+  references `@Frame`/`@Time`/`@TimeInc`, a script only when it reads `lib.frame` etc., and foreach/asset/graph_ref
+  bodies cooked through `ctx.subcook` propagate their body's dependence. Because this is only known after cooking, the
+  engine first looks the node up under its time-free signature; a node found time-dependent is re-keyed with the time
+  and its base signature is remembered (`timeDeps`), so later cooks go straight to the time-mixed key.
+- `NodeResult.timeDependent` also covers dependence through inputs and references; `input` nodes of a body are not
+  time-dependent themselves (the parent's input signature already carries it).
+`cookFrames(graph, {start, end, step}, cb)` cooks a range in order with the shared cache.
+
+**Solver.** Houdini's SOP solver: cooking frame N runs the body for frames `start_frame..N` (times `substeps`), feeding
+each result back as body input 0. Frame states are chained by signature: `S(start-1) = hash(params, vars, initial
+input at start_frame)`, `S(f) = hash(S(f-1), f, extra-input signatures at f)`. Each state is cached under `S(f)`, so the
+solver resumes from the latest cached frame (10 → 11 runs the body once) and earlier frames are cache hits. Extra
+inputs that are time-dependent are re-cooked at each simulated frame (`ctx.inputAt`); inputs inside a nested graph are
+taken at the parent's frame. `foreach` with feedback is the count-based, time-free counterpart.
+
+**Expression references.** `npoints nprims nvertices bbox centroid detail point prim` read cooked geometry of another
+node of the same graph (or body), `ch` reads another node's resolved param. A regex scan of the `"=expr"` strings finds
+them before cooking (node names must be string literals). They are hidden dependencies: validation reports unknown
+names (did-you-mean), unknown `ch` params and cycles over a combined graph where a node's cook depends on its inputs
+and its params, and its params depend on the geometry (or params, for `ch`) they read. Referenced nodes cook before
+the param is resolved, and their signatures (for `ch`, the referenced value) are mixed into the reader's signature.
+Graph `vars` may not use these functions; `dryRun` reports such params as deferred.
+
+**Versioning.** `GraphSpec.version` (current `GRAPH_VERSION = 1`). `migrateGraph` applies registered migrations in
+order and stamps the version; unversioned graphs are version 0. It runs on whole documents (Engine.cook at depth 0,
+workspace load and save, MCP build, asset registration); nested bodies belong to their parent document, so migrations
+walk into them (`forEachNode`). `NodeDef.deprecated` names the replacement: the catalog hides such nodes unless asked,
+`help` shows the notice, and cooking warns.
 
 ## What makes it LLM-friendly
 
