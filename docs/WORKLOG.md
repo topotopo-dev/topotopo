@@ -41,19 +41,21 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 ### Phase 0: foundation
 | id | item | status | notes |
 |---|---|---|---|
-| P0-A | Test infrastructure: shared fixtures, golden tests per node + per example, property tests (random graphs, determinism, cache correctness), wrangle fuzz, benchmark harness, node reference generator (`docs/nodes.md`), GitHub Actions CI | running (agent) | started 2026-10-12 |
+| P0-A | Test infrastructure: shared fixtures, golden tests per node + per example, property tests (random graphs, determinism, cache correctness), wrangle fuzz, benchmark harness, node reference generator (`docs/nodes.md`), GitHub Actions CI | merged | cc5fb0a, 2026-10-12. Baseline bench on i7-10700K: fuse 500k = 5.0 s, subdivide 100k×2 = 7.4 s, copy_to_points 100k = 3.1 s, scatter 1M = 1.4 s are over target |
 | P0-B | Engine: time/frame in cook options, `usesTime`, `solver` node, expression functions reading upstream geometry (`npoints`, `bbox`, `detail`, `point`, `prim`, `centroid`) and `ch()` references, graph `version` + migrations, node deprecation, CLI `--frame/--frames`, MCP `frame` | running (agent) | started 2026-10-12 |
 | P0-C1 | Geometry model: vertex groups, edge groups (point-pair canonical form), half-edge structure with cache, edge/vertex group patterns, `group` node for all classes, `group_promote`, `group_expand`, crease-aware `subdivide`, `normal` hard edges, JSON IO round trip, inspect/summary output | running (agent) | started 2026-10-12 |
 | P0-C2 | Array attributes (`float[]`, `int[]`, `string[]`) through builder, merge, wrangle, JSON IO | queued | after C1 |
 | P0-D | Worker pool behind `Host` (parallel branches, chunked wrangles) + benchmarks gate | queued | after A, B |
+| P0-E | Bugs from P0-A: (1) `subdivide levels:0` mutates its input via `refreshNormals` on the uncloned input, audit all 8 `refreshNormals` callers; (2) `fill`/`offset_curve`/`boolean2d` throw raw TypeError on empty input; (3) `script` node can hang the process: vm timeout covers only the synchronous part, `await 0; while(true){}` hangs the MCP server; (4) wrangle syntax errors after the snippet end (unclosed `[`, stray `}`) have no line hint and a stray `}` escapes the kernel wrapper; (5) `boolean` fixture is empty (sphere encloses box); (6) only 7/96 NodeDefs have `example` | queued | after B and C1 (they edit code.ts, wrangle.ts, topology.ts) |
+| P0-F | Performance: `fuse` (5.0 s at 500k, superlinear), `subdivide` (1.4 s/level at 100k), `copy_to_points` (3.1 s for 10M tris), `scatter` (1.4 s/1M) | queued | after C1 and P2-A (packed copies change the copy case) |
 
 ### Phase 1: modelling parity
 | id | item | status | notes |
 |---|---|---|---|
 | P1-A | `polybevel` (edge + point, chamfer/round, segments) | queued | after C1 |
 | P1-B | `polysplit`/`knife`, `polybridge`, `polyfill` (quad), edge loop/ring/dissolve/collapse/divide ops | queued | after C1 |
-| P1-C | Deformers: `soft_transform` with falloff ramps, `lattice`, `path_deform`, `point_deform`, `rest` | queued | |
-| P1-D | UVs: `uv_unwrap` (xatlas), `uv_layout`, `uv_flatten` (LSCM), UV view in render | queued | |
+| P1-C | Deformers: `soft_transform` with falloff ramps, `lattice`, `path_deform`, `point_deform`, `rest` | running (agent) | started 2026-10-12 from cc5fb0a |
+| P1-D | UVs: `uv_unwrap` (xatlas), `uv_layout`, `uv_flatten` (LSCM), UV view in render | running (agent) | started 2026-10-12 from cc5fb0a |
 | P1-E | `remesh_isotropic`, attribute-preserving `decimate` (meshopt), `mesh_repair`, `lod` | queued | after C1 |
 | P1-F | Measures: `curvature`, `occlusion`/`thickness` bake, `distance`, `assert`/`expect`, `explain` + `diff` MCP tools | queued | |
 | P1-G | Render upgrades: wireframe/edge overlay, cross-section, normal/up glyphs, group/piece labels | queued | |
@@ -70,4 +72,5 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P2-G | Houdini parity tests through the Houdini MCP; Unreal round trip through the Unreal MCP | queued | needs apps running |
 
 ## Log
-- 2026-10-12: roadmap written, decisions taken, LICENSE added, run started.
+- 2026-10-12: roadmap written, decisions taken, LICENSE added, run started. P0-A, P0-B, P0-C1 launched.
+- 2026-10-12: P0-A merged (cc5fb0a). `npm test` now has seven layers; goldens must be updated after geometry changes. Six bugs filed as P0-E, four slow cases as P0-F. P1-C and P1-D launched.

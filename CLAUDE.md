@@ -7,5 +7,5 @@ LLM-native procedural geometry engine (Houdini-SOP style node graphs), headless 
 - New nodes: one `defineNode()` in `src/nodes/*`; params need type, default and desc (they drive docs, validation and the future GUI). Use `GeoBuilder` provenance so attributes carry through.
 - Cooked geometry is immutable: `clone()` before writing.
 - Conventions: Y-up, metres, degrees; Houdini attribute names.
-- Verify: `npm run typecheck`, `npm test` (smoke + io + MCP e2e), `npm run showcase` then look at `examples/renders/*.png`.
+- Verify: `npm run typecheck`, `npm test` (smoke, golden fingerprints, property + fuzz, docs staleness, io, MCP e2e), `npm run showcase` then look at `examples/renders/*.png`. New or changed geometry output: `npm run test:update`, review `git diff test/golden`, `npm run docs`, commit both. Node fixtures live in `test/fixtures.ts`.
 - Design and roadmap: `docs/DESIGN.md`.
