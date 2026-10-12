@@ -530,8 +530,8 @@ export function lscm(pos: Float64Array, tris: Int32Array, pins?: [number, number
   let rz = 0, r0 = 0;
   for (let i = 0; i < N2; i++) { z[i] = r[i] / diag[i]; p[i] = z[i]; rz += r[i] * z[i]; r0 += r[i] * r[i]; }
   const scale = Math.max(1e-30, totalArea);
-  const tol = opts.tol ?? 1e-11;
-  const maxIter = opts.maxIter ?? Math.max(500, Math.min(20000, 20 * Math.ceil(Math.sqrt(n)) + 200));
+  const tol = opts.tol ?? 1e-9;
+  const maxIter = opts.maxIter ?? Math.max(500, Math.min(30000, 50 * Math.ceil(Math.sqrt(n)) + 500));
   let it = 0, rr = r0;
   while (it < maxIter && Math.sqrt(rr) > tol * Math.sqrt(scale)) {
     matvec(p, Ap);
@@ -561,7 +561,8 @@ export function lscm(pos: Float64Array, tris: Int32Array, pins?: [number, number
   }
   if (signed < 0) for (let i = 0; i < n; i++) x[i * 2 + 1] = -x[i * 2 + 1];
   for (let i = 0; i < N2; i++) if (!Number.isFinite(x[i])) x[i] = 0;
-  return { uv: x, iterations: it, residual: Math.sqrt(rr / Math.max(1e-300, r0)) };
+  const converged = Math.sqrt(rr) <= tol * Math.sqrt(scale) * 10;
+  return { uv: x, iterations: it, residual: converged ? 0 : Math.sqrt(rr / Math.max(1e-300, r0)) };
 }
 
 /** Approximate farthest-apart pair (double sweep) among candidate vertex indices (all when null). */
