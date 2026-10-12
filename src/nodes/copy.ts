@@ -151,7 +151,8 @@ defineNode({
     'per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib ' +
     'only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or ' +
     'prim attribute, Houdini\'s density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise ' +
-    'spacing by weighted sample elimination (5 candidates per point). relax_iterations: Lloyd-style point relaxation afterwards (surface ' +
+    'spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib ' +
+    'keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface ' +
     'mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface ' +
     'through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart ' +
     'throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source ' +
