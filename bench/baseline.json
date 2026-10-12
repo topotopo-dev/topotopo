@@ -1,28 +1,30 @@
 {
-  "generated": "2026-10-12T15:10:17.366Z",
+  "generated": "2026-10-12T19:29:34.741Z",
   "node": "v24.14.0",
   "platform": "win32-x64",
   "cpu": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
   "cpus": 16,
   "quick": false,
-  "runs": 3,
+  "runs": 5,
   "results": [
     {
       "name": "scatter_1m",
       "what": "scatter 1M points on a grid (relax off)",
       "elements": 1000000,
       "unit": "points",
-      "ms": 1378.7,
+      "ms": 285.1,
       "runs": [
-        1378.7,
-        1671.5,
-        1568.9
+        304.8,
+        296.4,
+        312.6,
+        285.8,
+        285.1
       ],
-      "total_ms": 1382.5,
-      "elements_per_sec": 725311,
+      "total_ms": 287.4,
+      "elements_per_sec": 3507519,
       "target_ms": 1000,
       "target_source": "roadmap §1.7 (scatter + packed copy of 1M under 1 s)",
-      "meets_target": false,
+      "meets_target": true,
       "out": "1M pts, 0 prims"
     },
     {
@@ -30,17 +32,19 @@
       "what": "copy a 100-triangle mesh to 100k points",
       "elements": 10000000,
       "unit": "triangles out",
-      "ms": 3086.5,
+      "ms": 318.7,
       "runs": [
-        3167.9,
-        3086.5,
-        3176.9
+        318.7,
+        356.9,
+        401.9,
+        393.2,
+        393
       ],
-      "total_ms": 3102.6,
-      "elements_per_sec": 3239877,
+      "total_ms": 336.9,
+      "elements_per_sec": 31380622,
       "target_ms": 1000,
       "target_source": "goal (roadmap targets packed copies; these are real copies)",
-      "meets_target": false,
+      "meets_target": true,
       "out": "6.6M pts, 10M prims"
     },
     {
@@ -48,17 +52,19 @@
       "what": "Catmull-Clark, 1 level, 99.9k-face grid",
       "elements": 99856,
       "unit": "input faces",
-      "ms": 1358.7,
+      "ms": 177.6,
       "runs": [
-        1563.9,
-        1457,
-        1358.7
+        327.9,
+        256.4,
+        438.6,
+        256.3,
+        177.6
       ],
-      "total_ms": 1388.5,
-      "elements_per_sec": 73492,
+      "total_ms": 215.7,
+      "elements_per_sec": 562269,
       "target_ms": 500,
       "target_source": "roadmap §1.7 (100k faces × 2 levels under 1 s)",
-      "meets_target": false,
+      "meets_target": true,
       "out": "400.7k pts, 399.4k prims"
     },
     {
@@ -66,17 +72,19 @@
       "what": "Catmull-Clark, 2 levels, 99.9k-face grid",
       "elements": 99856,
       "unit": "input faces",
-      "ms": 7407.9,
+      "ms": 893.6,
       "runs": [
-        7878.4,
-        7407.9,
-        7608.2
+        952.8,
+        1206.3,
+        917.6,
+        957.2,
+        893.6
       ],
-      "total_ms": 7435.3,
-      "elements_per_sec": 13480,
+      "total_ms": 924.4,
+      "elements_per_sec": 111750,
       "target_ms": 1000,
       "target_source": "roadmap §1.7",
-      "meets_target": false,
+      "meets_target": true,
       "out": "1.6M pts, 1.6M prims"
     },
     {
@@ -84,14 +92,16 @@
       "what": "boolean subtract of two 99.2k-triangle spheres",
       "elements": 198448,
       "unit": "input triangles",
-      "ms": 921.2,
+      "ms": 1055.2,
       "runs": [
-        947.5,
-        921.2,
-        929
+        1066.7,
+        1065,
+        1055.2,
+        1058.8,
+        1097.6
       ],
-      "total_ms": 1016,
-      "elements_per_sec": 215428,
+      "total_ms": 1138,
+      "elements_per_sec": 188072,
       "target_ms": 1200,
       "target_source": "roadmap §1.7 (500k triangles under 3 s), scaled to 200k",
       "meets_target": true,
@@ -102,14 +112,16 @@
       "what": "boolean subtract of two 249k-triangle spheres",
       "elements": 498000,
       "unit": "input triangles",
-      "ms": 2277.5,
+      "ms": 2505.1,
       "runs": [
-        2345.2,
-        2277.5,
-        2416.7
+        2692,
+        2753.8,
+        2505.1,
+        2617.8,
+        2746.9
       ],
-      "total_ms": 2544.1,
-      "elements_per_sec": 218660,
+      "total_ms": 2761,
+      "elements_per_sec": 198796,
       "target_ms": 3000,
       "target_source": "roadmap §1.7",
       "meets_target": true,
@@ -120,14 +132,16 @@
       "what": "noise_displace (fbm, along normals) on 1M points",
       "elements": 1002001,
       "unit": "points",
-      "ms": 312.9,
+      "ms": 358.2,
       "runs": [
-        312.9,
-        322.8,
-        317
+        403.3,
+        358.2,
+        413.9,
+        359.7,
+        393.7
       ],
-      "total_ms": 758.7,
-      "elements_per_sec": 3201949,
+      "total_ms": 775.1,
+      "elements_per_sec": 2797652,
       "target_ms": 1000,
       "target_source": "goal",
       "meets_target": true,
@@ -138,14 +152,16 @@
       "what": "point wrangle (sin + colour) over 1M points",
       "elements": 1002001,
       "unit": "points",
-      "ms": 100.9,
+      "ms": 100.7,
       "runs": [
-        133.4,
-        121.3,
-        100.9
+        101.6,
+        103.6,
+        109.4,
+        100.7,
+        104.2
       ],
-      "total_ms": 540,
-      "elements_per_sec": 9929050,
+      "total_ms": 536.1,
+      "elements_per_sec": 9945449,
       "target_ms": 500,
       "target_source": "goal",
       "meets_target": true,
@@ -156,14 +172,16 @@
       "what": "sdf_to_mesh of a torus at 128³",
       "elements": 2097152,
       "unit": "voxels",
-      "ms": 784.4,
+      "ms": 879.6,
       "runs": [
-        834.4,
-        788.6,
-        784.4
+        886.8,
+        907.8,
+        923.8,
+        912.9,
+        879.6
       ],
-      "total_ms": 784.5,
-      "elements_per_sec": 2673728,
+      "total_ms": 880,
+      "elements_per_sec": 2384183,
       "target_ms": 1000,
       "target_source": "goal",
       "meets_target": true,
@@ -174,14 +192,16 @@
       "what": "triangulate a 499.8k-quad grid",
       "elements": 499849,
       "unit": "polygons",
-      "ms": 296.2,
+      "ms": 375.4,
       "runs": [
-        296.2,
-        384,
-        319.9
+        397.5,
+        419,
+        384.3,
+        375.4,
+        375.7
       ],
-      "total_ms": 537.1,
-      "elements_per_sec": 1687661,
+      "total_ms": 582.3,
+      "elements_per_sec": 1331657,
       "target_ms": 500,
       "target_source": "goal",
       "meets_target": true,
@@ -192,14 +212,16 @@
       "what": "merge 100 spheres (1280 triangles each)",
       "elements": 128000,
       "unit": "triangles out",
-      "ms": 4.8,
+      "ms": 4.6,
       "runs": [
-        7.6,
-        4.8,
-        6.9
+        8,
+        33.9,
+        6.9,
+        4.6,
+        6.1
       ],
-      "total_ms": 48.8,
-      "elements_per_sec": 26897537,
+      "total_ms": 54.1,
+      "elements_per_sec": 27863642,
       "target_ms": 100,
       "target_source": "goal",
       "meets_target": true,
@@ -210,18 +232,160 @@
       "what": "fuse 502k points (every point doubled)",
       "elements": 502002,
       "unit": "points",
-      "ms": 4960.2,
+      "ms": 222.4,
       "runs": [
-        5277.6,
-        5019.9,
-        4960.2
+        224.8,
+        392.3,
+        239,
+        222.4,
+        376
       ],
-      "total_ms": 5122.4,
-      "elements_per_sec": 101207,
+      "total_ms": 365.5,
+      "elements_per_sec": 2256903,
       "target_ms": 1000,
       "target_source": "goal",
-      "meets_target": false,
+      "meets_target": true,
       "out": "251k pts, 500k prims"
+    },
+    {
+      "name": "occlusion_50k",
+      "what": "occlusion (32 rays per point, BVH build included) on a noisy sphere with 49.7k points",
+      "elements": 1590400,
+      "unit": "rays",
+      "ms": 2152.6,
+      "runs": [
+        2155.5,
+        2164.5,
+        2152.6,
+        2156.9,
+        2155
+      ],
+      "total_ms": 2217.9,
+      "elements_per_sec": 738829,
+      "target_ms": 2000,
+      "target_source": "P1-F (50k points × 32 samples under 2 s)",
+      "meets_target": false,
+      "out": "49.7k pts, 49.9k prims"
+    },
+    {
+      "name": "copy_to_points_1m_packed",
+      "what": "packed copies of a 100-triangle mesh on 1M points (orient + pscale)",
+      "elements": 1000000,
+      "unit": "instances",
+      "ms": 260.7,
+      "runs": [
+        282,
+        261.1,
+        336.8,
+        269,
+        260.7
+      ],
+      "total_ms": 1134.4,
+      "elements_per_sec": 3835413,
+      "target_ms": 1000,
+      "target_source": "roadmap §1.7 (scatter + packed copy of 1M under 1 s)",
+      "meets_target": true,
+      "out": "1M pts, 1M prims"
+    },
+    {
+      "name": "unpack_100k",
+      "what": "unpack 100k packed instances of a 100-triangle mesh",
+      "elements": 10000000,
+      "unit": "triangles out",
+      "ms": 519.6,
+      "runs": [
+        530,
+        612.8,
+        812.1,
+        519.6,
+        587.8
+      ],
+      "total_ms": 594.2,
+      "elements_per_sec": 19245288,
+      "target_ms": 2000,
+      "target_source": "goal (P2-A)",
+      "meets_target": true,
+      "out": "6.6M pts, 10M prims"
+    },
+    {
+      "name": "heightfield_erode_512",
+      "what": "erosion (droplets + thermal), 512² samples × 100 iterations",
+      "elements": 26214400,
+      "unit": "sample-iterations",
+      "ms": 2246.5,
+      "runs": [
+        2281.6,
+        2352.9,
+        2295.9,
+        2336,
+        2246.5
+      ],
+      "total_ms": 2379.7,
+      "elements_per_sec": 11668997,
+      "target_ms": 3000,
+      "target_source": "P2-C brief (512² × 100 iterations under 3 s)",
+      "meets_target": true,
+      "out": "0 pts, 0 prims"
+    },
+    {
+      "name": "scatter_relax_100k",
+      "what": "scatter 100k points on a grid with relax (sample elimination of 5× candidates)",
+      "elements": 100000,
+      "unit": "points",
+      "ms": 2502.7,
+      "runs": [
+        2638.3,
+        2502.7,
+        2574.9,
+        2545.5,
+        2522.1
+      ],
+      "total_ms": 2507.7,
+      "elements_per_sec": 39956,
+      "target_ms": 3000,
+      "target_source": "goal (P0-F; relax is the scatter default)",
+      "meets_target": true,
+      "out": "100k pts, 0 prims"
+    },
+    {
+      "name": "subdivide_sphere_100k",
+      "what": "Catmull-Clark, 1 level, UV sphere with 100.4k faces (vertex N, vertex uv)",
+      "elements": 100352,
+      "unit": "input faces",
+      "ms": 408.8,
+      "runs": [
+        528.5,
+        408.8,
+        487.7,
+        485.4,
+        418
+      ],
+      "total_ms": 572.2,
+      "elements_per_sec": 245454,
+      "target_ms": 500,
+      "target_source": "goal (P0-F: attribute interpolation + normal refresh)",
+      "meets_target": true,
+      "out": "400.5k pts, 400.5k prims"
+    },
+    {
+      "name": "ray_100k",
+      "what": "ray node: project 99.9k points onto a 99.2k-triangle sphere (BVH build included)",
+      "elements": 99856,
+      "unit": "rays",
+      "ms": 320,
+      "runs": [
+        340.7,
+        334.8,
+        351.7,
+        320,
+        334
+      ],
+      "total_ms": 382.8,
+      "elements_per_sec": 312003,
+      "target_ms": 1000,
+      "target_source": "goal (P0-F)",
+      "meets_target": true,
+      "out": "99.9k pts, 0 prims"
     }
   ]
 }
