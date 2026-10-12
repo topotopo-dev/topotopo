@@ -84,7 +84,7 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, heightfield, loops, instancing, assets, uv, render, export, verify, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, heightfield, loops, instancing, pcg, assets, uv, render, export, verify, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
@@ -141,7 +141,8 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | measure | `curvature` `occlusion` (ambient occlusion, cavity, thickness) `distance` `assert` (in-graph checks: watertight, counts, bbox, edge length, degenerate, self-intersections, attributes, groups, expression) |
 | group | `group` `delete` `group_promote` `group_expand` `group_combine` `group_delete` `group_rename` (point, vertex, prim and edge groups) |
 | topology | `sort` `normal` `fuse` `clean` `reverse` `facet` `triangulate` `subdivide` `poly_extrude` `poly_bevel` `grid_split` `fill_holes` `bound` `decimate` `remesh` (voxel) `remesh_isotropic` `mesh_repair` `lod` `knife` `polysplit` `edge_divide` `dissolve` `edge_collapse` `polybridge` `polyfill` |
-| copy | `copy_xform` `scatter` `copy_to_points` (real copies or packed instances) `pack` `unpack` |
+| copy | `copy_xform` `scatter` (count or density per m², density attribute + 0..1 mask, blue noise, relaxation, exact min distance, per-prim cap) `copy_to_points` (real copies or packed instances; variants by attribute or weights) `pack` `unpack` |
+| pcg | `mask` (slope, height, curvature, occlusion, distance, direction, noise, attribute, group, inside; combine) `attribute_from_map` (PNG → attribute by uv or planar projection) `orient` (orient/N/up from normals, a surface, curve tangents, a direction or target; random yaw, tilt, scale) `points_along_curve` `cluster` (k-means, radius) `prune` (overlap, density, expression, near geometry) |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
 | heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
@@ -161,7 +162,7 @@ grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi
 bracket, a solver growth animation (rendered at the frame named by its `meta.frame`), polygon editing (loop cuts, knife,
 bridge, quad fill, dissolve), bevels (rounded box, chamfered top edges, a star with a rounded rim), a UV toolkit demo, and a
 render-overlay demo (`render_modes`: section view, hard edges, normal glyphs, group labels, matcap). A graph's `meta.render`
-takes any `render` tool option. The forest example places 30,000 packed tree instances in three variants, and `terrain_erosion` is an eroded
+takes any `render` tool option. The forest example is the PCG chain (mask → scatter → orient → prune → packed copies of three weighted tree variants from 30,000 candidates), `pcg_scatter` puts lamp posts along a road and cluster-coloured rocks away from it, and `terrain_erosion` is an eroded
 heightfield with a road and rocks on its steep slopes.
 
 To cook a graph from the command line:
@@ -197,6 +198,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | arrays | `node test/arrays.ts` | array attributes: storage, merge and builder rules, wrangle `f[]@`/`i[]@`/`s[]@` and helpers, `attrib_array`, JSON, inspect, fingerprints, every node type fed array attributes |
 | packed | `node test/packed.ts` | packed prims: model (clone, subsets, merge dedup, builder, bbox), pack/unpack round trips, packed copies equal real copies, transforms, auto-unpack, JSON/GLB/USD, render budget, every node type fed instances |
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, erosion determinism and mass conservation, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
+| pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.
