@@ -268,10 +268,18 @@ export function kmeans(P: ArrayLike<number>, idx: ArrayLike<number>, k: number, 
   const r = rng(seed + 0.25);
   const C = new Float64Array(k * 3);
   const px = (a: number, c: number) => P[idx[a] * 3 + c];
-  // k-means++
+  // k-means++ (O(n·k)); for very large n·k a seeded random choice of k distinct points instead
   const D2 = new Float64Array(n).fill(Infinity);
   let first = Math.min(n - 1, Math.floor(r() * n));
-  for (let c = 0; c < k; c++) {
+  if (n * k > 5e7) {
+    const pick = Int32Array.from({ length: n }, (_, a) => a);
+    for (let c = 0; c < k; c++) {
+      const b = c + Math.floor(r() * (n - c));
+      const t = pick[c]; pick[c] = pick[b]; pick[b] = t;
+      C[c * 3] = px(pick[c], 0); C[c * 3 + 1] = px(pick[c], 1); C[c * 3 + 2] = px(pick[c], 2);
+    }
+  }
+  for (let c = 0; c < k && n * k <= 5e7; c++) {
     let pick = first;
     if (c > 0) {
       let total = 0;
