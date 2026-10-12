@@ -167,6 +167,7 @@ defineNode({
 
 // ---------------------------------------------------------------- text
 
+const fontFailed = new Map<string, string>();
 const fontCache = new Map<string, any>();
 
 function flattenPath(cmds: any[], segs: number): number[][][] {
@@ -214,16 +215,26 @@ defineNode({
     center: P.center(),
   },
   signatureExtra: (p, engine) => engine.host.findFont(p.font || undefined) ?? 'nofont',
-  async cook({ p, engine }) {
-    const path = engine.host.findFont(p.font || undefined);
-    if (!path) throw new NodeError(`font "${p.font || '(default)'}" not found; give a .ttf/.otf path`);
-    let font = fontCache.get(path);
-    if (!font) {
-      const bytes = await engine.host.readFile(path);
+  async cook({ p, engine, warn }) {
+    const host = engine.host;
+    const name = p.font || undefined;
+    const candidates = host.fontCandidates?.(name) ?? [host.findFont(name)].filter((f): f is string => !!f);
+    if (!candidates.length) throw new NodeError(`font "${p.font || '(default)'}" not found; give a .ttf/.otf path`);
+    // not every system font parses (opentype.js rejects some GSUB tables), so try the candidates in order
+    let font: any = null;
+    const failures: string[] = [];
+    for (const path of candidates) {
+      const cached = fontCache.get(path);
+      if (cached) { font = cached; break; }
+      if (fontFailed.has(path)) { failures.push(`${path}: ${fontFailed.get(path)}`); continue; }
+      const bytes = await host.readFile(path);
       try { font = opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); }
-      catch (e: any) { throw new NodeError(`cannot parse font ${path}: ${e.message}`); }
+      catch (e: any) { fontFailed.set(path, e.message); failures.push(`${path}: ${e.message}`); continue; }
       fontCache.set(path, font);
+      break;
     }
+    if (!font) throw new NodeError(`cannot parse any font for "${p.font || '(default)'}"`, failures.join('; '));
+    if (failures.length && !name) warn(`skipped unparsable font(s): ${failures.map((f) => f.split(':')[0]).join(', ')}`);
     const lines = String(p.text).split(/\\n|\n/);
     let polys: number[][][] = [];
     const lineH = p.size * p.line_spacing;

@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.5, 0.3, 3.5],
+      "min": [-3.5, 0, -3.5]
+    },
+    "counts": {
+      "points": 72,
+      "prims": 55,
+      "vertices": 220,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "c0144c2d11c042c7",
+      "attributes": {
+        "point.Cd": "79055bc5741645ff",
+        "vertex.uv": "14566305b5802d8f"
+      },
+      "topology": "012ded774634ff6d"
+    }
+  },
+  "name": "example.solver_growth",
+  "ok": true,
+  "source": "examples/solver_growth.json",
+  "warnings": []
+}
