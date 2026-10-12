@@ -486,7 +486,8 @@ defineNode({
     'rotation-minimising up; direction = the direction param; look_at = towards target; random = a random rotation of up to max_angle ' +
     'about axis ([0,0,0] = any axis) applied to the normal_up frame. align_axis z (default) puts the main direction on +Z (N) and makes ' +
     'the up param perpendicular for +Y; align_axis y puts it on +Y (upright models such as trees, rocks or posts follow the surface) and ' +
-    'takes +Z from the direction param (the up param in direction mode). Then random_yaw turns about the instance\'s +Y and tilt leans ' +
+    'takes +Z from the direction param (the up param in direction mode). upright keeps +Y on the up param and only turns the heading ' +
+    '(posts along a sloped road). Then random_yaw turns about the instance\'s +Y and tilt leans ' +
     'it by an angle in the range towards a random side (degrees). Scale: scale_min..scale_max, random per point or picked by scale_attrib ' +
     '(0..1, e.g. a mask): uniform → pscale, per axis → scale. Points outside group keep their attributes.',
   aliases: ['pcg_orient', 'align', 'orient_points', 'transform_points'],
@@ -508,6 +509,7 @@ defineNode({
     scale_max: { type: 'vec3', default: [1, 1, 1], desc: 'largest scale', aliases: ['max_scale'] },
     uniform_scale: { type: 'bool', default: true, desc: 'one random factor (x component of the range) → pscale; off: per-axis factors → scale' },
     scale_attrib: { type: 'string', default: '', desc: 'point attribute 0..1 picking the scale between min and max instead of a random value (a scale ramp by mask)' },
+    upright: { type: 'bool', default: false, desc: 'keep +Y on the up param: only the heading (+Z projected onto the horizontal plane) follows the mode (lamp posts on a sloped road, buildings)', aliases: ['keep_upright', 'yaw_only'] },
     snap: { type: 'bool', default: false, desc: 'surface: move the points onto the surface' },
     write: { type: 'enum', options: ['both', 'orient', 'n_up'], default: 'both', desc: 'attributes to write: orient + N + up, only orient, or only N + up' },
     seed: P.seed(),
@@ -601,6 +603,10 @@ defineNode({
         const zr = mode === 'curve_tangent' ? ref2 : mode === 'direction' ? upP : dirP;
         const u = unit(U);
         N = perpTo(zr, u) ?? perpTo([0, 0, 1], u) ?? perpTo([1, 0, 0], u)!;
+      }
+      if (p.upright) {
+        N = perpTo(unit(N), upP) ?? perpTo(dirP, upP) ?? perpTo([0, 0, 1], upP) ?? perpTo([1, 0, 0], upP)!;
+        U = upP;
       }
       let q: Quat = frameQuat(N, U);
       if (mode === 'random') {
