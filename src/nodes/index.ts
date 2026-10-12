@@ -12,3 +12,4 @@ import './procedural.ts';
 import './code.ts';
 import './flow.ts';
 import './deform.ts';
+import './measure.ts';
