@@ -45,6 +45,13 @@ export interface WorkerPool {
   readonly size: number;
   /** override of every kernel's size threshold (elements below which work stays on the calling thread), for tests */
   readonly minElements?: number;
+  /** threads running or starting (0 = cold: the next task would wait for a thread to start) */
+  readonly threads: number;
+  /**
+   * Start every thread now; resolves when they are up. `background`: the starting threads do not keep the process
+   * alive (parallelMap warms a cold pool this way while it runs its first job on the calling thread).
+   */
+  warm(background?: boolean): Promise<void>;
   run<T = PoolResult>(task: PoolTask): Promise<T>;
   /** stop all workers; pending tasks fail. The pool restarts on the next run. */
   close(): Promise<void>;

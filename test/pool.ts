@@ -215,13 +215,22 @@ section('ported nodes: pool on = pool off, bit for bit');
 }
 
 // ------------------------------------------------------------------ threshold
-section('small inputs stay on the cooking thread');
+section('small inputs stay on the cooking thread; a cold pool starts in the background');
 {
+  const big: GraphSpec = { nodes: { g: { type: 'grid', params: { divisions: [200, 200] } }, n: { type: 'noise_displace', in: ['g'] } }, output: 'n' };
+  const c0 = { ...onDefault.poolStats };
+  check(onDefault.host.pool!.threads === 0, 'the pool has no thread before the first job');
+  await onDefault.cook(big);
+  check(onDefault.poolStats.serial === c0.serial + 1 && onDefault.poolStats.parallel === c0.parallel && onDefault.host.pool!.stats().workers === 4,
+    'the first job runs here while the cold pool starts its threads');
+  await onDefault.host.pool!.warm();
+  check(onDefault.host.pool!.threads === 4 && onDefault.host.pool!.stats().workers === 4, 'warm() resolves when the threads are up');
+  onDefault.cache.clear();
   const s0 = { ...onDefault.poolStats };
   onDefault.cache.clear();
   await onDefault.cook({ nodes: { s: { type: 'sphere' }, n: { type: 'noise_displace', in: ['s'] } }, output: 'n' });
   check(onDefault.poolStats.serial === s0.serial + 1 && onDefault.poolStats.parallel === s0.parallel, `a small noise_displace bypasses the pool (serial ${onDefault.poolStats.serial - s0.serial}, parallel ${onDefault.poolStats.parallel - s0.parallel})`);
-  await onDefault.cook({ nodes: { g: { type: 'grid', params: { divisions: [200, 200] } }, n: { type: 'noise_displace', in: ['g'] } }, output: 'n' });
+  await onDefault.cook(big);
   check(onDefault.poolStats.parallel === s0.parallel + 1, `40k points go to the pool (${onDefault.poolStats.parallel - s0.parallel} job, ${onDefault.poolStats.chunks - s0.chunks} chunks)`);
   const s1 = { ...onDefault.poolStats };
   await onDefault.cook({ nodes: { s: { type: 'sphere', params: { rows: 20, cols: 20 } }, o: { type: 'occlusion', in: ['s'], params: { samples: 8 } } }, output: 'o' });

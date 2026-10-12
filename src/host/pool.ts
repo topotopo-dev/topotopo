@@ -69,6 +69,8 @@ class NodeWorkerPool implements WorkerPool {
   /** consecutive workers that died before becoming ready */
   private startFailures = 0;
   private broken: Error | null = null;
+  /** warm() calls someone awaits: their starting workers keep the process alive */
+  private warming = 0;
 
   constructor(o: NodePoolOptions) {
     this.size = Math.max(0, Math.floor(o.size));
@@ -83,6 +85,7 @@ class NodeWorkerPool implements WorkerPool {
     return new Promise<T>((resolve, reject) => {
       this.queue.push({ id: this.nextId++, task, resolve, reject });
       this.pump();
+      this.refresh();
     });
   }
 
@@ -91,6 +94,25 @@ class NodeWorkerPool implements WorkerPool {
       workers: this.slots.length, busy: this.slots.filter((s) => s.busy).length, queued: this.queue.length,
       ...this.counters,
     };
+  }
+
+  get threads(): number {
+    return this.slots.length;
+  }
+
+  warm(background = false): Promise<void> {
+    if (this.broken || !(this.size > 0)) return Promise.resolve();
+    while (this.slots.length < this.size) this.spawn();
+    const starting = this.slots.filter((s) => !s.ready);
+    if (!background) this.warming++;
+    this.refresh();
+    return Promise.all(starting.map((s) => new Promise<void>((res) => {
+      s.worker.once('message', () => res());
+      s.worker.once('exit', () => res());
+    }))).then(() => {
+      if (!background) this.warming--;
+      this.refresh();
+    });
   }
 
   async close(): Promise<void> {
@@ -119,6 +141,18 @@ class NodeWorkerPool implements WorkerPool {
     // start workers for the tasks still waiting (those already starting will take some of them)
     const starting = this.slots.filter((s) => !s.ready).length;
     for (let need = this.queue.length - starting; need > 0 && this.slots.length < this.size; need--) this.spawn();
+  }
+
+  /**
+   * Keep the process alive only for work: busy workers, and starting workers while tasks wait for them. Idle and
+   * warming workers are unref'd, so a script that is done exits.
+   */
+  private refresh() {
+    const waiting = this.queue.length > 0 || this.warming > 0;
+    for (const s of this.slots) {
+      if (s.busy || (!s.ready && waiting)) s.worker.ref();
+      else s.worker.unref();
+    }
   }
 
   private spawn() {
@@ -173,6 +207,7 @@ class NodeWorkerPool implements WorkerPool {
       this.startFailures = 0;
       this.pump();
       if (!slot.busy) this.idle(slot);
+      this.refresh();
       return;
     }
     if (m?.type !== 'result') return;
@@ -198,6 +233,7 @@ class NodeWorkerPool implements WorkerPool {
     }
     this.pump();
     if (!slot.busy) this.idle(slot);
+    this.refresh();
   }
 
   private onExit(slot: Slot, code: number) {
@@ -223,6 +259,7 @@ class NodeWorkerPool implements WorkerPool {
       job.reject(new Error(`kernel "${job.task.kernel}": worker thread crashed (${why}); it has been replaced`));
     }
     this.pump();
+    this.refresh();
   }
 
   /** a worker without work: do not keep the process alive; stop it after idleMs */
