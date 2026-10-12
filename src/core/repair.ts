@@ -1,9 +1,11 @@
 // Mesh repair (the mesh_repair node): diagnose and fix polygon meshes. Steps, in order, each optional:
-//   1. fuse points closer than a tolerance
+//   1. fuse points closer than a tolerance (by default only where one of them is on an open border, so solids that
+//      merely touch keep their own points)
 //   2. degenerate faces: repeated points are dropped from polygons, polygons with < 3 distinct points removed;
 //      zero-area triangles (three collinear points) are removed and their middle point is inserted into the
 //      neighbour across their long side, so a closed mesh stays closed (no slit is left behind)
-//   3. duplicate faces (same point set, either winding) removed
+//   3. duplicate faces: a copy with the same winding is removed; two faces on the same points with opposite
+//      windings (an internal wall between solids fused face to face) are both removed
 //   4. non-manifold edges (> 2 faces): keep, remove the extra faces, or split. Faces around such an edge are
 //      sorted by angle and paired with an angular neighbour of opposite direction that encloses material with
 //      them; split then duplicates every point whose corners fall into several fans (also bowtie points), so
@@ -25,9 +27,11 @@ import { ClosestBVH } from './remesh.ts';
 
 export type NonManifoldMode = 'keep' | 'remove' | 'split';
 export type SelfIntersectMode = 'off' | 'report' | 'remove_faces';
+export type FuseMode = 'borders' | 'all' | 'off';
 
 export interface RepairOptions {
-  fuse: boolean;
+  /** weld points within tolerance: on open borders only, everywhere, or not at all */
+  fuse: FuseMode;
   tolerance: number;
   degenerate: boolean;
   duplicates: boolean;
@@ -168,30 +172,44 @@ class Repair {
 
   // ------------------------------------------------------------ 1. fuse
 
-  fuse(tol: number) {
+  /**
+   * Weld points within tol. mode 'borders': a pair is welded only when at least one of the two points lies on an
+   * open border (a polygon side no other polygon shares, or a lone polyline/small prim) — cracks and polygon soups
+   * close, while solids that merely touch (fracture pieces, stacked parts) keep their own points. 'all' welds
+   * every pair.
+   */
+  fuse(tol: number, mode: 'borders' | 'all') {
     const n = this.ptSrc.length, P = this.P, repr = new Int32Array(n);
     for (let i = 0; i < n; i++) repr[i] = i;
-    if (tol > 0) {
-      const cell = tol, grid = new Map<string, number[]>();
-      for (let i = 0; i < n; i++) {
-        const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
-        const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
-        let found = -1;
+    let border: Uint8Array | null = null;
+    if (mode === 'borders') {
+      border = new Uint8Array(n);
+      for (const [key, l] of this.sides()) {
+        if (l.length !== 2) continue;
+        const a = Math.floor(key / EDGE_KEY_LIMIT);
+        border[a] = 1; border[key - a * EDGE_KEY_LIMIT] = 1;
+      }
+      for (const q of this.polys) if (!q.dead && (!q.closed || q.pts.length < 3)) for (const p of q.pts) border[p] = 1;
+    }
+    const ok = (i: number, j: number) => !border || border[i] === 1 || border[j] === 1;
+    const grid = new Map<string, number[]>();
+    for (let i = 0; i < n; i++) {
+      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+      let found = -1;
+      if (tol > 0) {
+        const cx = Math.floor(x / tol), cy = Math.floor(y / tol), cz = Math.floor(z / tol);
         for (let dx = -1; dx <= 1 && found < 0; dx++)
           for (let dy = -1; dy <= 1 && found < 0; dy++)
             for (let dz = -1; dz <= 1 && found < 0; dz++) {
               const l = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
-              if (l) for (const j of l) if (Math.hypot(P[j * 3] - x, P[j * 3 + 1] - y, P[j * 3 + 2] - z) <= tol) { found = j; break; }
+              if (l) for (const j of l) if (ok(i, j) && Math.hypot(P[j * 3] - x, P[j * 3 + 1] - y, P[j * 3 + 2] - z) <= tol) { found = j; break; }
             }
         if (found >= 0) repr[i] = found;
         else { const k = `${cx},${cy},${cz}`; const l = grid.get(k); if (l) l.push(i); else grid.set(k, [i]); }
-      }
-    } else {
-      const seen = new Map<string, number>();
-      for (let i = 0; i < n; i++) {
-        const k = `${P[i * 3]},${P[i * 3 + 1]},${P[i * 3 + 2]}`;
-        const j = seen.get(k);
-        if (j === undefined) seen.set(k, i); else repr[i] = j;
+      } else {
+        const k = `${x},${y},${z}`, l = grid.get(k);
+        if (l) for (const j of l) if (ok(i, j)) { found = j; break; }
+        if (found >= 0) repr[i] = found; else if (l) l.push(i); else grid.set(k, [i]);
       }
     }
     // only points used by prims count as fused (unused duplicates are dropped as isolated points)
@@ -266,12 +284,35 @@ class Repair {
 
   // ------------------------------------------------------------ 3. duplicates
 
+  /**
+   * Faces on the same point set: a copy with the same winding goes; a pair with opposite windings is an internal
+   * double wall (two solids touching face to face, fused together) and both go, which leaves the union's shell.
+   */
   duplicates() {
-    const seen = new Set<string>();
+    // faces are compared by position (points at exactly the same place count as one), so unwelded copies are found
+    const P = this.P, weld = new Map<string, number>(), wid = (p: number) => {
+      const s = this.ptSrc[p] * 3, k = `${P[s]},${P[s + 1]},${P[s + 2]}`;
+      let w = weld.get(k);
+      if (w === undefined) { w = p; weld.set(k, w); }
+      return w;
+    };
+    const seen = new Map<string, number[]>();
     for (const f of this.faces()) {
-      const q = this.polys[f];
-      const k = q.pts.slice().sort((x, y) => x - y).join(',');
-      if (seen.has(k)) { q.dead = true; this.rep.duplicate_faces++; } else seen.add(k);
+      const q = this.polys[f], w = q.pts.map(wid);
+      const k = w.slice().sort((x, y) => x - y).join(',');
+      const list = seen.get(k);
+      if (!list) { seen.set(k, [f]); continue; }
+      let done = false;
+      for (let i = 0; i < list.length && !done; i++) {
+        const g = this.polys[list[i]];
+        if (sameWinding(g.pts.map(wid), w)) { q.dead = true; this.rep.duplicate_faces++; done = true; }
+        else if (g.pts.slice().sort((x, y) => x - y).join(',') === q.pts.slice().sort((x, y) => x - y).join(',')) {
+          // opposite windings on the very same points: an internal double wall
+          q.dead = true; g.dead = true; this.rep.duplicate_faces += 2; list.splice(i, 1); done = true;
+        }
+      }
+      // opposite windings on different (coincident) points: two solids touching face to face, both kept
+      if (!done) list.push(f);
     }
   }
 
@@ -611,6 +652,13 @@ class Repair {
   }
 }
 
+/** Do two polygons on the same points run the same way round? */
+function sameWinding(a: number[], b: number[]): boolean {
+  const n = a.length, k = b.indexOf(a[0]);
+  if (k < 0 || n < 3) return true;
+  return b[(k + 1) % n] === a[1];
+}
+
 const EPS = 1e-12;
 
 /**
@@ -653,7 +701,7 @@ function segTri(T: Float64Array, a: number, b: number, o: number): [number, numb
 /** Run the repair steps on g (see the header). */
 export function repairMesh(g: Geometry, o: RepairOptions): { geo: Geometry; report: RepairReport } {
   const r = new Repair(g);
-  if (o.fuse) r.fuse(Math.max(0, o.tolerance));
+  if (o.fuse !== 'off') r.fuse(Math.max(0, o.tolerance), o.fuse);
   if (o.degenerate) r.degenerate();
   if (o.duplicates) r.duplicates();
   r.nonManifold(o.nonManifold);

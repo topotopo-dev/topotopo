@@ -61,12 +61,14 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   uv_unwrap: { max_iterations: [1, 2], resolution: 'keep', texels_per_unit: 'keep', padding: [0, 8], bruteforce: 'keep', max_boundary_length: 'keep' },
   uv_autoseam: { max_cost: [0.5, 4] },
   uv_layout: { iterations: [1, 4], udims: [1, 4] },
+  remesh_isotropic: { target_length: 'keep', iterations: [0, 3], relax_passes: [1, 2], max_triangles: 'keep' },
+  lod: { levels: [1, 4] },
 };
 
 /** Node types that get slow on big inputs: only chained when the incoming geometry has at most this many prims. */
 const MAX_INPUT_PRIMS: Record<string, number> = {
   minkowski: 400, convex_hull: 20000, voronoi_fracture: 3000, boolean: 20000, remesh: 20000, sdf_from_mesh: 20000,
-  smooth_solid: 3000, decimate: 50000, uv_unwrap: 3000, uv_autoseam: 3000, uv_flatten: 20000, uv_layout: 20000, foreach: 2000, copy_to_points: 5000, triangulate2d: 20000, voronoi2d: 20000,
+  smooth_solid: 3000, decimate: 50000, remesh_isotropic: 20000, mesh_repair: 50000, lod: 50000, uv_unwrap: 3000, uv_autoseam: 3000, uv_flatten: 20000, uv_layout: 20000, foreach: 2000, copy_to_points: 5000, triangulate2d: 20000, voronoi2d: 20000,
 };
 
 const GROUP_PATTERNS = ['', '', '', '@P.y>0', '0-10', '!0-5', '@P.x<0.2', '*', 'top', '0-100:2'];

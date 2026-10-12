@@ -41,6 +41,9 @@ export const SRC: Record<string, NodeSpec> = {
   NBRS: { type: 'attrib_array', in: ['GRID'], params: { mode: 'from_neighbours' } },
   CUBE: { type: 'box' },
   OPENTUBE: { type: 'tube', params: { cols: 12, caps: false } },
+  // mesh_repair (P1-E): a box with a missing face and four reversed faces
+  HOLED: { type: 'delete', in: ['BOX'], params: { group: '0' } },
+  BROKEN: { type: 'reverse', in: ['HOLED'], params: { group: '1-4' } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -57,6 +60,7 @@ export const INPUTS: Record<string, string[]> = {
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
   attrib_array: ['NBRS'],
   polysplit: ['BOX'], edge_divide: ['BOX'], dissolve: ['GRID'], polybridge: ['CUBE'], polyfill: ['OPENTUBE'],
+  remesh_isotropic: ['BOX'], mesh_repair: ['BROKEN'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -86,6 +90,9 @@ export const PARAMS: Record<string, any> = {
   dissolve: { group: '@P.x>0.1' },
   edge_collapse: { group: '0-40:8' },
   polybridge: { source: '@P.y>0.4', target: '@P.y<-0.4', divisions: 2, blend: 0.5, delete_inner_faces: true },
+  remesh_isotropic: { target_length: 0.2, iterations: 4 },
+  mesh_repair: { self_intersections: 'report' },
+  lod: { levels: 3 },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */

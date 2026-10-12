@@ -98,7 +98,7 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     if (a !== b && b !== c && a !== c) keep.push(t);
   }
   const nt = keep.length;
-  if (!nt) throw new DecimateError('decimate needs polygons (no triangles with three distinct points in the input or group)');
+  if (!nt) throw new DecimateError('no polygons to decimate (no triangles with three distinct points in the input or group)');
   // render vertices: (point, corner attribute values, prim region)
   const vAttrs = [...g.vertices.map.values()].filter((a) => !a.isArray);
   const regions = primRegions(g);
@@ -171,9 +171,23 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     }
   }
   const error = err, errorAbs = o.errorAbsolute ? err : err * scale;
+  // meshoptimizer can leave a "flap" (two triangles on the same three points with opposite winding, seen where a
+  // piece has coincident unwelded points): both go, which keeps a closed piece closed. Exact duplicates keep one.
+  const nOut = out.length / 3, keepTri = new Uint8Array(nOut).fill(1), seenTri = new Map<string, number>();
+  for (let i = 0; i < nOut; i++) {
+    const a = rvPt[out[i * 3]], b = rvPt[out[i * 3 + 1]], c = rvPt[out[i * 3 + 2]];
+    if (a === b || b === c || a === c) { keepTri[i] = 0; continue; }
+    const key = a < b ? (b < c ? `${a},${b},${c}` : a < c ? `${a},${c},${b}` : `${c},${a},${b}`) : a < c ? `${b},${a},${c}` : b < c ? `${b},${c},${a}` : `${c},${b},${a}`;
+    const j = seenTri.get(key);
+    if (j === undefined) { seenTri.set(key, i); continue; }
+    const d = rvPt[out[j * 3]], e = rvPt[out[j * 3 + 1]], f = rvPt[out[j * 3 + 2]];
+    const sameWinding = (a === d && b === e) || (a === e && b === f) || (a === f && b === d);
+    keepTri[i] = 0;
+    if (!sameWinding) { keepTri[j] = 0; seenTri.delete(key); }
+  }
   // rebuild: points in input order, passthrough prims, then the decimated triangles
   const used = new Uint8Array(np);
-  for (let i = 0; i < out.length; i++) used[rvPt[out[i]]] = 1;
+  for (let i = 0; i < out.length; i++) if (keepTri[(i / 3) | 0]) used[rvPt[out[i]]] = 1;
   const pass = (pr: number) => !(g.primClosed[pr] && g.primSize(pr) >= 3 && (!sel || sel[pr]));
   for (let pr = 0; pr < g.numPrims; pr++) if (pass(pr)) for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) used[vp[v]] = 1;
   const b = new GeoBuilder(g), map = new Int32Array(np).fill(-1);
@@ -184,7 +198,10 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) { pts.push(map[vp[v]]); vs.push(v); }
     b.addPrim(pts, !!g.primClosed[pr], pr, vs);
   }
+  let trisOut = 0;
   for (let i = 0; i < out.length; i += 3) {
+    if (!keepTri[i / 3]) continue;
+    trisOut++;
     const r0 = out[i], r1 = out[i + 1], r2 = out[i + 2];
     const v0 = repV[r0], v1 = repV[r1], v2 = repV[r2];
     // the prim most corners came from (they share one prim region, so its prim attributes apply to the face)
@@ -192,7 +209,7 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     const prim = p1 === p2 ? p1 : p0;
     b.addPrim([map[rvPt[r0]], map[rvPt[r1]], map[rvPt[r2]]], true, prim, [v0, v1, v2]);
   }
-  return { geo: b.build(), error, errorAbs, trisIn: nt, trisOut: out.length / 3, used: steer.used, skipped: steer.skipped };
+  return { geo: b.build(), error, errorAbs, trisIn: nt, trisOut, used: steer.used, skipped: steer.skipped };
 }
 
 export interface PointDecimateOptions {
