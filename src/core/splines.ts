@@ -277,53 +277,61 @@ function pieceDeBoor(pc: Piece, t: number, out: number[] | Float64Array) {
   out[0] = d[p * 4] / w; out[1] = d[p * 4 + 1] / w; out[2] = d[p * 4 + 2] / w;
 }
 
-/** B-spline basis functions and their derivatives up to nd at t in span k (Piegl & Tiller A2.3): ders[d][j]. */
-function dersBasis(pc: Piece, k: number, t: number, nd: number): number[][] {
-  const p = pc.p, U = pc.U;
-  const ndu: number[][] = Array.from({ length: p + 1 }, () => new Array(p + 1).fill(0));
-  const left = new Array(p + 1).fill(0), right = new Array(p + 1).fill(0);
-  ndu[0][0] = 1;
+const MAXP1 = MAX_ORDER + 1;
+const NDU = new Float64Array(MAXP1 * MAXP1), LEFT = new Float64Array(MAXP1), RIGHT = new Float64Array(MAXP1);
+const AA = new Float64Array(2 * MAXP1), DERS = new Float64Array(3 * MAXP1);
+
+/**
+ * B-spline basis functions and their derivatives up to nd (≤ 2) at t in span k (Piegl & Tiller A2.3), into a shared
+ * scratch buffer: derivative d of basis j (the CV k - p + j) is at [d * MAXP1 + j]. Read it before the next call.
+ */
+function dersBasis(pc: Piece, k: number, t: number, nd: number): Float64Array {
+  const p = pc.p, U = pc.U, P1 = MAXP1;
+  const ndu = NDU, left = LEFT, right = RIGHT, ders = DERS, a = AA;
+  ndu[0] = 1;
   for (let j = 1; j <= p; j++) {
     left[j] = t - U[k + 1 - j];
     right[j] = U[k + j] - t;
     let saved = 0;
     for (let r = 0; r < j; r++) {
-      ndu[j][r] = right[r + 1] + left[j - r];
-      const tmp = ndu[j][r] !== 0 ? ndu[r][j - 1] / ndu[j][r] : 0;
-      ndu[r][j] = saved + right[r + 1] * tmp;
+      const v = right[r + 1] + left[j - r];
+      ndu[j * P1 + r] = v;
+      const tmp = v !== 0 ? ndu[r * P1 + j - 1] / v : 0;
+      ndu[r * P1 + j] = saved + right[r + 1] * tmp;
       saved = left[j - r] * tmp;
     }
-    ndu[j][j] = saved;
+    ndu[j * P1 + j] = saved;
   }
-  const ders: number[][] = Array.from({ length: nd + 1 }, () => new Array(p + 1).fill(0));
-  for (let j = 0; j <= p; j++) ders[0][j] = ndu[j][p];
-  const a = [new Array(p + 1).fill(0), new Array(p + 1).fill(0)];
+  for (let j = 0; j <= p; j++) ders[j] = ndu[j * P1 + p];
   for (let r = 0; r <= p; r++) {
-    let s1 = 0, s2 = 1;
-    a[0][0] = 1;
+    let s1 = 0, s2 = P1;
+    a[0] = 1;
     for (let kk = 1; kk <= nd; kk++) {
       let d = 0;
       const rk = r - kk, pk = p - kk;
       if (r >= kk) {
-        a[s2][0] = ndu[pk + 1][rk] !== 0 ? a[s1][0] / ndu[pk + 1][rk] : 0;
-        d = a[s2][0] * ndu[rk][pk];
+        const den = ndu[(pk + 1) * P1 + rk];
+        a[s2] = den !== 0 ? a[s1] / den : 0;
+        d = a[s2] * ndu[rk * P1 + pk];
       }
       const j1 = rk >= -1 ? 1 : -rk, j2 = r - 1 <= pk ? kk - 1 : p - r;
       for (let j = j1; j <= j2; j++) {
-        a[s2][j] = ndu[pk + 1][rk + j] !== 0 ? (a[s1][j] - a[s1][j - 1]) / ndu[pk + 1][rk + j] : 0;
-        d += a[s2][j] * ndu[rk + j][pk];
+        const den = ndu[(pk + 1) * P1 + rk + j];
+        a[s2 + j] = den !== 0 ? (a[s1 + j] - a[s1 + j - 1]) / den : 0;
+        d += a[s2 + j] * ndu[(rk + j) * P1 + pk];
       }
       if (r <= pk) {
-        a[s2][kk] = ndu[pk + 1][r] !== 0 ? -a[s1][kk - 1] / ndu[pk + 1][r] : 0;
-        d += a[s2][kk] * ndu[r][pk];
+        const den = ndu[(pk + 1) * P1 + r];
+        a[s2 + kk] = den !== 0 ? -a[s1 + kk - 1] / den : 0;
+        d += a[s2 + kk] * ndu[r * P1 + pk];
       }
-      ders[kk][r] = d;
+      ders[kk * P1 + r] = d;
       const tmp = s1; s1 = s2; s2 = tmp;
     }
   }
   let f = p;
   for (let kk = 1; kk <= nd; kk++) {
-    for (let j = 0; j <= p; j++) ders[kk][j] *= f;
+    for (let j = 0; j <= p; j++) ders[kk * P1 + j] *= f;
     f *= p - kk;
   }
   return ders;
@@ -353,29 +361,45 @@ export function evalPoint(s: Spline, u: number, out: number[] = [0, 0, 0]): numb
   return out;
 }
 
-/** Point, first and second derivative with respect to u ∈ [0, 1]. */
-export function evalDerivs(s: Spline, u: number): { P: Vec3; d1: Vec3; d2: Vec3 } {
-  if (!s.pieces.length) return { P: [0, 0, 0], d1: [0, 0, 0], d2: [0, 0, 0] };
+const DV = new Float64Array(9);
+
+/** Point (DV[0..3)), first (DV[3..6)) and, with nd 2, second derivative (DV[6..9)) with respect to u, into DV. */
+function derivs(s: Spline, u: number, nd: 1 | 2): Float64Array {
+  const out = DV;
+  out.fill(0);
+  if (!s.pieces.length) return out;
   const { pc, t, dtdu } = locate(s, u);
   const p = pc.p;
-  if (p === 0) { const P = evalPoint(s, u) as Vec3; return { P, d1: [0, 0, 0], d2: [0, 0, 0] }; }
+  if (p === 0) { pieceDeBoor(pc, t, out); return out; }
   const k = pc.bezier ? p : findSpan(pc, t);
-  const D = dersBasis(pc, k, t, Math.min(2, p));
-  const A = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
-  for (let d = 0; d < D.length; d++)
-    for (let j = 0; j <= p; j++) {
-      const N = D[d][j], o = (k - p + j) * 4;
-      for (let c = 0; c < 4; c++) A[d][c] += N * pc.H[o + c];
-    }
-  const w0 = A[0][3] || 1e-300, w1 = A[1][3], w2 = A[2][3];
-  const P: Vec3 = [A[0][0] / w0, A[0][1] / w0, A[0][2] / w0];
-  const d1: Vec3 = [0, 0, 0], d2: Vec3 = [0, 0, 0];
-  for (let c = 0; c < 3; c++) {
-    d1[c] = (A[1][c] - w1 * P[c]) / w0;
-    d2[c] = (A[2][c] - 2 * w1 * d1[c] - w2 * P[c]) / w0;
+  const n = Math.min(nd, p);
+  const D = dersBasis(pc, k, t, n), H = pc.H;
+  let x0 = 0, y0 = 0, z0 = 0, w0 = 0, x1 = 0, y1 = 0, z1 = 0, w1 = 0, x2 = 0, y2 = 0, z2 = 0, w2 = 0;
+  for (let j = 0; j <= p; j++) {
+    const o = (k - p + j) * 4, hx = H[o], hy = H[o + 1], hz = H[o + 2], hw = H[o + 3];
+    const N0 = D[j], N1 = D[MAXP1 + j];
+    x0 += N0 * hx; y0 += N0 * hy; z0 += N0 * hz; w0 += N0 * hw;
+    x1 += N1 * hx; y1 += N1 * hy; z1 += N1 * hz; w1 += N1 * hw;
+    if (n > 1) { const N2 = D[2 * MAXP1 + j]; x2 += N2 * hx; y2 += N2 * hy; z2 += N2 * hz; w2 += N2 * hw; }
   }
-  for (let c = 0; c < 3; c++) { d1[c] *= dtdu; d2[c] *= dtdu * dtdu; }
-  return { P, d1, d2 };
+  if (!(w0 !== 0)) w0 = 1e-300;
+  const px = x0 / w0, py = y0 / w0, pz = z0 / w0;
+  const d1x = (x1 - w1 * px) / w0, d1y = (y1 - w1 * py) / w0, d1z = (z1 - w1 * pz) / w0;
+  out[0] = px; out[1] = py; out[2] = pz;
+  out[3] = d1x * dtdu; out[4] = d1y * dtdu; out[5] = d1z * dtdu;
+  if (nd > 1) {
+    const s2 = dtdu * dtdu;
+    out[6] = ((x2 - 2 * w1 * d1x - w2 * px) / w0) * s2;
+    out[7] = ((y2 - 2 * w1 * d1y - w2 * py) / w0) * s2;
+    out[8] = ((z2 - 2 * w1 * d1z - w2 * pz) / w0) * s2;
+  }
+  return out;
+}
+
+/** Point, first and second derivative with respect to u ∈ [0, 1]. */
+export function evalDerivs(s: Spline, u: number): { P: Vec3; d1: Vec3; d2: Vec3 } {
+  const D = derivs(s, u, 2);
+  return { P: [D[0], D[1], D[2]], d1: [D[3], D[4], D[5]], d2: [D[6], D[7], D[8]] };
 }
 
 /** Unit tangent at u (zero vector where the curve stops, e.g. on a doubled CV). */
@@ -405,7 +429,7 @@ export function evalBasis(s: Spline, u: number): { P: number[]; idx: number[]; w
   pieceDeBoor(pc, t, P);
   if (p === 0) return { P, idx: [pc.cv[0]], w: [1] };
   const k = pc.bezier ? p : findSpan(pc, t);
-  const N = dersBasis(pc, k, t, 0)[0];
+  const N = dersBasis(pc, k, t, 0);
   const idx: number[] = [], w: number[] = [];
   let sum = 0;
   for (let j = 0; j <= p; j++) { const x = N[j] * pc.H[(k - p + j) * 4 + 3]; sum += x; }
@@ -441,8 +465,8 @@ const GLW = [0.23692688505618908, 0.47862867049936647, 0.5688888888888889, 0.478
 
 /** |dC/du| at u. */
 export function speedAt(s: Spline, u: number): number {
-  const { d1 } = evalDerivs(s, u);
-  return Math.hypot(d1[0], d1[1], d1[2]);
+  const D = derivs(s, u, 1);
+  return Math.sqrt(D[3] * D[3] + D[4] * D[4] + D[5] * D[5]);
 }
 
 function gl5(s: Spline, u0: number, u1: number): number {
@@ -496,6 +520,53 @@ export function uAtLength(s: Spline, tab: ArcTable, len: number): number {
     x = nx;
   }
   return x;
+}
+
+/** Arc length from u = 0 to u. */
+export function lengthAtU(s: Spline, tab: ArcTable, u: number): number {
+  if (!(u > 0)) return 0;
+  if (u >= 1) return tab.total;
+  const U = tab.u;
+  let lo = 0, hi = U.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (U[mid] <= u) lo = mid; else hi = mid; }
+  return tab.s[lo] + (u > U[lo] ? gl5(s, U[lo], u) : 0);
+}
+
+/**
+ * Global u of nseg + 1 points evenly spaced by arc length (closed curves: nseg points, the last segment returns to
+ * the start), with the arc length of each and the total.
+ */
+export function samplesByLength(s: Spline, nseg: number): { u: number[]; len: number[]; total: number } {
+  const tab = arcTable(s), total = tab.total, cnt = s.closed ? nseg : nseg + 1;
+  const u: number[] = [], len: number[] = [];
+  for (let i = 0; i < cnt; i++) {
+    const L = (total * i) / nseg;
+    u.push(i === 0 ? 0 : !s.closed && i === nseg ? 1 : uAtLength(s, tab, L));
+    len.push(L);
+  }
+  return { u, len, total };
+}
+
+/**
+ * The natural parameter of CV k (global u): its Greville abscissa (the average of the degree knots it spans) for
+ * NURBS, its place within its segment for Bezier curves. Curve attributes on CVs are evaluated there.
+ */
+export function grevilleU(s: Spline, k: number): number {
+  for (const pc of s.pieces) {
+    if (pc.bezier || pc.p === 0) {
+      const j = Array.prototype.indexOf.call(pc.cv, k);
+      if (j >= 0) return pc.p ? pc.u0 + (j / pc.p) * (pc.u1 - pc.u0) : pc.u0;
+      continue;
+    }
+    const p = pc.p, U = pc.U;
+    let t = 0;
+    for (let i = k + 1; i <= k + p; i++) t += U[i];
+    t /= p;
+    const T = pc.b - pc.a;
+    if (s.closed) t = pc.a + ((((t - pc.a) % T) + T) % T);
+    return Math.min(1, Math.max(0, (t - pc.a) / T));
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------- closest point
@@ -937,7 +1008,7 @@ export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: num
     for (let k = 0; k < m; k++) {
       const t = pc.a + params[k] * tp;
       const span = findSpan(pc, t);
-      const N = dersBasis(pc, span, t, 0)[0];
+      const N = dersBasis(pc, span, t, 0);
       const cols: number[] = [], vals: number[] = [];
       const r = [Q[k * 3], Q[k * 3 + 1], Q[k * 3 + 2]];
       for (let j = 0; j <= p; j++) {

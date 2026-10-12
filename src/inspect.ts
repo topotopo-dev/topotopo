@@ -197,7 +197,7 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
         vals.unshift(`packed pt ${g.primPoints(i)[0]} source ${g.packedSource![i]} xform[${Array.from({ length: 9 }, (_, k) => fmtNum(X[o9 + k])).join(' ')}]`);
       } else if (cls === 'prim' && g.isSpline(i)) {
         const oa = g.prims.get('spline_order');
-        vals.unshift(`${g.primKind![i] === 2 ? 'bezier' : 'nurbs'}${g.primClosed[i] ? ' closed' : ''} order ${oa ? fmtVal(oa.get(i)) : 4} cvs[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
+        vals.unshift(`${g.primKind![i] === 2 ? 'bezier' : 'nurbs'}${g.primClosed[i] ? ' closed' : ''} order ${oa ? Number(oa.get(i)) : 4} cvs[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
       } else if (cls === 'prim') vals.unshift(`${g.primClosed[i] ? 'poly' : 'line'} pts[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
       if (cls === 'vertex') vals.unshift(`pt ${g.vertexPoint[i]}`);
       out.push(`  ${i}: ${vals.join('  ')}`);

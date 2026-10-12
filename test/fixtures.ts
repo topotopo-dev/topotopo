@@ -55,6 +55,14 @@ export const SRC: Record<string, NodeSpec> = {
   // mesh_repair (P1-E): a box with a missing face and four reversed faces
   HOLED: { type: 'delete', in: ['BOX'], params: { group: '0' } },
   BROKEN: { type: 'reverse', in: ['HOLED'], params: { group: '1-4' } },
+  // spline toolkit (P2-D): a weighted NURBS, the default Bezier, a noisy helix, a zig-zag path, a road over bumps
+  NURBS: { type: 'nurbs', params: { points: [[0, 0, 0], [1, 0.5, 1], [2.5, 0, 1.2], [3, 0.8, 0], [4.2, 0.2, -0.5], [5, 0, 0.4]], weights: [1, 2, 1, 1, 0.5, 1] } },
+  BEZIER: { type: 'bezier' },
+  SPIRAL: { type: 'spiral', params: { turns: 1.5, points_per_turn: 40 } },
+  NOISY: { type: 'jitter', in: ['SPIRAL'], params: { amount: 0.04 } },
+  ZIGZAG: { type: 'curve', params: { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [2, 0.5, 1], [2, 0, 2]] } },
+  BUMPY: { type: 'noise_displace', in: ['GRID'], params: { amplitude: 0.3 } },
+  ROAD: { type: 'curve', params: { points: [[-0.9, 1, -0.8], [0, 1, 0.2], [0.9, 1, 0.7]] } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -81,6 +89,8 @@ export const INPUTS: Record<string, string[]> = {
   heightfield_erode: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
   heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
   remesh_isotropic: ['BOX'], mesh_repair: ['BROKEN'],
+  convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
+  curve_attribs: ['NURBS'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -128,6 +138,13 @@ export const PARAMS: Record<string, any> = {
   remesh_isotropic: { target_length: 0.2, iterations: 4 },
   mesh_repair: { self_intersections: 'report' },
   lod: { levels: 3 },
+  nurbs: { weights: [1, 1, 3, 1, 1, 1] },
+  convert_curve: { to: 'bezier' },
+  spline_fit: { tolerance: 0.08, smoothing: 0.2 },
+  fillet_curve: { radius: 0.3, segments: 4 },
+  offset_curve_3d: { distance: 0.3, both: true, lift: 0.2 },
+  project_curve: { spacing: 0.1, lift: 0.02 },
+  curve_attribs: { frame: true, curvature: true, segment: true, ramp_attrib: 'width', ramp: [[0, 0.2], [1, 0.05]] },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */
@@ -163,14 +180,22 @@ export function checkGeo(g: Geometry): string[] {
     else {
       let bad = '';
       for (let p = 0; p < n && !bad; p++) {
-        if (!g.primKind[p]) { if (g.packedSource[p] !== -1) bad = `prim ${p}: not packed but has source ${g.packedSource[p]}`; continue; }
+        const k = g.primKind[p];
+        if (k !== 1) {
+          // 0 polygon/polyline, 2 Bezier, 3 NURBS
+          if (k > 3) bad = `prim ${p}: unknown kind ${k}`;
+          else if (g.packedSource[p] !== -1) bad = `prim ${p}: not packed but has source ${g.packedSource[p]}`;
+          else if (k >= 2 && g.primSize(p) < 1) bad = `spline prim ${p} has no CVs`;
+          continue;
+        }
         if (g.primSize(p) !== 1) bad = `packed prim ${p} has ${g.primSize(p)} vertices`;
         else if (!(g.packedSource[p] >= 0 && g.packedSource[p] < g.packedSources.length)) bad = `packed prim ${p}: source ${g.packedSource[p]} of ${g.packedSources.length}`;
         else if (g.primClosed[p]) bad = `packed prim ${p} is closed`;
         else for (let c = 0; c < 9; c++) if (!Number.isFinite(g.packedXform[p * 9 + c])) { bad = `packed prim ${p}: non-finite transform`; break; }
       }
       if (bad) errs.push(bad);
-      if (!g.primKind.includes(1)) errs.push('packed arrays without packed prims');
+      if (!g.primKind.some((k) => k)) errs.push('prim kind arrays without packed or spline prims');
+      if (g.packedSources.length && !g.primKind.includes(1)) errs.push('packed sources without packed prims');
       for (const [i, src] of g.packedSources.entries()) for (const e of checkGeo(src)) errs.push(`packed source ${i}: ${e}`);
     }
   }
