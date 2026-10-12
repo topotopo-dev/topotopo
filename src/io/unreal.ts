@@ -131,7 +131,7 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
     objects = 'objects.glb';
   }
   if (g.hasPacked()) {
-    files.push({ path: 'instances.csv', bytes: new TextEncoder().encode(exportCSV(g, { pcg: true, scale: 100, warn: o.warn })) });
+    files.push({ path: 'instances.csv', bytes: new TextEncoder().encode(exportCSV(g, { pcg: true, scale: 100, warn: (m) => { if (!/other point/.test(m)) o.warn?.(m); } })) });
     files.push({ path: 'instances.meshes.json', bytes: new TextEncoder().encode(instanceMeshesJSON(g, { meshDir: 'meshes', stream: 'instances.csv', scene: objects ?? undefined })) });
     const names = packedSourceNames(g);
     for (let s = 0; s < g.packedSources.length; s++) files.push({ path: `meshes/${names[s]}.glb`, bytes: await exportGLB(flattenSource(g.packedSources[s]), glbOpts) });
