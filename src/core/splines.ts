@@ -162,11 +162,12 @@ export function makeSpline(type: SplineType, P: ArrayLike<number>, o: SplineInit
   if (o.weights) {
     let bad = 0;
     for (let i = 0; i < n; i++) {
+      // weights must be positive: 0 / negative / NaN (e.g. a Pw attribute filled with 0 by a merge) count as 1
       const w = Number(o.weights[i] ?? 1);
-      if (!(w > 1e-12) || !Number.isFinite(w)) { bad++; W[i] = 1e-12; } else W[i] = w;
+      if (!(w > 1e-12) || !Number.isFinite(w)) { bad++; W[i] = 1; } else W[i] = w;
       if (W[i] !== 1) rational = true;
     }
-    if (bad) notes.push(`${bad} non-positive weight(s) raised to 1e-12`);
+    if (bad) notes.push(`${bad} non-positive weight(s) (Pw) treated as 1`);
   }
   const closed = !!o.closed && n >= 3;
   let order = clampOrder(o.order ?? DEFAULT_ORDER);
@@ -536,8 +537,8 @@ export function lengthAtU(s: Spline, tab: ArcTable, u: number): number {
  * Global u of nseg + 1 points evenly spaced by arc length (closed curves: nseg points, the last segment returns to
  * the start), with the arc length of each and the total.
  */
-export function samplesByLength(s: Spline, nseg: number): { u: number[]; len: number[]; total: number } {
-  const tab = arcTable(s), total = tab.total, cnt = s.closed ? nseg : nseg + 1;
+export function samplesByLength(s: Spline, nseg: number, tab: ArcTable = arcTable(s)): { u: number[]; len: number[]; total: number } {
+  const total = tab.total, cnt = s.closed ? nseg : nseg + 1;
   const u: number[] = [], len: number[] = [];
   for (let i = 0; i < cnt; i++) {
     const L = (total * i) / nseg;
@@ -1226,6 +1227,47 @@ export function splinesToPolylines(g: Geometry, o: ToPolylinesOptions = {}): { g
   }
   out = out.subsetPoints(keep);
   return { geo: tidySplineAttribs(out), converted, pointOrigin };
+}
+
+/** Does g, or any packed source inside it (recursively), hold spline prims? */
+export function hasSplinesDeep(g: Geometry, seen = new Set<Geometry>()): boolean {
+  if (g.hasSplines()) return true;
+  if (!g.hasPacked()) return false;
+  for (const s of g.packedSources) {
+    if (seen.has(s)) continue;
+    seen.add(s);
+    if (hasSplinesDeep(s, seen)) return true;
+  }
+  return false;
+}
+
+const deepMemo = new WeakMap<Geometry, Geometry>();
+
+/**
+ * splinesToPolylines on g and inside its packed sources (recursively; converted sources are new geometries, memoised,
+ * so instances keep sharing them). For writers of formats without spline prims.
+ */
+export function splinesToPolylinesDeep(g: Geometry, o: PolylineOptions = {}): { geo: Geometry; converted: number } {
+  let converted = 0;
+  const conv = (src: Geometry): Geometry => {
+    const m = deepMemo.get(src);
+    if (m) return m;
+    let out = src;
+    if (src.hasPacked() && src.packedSources.some((s) => hasSplinesDeep(s))) {
+      out = src.clone();
+      out.packedSources = out.packedSources.map(conv);
+    }
+    if (out.hasSplines()) { const r = splinesToPolylines(out, o); converted += r.converted; out = r.geo; }
+    deepMemo.set(src, out);
+    return out;
+  };
+  let geo = g;
+  if (g.hasPacked() && g.packedSources.some((s) => hasSplinesDeep(s))) {
+    geo = g.clone();
+    geo.packedSources = geo.packedSources.map(conv);
+  }
+  if (geo.hasSplines()) { const r = splinesToPolylines(geo, o); converted += r.converted; geo = r.geo; }
+  return { geo, converted };
 }
 
 /** Polyline input for a node that samples curves itself: spline prims evaluated (no-op without splines). */

@@ -614,16 +614,16 @@ defineNode({
   type: 'offset_curve_3d',
   category: 'curve',
   summary: 'Offset curves sideways in 3D (rotation-minimising frame or a fixed plane normal): rails, kerbs, parallel paths.',
-  description: 'Each edge moves by distance along its side vector up × direction (positive = left when looking down `up` with the curve heading away), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.',
+  description: 'Each edge moves by distance along its side vector up × direction (positive = to the left of the direction of travel, up being up), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.',
   aliases: ['curve_offset', 'offset3d', 'polyoffset'],
   inputs: [{ name: 'curves', desc: 'polylines/polygons (Bezier/NURBS curves are sampled adaptively)' }],
   splines: 'keep',
   params: {
-    distance: { type: 'float', default: 0.25, desc: 'side offset (negative = other side)', aliases: ['offset', 'dist', 'width'] },
+    distance: { type: 'float', default: 0.25, desc: 'side offset, positive = left of the direction of travel (negative = right)', aliases: ['offset', 'dist'] },
     lift: { type: 'float', default: 0, desc: 'offset along up (e.g. rail height)', aliases: ['height', 'up_offset'] },
     frame: { type: 'enum', options: ['rmf', 'plane'], default: 'rmf', desc: 'rmf = rotation-minimising frame along each curve; plane = fixed up normal' },
     up: { type: 'vec3', default: [0, 1, 0], desc: 'initial up (rmf) or the plane normal (plane)', aliases: ['normal', 'plane_normal'] },
-    corner: { type: 'enum', options: ['mitre', 'round', 'bevel'], default: 'mitre', desc: 'outer corner style', aliases: ['join', 'miter'] },
+    corner: { type: 'enum', options: ['mitre', 'round', 'bevel'], default: 'mitre', desc: 'outer corner style', aliases: ['join', 'corners'] },
     mitre_limit: { type: 'float', default: 4, min: 1, desc: 'mitres longer than this × distance are bevelled', aliases: ['miter_limit'] },
     round_segments: { type: 'int', default: 4, min: 1, desc: 'segments per 90° of round corners' },
     both: { type: 'bool', default: false, desc: 'also output the -distance offset (two rails; prim int side = +1 / -1)', aliases: ['both_sides', 'double'] },
@@ -678,9 +678,9 @@ function resampleBySpacing(g: Geometry, spacing: number): Geometry {
     if (!isCurvePrim(g, pr)) { b.addPrim(pts.map((i) => b.copyPoint(i)), !!g.primClosed[pr], pr); continue; }
     if (g.isSpline(pr)) {
       const s = splineFromPrim(g, pr);
-      const total = samplesByLength(s, 1).total;
-      const nseg = Math.max(s.closed ? 3 : 1, Math.round(total / spacing));
-      const ids = samplesByLength(s, nseg).u.map((u) => { const e = evalBasis(s, u); return b.addPoint(e.P[0], e.P[1], e.P[2], { i: e.idx.map((k) => pts[k]), w: e.w }); });
+      const tab = arcTable(s);
+      const nseg = Math.max(s.closed ? 3 : 1, Math.round(tab.total / spacing));
+      const ids = samplesByLength(s, nseg, tab).u.map((u) => { const e = evalBasis(s, u); return b.addPoint(e.P[0], e.P[1], e.P[2], { i: e.idx.map((k) => pts[k]), w: e.w }); });
       b.addPrim(ids, s.closed, pr);
       continue;
     }
@@ -814,7 +814,7 @@ defineNode({
     frame: { type: 'bool', default: false, desc: 'write point N (= tangent) and up (rotation-minimising), for copy_to_points/sweep', aliases: ['orient', 'frames'] },
     curvature: { type: 'bool', default: false, desc: 'write point curvature (1/radius)' },
     segment: { type: 'bool', default: false, desc: 'write point int segment (edge / span index)' },
-    up: { type: 'vec3', default: [0, 1, 0], desc: 'initial up of the frames (point attribute up is not overridden)' },
+    up: { type: 'vec3', default: [0, 1, 0], desc: 'initial up of the rotation-minimising frames (an input point attribute up steers them per point instead)' },
     ramp_attrib: { type: 'string', default: '', desc: 'float point attribute to fill with ramp(curveu), e.g. "width" ("" = none)', aliases: ['attrib', 'name'] },
     ramp: { type: 'ramp', default: [[0, 1], [1, 1]], desc: 'value along the curve (u 0..1) for ramp_attrib' },
     ramp_scale: { type: 'float', default: 1, desc: 'multiplier of the ramp values' },
@@ -825,6 +825,9 @@ defineNode({
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const sel = mask(g, 'prim', p.group);
+    // an up attribute of the input steers the frames (read before frame:true writes its own)
+    const upIn = g.points.get('up');
+    const ups = upIn && upIn.size === 3 && upIn.type === 'float' ? (upIn.clone().data as Float64Array) : null;
     const pa = (name: string, size = 1, type: 'float' | 'int' = 'float') => g.points.add(name, type, size);
     const cu = p.curveu ? pa('curveu') : null, al = p.arclength ? pa('arclength') : null, tg = p.tangent ? pa('tangentu', 3) : null;
     const NA = p.frame ? pa('N', 3) : null, UA = p.frame ? pa('up', 3) : null, kA = p.curvature ? pa('curvature') : null, sA = p.segment ? pa('segment', 1, 'int') : null;
@@ -833,7 +836,6 @@ defineNode({
       const v0 = evalRamp(p.ramp, 0);
       rampA = g.points.add(p.ramp_attrib, 'float', Array.isArray(v0) ? v0.length : 1);
     }
-    const upAttr = g.points.get('up');
     for (let pr = 0; pr < g.numPrims; pr++) {
       if ((sel && !sel[pr]) || !isCurvePrim(g, pr)) continue;
       const pts = g.primPoints(pr), n = pts.length;
@@ -875,7 +877,7 @@ defineNode({
           }
         }
       }
-      const F = rmFrames(pos, closed, p.up, upAttr && upAttr.size === 3 ? pts.map((i) => upAttr.get(i) as Vec3) : undefined);
+      const F = rmFrames(pos, closed, p.up, ups ? pts.map((i) => [ups[i * 3], ups[i * 3 + 1], ups[i * 3 + 2]] as Vec3) : undefined);
       for (let k = 0; k < n; k++) {
         const i = pts[k];
         const t = tan[k] ?? F.T[k];

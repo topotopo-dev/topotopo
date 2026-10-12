@@ -12,7 +12,7 @@ import { crossSection, crossSectionFaces, detectPlane, fromManifold, planeMatrix
 import type { Plane } from '../core/manifold.ts';
 import { FRAMES, P, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
-import { evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
+import { arcTable, evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
 
 // ---------------------------------------------------------------- helpers
 
@@ -320,10 +320,10 @@ defineNode({
       if (g.isSpline(pr) && p.treat_splines === 'exact') {
         // the true curve, evenly by arc length; CV attributes follow the curve's basis weights
         const s = splineFromPrim(g, pr);
-        const total = samplesByLength(s, 1).total;
-        let nseg = p.mode === 'count' ? p.count : Math.max(1, Math.round(total / p.length));
+        const tab = arcTable(s);
+        let nseg = p.mode === 'count' ? p.count : Math.max(1, Math.round(tab.total / p.length));
         if (s.closed) nseg = Math.max(3, nseg);
-        const smp = samplesByLength(s, nseg);
+        const smp = samplesByLength(s, nseg, tab);
         const ids = smp.u.map((u, i) => {
           const e = evalBasis(s, u);
           const id = b.addPoint(e.P[0], e.P[1], e.P[2], { i: e.idx.map((k) => ptsIdx[k]), w: e.w });

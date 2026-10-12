@@ -342,6 +342,14 @@ const primPos = (g: Geometry, p: number) => {
   check(/PolygonCurve_run/.test(geo) && !/NURB|Bezier/.test(geo), 'Houdini .geo writes the evaluated polylines');
   const json = JSON.parse(new TextDecoder().decode(exportGeometry(g, 'json', {})));
   check(json.splines?.kind?.join() === '3,2', 'json export keeps the spline prims (lossless)');
+  // packed instances of a spline: exporters and the renderer evaluate the curve inside the source too
+  const pk = await cook({ a: { type: 'nurbs' }, pts: { type: 'point_grid', params: { counts: [2, 1, 1] } }, c: { type: 'copy_to_points', in: ['a', 'pts'], params: { pack: true } } }, 'c');
+  const pkNotes: string[] = [];
+  const objp = new TextDecoder().decode(exportGeometry(pk, 'obj', { warn: (m) => pkNotes.push(m) }));
+  const lp = objp.split('\n').filter((l) => l.startsWith('l '));
+  check(pk.numPacked === 2 && lp.length === 2 && lp[0].split(' ').length > 20 && pkNotes.some((m) => /inside packed instances/.test(m)), `packed instances of a NURBS export their evaluated curves (${lp[0]?.split(' ').length - 1} points each)`);
+  const pimg = renderGeometry(pk, { width: 160, height: 120, views: ['top'] } as any);
+  check(pimg.notes.some((m) => /2 NURBS curves drawn as polylines/.test(m)), `render of packed splines draws their curves (${pimg.notes.join('; ')})`);
   // splinesToPolylines keeps other prims and their points
   const mixed = await cook({ a: { type: 'nurbs' }, bx: { type: 'box' }, m: { type: 'merge', in: ['bx', 'a'] } }, 'm');
   const conv = splinesToPolylines(mixed).geo;

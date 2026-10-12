@@ -15,6 +15,8 @@
 // --strict also fails on node errors that look like internal JS errors (TypeError etc.).
 // On failure the graph JSON is printed; reproduce with --seed S --only I.
 import { allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
+import { expandedTriangles } from '../src/core/packed.ts';
+import type { Geometry } from '../src/core/geometry.ts';
 import { hash32, rng } from '../src/core/random.ts';
 import type { Engine, CookReport } from '../src/graph/engine.ts';
 import type { GraphSpec, NodeDef, NodeSpec, ParamDef } from '../src/graph/types.ts';
@@ -171,6 +173,9 @@ const CHAINABLE = allNodeDefs().filter((d) => d.inputs.length > 0 && !SKIP.has(d
 
 interface Built { graph: GraphSpec; chain: string[]; truncated: string }
 
+/** Prims a node will see: packed instances count with the triangles they expand to (nodes that need polygons unpack). */
+const effectivePrims = (g: Geometry | null | undefined) => (g ? g.numPrims + (g.hasPacked() ? expandedTriangles(g) : 0) : 0);
+
 /** Build a chain incrementally, cooking as it grows so it can stop before outputs get large or slow. */
 async function buildGraph(engine: Engine, seed: number): Promise<Built> {
   const r = rng(seed);
@@ -182,7 +187,7 @@ async function buildGraph(engine: Engine, seed: number): Promise<Built> {
   let prevPrims = 0;
   try {
     const first = await engine.cook({ nodes: structuredClone(nodes), output: src });
-    prevPrims = first.geo?.numPrims ?? 0;
+    prevPrims = effectivePrims(first.geo);
   } catch { /* reported by the checks below */ }
   const want = randInt(r, 1, 4);
   let truncated = '';
@@ -208,7 +213,7 @@ async function buildGraph(engine: Engine, seed: number): Promise<Built> {
     Object.assign(nodes, trial);
     chain.push(def.type);
     prev = name;
-    prevPrims = g?.numPrims ?? 0;
+    prevPrims = effectivePrims(g);
   }
   return { graph: { nodes, output: prev }, chain, truncated };
 }

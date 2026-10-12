@@ -13,7 +13,7 @@ import { decomposeXform, expandForExport, isolatedMask, pieces, xf, xfLinear } f
 import type { ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, stripPacked } from '../core/packed.ts';
 import { heightmapBytes } from './heightmap.ts';
-import { splinesToPolylines } from '../core/splines.ts';
+import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
 import type { HeightmapFormat } from './heightmap.ts';
 
 export type { ExportOptions } from './common.ts';
@@ -277,14 +277,14 @@ export function exportFormatFromPath(path: string): string {
 }
 
 /**
- * Spline prims (Bezier/NURBS) written as the polylines they evaluate to, with a note: the formats here have no spline
- * prims (json keeps them losslessly and is not converted).
+ * Spline prims (Bezier/NURBS), also inside packed sources, written as the polylines they evaluate to, with a note: the
+ * formats here have no spline prims (json keeps them losslessly and is not converted).
  */
 function splinesForExport(g: Geometry, o: ExportOptions, format: string): Geometry {
-  if (!g.hasSplines()) return g;
-  const r = splinesToPolylines(g);
-  o.warn?.(`${format}: ${r.converted} spline curve${r.converted === 1 ? '' : 's'} (Bezier/NURBS) written as polylines (json keeps them as splines)`);
-  return r.geo;
+  if (!hasSplinesDeep(g)) return g;
+  const n = g.numSplines;
+  o.warn?.(`${format}: ${n ? `${n} spline curve${n === 1 ? '' : 's'}` : 'spline curves inside packed instances'} (Bezier/NURBS) written as polylines (json keeps them as splines)`);
+  return splinesToPolylinesDeep(g).geo;
 }
 
 /** Synchronous export for every format except glb/gltf (see exportGeometryAsync). */
