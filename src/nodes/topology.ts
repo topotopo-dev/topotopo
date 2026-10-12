@@ -35,7 +35,8 @@ defineNode({
   type: 'clean',
   category: 'topology',
   summary: 'Tidy geometry: weld duplicates, drop degenerate/zero-area prims and unused points, optionally fix winding.',
-  aliases: ['cleanup', 'repair'],
+  description: 'For holes, non-manifold edges, inconsistent winding and self-intersections use mesh_repair.',
+  aliases: ['cleanup'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
     fuse_distance: { type: 'float', default: 0, min: 0, desc: 'weld points within this distance first (0 = off)' },
