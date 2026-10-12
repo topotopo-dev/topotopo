@@ -10,15 +10,17 @@ WORKFLOW
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs; overlays for specific questions: wireframe "hard"/"boundary", views "section", glyphs "N", label_groups, shading "matcap", see help topic "render"). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
-6. export to glb/gltf (materials, meshopt), geo (Houdini), csv (Unreal PCG points), points.json, obj/usda/ply/stl/json for Unreal, Blender, Houdini.
+6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal.
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
-INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb and usda export them as instances). See help topic "instancing".
+INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
+PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
+CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
-TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape. See help topic "heightfield".`;
+TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".`;
 
 export const TOPICS: Record<string, string> = {
   graph: `GRAPH FORMAT
@@ -183,7 +185,8 @@ Common names:
   width float curve diameter (polywire, USD curves) · curveu 0..1 along curves (resample)
   name string piece name (export splits meshes by it) · class int piece id (connectivity) · copynum int (copy nodes)
   material string prim: material name (material node); detail "materials" = JSON table name → {baseColor, metallic,
-    roughness, emissive, alpha, doubleSided, unlit} that exporters write as glTF materials (Houdini shop_materialpath is read too)
+    roughness, emissive, alpha, doubleSided, unlit, textures: {baseColor, normal, roughness} file paths} that exporters
+    write as glTF / USD materials (Houdini shop_materialpath is read too)
   id int · piece · variant int (copy_to_points variants) · height (terrain 0-1)
 Instancing transform: P + trans, rotation from orient, else N (+Z axis) and up (+Y axis), then rot; scale = pscale * scale.
 Types: float/int with tuple size 1-4 (up to 16), or string. Merging unions attributes; missing values take defaults
@@ -252,7 +255,10 @@ UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes 
   location = (origin.x × 100, origin.z × 100, 100 × (height_min + range × 32768 / 65535)).
   Prefer resolutions Unreal likes (127, 253, 505, 1009, 2017, 4033 per side): heightfield_resample {samples: [505, 505]}.
   Weight layers: export {format: "mask_png", layers: ["mask", "flow"]} → one 8-bit PNG per layer (name_<layer>.png).
-  Tiles: pass the same height_min / height_max to every export.`,
+  Tiles: pass the same height_min / height_max to every export.
+  Whole scene: export {format: "unreal_landscape", path: "exports/level"} of a merge(heightfield, meshes, instances) →
+  heightmap + every layer + landscape.json (the exact Landscape import settings and steps) + objects.glb + the instance
+  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). examples/unreal_demo.json is a complete scene.`,
 
   loops: `FOREACH LOOPS
 {"type": "foreach", "in": ["lots"], "params": {"mode": "prims", "body": {
@@ -291,13 +297,94 @@ Every other node (boolean, subdivide, scatter, normal, measure, uv_*, …) gets 
   source's own colours win and an anchor Cd tints colourless sources.
 See them: render draws instances (an evenly spread subset above 600k triangles, with a note "rendering 9.5k of 30k
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
-Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, TRANSLATION/ROTATION/SCALE per instance; shear
-  is approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices, positions,
-  orientations, scales); json keeps them losslessly; obj/ply/stl/geo/csv/points.json expand them (warned).
-  instancing:"expand" (export option) always writes real geometry. Unreal: glb instances import as instanced meshes
-  where the importer supports EXT_mesh_gpu_instancing; USD PointInstancer → HISM.
-Example (forest): terrain → scatter → attrib_randomize {name:"variant", distribution:"choice", values:["pine","fir","oak"]}
-  → copy_to_points {pack:true, variants:"name"} with trees = merge of three meshes named pine/fir/oak (examples/forest.json).`,
+Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",
+  TRANSLATION/ROTATION/SCALE per instance, anchor attributes as _NAME instance accessors (Cd → _COLOR); shear is
+  approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices, positions, orientations,
+  scales, ids, velocities, primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
+  csv / points.json → one row per instance (instance stream: Position/Rotation/Scale or P/orient/scale, Mesh column)
+  + <name>.meshes.json + one GLB per source; json keeps them losslessly; obj/ply/stl expand them (warned).
+  instancing:"expand" (export option) always writes real geometry (instances:"expand" for csv/points.json only).
+  Unreal: instances.csv + meshes for PCG / ISM, or glb instances where the importer supports EXT_mesh_gpu_instancing;
+  USD PointInstancer → HISM.
+Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
+  with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
+
+  pcg: `PCG: SCATTERING AND INSTANCING (Houdini scatter/copy toolkit, Unreal PCG point filters)
+THE CHAIN
+  mask (0..1 point attribute from features) → scatter {density_mask:"mask"} → orient (frames, random yaw/tilt/scale)
+  → prune (overlaps, density, expression, keep-out geometry) → copy_to_points {pack:true, variants, variant_weights}
+  → export glb (EXT_mesh_gpu_instancing) / usda (PointInstancer) / csv {pcg:true} (Unreal PCG point stream, help "export").
+  Points carry everything as Houdini attributes: P, N, up, orient, pscale, scale, Cd, name, variant, seed, mask, cluster.
+mask {by, min, max, falloff, ramp, invert, combine, name:"mask"}: v = feature; 1 inside [min, max], linear fade over falloff.
+  by slope (degrees from up; default 0..30 = gentle) | height (metres along up) | curvature (1/m, + convex, − concave)
+  | occlusion (0..1 AO, samples) | distance (metres to input 1: mesh, curve or points) | direction (degrees between N and
+  direction) | noise (0..1, frequency, octaves) | attribute (source_attrib) | group (pattern) | inside (input 1 closed mesh;
+  falloff = soft edge outside). combine replace | multiply (and) | max (or) | add | subtract | min with the existing mask.
+  Chain masks: {by:"slope", max:25, falloff:10} → {by:"distance", min:5, max:1e9, falloff:3, combine:"multiply"} (input 1 = road).
+  Point clouds without N take slope/direction/curvature/occlusion from the surface in input 1.
+attribute_from_map {path, projection:"uv"|"xz"|"xy"|"yz", size, center, channel, remap, name}: PNG → point attribute
+  (density maps, masks, Cd). xz = top view, image spans size × size around center (same layout as heightfield png16).
+scatter: generate_by count (exactly count) | density (density × density_scale per m² × weight) | auto (legacy: density > 0 →
+  density, else count). weight = density_attrib (point/vertex/prim, ≥ 0) × density_mask (0..1). relax (blue noise, follows
+  the weights), relax_iterations (Lloyd-style push-apart on the surface), min_distance (exact), max_per_prim,
+  emit_attributes ("*": point/vertex attributes interpolated, prim attributes copied; "^uv" excludes), write_primuv
+  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume.
+orient {mode, align_axis, upright, random_yaw, tilt, scale_min/max, scale_attrib}: writes orient + N + up (+Z = N, +Y = up,
+  as copy_to_points reads them). mode normal_up (point N/up) | surface (normal of input 1; snap) | curve_tangent (nearest
+  curve of input 1, rotation-minimising up) | direction | look_at (target) | random (axis, max_angle).
+  Trees/rocks on terrain: {mode:"surface", align_axis:"y"} (up follows the slope) or {mode:"direction", random_yaw:[0,360]}
+  (upright). Posts along a sloped road: {mode:"normal_up", upright:true} after points_along_curve.
+points_along_curve {spacing | count | mode subdivision/at_points, start_offset, end_offset, jitter, side_offset, both_sides}:
+  curveu, tangent = N, up (RMF), orient, curve_id, side; Unreal PCG Spline Sampler.
+prune {mode}: overlap (spheres radius × pscale, priority largest | smallest | random | order | attribute: none overlap) |
+  density (keep with probability attrib × fraction) | expression ("@mask<0.5" removed) | near_geometry (within distance
+  of input 1, inside its closed polygons). invert keeps the others.
+cluster {method kmeans (count, iterations) | radius, center, color}: int cluster per point; color:true for a debug render.
+copy_to_points: variants "name"/"piece" + variant_attrib (exact pick) or variant_weights [3, 1, 1] (seeded weighted pick);
+  scale_attrib (e.g. "mask": bigger where the mask is high), rotate_attrib (float yaw degrees, vec3 Euler, vec4 quaternion).
+  pack:true for anything above a few thousand copies.
+Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatter ≈ Surface/Spline/Volume Sampler; orient ≈
+  Transform Points; prune ≈ Self Pruning / Density Filter / Difference; copy_to_points pack ≈ Static Mesh Spawner.
+Example: examples/forest.json (30k candidates → pruned packed forest) and examples/pcg_scatter.json (road, lamps, rocks).`,
+
+  curves: `CURVES (polylines and Bezier / NURBS spline prims)
+Polylines are open prims of points; closed curves are polygons (faces). Spline prims are Houdini's Bezier/NURBS curves:
+  the prim's points are its CONTROL POINTS (CVs) and the curve is evaluated exactly wherever it is needed.
+  bezier {points, order, closed, weights}   segments of order CVs sharing their ends: 7 CVs of order 4 = 2 cubic segments
+                                            (CVs 0-3, 3-6); closed: segments × (order-1) CVs. order 4 = cubic.
+  nurbs {points, order, closed, knots, parameterization, weights, fit}   clamped open curves start/end on their end CVs;
+                                            fit:true passes THROUGH the points (CVs computed). knots [] = automatic.
+  Attributes: prim spline_order, prim float[] knots (NURBS), point Pw (weights, default 1). Point attributes on CVs
+  (Cd, width, pscale) blend along the curve with its basis weights.
+Which nodes see the spline itself: transform and every deformer move the CVs (the curve follows, like Houdini);
+  attribute/group/delete/merge/copy/wrangle/script/pack nodes work on the CV points; resample samples the TRUE curve
+  evenly by arc length (treat_splines "control_polygon" = the CV hull); carve, ends, sweep, polywire, offset_curve_3d,
+  project_curve, curve_attribs evaluate it themselves. EVERY OTHER node gets polylines automatically, with a warning
+  "converted N spline curves to polylines for <node>" (adaptive: chords within 1/2000 of the curve size). To choose the
+  resolution put convert_curve {to:"polyline", tolerance | segments per span} or resample before such nodes.
+  render draws the evaluated curves; export writes polylines (json keeps splines).
+Nodes:
+  convert_curve {to: polyline|bezier|nurbs, order, fit, tolerance, segments}   spline → polyline evaluates; bezier ⇄
+      nurbs is exact; polyline → spline uses the points as CVs, or passes through them with fit:true.
+  spline_fit {tolerance | cv_count, smoothing, order, output nurbs|polyline}   least-squares NURBS through ordered points:
+      denoise GPS-like / jittered polylines, compress dense curves (prim fit_error = largest deviation).
+  fillet_curve {radius, type round|chamfer|bezier, segments, group (corner points), angle_min, clamp}   rounds polyline
+      corners in 3D (new points in point group "fillet").
+  offset_curve_3d {distance, lift, frame rmf|plane, up, corner mitre|round|bevel, both}   parallel curves in 3D:
+      rails, kerbs, lanes (both:true = two rails, prim side ±1; frame "plane" keeps them level). offset_curve is the
+      2D (Clipper) grow/shrink of CLOSED flat shapes; use offset_curve_3d for open paths or anything not flat.
+  project_curve (curves, surface | heightfield) {mode direction|closest, direction, spacing, lift, misses}   drapes a
+      curve onto terrain; spacing resamples first so it follows the bumps; writes point hit and N (smooth normals).
+  curve_attribs {curveu, arclength, tangent (tangentu), frame (N = tangent, up), curvature, segment, ramp_attrib + ramp}
+      e.g. ramp_attrib "width" + ramp [[0,0.3],[1,0.05]] → polywire tapers; frame:true → copy_to_points aligns copies.
+Recipes:
+  Road on terrain: nurbs {points, fit:true} → project_curve (terrain) {spacing:0.3, lift:0.1} → wrangle "@up = @N;"
+    → sweep {shape:"ribbon", radius:1.2}. (On a heightfield: heightfield_path cuts the road into the terrain.)
+  Handrails: curve (corners) → fillet_curve {radius:1.5} → offset_curve_3d {distance:0.7, lift:0.9, both:true,
+    frame:"plane"} → sweep {radius:0.04}; posts: resample the rails {length:1.5} → copy_to_points a thin box.
+  Letter / logo outline: bezier {closed:true, points} (+ inner contours for holes) → convert_curve → extrude.
+  Cable with sag: nurbs {points:[a, mid lowered, b]} → resample {length:0.05} → polywire; taper with curve_attribs.
+See examples/splines.json.`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
@@ -367,7 +454,9 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
-  precision 64 | 32 (geo). For Unreal and Blender keep the default uncompressed GLB.
+  precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
+  prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
+  uncompressed GLB.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. N → NORMAL (else computed, 60° cusp),
   uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. Custom attributes: every other numeric point/vertex attribute
@@ -375,6 +464,11 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
 MATERIALS: the material node writes prim "material" + the detail table. Vertex colours win: prims whose Cd is not all
   white export baseColor white × COLOR_0 with the material's metallic/roughness/emissive; otherwise baseColor = the
   material colour. alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
+TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the workspace/graph; the mesh
+  needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
+  map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
+  keep the paths in the material table. glTF import records texture paths (or "embedded:<name>") without decoding.
+  USD materials: UsdPreviewSurface per table entry under /root/materials, bound per mesh or per GeomSubset.
 UNREAL: import the GLB (Interchange): meshes, materials and vertex colours. PCG points: export csv with pcg:true
   (Name, Position.X/Y/Z, Rotation.Roll/Pitch/Yaw, Scale.X/Y/Z, Density, Color.R/G/B/A, Seed, then other attributes).
   Unreal space: X = x, Y = z, Z = y (Y/Z swap, like Unreal's glTF importer and Houdini Engine), centimetres (scale
@@ -384,16 +478,43 @@ UNREAL: import the GLB (Interchange): meshes, materials and vertex colours. PCG 
   Vector4 Color; int Seed} (+ any extra columns), import the CSV as a DataTable with it, then in a PCG graph use
   "Load Data Table" (or Get Data Table Row) and map Position/Rotation/Scale/Density/Color/Seed onto the point
   properties ($Position …) with Attribute Rename/Copy if your version keeps them as attributes; spawn with Static Mesh Spawner.
-HOUDINI: File SOP reads .geo (and glb/obj/usd). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
+INSTANCE STREAM (csv / points.json of packed prims, instances "rows"): one row per instance in prim order. P = anchor
+  position, orient + scale = the instance 3×3 decomposed (mirror = negative scale x), Mesh = the source name (its single
+  prim "name", else source_<i>; the same names as the glTF nodes and USD prototypes), then every other anchor point /
+  packed prim attribute (id, variant, tint, height…). The transform inputs (N, up, orient, rot, scale, pscale, trans,
+  pivot) are not repeated: copy_to_points folded them into the transform. pcg:true writes Position/Rotation/Scale
+  (Unreal cm, degrees) + Mesh right after Seed. Next to it: <name>.meshes.json (Mesh → <name>_meshes/<Mesh>.glb,
+  instance counts, bounds, materials) and the GLBs (one source each, metres, Y-up, at the origin; meshes:false skips them).
+UNREAL LANDSCAPE BUNDLE: export {format:"unreal_landscape", path:"exports/level"} (a directory; a path ending in .json
+  names the manifest) of a geometry with a heightfield, plus the meshes/instances to place on it (merge them):
+  landscape.json (manifest), heightmap.png + heightmap.json (png16 + sidecar), layers/<layer>.png (every other layer, 8-bit;
+  layers outside 0..1 normalised, the range in the manifest), objects.glb (meshes + EXT_mesh_gpu_instancing instances),
+  objects_expanded.glb (the same with real copies, for importers without the extension),
+  instances.csv + instances.meshes.json + meshes/<Mesh>.glb (the instance stream). landscape.* in the manifest gives
+  Unreal's import layout for the heightmap (section size, sections per component, components, overall resolution: exact
+  for 127/253/505/1009/2017/4033 samples), scale, new_landscape_location_cm (the centre: the New Landscape panel centres
+  on it) and actor_location_cm (the corner, where the actor ends up).
+  Manual import (Unreal 5.8): 1. Landscape mode (Shift+2) > Manage > New > Import from File, heightmap.png. 2. Section
+  Size, Sections Per Component, Number of Components from landscape.json; Overall Resolution must match. 3. Location =
+  new_landscape_location_cm, Rotation 0, Scale = landscape.scale. 4. One landscape material layer per layers[] entry;
+  assign layers/<name>.png in the import panel (or Paint > Target Layers > Import). 5. Import. 6. objects.glb through the
+  Interchange glTF import at the origin (X = x, Y = z, Z = y, cm), or meshes/*.glb + instances.csv for PCG / ISM by Mesh.
+HOUDINI: File SOP reads .geo (and glb/obj/usd); packed prims are written as PackedGeometry with embedded geometry
+  stored once in sharedprimitivedata (layout not yet confirmed against a Houdini-written file: instancing "expand" is
+  the safe path). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
   A material name becomes a Houdini material path with a wrangle: s@shop_materialpath = "/mat/" + s@material;
 BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME).
-PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing, usda a PointInstancer, json keeps
-  them; obj/ply/stl/geo/csv/points.json expand them. Option instancing "expand" writes real geometry everywhere.
+PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing with per-instance attributes, usda a
+  PointInstancer with per-instance primvars, geo PackedGeometry prims, csv/points.json the instance stream, json keeps
+  them; obj/ply/stl expand them. Option instancing "expand" writes real geometry everywhere.
+SPLINES (Bezier/NURBS prims, help topic "curves"): every format but json writes the evaluated polylines (closed curves as
+  polygons), with a note; json keeps the spline prims. convert_curve first to choose the resolution.
 Heightfields: png16 (.png) / r16 (.r16, .raw) heightmaps with a .json sidecar (range + Unreal Landscape scale/location),
 mask_png (8-bit weight layers; layers: [...]); height_min/height_max fix the range. See help topic "heightfield".
 IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; external .bin; node transforms;
-  EXT_mesh_gpu_instancing as packed prims, instancing:"expand" for geometry; names → "name", materials → "material" + table), geo and uncompressed bgeo
-  (Houdini; not .bgeo.sc; volumes skipped), csv (P.x | x,y,z | P[x] | Unreal Position.X or struct cells), points.json,
+  EXT_mesh_gpu_instancing as packed prims with their _NAME instance attributes on the anchors, instancing:"expand" for
+  geometry; names → "name", materials → "material" + table with texture paths), geo and uncompressed bgeo
+  (Houdini; embedded packed geometry → packed prims; not .bgeo.sc; volumes and packed disk prims skipped), csv (P.x | x,y,z | P[x] | Unreal Position.X or struct cells), points.json,
   json (polyforge, points stream or Houdini geo, detected). up_axis "z" converts Z-up sources.`,
 
   verify: `VERIFY YOUR WORK (cheap checks before reaching for a render)

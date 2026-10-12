@@ -1,6 +1,7 @@
 // Registers every built-in node type (import for side effects).
 import './generate.ts';
 import './curves.ts';
+import './splines.ts';
 import './transform.ts';
 import './attributes.ts';
 import './groups.ts';
@@ -20,3 +21,4 @@ import './flow.ts';
 import './deform.ts';
 import './uv.ts';
 import './measure.ts';
+import './pcg.ts';

@@ -2,6 +2,9 @@
 // uvs, custom attributes, polylines and points; Houdini .geo (all attribute classes, groups, strings, polylines,
 // a hand-written Houdini-style sample); CSV (plain + Unreal PCG); points JSON. Every GLB written is checked with
 // the Khronos glTF validator (gltf-validator, offline).
+// Part 2: the instance stream (rows, Unreal transforms rebuilt within 1e-6, re-instancing, meshes sidecar + GLBs),
+// per-instance attributes in glTF and USD, packed Houdini .geo, material textures (glTF embed, USD UsdUVTexture,
+// import paths), the Unreal Landscape bundle, and scripts/export-demo.ts in a temp dir.
 //   node test/interop.ts
 import fs from 'node:fs';
 import path from 'node:path';
@@ -383,6 +386,377 @@ function encodeBinaryJSON(v: any): Uint8Array {
       check(r.ok && got === want, `file node reads ${f} (${got}/${want})${r.ok ? '' : ' ' + r.errors.map((e) => e.message).join(';')}`);
     }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
+// ================================================================ part 2: instances, textures, landscape bundle
+// packed scene: three named variants with materials, instances rotated/scaled per point, a mirrored subset, anchor
+// attributes of every kind (int id, float tint, string variant, colour, velocity), plus an ordinary mesh
+const instGraph = {
+  nodes: {
+    a: { type: 'box', params: { size: [0.6, 1, 0.6], center: [0, 0.5, 0] } },
+    am: { type: 'material', in: ['a'], params: { name: 'crate', base_color: '#a0703c', roughness: 0.7 } },
+    an: { type: 'attrib_create', in: ['am'], params: { name: 'name', class: 'prim', value: 'crate' } },
+    b: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.5, center: [0, 0.5, 0] } },
+    bm: { type: 'material', in: ['b'], params: { name: 'stone', base_color: [0.4, 0.4, 0.42] } },
+    bn: { type: 'attrib_create', in: ['bm'], params: { name: 'name', class: 'prim', value: 'boulder' } },
+    c: { type: 'tube', params: { radius: 0.2, height: 2, center: [0, 1, 0], cols: 6 } },
+    cn: { type: 'attrib_create', in: ['c'], params: { name: 'name', class: 'prim', value: 'post' } },
+    srcs: { type: 'merge', in: ['an', 'bn', 'cn'] },
+    pts: { type: 'point_grid', params: { counts: [6, 1, 5], size: [20, 0, 16] } },
+    pv: { type: 'attrib_randomize', in: ['pts'], params: { name: 'variant', distribution: 'choice', values: ['crate', 'boulder', 'post'], seed: 3 } },
+    po: { type: 'attrib_randomize', in: ['pv'], params: { name: 'orient', distribution: 'orient', seed: 4 } },
+    pw: { type: 'wrangle', in: ['po'], params: { code: '@pscale = 0.5 + rand(@ptnum) * 1.5;\nv@scale = set(1, 1 + rand(@ptnum + 1), 1);\ni@id = 1000 + @ptnum * 7;\nf@tint = rand(@ptnum + 2);\nv@Cd = set(rand(@ptnum + 3), 0.25, 0.75);\n@P.y += rand(@ptnum + 4) * 2;' } },
+    inst: { type: 'copy_to_points', in: ['srcs', 'pw'], params: { pack: true, variants: 'name', variant_attrib: 'variant' } },
+    mir: { type: 'transform', in: ['inst'], params: { group: '@P.x>5', scale: [-1, 1, 1] } },
+    rot0: { type: 'transform', in: ['mir'], params: { rotate: [0, 30, 0] } },
+    // anchors are points: a wrangle adds a string label and a velocity per instance (copy_to_points consumes variant and v)
+    rot: { type: 'wrangle', in: ['rot0'], params: { code: 's@variant = @ptnum % 3 == 0 ? "tall" : "short";\nv@v = set(@ptnum * 0.1, 0, -1);' } },
+    ground: { type: 'grid', params: { size: [24, 20] } },
+    scene: { type: 'merge', in: ['ground', 'rot'] },
+  },
+  output: 'scene',
+};
+const iscene = await cook(instGraph);
+const iinst = await cook({ ...instGraph, output: 'rot' });
+check(iinst.numPacked === 30 && iinst.packedSources.length === 3 && iscene.numPacked === 30, `instance scene: ${iinst.numPacked} instances of ${iinst.packedSources.length} sources`);
+const { instancePoints, rotatorToHoudini } = await import('../src/io/points.ts');
+const { packedSourceNames, packedPrims } = await import('../src/io/common.ts');
+const { m4fromQuat } = await import('../src/core/math.ts');
+const srcNames = packedSourceNames(iinst);
+check(srcNames.slice().sort().join() === 'boulder,crate,post', `source names from the prim "name" (${srcNames.join(', ')})`);
+const maxAbs = (a: ArrayLike<number>, b: ArrayLike<number>) => { let d = 0; for (let i = 0; i < a.length; i++) d = Math.max(d, Math.abs(a[i] - b[i])); return d; };
+const mirrored = packedPrims(iinst).filter((p) => { const X = iinst.packedXform!, o = p * 9; return X[o] * (X[o + 4] * X[o + 8] - X[o + 5] * X[o + 7]) - X[o + 3] * (X[o + 1] * X[o + 8] - X[o + 2] * X[o + 7]) + X[o + 6] * (X[o + 1] * X[o + 5] - X[o + 2] * X[o + 4]) < 0; }).length;
+check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirrored})`);
+
+// ---------------------------------------------------------------- instance stream: rows, decomposition, Unreal transforms
+{
+  const st = instancePoints(iinst);
+  let d = 0;
+  st.prims.forEach((p, i) => {
+    const R = m4fromQuat(st.pts.points.get('orient')!.get(i) as any), s = st.pts.points.get('scale')!.get(i) as number[];
+    const M = new Float64Array(16);
+    for (let c = 0; c < 3; c++) for (let r = 0; r < 3; r++) M[c * 4 + r] = R[c * 4 + r] * s[c];
+    M[12] = st.pts.P[i * 3]; M[13] = st.pts.P[i * 3 + 1]; M[14] = st.pts.P[i * 3 + 2]; M[15] = 1;
+    d = Math.max(d, maxAbs(M, iinst.packedFullTransform(p)));
+  });
+  check(st.pts.numPoints === iinst.numPacked && d < 1e-9, `instance stream: one row per instance, T·R(orient)·S(scale) rebuilds the full transform (max diff ${d.toExponential(1)})`);
+  const pn = st.pts.points.names();
+  check(['id', 'tint', 'variant', 'Cd', 'v', 'Mesh'].every((n) => pn.includes(n)) && !pn.includes('pscale') && !pn.includes('N'), `instance stream attributes: ${pn.join(' ')} (transform inputs folded)`);
+
+  const warns: string[] = [];
+  const csv = new TextDecoder().decode(exportGeometry(iscene, 'csv', { pcg: true, warn: (m) => warns.push(m) }));
+  const rows = parseCSVText(csv);
+  const h = rows[0];
+  check(rows.length - 1 === iscene.numPacked, `pcg csv: ${rows.length - 1} rows = ${iscene.numPacked} instances`);
+  check(h.slice(0, 17).join(',') === 'Name,Position.X,Position.Y,Position.Z,Rotation.Roll,Rotation.Pitch,Rotation.Yaw,Scale.X,Scale.Y,Scale.Z,Density,Color.R,Color.G,Color.B,Color.A,Seed,Mesh' && h.includes('id') && h.includes('tint') && h.includes('variant'),
+    `pcg csv instance header: ${h.join(',').slice(0, 140)}`);
+  check(warns.some((w) => /other point/.test(w)), 'pcg csv: the non-instanced ground points are reported as not written');
+  // Unreal → Houdini: R from the rotator, scale back through the axis swap, position /100 with Y/Z swapped
+  const col = (n: string) => h.indexOf(n);
+  const prims = packedPrims(iscene);
+  let ud = 0, meshOk = true;
+  rows.slice(1).forEach((r, i) => {
+    const R = rotatorToHoudini(+r[col('Rotation.Pitch')], +r[col('Rotation.Yaw')], +r[col('Rotation.Roll')]);
+    const s = [+r[col('Scale.X')], +r[col('Scale.Z')], +r[col('Scale.Y')]];
+    const M = new Float64Array(16);
+    for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) M[c * 4 + k] = R[c * 4 + k] * s[c];
+    M[12] = +r[col('Position.X')] / 100; M[13] = +r[col('Position.Z')] / 100; M[14] = +r[col('Position.Y')] / 100; M[15] = 1;
+    ud = Math.max(ud, maxAbs(M, iscene.packedFullTransform(prims[i])));
+    if (r[col('Mesh')] !== srcNames[iscene.packedSource![prims[i]]]) meshOk = false;
+  });
+  check(ud < 1e-6, `pcg csv: Position/Rotation/Scale rebuild every instance 4×4 within 1e-6, mirrored ones included (max diff ${ud.toExponential(1)})`);
+  check(meshOk, 'pcg csv: Mesh names the packed source of each row');
+  // struct cells (DataTable) carry the same instance rows
+  const cs = new TextDecoder().decode(exportGeometry(iscene, 'csv', { pcg: true, pcgStruct: true }));
+  check(parseCSVText(cs).length - 1 === 30 && parseCSVText(cs)[0].slice(0, 8).join(',') === 'Name,Position,Rotation,Scale,Density,Color,Seed,Mesh', 'pcg struct csv: one row per instance with Mesh');
+
+  // points JSON stream re-instanced by copy_to_points reproduces the instances
+  const pj = exportGeometry(iscene, 'pointsjson');
+  const pjj = JSON.parse(new TextDecoder().decode(pj));
+  check(pjj.count === 30 && pjj.kind === 'instances' && pjj.meshes.join() === srcNames.join() && pjj.attributes.Mesh?.type === 'string', `points.json instance stream: count ${pjj.count}, kind ${pjj.kind}, meshes ${pjj.meshes.join(',')}`);
+  const tmp = fs.mkdtempSync(path.join(ROOT, 'test', '.tmp-interop-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'inst.points.json'), pj);
+    const reGraph = { ...instGraph, nodes: { ...instGraph.nodes, f: { type: 'file', params: { path: path.join(tmp, 'inst.points.json') } }, re: { type: 'copy_to_points', in: ['srcs', 'f'], params: { pack: true, variants: 'name', variant_attrib: 'Mesh' } } }, output: 're' };
+    const re = await cook(reGraph);
+    let rd = 0;
+    const rp = packedPrims(re), op = packedPrims(iinst);
+    rp.forEach((p, i) => { rd = Math.max(rd, maxAbs(re.packedFullTransform(p), iinst.packedFullTransform(op[i]))); });
+    const srcOk = rp.every((p, i) => packedSourceNames(re)[re.packedSource![p]] === srcNames[iinst.packedSource![op[i]]]);
+    check(rp.length === 30 && rd < 1e-9 && srcOk, `points.json → copy_to_points {variant_attrib: "Mesh"} rebuilds the same instances (max diff ${rd.toExponential(1)})`);
+
+    // the multi-file export: stream + meshes sidecar + one GLB per source
+    const { exportFilesAsync } = await import('../src/io/files.ts');
+    const res = await exportFilesAsync(iscene, 'csv', path.join(tmp, 'props.csv'), { pcg: true, warn: () => {} });
+    const rel = res.files.map((f) => path.relative(tmp, f.path).split(path.sep).join('/'));
+    check(rel.join() === ['props.csv', 'props.meshes.json', ...srcNames.map((n) => `props_meshes/${n}.glb`)].join(), `csv instance export files: ${rel.join(', ')}`);
+    const side = JSON.parse(new TextDecoder().decode(res.files[1].bytes));
+    const counts: Record<string, number> = {};
+    for (const p of packedPrims(iscene)) { const n = srcNames[iscene.packedSource![p]]; counts[n] = (counts[n] ?? 0) + 1; }
+    check(side.format === 'polyforge-instance-meshes' && side.meshes.every((m: any, i: number) => m.name === srcNames[i] && m.file === `props_meshes/${m.name}.glb` && m.instances === counts[m.name]) && side.meshes.find((m: any) => m.name === 'crate').materials.join() === 'crate',
+      'meshes sidecar: names, files, instance counts and materials per source');
+    for (const f of res.files.filter((x) => x.path.endsWith('.glb'))) await validate(f.bytes, `source mesh ${path.basename(f.path)}`);
+    const crate = await importGeometryAsync(res.files.find((f) => f.path.endsWith('crate.glb'))!.bytes, 'glb');
+    check(crate.numPrims === 12 && !crate.hasPacked() && readMaterials(crate).crate !== undefined, `source GLB holds the source mesh at the origin (${crate.numPrims} triangles, material crate)`);
+    const noMesh = await exportFilesAsync(iscene, 'pointsjson', path.join(tmp, 'p.points.json'), { meshes: false });
+    check(noMesh.files.length === 2 && noMesh.files[1].path.endsWith('p.meshes.json'), 'points.json instance export with meshes:false: stream + sidecar only');
+    const exp = await exportFilesAsync(iscene, 'csv', path.join(tmp, 'all.csv'), { instances: 'expand', warn: () => {} });
+    check(exp.files.length === 1 && parseCSVText(new TextDecoder().decode(exp.files[0].bytes)).length - 1 > 30 * 8, 'instances:"expand": one row per point of the expanded geometry, no sidecar');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
+// ---------------------------------------------------------------- per-instance attributes: glTF and USD
+{
+  const byId = (g: Geometry) => {
+    const m = new Map<number, { cd: number[]; tint: number; variant: string; v: number[] }>();
+    for (const p of packedPrims(g)) {
+      const a = g.vertexPoint[g.primStart[p]];
+      const get = (n: string) => { const at = g.points.get(n) ?? g.prims.get(n); return at ? at.get(g.points.has(n) ? a : p) : undefined; };
+      m.set(get('id') as number, { cd: get('Cd') as number[], tint: get('tint') as number, variant: get('variant') as string, v: get('v') as number[] });
+    }
+    return m;
+  };
+  const want = byId(iscene);
+  for (const opts of [{}, { quantize: true }, { compress: 'meshopt' as const }]) {
+    const label = JSON.stringify(opts);
+    const glb = await exportGeometryAsync(iscene, 'glb', opts);
+    await validate(glb, `glb instance attributes ${label}`);
+    const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + new DataView(glb.buffer, glb.byteOffset).getUint32(12, true))));
+    const sems = Object.keys(json.nodes.find((n: any) => n.extensions?.EXT_mesh_gpu_instancing)?.extensions.EXT_mesh_gpu_instancing.attributes ?? {});
+    check(['_COLOR', '_ID', '_TINT', '_VARIANT', '_V'].every((s) => sems.includes(s)) && !sems.includes('_ORIENT') && !sems.includes('_N'), `glb ${label}: instance accessors ${sems.join(' ')}`);
+    const back = await importGeometryAsync(glb, 'glb');
+    const got = byId(back);
+    let ok = got.size === want.size, worst = 0;
+    for (const [id, w] of want) {
+      const b = got.get(id);
+      if (!b || b.variant !== w.variant) { ok = false; continue; }
+      worst = Math.max(worst, maxAbs(b.cd, w.cd), Math.abs(b.tint - w.tint), maxAbs(b.v, w.v));
+    }
+    check(ok && worst < 1e-6 && back.points.get('id')?.type === 'int' && back.points.get('variant')?.type === 'string', `glb ${label}: Cd, id, tint, variant (string), v survive per instance (max diff ${worst.toExponential(1)})`);
+    const names = back.prims.get('name');
+    check(!!names && new Set(back.packedSources.map((s) => (s.prims.get('name')?.get(0) as string))).size === 3 && packedSourceNames(back).slice().sort().join() === 'boulder,crate,post', 'glb: instanced meshes keep the source names');
+  }
+  const noCustom = await importGeometryAsync(await exportGeometryAsync(iscene, 'glb', { custom: false }), 'glb');
+  check(!noCustom.points.has('tint') && noCustom.numPacked === 30, 'glb custom:false: no instance attributes');
+
+  const usd = new TextDecoder().decode(exportGeometry(iscene, 'usda'));
+  const inst = usd.slice(usd.indexOf('def PointInstancer'), usd.indexOf('def Scope "prototypes"'));
+  const arrayLen = (re: RegExp) => { const m = re.exec(inst); return m ? m[1].split(/,\s*(?![^()]*\))/).filter((x) => x.trim()).length : -1; };
+  check(arrayLen(/color3f\[\] primvars:displayColor = \[([^\]]*)\] \(\s*interpolation = "vertex"/) === 30, 'usda: primvars:displayColor per instance (interpolation vertex)');
+  check(arrayLen(/int64\[\] ids = \[([^\]]*)\]/) === 30 && /int64\[\] ids = \[1000, /.test(inst), 'usda: ids from the id attribute');
+  check(arrayLen(/vector3f\[\] velocities = \[([^\]]*)\]/) === 30, 'usda: velocities from v');
+  check(arrayLen(/float\[\] primvars:tint = \[([^\]]*)\]/) === 30 && arrayLen(/string\[\] primvars:variant = \[([^\]]*)\]/) === 30, 'usda: other anchor attributes as primvars (float tint, string variant)');
+  const primvars = [...inst.matchAll(/\S+\[\] primvars:(\w+)/g)].map((m) => m[1]);
+  check(!primvars.includes('orient') && !primvars.includes('N'), `usda instancer primvars: ${primvars.join(' ')}`);
+  check(/def Material "crate"/.test(usd) && /uniform token info:id = "UsdPreviewSurface"/.test(usd) && /rel material:binding = <\/root\/materials\/crate>/.test(usd), 'usda: UsdPreviewSurface materials bound to the prototype meshes');
+  const usdNo = new TextDecoder().decode(exportGeometry(iscene, 'usda', { custom: false, materials: false }));
+  check(!/primvars:tint/.test(usdNo) && /int64\[\] ids/.test(usdNo) && !/def Material/.test(usdNo), 'usda custom:false: ids/velocities/displayColor only; materials:false: no materials');
+}
+
+// ---------------------------------------------------------------- Houdini .geo: PackedGeometry with shared embedded geometry
+{
+  for (const prec of [64, 32] as const) {
+    const text = new TextDecoder().decode(exportGeometry(iscene, 'geo', { precision: prec }));
+    const j = JSON.parse(text);
+    const prims = j[j.indexOf('primitives') + 1] as any[];
+    const packed = prims.filter((p) => p[0][1] === 'PackedGeometry');
+    const shared = j[j.indexOf('sharedprimitivedata') + 1] as any[];
+    check(packed.length === 30 && shared.length === 6 && shared[0] === 'PackedGeometry' && shared[1][0] === 'geo:embedded', `geo ${prec}: 30 PackedGeometry prims, 3 embedded sources stored once in sharedprimitivedata`);
+    const back = importGeometry(new TextEncoder().encode(text), 'geo');
+    let d = 0;
+    const a = packedPrims(iscene), b = packedPrims(back);
+    a.forEach((p, i) => { d = Math.max(d, maxAbs(back.packedFullTransform(b[i]), iscene.packedFullTransform(p))); });
+    const srcSame = a.every((p, i) => back.packedSources[back.packedSource![b[i]]].numPrims === iscene.packedSources[iscene.packedSource![p]].numPrims);
+    check(back.numPacked === 30 && back.packedSources.length === 3 && d < (prec === 64 ? 1e-12 : 1e-5) && srcSame && checkGeo(back).length === 0,
+      `geo ${prec}: re-import keeps 30 instances of 3 sources, transforms within ${prec === 64 ? '1e-12' : '1e-5'} (max diff ${d.toExponential(1)})`);
+    check(back.points.get('tint') !== undefined && back.points.get('variant')?.get(b[0] === undefined ? 0 : back.vertexPoint[back.primStart[b[0]]]) === iscene.points.get('variant')?.get(iscene.vertexPoint[iscene.primStart[a[0]]]), `geo ${prec}: anchor attributes ride along`);
+    if (prec === 64) {
+      const gb = importGeometry(encodeBinaryJSON(j), 'bgeo');
+      check(gb.numPacked === 30 && gb.packedSources.length === 3, '.bgeo (binary JSON) with PackedGeometry reads the same instances');
+      // tolerant reader: nested 3×3 rows, the shared key under another parameter name, a pivot
+      const alt = JSON.parse(text);
+      const ap = alt[alt.indexOf('primitives') + 1] as any[];
+      const first = ap.find((p) => p[0][1] === 'PackedGeometry');
+      const body = first[1];
+      const t = body[body.indexOf('transform') + 1] as number[];
+      body[body.indexOf('transform') + 1] = [t.slice(0, 3), t.slice(3, 6), t.slice(6, 9)];
+      const params = body[body.indexOf('parameters') + 1];
+      params.sharedkey = params.embedded; delete params.embedded;
+      body[body.indexOf('pivot') + 1] = [0.5, 0, 0];
+      const ga = importGeometry(new TextEncoder().encode(JSON.stringify(alt)), 'geo');
+      const pa = packedPrims(ga)[0];
+      const srcA = ga.packedSources[ga.packedSource![pa]], src0 = iscene.packedSources[iscene.packedSource![a[0]]];
+      check(ga.numPacked === 30 && maxAbs(ga.packedFullTransform(pa), iscene.packedFullTransform(a[0])) < 1e-12 && Math.abs(srcA.bbox().min[0] - (src0.bbox().min[0] - 0.5)) < 1e-9,
+        'geo reader: nested 3×3, another key parameter and a pivot (source moved by -pivot) are understood');
+    }
+  }
+  const ex = new TextDecoder().decode(exportGeometry(iscene, 'geo', { instancing: 'expand' }));
+  check(!/PackedGeometry/.test(ex) && !/sharedprimitivedata/.test(ex), 'geo instancing:"expand": real geometry, no packed prims');
+}
+
+// ---------------------------------------------------------------- material textures
+{
+  const tmp = fs.mkdtempSync(path.join(ROOT, 'test', '.tmp-interop-'));
+  try {
+    const zlib = await import('node:zlib');
+    const { encodePNG } = await import('../src/render/png.ts');
+    const png = (r: number, g: number, b: number) => { const px = new Uint8Array(8 * 8 * 4); for (let i = 0; i < 64; i++) px.set([r, g, b, 255], i * 4); return encodePNG(px, 8, 8, (d) => zlib.deflateSync(d)); };
+    fs.mkdirSync(path.join(tmp, 'tex'));
+    fs.writeFileSync(path.join(tmp, 'tex', 'brick.png'), png(170, 80, 50));
+    fs.writeFileSync(path.join(tmp, 'tex', 'brick_n.png'), png(128, 128, 255));
+    fs.writeFileSync(path.join(tmp, 'tex', 'brick_r.png'), png(200, 200, 200));
+    const host = createNodeHost({ baseDir: tmp });
+    const teng = new Engine(host);
+    await teng.init();
+    const tr = await teng.cook({
+      nodes: {
+        b: { type: 'box' },
+        u: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
+        m: { type: 'material', in: ['u'], params: { name: 'brick', base_color_map: 'tex/brick.png', normal_map: 'tex/brick_n.png', roughness_map: 'tex/brick_r.png', roughness: 0.4 } },
+        n: { type: 'material', in: ['m'], params: { name: 'plain', group: '0', base_color: 'red' } },
+      },
+      output: 'n',
+    });
+    check(tr.ok, `textured material graph cooks${tr.ok ? '' : ': ' + tr.errors.map((e) => e.message).join('; ')}`);
+    const tg = tr.geo!;
+    check(JSON.stringify(readMaterials(tg).brick.textures) === JSON.stringify({ baseColor: 'tex/brick.png', normal: 'tex/brick_n.png', roughness: 'tex/brick_r.png' }) && readMaterials(tg).plain.textures === undefined,
+      'material node: texture paths in the table (absent when unset)');
+    const readFile = (p: string) => host.readFile(p);
+    const tw: string[] = [];
+    const glb = await exportGeometryAsync(tg, 'glb', { readFile, warn: (m) => tw.push(m) });
+    await validate(glb, 'glb with embedded textures');
+    const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + new DataView(glb.buffer, glb.byteOffset).getUint32(12, true))));
+    const bm = json.materials.find((m: any) => m.name === 'brick');
+    check(json.images?.length === 3 && json.textures?.length === 3 && json.images.every((im: any) => im.mimeType === 'image/png' && im.bufferView !== undefined) && !tw.length,
+      `glb: 3 images embedded (${json.images?.map((i: any) => i.mimeType).join(', ')})`);
+    const pbr = bm.pbrMetallicRoughness; // glTF leaves out factors at their default (1)
+    check(pbr.baseColorTexture && bm.normalTexture && pbr.metallicRoughnessTexture && (pbr.roughnessFactor ?? 1) === 1 && (pbr.baseColorFactor ?? [1, 1, 1, 1]).slice(0, 3).join() === '1,1,1',
+      'glb: base colour / normal / metallicRoughness textures wired, factors neutral under the maps');
+    const back = await importGeometryAsync(glb, 'glb');
+    check(JSON.stringify(readMaterials(back).brick.textures) === JSON.stringify(readMaterials(tg).brick.textures), 'glb import: texture paths back in the material table');
+    const gltf = new TextDecoder().decode(await exportGeometryAsync(tg, 'gltf', { readFile }));
+    check((gltf.match(/"uri":"data:image\/png;base64,/g) ?? []).length === 3, '.gltf: images embedded as data URIs');
+    // a .gltf written elsewhere with an external image: the importer records the resolved path, no decoding
+    const gj = JSON.parse(gltf);
+    for (const m of gj.materials) delete m.extras;
+    gj.images[0].uri = 'maps/base.png';
+    fs.mkdirSync(path.join(tmp, 'ext'));
+    fs.writeFileSync(path.join(tmp, 'ext', 'scene.gltf'), JSON.stringify(gj));
+    const fe = await teng.cook({ nodes: { f: { type: 'file', params: { path: path.join(tmp, 'ext', 'scene.gltf') } } } });
+    const tex = fe.ok ? Object.values(readMaterials(fe.geo!)).map((m) => m.textures).filter(Boolean) : [];
+    const paths = tex.flatMap((t) => Object.values(t!));
+    check(fe.ok && paths.some((p) => p.replace(/\\/g, '/').endsWith('ext/maps/base.png')) && paths.some((p) => p.startsWith('embedded:')), `gltf import without extras: texture paths ${paths.join(', ')}`);
+    // missing file and no file access: warned, exported without the map, still valid
+    const mw: string[] = [];
+    const bad = await exportGeometryAsync(tg, 'glb', { readFile: async (p) => { if (p.includes('_n')) throw new Error('nope'); return host.readFile(p); }, warn: (m) => mw.push(m) });
+    await validate(bad, 'glb with a missing texture');
+    const nw: string[] = [];
+    await exportGeometryAsync(tg, 'glb', { warn: (m) => nw.push(m) });
+    check(mw.some((m) => /brick_n\.png.*could not be read/.test(m)) && nw.some((m) => /no file access/.test(m)), 'textures: unreadable maps and missing file access are warned');
+    const noUv = await teng.cook({ nodes: { b: { type: 'box' }, d: { type: 'attrib_delete', in: ['b'], params: { name: 'uv', class: 'vertex' } }, m: { type: 'material', in: ['d'], params: { name: 't', base_color_map: 'tex/brick.png' } } }, output: 'm' });
+    check(noUv.ok && !noUv.geo!.vertices.has('uv') && !noUv.geo!.points.has('uv'), `mesh without uv for the warning check${noUv.ok ? '' : ': ' + noUv.errors.map((e) => e.message).join('; ')}`);
+    const uw: string[] = [];
+    await exportGeometryAsync(noUv.geo!, 'glb', { readFile, warn: (m) => uw.push(m) });
+    check(uw.some((m) => /no uv attribute/.test(m)), 'textures on a mesh without uv are warned');
+    // USD: UsdUVTexture network with relative asset paths; geo keeps the paths in the table
+    const usd = new TextDecoder().decode(exportGeometry(tg, 'usda', { texturePath: (p) => '../' + p }));
+    check(/uniform token info:id = "UsdUVTexture"/.test(usd) && /asset inputs:file = @\.\.\/tex\/brick\.png@/.test(usd) && /color3f inputs:diffuseColor\.connect = <\/root\/materials\/brick\/base_color_map\.outputs:rgb>/.test(usd)
+      && /normal3f inputs:normal\.connect/.test(usd) && /float inputs:roughness\.connect = <\/root\/materials\/brick\/roughness_map\.outputs:r>/.test(usd) && /UsdPrimvarReader_float2/.test(usd), 'usda: UsdUVTexture shaders (base colour sRGB, normal, roughness) with relative asset paths');
+    check(/def GeomSubset "mat_brick"/.test(usd) && /def GeomSubset "mat_plain"/.test(usd) && /familyName = "materialBind"/.test(usd), 'usda: a mesh mixing materials binds them through GeomSubsets');
+    const geo = importGeometry(exportGeometry(tg, 'geo'), 'geo');
+    check(JSON.stringify(readMaterials(geo).brick.textures) === JSON.stringify(readMaterials(tg).brick.textures), 'geo: texture paths travel in the detail material table');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
+// ---------------------------------------------------------------- Unreal Landscape bundle
+{
+  const { unrealComponents } = await import('../src/io/unreal.ts');
+  const lay = (n: number) => { const c = unrealComponents(n, n); return `${c.sectionSize}/${c.sectionsPerComponent}/${c.components[0]}${c.exact ? '' : '!'}`; };
+  const table = [127, 253, 505, 1009, 2017, 4033, 8129].map(lay).join(' ');
+  check(table === '63/2/1 63/2/2 63/2/4 63/2/8 63/2/16 63/2/32 127/2/32', `Unreal component layouts for the recommended sizes: ${table}`);
+  check(!unrealComponents(201, 201).exact && unrealComponents(201, 201).resolution[0] >= 201, 'a size that does not fit is flagged, with the padded resolution');
+  const lg = await cook({
+    nodes: {
+      hf: { type: 'heightfield', params: { size: [63, 63], samples: [127, 127] } },
+      n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 6, element_size: 20, seed: 2 } },
+      e: { type: 'heightfield_erode', in: ['n'], params: { iterations: 5 } },
+      m: { type: 'heightfield_mask_by_feature', in: ['e'], params: { feature: 'slope', min_angle: 20, layer: 'rock' } },
+      pts: { type: 'heightfield_scatter', in: ['m'], params: { count: 40, mask_layer: '' } },
+      id: { type: 'wrangle', in: ['pts'], params: { code: 'i@id = @ptnum;' } },
+      s: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.5 } },
+      sn: { type: 'attrib_create', in: ['s'], params: { name: 'name', class: 'prim', value: 'bush' } },
+      inst: { type: 'copy_to_points', in: ['sn', 'id'], params: { pack: true } },
+      out: { type: 'merge', in: ['m', 'inst'] },
+    },
+    output: 'out',
+  });
+  const { exportFilesAsync } = await import('../src/io/files.ts');
+  const { heightmapExport } = await import('../src/io/heightmap.ts');
+  const { decodePNG } = await import('../src/io/png-decode.ts');
+  const res = await exportFilesAsync(lg, 'unreal_landscape', 'bundle/level', {});
+  const byPath = new Map(res.files.map((f) => [f.path, f.bytes]));
+  const names = [...byPath.keys()];
+  const need = ['landscape.json', 'heightmap.png', 'heightmap.json', 'objects.glb', 'objects_expanded.glb', 'instances.csv', 'instances.meshes.json', 'meshes/bush.glb', 'layers/rock.png', 'layers/flow.png'];
+  check(need.every((n) => byPath.has('bundle/level/' + n)), `bundle files: ${names.map((n) => n.replace('bundle/level/', '')).join(', ')}`);
+  const man = JSON.parse(new TextDecoder().decode(byPath.get('bundle/level/landscape.json')!));
+  const side = JSON.parse(new TextDecoder().decode(byPath.get('bundle/level/heightmap.json')!));
+  const ref = heightmapExport(lg, 'png16').info as any;
+  check(JSON.stringify(man.landscape.scale) === JSON.stringify(ref.unreal.scale) && JSON.stringify(man.landscape.actor_location_cm) === JSON.stringify(ref.unreal.location_cm) && JSON.stringify(side.unreal) === JSON.stringify(ref.unreal)
+    && man.heightmap.height_min_m === ref.height_min && man.heightmap.height_max_m === ref.height_max && man.heightmap.resolution.join() === '127,127',
+    `bundle manifest matches heightmapExport's sidecar: scale (${man.landscape.scale}), actor location (${man.landscape.actor_location_cm})`);
+  const half = 63 * man.landscape.scale[0];
+  check(man.landscape.section_size_quads === 63 && man.landscape.sections_per_component === 2 && man.landscape.components.join() === '1,1' && man.landscape.exact_fit && man.landscape.overall_resolution.join() === '127,127'
+    && Math.abs(man.landscape.new_landscape_location_cm[0] - (man.landscape.actor_location_cm[0] + half)) < 1e-6 && man.manual_import.length >= 5,
+    `bundle: Landscape layout 63 quads, 2×2 sections, 1×1 component; panel location = corner + half size (${man.landscape.new_landscape_location_cm})`);
+  const hm = decodePNG(byPath.get('bundle/level/heightmap.png')!);
+  const rk = decodePNG(byPath.get('bundle/level/layers/rock.png')!);
+  check(hm.width === 127 && hm.bitDepth === 16 && rk.width === 127 && rk.bitDepth === 8 && man.layers.some((l: any) => l.name === 'rock' && l.file === 'layers/rock.png'), 'bundle: 16-bit heightmap and 8-bit layer PNGs decode at 127×127');
+  check(!man.layers.some((l: any) => l.name === 'height') && man.instances.count === 40 && man.instances.sources.join() === 'bush' && man.objects === 'objects.glb', 'bundle manifest: layers (no height), instances, objects');
+  await validate(byPath.get('bundle/level/objects.glb')!, 'bundle objects.glb');
+  const oe = await importGeometryAsync(byPath.get('bundle/level/objects_expanded.glb')!, 'glb');
+  check(!oe.hasPacked() && oe.numPrims === 40 * 80 && man.objects_expanded === 'objects_expanded.glb', `bundle objects_expanded.glb: the instances as real geometry (${oe.numPrims} triangles)`);
+  check(parseCSVText(new TextDecoder().decode(byPath.get('bundle/level/instances.csv')!)).length - 1 === 40, 'bundle instances.csv: 40 rows');
+  const viaJson = await exportFilesAsync(lg, 'unreal_landscape', 'x/terrain.json', {});
+  check(viaJson.files[0].path === 'x/terrain.json' && viaJson.files.some((f) => f.path === 'x/heightmap.png'), 'unreal_landscape with a .json path names the manifest');
+  let nohf = '';
+  try { await exportFilesAsync(await cook({ nodes: { b: { type: 'box' } } }), 'unreal_landscape', 'y', {}); } catch (e: any) { nohf = e.message; }
+  check(/no heightfield/.test(nohf), 'unreal_landscape without a heightfield: clear error');
+}
+
+// ---------------------------------------------------------------- export:demo in a temp dir
+{
+  const tmp = fs.mkdtempSync(path.join(ROOT, 'test', '.tmp-interop-'));
+  try {
+    const { execFileSync } = await import('node:child_process');
+    const t0 = performance.now();
+    const out = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'export-demo.ts'), tmp], { encoding: 'utf8', cwd: ROOT });
+    const info = JSON.parse(fs.readFileSync(path.join(tmp, 'demo.json'), 'utf8'));
+    const files: string[] = info.files.map((f: any) => f.path);
+    const need = ['landscape/landscape.json', 'landscape/heightmap.png', 'landscape/objects.glb', 'landscape/objects_expanded.glb', 'landscape/instances.csv', 'scene.glb', 'scene_expanded.glb', 'scene.usda', 'scene.geo', 'instances.csv', 'instances.meshes.json'];
+    check(need.every((f) => files.includes(f) && fs.statSync(path.join(tmp, f)).size > 0) && info.scene.instances > 100 && info.warnings.length === 0 && /files, /.test(out),
+      `export:demo: ${files.length} files, ${info.scene.instances} instances of ${info.scene.sources} sources in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    const man = JSON.parse(fs.readFileSync(path.join(tmp, 'landscape', 'landscape.json'), 'utf8'));
+    check(man.landscape.exact_fit && man.landscape.components.join() === '2,2' && ['grass', 'rock', 'road'].every((l) => man.layers.some((x: any) => x.name === l)), 'export:demo: the landscape fits Unreal exactly (2×2 components) with grass/rock/road layers');
+    await validate(new Uint8Array(fs.readFileSync(path.join(tmp, 'scene.glb'))), 'export:demo scene.glb');
+    const sg = importGeometry(new Uint8Array(fs.readFileSync(path.join(tmp, 'scene.geo'))), 'geo');
+    check(sg.numPacked === info.scene.instances, `export:demo scene.geo re-imports ${sg.numPacked} packed instances`);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
+/** RFC 4180 rows (test helper). */
+function parseCSVText(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+    else if (c !== '\r') f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows;
 }
 
 console.log(fail ? `${fail} interop check(s) failed` : 'interop: all checks passed');

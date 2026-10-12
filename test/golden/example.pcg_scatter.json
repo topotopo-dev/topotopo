@@ -1,0 +1,70 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "cluster:int:1",
+        "curve_id:int:1",
+        "curveu:float:1",
+        "height:float:1",
+        "hitdist:float:1",
+        "hitprim:int:1",
+        "mask:float:1",
+        "side:int:1",
+        "tangent:float:3"
+      ],
+      "prim": ["copynum:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [31.3273, 5.3187, 31.1245],
+      "min": [-31.247, -3.9427, -31.0581]
+    },
+    "counts": {
+      "points": 9906,
+      "prims": 9577,
+      "vertices": 37213,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["caps", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "e78492c7df8b8e3d",
+      "attributes": {
+        "group.prim.caps": "6b0aaf9b82998de5",
+        "group.prim.sides": "554fe0cb643ec855",
+        "point.Cd": "0d0ef157061eff91",
+        "point.N": "dbe461957946c073",
+        "point.cluster": "9d7faf0623b0865c",
+        "point.curve_id": "b104f705adca8e1f",
+        "point.curveu": "6396fd20df55cc6e",
+        "point.height": "81ef7c808cb8d9d2",
+        "point.hitdist": "25e6e6077bd6c299",
+        "point.hitprim": "2209d1cdac230db7",
+        "point.mask": "e80daf29626db093",
+        "point.side": "57412fc5d023a99f",
+        "point.tangent": "2c0abc099ba6b783",
+        "prim.copynum": "ad3ce5e28b6a1d7c",
+        "vertex.uv": "3f1595bbf3bab809"
+      },
+      "topology": "23a27302ec673b44"
+    },
+    "packed": {
+      "hash": "b74535759e19550b",
+      "instances": 365,
+      "sources": ["8b3c77d11c0e9d3f", "0613b3ffe69f5c71"]
+    }
+  },
+  "name": "example.pcg_scatter",
+  "ok": true,
+  "source": "examples/pcg_scatter.json",
+  "warnings": []
+}

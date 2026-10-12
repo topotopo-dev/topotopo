@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [2, 0.3993, 2],
+      "min": [0, 0, 0]
+    },
+    "counts": {
+      "points": 17,
+      "prims": 1,
+      "vertices": 17,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": ["fillet"],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "6d53d5f3a02bbc45",
+      "attributes": {
+        "group.point.fillet": "bcc007c5032b2c1f"
+      },
+      "topology": "ad171d9632819c6c"
+    }
+  },
+  "name": "node.fillet_curve",
+  "ok": true,
+  "source": "fixture for node type \"fillet_curve\" (test/fixtures.ts)",
+  "warnings": []
+}

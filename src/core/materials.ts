@@ -1,8 +1,11 @@
 // Material data carried with geometry (not shading): a prim string attribute `material` names a material,
 // and a detail string attribute `materials` holds the table as JSON:
 //   { "name": { "baseColor": [r,g,b], "metallic": 0, "roughness": 0.5, "emissive": [r,g,b], "alpha": 1,
-//               "doubleSided": false, "unlit": false } }
-// Exporters turn the table into glTF materials. Houdini's `shop_materialpath` is accepted on import (basename).
+//               "doubleSided": false, "unlit": false,
+//               "textures": { "baseColor": "tex/brick.png", "normal": "tex/brick_n.png", "roughness": "tex/brick_r.png" } } }
+// Exporters turn the table into glTF / USD materials. Houdini's `shop_materialpath` is accepted on import (basename).
+// Texture entries are file paths (as given to the material node; exporters read or reference them); the key is
+// absent when a material has no texture, so tables without textures are unchanged.
 //
 // Geometry.merge keeps the first detail value of each name, so the table of the first input wins there.
 // The `merge` node and the exporters union tables with mergeMaterialTables() instead; other nodes that merge
@@ -17,7 +20,14 @@ export interface Material {
   alpha: number;
   doubleSided: boolean;
   unlit: boolean;
+  /** texture file paths (absent = none): base colour (sRGB), tangent-space normal map, roughness (grey) */
+  textures?: MaterialTextures;
 }
+
+export interface MaterialTextures { baseColor?: string; normal?: string; roughness?: string }
+
+/** Texture slots in table order. */
+export const TEXTURE_SLOTS = ['baseColor', 'normal', 'roughness'] as const;
 
 export type MaterialTable = Record<string, Material>;
 
@@ -49,7 +59,23 @@ export function normalizeMaterial(m: any): Material {
     alpha: num(m?.alpha, d.alpha),
     doubleSided: typeof m?.doubleSided === 'boolean' ? m.doubleSided : d.doubleSided,
     unlit: typeof m?.unlit === 'boolean' ? m.unlit : d.unlit,
+    ...textureField(m?.textures),
   };
+}
+
+/** { textures } with the non-empty string slots, or {} when there is none (keeps texture-free tables unchanged). */
+function textureField(t: any): { textures?: MaterialTextures } {
+  if (!t || typeof t !== 'object') return {};
+  const out: MaterialTextures = {};
+  for (const k of TEXTURE_SLOTS) if (typeof t[k] === 'string' && t[k].trim()) out[k] = t[k].trim();
+  return Object.keys(out).length ? { textures: out } : {};
+}
+
+/** Every texture path used by a table (deduplicated, table order). */
+export function texturePaths(t: MaterialTable): string[] {
+  const out = new Set<string>();
+  for (const m of Object.values(t)) for (const k of TEXTURE_SLOTS) { const p = m.textures?.[k]; if (p) out.add(p); }
+  return [...out];
 }
 
 /** The material table stored on the geometry (empty when there is none or it does not parse). */

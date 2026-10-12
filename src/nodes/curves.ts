@@ -1,5 +1,6 @@
 // Curves: generation (line, circle, curve, spiral, 2D shapes) and operations
 // (resample, carve, ends, sweep, polywire, revolve, extrude, offset, 2D booleans, fill, loft).
+// Bezier/NURBS prims and the spline toolkit live in splines.ts (nodes) and core/splines.ts (kernels).
 import { GeoBuilder, Geometry } from '../core/geometry.ts';
 import type { Src } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
@@ -11,6 +12,7 @@ import { crossSection, crossSectionFaces, detectPlane, fromManifold, planeMatrix
 import type { Plane } from '../core/manifold.ts';
 import { FRAMES, P, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
+import { arcTable, evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
 
 // ---------------------------------------------------------------- helpers
 
@@ -287,14 +289,17 @@ defineNode({
   type: 'resample',
   category: 'curve',
   summary: 'Resample curves (and polygon outlines) to even spacing; optional smoothing. Adds curveu.',
-  inputs: [{ name: 'curves', desc: 'polylines or polygons' }],
+  description: 'Bezier/NURBS prims are sampled on the true curve, evenly by arc length (treat_splines "exact"; their CV attributes are blended with the curve\'s own basis weights), or along their control polygon ("control_polygon"); either way the result is a polyline.',
+  inputs: [{ name: 'curves', desc: 'polylines, polygons or Bezier/NURBS curves' }],
+  splines: 'keep',
   params: {
     mode: { type: 'enum', options: ['length', 'count'], default: 'length', desc: 'segment length or a fixed segment count per curve' },
     length: { type: 'float', default: 0.1, min: 1e-6, desc: 'target segment length', aliases: ['seglen', 'segment_length'] },
     count: { type: 'int', default: 20, min: 1, desc: 'segments per curve (mode=count)', aliases: ['segments'] },
-    smooth: { type: 'bool', default: false, desc: 'Catmull-Rom smooth before resampling' },
+    smooth: { type: 'bool', default: false, desc: 'Catmull-Rom smooth before resampling (polylines)' },
     group: P.group('prim'),
     tangent: { type: 'bool', default: false, desc: 'also write point tangentu (unit tangent)' },
+    treat_splines: { type: 'enum', options: ['exact', 'control_polygon'], default: 'exact', desc: 'Bezier/NURBS prims: sample the curve itself by arc length (exact) or their control polygon as a polyline' },
   },
   outputs: 'point curveu (0..1 along each curve), optional tangentu',
   cook: ({ input, p }) => {
@@ -303,11 +308,30 @@ defineNode({
     const b = new GeoBuilder(g);
     const cu = b.attrib('point', 'curveu', 1);
     const tg = p.tangent ? b.attrib('point', 'tangentu', 3) : null;
+    const keptSplines: [number, number][] = [];
     for (let pr = 0; pr < g.numPrims; pr++) {
       const ptsIdx = g.primPoints(pr);
       const closed = !!g.primClosed[pr];
       if ((sel && !sel[pr]) || ptsIdx.length < 2) {
-        b.addPrim(ptsIdx.map((i) => b.copyPoint(i)), closed, pr);
+        const np = b.addPrim(ptsIdx.map((i) => b.copyPoint(i)), closed, pr);
+        if (g.isSpline(pr)) keptSplines.push([np, g.primKind![pr]]);
+        continue;
+      }
+      if (g.isSpline(pr) && p.treat_splines === 'exact') {
+        // the true curve, evenly by arc length; CV attributes follow the curve's basis weights
+        const s = splineFromPrim(g, pr);
+        const tab = arcTable(s);
+        let nseg = p.mode === 'count' ? p.count : Math.max(1, Math.round(tab.total / p.length));
+        if (s.closed) nseg = Math.max(3, nseg);
+        const smp = samplesByLength(s, nseg, tab);
+        const ids = smp.u.map((u, i) => {
+          const e = evalBasis(s, u);
+          const id = b.addPoint(e.P[0], e.P[1], e.P[2], { i: e.idx.map((k) => ptsIdx[k]), w: e.w });
+          cu.set(id, smp.total > 0 ? smp.len[i] / smp.total : 0);
+          if (tg) tg.set(id, tangentAt(s, u));
+          return id;
+        });
+        b.addPrim(ids, s.closed, pr);
         continue;
       }
       // dense polyline with provenance (pairs of source points + weight)
@@ -347,7 +371,11 @@ defineNode({
       }
       b.addPrim(ids, closed, pr);
     }
-    return b.build();
+    const out = b.build();
+    if (!g.hasSplines()) return out;
+    // spline prims outside the group stay splines (GeoBuilder makes every prim a polygon/polyline)
+    if (keptSplines.length) { out.ensurePacked(); for (const [np, k] of keptSplines) out.primKind![np] = k; }
+    return tidySplineAttribs(out);
   },
 });
 
@@ -355,13 +383,14 @@ defineNode({
   type: 'carve',
   category: 'curve',
   summary: 'Trim curves to a portion of their length (u range 0..1).',
-  inputs: [{ name: 'curves', desc: 'polylines' }],
+  inputs: [{ name: 'curves', desc: 'polylines (Bezier/NURBS curves are evaluated first)' }],
+  splines: 'keep',
   params: {
     start: { type: 'float', default: 0, min: 0, max: 1, desc: 'start u (0..1 of arc length)' },
     end: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'end u' },
   },
   cook: ({ input, p }) => {
-    const g = input(0);
+    const g = evaluateSplines(input(0));
     const b = new GeoBuilder(g);
     for (let pr = 0; pr < g.numPrims; pr++) {
       const idx = g.primPoints(pr);
@@ -388,14 +417,15 @@ defineNode({
   type: 'ends',
   category: 'curve',
   summary: 'Convert between closed polygons and open polylines (unroll outlines / close curves).',
-  aliases: ['convert_curve', 'unroll'],
-  inputs: [{ name: 'geo', desc: 'polygons or polylines' }],
+  aliases: ['unroll'],
+  inputs: [{ name: 'geo', desc: 'polygons or polylines (Bezier/NURBS curves are evaluated first)' }],
+  splines: 'keep',
   params: {
     mode: { type: 'enum', options: ['unroll', 'close', 'open'], default: 'unroll', desc: 'unroll: polygon → polyline outline (ends meet); close: polyline → polygon; open: polygon → polyline (drops closing edge)' },
     group: P.group('prim'),
   },
   cook: ({ input, p }) => {
-    const g = input(0);
+    const g = evaluateSplines(input(0));
     const sel = mask(g, 'prim', p.group);
     const b = new GeoBuilder(g);
     for (let i = 0; i < g.numPoints; i++) b.copyPoint(i);
@@ -483,9 +513,10 @@ defineNode({
   category: 'curve',
   summary: 'Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).',
   inputs: [
-    { name: 'backbone', desc: 'curves to sweep along' },
+    { name: 'backbone', desc: 'curves to sweep along (Bezier/NURBS curves are sampled adaptively)' },
     { name: 'profile', desc: 'cross-section curve drawn in the XY plane (optional; one per backbone or a single shared one)', optional: true },
   ],
+  splines: 'keep',
   params: {
     shape: { type: 'enum', options: ['circle', 'square', 'ribbon', 'half_circle'], default: 'circle', desc: 'built-in profile when no profile input' },
     radius: { type: 'float', default: 0.1, desc: 'built-in profile radius / half width', aliases: ['width', 'rad'] },
@@ -498,10 +529,10 @@ defineNode({
   },
   outputs: 'vertex uv; prim groups caps, sides',
   cook: ({ input, hasInput, p }) => {
-    const g = input(0);
+    const g = evaluateSplines(input(0));
     let profiles: Profile[];
     if (hasInput(1)) {
-      const pg = input(1);
+      const pg = evaluateSplines(input(1));
       profiles = [];
       for (let pr = 0; pr < pg.numPrims; pr++) profiles.push({ pts: curvePoints(pg, pr), closed: !!pg.primClosed[pr] });
       if (!profiles.length) throw new NodeError('profile input has no curves');
@@ -519,7 +550,8 @@ defineNode({
   category: 'curve',
   summary: 'Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Great for branches, cables, wireframes.',
   aliases: ['wire', 'tubes'],
-  inputs: [{ name: 'curves', desc: 'polylines (or polygon edges)' }],
+  inputs: [{ name: 'curves', desc: 'polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively' }],
+  splines: 'keep',
   params: {
     radius: { type: 'float', default: 0.05, desc: 'tube radius (used when no width attribute)', aliases: ['rad', 'wire_radius'] },
     divisions: { type: 'int', default: 8, min: 3, desc: 'sides around the tube', aliases: ['sides', 'cols'] },
@@ -528,7 +560,7 @@ defineNode({
   },
   outputs: 'vertex uv; prim groups caps, sides',
   cook: ({ input, p }) => {
-    const g = input(0);
+    const g = evaluateSplines(input(0));
     const wA = p.use_width ? g.points.get('width') : undefined;
     return sweepCurves(g, [circleProfile(1, p.divisions)], {
       caps: p.caps, twist: 0, up: [0, 1, 0], scaleRamp: null, uvLength: false,

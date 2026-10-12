@@ -20,6 +20,7 @@ import { Attribute, AttribTable, Geometry, unifyDisplayAttribs } from './geometr
 import { mergeMaterialTables, writeMaterials } from './materials.ts';
 import { m4normalMatrix, qFromMat, qMul } from './math.ts';
 import { resolveVertexNormals } from './topology.ts';
+import { splineCounts, splinesToPolylines } from './splines.ts';
 import type { Mat4, Quat } from './math.ts';
 
 /**
@@ -61,7 +62,7 @@ export function composePackedXforms(g: Geometry, m: Mat4, ptMask: ArrayLike<numb
   if (!kind) return;
   const A = xform3(m), X = g.packedXform!;
   for (let p = from; p < to; p++) {
-    if (!kind[p]) continue;
+    if (kind[p] !== 1) continue;
     if (ptMask && !ptMask[g.vertexPoint[g.primStart[p]]]) continue;
     mul3InPlace(A, X, p * 9);
   }
@@ -112,7 +113,7 @@ function dropPrims(g: Geometry, removed: Uint8Array): { geo: Geometry; keepPrim:
 /** The part of g that is not instanced: packed prims and the anchor points only they use removed. */
 export function stripPacked(g: Geometry): Geometry {
   if (!g.primKind) return g;
-  return dropPrims(g, g.primKind.slice()).geo;
+  return dropPrims(g, g.primKind.map((k) => (k === 1 ? 1 : 0))).geo;
 }
 
 /** A packed source ready to be written or copied: nested instances expanded, SDF volumes dropped. */
@@ -130,12 +131,12 @@ export function expandedTriangles(g: Geometry): number {
   if (m !== undefined) return m;
   let t = 0;
   for (let p = 0; p < g.numPrims; p++) {
-    if (g.primKind && g.primKind[p]) continue;
+    if (g.primKind && g.primKind[p]) continue; // instances below; spline curves draw no triangles
     if (g.primClosed[p]) { const n = g.primStart[p + 1] - g.primStart[p]; if (n >= 3) t += n - 2; }
   }
   if (g.primKind) {
     const per = g.packedSources.map(expandedTriangles);
-    for (let p = 0; p < g.numPrims; p++) if (g.primKind[p]) t += per[g.packedSource![p]] ?? 0;
+    for (let p = 0; p < g.numPrims; p++) if (g.primKind[p] === 1) t += per[g.packedSource![p]] ?? 0;
   }
   triMemo.set(g, t);
   return t;
@@ -248,7 +249,7 @@ export function expandPacked(g: Geometry, o: ExpandOptions = {}): ExpandResult {
   const np0 = g.numPoints, npr0 = g.numPrims;
   // instances selected, then limit and budget
   const sel: number[] = [];
-  for (let p = 0; p < npr0; p++) if (kind[p] && (!o.group || o.group[p]) && g.primStart[p + 1] - g.primStart[p] === 1) sel.push(p);
+  for (let p = 0; p < npr0; p++) if (kind[p] === 1 && (!o.group || o.group[p]) && g.primStart[p + 1] - g.primStart[p] === 1) sel.push(p);
   let drawn = sel;
   if (o.limit && o.limit > 0 && drawn.length > o.limit) {
     drawn = drawn.slice(0, o.limit);
@@ -461,8 +462,9 @@ function withShadingNormals(src: Geometry): Geometry {
 }
 
 /**
- * The renderer's packed hook: expand instances within a triangle budget, carry anchor colours/materials (and the
- * colour-by attribute) onto them, write a "piece" prim attribute, and remap a highlight mask onto the result.
+ * The renderer's packed and spline hook: expand instances within a triangle budget, carry anchor colours/materials (and
+ * the colour-by attribute) onto them, write a "piece" prim attribute, draw spline prims (Bezier/NURBS, also inside
+ * packed sources) as the polylines they evaluate to, and remap a highlight mask onto the result.
  * Options are passed through structurally so this core module does not depend on the renderer.
  */
 export function expandForRender<T extends { colorBy?: string | null; highlight?: { cls: 'point' | 'prim'; mask: Uint8Array; label?: string } | null; title?: string }>(
@@ -470,11 +472,25 @@ export function expandForRender<T extends { colorBy?: string | null; highlight?:
 ): { geo: Geometry; opts: T; notes: string[] } {
   const transfer = ['Cd', 'Alpha', 'material'];
   if (o.colorBy) transfer.push(o.colorBy.split('.')[0]);
-  const r = expandPacked(g, { maxTriangles, transfer, pieceAttrib: g.prims.has('piece') ? '' : 'piece', origins: !!o.highlight, prepare: withShadingNormals });
+  const r = g.hasPacked()
+    ? expandPacked(g, { maxTriangles, transfer, pieceAttrib: g.prims.has('piece') ? '' : 'piece', origins: !!o.highlight, prepare: withShadingNormals })
+    : { geo: g, instances: 0, expanded: 0, notes: [] as string[], primOrigin: undefined as Int32Array | undefined, pointOrigin: undefined as Int32Array | undefined };
   let opts = o;
   const h = o.highlight;
-  if (h && r.primOrigin && r.pointOrigin) {
-    const origin = h.cls === 'prim' ? r.primOrigin : r.pointOrigin;
+  let primOrigin = r.primOrigin, pointOrigin = r.pointOrigin;
+  const sc = splineCounts(r.geo);
+  if (sc) {
+    // spline prims draw as their polylines (prim order is kept; curve samples map to their heaviest CV)
+    const c = splinesToPolylines(r.geo, { origins: !!h });
+    if (h) {
+      primOrigin ??= Int32Array.from({ length: g.numPrims }, (_, i) => i);
+      const po = pointOrigin;
+      pointOrigin = po ? c.pointOrigin!.map((i) => po[i]) : c.pointOrigin;
+    }
+    r.geo = c.geo;
+  }
+  if (h && primOrigin && pointOrigin) {
+    const origin = h.cls === 'prim' ? primOrigin : pointOrigin;
     const mask = new Uint8Array(origin.length);
     for (let i = 0; i < origin.length; i++) mask[i] = h.mask[origin[i]] ?? 0;
     opts = { ...o, highlight: { ...h, mask } };
@@ -484,5 +500,6 @@ export function expandForRender<T extends { colorBy?: string | null; highlight?:
   const info = packedInfo(g);
   const notes = [...r.notes];
   if (info) notes.unshift(`${kfmt(info.instances)} packed instances of ${info.sources} source${info.sources === 1 ? '' : 's'} expanded for display`);
+  if (sc) notes.push(`${[sc.bezier ? `${sc.bezier} Bezier` : '', sc.nurbs ? `${sc.nurbs} NURBS` : ''].filter(Boolean).join(' + ')} curve${sc.bezier + sc.nurbs === 1 ? '' : 's'} drawn as polylines`);
   return { geo: r.geo, opts, notes };
 }
