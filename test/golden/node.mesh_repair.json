@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["repair_report:string:1"],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 25,
+      "vertices": 98,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["filled", "self_intersecting"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "5e7fa92eda54cd74",
+      "attributes": {
+        "detail.repair_report": "fa19a8cce79f1586",
+        "group.prim.filled": "d9345f13a38d38c9",
+        "group.prim.self_intersecting": "ffa0fd5c909a9fc6",
+        "vertex.uv": "2e503d45668a047f"
+      },
+      "topology": "bc028a2be017c251"
+    }
+  },
+  "name": "node.mesh_repair",
+  "ok": true,
+  "source": "fixture for node type \"mesh_repair\" (test/fixtures.ts)",
+  "warnings": ["[target] mesh_repair: 4 faces flipped, 1 hole filled"]
+}

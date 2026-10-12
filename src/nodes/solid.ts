@@ -1,5 +1,5 @@
 // Solid modelling via manifold-3d (booleans, clipping, Minkowski, smoothing, fracture,
-// slicing) and mesh decimation via meshoptimizer.
+// slicing). Decimation lives in remesh.ts.
 import { GeoBuilder, Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
@@ -9,7 +9,6 @@ import { KDTree, TriBVH } from '../core/spatial.ts';
 import { rng } from '../core/random.ts';
 import { normalize, m4invert } from '../core/math.ts';
 import type { Vec3 } from '../core/math.ts';
-import { MeshoptSimplifier } from 'meshoptimizer';
 import { P, mask } from './util.ts';
 import { applyMatrix } from './transform.ts';
 
@@ -183,37 +182,6 @@ defineNode({
     const r = track(s.refine(p.refine));
     return fromManifold(r, L, [{ geo: input(0), id: manifoldId(m) }]).geo;
   }),
-});
-
-defineNode({
-  type: 'decimate',
-  category: 'topology',
-  summary: 'Reduce triangle count while preserving shape (meshoptimizer). Output is triangles; vertex attributes are dropped.',
-  aliases: ['polyreduce', 'simplify', 'reduce'],
-  inputs: [{ name: 'geo', desc: 'polygon mesh' }],
-  params: {
-    ratio: { type: 'float', default: 0.25, min: 0, max: 1, desc: 'target fraction of triangles to keep', aliases: ['percentage', 'keep'] },
-    max_error: { type: 'float', default: 0.05, min: 0, desc: 'max deviation relative to mesh size (stops early if reached)', aliases: ['error'] },
-    lock_border: { type: 'bool', default: true, desc: 'keep open borders fixed' },
-    aggressive: { type: 'bool', default: false, desc: 'sloppy mode: ignores topology, reaches any target' },
-  },
-  cook: ({ input, p }) => {
-    const g = input(0);
-    const { tris } = triangulate(g);
-    if (!tris.length) throw new NodeError('decimate needs polygons');
-    const idx = Uint32Array.from(tris, (v) => g.vertexPoint[v]);
-    const pos = Float32Array.from(g.P);
-    const target = Math.max(3, Math.floor((idx.length / 3) * p.ratio) * 3);
-    const [out] = p.aggressive
-      ? MeshoptSimplifier.simplifySloppy(idx, pos, 3, null, target, p.max_error)
-      : MeshoptSimplifier.simplify(idx, pos, 3, target, p.max_error, p.lock_border ? ['LockBorder'] : []);
-    const prims: number[][] = [];
-    for (let i = 0; i < out.length; i += 3) prims.push([out[i], out[i + 1], out[i + 2]]);
-    const res = g.clone();
-    const r2 = new Geometry({ positions: g.P, prims });
-    r2.points = res.points;
-    return r2.removeUnusedPoints();
-  },
 });
 
 defineNode({

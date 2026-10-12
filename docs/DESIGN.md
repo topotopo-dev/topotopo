@@ -48,6 +48,8 @@ src/core/      geometry model + algorithms (no I/O)
   groupconvert.ts  any/all conversion of selections between point, vertex, prim and edge
   polyedit.ts    polygon-editing kernels: edge-point insertion + face splits (knife, polysplit, edge divide), plane chords,
                  quad rings, chain ordering, bridge, hole fill (quad fan, Coons grid), dissolve, collapse
+  remesh.ts      isotropic remeshing kernel (typed arrays in/out: the swap point for a native remesher), closest-point BVH,
+                 Geometry wrapper (features, seams, provenance); decimate.ts meshoptimizer decimation; repair.ts mesh repair
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
@@ -266,7 +268,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 | library | licence | used for |
 |---|---|---|
 | manifold-3d | Apache-2.0 | booleans, convex hull, Minkowski, smoothing/refine, level-set meshing, 2D cross-sections (Clipper2): offset, 2D booleans, text fill, extrude |
-| meshoptimizer | MIT | decimation; meshopt compression/decompression for glTF (EXT_meshopt_compression) |
+| meshoptimizer | MIT | decimation (simplifyWithAttributes, simplifySloppy, simplifyPoints), `lod`; meshopt compression/decompression for glTF (EXT_meshopt_compression) |
 | xatlas-wasm (xatlas by Jonathan Young) | MIT | `uv_unwrap` / `uv_autoseam`: chart segmentation, parameterisation, atlas packing (single-file ES module, WASM embedded) |
 | @gltf-transform/core + extensions | MIT | glTF 2.0 document model, GLB/glTF reading and writing, KHR/EXT extensions (materials, quantization, meshopt, Draco, instancing) |
 | earcut | ISC | n-gon triangulation |

@@ -209,7 +209,8 @@ ARRAY ATTRIBUTES: float[] int[] string[] hold a variable-length list per element
 Volumes are signed distance functions (negative inside) carried in geometry; nodes compose them lazily.
   sdf_shape (sphere box round_box torus capsule cylinder cone ellipsoid octahedron) → sdf_combine (union/subtract/intersect,
   smooth_* with blend k) → sdf_modify (offset shell noise twist bend repeat) → sdf_to_mesh (watertight triangles, smooth N).
-  sdf_from_mesh turns closed meshes into volumes (blend meshes, offsets); remesh = voxel remesh.
+  sdf_from_mesh turns closed meshes into volumes (blend meshes, offsets); remesh = voxel remesh (remesh_isotropic keeps
+  sharp edges, boundaries and attributes).
 sdf_expr: write the distance in JS: p = [x,y,z]; return a number. Inputs via sdf(0, p), sdf(1, p).
   IQ-style helpers: sdSphere(p,r) sdBox(p,[hx,hy,hz]) sdRoundBox(p,b,r) sdTorus(p,R,r) sdCapsule(p,a,b,r) sdCylinder(p,h,r)
   sdCone(p,h,r) sdEllipsoid(p,[rx,ry,rz]) sdPlane(p,n,h) sdOctahedron(p,s) sdHexPrism(p,[r,h]) sdSegment(p,a,b,r)
@@ -455,7 +456,11 @@ MEASURE NODES (category measure) turn shape into attributes for masks and colour
  plane with the cut in edge group "cut"; polybridge {source:"border:a", target:"border:b", delete_inner_faces:true} tunnels
  between two face groups; polyfill {mode:"grid"} caps holes with quads; dissolve {group:"split"} removes loops again.
 12) Rounded / chamfered hard-surface edges: box → poly_bevel {group:"angle>80", offset:0.05, divisions:3} (divisions 0 =
- chamfer; shape 1 = squarer, -0.5 = flat, -1 = cove). Only the rim of a slab: extrude → poly_bevel {group:"border:top"}.`,
+ chamfer; shape 1 = squarer, -0.5 = flat, -1 = cove). Only the rim of a slab: extrude → poly_bevel {group:"border:top"}.
+13) Clean asset pipeline: imported/broken mesh → mesh_repair (fuse, winding, small holes; report in detail repair_report)
+ → remesh_isotropic {target_length, feature_angle:40} (even triangles before uv_unwrap or simulation; target_attrib for
+ adaptive size) → uv_unwrap → lod {levels:4, ratios:[1,0.5,0.25,0.1]} (prim lod + name _LOD0…, export split_by_name) or
+ decimate {ratio, attributes:"uv N"} for one level. remesh (voxel) only when the input is beyond repair (it drops attributes).`,
 };
 
 export function topicList() {
