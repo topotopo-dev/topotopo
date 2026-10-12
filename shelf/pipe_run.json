@@ -146,6 +146,6 @@
     "watertight": true,
     "pivot": "curve",
     "inputs": ["curve"],
-    "thumbnail_render": { "azimuth": 35, "elevation": 30 }
+    "thumbnail_render": { "azimuth": 35, "elevation": 30, "zoom": 1.35 }
   }
 }

@@ -104,6 +104,6 @@
   "meta": {
     "shelf_group": "architecture",
     "watertight": true,
-    "thumbnail_render": { "azimuth": 20, "elevation": 20, "zoom": 1.3 }
+    "thumbnail_render": { "azimuth": 12, "elevation": 12, "zoom": 0.95 }
   }
 }
