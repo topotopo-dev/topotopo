@@ -5,11 +5,14 @@
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
 //                   [--shading flat|matcap|ao] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
-//                   [--instancing packed|expand]
+//                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
 //                   [--inspect summary|attributes|topology|all]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
+//   Packed instances to .csv/.points.json: one row per instance + <name>.meshes.json + <name>_meshes/<Mesh>.glb.
 //   Heightfields: --export terrain.png (16-bit heightmap + terrain.json sidecar for Unreal), .r16/.raw, or
-//                 --format mask_png --layers mask,flow; --layer picks the layer.
+//                 --format mask_png --layers mask,flow; --layer picks the layer;
+//                 --format unreal_landscape --export out/level (a directory: heightmap, layers, manifest, objects.glb,
+//                 instance stream).
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter
@@ -26,10 +29,9 @@ import { parseViews } from './render/raster.ts';
 import type { RenderOptions } from './render/raster.ts';
 import { renderArgs } from './render/options.ts';
 import { encodePNG } from './render/png.ts';
-import { exportFormatFromPath, exportGeometryAsync } from './io/export.ts';
+import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
-import { HEIGHTMAP_FORMATS, heightmapExport, heightmapPaths } from './io/heightmap.ts';
-import type { HeightmapFormat } from './io/heightmap.ts';
+import { exportFilesAsync } from './io/files.ts';
 import { inspect } from './inspect.ts';
 import { catalogText, nodeDoc } from './mcp/docs.ts';
 
@@ -45,8 +47,10 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
     '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
-    '                         [--instancing packed|expand] (packed instances: glb/usda keep them by default)',
-    '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json',
+    '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
+    '                         [--instances rows|expand] [--no-meshes] (csv/points.json of packed instances: one row per instance + meshes sidecar + GLBs)',
+    '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json; heightfields .png (png16) .r16,',
+    '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle for Unreal Landscape)',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     '       node src/cli.ts --catalog | --help-node <type>',
   ].join('\n'));
@@ -135,17 +139,11 @@ async function writeOutputs(r: CookReport, frame?: number) {
     const p = at(ex);
     const raw = (opt('--format') ?? exportFormatFromPath(ex)).toLowerCase();
     const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
-    if (HEIGHTMAP_FORMATS.includes(fmt as HeightmapFormat)) {
-      // heightfield -> heightmap + JSON sidecar (png16/r16) or one PNG per mask layer
-      fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
-      const res = heightmapExport(geo, fmt as HeightmapFormat, { layer: opt('--layer'), layers: opt('--layers')?.split(','), deflate: (d) => zlib.deflateSync(d) });
-      const paths = heightmapPaths(p, res.files);
-      res.files.forEach((f, i) => fs.writeFileSync(paths[i], f.bytes));
-      console.log(`exported ${paths.join(', ')}: ${res.summary}`);
-      return;
-    }
+    if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
     const up = opt('--up-axis');
-    const bytes = await exportGeometryAsync(geo, fmt, {
+    const outDir = fmt === 'unreal_landscape' && !/\.json$/i.test(p) ? path.resolve(p) : path.dirname(path.resolve(p));
+    const host = engine.host;
+    const { files, summary } = await exportFilesAsync(geo, fmt, p, {
       splitByName: true,
       compress: opt('--compress') as any,
       quantize: argv.includes('--quantize') || undefined,
@@ -155,11 +153,19 @@ async function writeOutputs(r: CookReport, frame?: number) {
       upAxis: up === 'z' || up === 'y' ? up : undefined,
       scale: opt('--scale') !== undefined ? Number(opt('--scale')) : undefined,
       instancing: opt('--instancing') === 'expand' ? 'expand' : undefined,
+      instances: opt('--instances') === 'expand' ? 'expand' : undefined,
+      meshes: argv.includes('--no-meshes') ? false : undefined,
+      layer: opt('--layer'), layers: opt('--layers')?.split(','),
+      deflate: (d) => zlib.deflateSync(d),
+      readFile: (t) => host.readFile(t),
+      texturePath: (t) => { const abs = host.resolvePath(t); return /^[a-z][a-z0-9+.-]*:\/\//i.test(abs) ? abs : path.relative(outDir, abs).split(path.sep).join('/'); },
       warn: (m) => console.warn(`warning: ${m}`),
     });
-    fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
-    fs.writeFileSync(p, bytes);
-    console.log(`exported ${p}`);
+    for (const f of files) {
+      fs.mkdirSync(path.dirname(path.resolve(f.path)), { recursive: true });
+      fs.writeFileSync(f.path, f.bytes);
+    }
+    console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${summary}` : ''}`);
   }
 }
 

@@ -9,9 +9,11 @@ import { geoToJSON } from './json.ts';
 import { exportGLB, exportGLTF } from './gltf.ts';
 import { exportHoudiniGeo } from './hgeo.ts';
 import { exportCSV, exportPointsJSON } from './points.ts';
-import { decomposeXform, expandForExport, isolatedMask, pieces, xf, xfLinear } from './common.ts';
+import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, decomposeXform, expandForExport, isolatedMask, packedPrims, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, stripPacked } from '../core/packed.ts';
+import { mergeMaterialTables, primMaterials } from '../core/materials.ts';
+import type { MaterialTable } from '../core/materials.ts';
 import { heightmapBytes } from './heightmap.ts';
 import type { HeightmapFormat } from './heightmap.ts';
 
@@ -136,36 +138,114 @@ const tup = (a: ArrayLike<number>, k: number, n: number) => '(' + Array.from({ l
  * USDA stage: meshes, curves and points under /root, split by prim name. Packed instances (instancing 'packed', the
  * default) become one PointInstancer /root/instances whose prototypes (one per packed source, under its
  * "prototypes" scope) are written the same way; instancing 'expand' writes real copies instead.
+ * Per-instance data on the PointInstancer: ids (int "id"), velocities (v), primvars:displayColor / displayOpacity
+ * (Cd / Alpha) and, unless custom is false, every other anchor attribute as primvars:<name>, all with interpolation
+ * "vertex" (USD's per-instance interpolation on a PointInstancer).
+ * Materials (unless materials is false): the material table becomes UsdPreviewSurface materials under
+ * /root/materials, texture maps UsdUVTexture shaders reading primvars:st (asset paths through texturePath), bound
+ * per mesh (MaterialBindingAPI) or per face set (GeomSubset family "materialBind") when a mesh mixes materials.
  */
 export function exportUSDA(g: Geometry, o: ExportOptions = {}): string {
   const out: string[] = ['#usda 1.0', '(', '    defaultPrim = "root"', '    metersPerUnit = 1', `    upAxis = "${o.upAxis === 'z' ? 'Z' : 'Y'}"`, ')', '', 'def Xform "root"', '{'];
-  const used = new Set<string>();
+  const used = new Set<string>(['materials']);
   const uniq = (n: string) => { let k = usdName(n), i = 1; while (used.has(k)) k = usdName(n) + '_' + i++; used.add(k); return k; };
   let inst: Geometry | null = null;
   if (g.hasPacked()) {
     if (o.instancing === 'expand') g = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
     else { inst = g; g = stripPacked(g); }
   }
-  usdaPrims(g, o, uniq, out);
-  if (inst) usdaInstancer(inst, o, uniq, out);
+  const mats = o.materials === false ? null : usdaMaterials(mergeMaterialTables([g, ...(inst ? [inst, ...inst.packedSources] : [])]), o, out);
+  usdaPrims(g, o, uniq, out, mats);
+  if (inst) usdaInstancer(inst, o, uniq, out, mats);
   out.push('}', '');
   return out.join('\n');
 }
 
+const usdStr = (s: string) => JSON.stringify(String(s));
+const usdAsset = (s: string) => '@' + String(s).replace(/\\/g, '/').replace(/@/g, '%40') + '@';
+
+/**
+ * UsdPreviewSurface materials for a table under /root/materials (nothing when the table is empty). Returns material
+ * name → prim path.
+ */
+function usdaMaterials(table: MaterialTable, o: ExportOptions, out: string[]): Map<string, string> | null {
+  const names = Object.keys(table);
+  if (!names.length) return null;
+  const paths = new Map<string, string>();
+  const used = new Set<string>();
+  out.push('    def Scope "materials"', '    {');
+  for (const name of names) {
+    const m = table[name];
+    let id = usdName(name), k = 1;
+    while (used.has(id)) id = `${usdName(name)}_${k++}`;
+    used.add(id);
+    const mp = `/root/materials/${id}`;
+    paths.set(name, mp);
+    const tex = m.textures ?? {};
+    const file = (t: string) => usdAsset(o.texturePath ? o.texturePath(t) : t);
+    const I = '            ';
+    out.push(`        def Material "${id}"`, '        {', `            token outputs:surface.connect = <${mp}/surface.outputs:surface>`, '');
+    out.push(`${I}def Shader "surface"`, `${I}{`, `${I}    uniform token info:id = "UsdPreviewSurface"`);
+    out.push(`${I}    color3f inputs:diffuseColor = ${tup(m.baseColor, 0, 3)}`);
+    if (tex.baseColor) out.push(`${I}    color3f inputs:diffuseColor.connect = <${mp}/base_color_map.outputs:rgb>`);
+    out.push(`${I}    color3f inputs:emissiveColor = ${tup(m.emissive, 0, 3)}`);
+    out.push(`${I}    float inputs:metallic = ${fmt(m.metallic)}`);
+    out.push(`${I}    float inputs:roughness = ${fmt(m.roughness)}`);
+    if (tex.roughness) out.push(`${I}    float inputs:roughness.connect = <${mp}/roughness_map.outputs:r>`);
+    if (tex.normal) out.push(`${I}    normal3f inputs:normal.connect = <${mp}/normal_map.outputs:rgb>`);
+    out.push(`${I}    float inputs:opacity = ${fmt(m.alpha)}`);
+    out.push(`${I}    int inputs:useSpecularWorkflow = 0`);
+    out.push(`${I}    token outputs:surface`, `${I}}`);
+    if (tex.baseColor || tex.normal || tex.roughness) {
+      out.push('', `${I}def Shader "st_reader"`, `${I}{`, `${I}    uniform token info:id = "UsdPrimvarReader_float2"`, `${I}    string inputs:varname = "st"`, `${I}    float2 outputs:result`, `${I}}`);
+      const texShader = (id2: string, path: string, colorSpace: string, output: string, extra: string[] = []) => {
+        out.push('', `${I}def Shader "${id2}"`, `${I}{`, `${I}    uniform token info:id = "UsdUVTexture"`, `${I}    asset inputs:file = ${file(path)}`,
+          `${I}    float2 inputs:st.connect = <${mp}/st_reader.outputs:result>`, `${I}    token inputs:sourceColorSpace = "${colorSpace}"`,
+          `${I}    token inputs:wrapS = "repeat"`, `${I}    token inputs:wrapT = "repeat"`, ...extra.map((l) => I + '    ' + l), `${I}    ${output}`, `${I}}`);
+      };
+      if (tex.baseColor) texShader('base_color_map', tex.baseColor, 'sRGB', 'float3 outputs:rgb');
+      if (tex.roughness) texShader('roughness_map', tex.roughness, 'raw', 'float outputs:r');
+      if (tex.normal) texShader('normal_map', tex.normal, 'raw', 'float3 outputs:rgb', ['float4 inputs:scale = (2, 2, 2, 1)', 'float4 inputs:bias = (-1, -1, -1, 0)']);
+    }
+    out.push('        }');
+  }
+  out.push('    }');
+  return paths;
+}
+
+/** Material binding lines for a mesh/curves prim: a direct binding when all faces agree, else GeomSubsets. */
+function usdaBinding(faceMats: (string | null)[], mats: Map<string, string> | null, indent: string): { schema: boolean; body: string[] } {
+  if (!mats || !faceMats.length) return { schema: false, body: [] };
+  const groups = new Map<string, number[]>();
+  faceMats.forEach((m, i) => { if (m && mats.has(m)) { let l = groups.get(m); if (!l) groups.set(m, (l = [])); l.push(i); } });
+  if (!groups.size) return { schema: false, body: [] };
+  if (groups.size === 1 && [...groups.values()][0].length === faceMats.length) return { schema: true, body: [`${indent}rel material:binding = <${mats.get([...groups.keys()][0])}>`] };
+  const body: string[] = [`${indent}uniform token subsetFamily:materialBind:familyType = "nonOverlapping"`];
+  const used = new Set<string>();
+  for (const [m, idx] of groups) {
+    let id = 'mat_' + usdName(m), k = 1;
+    while (used.has(id)) id = `mat_${usdName(m)}_${k++}`;
+    used.add(id);
+    body.push('', `${indent}def GeomSubset "${id}" (`, `${indent}    prepend apiSchemas = ["MaterialBindingAPI"]`, `${indent})`, `${indent}{`,
+      `${indent}    uniform token elementType = "face"`, `${indent}    uniform token familyName = "materialBind"`,
+      `${indent}    int[] indices = [${idx.join(', ')}]`, `${indent}    rel material:binding = <${mats.get(m)}>`, `${indent}}`);
+  }
+  return { schema: false, body };
+}
+
+/** USD array type of an attribute (null when it has no USD form here). */
+function usdArrayType(type: string, size: number): string | null {
+  if (type === 'string') return size === 1 ? 'string[]' : null;
+  if (size < 1 || size > 4) return null;
+  const base = type === 'int' ? 'int' : 'float';
+  return size === 1 ? `${base}[]` : `${base}${size}[]`;
+}
+
 /** PointInstancer for the packed prims of g (prototypes = packed sources), appended to out under /root. */
-function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => string, out: string[]) {
+function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => string, out: string[], mats: Map<string, string> | null = null) {
   const kind = g.primKind!, S = g.packedSource!, X = g.packedXform!, P = g.P;
   const name = uniq('instances');
-  const protoUsed = new Set<string>();
-  const protoNames = g.packedSources.map((src, k) => {
-    const na = src.prims.get('name');
-    const vals = na && na.type === 'string' ? new Set(na.data as string[]) : null;
-    let n = usdName(vals && vals.size === 1 && [...vals][0] ? [...vals][0] : `proto_${k}`), i = 1;
-    const b = n;
-    while (protoUsed.has(n)) n = b + '_' + i++;
-    protoUsed.add(n);
-    return n;
-  });
+  const protoNames = packedSourceNames(g).map(usdName);
   const idx: number[] = [], pos: number[] = [], ori: string[] = [], scl: number[] = [];
   let sheared = 0;
   for (let p = 0; p < kind.length; p++) {
@@ -184,12 +264,33 @@ function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => strin
   out.push(`        point3f[] positions = [${Array.from({ length: pos.length / 3 }, (_, k) => tup(pos, k, 3)).join(', ')}]`);
   out.push(`        quath[] orientations = [${ori.join(', ')}]`);
   out.push(`        float3[] scales = [${Array.from({ length: scl.length / 3 }, (_, k) => tup(scl, k, 3)).join(', ')}]`);
+  // per-instance data: ids, velocities, display colour / opacity, other anchor attributes as primvars
+  const prims = packedPrims(g);
+  const vertex = ['            interpolation = "vertex"', '        )'];
+  for (const a of anchorAttribs(g, INSTANCE_ATTRIB_SKIP)) {
+    const vals = prims.map((p) => anchorValue(g, a, p));
+    const num = vals as number[][];
+    const t = a.attr.type, sz = a.attr.size;
+    if (a.name === 'id' && t === 'int' && sz === 1) { out.push(`        int64[] ids = [${num.map((v) => v[0]).join(', ')}]`); continue; }
+    if (a.name === 'v' && t === 'float' && sz === 3) {
+      const sc = o.scale ?? 1;
+      out.push(`        vector3f[] velocities = [${num.map((v) => { const d = xfDir(v[0] * sc, v[1] * sc, v[2] * sc, o); return tup(d, 0, 3); }).join(', ')}]`);
+      continue;
+    }
+    if (a.name === 'Cd' && t === 'float' && sz >= 3) { out.push(`        color3f[] primvars:displayColor = [${num.map((v) => tup(v, 0, 3)).join(', ')}] (`, ...vertex); continue; }
+    if (a.name === 'Alpha' && t === 'float' && sz === 1) { out.push(`        float[] primvars:displayOpacity = [${num.map((v) => fmt(v[0])).join(', ')}] (`, ...vertex); continue; }
+    if (o.custom === false) continue;
+    const ut = usdArrayType(t, sz);
+    if (!ut) continue;
+    const body = t === 'string' ? (vals as string[]).map(usdStr).join(', ') : sz === 1 ? num.map((v) => fmt(v[0])).join(', ') : num.map((v) => tup(v, 0, sz)).join(', ');
+    out.push(`        ${ut} primvars:${usdName(a.name)} = [${body}] (`, ...vertex);
+  }
   out.push('        def Scope "prototypes"', '        {');
   g.packedSources.forEach((src, k) => {
     out.push(`            def Xform "${protoNames[k]}"`, '            {');
     const lines: string[] = [];
     const pu = new Set<string>();
-    usdaPrims(flattenSource(src), o, (n) => { let s = usdName(n), i = 1; while (pu.has(s)) s = usdName(n) + '_' + i++; pu.add(s); return s; }, lines);
+    usdaPrims(flattenSource(src), o, (n) => { let s = usdName(n), i = 1; while (pu.has(s)) s = usdName(n) + '_' + i++; pu.add(s); return s; }, lines, mats);
     for (const l of lines) out.push('            ' + l);
     out.push('            }');
   });
@@ -198,10 +299,11 @@ function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => strin
 }
 
 /** Mesh, BasisCurves and Points prims of g (split by prim name) as USDA lines at the indentation of /root's children. */
-function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, out: string[]) {
+function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, out: string[], mats: Map<string, string> | null = null) {
   for (const { name, geo } of pieces(g, { splitByName: true, ...o })) {
     const polys: number[] = [];
     for (let p = 0; p < geo.numPrims; p++) if (geo.primClosed[p]) polys.push(p);
+    const pm = mats ? primMaterials(geo) : null;
     if (polys.length) {
       const pts: number[] = [];
       for (let i = 0; i < geo.numPoints; i++) pts.push(...xf(geo.P[i * 3], geo.P[i * 3 + 1], geo.P[i * 3 + 2], o));
@@ -213,7 +315,8 @@ function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, o
         const n = [cn[v * 3], cn[v * 3 + 1], cn[v * 3 + 2]];
         nrm.push(...(o.upAxis === 'z' ? [n[0], -n[2], n[1]] : n));
       }
-      out.push(`    def Mesh "${uniq(name)}"`, '    {', '        uniform token subdivisionScheme = "none"');
+      const bind = usdaBinding(pm ? polys.map((p) => pm[p] || null) : [], mats, '        ');
+      out.push(`    def Mesh "${uniq(name)}"${bind.schema ? ' (' : ''}`, ...(bind.schema ? ['        prepend apiSchemas = ["MaterialBindingAPI"]', '    )'] : []), '    {', '        uniform token subdivisionScheme = "none"');
       out.push(`        int[] faceVertexCounts = [${counts.join(', ')}]`);
       out.push(`        int[] faceVertexIndices = [${idx.join(', ')}]`);
       out.push(`        point3f[] points = [${Array.from({ length: pts.length / 3 }, (_, k) => tup(pts, k, 3)).join(', ')}]`);
@@ -239,6 +342,7 @@ function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, o
         const vals = Array.from(a.data as Float64Array);
         out.push(a.size === 1 ? `        float[] primvars:${usdName(n)} = [${vals.map(fmt).join(', ')}] (` : `        float3[] primvars:${usdName(n)} = [${Array.from({ length: vals.length / 3 }, (_, k) => tup(vals, k, 3)).join(', ')}] (`, '            interpolation = "vertex"', '        )');
       }
+      out.push(...bind.body);
       out.push('    }');
     }
     const curves: number[] = [];
@@ -250,10 +354,12 @@ function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, o
         counts.push(geo.primSize(p));
         for (const i of geo.primPoints(p)) { pts.push(...xf(geo.P[i * 3], geo.P[i * 3 + 1], geo.P[i * 3 + 2], o)); widths.push(w ? (w.get(i) as number) * (o.scale ?? 1) : 0.01); }
       }
-      out.push(`    def BasisCurves "${uniq(name + '_curves')}"`, '    {', '        uniform token type = "linear"');
+      const cb = usdaBinding(pm ? curves.map((p) => pm[p] || null) : [], mats, '        ');
+      const cbind = cb.schema ? cb : { schema: false, body: [] as string[] }; // curves: whole-prim binding only
+      out.push(`    def BasisCurves "${uniq(name + '_curves')}"${cbind.schema ? ' (' : ''}`, ...(cbind.schema ? ['        prepend apiSchemas = ["MaterialBindingAPI"]', '    )'] : []), '    {', '        uniform token type = "linear"');
       out.push(`        int[] curveVertexCounts = [${counts.join(', ')}]`);
       out.push(`        point3f[] points = [${Array.from({ length: pts.length / 3 }, (_, k) => tup(pts, k, 3)).join(', ')}]`);
-      out.push(`        float[] widths = [${widths.map(fmt).join(', ')}] (`, '            interpolation = "vertex"', '        )', '    }');
+      out.push(`        float[] widths = [${widths.map(fmt).join(', ')}] (`, '            interpolation = "vertex"', '        )', ...cbind.body, '    }');
     }
   }
   const iso = isolatedPoints(g, o);
@@ -263,9 +369,10 @@ function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, o
   }
 }
 
-export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson' | HeightmapFormat;
+export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson' | HeightmapFormat | 'unreal_landscape';
 
-export const EXPORT_FORMATS: ExportFormat[] = ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'pointsjson', 'png16', 'r16', 'mask_png'];
+/** Every export format; unreal_landscape writes a directory (exportFilesAsync in io/files.ts). */
+export const EXPORT_FORMATS: ExportFormat[] = ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'pointsjson', 'png16', 'r16', 'mask_png', 'unreal_landscape'];
 
 /** Format from a file name: the extension, with ".points.json" → pointsjson. */
 export function exportFormatFromPath(path: string): string {
@@ -290,6 +397,7 @@ export function exportGeometry(g: Geometry, format: ExportFormat, o: ExportOptio
     case 'csv': return enc.encode(exportCSV(g, o));
     case 'pointsjson': return enc.encode(exportPointsJSON(g, o));
     case 'glb': case 'gltf': throw new Error(`${format} export is asynchronous (gltf-transform): use exportGeometryAsync`);
+    case 'unreal_landscape': throw new Error('unreal_landscape writes a directory of files: use exportFilesAsync (src/io/files.ts)');
     default: throw new Error(`unknown export format "${format}" (${EXPORT_FORMATS.join(', ')})`);
   }
 }

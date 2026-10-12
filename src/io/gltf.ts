@@ -16,15 +16,26 @@
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
 //   (TRANSLATION / ROTATION / SCALE per instance; a 3×3 with shear is written as its nearest rotation and the
 //   scale of its columns, with a warning); the rest of the geometry as above. instancing 'expand' writes real copies.
+//   Per-instance attributes (custom, default on): the anchor point / packed prim attributes become extra instance
+//   accessors with the extension's "_" prefix: Cd (+ Alpha) → _COLOR (VEC3/VEC4 float), every other numeric attribute
+//   of size 1–4 → _NAME (float, or the smallest integer type), single strings → _NAME integer indices into a table in
+//   the node's extras; the transform inputs (N, up, orient, rot, scale, trans, pivot) are folded into TRS and skipped.
+//   Node extras (polyforge.instanceAttributes) keep names, classes, types and string tables for re-import.
+//   Node and mesh names are packedSourceNames() (the source's prim "name", else source_<i>), as in the instance stream.
+//   Textures: the material table's texture paths (base colour, normal, roughness) are read with options.readFile and
+//   embedded (PNG / JPEG) as baseColorTexture, normalTexture and metallicRoughnessTexture (roughness = green channel);
+//   a map replaces its factor (baseColorFactor white, roughnessFactor 1). Without readFile the maps are skipped.
 //
 // Import
 //   node hierarchy flattened with world transforms, EXT_mesh_gpu_instancing as packed prims (one source per mesh;
 //   instancing 'expand' = real geometry), every primitive mode,
 //   meshopt (meshoptimizer decoder) and Draco (when draco3dgltf is installed) decoded, external .bin files read
 //   relative to the file. Mesh/node names → prim "name", materials → prim "material" + table, COLOR_0 → Cd/Alpha,
-//   TEXCOORD_0/1 → uv/uv2, custom `_X` → attributes. Textures are not read.
+//   TEXCOORD_0/1 → uv/uv2, custom `_X` → attributes, instance `_X` accessors → anchor attributes. Texture images are
+//   not decoded: their paths (URI resolved against the file, or "embedded:<name>" for images inside a GLB) go into the
+//   material table's textures entries; files written by polyforge restore the original paths from material extras.
 import { Document, GLB_BUFFER, MathUtils, PlatformIO, Primitive } from '@gltf-transform/core';
-import type { Accessor, JSONDocument, Material as GMaterial, Node as GNode } from '@gltf-transform/core';
+import type { Accessor, JSONDocument, Material as GMaterial, Node as GNode, Texture } from '@gltf-transform/core';
 import {
   ALL_EXTENSIONS, EXTMeshGPUInstancing, EXTMeshoptCompression, KHRDracoMeshCompression, KHRMaterialsEmissiveStrength, KHRMaterialsUnlit, KHRMeshQuantization,
 } from '@gltf-transform/extensions';
@@ -33,12 +44,12 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geometry.ts';
 import type { AttribClass, AttribType } from '../core/geometry.ts';
 import { resolveVertexNormals, triangulate } from '../core/topology.ts';
-import { DEFAULT_MATERIAL, normalizeMaterial, primMaterials, readMaterials, writeMaterials } from '../core/materials.ts';
-import type { Material, MaterialTable } from '../core/materials.ts';
+import { DEFAULT_MATERIAL, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
+import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
 import type { Mat4 } from '../core/math.ts';
-import { decomposeXform, isolatedMask, pieces, xf, xfDir, xfLinear } from './common.ts';
-import type { ExportOptions } from './common.ts';
+import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, baseOf, decomposeXform, isolatedMask, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
+import type { AnchorAttrib, ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked } from '../core/packed.ts';
 
 /** Above this many polylines per material and mesh, curves go into one LINES primitive instead of LINE_STRIPs. */
@@ -91,7 +102,7 @@ export class HostIO extends PlatformIO {
     for (const im of json.images ?? []) {
       const uri = im.uri;
       if (!uri || uri.startsWith('data:') || uri in jsonDoc.resources) continue;
-      jsonDoc.resources[uri] = new Uint8Array(0); // textures are not used by the geometry importer
+      jsonDoc.resources[uri] = new Uint8Array(0); // textures are not decoded: the importer records their paths
     }
   }
 }
@@ -228,6 +239,39 @@ interface MatState {
   table: MaterialTable;
   cache: Map<string, GMaterial>;
   defaultMat: Material;
+  /** texture bytes by path (exportGLB preloads them); undefined = no texture support in this call */
+  data?: Map<string, Uint8Array | null>;
+  textures: Map<string, Texture | null>;
+  uris: Set<string>;
+  warn?: (msg: string) => void;
+}
+
+/** Image MIME type from the first bytes (PNG or JPEG), or null. */
+export function imageMime(b: Uint8Array): string | null {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  return null;
+}
+
+/** The glTF texture for an image path (created once per path), or null when its bytes are missing or not PNG/JPEG. */
+function textureFor(st: MatState, path: string): Texture | null {
+  if (!st.data) return null;
+  let t = st.textures.get(path);
+  if (t !== undefined) return t;
+  t = null;
+  const bytes = st.data.get(path);
+  const mime = bytes ? imageMime(bytes) : null;
+  if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image; material exported without it`);
+  if (bytes && mime) {
+    const base = baseOf(path).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
+    const ext = mime === 'image/png' ? '.png' : '.jpg';
+    let uri = base + ext, k = 1;
+    while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
+    st.uris.add(uri);
+    t = st.doc.createTexture(base).setImage(bytes).setMimeType(mime).setURI(uri);
+  }
+  st.textures.set(path, t);
+  return t;
 }
 
 function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: boolean): GMaterial {
@@ -236,12 +280,18 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   if (m) return m;
   const isDefault = !name;
   const mat = isDefault ? st.defaultMat : st.table[name] ?? normalizeMaterial({});
-  const rgb = vertexColors ? [1, 1, 1] : mat.baseColor;
+  const tex = (slot: keyof MaterialTextures) => (mat.textures?.[slot] ? textureFor(st, mat.textures[slot]!) : null);
+  const baseTex = tex('baseColor'), normalTex = tex('normal'), roughTex = tex('roughness');
+  // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map
+  const rgb = vertexColors || baseTex ? [1, 1, 1] : mat.baseColor;
   m = st.doc.createMaterial(isDefault ? 'default' : name)
     .setBaseColorFactor([rgb[0], rgb[1], rgb[2], mat.alpha])
     .setMetallicFactor(mat.metallic)
-    .setRoughnessFactor(mat.roughness)
+    .setRoughnessFactor(roughTex ? 1 : mat.roughness)
     .setDoubleSided(mat.doubleSided);
+  if (baseTex) m.setBaseColorTexture(baseTex);
+  if (normalTex) m.setNormalTexture(normalTex);
+  if (roughTex) m.setMetallicRoughnessTexture(roughTex);
   const emax = Math.max(...mat.emissive);
   if (emax > 1) {
     m.setEmissiveFactor([mat.emissive[0] / emax, mat.emissive[1] / emax, mat.emissive[2] / emax]);
@@ -272,7 +322,11 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   doc.getRoot().setDefaultScene(scene);
   const quantize = !!o.quantize || o.compress === 'meshopt';
   const useMaterials = o.materials !== false;
-  const st: MatState = { doc, table: useMaterials ? readMaterials(g) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material };
+  const st: MatState = {
+    doc, table: useMaterials ? mergeMaterialTables([g, ...g.packedSources]) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material,
+    data: o.textureData, textures: new Map(), uris: new Set(), warn: o.warn,
+  };
+  let noUV = 0;
   const custom = o.custom !== false;
   const lineMode = o.lineMode ?? 'strip';
   // what to write: the geometry, or (packed) its non-instanced part plus one instanced mesh per packed source
@@ -318,6 +372,9 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
         if (!rgbSet && !blend) { out.channels.splice(ci, 1); out.data.splice(ci, 1); }
       }
       out.material = getMaterial(st, mat, vc, blend);
+      if (out.material.getBaseColorTexture() || out.material.getNormalTexture() || out.material.getMetallicRoughnessTexture()) {
+        if (!out.channels.some((c) => c.semantic === 'TEXCOORD_0')) noUV++;
+      }
     };
     for (const gr of groups.values()) {
       if (gr.closed) {
@@ -399,6 +456,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     job.onMesh?.(w);
   }
   if (quantize) doc.createExtension(KHRMeshQuantization).setRequired(true);
+  if (noUV) o.warn?.(`glTF: ${noUV} primitive(s) use a textured material but have no uv attribute (add uv_project or uv_unwrap)`);
   return doc;
 }
 
@@ -419,6 +477,10 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
     l.push(p);
   }
   const ext = doc.createExtension(EXTMeshGPUInstancing).setRequired(true);
+  const names = packedSourceNames(g);
+  const iattrs = o.custom === false ? [] : instanceAttribSpecs(g);
+  const info: Record<string, InstanceAttribInfo> = {};
+  for (const ia of iattrs) info[ia.sem] = { name: ia.a.name, cls: ia.a.cls, type: ia.type, size: ia.size, ...(ia.strings ? { strings: ia.strings } : {}) };
   let sheared = 0;
   const jobs: MeshJob[] = [];
   for (const [s, prims] of bySrc) {
@@ -434,9 +496,7 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
       SC.set(d.s, i * 3);
     });
     const src = flattenSource(g.packedSources[s]);
-    const na = src.prims.get('name');
-    const names = na && na.type === 'string' ? new Set(na.data as string[]) : null;
-    const label = names && names.size === 1 ? [...names][0] || `instances_${s}` : `instances_${s}`;
+    const label = names[s] ?? `source_${s}`;
     jobs.push({
       src, split: false,
       onMesh: ({ node, center, extent }) => {
@@ -453,13 +513,104 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
         }
         const ro = Q;
         const acc = (arr: Float32Array, type: 'VEC3' | 'VEC4') => doc.createAccessor().setArray(arr as Float32Array<ArrayBuffer>).setType(type).setBuffer(buffer);
-        node.setExtension('EXT_mesh_gpu_instancing', ext.createInstancedMesh()
-          .setAttribute('TRANSLATION', acc(tr, 'VEC3')).setAttribute('ROTATION', acc(ro, 'VEC4')).setAttribute('SCALE', acc(sc, 'VEC3')));
+        const im = ext.createInstancedMesh()
+          .setAttribute('TRANSLATION', acc(tr, 'VEC3')).setAttribute('ROTATION', acc(ro, 'VEC4')).setAttribute('SCALE', acc(sc, 'VEC3'));
+        for (const ia of iattrs) {
+          const vals = instanceAttribValues(g, ia, prims);
+          im.setAttribute(ia.sem, doc.createAccessor().setArray(vals).setType(TYPES[ia.size - 1]).setBuffer(buffer));
+        }
+        node.setExtension('EXT_mesh_gpu_instancing', im);
+        if (iattrs.length) node.setExtras({ polyforge: { instanceAttributes: info } });
       },
     });
   }
   if (sheared) o.warn?.(`glTF instancing: ${sheared} instance transform(s) have shear (non-uniform scale after rotation), written as rotation + per-axis scale; use instancing "expand" for exact geometry`);
   return jobs;
+}
+
+interface InstanceAttribInfo { name: string; cls: 'point' | 'prim'; type: 'float' | 'int' | 'string'; size: number; strings?: string[] }
+interface InstanceAttribSpec { sem: string; a: AnchorAttrib; type: 'float' | 'int' | 'string'; size: number; alpha: AnchorAttrib | null; strings?: string[]; index?: Map<string, number> }
+
+/** The per-instance attributes written as `_NAME` instance accessors (see the module comment). */
+function instanceAttribSpecs(g: Geometry): InstanceAttribSpec[] {
+  const list = anchorAttribs(g, INSTANCE_ATTRIB_SKIP);
+  const cd = list.find((x) => x.name === 'Cd' && x.attr.type === 'float' && x.attr.size === 3) ?? null;
+  const alpha = cd ? list.find((x) => x.name === 'Alpha' && x.attr.type === 'float' && x.attr.size === 1) ?? null : null;
+  const used = new Set(['TRANSLATION', 'ROTATION', 'SCALE']);
+  const out: InstanceAttribSpec[] = [];
+  for (const a of list) {
+    if (a === alpha) continue; // folded into _COLOR
+    if (a.attr.type !== 'string' && (a.attr.size < 1 || a.attr.size > 4)) continue;
+    const base = a === cd ? '_COLOR' : '_' + a.name.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    let sem = base, k = 1;
+    while (used.has(sem)) sem = `${base}_${k++}`;
+    used.add(sem);
+    if (a.attr.type === 'string') {
+      // a table of the values in first-use order (instances in prim order)
+      const index = new Map<string, number>(), strings: string[] = [];
+      for (let p = 0; p < g.numPrims; p++) {
+        if (!g.isPacked(p)) continue;
+        const v = anchorValue(g, a, p) as string;
+        if (!index.has(v)) { index.set(v, strings.length); strings.push(v); }
+      }
+      out.push({ sem, a, type: 'string', size: 1, alpha: null, strings, index });
+    } else out.push({ sem, a, type: a.attr.type === 'int' ? 'int' : 'float', size: a === cd && alpha ? 4 : a.attr.size, alpha: a === cd ? alpha : null });
+  }
+  return out;
+}
+
+/** Accessor array of one per-instance attribute over the given packed prims. */
+function instanceAttribValues(g: Geometry, ia: InstanceAttribSpec, prims: number[]): TypedArray {
+  const n = prims.length, size = ia.size;
+  if (ia.type === 'float') {
+    const out = new Float32Array(n * size);
+    prims.forEach((p, i) => {
+      const v = anchorValue(g, ia.a, p) as number[];
+      for (let c = 0; c < ia.a.attr.size && c < size; c++) out[i * size + c] = v[c];
+      if (ia.alpha) out[i * size + 3] = (anchorValue(g, ia.alpha, p) as number[])[0];
+    });
+    return out;
+  }
+  const d: number[] = new Array(n * size);
+  prims.forEach((p, i) => {
+    if (ia.type === 'string') d[i] = ia.index!.get(anchorValue(g, ia.a, p) as string) ?? 0;
+    else { const v = anchorValue(g, ia.a, p) as number[]; for (let c = 0; c < size; c++) d[i * size + c] = v[c]; }
+  });
+  let mn = Infinity, mx = -Infinity;
+  for (const x of d) { if (x < mn) mn = x; if (x > mx) mx = x; }
+  if (!n) return new Uint8Array(0);
+  return mn >= -128 && mx <= 127 ? Int8Array.from(d) : mn >= 0 && mx <= 255 ? Uint8Array.from(d)
+    : mn >= -32768 && mx <= 32767 ? Int16Array.from(d) : mn >= 0 && mx <= 65535 ? Uint16Array.from(d) : Float32Array.from(d);
+}
+
+/** Per-instance accessors of an EXT_mesh_gpu_instancing node → anchor point / packed prim attributes of `part`. */
+function applyInstanceAttribs(part: Geometry, inst: InstancedMesh, info: Record<string, InstanceAttribInfo>, warn: (m: string) => void) {
+  const n = part.numPrims;
+  for (const sem of inst.listSemantics()) {
+    if (!sem.startsWith('_')) continue;
+    const r = readAccessor(inst.getAttribute(sem)!);
+    if (r.count !== n) { warn(`EXT_mesh_gpu_instancing: ${sem} has ${r.count} values for ${n} instances; skipped`); continue; }
+    const spec = info[sem];
+    const t = spec?.cls === 'prim' ? part.prims : part.points; // anchor point i belongs to packed prim i
+    if (spec?.type === 'string') {
+      const table = spec.strings ?? [];
+      t.map.set(spec.name, new Attribute('string', 1, Array.from({ length: n }, (_, i) => String(table[Math.round(r.data[i])] ?? ''))));
+      continue;
+    }
+    const name = spec?.name ?? (sem === '_COLOR' ? 'Cd' : sem.slice(1).toLowerCase());
+    if (name === 'Cd' && r.size >= 3) {
+      const cd = t.add('Cd', 'float', 3).data as Float64Array;
+      for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) cd[i * 3 + c] = r.data[i * r.size + c];
+      if (r.size === 4) { const al = t.add('Alpha', 'float', 1).data as Float64Array; for (let i = 0; i < n; i++) al[i] = r.data[i * 4 + 3]; }
+      continue;
+    }
+    const type: AttribType = spec?.type === 'int' ? 'int' : 'float';
+    const size = r.size;
+    const at = new Attribute(type, size, type === 'int' ? new Int32Array(n * size) : new Float64Array(n * size), defaultValueFor(name, size, type));
+    const d = at.data as Float64Array | Int32Array;
+    for (let i = 0; i < n * size; i++) d[i] = type === 'int' ? Math.round(r.data[i]) : r.data[i];
+    t.map.set(name, at);
+  }
 }
 
 /** Create accessors (optionally quantized), the mesh and its node. */
@@ -531,8 +682,23 @@ async function exportIO(doc: Document, o: ExportOptions): Promise<HostIO> {
   return io;
 }
 
+/** Read the material table's texture files (o.readFile) for gltfDocument; warns about each one it cannot read. */
+async function withTextures(g: Geometry, o: ExportOptions): Promise<ExportOptions> {
+  if (o.materials === false || o.textureData) return o;
+  const paths = texturePaths(mergeMaterialTables([g, ...g.packedSources]));
+  if (!paths.length) return o;
+  const data = new Map<string, Uint8Array | null>();
+  for (const p of paths) {
+    if (!o.readFile) { data.set(p, null); continue; }
+    try { data.set(p, await o.readFile(p)); } catch (e: any) { data.set(p, null); o.warn?.(`glTF: texture "${p}" could not be read (${e?.message ?? e}); material exported without it`); }
+  }
+  if (!o.readFile) o.warn?.(`glTF: ${paths.length} texture map(s) skipped: no file access in this export (pass readFile)`);
+  return { ...o, textureData: data };
+}
+
 /** GLB bytes. */
 export async function exportGLB(g: Geometry, o: ExportOptions = {}): Promise<Uint8Array> {
+  o = await withTextures(g, o);
   const doc = gltfDocument(g, o);
   const io = await exportIO(doc, o);
   return io.writeBinary(doc);
@@ -540,6 +706,7 @@ export async function exportGLB(g: Geometry, o: ExportOptions = {}): Promise<Uin
 
 /** Self-contained .gltf JSON text (buffers embedded as data URIs). */
 export async function exportGLTF(g: Geometry, o: ExportOptions = {}): Promise<string> {
+  o = await withTextures(g, o);
   const doc = gltfDocument(g, o);
   const io = await exportIO(doc, o);
   const { json, resources } = await io.writeJSON(doc, { format: 'GLTF' as any });
@@ -548,6 +715,11 @@ export async function exportGLTF(g: Geometry, o: ExportOptions = {}): Promise<st
     const data = resources[b.uri];
     if (data) b.uri = 'data:application/octet-stream;base64,' + base64(data);
     else delete b.uri; // meshopt fallback buffer: no data
+  }
+  for (const im of json.images ?? []) {
+    if (!im.uri || im.uri.startsWith('data:')) continue;
+    const data = resources[im.uri];
+    if (data) im.uri = `data:${im.mimeType ?? imageMime(data) ?? 'image/png'};base64,` + base64(data);
   }
   return JSON.stringify(json);
 }
@@ -599,8 +771,19 @@ function readAccessor(a: Accessor): { size: number; count: number; data: Float64
   return { size, count, data };
 }
 
+/** Path of a texture's image: its URI resolved against `base`, or "embedded:<name>" for an image stored in the file. */
+function texturePathOf(t: Texture | null, base: string, index: (t: Texture) => number): string | undefined {
+  if (!t) return undefined;
+  const uri = t.getURI();
+  if (uri && !uri.startsWith('data:') && t.getImage()?.byteLength === 0) {
+    const u = decodeURIComponent(uri);
+    return /^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith('/') || /^[A-Za-z]:[\\/]/.test(u) || !base ? u : base.replace(/[\\/]+$/, '') + '/' + u;
+  }
+  return `embedded:${t.getName() || (uri && !uri.startsWith('data:') ? uri : `image_${index(t)}`)}`;
+}
+
 /** Material table entry from a glTF material (lossless for polyforge files via extras). */
-function materialEntry(m: GMaterial): Material {
+function materialEntry(m: GMaterial, base = '', index: (t: Texture) => number = () => 0): Material {
   const ex = (m.getExtras() as any)?.polyforge?.material;
   if (ex) return normalizeMaterial(ex);
   const bc = m.getBaseColorFactor(), em = m.getEmissiveFactor();
@@ -609,6 +792,11 @@ function materialEntry(m: GMaterial): Material {
     baseColor: [bc[0], bc[1], bc[2]], metallic: m.getMetallicFactor(), roughness: m.getRoughnessFactor(),
     emissive: [em[0] * strength, em[1] * strength, em[2] * strength], alpha: bc[3],
     doubleSided: m.getDoubleSided(), unlit: !!m.getExtension('KHR_materials_unlit'),
+    textures: {
+      baseColor: texturePathOf(m.getBaseColorTexture(), base, index),
+      normal: texturePathOf(m.getNormalTexture(), base, index),
+      roughness: texturePathOf(m.getMetallicRoughnessTexture(), base, index),
+    },
   });
 }
 
@@ -705,8 +893,9 @@ function instanceMatrices(inst: InstancedMesh): Mat4[] {
 }
 
 /** Geometry from a gltf-transform Document (all scenes' nodes flattened into world space). */
-export function documentToGeometry(doc: Document, warn: (m: string) => void = () => {}, instancing: 'packed' | 'expand' = 'packed'): Geometry {
+export function documentToGeometry(doc: Document, warn: (m: string) => void = () => {}, instancing: 'packed' | 'expand' = 'packed', base = ''): Geometry {
   const root = doc.getRoot();
+  const texIndex = (t: Texture) => root.listTextures().indexOf(t);
   const table: MaterialTable = {};
   const matNames = new Map<GMaterial, string | null>();
   const matName = (m: GMaterial | null): string | null => {
@@ -716,7 +905,7 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
     if ((m.getExtras() as any)?.polyforge?.default) n = null;
     else {
       n = m.getName() || `material_${root.listMaterials().indexOf(m)}`;
-      if (!(n in table)) table[n] = materialEntry(m);
+      if (!(n in table)) table[n] = materialEntry(m, base, texIndex);
     }
     matNames.set(m, n);
     return n;
@@ -753,7 +942,9 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
         src = Geometry.merge(ps);
         byLabel.set(label, src);
       }
-      parts.push(packedFromMatrices(src, mats));
+      const part = packedFromMatrices(src, mats);
+      applyInstanceAttribs(part, inst, ((node.getExtras() as any)?.polyforge?.instanceAttributes ?? {}) as Record<string, InstanceAttribInfo>, warn);
+      parts.push(part);
       return;
     }
     if (inst) instanced = true;
@@ -792,5 +983,5 @@ export async function importGLTFAsync(bytes: Uint8Array, opts: GLTFImportOptions
   const base = opts.path ? opts.path.replace(/[?#].*$/, '').replace(/[^\\/]*$/, '').replace(/[\\/]$/, '') : '';
   await io.loadExternal(jsonDoc, base);
   const doc = await io.readJSON(jsonDoc);
-  return documentToGeometry(doc, opts.warn, opts.instancing ?? 'packed');
+  return documentToGeometry(doc, opts.warn, opts.instancing ?? 'packed', base);
 }
