@@ -10,15 +10,15 @@
 //    than two incident polygons) and edges whose two polygons have inconsistent winding (both
 //    half-edges in the same direction) never throw: only the first opposite-direction pair (if
 //    any) becomes twins, the rest keep heTwin = -1 (they behave like boundaries for walks), and
-//    the edge is listed in nonManifoldEdges (winding problems also in flippedEdges).
-//    isManifold is true when no edge is listed. Non-manifold *vertices* (bowties) are allowed;
-//    queries around them fall back to unordered results.
+//    the edge is listed in nonManifoldEdges (a two-polygon edge with both half-edges running
+//    the same way is also listed in flippedEdges). isManifold is true when no edge is listed.
+//    Non-manifold *vertices* (bowties) are allowed; queries around them fall back to unordered
+//    results. Edge lookups (edgeId, halfEdge) scan the outgoing half-edges of a point, no hashing.
 //  - The structure holds topology only; geometric queries (dihedralAngle, edgeLength) read the
 //    current P. The cache is keyed by the Geometry object and invalidated when its topology
 //    arrays (vertexPoint, primStart, primClosed) are replaced or the point count changes. Code
 //    that edits those arrays in place after querying must call invalidateHalfEdges(g).
 import type { Geometry } from './geometry.ts';
-import { edgeKey } from './edges.ts';
 
 export interface EdgeWalk {
   /**
@@ -66,7 +66,6 @@ export class HalfEdgeMesh {
   readonly pointHalves: Int32Array;
   readonly nonManifoldEdges = new Set<number>();
   readonly flippedEdges = new Set<number>();
-  private index = new Map<number, number>();
   // topology identity used to validate the cache
   readonly srcVertexPoint: Int32Array;
   readonly srcPrimStart: Int32Array;
@@ -104,19 +103,25 @@ export class HalfEdgeMesh {
         N[h] = first + (k + 1) % n; PV[h] = first + (k - 1 + n) % n;
       }
     }
-    // undirected edges in order of first occurrence
-    const E = (this.heEdge = new Int32Array(nh));
-    const A: number[] = [], B: number[] = [], firstH: number[] = [];
-    const cnt: number[] = [];
+    // outgoing half-edges per point (CSR); also used to find edges without hashing
+    const ps = (this.pointHalfStart = new Int32Array(np + 1));
+    for (let h = 0; h < nh; h++) ps[O[h] + 1]++;
+    for (let p = 0; p < np; p++) ps[p + 1] += ps[p];
+    const ph = (this.pointHalves = new Int32Array(nh)), pfill = ps.slice(0, np);
+    for (let h = 0; h < nh; h++) ph[pfill[O[h]]++] = h;
+    // undirected edges in order of first occurrence: all half-edges a→b and b→a share the id
+    const E = (this.heEdge = new Int32Array(nh).fill(-1));
+    const A = new Int32Array(nh), B = new Int32Array(nh), firstH = new Int32Array(nh), cnt = new Int32Array(nh);
+    let ne = 0;
     for (let h = 0; h < nh; h++) {
-      const a = O[h], b = O[N[h]];
-      const k = edgeKey(a, b);
-      let e = this.index.get(k);
-      if (e === undefined) { e = A.length; this.index.set(k, e); A.push(Math.min(a, b)); B.push(Math.max(a, b)); firstH.push(h); cnt.push(0); }
-      E[h] = e; cnt[e]++;
+      if (E[h] >= 0) continue;
+      const a = O[h], b = O[N[h]], e = ne++;
+      A[e] = Math.min(a, b); B[e] = Math.max(a, b); firstH[e] = h;
+      for (let k = ps[a]; k < ps[a + 1]; k++) { const x = ph[k]; if (O[N[x]] === b) { E[x] = e; cnt[e]++; } }
+      for (let k = ps[b]; k < ps[b + 1]; k++) { const x = ph[k]; if (O[N[x]] === a) { E[x] = e; cnt[e]++; } }
     }
-    const ne = (this.numEdges = A.length);
-    this.edgeA = Int32Array.from(A); this.edgeB = Int32Array.from(B); this.edgeHalf = Int32Array.from(firstH);
+    this.numEdges = ne;
+    this.edgeA = A.slice(0, ne); this.edgeB = B.slice(0, ne); this.edgeHalf = firstH.slice(0, ne);
     const es = (this.edgeHalfStart = new Int32Array(ne + 1));
     for (let e = 0; e < ne; e++) es[e + 1] = es[e] + cnt[e];
     const eh = (this.edgeHalves = new Int32Array(nh)), fill = es.slice(0, ne);
@@ -131,25 +136,14 @@ export class HalfEdgeMesh {
           const hi = eh[s + i], hj = eh[s + j];
           if (O[hi] !== O[hj]) { T[hi] = hj; T[hj] = hi; paired = true; break; }
         }
-      if (n >= 2 && !paired) { this.nonManifoldEdges.add(e); this.flippedEdges.add(e); }
-      else if (n > 2) {
-        // flag winding problems among the extra sides too
-        let fwd = 0;
-        for (let i = 0; i < n; i++) if (O[eh[s + i]] === O[eh[s]]) fwd++;
-        if (fwd !== n - fwd) this.flippedEdges.add(e);
-      }
+      if (n >= 2 && !paired) { this.nonManifoldEdges.add(e); if (n === 2) this.flippedEdges.add(e); }
     }
-    // outgoing half-edges per point; pointFirst prefers a boundary half-edge
+    // pointFirst: one outgoing half-edge per point, preferring a boundary one
     const pf = (this.pointFirst = new Int32Array(np).fill(-1));
-    const ps = (this.pointHalfStart = new Int32Array(np + 1));
     for (let h = 0; h < nh; h++) {
       const p = O[h];
-      ps[p + 1]++;
       if (pf[p] < 0 || (T[pf[p]] >= 0 && T[h] < 0)) pf[p] = h;
     }
-    for (let p = 0; p < np; p++) ps[p + 1] += ps[p];
-    const ph = (this.pointHalves = new Int32Array(nh)), pfill = ps.slice(0, np);
-    for (let h = 0; h < nh; h++) ph[pfill[O[h]]++] = h;
   }
 
   get isManifold(): boolean { return this.nonManifoldEdges.size === 0; }
@@ -159,15 +153,17 @@ export class HalfEdgeMesh {
 
   /** Undirected edge id of {a, b}, or -1. */
   edgeId(a: number, b: number): number {
-    if (a === b || a < 0 || b < 0) return -1;
-    return this.index.get(edgeKey(a, b)) ?? -1;
+    const h = this.halfEdge(a, b);
+    if (h >= 0) return this.heEdge[h];
+    const t = this.halfEdge(b, a);
+    return t >= 0 ? this.heEdge[t] : -1;
   }
 
-  /** A half-edge running a → b, or -1. */
+  /** The first half-edge running a → b, or -1. */
   halfEdge(a: number, b: number): number {
-    const e = this.edgeId(a, b);
-    if (e < 0) return -1;
-    for (let k = this.edgeHalfStart[e]; k < this.edgeHalfStart[e + 1]; k++) if (this.heOrigin[this.edgeHalves[k]] === a) return this.edgeHalves[k];
+    if (a === b || a < 0 || b < 0 || a >= this.srcNumPoints || b >= this.srcNumPoints) return -1;
+    const ps = this.pointHalfStart, ph = this.pointHalves, O = this.heOrigin, N = this.heNext;
+    for (let k = ps[a]; k < ps[a + 1]; k++) if (O[N[ph[k]]] === b) return ph[k];
     return -1;
   }
 
