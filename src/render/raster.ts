@@ -5,6 +5,7 @@ import { Geometry } from '../core/geometry.ts';
 import { buildEdges, connectivity, primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { drawText, textWidth } from './font.ts';
 import { readUV, polygonSides, uvSeamPairs } from '../core/uv.ts';
+import { expandForRender } from '../core/packed.ts';
 import type { Vec3 } from '../core/math.ts';
 
 /** 3D views, plus 'uv': the 0..1 UV square (UDIM tiles) with every polygon drawn at its uv. */
@@ -90,6 +91,8 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
 
 /** Render the geometry; returns RGBA pixels. */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
+  // packed instances are drawn expanded (within a triangle budget), see core/packed.ts
+  if (g.hasPacked()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
   const views: ViewName[] = o.views?.length ? o.views : ['persp', 'front', 'right', 'top'];
   const tile = Math.max(128, Math.min(1600, Math.round(o.size ?? (views.length === 1 ? 800 : 512))));
   const ss = Math.max(1, Math.min(3, Math.round(o.ssaa ?? 2)));

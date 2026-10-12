@@ -1,5 +1,8 @@
-// Shared export options and helpers (axis/scale conversion, splitting by name).
+// Shared export options and helpers (axis/scale conversion, splitting by name, packed instances).
 import type { Geometry } from '../core/geometry.ts';
+import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
+import { qFromMat } from '../core/math.ts';
+import type { Quat } from '../core/math.ts';
 
 export interface ExportOptions {
   /** multiply positions (e.g. 100 for metres → centimetres) */
@@ -33,6 +36,60 @@ export interface ExportOptions {
   pcgStruct?: boolean;
   /** geo: float storage, 64 (fpreal64, lossless, default) or 32 (fpreal32, Houdini's default) */
   precision?: 32 | 64;
+  /**
+   * packed instances: 'packed' (default) writes native instancing where the format has it (glTF
+   * EXT_mesh_gpu_instancing, USD PointInstancer; json keeps them losslessly) and expands them elsewhere;
+   * 'expand' always writes real geometry.
+   */
+  instancing?: 'packed' | 'expand';
+  /** receives non-fatal notes (instances expanded for a format without instancing, shear dropped, …) */
+  warn?: (msg: string) => void;
+}
+
+/** A packed prim's 3×3 (9 numbers at X[o..]) in export space: C·X·Cᵀ with C the axis conversion (scale excluded). */
+export function xfLinear(X: ArrayLike<number>, o: number, opt: ExportOptions): number[] {
+  const m = Array.from({ length: 9 }, (_, k) => X[o + k]);
+  if (opt.upAxis !== 'z') return m;
+  // C: (x, y, z) → (x, -z, y). C·X maps each column the same way; ·Cᵀ then sets col1 = -col2, col2 = col1.
+  const c = [0, 1, 2].map((j) => [m[j * 3], -m[j * 3 + 2], m[j * 3 + 1]]);
+  return [...c[0], ...c[2].map((x) => -x), ...c[1]];
+}
+
+/** The geometry to write for a format without instancing: packed instances expanded, with one warning. */
+export function expandForExport(g: Geometry, o: ExportOptions, format: string): Geometry {
+  if (!g.hasPacked()) return g;
+  if (o.instancing !== 'expand') o.warn?.(`${format}: ${g.numPacked} packed instances were expanded into geometry (${format} has no instancing; glb, gltf and usda keep instances)`);
+  return expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
+}
+
+/**
+ * Split a 3×3 (column-major) into translation-free rotation (unit quaternion x, y, z, w) and per-axis scale, for
+ * TRS instance formats. A mirrored matrix gets a negative x scale. Shear cannot be represented: the rotation is
+ * then the nearest one (polar decomposition by iteration) and `shear` is true.
+ */
+export function decomposeXform(X: ArrayLike<number>, o = 0): { q: Quat; s: [number, number, number]; shear: boolean } {
+  const c = [0, 1, 2].map((j) => [X[o + j * 3], X[o + j * 3 + 1], X[o + j * 3 + 2]]);
+  const s = c.map((v) => Math.hypot(v[0], v[1], v[2])) as [number, number, number];
+  const det = c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) - c[1][0] * (c[0][1] * c[2][2] - c[0][2] * c[2][1]) + c[2][0] * (c[0][1] * c[1][2] - c[0][2] * c[1][1]);
+  if (det < 0) s[0] = -s[0];
+  const R = c.map((v, j) => (s[j] ? v.map((x) => x / s[j]) : [j === 0 ? 1 : 0, j === 1 ? 1 : 0, j === 2 ? 1 : 0]));
+  const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const shear = Math.abs(dot(R[0], R[1])) > 1e-6 || Math.abs(dot(R[0], R[2])) > 1e-6 || Math.abs(dot(R[1], R[2])) > 1e-6;
+  let M = R;
+  if (shear) {
+    // polar decomposition: M ← (M + M⁻ᵀ) / 2 converges to the closest rotation
+    for (let it = 0; it < 30; it++) {
+      const [a, b, d] = M;
+      const cr = (u: number[], v: number[]) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      const dt = dot(a, cr(b, d)) || 1;
+      const inv = [cr(b, d), cr(d, a), cr(a, b)].map((v) => v.map((x) => x / dt)); // columns of M⁻ᵀ
+      M = M.map((v, j) => v.map((x, k) => (x + inv[j][k]) / 2));
+    }
+  }
+  const m = new Float64Array(16);
+  for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) m[j * 4 + k] = M[j][k];
+  m[15] = 1;
+  return { q: qFromMat(m), s, shear };
 }
 
 /** Position conversion for export: scale, then optional Y-up → Z-up (right-handed: x, -z, y). */

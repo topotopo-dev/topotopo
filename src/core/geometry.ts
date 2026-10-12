@@ -15,9 +15,16 @@
 // EdgeSets of unordered point pairs (see edges.ts): they survive every operation that keeps
 // point numbers and are remapped wherever points are renumbered or deleted.
 //
-// Cooked geometry is treated as immutable: nodes clone() before modifying.
-import type { Vec3 } from './math.ts';
+// Packed primitives (instances, see packed.ts): a prim with primKind 1 has exactly one vertex, whose point is the
+// instance anchor (P = instance position, as in Houdini), and references a shared, immutable source Geometry
+// (packedSources[packedSource[p]]) through a 3×3 rotation·scale matrix (packedXform, 9 numbers per prim, column-major).
+// World transform of the instance = translate(P[anchor]) · packedXform. primClosed is 0 for packed prims. The three
+// per-prim arrays are allocated lazily (absent = no packed prims) and travel with clone, merge, subsets and GeoBuilder.
+//
+// Cooked geometry is treated as immutable: nodes clone() before modifying. Packed sources are never modified.
+import type { Mat4, Vec3 } from './math.ts';
 import { EdgeSet, EDGE_KEY_LIMIT } from './edges.ts';
+import { geoContentHash } from './geohash.ts';
 
 export type AttribClass = 'point' | 'vertex' | 'prim' | 'detail';
 /** Element types: fixed-size tuples (float/int with tuple size 1-16, or string) and variable-length arrays. */
@@ -404,6 +411,13 @@ export class Geometry {
   // Object.create(Geometry.prototype) (fast paths in nodes) never sees them undefined.
   private _vertexGroups?: Map<string, Uint8Array>;
   private _edgeGroups?: Map<string, EdgeSet>;
+  /** Packed prims: 1 = packed instance, 0 = polygon/polyline (see the file comment). Absent = no packed prims. */
+  primKind?: Uint8Array;
+  /** Packed prims: index into packedSources per prim (-1 for other prims). Allocated with primKind. */
+  packedSource?: Int32Array;
+  /** Packed prims: 3×3 rotation·scale per prim, 9 numbers column-major (identity for other prims). Allocated with primKind. */
+  packedXform?: Float64Array;
+  private _packedSources?: Geometry[];
 
   /** Vertex groups: one byte per vertex. */
   get vertexGroups(): Map<string, Uint8Array> { return this._vertexGroups ?? (this._vertexGroups = new Map()); }
@@ -411,6 +425,9 @@ export class Geometry {
   /** Edge groups: sets of unordered point pairs. */
   get edgeGroups(): Map<string, EdgeSet> { return this._edgeGroups ?? (this._edgeGroups = new Map()); }
   set edgeGroups(m: Map<string, EdgeSet>) { this._edgeGroups = m; }
+  /** Shared, immutable geometries referenced by packed prims (deduplicated). */
+  get packedSources(): Geometry[] { return this._packedSources ?? (this._packedSources = []); }
+  set packedSources(s: Geometry[]) { this._packedSources = s; }
 
   constructor(init: GeoInit = {}) {
     const pos = init.positions ?? [];
@@ -501,18 +518,32 @@ export class Geometry {
     g.vertexGroups = new Map([...this.vertexGroups].map(([k, v]) => [k, v.slice()]));
     g.edgeGroups = new Map([...this.edgeGroups].map(([k, v]) => [k, v.clone()]));
     g.volumes = this.volumes.slice();
+    if (this.primKind) {
+      // sources are shared (immutable), the per-prim arrays are copied
+      g.primKind = this.primKind.slice();
+      g.packedSource = this.packedSource!.slice();
+      g.packedXform = this.packedXform!.slice();
+      g.packedSources = this.packedSources.slice();
+    }
     return g;
   }
 
+  /**
+   * Bounding box of the points, the packed instances (their sources' boxes, transformed) and optionally the SDF
+   * volumes. Anchor points used only by packed prims are not counted: the box is the one of what is drawn.
+   */
   bbox(includeVolumes = false): { min: Vec3; max: Vec3; empty: boolean } {
     const P = this.P;
     const min: Vec3 = [Infinity, Infinity, Infinity], max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    const anchorsOnly = this.primKind ? packedAnchorOnly(this) : null;
     for (let i = 0; i < P.length; i += 3) {
+      if (anchorsOnly && anchorsOnly[i / 3]) continue;
       const x = P[i], y = P[i + 1], z = P[i + 2];
       if (x < min[0]) min[0] = x; if (x > max[0]) max[0] = x;
       if (y < min[1]) min[1] = y; if (y > max[1]) max[1] = y;
       if (z < min[2]) min[2] = z; if (z > max[2]) max[2] = z;
     }
+    if (this.primKind) packedBounds(this, includeVolumes, min, max);
     if (includeVolumes)
       for (const v of this.volumes)
         for (let c = 0; c < 3; c++) {
@@ -538,6 +569,124 @@ export class Geometry {
     return s;
   }
 
+  // ------------------------------------------------------------ packed primitives
+
+  /** True when at least one prim is a packed instance. */
+  hasPacked(): boolean {
+    return !!this.primKind && this.packedSources.length > 0 && this.primKind.includes(1);
+  }
+
+  /** Is prim p a packed instance? */
+  isPacked(p: number): boolean {
+    return this.primKind !== undefined && this.primKind[p] === 1;
+  }
+
+  /** Number of packed prims. */
+  get numPacked(): number {
+    const k = this.primKind;
+    if (!k) return 0;
+    let n = 0;
+    for (let i = 0; i < k.length; i++) n += k[i];
+    return n;
+  }
+
+  /** Allocate the packed per-prim arrays (no packed prims yet) if absent, or pad them after prims were appended. */
+  ensurePacked(): this {
+    const n = this.numPrims;
+    if (this.primKind && this.primKind.length === n) return this;
+    const kind = new Uint8Array(n), src = new Int32Array(n).fill(-1), X = new Float64Array(n * 9);
+    for (let p = 0; p < n; p++) { X[p * 9] = 1; X[p * 9 + 4] = 1; X[p * 9 + 8] = 1; }
+    if (this.primKind) {
+      const m = Math.min(n, this.primKind.length);
+      kind.set(this.primKind.subarray(0, m));
+      src.set(this.packedSource!.subarray(0, m));
+      X.set(this.packedXform!.subarray(0, m * 9));
+    }
+    this.primKind = kind;
+    this.packedSource = src;
+    this.packedXform = X;
+    return this;
+  }
+
+  /** Drop all packed bookkeeping (call after removing every packed prim by hand). */
+  clearPacked(): this {
+    this.primKind = undefined;
+    this.packedSource = undefined;
+    this.packedXform = undefined;
+    this._packedSources = undefined;
+    return this;
+  }
+
+  /** Index of a source in packedSources, appending it if it is not there yet (dedup by object identity). */
+  addPackedSource(src: Geometry): number {
+    const list = this.packedSources;
+    const i = list.indexOf(src);
+    if (i >= 0) return i;
+    list.push(src);
+    return list.length - 1;
+  }
+
+  /** World transform of packed prim p: translate(P[anchor]) · packedXform (a 4×4, column-major). */
+  packedFullTransform(p: number): Mat4 {
+    const m = new Float64Array(16);
+    const X = this.packedXform, o = p * 9;
+    if (X) {
+      m[0] = X[o]; m[1] = X[o + 1]; m[2] = X[o + 2];
+      m[4] = X[o + 3]; m[5] = X[o + 4]; m[6] = X[o + 5];
+      m[8] = X[o + 6]; m[9] = X[o + 7]; m[10] = X[o + 8];
+    } else { m[0] = 1; m[5] = 1; m[10] = 1; }
+    if (this.primStart[p + 1] > this.primStart[p]) {
+      const a = this.vertexPoint[this.primStart[p]], P = this.P;
+      m[12] = P[a * 3]; m[13] = P[a * 3 + 1]; m[14] = P[a * 3 + 2];
+    }
+    m[15] = 1;
+    return m;
+  }
+
+  /**
+   * Set this geometry's packed arrays to src's, gathered by prim index (primIdx[i] = source prim of prim i, -1 = not
+   * packed), and drop sources no prim uses any more. Used by subsets and by nodes that reorder prims.
+   */
+  gatherPacked(src: Geometry, primIdx: ArrayLike<number>): this {
+    if (!src.primKind) { this.clearPacked(); return this; }
+    const n = primIdx.length;
+    const kind = new Uint8Array(n), s = new Int32Array(n), X = new Float64Array(n * 9);
+    const sk = src.primKind, ss = src.packedSource!, sx = src.packedXform!;
+    for (let i = 0; i < n; i++) {
+      const j = primIdx[i];
+      if (j >= 0 && sk[j]) {
+        kind[i] = 1; s[i] = ss[j];
+        for (let c = 0; c < 9; c++) X[i * 9 + c] = sx[j * 9 + c];
+      } else { s[i] = -1; X[i * 9] = 1; X[i * 9 + 4] = 1; X[i * 9 + 8] = 1; }
+    }
+    this.primKind = kind;
+    this.packedSource = s;
+    this.packedXform = X;
+    this.packedSources = src.packedSources.slice();
+    return this.compactPackedSources();
+  }
+
+  /** Renumber packed sources to the ones in use (first-use order kept); clears the packed arrays when none is left. */
+  compactPackedSources(): this {
+    const kind = this.primKind;
+    if (!kind) return this;
+    const list = this.packedSources, S = this.packedSource!;
+    const remap = new Int32Array(list.length).fill(-1);
+    const used: Geometry[] = [];
+    let identity = true;
+    for (let p = 0; p < kind.length; p++) {
+      if (!kind[p]) continue;
+      const i = S[p];
+      if (remap[i] < 0) { remap[i] = used.length; used.push(list[i]); }
+      if (remap[i] !== i) identity = false;
+    }
+    if (!used.length) return this.clearPacked();
+    if (identity && used.length === list.length) return this;
+    for (let p = 0; p < kind.length; p++) if (kind[p]) S[p] = remap[S[p]];
+    this.packedSources = used;
+    return this;
+  }
+
   /**
    * Delete vertices where keep[v] is falsy, with the subsetPoints rules: closed polygons that
    * lose a vertex are deleted; open polylines lose those vertices (and are deleted if fewer than
@@ -545,12 +694,13 @@ export class Geometry {
    */
   subsetVertices(keep: ArrayLike<number | boolean>, removeUnusedPoints = false): Geometry {
     const primIdx: number[] = [], vtxIdx: number[] = [], starts = [0];
+    const kind = this.primKind;
     for (let p = 0; p < this.numPrims; p++) {
       const s = this.primStart[p], e = this.primStart[p + 1];
       let missing = 0;
       for (let v = s; v < e; v++) if (!keep[v]) missing++;
       if (missing && this.primClosed[p]) continue;
-      if (e - s - missing < (this.primClosed[p] ? 1 : 2)) continue;
+      if (e - s - missing < (this.primClosed[p] || (kind && kind[p]) ? 1 : 2)) continue;
       primIdx.push(p);
       for (let v = s; v < e; v++) if (keep[v]) vtxIdx.push(v);
       starts.push(vtxIdx.length);
@@ -564,6 +714,7 @@ export class Geometry {
     g.primGroups = new Map([...this.primGroups].map(([k, m]) => [k, Uint8Array.from(primIdx, (p) => m[p])]));
     g.vertexGroups = gatherGroups(this.vertexGroups, vtxIdx);
     g.edgeGroups = pruneEdgeGroups(g, this.edgeGroups);
+    if (this.primKind) g.gatherPacked(this, primIdx);
     return removeUnusedPoints ? g.removeUnusedPoints() : g;
   }
 
@@ -587,6 +738,7 @@ export class Geometry {
     g.vertexGroups = gatherGroups(this.vertexGroups, vtxIdx);
     // edges that no longer bound any primitive leave their edge groups
     g.edgeGroups = pruneEdgeGroups(g, this.edgeGroups);
+    if (this.primKind) g.gatherPacked(this, primIdx);
     return removeUnusedPoints ? g.removeUnusedPoints() : g;
   }
 
@@ -607,12 +759,13 @@ export class Geometry {
     for (let i = 0; i < this.numPoints; i++) if (keep[i]) { remap[i] = ptIdx.length; ptIdx.push(i); }
     if (ptIdx.length === this.numPoints) return this.clone();
     const primIdx: number[] = [], vtxIdx: number[] = [], starts = [0];
+    const kind = this.primKind;
     for (let p = 0; p < this.numPrims; p++) {
       const s = this.primStart[p], e = this.primStart[p + 1];
       let missing = 0;
       for (let v = s; v < e; v++) if (remap[this.vertexPoint[v]] < 0) missing++;
       if (missing && this.primClosed[p]) continue;
-      if (e - s - missing < (this.primClosed[p] ? 1 : 2)) continue;
+      if (e - s - missing < (this.primClosed[p] || (kind && kind[p]) ? 1 : 2)) continue;
       primIdx.push(p);
       for (let v = s; v < e; v++) if (remap[this.vertexPoint[v]] >= 0) vtxIdx.push(v);
       starts.push(vtxIdx.length);
@@ -630,6 +783,7 @@ export class Geometry {
     g.vertexGroups = gatherGroups(this.vertexGroups, vtxIdx);
     if (this.edgeGroups.size) g.edgeGroups = pruneEdgeGroups(g, new Map([...this.edgeGroups].map(([k, e]) => [k, e.remap(remap)])));
     g.volumes = this.volumes.slice();
+    if (this.primKind) g.gatherPacked(this, primIdx);
     return g;
   }
 
@@ -670,7 +824,85 @@ export class Geometry {
     out.vertexGroups = mergeGroups(geos.map((g) => [g.vertexGroups, g.numVertices] as const), nv);
     out.edgeGroups = mergeEdgeGroups(geos.map((g) => [g.edgeGroups, g.numPoints] as const));
     out.volumes = geos.flatMap((g) => g.volumes);
+    if (geos.some((g) => g.primKind)) mergePacked(out, geos);
     return out;
+  }
+}
+
+// ---------------------------------------------------------------- packed helpers
+
+/** Concatenate the packed arrays of merged inputs. Sources are shared, deduplicated by identity and by content. */
+function mergePacked(out: Geometry, geos: Geometry[]) {
+  out.ensurePacked();
+  const kind = out.primKind!, S = out.packedSource!, X = out.packedXform!;
+  const sources: Geometry[] = [];
+  const byObj = new Map<Geometry, number>(), byHash = new Map<string, number>();
+  const index = (src: Geometry): number => {
+    let i = byObj.get(src);
+    if (i !== undefined) return i;
+    const h = geoContentHash(src);
+    i = byHash.get(h);
+    if (i === undefined) { i = sources.length; sources.push(src); byHash.set(h, i); }
+    byObj.set(src, i);
+    return i;
+  };
+  let o = 0;
+  for (const g of geos) {
+    if (g.primKind) {
+      const map = g.packedSources.map(index);
+      const gk = g.primKind, gs = g.packedSource!, gx = g.packedXform!;
+      for (let p = 0; p < gk.length; p++) {
+        if (!gk[p]) continue;
+        kind[o + p] = 1;
+        S[o + p] = map[gs[p]];
+        X.set(gx.subarray(p * 9, p * 9 + 9), (o + p) * 9);
+      }
+    }
+    o += g.numPrims;
+  }
+  out.packedSources = sources;
+  out.compactPackedSources();
+}
+
+/** Points referenced only by packed prims (anchors), as a mask (1 = anchor only). */
+export function packedAnchorOnly(g: Geometry): Uint8Array {
+  const np = g.numPoints, out = new Uint8Array(np);
+  const kind = g.primKind;
+  if (!kind) return out;
+  const other = new Uint8Array(np);
+  for (let p = 0; p < g.numPrims; p++) {
+    const flag = kind[p] ? out : other;
+    for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) flag[g.vertexPoint[v]] = 1;
+  }
+  for (let i = 0; i < np; i++) if (other[i]) out[i] = 0;
+  return out;
+}
+
+const sourceBoxes = new WeakMap<Geometry, { min: Vec3; max: Vec3; empty: boolean }[]>();
+
+/** Grow min/max by every packed instance's source box, transformed (exact box of the transformed box). */
+function packedBounds(g: Geometry, includeVolumes: boolean, min: Vec3, max: Vec3) {
+  const kind = g.primKind!, S = g.packedSource!, X = g.packedXform!, P = g.P;
+  const boxes = g.packedSources.map((src) => {
+    let c = sourceBoxes.get(src);
+    if (!c) { c = []; sourceBoxes.set(src, c); }
+    const k = includeVolumes ? 1 : 0;
+    return c[k] ?? (c[k] = src.bbox(includeVolumes));
+  });
+  for (let p = 0; p < kind.length; p++) {
+    if (!kind[p] || g.primStart[p + 1] === g.primStart[p]) continue;
+    const b = boxes[S[p]];
+    if (!b || b.empty) continue;
+    const a = g.vertexPoint[g.primStart[p]], o = p * 9;
+    const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2, cz = (b.min[2] + b.max[2]) / 2;
+    const ex = (b.max[0] - b.min[0]) / 2, ey = (b.max[1] - b.min[1]) / 2, ez = (b.max[2] - b.min[2]) / 2;
+    for (let r = 0; r < 3; r++) {
+      const m0 = X[o + r], m1 = X[o + 3 + r], m2 = X[o + 6 + r];
+      const c = P[a * 3 + r] + m0 * cx + m1 * cy + m2 * cz;
+      const e = Math.abs(m0) * ex + Math.abs(m1) * ey + Math.abs(m2) * ez;
+      if (c - e < min[r]) min[r] = c - e;
+      if (c + e > max[r]) max[r] = c + e;
+    }
   }
 }
 
@@ -718,7 +950,7 @@ function mergeEdgeGroups(list: (readonly [Map<string, EdgeSet>, number])[]): Map
 const DISPLAY_ATTRIBS = ['Cd', 'Alpha', 'N', 'uv'];
 
 /** Promote display attributes to vertex class where inputs disagree on their class. */
-function unifyDisplayAttribs(geos: Geometry[]): Geometry[] {
+export function unifyDisplayAttribs(geos: Geometry[]): Geometry[] {
   let out = geos;
   for (const name of DISPLAY_ATTRIBS) {
     const classes = new Set<AttribClass>();
@@ -1016,6 +1248,15 @@ export class GeoBuilder {
     }
     for (const [k, s] of this.grpEdge) g.edgeGroups.set(k, s.clone());
     g.volumes = this.volumes;
+    // a prim copied from a single packed source prim keeps its kind, source and transform (if it has one vertex)
+    if (src && src.primKind) {
+      const idx = new Int32Array(npr);
+      for (let p = 0; p < npr; p++) {
+        const s = this.primSrc[p];
+        idx[p] = s >= 0 && s < src.primKind.length && src.primKind[s] && this.starts[p + 1] - this.starts[p] === 1 ? s : -1;
+      }
+      g.gatherPacked(src, idx);
+    }
     return g;
   }
 }

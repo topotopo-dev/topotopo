@@ -41,6 +41,7 @@ function deleteGroup(g: Geometry, cls: GroupClass, name: string) {
 defineNode({
   type: 'group_promote',
   category: 'group',
+  packed: 'keep',
   summary: 'Convert groups between point, vertex, prim and edge classes, with any/all inclusion (Houdini Group Promote).',
   description:
     'An element of the target class joins when any (or all) of the source-class elements touching it are in the group. ' +
@@ -121,6 +122,7 @@ function connectors(g: Geometry, cls: 'point' | 'prim' | 'edge', via: 'edge' | '
 defineNode({
   type: 'group_expand',
   category: 'group',
+  packed: 'keep',
   summary: 'Grow or shrink a point, prim or edge group by N steps across connectivity (negative steps shrink).',
   description:
     'Grow adds every neighbour of the group per step; shrink removes every member that has a neighbour outside the group. ' +
@@ -171,6 +173,7 @@ defineNode({
 defineNode({
   type: 'group_delete',
   category: 'group',
+  packed: 'keep',
   summary: 'Delete groups by name (wildcards, "^name" keeps) from one or all classes.',
   aliases: ['groupdelete', 'delete_group', 'remove_group'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -192,6 +195,7 @@ defineNode({
 defineNode({
   type: 'group_rename',
   category: 'group',
+  packed: 'keep',
   summary: 'Rename a group (any class).',
   aliases: ['grouprename', 'rename_group'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
@@ -301,6 +305,7 @@ function evalCombine(expr: string, operand: (name: string) => Uint8Array, n: num
 defineNode({
   type: 'group_combine',
   category: 'group',
+  packed: 'keep',
   summary: 'Boolean combination of groups into a new group: "a & !b | c" (| or, & and, ^ xor, ! not, parentheses).',
   description:
     'Operands are group names (wildcards allowed) or any single group-pattern token of the class, e.g. "@P.y>0", "0-10", ' +

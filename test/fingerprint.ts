@@ -70,6 +70,8 @@ export interface Fingerprint {
     attributes: Record<string, string>;
   };
   volumes?: { name: string; kind: string; bounds: { min: number[]; max: number[] }; samples: string }[];
+  /** packed instances (only present when there are some): count, per-source fingerprint hashes, per-prim source + xform hash */
+  packed?: { instances: number; sources: string[]; hash: string };
 }
 
 const CLASSES = ['point', 'vertex', 'prim', 'detail'] as const;
@@ -155,6 +157,21 @@ export function fingerprint(g: Geometry): Fingerprint {
   ht.int(g.primClosed.length);
   for (const v of g.primClosed) ht.int(v);
   fp.hashes.topology = ht.hex();
+
+  if (g.hasPacked()) {
+    // each source by the hash of its own fingerprint (recursively), then per packed prim: number, source, quantised 3×3
+    const srcs = g.packedSources.map((s) => new Hasher().str(sortedJSON(fingerprint(s))).hex());
+    const h = new Hasher();
+    const k = g.primKind!, S = g.packedSource!, X = g.packedXform!;
+    let n = 0;
+    for (let p = 0; p < k.length; p++) {
+      if (!k[p]) continue;
+      n++;
+      h.int(p).str(srcs[S[p]]);
+      for (let c = 0; c < 9; c++) h.float(X[p * 9 + c], ATTR_Q);
+    }
+    fp.packed = { instances: n, sources: srcs, hash: h.hex() };
+  }
 
   if (g.volumes.length) {
     fp.volumes = g.volumes.map((vol) => {

@@ -7,6 +7,7 @@ import { evalGroup } from './core/groups.ts';
 import { edgeList } from './core/edges.ts';
 import { halfEdges } from './core/halfedge.ts';
 import { fmtNum } from './render/raster.ts';
+import { packedSummaryLine } from './core/packed.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
@@ -63,15 +64,19 @@ function arrayStats(a: Attribute, count: number, sel?: Uint8Array | null): strin
 
 export function summarize(g: Geometry): string {
   const lines: string[] = [];
-  let polys = 0, lines_ = 0, tris = 0, quads = 0;
+  let polys = 0, lines_ = 0, tris = 0, quads = 0, packed = 0;
   for (let p = 0; p < g.numPrims; p++) {
-    if (g.primClosed[p]) { polys++; const s = g.primSize(p); if (s === 3) tris++; else if (s === 4) quads++; } else lines_++;
+    if (g.primKind && g.primKind[p]) packed++;
+    else if (g.primClosed[p]) { polys++; const s = g.primSize(p); if (s === 3) tris++; else if (s === 4) quads++; } else lines_++;
   }
   const parts = [`${n(g.numPoints)} points`, `${n(g.numPrims)} prims`];
   const kinds: string[] = [];
   if (polys) kinds.push(`${n(polys)} polygons (${n(tris)} tri, ${n(quads)} quad, ${n(polys - tris - quads)} ngon)`);
   if (lines_) kinds.push(`${n(lines_)} polylines`);
+  if (packed) kinds.push(`${n(packed)} packed`);
   lines.push(`geometry: ${parts.join(', ')}${kinds.length ? ' = ' + kinds.join(' + ') : ''}, ${n(g.numVertices)} vertices${g.volumes.length ? `, ${g.volumes.length} SDF volume(s)` : ''}`);
+  const pk = packedSummaryLine(g);
+  if (pk) lines.push(pk);
   if (g.numPoints || g.volumes.length) {
     const b = g.bbox(true);
     const size = [0, 1, 2].map((a) => b.max[a] - b.min[a]);
@@ -180,7 +185,10 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     for (let i = start; i < total && shown < count; i++) {
       if (sel && !sel[i]) continue;
       const vals = names.map((k) => `${k}=${fmtAttr(t.get(k)!, i)}`);
-      if (cls === 'prim') vals.unshift(`${g.primClosed[i] ? 'poly' : 'line'} pts[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
+      if (cls === 'prim' && g.isPacked(i)) {
+        const X = g.packedXform!, o9 = i * 9;
+        vals.unshift(`packed pt ${g.primPoints(i)[0]} source ${g.packedSource![i]} xform[${Array.from({ length: 9 }, (_, k) => fmtNum(X[o9 + k])).join(' ')}]`);
+      } else if (cls === 'prim') vals.unshift(`${g.primClosed[i] ? 'poly' : 'line'} pts[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
       if (cls === 'vertex') vals.unshift(`pt ${g.vertexPoint[i]}`);
       out.push(`  ${i}: ${vals.join('  ')}`);
       shown++;

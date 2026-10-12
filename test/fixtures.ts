@@ -115,6 +115,24 @@ export function checkGeo(g: Geometry): string[] {
   for (const [k, m] of g.pointGroups) if (m.length !== g.numPoints) errs.push(`point group ${k} size`);
   for (const [k, m] of g.primGroups) if (m.length !== g.numPrims) errs.push(`prim group ${k} size`);
   for (let i = 0; i < g.P.length; i++) if (!Number.isFinite(g.P[i])) { errs.push('non-finite P'); break; }
+  // packed prims: arrays sized to the prims, one vertex each, valid source, finite transform; sources consistent
+  if (g.primKind) {
+    const n = g.numPrims;
+    if (g.primKind.length !== n || g.packedSource?.length !== n || g.packedXform?.length !== n * 9) errs.push('packed array sizes');
+    else {
+      let bad = '';
+      for (let p = 0; p < n && !bad; p++) {
+        if (!g.primKind[p]) { if (g.packedSource[p] !== -1) bad = `prim ${p}: not packed but has source ${g.packedSource[p]}`; continue; }
+        if (g.primSize(p) !== 1) bad = `packed prim ${p} has ${g.primSize(p)} vertices`;
+        else if (!(g.packedSource[p] >= 0 && g.packedSource[p] < g.packedSources.length)) bad = `packed prim ${p}: source ${g.packedSource[p]} of ${g.packedSources.length}`;
+        else if (g.primClosed[p]) bad = `packed prim ${p} is closed`;
+        else for (let c = 0; c < 9; c++) if (!Number.isFinite(g.packedXform[p * 9 + c])) { bad = `packed prim ${p}: non-finite transform`; break; }
+      }
+      if (bad) errs.push(bad);
+      if (!g.primKind.includes(1)) errs.push('packed arrays without packed prims');
+      for (const [i, src] of g.packedSources.entries()) for (const e of checkGeo(src)) errs.push(`packed source ${i}: ${e}`);
+    }
+  }
   return errs;
 }
 

@@ -194,6 +194,40 @@ const CASES: Case[] = [
       },
     }),
   },
+  {
+    name: 'copy_to_points_1m_packed',
+    what: (q) => `packed copies of a 100-triangle mesh on ${k(q ? 1e5 : 1e6)} points (orient + pscale)`,
+    elements: (q) => (q ? 1e5 : 1e6), unit: 'instances',
+    target: 1000, targetSource: 'roadmap §1.7 (scatter + packed copy of 1M under 1 s)',
+    graph: (q) => ({
+      nodes: {
+        tg: { type: 'grid', params: { size: [0.05, 0.05], divisions: [10, 5] } },
+        tt: { type: 'triangulate', in: ['tg'] },
+        tmpl: { type: 'attrib_delete', in: ['tt'], params: { names: '*' } },
+        pts: { type: 'point_grid', params: { counts: q ? [100, 10, 100] : [100, 100, 100], size: [100, 10, 100] } },
+        ori: { type: 'attrib_randomize', in: ['pts'], params: { name: 'orient', distribution: 'orient' } },
+        sc: { type: 'attrib_randomize', in: ['ori'], params: { name: 'pscale', min: 0.5, max: 1.5 } },
+        target: { type: 'copy_to_points', in: ['tmpl', 'sc'], params: { pack: true } },
+      },
+    }),
+  },
+  {
+    name: 'unpack_100k',
+    what: (q) => `unpack ${k(q ? 1e4 : 1e5)} packed instances of a 100-triangle mesh`,
+    elements: (q) => (q ? 1e4 : 1e5) * 100, unit: 'triangles out',
+    target: 2000, targetSource: 'goal (P2-A)',
+    graph: (q) => ({
+      nodes: {
+        tg: { type: 'grid', params: { size: [0.05, 0.05], divisions: [10, 5] } },
+        tt: { type: 'triangulate', in: ['tg'] },
+        tmpl: { type: 'attrib_delete', in: ['tt'], params: { names: '*' } },
+        pts: { type: 'point_grid', params: { counts: q ? [100, 1, 100] : [100, 10, 100], size: [100, 10, 100] } },
+        ori: { type: 'attrib_randomize', in: ['pts'], params: { name: 'orient', distribution: 'orient' } },
+        cp: { type: 'copy_to_points', in: ['tmpl', 'ori'], params: { pack: true } },
+        target: { type: 'unpack', in: ['cp'] },
+      },
+    }),
+  },
 ];
 
 function booleanGraph(rows: number): GraphSpec {

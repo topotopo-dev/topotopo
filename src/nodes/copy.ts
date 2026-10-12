@@ -4,7 +4,8 @@ import { EdgeSet } from '../core/edges.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { rng } from '../core/random.ts';
-import { primNormals, triangulate } from '../core/topology.ts';
+import { connectivity, primNormals, triangulate } from '../core/topology.ts';
+import { composePackedXforms } from '../core/packed.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { lookAtBasis, m4apply, m4applyDir, m4basis, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize } from '../core/math.ts';
 import type { Mat4, Vec3 } from '../core/math.ts';
@@ -245,17 +246,29 @@ function repeatTable(t: AttribTable, reps: { src: Int32Array }[]): AttribTable {
 defineNode({
   type: 'copy_to_points',
   category: 'copy',
-  summary: 'Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over.',
+  packed: 'keep',
+  summary: 'Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over. pack:true makes packed instances (cheap at millions).',
   aliases: ['copytopoints', 'instance', 'copy_to_pts'],
+  description:
+    'pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position ' +
+    'carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). ' +
+    'Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute ' +
+    'nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). ' +
+    'Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; ' +
+    'the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, ' +
+    'or the exact value, e.g. a string name); without that attribute the pieces cycle.',
   inputs: [{ name: 'geo', desc: 'geometry to copy' }, { name: 'points', desc: 'template points' }],
   params: {
     group: P.group('point', 'template points to use ("" = all)'),
+    pack: { type: 'bool', default: false, desc: 'output packed instances (one point + one packed prim per copy, sharing the source) instead of real copies', aliases: ['pack_and_instance', 'packed'] },
     copy_attribs: { type: 'string', default: '*', desc: 'template point attributes copied onto the copies (pattern; transform attributes are always excluded)' },
     copy_attrib: { type: 'string', default: 'copynum', desc: 'prim int attribute with the copy index ("" = none)' },
+    variants: { type: 'enum', options: ['none', 'name', 'piece'], default: 'none', desc: 'split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set)' },
     piece_attrib: { type: 'string', default: '', desc: 'variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class")' },
     variant_attrib: { type: 'string', default: 'variant', desc: 'variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value)' },
   },
-  outputs: 'prim copynum; template point attributes on copied points',
+  outputs: 'prim copynum; template point attributes on copied points (pack: on the instance anchor points)',
+  example: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_attrib: 'variant' } },
   cook: ({ input, p }) => {
     const src = input(0), t = input(1);
     const sel = mask(t, 'point', p.group);
@@ -264,26 +277,47 @@ defineNode({
     if (!tpts.length || (!src.numPoints && !src.volumes.length)) return new Geometry();
     // variants
     let pieceOf: ((i: number) => Geometry) | null = null;
-    if (p.piece_attrib) {
-      const pa = src.prims.get(p.piece_attrib);
-      if (!pa) throw new NodeError(`piece_attrib "${p.piece_attrib}" not on source prims`);
-      const values = [...new Set(Array.from({ length: src.numPrims }, (_, i) => pa.get(i) as any))].sort((a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0));
-      const subsets = new Map<any, Geometry>();
-      for (const v of values) subsets.set(v, src.subsetPrims(Uint8Array.from({ length: src.numPrims }, (_, i) => (pa.get(i) === v ? 1 : 0))));
+    let pieceKey: ((i: number) => any) | null = null;
+    let subsets: Map<any, Geometry> | null = null;
+    const splitAttr = p.variants === 'name' ? 'name' : p.variants === 'piece' ? '' : p.piece_attrib;
+    if (p.variants === 'piece' || splitAttr) {
+      let values: any[];
+      subsets = new Map<any, Geometry>();
+      if (!splitAttr) {
+        // connectivity pieces, numbered 0.. in the order of their first prim
+        const conn = connectivity(src);
+        const order: number[] = [], index = new Map<number, number>();
+        for (let pr = 0; pr < src.numPrims; pr++) { const c = conn.primClass[pr]; if (c >= 0 && !index.has(c)) { index.set(c, order.length); order.push(c); } }
+        values = order.map((_, k) => k);
+        order.forEach((c, k) => subsets!.set(k, src.subsetPrims(Uint8Array.from(conn.primClass, (x) => (x === c ? 1 : 0)))));
+      } else {
+        const pa = src.prims.get(splitAttr);
+        if (!pa) throw new NodeError(p.variants === 'name' ? 'variants "name": the source has no prim attribute "name" (set it with attrib_create or name pieces before merging)' : `piece_attrib "${splitAttr}" not on source prims`);
+        values = [...new Set(Array.from({ length: src.numPrims }, (_, i) => pa.get(i) as any))].sort((a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0));
+        for (const v of values) subsets.set(v, src.subsetPrims(Uint8Array.from({ length: src.numPrims }, (_, i) => (pa.get(i) === v ? 1 : 0))));
+      }
       const va = t.points.get(p.variant_attrib);
-      pieceOf = (i) => {
-        if (!va) return subsets.get(values[i % values.length])!;
+      pieceKey = (i) => {
+        if (!values.length) return undefined;
+        if (!va) return values[i % values.length];
         const v = va.get(i) as any;
-        if (subsets.has(v)) return subsets.get(v)!;
-        if (typeof v === 'number') return subsets.get(values[((Math.floor(v) % values.length) + values.length) % values.length])!;
-        return new Geometry();
+        if (subsets!.has(v)) return v;
+        if (typeof v === 'number') return values[((Math.floor(v) % values.length) + values.length) % values.length];
+        return undefined;
       };
+      pieceOf = (i) => subsets!.get(pieceKey!(i)) ?? new Geometry();
     }
-    const parts: Geometry[] = [];
     const copyNames = new Set<string>();
     const pats = String(p.copy_attribs).split(/[\s,]+/).filter(Boolean);
     const matches = (n: string) => pats.some((pt) => !pt.startsWith('^') && new RegExp('^' + pt.replace(/\*/g, '.*') + '$').test(n)) && !pats.some((pt) => pt.startsWith('^') && new RegExp('^' + pt.slice(1).replace(/\*/g, '.*') + '$').test(n));
     for (const n of t.points.names()) if (!XFORM_ATTRIBS.has(n) && matches(n)) copyNames.add(n);
+
+    if (p.pack) {
+      const sources = subsets ? [...subsets.values()] : [src];
+      const keyIndex = subsets ? new Map([...subsets.keys()].map((k, i) => [k, i])) : null;
+      const pick = (ti: number) => (keyIndex ? keyIndex.get(pieceKey!(ti)) ?? -1 : 0);
+      return packedCopies(src, sources, pick, t, tpts, copyNames, p.copy_attrib);
+    }
 
     if (!pieceOf) {
       // fast path: one source repeated
@@ -302,6 +336,18 @@ defineNode({
       out.vertexGroups = new Map([...src.vertexGroups].map(([k, m]) => { const o = new Uint8Array(nv * nc); for (let c = 0; c < nc; c++) o.set(m, c * nv); return [k, o]; }));
       out.edgeGroups = new Map([...src.edgeGroups].map(([k, e]) => { const o = new EdgeSet(); for (let c = 0; c < nc; c++) for (const [a, b] of e) o.add(a + c * np, b + c * np); return [k, o]; }));
       out.volumes = [];
+      // packed prims in the source: repeated, each copy composing its transform into theirs
+      if (src.primKind) {
+        out.primKind = new Uint8Array(npr * nc);
+        out.packedSource = new Int32Array(npr * nc);
+        out.packedXform = new Float64Array(npr * nc * 9);
+        out.packedSources = src.packedSources.slice();
+        for (let c = 0; c < nc; c++) {
+          out.primKind.set(src.primKind, c * npr);
+          out.packedSource.set(src.packedSource!, c * npr);
+          out.packedXform.set(src.packedXform!, c * npr * 9);
+        }
+      }
       const Pd = out.P, sP = src.P;
       const NA = out.points.get('N'), VNA = out.vertices.get('N');
       const vecA = ['v', 'up'].map((n) => out.points.get(n)).filter((a) => a && a.size === 3) as Attribute[];
@@ -323,6 +369,7 @@ defineNode({
         for (let v = 0; v < nv; v++) out.vertexPoint[c * nv + v] = src.vertexPoint[v] + c * np;
         for (let pr = 0; pr < npr; pr++) { out.primStart[c * npr + pr] = src.primStart[pr] + c * nv; out.primClosed[c * npr + pr] = src.primClosed[pr]; }
         if (cn) cn.fill(c, c * npr, (c + 1) * npr);
+        if (out.primKind) composePackedXforms(out, M, null, c * npr, (c + 1) * npr);
       });
       out.primStart[npr * nc] = nv * nc;
       for (const n of copyNames) {
@@ -334,6 +381,7 @@ defineNode({
       return out;
     }
     // variants path: transform each chosen piece
+    const parts: Geometry[] = [];
     tpts.forEach((ti, c) => {
       const piece = pieceOf!(ti);
       if (!piece.numPoints) return;
@@ -341,6 +389,7 @@ defineNode({
       const g = piece.clone();
       const Pd = g.P;
       for (let i = 0; i < g.numPoints; i++) m4apply(M, Pd[i * 3], Pd[i * 3 + 1], Pd[i * 3 + 2], Pd, i * 3);
+      if (g.primKind) composePackedXforms(g, M);
       for (const cls of ['point', 'vertex'] as const) {
         const A = g.table(cls).get('N');
         if (!A || A.size !== 3) continue;
@@ -363,5 +412,132 @@ defineNode({
     return Geometry.merge(parts);
   },
 });
+
+/**
+ * Instance transforms of template points, written without allocations (1M points in a few tens of ms):
+ * pos (3 per point) = translation, X (9 per point) = rotation·scale, column-major. Same conventions and the same
+ * arithmetic as pointTransform: P + trans; orient, else N (or v) with up, else identity; then rot; times
+ * pscale·scale; pivot moves the translation by -(R·S)·pivot.
+ */
+export function instanceXforms(t: Geometry, tpts: ArrayLike<number>): { pos: Float64Array; X: Float64Array } {
+  const n = tpts.length, pos = new Float64Array(n * 3), X = new Float64Array(n * 9);
+  const get = (name: string) => t.points.get(name);
+  const f = (a: Attribute | undefined, size: number) => (a && a.size === size && a.type !== 'string' && !a.isArray ? (a.data as Float64Array) : null);
+  const Pd = t.P, tr = f(get('trans'), 3), orient = f(get('orient'), 4);
+  const NA = get('N') ?? get('v'), N = f(NA, 3), up = f(get('up'), 3), rot = f(get('rot'), 4);
+  const psA = get('pscale'), ps = psA && psA.size === 1 && psA.type !== 'string' && !psA.isArray ? (psA.data as Float64Array) : null;
+  const sc = f(get('scale'), 3), pv = f(get('pivot'), 3);
+  const R = new Float64Array(9), Q = new Float64Array(9);
+  const quat = (d: Float64Array, o: number, out: Float64Array) => {
+    // m4fromQuat (no normalisation, as there)
+    const x = d[o], y = d[o + 1], z = d[o + 2], w = d[o + 3];
+    out[0] = 1 - 2 * (y * y + z * z); out[1] = 2 * (x * y + z * w); out[2] = 2 * (x * z - y * w);
+    out[3] = 2 * (x * y - z * w); out[4] = 1 - 2 * (x * x + z * z); out[5] = 2 * (y * z + x * w);
+    out[6] = 2 * (x * z + y * w); out[7] = 2 * (y * z - x * w); out[8] = 1 - 2 * (x * x + y * y);
+  };
+  for (let k = 0; k < n; k++) {
+    const i = tpts[k];
+    let px = Pd[i * 3], py = Pd[i * 3 + 1], pz = Pd[i * 3 + 2];
+    if (tr) { px += tr[i * 3]; py += tr[i * 3 + 1]; pz += tr[i * 3 + 2]; }
+    R[0] = 1; R[1] = 0; R[2] = 0; R[3] = 0; R[4] = 1; R[5] = 0; R[6] = 0; R[7] = 0; R[8] = 1;
+    if (orient) quat(orient, i * 4, R);
+    else if (N) {
+      // lookAtBasis(N, up): z = N, x = up × z (fallback axis when parallel), y = z × x
+      const dx = N[i * 3], dy = N[i * 3 + 1], dz = N[i * 3 + 2];
+      if (Math.hypot(dx, dy, dz) > 1e-12) {
+        const l = Math.hypot(dx, dy, dz);
+        const zx = l > 1e-20 ? dx / l : 0, zy = l > 1e-20 ? dy / l : 0, zz = l > 1e-20 ? dz / l : 0;
+        if (Math.hypot(zx, zy, zz) !== 0) {
+          const ux = up ? up[i * 3] : 0, uy = up ? up[i * 3 + 1] : 1, uz = up ? up[i * 3 + 2] : 0;
+          let xx = uy * zz - uz * zy, xy = uz * zx - ux * zz, xz = ux * zy - uy * zx;
+          if (Math.hypot(xx, xy, xz) < 1e-8) {
+            const ax = Math.abs(zy) < 0.9 ? 0 : 1, ay = Math.abs(zy) < 0.9 ? 1 : 0;
+            xx = ay * zz - 0 * zy; xy = 0 * zx - ax * zz; xz = ax * zy - ay * zx;
+          }
+          const xl = Math.hypot(xx, xy, xz);
+          if (xl > 1e-20) { xx /= xl; xy /= xl; xz /= xl; } else { xx = 0; xy = 0; xz = 0; }
+          R[0] = xx; R[1] = xy; R[2] = xz;
+          R[3] = zy * xz - zz * xy; R[4] = zz * xx - zx * xz; R[5] = zx * xy - zy * xx;
+          R[6] = zx; R[7] = zy; R[8] = zz;
+        }
+      }
+    }
+    if (rot) {
+      quat(rot, i * 4, Q);
+      // R := R · Q, column by column
+      const r0 = R[0], r1 = R[1], r2 = R[2], r3 = R[3], r4 = R[4], r5 = R[5], r6 = R[6], r7 = R[7], r8 = R[8];
+      for (let c = 0; c < 3; c++) {
+        const q0 = Q[c * 3], q1 = Q[c * 3 + 1], q2 = Q[c * 3 + 2];
+        R[c * 3] = r0 * q0 + r3 * q1 + r6 * q2;
+        R[c * 3 + 1] = r1 * q0 + r4 * q1 + r7 * q2;
+        R[c * 3 + 2] = r2 * q0 + r5 * q1 + r8 * q2;
+      }
+    }
+    const s = ps ? ps[i] : 1;
+    const sx = s * (sc ? sc[i * 3] : 1), sy = s * (sc ? sc[i * 3 + 1] : 1), sz = s * (sc ? sc[i * 3 + 2] : 1);
+    const o = k * 9;
+    X[o] = R[0] * sx; X[o + 1] = R[1] * sx; X[o + 2] = R[2] * sx;
+    X[o + 3] = R[3] * sy; X[o + 4] = R[4] * sy; X[o + 5] = R[5] * sy;
+    X[o + 6] = R[6] * sz; X[o + 7] = R[7] * sz; X[o + 8] = R[8] * sz;
+    if (pv) {
+      const vx = -pv[i * 3], vy = -pv[i * 3 + 1], vz = -pv[i * 3 + 2];
+      px += X[o] * vx + X[o + 3] * vy + X[o + 6] * vz;
+      py += X[o + 1] * vx + X[o + 4] * vy + X[o + 7] * vz;
+      pz += X[o + 2] * vx + X[o + 5] * vy + X[o + 8] * vz;
+    }
+    pos[k * 3] = px; pos[k * 3 + 1] = py; pos[k * 3 + 2] = pz;
+  }
+  return { pos, X };
+}
+
+/**
+ * Packed copy_to_points: one anchor point + one packed prim per copy. Template attributes go onto the anchors; the
+ * attributes they replace in an unpacked copy (point attributes of the same name, and every Cd) are removed from
+ * the shared sources once, so unpacking gives the same result as pack:false.
+ */
+function packedCopies(
+  src: Geometry, sources: Geometry[], pick: (ti: number) => number, t: Geometry, tpts: number[], copyNames: Set<string>, copyAttrib: string,
+): Geometry {
+  const strip = (g: Geometry) => {
+    const kill = [...copyNames].filter((n) => g.points.has(n) || (n === 'Cd' && g.findAttrib('Cd')));
+    if (!kill.length) return g;
+    const c = g.clone();
+    for (const n of kill) {
+      c.points.delete(n);
+      if (n === 'Cd') { c.prims.delete('Cd'); c.vertices.delete('Cd'); }
+    }
+    return c;
+  };
+  const srcs = sources.map(strip);
+  const chosen: number[] = [], copyIdx: number[] = [], srcIdx: number[] = [];
+  tpts.forEach((ti, c) => {
+    const s = pick(ti);
+    if (s < 0 || !srcs[s] || !srcs[s].numPoints) return; // empty piece: no copy (as unpacked)
+    chosen.push(ti); copyIdx.push(c); srcIdx.push(s);
+  });
+  const n = chosen.length;
+  const { pos, X } = instanceXforms(t, chosen);
+  const out = Object.create(Geometry.prototype) as Geometry;
+  out.points = new AttribTable(n);
+  (out.points.add('P', 'float', 3).data as Float64Array).set(pos);
+  for (const name of copyNames) out.points.set(name, t.points.get(name)!.gather(chosen));
+  out.vertices = new AttribTable(n);
+  out.prims = new AttribTable(n);
+  if (copyAttrib) (out.prims.add(copyAttrib, 'int', 1).data as Int32Array).set(copyIdx);
+  out.detail = src.detail.clone();
+  out.primStart = Int32Array.from({ length: n + 1 }, (_, i) => i);
+  out.vertexPoint = Int32Array.from({ length: n }, (_, i) => i);
+  out.primClosed = new Uint8Array(n);
+  out.pointGroups = new Map();
+  out.primGroups = new Map();
+  out.vertexGroups = new Map();
+  out.edgeGroups = new Map();
+  out.volumes = [];
+  out.primKind = new Uint8Array(n).fill(1);
+  out.packedSource = Int32Array.from(srcIdx);
+  out.packedXform = X;
+  out.packedSources = srcs;
+  return out.compactPackedSources();
+}
 
 export { m4basis };
