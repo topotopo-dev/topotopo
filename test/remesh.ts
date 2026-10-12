@@ -5,7 +5,8 @@ import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { halfEdges } from '../src/core/halfedge.ts';
-import { primNewell, signedVolume, topologyReport } from '../src/core/topology.ts';
+import { primNewell, signedVolume, topologyReport, triangulate } from '../src/core/topology.ts';
+import { ClosestBVH } from '../src/core/remesh.ts';
 import { repairMesh } from '../src/core/repair.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
@@ -97,6 +98,28 @@ function edgeLengths(g: Geometry) {
   for (let v = 0; v < ref.numVertices; v++) ru.add(`${refUv[v * 3].toFixed(4)},${refUv[v * 3 + 1].toFixed(4)}`);
   for (let v = 0; v < g.numVertices; v++) if (!(outUv[v * 3] >= -1e-9 && outUv[v * 3] <= 1 + 1e-9 && outUv[v * 3 + 1] >= -1e-9 && outUv[v * 3 + 1] <= 1 + 1e-9)) uvOk = false;
   check(uvOk, 'box: uv stays inside the input uv range');
+  // every output corner's uv equals the input's uv mapping at that point, on the face's side of the box edge
+  const { tris } = triangulate(ref);
+  const T = new Float64Array(tris.length * 3);
+  for (let i = 0; i < tris.length; i++) for (let c = 0; c < 3; c++) T[i * 3 + c] = ref.P[ref.vertexPoint[tris[i]] * 3 + c];
+  const bvh = new ClosestBVH(T, 3);
+  let uvErr = 0;
+  for (let p = 0; p < g.numPrims; p++) {
+    const vs = [g.primStart[p], g.primStart[p] + 1, g.primStart[p] + 2];
+    const c = [0, 1, 2].map((k) => vs.reduce((s, v) => s + g.P[g.vertexPoint[v] * 3 + k], 0) / 3);
+    for (const v of vs) {
+      // a point just inside the face from this corner picks the input triangle on the face's side
+      const q = [0, 1, 2].map((k) => g.P[g.vertexPoint[v] * 3 + k] * 0.999 + c[k] * 0.001);
+      const t = bvh.closest(q[0], q[1], q[2]);
+      bvh.onItem(t, g.P[g.vertexPoint[v] * 3], g.P[g.vertexPoint[v] * 3 + 1], g.P[g.vertexPoint[v] * 3 + 2]);
+      const w = [bvh.b0, bvh.b1, bvh.b2];
+      for (let k = 0; k < 2; k++) {
+        const want = w.reduce((s, x, j) => s + x * refUv[tris[t * 3 + j] * 3 + k], 0);
+        uvErr = Math.max(uvErr, Math.abs(want - outUv[v * 3 + k]));
+      }
+    }
+  }
+  check(uvErr < 1e-6, `box: corner uv follows the input mapping on each side of the seams (max error ${uvErr.toExponential(2)})`);
 }
 
 // ---------------------------------------------------------------- remesh_isotropic: adaptive target
@@ -152,6 +175,21 @@ function edgeLengths(g: Geometry) {
   check(watertight(us), 'uv sphere: watertight');
 }
 
+// ---------------------------------------------------------------- remesh_isotropic: edge groups as features
+{
+  // a flat grid with an edge group along x = 0: the new edges along that line keep the group
+  const nodes: Record<string, NodeSpec> = {
+    g: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
+    e: { type: 'group', in: ['g'], params: { name: 'crease', class: 'edge', expr: 'Math.abs(@P.x) < 1e-6' } },
+    r: { type: 'remesh_isotropic', in: ['e'], params: { target_length: 0.1, iterations: 5, edge_groups: 'crease' } },
+  };
+  const g = await cook(nodes, 'r');
+  const set = g.edgeGroups.get('crease');
+  let len = 0, onLine = true;
+  if (set) for (const [a, b] of set) { len += Math.hypot(...pos(g, a).map((v, k) => v - pos(g, b)[k])); if (Math.abs(g.P[a * 3]) > 1e-9 || Math.abs(g.P[b * 3]) > 1e-9) onLine = false; }
+  check(set && set.size >= 15 && onLine && Math.abs(len - 2) < 1e-6, `edge_groups: the crease line is kept and stays in group "crease" (${set?.size ?? 0} edges, length ${len.toFixed(4)})`);
+}
+
 // ---------------------------------------------------------------- remesh_isotropic: non-manifold input
 {
   // two cubes fused along one edge: the non-manifold edge stays as it is, the rest is remeshed without sliver fans
@@ -165,18 +203,19 @@ function edgeLengths(g: Geometry) {
 }
 
 // ---------------------------------------------------------------- remesh_isotropic: timing (100k triangles, 10 iterations)
-{
-  const nodes: Record<string, NodeSpec> = {
-    s: { type: 'sphere', params: { type: 'ico', level: 6 } },
-    n: { type: 'noise_displace', in: ['s'], params: { amplitude: 0.05, frequency: 3 } },
-    r: { type: 'remesh_isotropic', in: ['n'], params: { iterations: 10 } },
-  };
-  await cook({ s: nodes.s, n: nodes.n }, 'n');
+for (const [label, src] of [
+  // a uv sphere: 100k triangles with poles, a uv seam and uneven triangles (lots of splits, collapses and flips)
+  ['uv sphere', { s: { type: 'sphere', params: { rows: 224, cols: 224 } } }],
+  // an even, noisy ico sphere at its own edge length (mostly relaxation + projection)
+  ['noisy ico sphere', { s: { type: 'sphere', params: { type: 'ico', level: 6 } }, n: { type: 'noise_displace', in: ['s'], params: { amplitude: 0.05, frequency: 3 } } }],
+] as [string, Record<string, NodeSpec>][]) {
+  const last = Object.keys(src).pop()!;
+  const input = await cook(src, last);
   const t0 = performance.now();
-  const r = await cookR(nodes, 'r');
+  const r = await cookR({ ...src, r: { type: 'remesh_isotropic', in: [last], params: { iterations: 10 } } }, 'r');
   const ms = performance.now() - t0;
-  console.log(`     timing: remesh_isotropic ${triCount((await cook({ s: nodes.s, n: nodes.n }, 'n')))} → ${triCount(r.geo!)} triangles, 10 iterations: ${ms.toFixed(0)} ms`);
-  check(ms < 8000, `timing: 82k-triangle remesh, 10 iterations in ${ms.toFixed(0)} ms (target < 2000 ms on a desktop; test limit 8000)`);
+  console.log(`     timing: remesh_isotropic ${label} ${triCount(input)} → ${triCount(r.geo!)} triangles, 10 iterations: ${ms.toFixed(0)} ms`);
+  check(ms < 8000, `timing: ${label}, ${triCount(input)} triangles, 10 iterations in ${ms.toFixed(0)} ms (target < 2000 ms on a desktop; test limit 8000)`);
 }
 
 // ---------------------------------------------------------------- decimate

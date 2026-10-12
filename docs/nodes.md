@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-119 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+122 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -14,7 +14,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [measure](#measure)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
-- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [normal](#normal) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
+- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
@@ -2001,9 +2001,11 @@ Bounding box of the input (whole or per connected piece) as a box mesh.
 
 ### clean
 
-category: `topology` · aliases: `cleanup`, `repair`
+category: `topology` · aliases: `cleanup`
 
 Tidy geometry: weld duplicates, drop degenerate/zero-area prims and unused points, optionally fix winding.
+
+For holes, non-manifold edges, inconsistent winding and self-intersections use mesh_repair.
 
 **Inputs**
 
@@ -2023,24 +2025,50 @@ Tidy geometry: weld duplicates, drop degenerate/zero-area prims and unused point
 
 ### decimate
 
-category: `topology` · aliases: `polyreduce`, `simplify`, `reduce`
+category: `topology` · aliases: `polyreduce`, `simplify`, `reduce`, `decimate_points`
 
-Reduce triangle count while preserving shape (meshoptimizer). Output is triangles; vertex attributes are dropped.
+Reduce triangle count while preserving shape, uv seams and attributes (meshoptimizer). Output is triangles; also thins point clouds.
+
+Houdini: PolyReduce SOP. Polygons are triangulated first and the result is triangles. meshoptimizer simplifyWithAttributes collapses edges by quadric error: corners whose vertex attributes differ (uv seams, hard normals) and borders between prims with different string attributes or prim groups stay intact, and the "attributes" (float point or vertex attributes with weights) steer which edges go. Points keep their exact positions and attributes (meshoptimizer only removes points); corners copy the corner they stand for. max_error stops early (relative to the mesh extent, or in scene units with error_absolute); the achieved error is written to detail "error" (and "error_abs" in scene units). prune lets whole small pieces vanish; aggressive (sloppy) ignores topology and seams to reach any target. group decimates only those prims (points shared with other prims stay; sparse speeds up small groups of big meshes). mode points (or auto on a point cloud) thins points with simplifyPoints, keeping an even spread and the point_attributes (Cd, pscale).
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | polygon mesh |
+| 0 | `geo` | no | no | polygon mesh or point cloud |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `ratio` | float | `0.25` | 0..1 |  | `percentage`, `keep` | target fraction of triangles to keep |
-| `max_error` | float | `0.05` | 0.. |  | `error` | max deviation relative to mesh size (stops early if reached) |
-| `lock_border` | bool | `true` |  |  |  | keep open borders fixed |
-| `aggressive` | bool | `false` |  |  |  | sloppy mode: ignores topology, reaches any target |
+| `ratio` | float | `0.25` | 0..1 |  | `percentage`, `keep` | target fraction of triangles (or points) to keep |
+| `target_count` | int | `0` | 0.. |  | `count`, `target`, `final_count` | target number of triangles (points in points mode); > 0 overrides ratio |
+| `max_error` | float | `0.05` | 0.. |  | `error`, `target_error` | stop when the deviation reaches this (relative to the mesh extent, or scene units with error_absolute) |
+| `error_absolute` | bool | `false` |  |  |  | max_error (and detail "error") in scene units instead of relative to the mesh size |
+| `lock_border` | bool | `true` |  |  |  | keep open borders fixed (tiles and pieces still stitch) |
+| `attributes` | string | `"uv N Cd"` |  |  | `attribs`, `weights` | float point/vertex attributes that steer the reduction, with optional weights: "uv:2 N:0.5 Cd" (weight 1 ≈ a change of 1 costs like moving across the whole mesh); missing ones are skipped |
+| `prune` | bool | `false` |  |  |  | allow small disconnected pieces to disappear entirely |
+| `sparse` | bool | `false` |  |  |  | faster when the group is a small part of a big mesh (use error_absolute for consistent errors) *(advanced)* |
+| `regularize` | bool | `false` |  |  |  | favour evenly sized triangles over exact shape *(advanced)* |
+| `aggressive` | bool | `false` |  |  | `sloppy` | sloppy mode: ignores topology and seams, reaches any target |
+| `group` | group (prim) | `""` |  |  |  | prims to decimate ("" = all); points shared with other prims stay |
+| `lock` | group (point) | `""` |  |  | `lock_points` | point group that must not move or disappear ("" = none) |
+| `mode` | enum | `"auto"` |  | `auto`, `mesh`, `points` |  | auto = points when the input has no polygons; points thins a point cloud |
+| `point_attributes` | string | `"Cd pscale"` |  |  |  | points mode: float point attributes kept apart (up to 3 components in total, with optional weights) |
+
+**Writes:** triangles; detail float error, error_abs; points mode keeps the chosen points with all attributes
+
+**Example**
+
+```json
+{
+  "type": "decimate",
+  "params": {
+    "ratio": 0.2,
+    "attributes": "uv:1 N:0.5"
+  }
+}
+```
 
 ### dissolve
 
@@ -2278,6 +2306,107 @@ Unlike clip, both sides stay connected (keep both) and the mesh stays watertight
 }
 ```
 
+### lod
+
+category: `topology` · aliases: `lod_tree`, `polyreduce_lod`, `lod_create`, `lods`
+
+Levels of detail in one go: decimated copies tagged with prim lod and name suffix _LOD0, _LOD1 … (merged), or one level (switch).
+
+Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. merge outputs all levels together with prim int "lod" and prim "name" = input name (or base_name) + "_LOD<k>", so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level". Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `levels` | int | `4` | 1..12 |  | `count`, `num_levels` | number of levels (LOD0 … LODn-1) |
+| `ratios` | json | `[1,0.5,0.25,0.125]` |  |  |  | triangle fraction per level, e.g. [1, 0.5, 0.25, 0.125]; missing entries keep halving |
+| `screen_sizes` | json | `[]` |  |  |  | error-driven levels instead: screen size per level, e.g. [1, 0.5, 0.25, 0.1] (fraction of screen height); [] = use ratios |
+| `pixel_error` | float | `1` | 0.. |  |  | screen_sizes: allowed error in pixels *(advanced)* |
+| `screen_height` | int | `1080` | 1.. |  |  | screen_sizes: screen height in pixels *(advanced)* |
+| `max_error` | float | `1` | 0.. |  | `error` | ratio levels: stop early at this relative error (1 = reach the ratio) |
+| `attributes` | string | `"uv N Cd"` |  |  |  | float point/vertex attributes that steer the reduction, with optional weights ("uv:2 N:0.5") |
+| `lock_border` | bool | `false` |  |  |  | keep open borders fixed in every level |
+| `prune` | bool | `true` |  |  |  | let small disconnected pieces (leaves, bolts) vanish in coarse levels |
+| `mode` | enum | `"merge"` |  | `merge`, `switch` |  | merge = all levels in one geometry; switch = only "level" |
+| `level` | int | `0` | 0.. |  |  | switch mode: the level to output |
+| `base_name` | string | `"mesh"` |  |  | `name` | name for prims without a "name" attribute (becomes mesh_LOD0 …) |
+| `spacing` | vec3 | `[0,0,0]` |  |  | `offset` | offset of level k = k * spacing (side-by-side previews; keep 0 for export) |
+
+**Writes:** prim int lod, prim string name (…_LOD<k>); detail string lod (JSON per level), detail int[] lod_tris
+
+**Example**
+
+```json
+{
+  "type": "lod",
+  "params": {
+    "levels": 4,
+    "ratios": [
+      1,
+      0.5,
+      0.25,
+      0.1
+    ],
+    "spacing": [
+      2.5,
+      0,
+      0
+    ]
+  }
+}
+```
+
+### mesh_repair
+
+category: `topology` · aliases: `repair`, `polydoctor`, `mesh_doctor`, `fix_mesh`
+
+Diagnose and fix meshes: fuse duplicates, degenerate/duplicate faces, non-manifold edges, winding, small holes, self-intersections.
+
+Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switched off: fuse points within tolerance (by default only where one of the two lies on an open border: cracks and polygon soups close, solids that merely touch, like fracture pieces, keep their own points); drop repeated points and faces with < 3 distinct points, zero-area triangles hand their middle point to the neighbour across their long side (no slit is left); duplicate faces (compared by position: a copy with the same winding goes, an opposite-winding pair on the same points, i.e. an internal wall, goes entirely); non-manifold edges (3+ faces): keep, remove the extra faces, or split (faces around the edge are paired by angle and orientation, then every point whose corners form several fans (also bowtie points) is duplicated so each fan is manifold); winding made consistent across manifold edges (each piece keeps its majority orientation); holes with at most max_hole_edges edges ear-clipped (no new points, attributes from the neighbouring faces, prim group "filled"); closed pieces turned outward (signed volume); optional self-intersection test (BVH, triangle pairs that cross; report → prim group "self_intersecting", remove_faces → delete them and fill the holes); points no prim uses removed. Detail string "repair_report" holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed or found something. Polylines pass through. For a quick tidy without topology changes use clean; for meshes beyond repair, remesh (voxel) rebuilds a watertight surface.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `fuse` | enum | `"borders"` |  | `borders`, `all`, `off` |  | weld points within tolerance: borders = only where one of the two is on an open border (cracks, polygon soups; touching solids stay separate); all = every pair |
+| `tolerance` | float | `0.00001` | 0.. |  | `distance`, `fuse_distance` | fuse distance (0 = exactly coincident points only) |
+| `remove_degenerate` | bool | `true` |  |  |  | remove faces with repeated points or zero area (collinear triangles merge into their neighbour) |
+| `remove_duplicates` | bool | `true` |  |  |  | remove faces that use the same points as an earlier face |
+| `non_manifold` | enum | `"split"` |  | `split`, `remove`, `keep` |  | edges with 3+ faces: split = duplicate points so every fan is manifold; remove = delete the extra faces; keep |
+| `fix_winding` | bool | `true` |  |  |  | make face winding consistent across shared edges |
+| `outward` | bool | `true` |  |  |  | turn closed pieces so their normals face outward (needs fix_winding) |
+| `fill_holes` | bool | `true` |  |  |  | cap small holes |
+| `max_hole_edges` | int | `8` | 0.. |  |  | only fill holes with at most this many edges (0 = any size) |
+| `self_intersections` | enum | `"off"` |  | `off`, `report`, `remove_faces` |  | find faces that cross other faces: report (prim group self_intersecting) or remove them and fill the holes |
+| `remove_isolated` | bool | `true` |  |  |  | remove points no prim uses (only when the geometry has prims) |
+
+**Writes:** detail string repair_report (JSON counts); prim groups filled, self_intersecting (report mode)
+
+**Example**
+
+```json
+{
+  "type": "mesh_repair",
+  "params": {
+    "tolerance": 0.001,
+    "max_hole_edges": 12,
+    "self_intersections": "report"
+  }
+}
+```
+
 ### normal
 
 category: `topology` · aliases: `normals`, `compute_normals`
@@ -2446,6 +2575,8 @@ category: `topology` · aliases: `voxel_remesh`, `remesh_voxel`
 
 Voxel remesh: rebuild a closed mesh as an even, watertight triangle mesh (mesh → SDF → isosurface).
 
+Always watertight and merges overlapping parts, but sharp edges round off and attributes are dropped. To keep the surface, sharp edges, boundaries, uv and other attributes use remesh_isotropic (Houdini Remesh SOP).
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -2459,6 +2590,50 @@ Voxel remesh: rebuild a closed mesh as an even, watertight triangle mesh (mesh �
 | `edge_length` | float | `0` | 0.. |  |  | target edge length (0 = auto from divisions) |
 | `divisions` | int | `48` | 8..256 |  |  | resolution across the largest dimension when edge_length = 0 |
 | `offset` | float | `0` |  |  |  | grow (+) / shrink (−) the surface |
+
+### remesh_isotropic
+
+category: `topology` · aliases: `remesh_iso`, `isotropic_remesh`
+
+Isotropic remesh (Botsch–Kobbelt): even triangles of a target edge length on the input surface; keeps sharp edges, seams, boundaries and attributes.
+
+Houdini: Remesh SOP (Target Size, Iterations, Hard Edges, adaptive sizing). Each iteration splits edges longer than 4/3·L, collapses edges shorter than 4/5·L, flips edges toward valence 6, relaxes points tangentially and projects them back onto the input with a BVH. Polygons are triangulated first; the output is triangles. Feature edges (dihedral angle above feature_angle, uv/vertex-attribute seams, borders between prims with different string attributes or prim groups, the edge_groups) are never flipped, are resampled along themselves and keep their points on the input feature curve; corners where 3+ features meet stay fixed. Boundaries are resampled along themselves unless preserve_boundary. With group, only those prims are remeshed and the border of the group stays exactly as it was. Adaptive: target_attrib is a point float attribute with the wanted edge length per point (e.g. from measure curvature or a distance), interpolated on the surface. Attributes: point attributes are interpolated at each new point's closest location on the input, vertex attributes (uv) the same way per side of each seam, prim attributes and groups come from the input prim under each face. Which remesh? remesh_isotropic keeps the surface, its sharp edges, boundaries and attributes (use it before uv_unwrap, decimate/lod, simulation); remesh (voxel) rebuilds a closed, possibly self-intersecting or broken mesh through an SDF: always watertight, but sharp edges round off and attributes are dropped.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `target_length` | float | `0` | 0.. |  | `edge_length`, `target_size`, `length`, `size` | target edge length L (0 = mean edge length of the input or group) |
+| `iterations` | int | `6` | 0..50 |  | `iters` | split / collapse / flip / relax rounds (more = more even; 5–10 is typical) |
+| `target_attrib` | string | `""` |  |  | `size_attrib`, `adaptive_attrib` | point float attribute giving the target edge length per point (adaptive density); "" = uniform target_length |
+| `feature_angle` | float | `45` | 0..180 |  | `hard_angle`, `sharp_angle` | edges whose faces meet at more than this angle (degrees) are kept as sharp features (0 = no automatic features) |
+| `preserve_boundary` | bool | `false` |  |  |  | keep boundary points and edges exactly (off = resample the boundary along itself; corners stay) |
+| `group` | group (prim) | `""` |  |  |  | prims to remesh ("" = all); the border of the group stays fixed |
+| `edge_groups` | group (edge) | `""` |  |  | `hard_edges`, `features` | edge group(s) or pattern to keep as feature edges ("" = none), e.g. "creases" or "seam*"; named groups follow the new feature edges |
+| `keep_prim_borders` | bool | `true` |  |  |  | keep borders between prims with different string attributes (name, material) or prim groups as feature edges |
+| `relax_passes` | int | `1` | 1..10 |  |  | relaxation + projection passes per iteration *(advanced)* |
+| `max_triangles` | int | `4000000` | 1000.. |  |  | refuse to run when the estimated output has more triangles than this *(advanced)* |
+
+**Writes:** triangles; point/vertex/prim attributes and groups by provenance; feature edge groups (edge_groups) follow the new edges
+
+**Example**
+
+```json
+{
+  "type": "remesh_isotropic",
+  "params": {
+    "target_length": 0.05,
+    "iterations": 8,
+    "feature_angle": 40
+  }
+}
+```
 
 ### reverse
 

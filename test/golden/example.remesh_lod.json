@@ -1,0 +1,58 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["lod:string:1", "lod_tris:int[]:1", "repair_report:string:1"],
+      "point": ["N:float:3", "P:float:3", "depth:int:1", "pscale:float:1", "tl:float:1", "width:float:1"],
+      "prim": ["copynum:int:1", "depth:int:1", "lod:int:1", "name:string:1"],
+      "vertex": ["Cd:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [4.2071, 4.6124, 1.1205],
+      "min": [-4.3555, 0, -1.0546]
+    },
+    "counts": {
+      "points": 8942,
+      "prims": 9908,
+      "vertices": 29724,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": ["J", "K", "M", "leaves"],
+      "prim": ["caps", "filled", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "e3eae65a6b6608a4",
+      "attributes": {
+        "detail.lod": "da381450ca6fe1d6",
+        "detail.lod_tris": "15dfb105539c440f",
+        "detail.repair_report": "d60900eb550d32c1",
+        "group.point.J": "4d4d52213acf3f8b",
+        "group.point.K": "4d4d52213acf3f8b",
+        "group.point.M": "4d4d52213acf3f8b",
+        "group.point.leaves": "4d4d52213acf3f8b",
+        "group.prim.caps": "2d6938d1f3f1b203",
+        "group.prim.filled": "6ee1a300f9fadce2",
+        "group.prim.sides": "22c47a3bf70522dd",
+        "point.N": "7ddff8ba6d86d908",
+        "point.depth": "858c5124aafea47e",
+        "point.pscale": "97001e258cfd6adf",
+        "point.tl": "63a94314a5e31afe",
+        "point.width": "e310800a89148610",
+        "prim.copynum": "ed20f8d512f8addb",
+        "prim.depth": "eb31fd8559f37e1f",
+        "prim.lod": "c30db124785c785e",
+        "prim.name": "f61517ace768793a",
+        "vertex.Cd": "de877800efe8bf0a",
+        "vertex.uv": "ff53bd6bc7ac5091"
+      },
+      "topology": "26553d6434a769de"
+    }
+  },
+  "name": "example.remesh_lod",
+  "ok": true,
+  "source": "examples/remesh_lod.json",
+  "warnings": ["[fixed] mesh_repair: 3 points fused, 1 duplicate face removed, 16 faces flipped, 1 hole filled"]
+}

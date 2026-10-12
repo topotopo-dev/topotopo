@@ -42,6 +42,8 @@ src/core/      geometry model + algorithms (no I/O)
   groupconvert.ts  any/all conversion of selections between point, vertex, prim and edge
   polyedit.ts    polygon-editing kernels: edge-point insertion + face splits (knife, polysplit, edge divide), plane chords,
                  quad rings, chain ordering, bridge, hole fill (quad fan, Coons grid), dissolve, collapse
+  remesh.ts      isotropic remeshing kernel (typed arrays in/out: the swap point for a native remesher), closest-point BVH,
+                 Geometry wrapper (features, seams, provenance); decimate.ts meshoptimizer decimation; repair.ts mesh repair
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
@@ -226,7 +228,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 | library | licence | used for |
 |---|---|---|
 | manifold-3d | Apache-2.0 | booleans, convex hull, Minkowski, smoothing/refine, level-set meshing, 2D cross-sections (Clipper2): offset, 2D booleans, text fill, extrude |
-| meshoptimizer | MIT | decimation |
+| meshoptimizer | MIT | decimation (simplifyWithAttributes, simplifySloppy, simplifyPoints), `lod` |
 | xatlas-wasm (xatlas by Jonathan Young) | MIT | `uv_unwrap` / `uv_autoseam`: chart segmentation, parameterisation, atlas packing (single-file ES module, WASM embedded) |
 | earcut | ISC | n-gon triangulation |
 | d3-delaunay | ISC | 2D Delaunay / Voronoi |
