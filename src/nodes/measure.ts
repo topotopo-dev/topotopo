@@ -130,7 +130,7 @@ defineNode({
     const cone = p.cone_angle > 0 ? p.cone_angle : mode === 'thickness' ? 15 : 90;
     const sel = mask(g, 'point', p.group);
     const a = g.points.add(p.name || RAY_NAMES[mode], 'float', 1).data as Float64Array;
-    if (scene.empty) warn(`nothing for the rays to hit: input 1 has no polygons${hasInput(1) ? ' and neither has the occluder' : ' (connect an occluder in input 2)'}`);
+    if (scene.empty) warn(`nothing for the rays to hit: geo has no polygons${hasInput(1) ? ' and neither has the occluder' : ' (connect an occluder as the second input)'}`);
     const v = rayMeasure(g.P, getPointNormals(g), scene, { mode, samples: p.samples, maxDistance: maxD, bias, coneAngle: cone, seed: p.seed }, sel);
     const range = mode === 'thickness' ? maxD : 1;
     let measured = 0;
@@ -154,7 +154,7 @@ defineNode({
   category: 'measure',
   summary: 'Distance from each point to a target: mesh surface (BVH), polylines, or points (KD-tree); optionally signed and with the nearest prim, uv and position.',
   description:
-    'The target (input 2) is measured as polygons (closest point on the surface), polylines (closest point on the ' +
+    'The target (second input) is measured as polygons (closest point on the surface), polylines (closest point on the ' +
     'segments) and, when it has no prims at all, its points. signed makes points inside a closed target negative ' +
     '(ray-parity inside test). extra also writes nearest_prim (int, -1 = none), nearest_uv (prim uv: triangle ' +
     'barycentrics like Houdini primuv, quad bilinear, polyline u 0..1) and nearest_P. Points farther than ' +
@@ -182,10 +182,10 @@ defineNode({
     output: 'out',
   },
   cook: ({ input, hasInput, p, warn }) => {
-    if (!hasInput(1)) throw new NodeError('distance needs a target in input 2 (a mesh, curves or points)', '"in": ["points", "target"]');
+    if (!hasInput(1)) throw new NodeError('distance needs a target as its second input (a mesh, curves or points)', '"in": ["points", "target"]');
     const tgt = input(1);
     const q = new SurfaceQuery(tgt);
-    if (q.empty) throw new NodeError(`the target (input 2) is empty (${tgt.numPoints} points, ${tgt.numPrims} prims): nothing to measure to`);
+    if (q.empty) throw new NodeError(`the target (second input) is empty (${tgt.numPoints} points, ${tgt.numPrims} prims): nothing to measure to`);
     const g = input(0).clone();
     const d = g.points.add(p.name || 'dist', 'float', 1).data as Float64Array;
     const ex = p.extra

@@ -88,7 +88,7 @@ function shapeWord(ext: number[], volume: number, closed: boolean, genus: number
 
 function readsAs(g: Geometry, f: ShapeFacts): string {
   const { pr, mix } = f;
-  if (!g.numPoints) return 'empty geometry';
+  if (!g.numPoints) return g.volumes.length ? `only ${plural(g.volumes.length, 'SDF volume')}, no mesh yet (sdf_to_mesh makes one)` : 'empty geometry';
   if (!g.numPrims) return `point cloud of ${n(g.numPoints)} points spanning ${size3(f.size)}`;
   if (!mix.polys) {
     let len = 0;
@@ -115,7 +115,7 @@ function readsAs(g: Geometry, f: ShapeFacts): string {
 }
 
 /** Thickness at sampled surface points of the closed pieces (inward rays from the outward face normals). */
-function sampleThickness(g: Geometry, pr: PieceReport, diag: number) {
+function sampleThickness(g: Geometry, pr: PieceReport, diag: number, query: SurfaceQuery | null) {
   if (!pr.pieces.some((x) => x.closed)) return null;
   const s = sampleSurface(g, 384, 7);
   const keep: number[] = [];
@@ -128,7 +128,7 @@ function sampleThickness(g: Geometry, pr: PieceReport, diag: number) {
   if (!keep.length) return null;
   const P = new Float64Array(keep.length * 3), N = new Float64Array(keep.length * 3);
   keep.forEach((i, j) => { for (let c = 0; c < 3; c++) { P[j * 3 + c] = s.P[i * 3 + c]; N[j * 3 + c] = s.N[i * 3 + c]; } });
-  const scene = RayScene.of(g);
+  const scene = query?.rays ?? RayScene.of(g);
   const t = rayMeasure(P, N, scene, { mode: 'thickness', samples: 6, maxDistance: diag, bias: 1e-5 * diag, coneAngle: 15, seed: 3 });
   let mi = 0;
   for (let i = 1; i < t.length; i++) if (t[i] < t[mi]) mi = i;
@@ -149,7 +149,7 @@ export function explainGeometry(g: Geometry, label = ''): string {
   const symSamples = g.numPoints ? sampleSurface(g, 600, 1, true) : null;
   const sym = query && symSamples && diag > 0 ? mirrorSymmetry(g, query, symSamples, symTol) : [];
   const symmetric = sym.filter((s) => s.symmetric).map((s) => s.axis);
-  const thickness = mix.polys && diag > 0 ? sampleThickness(g, pr, diag) : null;
+  const thickness = mix.polys && diag > 0 ? sampleThickness(g, pr, diag, query) : null;
   const facts: ShapeFacts = { pr, mix, size, diag, pca, symmetric, thickness };
 
   out.push(`${label ? label + ' ' : ''}reads as: ${readsAs(g, facts)}`);

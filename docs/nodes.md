@@ -1882,7 +1882,7 @@ category: `measure` · aliases: `measure_distance`, `xyzdist`
 
 Distance from each point to a target: mesh surface (BVH), polylines, or points (KD-tree); optionally signed and with the nearest prim, uv and position.
 
-The target (input 2) is measured as polygons (closest point on the surface), polylines (closest point on the segments) and, when it has no prims at all, its points. signed makes points inside a closed target negative (ray-parity inside test). extra also writes nearest_prim (int, -1 = none), nearest_uv (prim uv: triangle barycentrics like Houdini primuv, quad bilinear, polyline u 0..1) and nearest_P. Points farther than max_distance get max_distance and nearest_prim -1 (Houdini xyzdist with a max distance).
+The target (second input) is measured as polygons (closest point on the surface), polylines (closest point on the segments) and, when it has no prims at all, its points. signed makes points inside a closed target negative (ray-parity inside test). extra also writes nearest_prim (int, -1 = none), nearest_uv (prim uv: triangle barycentrics like Houdini primuv, quad bilinear, polyline u 0..1) and nearest_P. Points farther than max_distance get max_distance and nearest_prim -1 (Houdini xyzdist with a max distance).
 
 **Inputs**
 
