@@ -183,7 +183,7 @@ const near = (a: number[], b: number[], tol = 1e-9) => maxDiff(a, b) <= tol;
   // the frame rotates positions and vectors: a path along +X is a 90° turn about Y for Z-aligned geometry
   const one: NodeSpec = { type: 'points', params: { positions: [[0.1, 0.2, 0.5]], attribs: { N: [[1, 0, 0]], up: [[0, 0, 1]], orient: [[0, 0, 0, 1]] } } };
   const fr = await geo({ o: one, c: { type: 'line', params: { direction: [1, 0, 0], length: 2 } }, d: { type: 'path_deform', in: ['o', 'c'] } }, 'd');
-  const fN = fr.points.get('N')!.data, fU = fr.points.get('up')!.data, fO = fr.points.get('orient')!.data;
+  const fN = fr.points.get('N')!.data as Float64Array, fU = fr.points.get('up')!.data as Float64Array, fO = fr.points.get('orient')!.data as Float64Array;
   check(near(pt(fr, 0), [0.5, 0.2, -0.1]), 'path_deform: positions follow the curve frame');
   check(near([fN[0], fN[1], fN[2]], [0, 0, -1]) && near([fU[0], fU[1], fU[2]], [1, 0, 0]), 'path_deform: N and up rotate with the frame');
   check(near(qRotate([fO[0], fO[1], fO[2], fO[3]], [0, 0, 1]), [1, 0, 0]), 'path_deform: orient rotates with the frame');
@@ -233,7 +233,7 @@ const near = (a: number[], b: number[], tol = 1e-9) => maxDiff(a, b) <= tol;
   }
   check(maxEdge < 0.3, `point_deform: a bent proxy gives a continuous result (longest edge ${maxEdge.toFixed(3)})`);
   const vec = await geo({ p: { type: 'points', params: { positions: [[0.1, 1, 0]], attribs: { N: [[1, 0, 0]] } } }, r: proxy, d: { type: 'transform', in: ['r'], params: { rotate: [0, 90, 0], pivot: [0, 1, 0] } }, o: { type: 'point_deform', in: ['p', 'r', 'd'] } }, 'o');
-  const vN = vec.points.get('N')!.data;
+  const vN = vec.points.get('N')!.data as Float64Array;
   check(near([vN[0], vN[1], vN[2]], [0, 0, -1], 1e-6), 'point_deform: N rotates with the proxy');
   const bad = await cook({ g: tubeG, r: proxy, d: { type: 'point_grid', params: { counts: [2, 2, 2] } }, o: { type: 'point_deform', in: ['g', 'r', 'd'] } }, 'o');
   check(!bad.ok && /must match/.test(bad.errors[0]?.message ?? ''), 'point_deform: rest/deformed count mismatch is a node error');

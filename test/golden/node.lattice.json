@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9996, 1, 0.9996],
+      "min": [-0.9996, -1, -0.9996]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "e090d787b5596871",
+      "attributes": {
+        "point.N": "21470a16483a8bcc"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.lattice",
+  "ok": true,
+  "source": "fixture for node type \"lattice\" (test/fixtures.ts)",
+  "warnings": []
+}
