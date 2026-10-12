@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.6, 1, 0.6],
+      "min": [-0.6, 0, -0.6]
+    },
+    "counts": {
+      "points": 48,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "343f13a5117fb6d7",
+      "attributes": {
+        "vertex.uv": "1cf8daeda40c2fd7"
+      },
+      "topology": "a2ac1dc43d70a51e"
+    }
+  },
+  "name": "node.loft",
+  "ok": true,
+  "source": "fixture for node type \"loft\" (test/fixtures.ts)",
+  "warnings": []
+}

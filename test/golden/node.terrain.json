@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "height:float:1", "uv:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [10, 2.0823, 10],
+      "min": [-10, -1.999, -10]
+    },
+    "counts": {
+      "points": 16641,
+      "prims": 16384,
+      "vertices": 65536,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "5d07ded33e320091",
+      "attributes": {
+        "point.N": "c297a7d471a44ca2",
+        "point.height": "3b70b5242825ecea",
+        "point.uv": "f248f44d6e3ef8c7"
+      },
+      "topology": "f298c51fa12dda01"
+    }
+  },
+  "name": "node.terrain",
+  "ok": true,
+  "source": "fixture for node type \"terrain\" (test/fixtures.ts)",
+  "warnings": []
+}

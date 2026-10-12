@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "curveu:float:1"],
+      "prim": ["copynum:int:1"],
+      "vertex": ["Cd:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.8, 6.2671, 1.8],
+      "min": [-1.8, -0.1, -1.8]
+    },
+    "counts": {
+      "points": 1228,
+      "prims": 1072,
+      "vertices": 4444,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["caps", "sides"]
+    },
+    "hashes": {
+      "P": "78bb752b72af0221",
+      "attributes": {
+        "group.prim.caps": "61660a483569f4e2",
+        "group.prim.sides": "99d23774c3fc3d2e",
+        "point.curveu": "cf7765251d210d3f",
+        "prim.copynum": "a492e88559a221ff",
+        "vertex.Cd": "cabd3fd51f3f753f",
+        "vertex.uv": "47ea1b0191179de3"
+      },
+      "topology": "cbb1e53b67641f4d"
+    }
+  },
+  "name": "example.spiral_stairs",
+  "ok": true,
+  "source": "examples/spiral_stairs.json",
+  "warnings": []
+}

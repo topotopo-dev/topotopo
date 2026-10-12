@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["cell_u:int:1", "cell_v:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "075ca1a2de0e7900",
+      "attributes": {
+        "point.N": "cc129b5e12907b04",
+        "prim.cell_u": "b360a5c59c37fd1f",
+        "prim.cell_v": "b360a5c59c37fd1f"
+      },
+      "topology": "fb416cdbc054b465"
+    }
+  },
+  "name": "node.grid_split",
+  "ok": true,
+  "source": "fixture for node type \"grid_split\" (test/fixtures.ts)",
+  "warnings": []
+}

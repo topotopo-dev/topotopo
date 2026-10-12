@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.0553, 0.6, 0.5984],
+      "min": [-0.0469, -0.0983, -0.0982]
+    },
+    "counts": {
+      "points": 200,
+      "prims": 194,
+      "vertices": 784,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["caps", "sides"]
+    },
+    "hashes": {
+      "P": "68b77d7e330b9440",
+      "attributes": {
+        "group.prim.caps": "11152786c73a6bfc",
+        "group.prim.sides": "3fca10e732601fdd",
+        "vertex.uv": "7c2b87510d99c633"
+      },
+      "topology": "28cf0bbc2fd0c316"
+    }
+  },
+  "name": "node.sweep",
+  "ok": true,
+  "source": "fixture for node type \"sweep\" (test/fixtures.ts)",
+  "warnings": []
+}

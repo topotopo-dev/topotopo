@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["N:float:3", "class:int:1", "sourceprim:int:1", "uv:float:3"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [5, 0, 5],
+      "min": [-5, 0, -5]
+    },
+    "counts": {
+      "points": 341,
+      "prims": 60,
+      "vertices": 341,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "61e249d32212fb99",
+      "attributes": {
+        "prim.N": "79d9ca0517223f9f",
+        "prim.class": "afc55805439c91bf",
+        "prim.sourceprim": "0b0b34b5b73b936f",
+        "prim.uv": "999d7901d2ac009f"
+      },
+      "topology": "5e56990ee8c6b114"
+    }
+  },
+  "name": "node.voronoi2d",
+  "ok": true,
+  "source": "fixture for node type \"voronoi2d\" (test/fixtures.ts)",
+  "warnings": []
+}

@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "9ec54b8e97d6dcdc",
+      "attributes": {
+        "point.N": "3c28f9be0faf0b34",
+        "vertex.uv": "ab7b5d3489d49826"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.uv_project",
+  "ok": true,
+  "source": "fixture for node type \"uv_project\" (test/fixtures.ts)",
+  "warnings": []
+}

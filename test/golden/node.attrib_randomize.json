@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "pscale:float:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "9ec54b8e97d6dcdc",
+      "attributes": {
+        "point.N": "3c28f9be0faf0b34",
+        "point.pscale": "790f11e300b3d21d"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.attrib_randomize",
+  "ok": true,
+  "source": "fixture for node type \"attrib_randomize\" (test/fixtures.ts)",
+  "warnings": []
+}

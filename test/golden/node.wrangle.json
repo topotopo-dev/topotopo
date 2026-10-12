@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 2, 1],
+      "min": [-1, -1.035, -1]
+    },
+    "counts": {
+      "points": 163,
+      "prims": 321,
+      "vertices": 962,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "d941d1c7030a8a89",
+      "attributes": {
+        "point.Cd": "dc678fc4d57dfb1a",
+        "point.N": "00d08efe84721c14"
+      },
+      "topology": "4708cc781dc861e2"
+    }
+  },
+  "name": "node.wrangle",
+  "ok": true,
+  "source": "fixture for node type \"wrangle\" (test/fixtures.ts)",
+  "warnings": []
+}

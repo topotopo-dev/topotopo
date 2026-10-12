@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9511, 0, 0.809],
+      "min": [-0.9511, 0, -1]
+    },
+    "counts": {
+      "points": 24,
+      "prims": 1,
+      "vertices": 24,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "b12fa65ad3ce1650",
+      "attributes": {},
+      "topology": "a7fecfe708bffdfd"
+    }
+  },
+  "name": "node.boolean2d",
+  "ok": true,
+  "source": "fixture for node type \"boolean2d\" (test/fixtures.ts)",
+  "warnings": []
+}

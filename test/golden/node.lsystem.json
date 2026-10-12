@@ -1,0 +1,45 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "depth:int:1", "pscale:float:1", "up:float:3", "width:float:1"],
+      "prim": ["depth:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.2889, 0.7165, 0.2994],
+      "min": [-0.2889, 0, -0.2775]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 13,
+      "vertices": 26,
+      "volumes": 0
+    },
+    "groups": {
+      "point": ["J", "K", "M", "leaves"],
+      "prim": []
+    },
+    "hashes": {
+      "P": "6bcb43a28d918f70",
+      "attributes": {
+        "group.point.J": "17c51abfa3b4d405",
+        "group.point.K": "17c51abfa3b4d405",
+        "group.point.M": "17c51abfa3b4d405",
+        "group.point.leaves": "17c51abfa3b4d405",
+        "point.N": "7feff485b1e9ec1f",
+        "point.depth": "d78076e56a52f65f",
+        "point.pscale": "ef45d7e5411c445f",
+        "point.up": "a31afc254d76b6df",
+        "point.width": "b114b4d5b1fd5e4f",
+        "prim.depth": "5e62d82632f1c39c"
+      },
+      "topology": "3f1e517f2e1f11a5"
+    }
+  },
+  "name": "node.lsystem",
+  "ok": true,
+  "source": "fixture for node type \"lsystem\" (test/fixtures.ts)",
+  "warnings": []
+}

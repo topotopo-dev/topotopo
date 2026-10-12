@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.7758, 1, 0.7872],
+      "min": [-0.7758, -1, -0.7872]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "ca438c6c9a328d16",
+      "attributes": {
+        "point.N": "dee0a238e201cc42"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.taper",
+  "ok": true,
+  "source": "fixture for node type \"taper\" (test/fixtures.ts)",
+  "warnings": []
+}

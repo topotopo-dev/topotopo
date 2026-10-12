@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.7, 0.7, 0.7],
+      "min": [-0.7, -0.7, -0.7]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": ["front", "side"]
+    },
+    "hashes": {
+      "P": "045c8a5e9c9b8e5c",
+      "attributes": {
+        "group.prim.front": "7d6d3c7d9f69a687",
+        "group.prim.side": "5d025c7da6ea3787",
+        "vertex.uv": "28d520c5fe340eef"
+      },
+      "topology": "211195f53fcdbf2f"
+    }
+  },
+  "name": "node.poly_extrude",
+  "ok": true,
+  "source": "fixture for node type \"poly_extrude\" (test/fixtures.ts)",
+  "warnings": []
+}

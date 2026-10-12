@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9619, 0.9619, 0.9619],
+      "min": [-0.9619, -0.9619, -0.9619]
+    },
+    "counts": {
+      "points": 42,
+      "prims": 80,
+      "vertices": 240,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "da58bbf6da52bb54",
+      "attributes": {
+        "point.N": "91a4c2c1aee4bed7"
+      },
+      "topology": "5a0e2fdfb23fb3a5"
+    }
+  },
+  "name": "node.decimate",
+  "ok": true,
+  "source": "fixture for node type \"decimate\" (test/fixtures.ts)",
+  "warnings": []
+}

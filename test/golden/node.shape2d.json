@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.5, 0, 0.5],
+      "min": [-0.5, 0, -0.5]
+    },
+    "counts": {
+      "points": 4,
+      "prims": 1,
+      "vertices": 4,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "55a43f8dcc25ed27",
+      "attributes": {},
+      "topology": "aea67c670d8b3d1d"
+    }
+  },
+  "name": "node.shape2d",
+  "ok": true,
+  "source": "fixture for node type \"shape2d\" (test/fixtures.ts)",
+  "warnings": []
+}

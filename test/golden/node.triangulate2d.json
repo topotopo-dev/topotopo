@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "sourceprim:int:1", "uv:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.9911, 0, 0.9879],
+      "min": [-0.9915, 0, -0.9922]
+    },
+    "counts": {
+      "points": 60,
+      "prims": 106,
+      "vertices": 318,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "4f30b0d01f743312",
+      "attributes": {
+        "point.N": "79d9ca0517223f9f",
+        "point.sourceprim": "0b0b34b5b73b936f",
+        "point.uv": "999d7901d2ac009f"
+      },
+      "topology": "4578737e2257f044"
+    }
+  },
+  "name": "node.triangulate2d",
+  "ok": true,
+  "source": "fixture for node type \"triangulate2d\" (test/fixtures.ts)",
+  "warnings": []
+}

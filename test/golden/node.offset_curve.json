@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.051, 0, 0.9086],
+      "min": [-1.05, 0, -1.0998]
+    },
+    "counts": {
+      "points": 40,
+      "prims": 1,
+      "vertices": 40,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "fc16c36f7227eb9d",
+      "attributes": {},
+      "topology": "732440a7d3ed257d"
+    }
+  },
+  "name": "node.offset_curve",
+  "ok": true,
+  "source": "fixture for node type \"offset_curve\" (test/fixtures.ts)",
+  "warnings": []
+}

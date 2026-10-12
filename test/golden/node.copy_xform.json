@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [3.7986, 1, 1],
+      "min": [-1, -1, -1.7496]
+    },
+    "counts": {
+      "points": 486,
+      "prims": 960,
+      "vertices": 2880,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "a981a6512b533827",
+      "attributes": {
+        "point.N": "f202cb22ffc08248",
+        "prim.copynum": "ee7c29c5a698e51f"
+      },
+      "topology": "8a98e55879c1d3e2"
+    }
+  },
+  "name": "node.copy_xform",
+  "ok": true,
+  "source": "fixture for node type \"copy_xform\" (test/fixtures.ts)",
+  "warnings": []
+}

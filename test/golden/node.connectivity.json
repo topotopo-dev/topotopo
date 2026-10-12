@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["piece_count:int:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["class:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "9ec54b8e97d6dcdc",
+      "attributes": {
+        "detail.piece_count": "3e80124432b7cade",
+        "point.N": "3c28f9be0faf0b34",
+        "prim.class": "b360a5c59c37fd1f"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.connectivity",
+  "ok": true,
+  "source": "fixture for node type \"connectivity\" (test/fixtures.ts)",
+  "warnings": []
+}

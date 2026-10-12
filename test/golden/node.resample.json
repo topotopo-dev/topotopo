@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "curveu:float:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [3, 0.4955, 0.5],
+      "min": [0, 0, 0]
+    },
+    "counts": {
+      "points": 36,
+      "prims": 1,
+      "vertices": 36,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "77a05d7d55816773",
+      "attributes": {
+        "point.curveu": "0bc04919925a879b"
+      },
+      "topology": "28f74dc6431a1d3c"
+    }
+  },
+  "name": "node.resample",
+  "ok": true,
+  "source": "fixture for node type \"resample\" (test/fixtures.ts)",
+  "warnings": []
+}

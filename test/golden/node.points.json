@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0, 0, 0],
+      "min": [0, 0, 0]
+    },
+    "counts": {
+      "points": 1,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "e2ba14a56c71da9f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.points",
+  "ok": true,
+  "source": "fixture for node type \"points\" (test/fixtures.ts)",
+  "warnings": []
+}

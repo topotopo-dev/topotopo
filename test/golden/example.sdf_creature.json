@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.3841, 0.8283, 0.6072],
+      "min": [-1.5306, -1.0838, -0.6014]
+    },
+    "counts": {
+      "points": 31164,
+      "prims": 62324,
+      "vertices": 186972,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "d751c7074b183105",
+      "attributes": {
+        "point.Cd": "4642bf33180545f1",
+        "point.N": "717e306327a31b89"
+      },
+      "topology": "b06265b4a85f702e"
+    }
+  },
+  "name": "example.sdf_creature",
+  "ok": true,
+  "source": "examples/sdf_creature.json",
+  "warnings": []
+}

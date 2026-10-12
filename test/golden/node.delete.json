@@ -1,0 +1,36 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0.1625, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 97,
+      "prims": 168,
+      "vertices": 504,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "6d6ee487f5b02cd5",
+      "attributes": {
+        "point.N": "ef071879b8bc9e67"
+      },
+      "topology": "af221ad21d7e7258"
+    }
+  },
+  "name": "node.delete",
+  "ok": true,
+  "source": "fixture for node type \"delete\" (test/fixtures.ts)",
+  "warnings": []
+}
