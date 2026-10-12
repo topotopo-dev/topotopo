@@ -323,18 +323,23 @@ Not in chunks, and why:
 - `script` (whole geometry, async `lib.run`, engine cache), prim/vertex/detail wrangles, wrangles that read other
   elements or edit the geometry, and every node without a ported kernel run on the main thread as before.
 
-Measured (i7-10700K, 8 cores / 16 threads, 15 workers; serial = `POLYFORGE_WORKERS=0`; node cook time, best of the
-bench runs; the machine was shared with other jobs, so ±15%):
+Measured (i7-10700K, 8 cores / 16 threads; serial = `POLYFORGE_WORKERS=0`; the node's cook time, best of 5 after a
+warm-up, two rounds; other jobs shared the machine, so ±10%):
 
-| case | serial | pool | speed-up | the serial remainder |
+| case | serial | 7 workers | 15 workers (default) | the serial remainder |
 |---|---|---|---|---|
-| `occlusion_50k` (32 rays/point) | 2081–2349 ms | 614–722 ms | 3.2–3.8× | BVH build (~0.33 s) |
-| `noise_displace_1m` (normal mode, normals from the polygons) | 296–334 ms | 129–171 ms | 1.9–2.4× | point normals (~0.09 s), clone, copies |
-| `noise_displace` 1M, direction mode | 217 ms | 81 ms | 2.7× | clone, copies, displacement |
-| `attrib_noise` 1M, size 3 | 608 ms | 136 ms | 4.5× | copies |
-| `wrangle_1m` (one sin per point) | 84–106 ms | 84–97 ms | ~1.1× | attribute copies, bindings |
-| `wrangle` 1M with `noise()` | 255 ms | 110 ms | 2.3× | as above |
-| `sdf_to_mesh_128`, others | unchanged | unchanged | — | not ported |
+| `occlusion_50k` (32 rays/point) | 2140 ms | 686 ms (3.1×) | 568 ms (3.8×) | BVH build (~0.33 s) |
+| `noise_displace_1m` (normal mode, normals from the polygons) | 294 ms | 132 ms (2.2×) | 137 ms (2.1×) | point normals (~0.09 s), clone, copies |
+| `noise_displace` 1M, direction mode | 217 ms | 91 ms (2.4×) | 81 ms (2.7×) | clone, copies, displacement |
+| `noise_displace` 1M on points with N | 324 ms | 243 ms | 207 ms (1.6×) | `refreshNormals` (~0.09 s) |
+| `attrib_noise` 1M, size 3 | 608 ms | 182 ms (3.3×) | 136 ms (4.5×) | copies |
+| `wrangle_1m` (one sin per point) | 90 ms | 71 ms (1.3×) | 70 ms (1.3×) | clone, bindings, attribute copies |
+| `wrangle` 1M with `noise()` | 255 ms | 115 ms (2.2×) | 110 ms (2.3×) | as above |
+| `sdf_to_mesh_128`, all other cases | — | unchanged (within noise) | unchanged | not ported |
+
+The point normals that bound noise_displace are a scatter-add over the vertices, memory-bound and not split: computing
+the per-polygon Newell vectors on the pool and summing them here (bit-identical) was tried and saved nothing, because
+the sums and the normalisation are most of pointNormals' cost.
 
 ## What makes it LLM-friendly
 
