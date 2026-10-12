@@ -263,6 +263,15 @@ const d = 0.1;
   let unitN = !!N;
   if (N) for (let q = 0; q < sph.numPoints; q++) if (Math.abs(Math.hypot(N.data[q * 3] as number, N.data[q * 3 + 1] as number, N.data[q * 3 + 2] as number) - 1) > 1e-9) unitN = false;
   check(unitN && watertight(sph), 'point N is recomputed (unit length) on the bevelled mesh');
+  // vertex N: a chamfer stays crisp (strip corners use the strip's own normal), a round bevel shades smoothly
+  const vN = async (divisions: number) => (await cookR({ b: { type: 'box' }, n: { type: 'normal', in: ['b'], params: { class: 'vertex' } }, v: { type: 'poly_bevel', in: ['n'], params: { offset: 0.1, divisions } } }, 'v')).geo;
+  const flatShaded = (geo: Geometry, prims: number[]) => {
+    const fn = primNormals(geo), vn = geo.vertices.get('N')!.data as Float64Array;
+    return prims.every((p) => { for (let v = geo.primStart[p]; v < geo.primStart[p + 1]; v++) if (Math.abs(vn[v * 3] * fn[p * 3] + vn[v * 3 + 1] * fn[p * 3 + 1] + vn[v * 3 + 2] * fn[p * 3 + 2] - 1) > 1e-9) return false; return true; });
+  };
+  const ch = await vN(0), rd = await vN(4);
+  check(flatShaded(ch, all(ch)), 'vertex N, chamfer: every prim keeps hard (flat) normals');
+  check(!flatShaded(rd, members(rd, 'bevel')), 'vertex N, round bevel: strips are smooth shaded');
   const a = (await bevel(BOX, { offset: 0.13, divisions: 3 })).geo, b = (await cookR({ b: { type: 'box' }, x: { type: 'poly_bevel', in: ['b'], params: { offset: 0.13, divisions: 3, shape: 0 } } }, 'x')).geo;
   check(a.numPoints === b.numPoints && a.P.every((x, i) => x === b.P[i]), 'deterministic');
 }

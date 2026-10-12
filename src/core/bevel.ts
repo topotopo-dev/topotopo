@@ -9,8 +9,7 @@
 //      one edge bevelled    → one point sliding along the other (unbevelled) edge, at the offset distance from the
 //                             bevelled edge's line;
 //      neither              → the slide points of its two edges, or v itself where an edge has no slide point.
-//    A slide point is shared by both faces of its edge (the two faces' slide distances are averaged). Where v is
-//    kept in several sectors (runs of faces between bevelled edges), each sector gets its own copy of v.
+//    A slide point is shared by both faces of its edge (the two faces' slide distances are averaged).
 //  - Each bevelled edge a→b (half-edge h in face F_L, twin in F_R) becomes a strip of divisions+1 quads. At each end
 //    the strip's cross-section is a profile from the end point in F_L to the end point in F_R: a superellipse arc
 //    O + (P0-O)·cos(φ)^(2/r) + (P1-O)·sin(φ)^(2/r), O = P0 + P1 - C, tangent to both faces because the control point C
@@ -21,7 +20,10 @@
 //      3+ distinct boundary points → corner patch: the polygon itself for a chamfer; for round bevels concentric
 //        rings of quads (an n-sided polygon or a single point in the middle, all-quad when divisions is odd), relaxed
 //        and pushed onto the sphere / superellipsoid around the profiles' common centre — the cube corner becomes an
-//        exact sphere octant. Patches whose sides differ in length fall back to a triangle fan.
+//        exact sphere octant. Patches whose sides differ in length fall back to a triangle fan. Where v itself is kept
+//        (a strip ending at a point with several unbevelled edges), the hole is split at v into lobes, each closed
+//        through v and filled as a polygon (chamfer) or a fan from v; a lobe whose points all lie on one line (a flat
+//        edge ending where the surface continues flat) is folded into the strip end and the faces instead.
 //      2 distinct points (a single bevelled edge ending at an unbevelled point, or two bevelled edges meeting at a
 //        mitre such as a cylinder rim) → no patch: the profile uses v as control point and is shared with the
 //        neighbouring face (its points are inserted into the face) or with the other strip.
@@ -117,7 +119,7 @@ const sub = (a: ArrayLike<number>, b: ArrayLike<number>): V3 => [a[0] - b[0], a[
 const add = (a: ArrayLike<number>, b: ArrayLike<number>): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const scale = (a: ArrayLike<number>, s: number): V3 => [a[0] * s, a[1] * s, a[2] * s];
 const dot = (a: ArrayLike<number>, b: ArrayLike<number>) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross = (a: ArrayLike<number>, b: ArrayLike<number>): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const cross3 = (a: ArrayLike<number>, b: ArrayLike<number>): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const len = (a: ArrayLike<number>) => Math.hypot(a[0], a[1], a[2]);
 const unit = (a: V3, fallback?: V3): V3 => {
   const l = len(a);
@@ -167,7 +169,6 @@ interface VRec {
   elen: Float64Array;
   slideT: Float64Array; // NaN = no slide point on that fan edge
   elems: Elem[][];
-  sector: Int32Array;
   // built
   slidePt: Int32Array;
   chains: number[][];
@@ -249,18 +250,20 @@ class Ctx {
     return { i: [he.heOrigin[h], he.heOrigin[he.hePrev[h]], he.dest(h)], w: [1 - w[0] - w[1], w[0], w[1]] };
   }
 
-  /** Corner patch for a closed loop of boundary points (see the header). Interior points copy point v. */
+  /**
+   * Corner patch for a closed loop of boundary points that does not pass through v (see the header). Interior points
+   * copy point v. Sides of equal length (all profiles) get the ring grid, others a triangle fan around a centre point.
+   */
   patch(v: number, boundary: number[], sideStart: number[], crossings: Crossing[], vsrc: number, psrc: number) {
     const K = sideStart.length;
     const segs = sideStart.map((s, j) => ((j + 1 < K ? sideStart[j + 1] : boundary.length) - s));
     const uniform = segs.every((s) => s === segs[0]);
     const ns = segs[0];
     const pos: V3[] = boundary.map((id) => this.bpos(id));
-    const fixed: boolean[] = boundary.map(() => true);
     const ids: number[] = boundary.slice();
     const faces: number[][] = [];
     const G = scale(pos.reduce((s, p) => add(s, p), [0, 0, 0] as V3), 1 / pos.length);
-    const newLocal = (p: V3) => { pos.push(p); fixed.push(false); ids.push(-1); return pos.length - 1; };
+    const newLocal = (p: V3) => { pos.push(p); ids.push(-1); return pos.length - 1; };
     if (uniform && ns === 1) faces.push(boundary.map((_, i) => i));
     else if (uniform) {
       // concentric rings: ring r has K·(ns - 2r) points; a single centre point when ns is even, a K-gon when odd
@@ -305,7 +308,8 @@ class Ctx {
           const m = nb[i].size || 1;
           pos[i] = [x / m, y / m, z / m];
         }
-      this.inflate(pos, boundary.length, sideStart.map((s) => pos[s]), crossings);
+      // only all-profile patches (the ring grid) bulge; a patch with straight sides lies in its faces' surface
+      if (uniform) this.inflate(pos, boundary.length, sideStart.map((s) => pos[s]), crossings);
       for (let i = boundary.length; i < pos.length; i++) ids[i] = this.add(pos[i], v);
     }
     for (const f of faces) this.emit(f.map((i) => ids[i]), psrc, f.map(() => vsrc), true);
@@ -346,8 +350,8 @@ class Ctx {
 
   emit(pts: number[], src: number, vsrc: Src[], corner: boolean) {
     // drop consecutive repeats (degenerate configurations); skip prims that collapse
-    const p: number[] = [], s: Src[] = [];
-    for (let i = 0; i < pts.length; i++) if (pts[i] !== pts[(i + pts.length - 1) % pts.length] || pts.length === 1) { p.push(pts[i]); s.push(vsrc[i]); }
+    const p: number[] = [], s: Src[] = [], n = pts.length;
+    for (let i = 0; i < n; i++) if (pts[i] !== pts[(i + n - 1) % n]) { p.push(pts[i]); s.push(vsrc[i]); }
     if (p.length < 3) return;
     this.newPrims.push({ pts: p, src, vsrc: s, corner });
   }
@@ -357,6 +361,7 @@ class Ctx {
    * bevel_edges edge group; return the finished geometry.
    */
   finish(chainOf: (number[] | undefined)[], chainSrcOf: (Src[] | undefined)[]): Geometry {
+    // N is recomputed at the end: every edge of a chamfer is hard, round bevels shade smoothly (cusp 60°)
     const g = this.g, he = this.he, b = this.b;
     const bevel = b.group('prim', 'bevel'), corner = b.group('prim', 'bevel_corner');
     const use = new Map<number, number>();
@@ -389,14 +394,23 @@ class Ctx {
       mark(q.pts, 1);
     }
     const eg = b.edgeGroup('bevel_edges');
-    for (const [k, bits] of use) if (bits === 3) { const [a, c] = edgeFromKey(k); eg.add(a, c); }
+    const hard = new EdgeSet(); // builder point ids; only used for a chamfer's normals
+    for (const [k, bits] of use) {
+      if (bits === 3) { const [a, c] = edgeFromKey(k); eg.add(a, c); }
+      if (bits & 1) hard.addKey(k);
+    }
     const built = b.build();
     // strips and patches copy prim attributes from a face, but not its groups (they are in bevel / bevel_corner)
     const first = built.numPrims - this.newPrims.length;
     for (const [name, m] of built.primGroups) if (name !== 'bevel' && name !== 'bevel_corner') m.fill(0, first);
-    let out = built.removeUnusedPoints();
     const hasN = ['point', 'vertex', 'prim'].some((c) => g.table(c as 'point').get('N')?.size === 3);
-    if (hasN) out = refreshNormals(out);
+    if (hasN && this.n === 0) built.edgeGroups.set('__bevel_hard', hard);
+    let out = built.removeUnusedPoints(); // (remaps edge groups)
+    if (hasN) {
+      const h = out.edgeGroups.get('__bevel_hard') ?? null;
+      out.edgeGroups.delete('__bevel_hard');
+      out = refreshNormals(out, 60, h);
+    }
     return out;
   }
 }
@@ -481,7 +495,7 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
     }
     if (!any) continue;
     const rec: VRec = {
-      fan, k, bev, d, dir, elen, slideT: new Float64Array(m).fill(NaN), elems: [], sector: new Int32Array(k),
+      fan, k, bev, d, dir, elen, slideT: new Float64Array(m).fill(NaN), elems: [],
       slidePt: new Int32Array(m).fill(-1), chains: [], chainSrc: [],
     };
     const sum = new Float64Array(m), cnt = new Int32Array(m);
@@ -491,9 +505,9 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
       const jo = i, ji = inIdx(rec, i);
       const uo = dir[jo], ui = dir[ji];
       const upo = unit(sub(uo, scale(N, dot(uo, N))), uo), upi = unit(sub(ui, scale(N, dot(ui, N))), ui);
-      const mo = cross(N, upo), mi = cross(upi, N);
+      const mo = cross3(N, upo), mi = cross3(upi, N);
       if (bev[jo] && bev[ji]) {
-        const sig = dot(N, cross(upo, upi));
+        const sig = dot(N, cross3(upo, upi));
         let x: V3;
         if (Math.abs(sig) > 1e-4) x = scale(add(scale(upi, d[jo]), scale(upo, d[ji])), 1 / sig);
         else x = scale(unit(add(mi, mo), mo), (d[jo] + d[ji]) / 2);
@@ -514,15 +528,6 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
       const a: Elem = Number.isNaN(rec.slideT[ji]) ? { k: 0 } : { k: 1, j: ji };
       const c: Elem = Number.isNaN(rec.slideT[jo]) ? { k: 0 } : { k: 1, j: jo };
       rec.elems[i] = a.k === 0 && c.k === 0 ? [a] : [a, c];
-    }
-    // sectors: runs of faces between bevelled edges (each sector keeps its own copy of v when needed)
-    let j0 = 0;
-    if (fan.closed) while (!bev[j0]) j0++;
-    let s = 0;
-    for (let q = 0; q < k; q++) {
-      const i = fan.closed ? (j0 + q) % k : q;
-      rec.sector[i] = s;
-      if (bev[inIdx(rec, i)]) s++;
     }
     recs.set(v, rec);
   }
@@ -571,17 +576,13 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
         const t = rec.slideT[j] * sc, tau = rec.elen[j] > 0 ? t / rec.elen[j] : 0;
         rec.slidePt[j] = C.add(add(pv, scale(rec.dir[j], t)), { i: [v, fan.ends[j]], w: [1 - tau, tau] });
       }
-    const keep = new Map<number, number>();
-    let vUsed = false;
     for (let i = 0; i < rec.k; i++) {
       const h = fan.hs[i];
       const ids: number[] = [], srcs: Src[] = [];
       for (const el of rec.elems[i]) {
         let id: number;
         if (el.k === 0) {
-          const s = rec.sector[i];
-          if (!keep.has(s)) { keep.set(s, vUsed ? C.add(pv, v) : v); vUsed = true; }
-          id = keep.get(s)!;
+          id = v;
           srcs.push(he.heVertex[h]);
         } else {
           if (el.k === 1) id = rec.slidePt[el.j];
@@ -598,6 +599,7 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
   }
   // ---- per point: hole boundary, profiles, patches
   const profileOf: (number[] | undefined)[] = new Array(he.numHalfEdges);
+  const extraOf: ({ k: number; id: number } | undefined)[] = new Array(he.numHalfEdges);
   for (const [v, rec] of recs) {
     const { fan, k } = rec;
     const pv = C.pt(v);
@@ -644,15 +646,18 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
         else {
           // a single bevelled edge ends here: the face holding [x0, x1] takes the profile points
           const x0 = pr[0], x1 = pr[pr.length - 1];
-          for (let i = 0; i < k; i++) {
+          let done = false;
+          for (let i = 0; i < k && !done; i++) {
             const ch = rec.chains[i];
             const q = ch.findIndex((id, qi) => id === x0 && ch[qi + 1] === x1);
             if (q < 0) continue;
             const ins = pr.slice(1, -1);
             ch.splice(q + 1, 0, ...ins);
             rec.chainSrc[i].splice(q + 1, 0, ...ins.map((id) => C.blendAt(fan.hs[i], C.bpos(id))));
-            break;
+            done = true;
           }
+          // (not expected) otherwise close the gap between the straight face edge and the profile with a polygon
+          if (!done) C.emit(pr, he.heFace[fan.hs[0]], pr.map(() => he.heVertex[fan.hs[0]]), true);
         }
       } else profs.set(j, makeProfile(j));
     }
@@ -666,7 +671,54 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
       if (cross[s] >= 0) boundary.push(...profs.get(cross[s])!.slice(1, -1));
     }
     const vsrc = he.heVertex[fan.hs[0]], psrc = he.heFace[fan.hs[0]];
-    if (fan.closed) C.patch(v, boundary, sideStart, crossInfo, vsrc, psrc);
+    // A flat edge ending where the surface continues flat (kept point v between two slide points on a straight line):
+    // the patch would have zero area. Instead v joins the strip's end (replacing a coincident profile point, or as an
+    // extra corner of one end quad), and the profile points on either side of v join the two faces along that line.
+    const sc1 = cross.filter((j) => j >= 0);
+    if (fan.closed && K === 3 && sc1.length === 1) {
+      const s0 = cross.indexOf(sc1[0]), kv = seq[(s0 + 2) % 3], base = profs.get(sc1[0])!;
+      const x0 = base[0], x1 = base[base.length - 1];
+      const P0 = C.bpos(x0), P1 = C.bpos(x1), chord = sub(P1, P0), cl = dot(chord, chord);
+      const nw = boundary.reduce((acc, id, i) => add(acc, cross3(C.bpos(id), C.bpos(boundary[(i + 1) % boundary.length]))), [0, 0, 0] as V3);
+      if (cl > 0 && len(nw) < 1e-9 * cl) {
+        const pk = C.bpos(kv), tk = dot(sub(pk, P0), chord) / cl;
+        const hit = base.findIndex((id, i) => i > 0 && i < base.length - 1 && len(sub(C.bpos(id), pk)) < 1e-9 * Math.sqrt(cl));
+        if (hit >= 0) base[hit] = kv;
+        else {
+          let at = 0;
+          while (at < base.length - 2 && dot(sub(C.bpos(base[at + 1]), P0), chord) / cl < tk) at++;
+          extraOf[fan.hs[sc1[0]]] = { k: at, id: kv };
+        }
+        const inner = base.slice(1, -1).filter((id) => id !== kv);
+        const lower = inner.filter((id) => dot(sub(C.bpos(id), P0), chord) / cl < tk), upper = inner.filter((id) => !lower.includes(id));
+        // faces hold [x0, v] and [v, x1] (in profile order); the points between join them
+        for (let i = 0; i < k; i++) {
+          const ch = rec.chains[i];
+          for (const [a0, a1, ins] of [[x0, kv, lower], [kv, x1, upper]] as [number, number, number[]][]) {
+            const q = ch.findIndex((id, qi) => id === a0 && ch[qi + 1] === a1);
+            if (q < 0 || !ins.length) continue;
+            ch.splice(q + 1, 0, ...ins);
+            rec.chainSrc[i].splice(q + 1, 0, ...ins.map((id) => C.blendAt(fan.hs[i], C.bpos(id))));
+          }
+        }
+        continue;
+      }
+    }
+    const vi = boundary.indexOf(v);
+    if (vi >= 0) {
+      // lobes closed through v: polygons for a chamfer, fans from v for round bevels
+      const loop = [...boundary.slice(vi), ...boundary.slice(0, vi)];
+      let lobe: number[] = [v];
+      const flush = () => {
+        if (lobe.length >= 3) {
+          if (n === 0) C.emit(lobe, psrc, lobe.map(() => vsrc), true);
+          else for (let i = 1; i + 1 < lobe.length; i++) C.emit([v, lobe[i], lobe[i + 1]], psrc, [vsrc, vsrc, vsrc], true);
+        }
+        lobe = [v];
+      };
+      for (let i = 1; i < loop.length; i++) { if (loop[i] === v) flush(); else lobe.push(loop[i]); }
+      flush();
+    } else if (fan.closed) C.patch(v, boundary, sideStart, crossInfo, vsrc, psrc);
     else C.emit(boundary, psrc, boundary.map(() => vsrc), true);
   }
   // ---- strips
@@ -674,6 +726,9 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
     if (!bevE[e]) continue;
     const h = he.edgeHalf[e], t = he.heTwin[h];
     const q = profileOf[h]!.slice().reverse(), r = profileOf[t]!;
+    // an extra point folded into an end (see above) sits inside one end quad: index of that quad, or -1
+    const xa = extraOf[h], xb = extraOf[t];
+    const qa = xa ? n - xa.k : -1, rb0 = xb ? xb.k : -1;
     const fl = he.heFace[h], fr = he.heFace[t];
     const psrc = primArea(g, fr) > primArea(g, fl) * (1 + 1e-9) ? fr : fl;
     // vertex sources: left side = the left face's corner sources, right side = the right face's, blended across
@@ -682,8 +737,13 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
     const la = ra.chainSrc[ja][ra.chainSrc[ja].length - 1], rA = ra.chainSrc[faceBefore(ra, ja)][0];
     const lb = rb.chainSrc[faceBefore(rb, jb)][0], rB = rb.chainSrc[jb][rb.chainSrc[jb].length - 1];
     for (let s = 0; s <= n; s++) {
-      const t0 = s / (n + 1), t1 = (s + 1) / (n + 1);
-      C.emit([q[s], q[s + 1], r[s + 1], r[s]], psrc, [mixSrc(la, rA, t0), mixSrc(la, rA, t1), mixSrc(lb, rB, t1), mixSrc(lb, rB, t0)], false);
+      const t0 = s / (n + 1), t1 = (s + 1) / (n + 1), tm = (t0 + t1) / 2;
+      const pts = [q[s]], src: Src[] = [mixSrc(la, rA, t0)];
+      if (s === qa) { pts.push(xa!.id); src.push(mixSrc(la, rA, tm)); }
+      pts.push(q[s + 1], r[s + 1]); src.push(mixSrc(la, rA, t1), mixSrc(lb, rB, t1));
+      if (s === rb0) { pts.push(xb!.id); src.push(mixSrc(lb, rB, tm)); }
+      pts.push(r[s]); src.push(mixSrc(lb, rB, t0));
+      C.emit(pts, psrc, src, false);
     }
   }
   return { geo: C.finish(chainOf, chainSrcOf), warnings, count, scale: sc };
@@ -742,7 +802,7 @@ export function bevelPoints(g: Geometry, selMask: Uint8Array | null, opts: Bevel
       chainSrcOf[h] = ids.map((id) => C.blendAt(h, C.bpos(id)));
     }
     const vsrc = he.heVertex[fan.hs[0]], psrc = he.heFace[fan.hs[0]];
-    if (!fan.closed || n === 0) {
+    if (!fan.closed || n === 0 || k < 3) {
       if (m >= 3) C.emit(S, psrc, S.map(() => vsrc), true);
       continue;
     }
