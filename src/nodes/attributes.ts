@@ -4,13 +4,13 @@ import type { AttribArrayType, AttribClass, AttribType } from '../core/geometry.
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { rand, gaussian, rng } from '../core/random.ts';
-import { fractal, makeNoise } from '../core/noise.ts';
 import { connectivity, primArea, primCentroid, primNormals, primPerimeter, vertexNormals, pointNeighbors, pointNormals, resolveVertexNormals, signedVolume } from '../core/topology.ts';
 import { edgeList, edgeSetToMask, forEachPrimEdge, maskToEdgeSet } from '../core/edges.ts';
 import { halfEdges } from '../core/halfedge.ts';
 import { dissolveEdges } from '../core/polyedit.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { evalRamp, parseColor } from '../graph/params.ts';
+import { then } from '../graph/parallel.ts';
 import { runWrangle } from '../core/wrangle.ts';
 import { P, edgeMask, getPointNormals, mask, wrangleTime } from './util.ts';
 import { normalize } from '../core/math.ts';
@@ -472,23 +472,22 @@ defineNode({
     seed: P.seed(),
     rest_attrib: { type: 'string', default: 'rest', desc: 'sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P)' },
   },
-  cook: ({ input, p }) => {
+  cook: ({ input, p, parallelMap }) => {
     const g = input(0).clone();
     const ra = p.rest_attrib ? g.points.get(p.rest_attrib) : undefined;
     const Pd = ra && ra.type === 'float' && ra.size === 3 ? (ra.data as Float64Array).slice() : g.P;
     const a = g.points.add(p.name, 'float', p.size);
-    const d = a.data as Float64Array;
-    const fns = Array.from({ length: p.size }, (_, c) => fractal(makeNoise(p.noise, p.seed + c * 101), { octaves: p.octaves, fractal: p.fractal }));
-    for (let i = 0; i < g.numPoints; i++) {
-      const x = Pd[i * 3] * p.frequency[0] + p.offset[0], y = Pd[i * 3 + 1] * p.frequency[1] + p.offset[1], z = Pd[i * 3 + 2] * p.frequency[2] + p.offset[2];
-      for (let c = 0; c < p.size; c++) {
-        let v = fns[c](x, y, z);
-        if (p.noise === 'worley') v = v * 2 - 1;
-        v = Math.max(-1, Math.min(1, v * p.contrast));
-        d[i * p.size + c] = p.range[0] + (v * 0.5 + 0.5) * (p.range[1] - p.range[0]);
-      }
-    }
-    return g;
+    // kernel "attrib_noise" (src/core/kernels.ts), chunked on the worker pool for large inputs
+    const run = parallelMap('attrib_noise', {
+      count: g.numPoints,
+      args: {
+        noise: p.noise, seed: p.seed, size: p.size, fopts: { octaves: p.octaves, fractal: p.fractal },
+        contrast: p.contrast, range: p.range, freq: p.frequency, offset: p.offset,
+      },
+      // every value is written: the shared copy need not start from the current data
+      inputs: { Q: Pd }, results: { D: a.data as Float64Array },
+    });
+    return then(run, () => g);
   },
 });
 

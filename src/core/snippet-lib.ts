@@ -8,6 +8,19 @@
 // (noise, hashing). Geometry query/edit functions dispatch through globalThis.__cur,
 // which the engine sets for each wrangle run.
 
+/**
+ * Library functions that go through globalThis.__cur (the wrangle's geometry API): they read other elements or
+ * inputs, edit the geometry or log. A point wrangle that calls none of them can run in chunks on worker threads
+ * (wrangle.ts runWrangleParallel); test/pool.ts checks this list against the functions installed below.
+ */
+export const GEOMETRY_FUNCTIONS = [
+  'npoints', 'nprims', 'nvertices', 'point', 'prim', 'vertex', 'detail', 'haspointattrib', 'hasprimattrib', 'primpoints',
+  'pointprims', 'neighbours', 'neighbors', 'neighbourcount', 'primvertexcount', 'nearpoint', 'nearpoints', 'xyzdist', 'minpos',
+  'closest', 'intersect', 'inpointgroup', 'inprimgroup', 'invertexgroup', 'inedgegroup', 'pointattribtype', 'addpoint',
+  'addprim', 'removepoint', 'removeprim', 'setpointattrib', 'setprimattrib', 'setvertexattrib', 'setdetailattrib',
+  'setpointgroup', 'setprimgroup', 'setvertexgroup', 'setedgegroup', 'print', 'printf', 'warning',
+];
+
 export function installSnippetLib(g: any, host: any) {
   const AP = g.Array.prototype;
   const acc = (name: string, i: number) =>

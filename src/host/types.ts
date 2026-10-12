@@ -2,6 +2,56 @@
 // src/host/node.ts implements this for Node (MCP server, CLI). A browser host
 // (Web Worker + fetch/OPFS) can implement the same interface for the future GUI.
 
+/**
+ * A job for a worker thread: run the registered kernel `kernel` (src/core/kernels.ts, or a host kernel such as
+ * 'wrangle') on typed arrays plus a small JSON argument.
+ */
+export interface PoolTask {
+  kernel: string;
+  /** small structured-cloneable argument */
+  args?: any;
+  /** element range handed to the kernel (kernels index arrays globally and process [start, end)) */
+  range?: [number, number];
+  /**
+   * Arrays the kernel reads and writes. SharedArrayBuffer-backed arrays are shared with the worker (the kernel writes
+   * straight into them); others are copied in, or moved when `transfer` is true (the caller's arrays are detached).
+   * The worker hands the non-shared arrays back in the result, moved, not copied.
+   */
+  arrays?: Record<string, ArrayBufferView>;
+  /** the caller allows moving the ArrayBuffers of `arrays` to the worker instead of copying them */
+  transfer?: boolean;
+  /**
+   * Read-only data reused across tasks (e.g. a BVH), cached in each worker under `key` (a content hash): it is sent
+   * only to workers that do not hold it yet, and the kernel can memoise objects built from it under the same key.
+   */
+  shared?: { key: string; arrays: Record<string, ArrayBufferView> };
+  /** wall-clock limit in ms (0 / absent = none): the task fails with a "timed out" error and its worker is replaced */
+  timeoutMs?: number;
+}
+
+/** What a pool task resolves with: the kernel's return value and the task's non-shared arrays, handed back. */
+export interface PoolResult<V = any> {
+  value: V;
+  arrays: Record<string, ArrayBufferView>;
+}
+
+/**
+ * Worker threads for per-element kernels (worker_threads in Node; Web Workers in a browser host). Workers start on
+ * the first task and stop when idle. A failing kernel rejects its task with an error naming the kernel; a crashed or
+ * timed-out worker fails only its own task and is replaced.
+ */
+export interface WorkerPool {
+  /** number of worker threads (at most this many tasks run at once) */
+  readonly size: number;
+  /** override of every kernel's size threshold (elements below which work stays on the calling thread), for tests */
+  readonly minElements?: number;
+  run<T = PoolResult>(task: PoolTask): Promise<T>;
+  /** stop all workers; pending tasks fail. The pool restarts on the next run. */
+  close(): Promise<void>;
+  /** counters for tests and diagnostics */
+  stats(): { workers: number; busy: number; queued: number; started: number; tasks: number; crashes: number; timeouts: number };
+}
+
 export interface Host {
   name: string;
   /** Read a file (or URL) as bytes. */
@@ -36,4 +86,9 @@ export interface Host {
    * Callers try them in order because not every system font parses (opentype.js rejects some GSUB tables).
    */
   fontCandidates?(name?: string): string[];
+  /**
+   * Worker pool for chunked kernels (CookContext.parallelMap) and the signal to cook independent graph branches
+   * concurrently. Absent (POLYFORGE_WORKERS=0, or a host without threads): everything runs on the calling thread.
+   */
+  pool?: WorkerPool;
 }

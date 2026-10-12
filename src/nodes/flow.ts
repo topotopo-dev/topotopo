@@ -4,6 +4,7 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { connectivity } from '../core/topology.ts';
 import { stableStringify } from '../graph/engine.ts';
+import type { CookReport } from '../graph/engine.ts';
 import { hashString } from '../core/random.ts';
 import { importFormatFromPath, importGeometryAsync } from '../io/import.ts';
 import { mergeMaterialTables, writeMaterials } from '../core/materials.ts';
@@ -34,6 +35,11 @@ defineNode({
   summary: 'Pass through one of several inputs by index (use "=expr" to drive it from vars).',
   inputs: [{ name: 'inputs', desc: 'candidate geometries', multi: true }],
   params: { index: { type: 'int', default: 0, desc: 'which input to output (clamped)', aliases: ['input'] } },
+  // only the selected candidate is cooked (the others are not needed and may even fail)
+  inputsUsed: (p, n) => {
+    const i = Math.max(0, Math.min(n - 1, p.index));
+    return Array.from({ length: n }, (_, k) => k === i);
+  },
   cook: ({ inputs, p }) => {
     if (!inputs.length) return new Geometry();
     const i = Math.max(0, Math.min(inputs.length - 1, p.index));
@@ -155,10 +161,10 @@ defineNode({
     if (items.length > p.max_iterations) throw new NodeError(`foreach: ${items.length} iterations exceeds max_iterations (${p.max_iterations})`);
     const outs: Geometry[] = [];
     let prev: { geo: Geometry; sig: string } = { geo: src, sig: ctx.inputSigs[0] ?? 'none' };
-    for (let i = 0; i < items.length; i++) {
+    const iterate = (i: number) => {
       const it = items[i];
       const pieceSig = p.mode === 'count' ? (p.feedback ? prev.sig : ctx.inputSigs[0] ?? 'none') : `${ctx.inputSigs[0]}:${p.mode}:${p.piece_attrib}:${i}`;
-      const r = await ctx.subcook(p.body, {
+      return ctx.subcook(p.body, {
         vars: { ...ctx.vars, iteration: i, numiterations: items.length, value: it.value, attr: it.attr },
         inputs: [
           { geo: p.feedback ? prev.geo : it.geo, sig: pieceSig },
@@ -166,6 +172,20 @@ defineNode({
           { geo: extra, sig: ctx.inputSigs[1] ?? 'none' },
         ],
       });
+    };
+    // independent iterations overlap when the engine cooks concurrently (a window of them at a time); their
+    // results are taken in order, so errors and warnings come out as in a sequential loop
+    const pool = ctx.engine.host.pool;
+    const window = !p.feedback && ctx.engine.concurrent && pool ? Math.max(1, pool.size) : 1;
+    const running: Promise<CookReport>[] = [];
+    let next = 0;
+    for (let i = 0; i < items.length; i++) {
+      while (next < items.length && next < i + window) {
+        const pr = iterate(next++);
+        pr.catch(() => {});
+        running.push(pr);
+      }
+      const r = await running[i];
       if (!r.ok || !r.geo) throw new NodeError(`foreach iteration ${i}: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
       for (const w of r.warnings.slice(0, 3)) ctx.warn(`[iter ${i}] ${w.node}: ${w.message}`);
       if (p.feedback) prev = { geo: r.geo, sig: r.results.get(r.target)?.sig ?? `fb${i}` };

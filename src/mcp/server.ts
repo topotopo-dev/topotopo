@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Polyforge MCP server (stdio). Exposes the geometry engine as tools for LLM agents.
 //   node src/mcp/server.ts [--workspace <dir>] [--viewer]
-// Env: POLYFORGE_WORKSPACE, POLYFORGE_VIEWER=1, POLYFORGE_PORT, POLYFORGE_SCRIPT_TIMEOUT_MS
+// Env: POLYFORGE_WORKSPACE, POLYFORGE_VIEWER=1, POLYFORGE_PORT, POLYFORGE_SCRIPT_TIMEOUT_MS, POLYFORGE_WORKERS
 // stdout carries the MCP protocol — log only to stderr.
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -29,7 +29,7 @@ const loaded = ws.load();
 log(`workspace ${wsDir}: ${loaded.graphs} graphs, ${loaded.assets} assets`);
 for (const e of loaded.assetErrors) log('asset error:', e);
 
-let viewer: { url: string } | null = null;
+let viewer: { url: string; close: () => void } | null = null;
 const ensureViewer = async () => {
   if (!viewer) { viewer = await startViewer(ws); log('preview at', viewer.url); }
   return viewer.url;
@@ -56,6 +56,17 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: 'text', text: `error: ${e?.message ?? e}` }], isError: true };
   }
 });
+
+// the client closing the pipe (or a signal) ends the session: stop the worker threads and the viewer, then exit
+let closing = false;
+const shutdown = async (why: string) => {
+  if (closing) return;
+  closing = true;
+  log(`shutting down (${why})`);
+  try { viewer?.close(); await engine.host.pool?.close(); } finally { process.exit(0); }
+};
+process.stdin.on('end', () => void shutdown('stdin closed'));
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => void shutdown(sig));
 
 await server.connect(new StdioServerTransport());
 log('ready (stdio)');

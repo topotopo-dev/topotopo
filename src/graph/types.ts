@@ -1,5 +1,6 @@
 import type { Geometry } from '../core/geometry.ts';
 import type { CookOptions, CookReport, Engine } from './engine.ts';
+import type { KernelJob, ParallelOptions, ParallelRun } from './parallel.ts';
 
 /** Current graph format version. Bump it together with a migration in migrate.ts. */
 export const GRAPH_VERSION = 1;
@@ -64,6 +65,11 @@ export interface NodeDef {
    * 'keep' when the node keeps packed prims (it works on elements and points, not on polygon shapes), else 'polyline'.
    */
   splines?: 'keep' | 'polyline' | ((p: Record<string, any>) => 'keep' | 'polyline');
+  /**
+   * The inputs the cook reads, decided from the resolved params before any input is cooked (switch: only the
+   * selected candidate). Inputs marked false are not cooked and appear as null. Default: all inputs.
+   */
+  inputsUsed?: (p: Record<string, any>, count: number) => boolean[];
   /** extra cache-key material (e.g. file mtime) */
   signatureExtra?: (p: Record<string, any>, engine: Engine) => string;
   cook(ctx: CookContext): Geometry | Promise<Geometry>;
@@ -129,6 +135,12 @@ export interface CookContext {
   inputAt(i: number, frame: number): Promise<{ geo: Geometry; sig: string; timeDependent: boolean }>;
   /** record a numeric statistic on the node result (e.g. solver steps) */
   stat(name: string, value: number): void;
+  /**
+   * Run a registered per-element kernel (src/core/kernels.ts) over job.count elements: in chunks on the host's worker
+   * pool when there is one and the job is large enough, else in one piece on this thread, synchronously (the result is
+   * then not a promise, so a node stays synchronous). Outputs are written in place; the result is the same bit for bit.
+   */
+  parallelMap(kernel: string, job: KernelJob, opts?: ParallelOptions): ParallelRun | Promise<ParallelRun>;
 }
 
 export class NodeError extends Error {
