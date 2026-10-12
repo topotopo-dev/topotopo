@@ -9,7 +9,7 @@ import { connectivity, primArea, primCentroid, primNormals, primPerimeter, verte
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { evalRamp, parseColor } from '../graph/params.ts';
 import { runWrangle } from '../core/wrangle.ts';
-import { P, getPointNormals, mask } from './util.ts';
+import { P, getPointNormals, mask, wrangleTime } from './util.ts';
 import { normalize } from '../core/math.ts';
 
 const CLS = { type: 'enum' as const, options: ['point', 'prim', 'vertex', 'detail'], default: 'point', desc: 'attribute class' };
@@ -450,7 +450,8 @@ defineNode({
     mode: { type: 'enum', options: ['replace', 'union', 'intersect', 'subtract'], default: 'replace', desc: 'combine with an existing group of the same name' },
     invert: { type: 'bool', default: false, desc: 'invert the selection' },
   },
-  cook: ({ input, p, engine, vars, inputs }) => {
+  cook: (ctx) => {
+    const { input, p, engine, vars, inputs } = ctx;
     let g = input(0).clone();
     const cls: 'point' | 'prim' = p.class;
     const n = cls === 'point' ? g.numPoints : g.numPrims;
@@ -476,6 +477,7 @@ defineNode({
         code: `@group___pfexpr = (${p.expr}) ? 1 : 0;`,
         runOver: cls === 'point' ? 'points' : 'prims', mask: null,
         inputs: [g, ...inputs.slice(1).map((x) => x ?? new Geometry())], vars, host: engine.host, timeoutMs: engine.scriptTimeoutMs,
+        time: wrangleTime(ctx, p.expr),
       });
       const em = r.geo.groups(cls).get('__pfexpr')!;
       for (let i = 0; i < n; i++) sel[i] &= em[i];
