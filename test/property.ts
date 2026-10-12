@@ -58,7 +58,7 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   slice: { count: [1, 10] },
   bound: { divisions: [1, 3] },
   sdf_modify: { count: [1, 3], octaves: [1, 4] },
-  uv_unwrap: { max_iterations: [1, 2], resolution: 'keep', texels_per_unit: 'keep', padding: [0, 8] },
+  uv_unwrap: { max_iterations: [1, 2], resolution: 'keep', texels_per_unit: 'keep', padding: [0, 8], bruteforce: 'keep', max_boundary_length: 'keep' },
   uv_autoseam: { max_cost: [0.5, 4] },
   uv_layout: { iterations: [1, 4], udims: [1, 4] },
 };
