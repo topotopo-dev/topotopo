@@ -6,6 +6,7 @@
 // vector glyphs (N, up, orient, v), point/prim numbers, group/piece/attribute labels, legends,
 // flat/matcap/AO shading and a self-describing annotation footer. With none of them set the
 // output is exactly what it always was.
+import { readMaterials, primMaterials } from '../core/materials.ts';
 import { Geometry } from '../core/geometry.ts';
 import { buildEdges, connectivity, primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { halfEdges } from '../core/halfedge.ts';
@@ -304,6 +305,18 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const get = (i: number) => { const x = a.get(i); return Array.isArray(x) ? x : [x as number, x as number, x as number]; };
       colorOf = (v) => get(elemIndex(f.cls, v));
       if (f.cls === 'point') pointColorOf = (p) => get(p);
+    }
+    // material base colours where there is no colour (no Cd, or Houdini's default white), as glTF export does
+    const pm = primMaterials(g), table = pm ? readMaterials(g) : null;
+    if (pm && table && Object.keys(table).length) {
+      const cd = colorOf, hasCd = !!(f && f.attr.type === 'float');
+      colorOf = (v) => {
+        const m = table[pm[vprim[v]]];
+        if (!m) return cd(v);
+        if (!hasCd) return m.baseColor;
+        const c = cd(v);
+        return c[0] === 1 && c[1] === 1 && c[2] === 1 ? m.baseColor : c;
+      };
     }
   }
   const hl = o.highlight;

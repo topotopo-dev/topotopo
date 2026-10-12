@@ -13,13 +13,23 @@
 //   Color "(X=r,Y=g,Z=b,W=a)" (FVector4), Seed. A row struct {FVector Position; FRotator Rotation; FVector Scale;
 //   float Density; FVector4 Color; int32 Seed} imports it directly.
 // Points JSON: { format: "polyforge-points", version: 1, count, attributes: { P: { type, size, data } } }.
+//
+// Instance stream (geometry with packed prims, instances 'rows', the default): one row per packed instance instead of
+// one per point. P = anchor position, orient + scale = the instance's 3×3 decomposed (rotation · per-axis scale; a
+// mirror gives a negative x scale, shear is approximated with a warning), Mesh = the source's name (its single prim
+// "name", else source_<i>; packedSourceNames), then every other anchor point attribute and packed prim attribute.
+// The transform inputs (N, up, orient, rot, scale, pscale, trans, pivot) are not repeated: copy_to_points already
+// folded them into the instance transform. PCG CSV rows put that transform into Position/Rotation/Scale and Mesh
+// right after Seed. instanceMeshesJSON() is the sidecar (<name>.meshes.json) that maps Mesh to a GLB per source.
 import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
 import { hash32 } from '../core/random.ts';
 import { lookAtBasis, m4fromQuat, m4identity, m4mul, qFromMat } from '../core/math.ts';
 import type { Mat4, Quat, Vec3 } from '../core/math.ts';
-import { attributeList, expandForExport, xf, xfDir } from './common.ts';
+import { TRANSFORM_ATTRIBS, anchorAttribs, attributeList, decomposeXform, expandForExport, packedPrims, packedSourceNames, xf, xfDir, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
+import { flattenSource } from '../core/packed.ts';
+import { primMaterials } from '../core/materials.ts';
 
 const COMP = ['x', 'y', 'z', 'w'];
 /** Vector attributes that follow an up-axis change. */
@@ -155,11 +165,109 @@ function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: strin
   return { header, rows };
 }
 
+// ------------------------------------------------------------------ instance stream
+
+/** True when packed prims are written as instance rows (csv / points.json). */
+export function instanceRows(g: Geometry, o: ExportOptions): boolean {
+  return g.hasPacked() && o.instances !== 'expand' && o.instancing !== 'expand';
+}
+
+export interface InstanceStream {
+  /** one point per instance: P, orient, scale, Mesh, then the anchor attributes */
+  pts: Geometry;
+  /** source names (index = packed source index) */
+  meshes: string[];
+  /** packed prim of each row */
+  prims: number[];
+  /** instances whose transform has shear (approximated) */
+  sheared: number;
+}
+
+/**
+ * The instance stream of g as a point cloud (see the module comment). `space` converts the transform to export axes
+ * (upAxis; positions stay unscaled, writers scale them); PCG rows use Houdini space and convert themselves.
+ */
+export function instancePoints(g: Geometry, space: ExportOptions = {}): InstanceStream {
+  const prims = packedPrims(g), n = prims.length;
+  const meshes = packedSourceNames(g);
+  const pts = new Geometry({ positions: new Float64Array(n * 3) });
+  const P = pts.P, GP = g.P, X = g.packedXform!, S = g.packedSource!;
+  const orient = pts.points.add('orient', 'float', 4), scale = pts.points.add('scale', 'float', 3);
+  const mesh = new Attribute('string', 1, new Array<string>(n).fill(''));
+  pts.points.map.set('Mesh', mesh);
+  let sheared = 0;
+  const axes: ExportOptions = { upAxis: space.upAxis };
+  prims.forEach((p, i) => {
+    const a = g.vertexPoint[g.primStart[p]];
+    P[i * 3] = GP[a * 3]; P[i * 3 + 1] = GP[a * 3 + 1]; P[i * 3 + 2] = GP[a * 3 + 2];
+    const d = decomposeXform(xfLinear(X, p * 9, axes));
+    if (d.shear) sheared++;
+    orient.set(i, d.q);
+    scale.set(i, d.s);
+    mesh.set(i, meshes[S[p]] ?? `source_${S[p]}`);
+  });
+  // anchor point attributes, then packed prim attributes (gathered to rows)
+  const anchors = prims.map((p) => g.vertexPoint[g.primStart[p]]);
+  const skip = new Set([...TRANSFORM_ATTRIBS, 'Mesh']);
+  for (const a of anchorAttribs(g, skip)) {
+    const idx = a.cls === 'point' ? anchors : prims;
+    const src = a.attr;
+    if (src.type === 'string') { pts.points.map.set(a.name, new Attribute('string', 1, idx.map((k) => String(src.get(k) ?? '')))); continue; }
+    const dst = Attribute.create(src.type, src.size, n, src.def);
+    const sd = src.data as Float64Array | Int32Array, dd = dst.data as Float64Array | Int32Array, sz = src.size;
+    idx.forEach((k, i) => { for (let c = 0; c < sz; c++) dd[i * sz + c] = sd[k * sz + c]; });
+    pts.points.map.set(a.name, dst);
+  }
+  return { pts, meshes, prims, sheared };
+}
+
+/** Points written as rows: the instance stream (with its warnings) or the (expanded) geometry. */
+function rowGeometry(g: Geometry, o: ExportOptions, format: string, space: ExportOptions): Geometry {
+  if (!instanceRows(g, o)) return expandForExport(g, o, format);
+  const { pts, prims, sheared } = instancePoints(g, space);
+  if (sheared) o.warn?.(`${format}: ${sheared} instance transform(s) have shear (non-uniform scale after rotation), written as rotation + per-axis scale; use instances "expand" for exact geometry`);
+  const anchors = new Set(prims.map((p) => g.vertexPoint[g.primStart[p]]));
+  const other = g.numPoints - anchors.size;
+  if (other > 0) o.warn?.(`${format}: one row per packed instance (${prims.length}); ${other} other point(s) of the geometry are not written (instances "expand" writes every point of the expanded geometry)`);
+  return pts;
+}
+
+/**
+ * Sidecar for an instance stream (<name>.meshes.json): the sources, in source order, with the GLB file each one is
+ * written to (meshDir/<Mesh>.glb, one mesh at the origin in metres, Y-up), instance counts, local bounds, triangles
+ * and materials, so a consumer (the Unreal PCG plugin, a script) can map the Mesh column to a mesh asset.
+ */
+export function instanceMeshesJSON(g: Geometry, o: ExportOptions & { meshDir?: string; stream?: string; scene?: string } = {}): string {
+  const names = packedSourceNames(g);
+  const counts = new Array(names.length).fill(0);
+  for (const p of packedPrims(g)) counts[g.packedSource![p]]++;
+  const r = (x: number) => +x.toFixed(6);
+  const meshes = g.packedSources.map((src, k) => {
+    const f = flattenSource(src);
+    let tris = 0;
+    for (let p = 0; p < f.numPrims; p++) if (f.primClosed[p]) tris += Math.max(0, f.primSize(p) - 2);
+    const bb = f.bbox();
+    const mats = primMaterials(f);
+    return {
+      index: k, name: names[k], file: (o.meshDir ? o.meshDir.replace(/[\\/]+$/, '') + '/' : '') + names[k] + '.glb', instances: counts[k],
+      points: f.numPoints, prims: f.numPrims, triangles: tris,
+      bounds_m: f.numPoints ? { min: bb.min.map(r), max: bb.max.map(r) } : null,
+      materials: mats ? [...new Set(mats.filter(Boolean))] : [],
+    };
+  });
+  return JSON.stringify({
+    format: 'polyforge-instance-meshes', version: 1,
+    stream: o.stream ?? null, scene: o.scene ?? null, mesh_column: 'Mesh', instances: counts.reduce((a, b) => a + b, 0),
+    units: 'mesh files: metres, Y-up, mesh at its own origin (the instance transform places it); PCG CSV rows: centimetres, Unreal axes X = x, Y = z, Z = y',
+    meshes,
+  }, null, 2) + '\n';
+}
+
 // ------------------------------------------------------------------ CSV
 
-/** CSV text, one row per point. */
+/** CSV text, one row per point (one row per instance for packed prims, see instances). */
 export function exportCSV(g: Geometry, o: ExportOptions = {}): string {
-  g = expandForExport(g, o, 'csv');
+  g = rowGeometry(g, o, 'csv', o.pcg ? {} : o);
   let header: string[], rows: string[][];
   if (o.pcg) ({ header, rows } = pcgRows(g, o));
   else {
@@ -333,7 +441,9 @@ function importCSVColumns(header: string[], cols: string[][], n: number): Attrib
 
 /** Compact JSON point stream (all or `attributes` point attributes; prims ignored). */
 export function exportPointsJSON(g: Geometry, o: ExportOptions = {}): string {
-  g = expandForExport(g, o, 'points json');
+  const rows = instanceRows(g, o);
+  const meshes = rows ? packedSourceNames(g) : null;
+  g = rowGeometry(g, o, 'points json', o);
   const attributes: Record<string, { type: AttribType; size: number; data: (number | string)[] }> = {};
   for (const [n, a] of selectAttribs(g, o)) {
     const data: (number | string)[] = [];
@@ -343,7 +453,7 @@ export function exportPointsJSON(g: Geometry, o: ExportOptions = {}): string {
     }
     attributes[n] = { type: a.type, size: a.type === 'string' ? 1 : a.size, data };
   }
-  return JSON.stringify({ format: 'polyforge-points', version: 1, count: g.numPoints, attributes });
+  return JSON.stringify({ format: 'polyforge-points', version: 1, count: g.numPoints, ...(meshes ? { kind: 'instances', meshes } : {}), attributes });
 }
 
 /** True for a parsed object that looks like a points JSON stream. */

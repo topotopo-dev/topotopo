@@ -13,7 +13,9 @@ defineNode({
   description:
     'Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail ' +
     'material table "materials" (JSON). Vertex colours (Cd) still win in exports: a material then supplies the PBR scalars. ' +
-    'Assign several materials by chaining material nodes with different groups.',
+    'Assign several materials by chaining material nodes with different groups. Texture maps are file paths (PNG or ' +
+    'JPEG, relative to the graph/workspace): glb/gltf embed them, usda references them through UsdUVTexture shaders, ' +
+    'geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.',
   aliases: ['material_assign', 'shop', 'assign_material', 'materialassign'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   outputs: 'prim "material" (string), detail "materials" (JSON table)',
@@ -27,6 +29,9 @@ defineNode({
     alpha: { type: 'float', default: 1, min: 0, max: 1, desc: 'opacity; below 1 exports with alphaMode BLEND', aliases: ['opacity', 'opac'] },
     double_sided: { type: 'bool', default: false, desc: 'render both faces', aliases: ['doublesided', 'two_sided'] },
     unlit: { type: 'bool', default: false, desc: 'unlit shading (KHR_materials_unlit)', aliases: ['emissive_only', 'flat'] },
+    base_color_map: { type: 'path', default: '', desc: 'base colour texture (sRGB PNG/JPEG path; "" = none); uses the uv attribute', aliases: ['basecolor_map', 'albedo_map', 'diffuse_map', 'color_map', 'basecolor_texture', 'base_color_texture'] },
+    normal_map: { type: 'path', default: '', desc: 'tangent-space normal map (PNG/JPEG path, OpenGL convention: +Y up; "" = none)', aliases: ['normal_texture', 'bump_map'] },
+    roughness_map: { type: 'path', default: '', desc: 'roughness texture (grey PNG/JPEG path; "" = none); glTF reads its green channel', aliases: ['roughness_texture', 'rough_map'] },
   },
   example: { type: 'material', params: { name: 'brick', base_color: '#a5462e', roughness: 0.9, group: '@P.y<0.5' } },
   cook: ({ input, p }) => {
@@ -40,6 +45,7 @@ defineNode({
     table[name] = normalizeMaterial({
       baseColor: p.base_color, metallic: p.metallic, roughness: p.roughness, emissive: p.emissive,
       alpha: p.alpha, doubleSided: !!p.double_sided, unlit: !!p.unlit,
+      textures: { baseColor: p.base_color_map, normal: p.normal_map, roughness: p.roughness_map },
     });
     writeMaterials(g, table);
     return g;

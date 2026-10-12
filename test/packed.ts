@@ -392,10 +392,16 @@ const SRC: Record<string, NodeSpec> = {
   const ow: string[] = [];
   const obj = exportOBJ(g, { warn: (m) => ow.push(m) });
   check(obj === exportOBJ(unpacked(g, 'name Cd material piece')) && ow.length === 1 && /expanded/.test(ow[0]), 'obj expands the instances (same text as the unpacked geometry) and warns once');
-  for (const fmt of ['stl', 'ply', 'geo', 'csv', 'pointsjson'] as const) {
+  // (csv / points.json write instance rows and geo writes PackedGeometry by default: see test/interop.ts)
+  for (const [fmt, opt] of [['stl', {}], ['ply', {}], ['csv', { instances: 'expand' }], ['pointsjson', { instances: 'expand' }]] as const) {
     const w: string[] = [];
-    const a = exportGeometry(g, fmt, { warn: (m) => w.push(m) }), b = exportGeometry(unpacked(g, 'name Cd material piece'), fmt);
-    check(eq(Array.from(a), Array.from(b)) && w.length === 1, `${fmt} expands the instances (same bytes as unpacked) with one warning`);
+    const a = exportGeometry(g, fmt, { ...opt, warn: (m) => w.push(m) }), b = exportGeometry(unpacked(g, 'name Cd material piece'), fmt);
+    check(eq(Array.from(a), Array.from(b)) && w.length === 1, `${fmt}${Object.keys(opt).length ? ' instances:"expand"' : ''} expands the instances (same bytes as unpacked) with one warning`);
+  }
+  {
+    const w: string[] = [];
+    const a = exportGeometry(g, 'geo', { instancing: 'expand', warn: (m) => w.push(m) }), b = exportGeometry(unpacked(g, 'name Cd material piece'), 'geo');
+    check(eq(Array.from(a), Array.from(b)) && w.length === 0, 'geo instancing:"expand" writes the expanded geometry (same bytes as unpacked)');
   }
   // GLB written elsewhere (one node, translation-only instances, node transform): packed on import, through the file node too
   const path = `${tmp}/inst.glb`;
