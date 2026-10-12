@@ -329,12 +329,6 @@ export class WrangleAPI {
     if (idx < 0 || idx >= a.count) return a.isArray ? [] : a.type === 'string' ? '' : a.size === 1 ? 0 : new Array(a.size).fill(0);
     return a.get(idx);
   }
-  /** Array length of an array attribute's element (tuple size for other attributes, 0 out of range). */
-  attrlen(i: number, cls: AttribClass, name: string, idx: number) {
-    const a = this.geo(i).table(cls).get(name);
-    if (!a) throw new Error(`input ${i} has no ${cls} attribute "${name}"`);
-    return idx >= 0 && idx < a.count ? a.arrayLength(idx) : 0;
-  }
   primpoints(i: number, p: number) { return this.geo(i).primPoints(p); }
   pointprims(i: number, pt: number) {
     let m = this.pp.get(i);

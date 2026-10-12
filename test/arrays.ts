@@ -85,6 +85,13 @@ const WITH_ARRAYS = (input: string): Record<string, NodeSpec> => ({
     if (!eq(big.get(i), want)) ok = false;
   }
   check(ok && ms < 3000, `amortised set: 200k varying-length writes + 29k rewrites in ${ms.toFixed(0)} ms`);
+  const strs = Attribute.create('string[]', 1, n);
+  const t1 = performance.now();
+  for (let i = 0; i < n; i++) strs.set(i, i % 2 ? ['a' + i, 'b'] : []);
+  for (let i = 0; i < n; i += 5) strs.set(i, ['x', 'y', 'z']);
+  const ms2 = performance.now() - t1;
+  const sOk = eq(strs.get(1), ['a1', 'b']) && eq(strs.get(5), ['x', 'y', 'z']) && eq(strs.get(2), []) && eq(strs.clone().get(n - 1), ['a' + (n - 1), 'b']);
+  check(sOk && ms2 < 3000, `amortised set: 200k string[] writes + 40k rewrites in ${ms2.toFixed(0)} ms`);
 }
 
 // ---------------------------------------------------------------- tables, add conversions
@@ -215,6 +222,16 @@ const WITH_ARRAYS = (input: string): Record<string, NodeSpec> => ({
   check(eq(v.points.get('w2')!.get(3), [3, 3.5, 4]) && v.points.get('k')!.get(5) === 4 && v.points.get('hl')!.get(0) === 3, 'opinput1_arr, point() and detail() return arrays');
   check(eq(v.points.get('tags')!.get(2), ['set', 'by', 'fn']), 'setpointattrib writes an existing array attribute');
 
+  const sc = await cook({
+    g: { type: 'grid', params: { divisions: [2, 2] } },
+    s: {
+      type: 'script', in: ['g'], params: {
+        code: "const a = geo.points.add('ring', 'float[]');\nfor (let i = 0; i < geo.numPoints; i++) a.set(i, Array.from({ length: i % 3 }, (_, k) => k));\n" +
+          "const n = geo.points.add('n', 'int');\nfor (let i = 0; i < geo.numPoints; i++) n.set(i, a.get(i).length + a.arrayLength(i));\nreturn geo;",
+      },
+    },
+  }, 's');
+  check(sc.points.get('ring')!.isArray && eq(sc.points.get('ring')!.get(2), [0, 1]) && sc.points.get('n')!.get(4) === 2, 'script: array attributes through the same Attribute API');
   const err = await cookErr({ g: { type: 'grid' }, w: { type: 'wrangle', in: ['g'], params: { code: 'v[]@pts = [];' } } }, 'w');
   check(/vector arrays are not supported/.test(err), 'v[]@ gives a clear error');
   const conv = await cook({ g: { type: 'grid', params: { divisions: [3, 3] } }, ...WITH_ARRAYS('g'), w: { type: 'wrangle', in: ['g_arr'], params: { code: 'f[]@nbrs = append(@nbrs, 0.5);' } } }, 'w');
