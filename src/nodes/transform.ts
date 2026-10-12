@@ -291,6 +291,7 @@ defineNode({
     seed: P.seed(),
     mask_attrib: { type: 'string', default: '', desc: 'point float attribute that scales the amplitude per point' },
     store: { type: 'string', default: '', desc: 'also store the scalar noise value in this point attribute ("" = off)' },
+    rest_attrib: { type: 'string', default: 'rest', desc: 'sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P)' },
     group: P.group('point'),
   },
   cook: ({ input, p }) => {
@@ -300,6 +301,8 @@ defineNode({
     const n = fractal(base, { octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity, fractal: p.fractal });
     const f = p.frequency, o = p.offset;
     const Pd = g.P, np = g.numPoints;
+    const ra = p.rest_attrib ? g.points.get(p.rest_attrib) : undefined;
+    const Q = ra && ra.type === 'float' && ra.size === 3 ? (ra.data as Float64Array).slice() : Pd;
     const N = p.mode === 'normal' ? getPointNormals(g).slice() : null;
     const dir = normalize(p.direction);
     const ma = p.mask_attrib ? g.points.get(p.mask_attrib) : null;
@@ -311,7 +314,7 @@ defineNode({
     const center = (v: number) => (p.noise === 'worley' ? v * 2 - 1 : v);
     for (let i = 0; i < np; i++) {
       if (sel && !sel[i]) continue;
-      const x = Pd[i * 3] * f[0] + o[0], y = Pd[i * 3 + 1] * f[1] + o[1], z = Pd[i * 3 + 2] * f[2] + o[2];
+      const x = Q[i * 3] * f[0] + o[0], y = Q[i * 3 + 1] * f[1] + o[1], z = Q[i * 3 + 2] * f[2] + o[2];
       const amp = p.amplitude * (ma ? (ma.get(i) as number) : 1);
       if (curl) {
         const c = curl(x, y, z);
