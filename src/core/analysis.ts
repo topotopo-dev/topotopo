@@ -248,6 +248,16 @@ export class RayScene {
 
   static of(g: Geometry): RayScene { return new RayScene(new TriBVH(g)); }
 
+  /** The arrays the ray queries read, for sharing the scene with worker threads (rebuilt there with fromArrays). */
+  toArrays(): { T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array } {
+    return { T: this.T, nodes: this.nodes, child: this.child, order: this.order };
+  }
+
+  /** A scene over arrays from toArrays() (no BVH build). Supports the ray queries, not the BVH's own methods. */
+  static fromArrays(a: { T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array }): RayScene {
+    return new RayScene({ T: a.T, nodes: a.nodes, child: a.child, order: a.order, numTris: a.order.length } as unknown as TriBVH);
+  }
+
   get empty() { return this.bvh.numTris === 0; }
 
   /** Entry distance of the ray into node n's box, or Infinity when it misses within [0, tmax). */
@@ -547,10 +557,15 @@ export interface RaySampleOptions {
  *  thickness: mean distance to the first hit along the inward rays (misses count as maxDistance), in metres
  * Points with a zero normal or outside the mask get 0.
  */
-export function rayMeasure(P: ArrayLike<number>, N: ArrayLike<number>, scene: RayScene, o: RaySampleOptions, mask?: ArrayLike<number> | null): Float64Array {
-  const n = Math.floor(P.length / 3), out = new Float64Array(n);
+export function rayMeasure(
+  P: ArrayLike<number>, N: ArrayLike<number>, scene: RayScene, o: RaySampleOptions, mask?: ArrayLike<number> | null,
+  /** write into this array instead of a new one (points outside [start, end) are left alone: chunked runs) */
+  into?: Float64Array, start = 0, end?: number,
+): Float64Array {
+  const n = Math.floor(P.length / 3), out = into ?? new Float64Array(n);
+  const i0 = Math.max(0, start), i1 = Math.min(n, end ?? n);
   if (scene.empty) {
-    if (o.mode === 'thickness') for (let i = 0; i < n; i++) if (!mask || mask[i]) out[i] = o.maxDistance;
+    if (o.mode === 'thickness') for (let i = i0; i < i1; i++) if (!mask || mask[i]) out[i] = o.maxDistance;
     return out;
   }
   const S = Math.max(1, Math.floor(o.samples));
@@ -563,7 +578,7 @@ export function rayMeasure(P: ArrayLike<number>, N: ArrayLike<number>, scene: Ra
   // shifted per point by a seeded random offset (Cranley-Patterson rotation), mapped cosine-weighted into the cone
   const U1 = new Float64Array(S), U2 = new Float64Array(S);
   for (let s = 0; s < S; s++) { U1[s] = (s + 0.5) / S; U2[s] = (s * 0.6180339887498949) % 1; }
-  for (let i = 0; i < n; i++) {
+  for (let i = i0; i < i1; i++) {
     if (mask && !mask[i]) continue;
     let nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2];
     const l = Math.hypot(nx, ny, nz);

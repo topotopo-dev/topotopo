@@ -15,6 +15,13 @@
 // params are found by a static scan before cooking. Referenced nodes are hidden dependencies: they
 // are validated (unknown names, cycles), cooked before the param is resolved, and their signatures
 // (or, for ch(), the referenced value) are mixed into the dependent node's signature.
+//
+// Concurrency: when the host has a worker pool (Engine.concurrent), the inputs of a node (and the nodes its
+// expressions reference) are pulled at once, so independent branches overlap wherever a cook awaits (a chunked
+// kernel on the pool, file I/O). Cooks of one signature that are in flight at the same time share one cook
+// (Engine.inflight). The report is then put in the order a one-at-a-time cook produces, without the nodes such a
+// cook would not have reached (it stops at the first failed input), so results, errors and warnings do not depend
+// on the pool. Without a pool everything is pulled one input at a time, as before.
 import { Geometry } from '../core/geometry.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { splinesToPolylines } from '../core/splines.ts';
@@ -26,6 +33,8 @@ import {
 } from './params.ts';
 import type { ExprRefs, ResolvedParams, TimeState } from './params.ts';
 import { migrateGraphDetailed } from './migrate.ts';
+import { parallelMap as runKernel } from './parallel.ts';
+import type { PoolStats } from './parallel.ts';
 import { NodeError } from './types.ts';
 import type { CookContext, GraphSpec, NodeDef, NodeSpec, ParamDef } from './types.ts';
 
@@ -81,6 +90,11 @@ export interface CookOptions {
   fps?: number;
   /** time step in seconds (default 1 / fps; the solver passes 1 / (fps * substeps)) */
   timeInc?: number;
+  /**
+   * Internal: signatures being cooked by the enclosing nodes of a nested cook (subcook, inputAt). A cook does not wait
+   * for an in-flight cook of the same signature when that cook is one of its ancestors (a recursive asset).
+   */
+  ancestors?: ReadonlySet<string>;
 }
 
 /** Frame range for cookFrames (end inclusive). */
@@ -296,6 +310,19 @@ interface CookSession {
   report: CookReport;
   pull: (n: string) => Promise<NodeResult>;
   paramsOf: (n: string) => Promise<NodeParams>;
+  /** node pulls and param resolutions started in this session */
+  memo: Map<string, Promise<NodeResult>>;
+  pmemo: Map<string, Promise<NodeParams>>;
+  /** resolved params by node (for putting a concurrent report in order) */
+  pdone: Map<string, NodeParams>;
+  /** results that shared another result's in-flight cook */
+  shared: { leader: NodeResult; waiter: NodeResult }[];
+}
+
+/** What an in-flight cook hands to the cooks that wait for it. */
+interface Flight {
+  done: Promise<{ geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean }>;
+  result: NodeResult;
 }
 
 const PSUF = '\u0000params';
@@ -312,6 +339,12 @@ export class Engine {
   manifold: any = null;
   maxDepth = 24;
   scriptTimeoutMs = 30000;
+  /** pull the inputs of a node concurrently (default: when the host has a worker pool) */
+  concurrent: boolean;
+  /** CookContext.parallelMap usage: jobs run on the pool / on the cooking thread, chunks dispatched */
+  poolStats: PoolStats = { parallel: 0, serial: 0, chunks: 0 };
+  /** cooks in progress by signature: a second cook of the same signature waits for the first */
+  private inflight = new Map<string, Flight>();
 
   /** shelf assets as shipped (name → graph), kept so that deleting a workspace override restores them */
   shelf = new Map<string, GraphSpec>();
@@ -321,6 +354,7 @@ export class Engine {
 
   constructor(host: Host) {
     this.host = host;
+    this.concurrent = !!host.pool && host.pool.size > 0;
   }
 
   async init() {
@@ -693,12 +727,14 @@ export class Engine {
     const memo = new Map<string, Promise<NodeResult>>();
     const pmemo = new Map<string, Promise<NodeParams>>();
     const s: CookSession = {
-      graph, opts, time, depth, report,
+      graph, opts, time, depth, report, memo, pmemo, pdone: new Map(), shared: [],
       vars: { ...(graph.vars ?? {}), ...(opts.vars ?? {}) },
       pull: (name) => {
         let pr = memo.get(name);
         if (!pr) {
           pr = this.cookOne(s, name);
+          // a concurrent pull nobody awaits any more (an earlier input failed) must not reject unhandled
+          pr.catch(() => {});
           memo.set(name, pr);
         }
         return pr;
@@ -706,7 +742,8 @@ export class Engine {
       paramsOf: (name) => {
         let pr = pmemo.get(name);
         if (!pr) {
-          pr = this.nodeParams(s, name);
+          pr = this.nodeParams(s, name).then((np) => { s.pdone.set(name, np); return np; });
+          pr.catch(() => {});
           pmemo.set(name, pr);
         }
         return pr;
@@ -714,6 +751,14 @@ export class Engine {
     };
 
     const res = await s.pull(target);
+    if (this.concurrent) {
+      // let branches that a failed input left running finish, then order the report as a sequential cook would
+      for (let n = -1; n !== memo.size + pmemo.size;) {
+        n = memo.size + pmemo.size;
+        await Promise.allSettled([...memo.values(), ...pmemo.values()]);
+      }
+      this.canonicalReport(s, target);
+    }
     for (const r of report.results.values()) {
       if (r.error && !r.upstream) report.errors.push(r.error);
       for (const w of r.warnings) report.warnings.push({ node: r.node, message: w });
@@ -799,10 +844,21 @@ export class Engine {
     const inputSigs: string[] = [];
     const inputRes: (NodeResult | null)[] = [];
     let depTime = false;
+    // a node that picks its inputs by param (switch) resolves its params first and cooks only the inputs it reads
+    const lazy = !!def.inputsUsed && !spec.bypass && def.type !== 'input';
+    let used: boolean[] | null = null;
+    if (lazy) {
+      const np0 = await s.paramsOf(name);
+      if (!np0.error && !np0.rp.errors.length) used = def.inputsUsed!(np0.rp.values, wiring.length);
+    }
+    const wanted = (i: number) => !!wiring[i] && (!lazy || !!used?.[i]);
+    // concurrent: start every input, and the params with the nodes they reference, at once
+    const started = this.concurrent ? wiring.map((ref, i) => (wanted(i) ? s.pull(ref!) : null)) : null;
+    if (this.concurrent && !lazy && def.type !== 'input') s.paramsOf(name);
     for (let i = 0; i < wiring.length; i++) {
       const ref = wiring[i];
-      if (!ref) { inputs.push(null); inputSigs.push('none'); inputRes.push(null); continue; }
-      const r = await s.pull(ref);
+      if (!wanted(i)) { inputs.push(null); inputSigs.push(ref ? 'unused' : 'none'); inputRes.push(null); continue; }
+      const r = await (started ? started[i]! : s.pull(ref!));
       if (r.error) {
         result.error = { node: name, message: `input ${i} ("${ref}") failed` };
         result.upstream = true;
@@ -869,6 +925,26 @@ export class Engine {
       result.cached = true;
       return result;
     }
+    // the same signature is cooking elsewhere (another branch, an identical node, another iteration): share that cook
+    const key = sig;
+    const flight = this.inflight.get(key);
+    if (flight && !opts.ancestors?.has(key)) {
+      const d = await flight.done;
+      if (!d.failed && d.geo) {
+        result.geo = d.geo;
+        result.sig = d.sig;
+        result.timeDependent = d.timeDep || depTime;
+        result.cached = true;
+        s.shared.push({ leader: flight.result, waiter: result });
+        return result;
+      }
+      // it failed: cook here again, as a cook that came after it would
+    }
+    let land!: (v: { geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean }) => void;
+    const mine: Flight = { done: new Promise((r) => { land = r; }), result };
+    this.inflight.set(key, mine);
+    let chainSet: Set<string> | null = null;
+    const chain = () => (chainSet ??= new Set([...(opts.ancestors ?? []), key]));
 
     const t0 = now();
     let readTime = false;
@@ -893,7 +969,7 @@ export class Engine {
       markTimeDependent: mark,
       async subcook(g, o = {}) {
         const inherit = o.frame === undefined && o.time === undefined ? { frame: time.frame, time: time.time, timeInc: time.timeInc } : {};
-        const r = await engine.cook(g, { fps: time.fps, ...inherit, ...o, depth: depth + 1 });
+        const r = await engine.cook(g, { fps: time.fps, ...inherit, ...o, depth: depth + 1, ancestors: chain() });
         if (r.timeDependent) mark();
         return r;
       },
@@ -902,12 +978,13 @@ export class Engine {
         const cur = inputRes[i];
         if (!ref || !cur) return { geo: new Geometry(), sig: 'none', timeDependent: false };
         if (!cur.timeDependent || frame === time.frame) return { geo: cur.geo ?? new Geometry(), sig: cur.sig, timeDependent: cur.timeDependent };
-        const r = await engine.cook(graph, { ...opts, target: ref, frame, time: undefined, timeInc: undefined, depth });
+        const r = await engine.cook(graph, { ...opts, target: ref, frame, time: undefined, timeInc: undefined, depth, ancestors: chain() });
         const rr = r.results.get(ref);
         if (!r.ok || !r.geo || !rr) throw new NodeError(`input ${i} ("${ref}") failed at frame ${frame}: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
         return { geo: r.geo, sig: rr.sig, timeDependent: true };
       },
       stat: (k, v) => { (result.stats ??= {})[k] = v; },
+      parallelMap: (kernel, job, o) => runKernel(engine.host.pool, kernel, job, o, engine.poolStats),
     };
     try {
       this.unpackInputs(def, rp.values, inputs, inputSigs, name, result);
@@ -930,7 +1007,94 @@ export class Engine {
       result.error = { node: name, message: msg, hint: e?.hint };
     }
     result.ms = now() - t0;
+    if (this.inflight.get(key) === mine) this.inflight.delete(key);
+    land({ geo: result.geo, sig: result.sig, timeDep, failed: !!result.error });
     return result;
+  }
+
+  /**
+   * Put a concurrent cook's report in the order of a sequential cook (one input at a time, each node's results in
+   * pull order) and drop the nodes a sequential cook would not have reached: it stops at a node's first failed input
+   * or failed expression reference. Results that shared an in-flight cook of the same signature swap roles so the one
+   * a sequential cook reaches first is the one that cooked (cached: false, with the cook's warnings and stats).
+   */
+  private canonicalReport(s: CookSession, target: string) {
+    const res = s.report.results;
+    const order: string[] = [];
+    const seen = new Set<string>(), pseen = new Set<string>();
+    const failed = (n: string) => { const r = res.get(n); return !r || !!r.error || !r.geo; };
+    const paramsOk = (n: string) => { const np = s.pdone.get(n); return !!np && !np.error && !np.rp.errors.length; };
+    // nodeParams: geometry references in order (stop at a failure), then the params of ch() targets
+    const params = (n: string): boolean => {
+      if (!pseen.has(n)) {
+        pseen.add(n);
+        const spec = s.graph.nodes[n];
+        const def = this.resolveDef(spec.type)!;
+        const refs = scanNodeRefs(def, spec.params);
+        if (hasRefs(refs)) {
+          let ok = true;
+          for (const g of refs.geo) {
+            pull(g);
+            if (failed(g)) { ok = false; break; }
+          }
+          if (ok) {
+            const done = new Set<string>();
+            for (const c of refs.ch) {
+              if (done.has(c.node)) continue;
+              done.add(c.node);
+              if (!params(c.node)) break;
+            }
+          }
+        }
+      }
+      return paramsOk(n);
+    };
+    // cookOne: inputs in order (stop at a failure), then the node's params
+    const pull = (n: string) => {
+      if (seen.has(n) || !res.has(n)) return;
+      seen.add(n);
+      order.push(n);
+      const spec = s.graph.nodes[n];
+      const def = this.resolveDef(spec.type)!;
+      const wiring = wiringOf(spec, def).list;
+      const lazy = !!def.inputsUsed && !spec.bypass && def.type !== 'input';
+      let used: boolean[] | null = null;
+      if (lazy) {
+        if (!params(n)) return;
+        used = def.inputsUsed!(s.pdone.get(n)!.rp.values, wiring.length);
+      }
+      for (let i = 0; i < wiring.length; i++) {
+        const ref = wiring[i];
+        if (!ref || (used && !used[i])) continue;
+        pull(ref);
+        if (!res.has(ref) || res.get(ref)!.error) return;
+      }
+      if (def.type !== 'input') params(n);
+    };
+    pull(target);
+    const all = new Map(res);
+    res.clear();
+    for (const n of order) res.set(n, all.get(n)!);
+    if (!s.shared.length) return;
+    const rank = new Map(order.map((n, i) => [n, i]));
+    const groups = new Map<NodeResult, NodeResult[]>();
+    for (const { leader, waiter } of s.shared) {
+      if (res.get(leader.node) !== leader || res.get(waiter.node) !== waiter) continue;
+      const g = groups.get(leader) ?? [leader];
+      g.push(waiter);
+      groups.set(leader, g);
+    }
+    for (const [leader, members] of groups) {
+      members.sort((a, b) => rank.get(a.node)! - rank.get(b.node)!);
+      const first = members[0];
+      if (first === leader) continue;
+      const take = (r: NodeResult) => ({ cached: r.cached, warnings: r.warnings, ms: r.ms, stats: r.stats });
+      const a = take(first), b = take(leader);
+      Object.assign(first, b);
+      Object.assign(leader, a);
+      if (!first.stats) delete first.stats;
+      if (!leader.stats) delete leader.stats;
+    }
   }
 
   /**
