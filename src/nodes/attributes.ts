@@ -8,6 +8,7 @@ import { fractal, makeNoise } from '../core/noise.ts';
 import { connectivity, primArea, primCentroid, primNormals, primPerimeter, vertexNormals, pointNormals, resolveVertexNormals, signedVolume } from '../core/topology.ts';
 import { edgeList, edgeSetToMask, forEachPrimEdge, maskToEdgeSet } from '../core/edges.ts';
 import { halfEdges } from '../core/halfedge.ts';
+import { dissolveEdges } from '../core/polyedit.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { evalRamp, parseColor } from '../graph/params.ts';
 import { runWrangle } from '../core/wrangle.ts';
@@ -579,10 +580,11 @@ defineNode({
     group: { type: 'group', default: '', desc: 'what to delete: group name, "!name", range "0-10", or "@P.y<0"' },
     class: {
       type: 'enum', options: ['prim', 'point', 'vertex', 'edge'], default: 'prim',
-      desc: 'element class of the pattern. vertex: removes those corners (polygons losing one are deleted, polylines shrink); edge: deletes every prim that uses one of the edges (dissolving edges is a separate polygon-modelling op)',
+      desc: 'element class of the pattern. vertex: removes those corners (polygons losing one are deleted, polylines shrink); edge: deletes every prim that uses one of the edges (edge_mode dissolve, or the dissolve node, merges faces instead)',
     },
     keep: { type: 'bool', default: false, desc: 'invert: keep the matches, delete the rest', aliases: ['invert', 'negate', 'delete_non_selected'] },
     remove_unused_points: { type: 'bool', default: true, desc: 'drop points no longer used by prims (prim, vertex and edge modes)' },
+    edge_mode: { type: 'enum', options: ['prims', 'dissolve'], default: 'prims', desc: 'class edge: prims = delete the prims using the edges (leaves holes); dissolve = remove the edges and merge their faces (dissolve node with defaults)' },
   },
   cook: ({ input, p }) => {
     const g = input(0);
@@ -594,6 +596,10 @@ defineNode({
     }
     if (p.class === 'edge') {
       const es = edgeMask(g, p.group);
+      if (p.edge_mode === 'dissolve') {
+        const sel = p.keep ? maskToEdgeSet(edgeList(g), null).filter((a, b) => !es.has(a, b)) : es;
+        return dissolveEdges(g, sel, { removeInline: true, removeDegenerate: true }).geo;
+      }
       const hit = new Uint8Array(g.numPrims);
       forEachPrimEdge(g, (pr, _v0, _v1, a, b) => { if (es.has(a, b)) hit[pr] = 1; });
       const keep = Uint8Array.from(hit, (h) => (p.keep ? h : h ? 0 : 1));
