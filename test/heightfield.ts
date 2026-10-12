@@ -16,6 +16,7 @@ import { rng } from '../src/core/random.ts';
 import { decodePNG, inflateZlib, pngChannel } from '../src/io/png-decode.ts';
 import { encodeGreyPNG, heightmapExport, heightmapPaths, quantize16, zlibStored } from '../src/io/heightmap.ts';
 import { exportGeometry } from '../src/io/export.ts';
+import { importGeometry } from '../src/io/import.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { summarize } from '../src/inspect.ts';
@@ -383,6 +384,8 @@ section('heightmap export and PNG decoding');
   check(masks.files.length === 2 && mi.bitDepth === 8 && mi.channels === 1 && mi.data[0] === Math.round(Math.max(0, Math.min(1, hf.layer('mask')![0])) * 255), 'mask_png: one 8-bit grey PNG per layer');
   check(heightmapPaths('out/t.png', masks.files).join() === 'out/t_mask.png,out/t_height.png' && heightmapPaths('out/t.png', res.files).join() === 'out/t.png,out/t.json', 'output paths: sidecar .json, one file per mask layer');
   check(exportGeometry(g, 'png16').length === stored.files[0].bytes.length, 'exportGeometry png16 wiring');
+  const js = heightfieldsOf(importGeometry(exportGeometry(g, 'json'), 'json'));
+  check(js.length === 1 && js[0].width === hf.width && js[0].cellSize === hf.cellSize && [...hf.layers].every(([k, a]) => same(js[0].layer(k)!, a)), 'json export/import keeps heightfields losslessly');
   let msg = '';
   try { exportGeometry(new Geometry({ positions: [0, 0, 0] }), 'png16'); } catch (e: any) { msg = e.message; }
   check(/no heightfield/.test(msg), `export of a geometry without a heightfield gives a clear error ("${msg.slice(0, 60)}…")`);

@@ -308,6 +308,7 @@ defineNode({
     const lo = p.height_min, hi = p.height_max;
     const iw = img.width, ih = img.height;
     const at = (fx: number, fz: number) => lo + (hi - lo) * bilinear(v, iw, ih, fx, p.flip_z ? ih - 1 - fz : fz);
+    if (iw < 2 || ih < 2) throw new NodeError(`${type}: image is ${iw} × ${ih}; need at least 2 × 2 pixels`);
     if (hasInput(0)) {
       const g = input(0).clone();
       let n = 0;
@@ -316,7 +317,6 @@ defineNode({
         if (!isHeightfield(vol)) continue;
         const hf = asHeightfield(vol);
         const out = hf.writable(p.layer);
-        if (iw < 2 || ih < 2) throw new NodeError(`${type}: image is ${iw} × ${ih}; need at least 2 × 2 pixels`);
         for (let j = 0; j < hf.height; j++)
           for (let i = 0; i < hf.width; i++) out[j * hf.width + i] = at((i / (hf.width - 1)) * (iw - 1), (j / (hf.height - 1)) * (ih - 1));
         g.volumes[k] = hf;
