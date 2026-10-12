@@ -2,14 +2,14 @@
 
 # Polyforge node reference
 
-153 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+167 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
 - [generate](#generate-nodes): [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
-- [curve](#curve-nodes): [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [curve](#curve) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [line](#line) · [loft](#loft) · [offset_curve](#offset_curve) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
+- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
@@ -24,6 +24,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file)
+- [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 
 ## generate nodes
 
@@ -368,6 +369,64 @@ None (generator).
 
 ## curve nodes
 
+### bezier
+
+category: `curve` · aliases: `bezier_curve`, `beziercurve`
+
+Bezier curve prim from control points (CVs) and an order; evaluates exactly wherever it is used.
+
+Houdini Curve SOP in Bezier mode (a BezierCurve prim). Segments of `order` CVs share their end CVs: 7 CVs of order 4 make two cubic segments (CVs 0-3 and 3-6); a closed curve wraps back to CV 0 (segments × (order-1) CVs). The CVs are ordinary points: transform, deformers, wrangles and attribute nodes move or edit them, and point attributes (Cd, width, Pw weights) blend along the curve. Nodes that need polylines get the evaluated curve automatically (with a note); convert_curve/resample choose the resolution. With an input, each polyline/polygon (or, without prims, all points in order) becomes a Bezier prim on those points.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | yes | no | optional: polylines/polygons (or ordered points) whose points become CVs |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `points` | json | `[[0,0,0],[0.6,1.2,0],[1.6,1.2,0],[2.2,0,0],[2.8,-1.2,0],[3.8,-1.2,0],[4.4,0,0]]` |  |  | `cvs`, `positions`, `pts` | CVs [[x,y,z], …] when no input is connected (2-number entries → [x, 0, z]) |
+| `order` | int | `4` | 2..11 |  |  | order = degree + 1 (4 = cubic, 3 = quadratic, 2 = linear) |
+| `closed` | bool | `false` |  |  |  | closed curve (wraps back to the first CV; regular with a multiple of order-1 CVs) |
+| `weights` | json | `[]` |  |  |  | rational weight per CV (point attribute Pw; [] = all 1); larger pulls the curve toward the CV |
+
+**Writes:** Bezier prims (prim spline_order; point Pw with weights)
+
+**Example**
+
+```json
+{
+  "type": "bezier",
+  "params": {
+    "points": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        3,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        0
+      ]
+    ],
+    "order": 4
+  }
+}
+```
+
 ### boolean2d
 
 category: `curve` · aliases: `curve_boolean`, `shape_boolean`
@@ -399,7 +458,7 @@ Trim curves to a portion of their length (u range 0..1).
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | polylines |
+| 0 | `curves` | no | no | polylines (Bezier/NURBS curves are evaluated first) |
 
 **Parameters**
 
@@ -430,6 +489,44 @@ None (generator).
 | `arc` | vec2 | `[0,360]` |  |  |  | begin/end angle in degrees (anything < 360 makes an open arc) |
 | `open` | bool | `false` |  |  |  | output an open polyline instead of a closed polygon face |
 
+### convert_curve
+
+category: `curve` · aliases: `convert`, `curve_convert`
+
+Convert curves between polyline, Bezier and NURBS (exact between spline types; fit to pass through points).
+
+Houdini Convert SOP for curves. Spline → polyline evaluates the curve (adaptive by tolerance, or segments per span); closed splines become closed polygons. Bezier ↔ NURBS is exact (multiple knots / blossoming; a short last Bezier segment is degree-elevated). Polyline → spline uses the points as CVs, or with fit passes through them (NURBS: global interpolation; Bezier: smooth cubic segments). Attributes follow (CV blends). Use convert to polyline before nodes that need a specific resolution; others convert automatically.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines, polygons, Bezier or NURBS curves |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `to` | enum | `"polyline"` |  | `polyline`, `bezier`, `nurbs` | `type`, `target` | target type |
+| `order` | int | `4` | 2..11 |  |  | order of curves made from polylines (fit Bezier is always cubic) |
+| `fit` | bool | `false` |  |  | `interpolate` | polylines → spline: pass through the points instead of using them as CVs |
+| `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | knots of NURBS made from polylines (parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns)) |
+| `segments` | int | `0` | 0.. |  | `divisions`, `lod` | to polyline: segments per knot span / Bezier segment; 0 = adaptive (tolerance) |
+| `tolerance` | float | `0` | 0.. |  |  | to polyline: largest chord-to-curve distance; 0 = 1/2000 of each curve's CV box diagonal |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Example**
+
+```json
+{
+  "type": "convert_curve",
+  "params": {
+    "to": "polyline",
+    "tolerance": 0.001
+  }
+}
+```
+
 ### curve
 
 category: `curve` · aliases: `polyline`, `path`, `spline`
@@ -449,9 +546,63 @@ None (generator).
 | `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points |
 | `subdivisions` | int | `8` | 1.. |  |  | smooth: samples per segment |
 
+### curve_attribs
+
+category: `curve` · aliases: `curveu`, `curve_attributes`, `orient_along_curve`, `orientalongcurve`
+
+Write curveu, arclength, tangent, frames (N/up), curvature, segment index and ramps along curves.
+
+Houdini Orient Along Curve plus the measure/attribute parts of Resample. Per point of each curve: curveu (0..1 by arc length), arclength (distance from the start), tangentu (unit tangent), with frame: N = tangent and up = rotation-minimising up (what copy_to_points needs to align copies along the curve; sweep reads up), curvature (1/radius; polylines: circle through the point and its neighbours), segment (index of the edge that starts at the point; splines: knot span / Bezier segment). ramp_attrib evaluates `ramp` at curveu into a float attribute (e.g. width for polywire, pscale for copies). On Bezier/NURBS prims the values are written on the CVs, evaluated on the curve at each CV's natural parameter (Greville abscissa).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines, polygons, Bezier or NURBS curves |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `curveu` | bool | `true` |  |  |  | write point curveu (0..1 by arc length) |
+| `arclength` | bool | `true` |  |  | `length` | write point arclength (distance from the curve start) |
+| `tangent` | bool | `true` |  |  |  | write point tangentu (unit tangent) |
+| `frame` | bool | `false` |  |  | `orient`, `frames` | write point N (= tangent) and up (rotation-minimising), for copy_to_points/sweep |
+| `curvature` | bool | `false` |  |  |  | write point curvature (1/radius) |
+| `segment` | bool | `false` |  |  |  | write point int segment (edge / span index) |
+| `up` | vec3 | `[0,1,0]` |  |  |  | initial up of the rotation-minimising frames (an input point attribute up steers them per point instead) |
+| `ramp_attrib` | string | `""` |  |  | `attrib`, `name` | float point attribute to fill with ramp(curveu), e.g. "width" ("" = none) |
+| `ramp` | ramp | `[[0,1],[1,1]]` |  |  |  | value along the curve (u 0..1) for ramp_attrib |
+| `ramp_scale` | float | `1` |  |  |  | multiplier of the ramp values |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** point curveu, arclength, tangentu, N + up (frame), curvature, segment, ramp_attrib
+
+**Example**
+
+```json
+{
+  "type": "curve_attribs",
+  "params": {
+    "frame": true,
+    "ramp_attrib": "width",
+    "ramp": [
+      [
+        0,
+        0.3
+      ],
+      [
+        1,
+        0.05
+      ]
+    ]
+  }
+}
+```
+
 ### ends
 
-category: `curve` · aliases: `convert_curve`, `unroll`
+category: `curve` · aliases: `unroll`
 
 Convert between closed polygons and open polylines (unroll outlines / close curves).
 
@@ -459,7 +610,7 @@ Convert between closed polygons and open polylines (unroll outlines / close curv
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | polygons or polylines |
+| 0 | `geo` | no | no | polygons or polylines (Bezier/NURBS curves are evaluated first) |
 
 **Parameters**
 
@@ -513,6 +664,46 @@ Fill closed outlines into faces, cutting holes (even-odd), e.g. text outlines or
 | `rule` | enum | `"EvenOdd"` |  | `EvenOdd`, `NonZero` |  | fill rule for overlapping contours |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane |
 
+### fillet_curve
+
+category: `curve` · aliases: `curve_fillet`, `polyline_fillet`, `polyfillet`
+
+Round, chamfer or Bezier-blend the corners of polylines and polygons (3D, any plane per corner).
+
+Like Houdini's PolyPath/fillet tools for curves (Fillet SOP is for surfaces). Each corner whose turn exceeds angle_min (and whose point is in group) is replaced by an arc of `radius` tangent to both edges (round), a straight cut at the same tangent points (chamfer) or a quadratic Bezier through the corner's handle (bezier). clamp shrinks radii that do not fit between neighbouring corners. Corners of open curves at their ends are never filleted. Attributes are blended from the corner and its neighbours; new points join point group "fillet". Bezier/NURBS input is converted to polylines first (a smooth curve has no corners).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines or polygons |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `radius` | float | `0.2` | 0.. |  | `rad`, `r` | fillet radius (chamfer/bezier: the same tangent points) |
+| `type` | enum | `"round"` |  | `round`, `chamfer`, `bezier` | `shape`, `mode` | corner shape |
+| `segments` | int | `6` | 1.. |  | `divisions` | segments per round/bezier corner |
+| `angle_min` | float | `1` | 0..180 |  |  | leave corners that turn less than this (degrees) |
+| `group` | group (point) | `""` |  |  |  | corner points to fillet ("" = all), e.g. "@P.y>0", "0-4" |
+| `clamp` | bool | `true` |  |  |  | shrink radii that do not fit between neighbouring corners |
+| `radius_attrib` | string | `""` |  |  |  | optional point float attribute multiplying the radius per corner |
+
+**Writes:** point group fillet (new corner points)
+
+**Example**
+
+```json
+{
+  "type": "fillet_curve",
+  "params": {
+    "radius": 0.5,
+    "segments": 8
+  }
+}
+```
+
 ### line
 
 category: `curve`
@@ -553,6 +744,67 @@ Skin a surface through a sequence of curves (in prim order). Curves are resample
 
 **Writes:** vertex uv
 
+### nurbs
+
+category: `curve` · aliases: `nurbs_curve`, `nurbscurve`
+
+NURBS curve prim from control points (CVs), order, knots and weights; or through points with fit.
+
+Houdini Curve SOP in NURBS mode (a NURBCurve prim). Open curves have n + order knots (automatic: clamped, so the curve starts and ends on its end CVs); closed curves are periodic with n + 1 breakpoints. fit:true makes the curve pass through the points (global interpolation; the CVs are computed). The CVs are ordinary points (transform/deform/wrangle move them, attributes blend along the curve); nodes that need polylines get the evaluated curve automatically. With an input, each polyline/polygon (or all points in order) becomes a NURBS prim.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | yes | no | optional: polylines/polygons (or ordered points) whose points become CVs (or are interpolated with fit) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `points` | json | `[[0,0,0],[1,0,1.5],[2.5,0.5,1.5],[3,1,0],[4.5,0.5,-0.5],[5.5,0,0.5]]` |  |  | `cvs`, `positions`, `pts` | CVs [[x,y,z], …] when no input is connected (2-number entries → [x, 0, z]) |
+| `order` | int | `4` | 2..11 |  |  | order = degree + 1 (4 = cubic); lowered when there are fewer CVs |
+| `closed` | bool | `false` |  |  |  | closed (periodic) curve |
+| `knots` | json | `[]` |  |  |  | explicit knots: open n + order non-decreasing values, closed n + 1 breakpoints; [] = automatic |
+| `parameterization` | enum | `"uniform"` |  | `uniform`, `chord`, `centripetal` | `knot_spacing`, `parameterisation` | automatic knot spacing (parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns)) |
+| `weights` | json | `[]` |  |  |  | rational weight per CV (point attribute Pw; [] = all 1) |
+| `fit` | bool | `false` |  |  | `interpolate`, `through_points` | interpolate: the curve passes through the points (CVs computed) instead of using them as CVs |
+
+**Writes:** NURBS prims (prim spline_order, prim float[] knots; point Pw with weights)
+
+**Example**
+
+```json
+{
+  "type": "nurbs",
+  "params": {
+    "points": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        0,
+        2
+      ],
+      [
+        4,
+        0,
+        0
+      ],
+      [
+        6,
+        0,
+        2
+      ]
+    ],
+    "fit": true
+  }
+}
+```
+
 ### offset_curve
 
 category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
@@ -574,6 +826,50 @@ category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
 | `segments` | int | `16` | 3.. |  |  | segments per full circle for round joins |
 | `output` | enum | `"outlines"` |  | `outlines`, `faces` |  | outlines = closed polygons per contour; faces = filled with holes cut |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
+
+### offset_curve_3d
+
+category: `curve` · aliases: `curve_offset`, `offset3d`, `polyoffset`
+
+Offset curves sideways in 3D (rotation-minimising frame or a fixed plane normal): rails, kerbs, parallel paths.
+
+Each edge moves by distance along its side vector direction × up (positive = to the right of the direction of travel, like side_offset of points_along_curve), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines/polygons (Bezier/NURBS curves are sampled adaptively) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `distance` | float | `0.25` |  |  | `offset`, `dist` | side offset, positive = right of the direction of travel (negative = left) |
+| `lift` | float | `0` |  |  | `height`, `up_offset` | offset along up (e.g. rail height) |
+| `frame` | enum | `"rmf"` |  | `rmf`, `plane` |  | rmf = rotation-minimising frame along each curve; plane = fixed up normal |
+| `up` | vec3 | `[0,1,0]` |  |  | `normal`, `plane_normal` | initial up (rmf) or the plane normal (plane) |
+| `corner` | enum | `"mitre"` |  | `mitre`, `round`, `bevel` | `join`, `corners` | outer corner style |
+| `mitre_limit` | float | `4` | 1.. |  | `miter_limit` | mitres longer than this × distance are bevelled |
+| `round_segments` | int | `4` | 1.. |  |  | segments per 90° of round corners |
+| `both` | bool | `false` |  |  | `both_sides`, `double` | also output the -distance offset (two rails; prim int side = +1 / -1) |
+| `keep_input` | bool | `false` |  |  |  | keep the input curves as well |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** prim int side (+1 / -1) with both
+
+**Example**
+
+```json
+{
+  "type": "offset_curve_3d",
+  "params": {
+    "distance": 0.6,
+    "lift": 1,
+    "both": true
+  }
+}
+```
 
 ### parametric_curve
 
@@ -621,7 +917,7 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | polylines (or polygon edges) |
+| 0 | `curves` | no | no | polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively |
 
 **Parameters**
 
@@ -634,17 +930,63 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 **Writes:** vertex uv; prim groups caps, sides
 
+### project_curve
+
+category: `curve` · aliases: `curve_project`, `ray_curve`, `projectcurve`
+
+Project curves onto a surface or heightfield (along a direction or to the closest point): roads and paths on terrain.
+
+Houdini Ray SOP applied to curves. Optionally resamples each curve by spacing first (splines exactly), so the projected curve follows the surface between the original points. direction mode casts rays (both ways with bidirectional); closest snaps to the nearest surface point. Writes point hit (1/0) and N (surface normal at the hit); misses stay where they are or are deleted. lift raises the result along the normal. Targets: polygons (input 1), or a heightfield (sampled exactly for vertical rays, through its preview mesh otherwise).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | curves (or points) to project |
+| 1 | `target` | no | no | surface mesh or heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"direction"` |  | `direction`, `closest` |  | rays along direction, or the closest surface point |
+| `direction` | vec3 | `[0,-1,0]` |  |  | `dir` | ray direction (mode direction) |
+| `bidirectional` | bool | `true` |  |  |  | also cast the opposite direction (the nearer hit wins) |
+| `spacing` | float | `0` | 0.. |  | `resample`, `length` | resample curves to this segment length first (0 = keep the points) |
+| `lift` | float | `0` |  |  |  | offset from the surface along its normal |
+| `max_distance` | float | `1000000000` | 0.. |  |  | ignore hits further than this |
+| `misses` | enum | `"keep"` |  | `keep`, `delete` |  | points without a hit: stay where they are (hit 0) or are deleted |
+| `normals` | bool | `true` |  |  |  | write point N from the surface |
+| `smooth_normals` | bool | `true` |  |  |  | N (and lift) from the interpolated vertex normals of the surface (60° cusp); false = the normal of the hit face |
+| `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** point hit (int), N (surface normal)
+
+**Example**
+
+```json
+{
+  "type": "project_curve",
+  "params": {
+    "spacing": 0.25,
+    "lift": 0.05
+  }
+}
+```
+
 ### resample
 
 category: `curve`
 
 Resample curves (and polygon outlines) to even spacing; optional smoothing. Adds curveu.
 
+Bezier/NURBS prims are sampled on the true curve, evenly by arc length (treat_splines "exact"; their CV attributes are blended with the curve's own basis weights), or along their control polygon ("control_polygon"); either way the result is a polyline.
+
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | polylines or polygons |
+| 0 | `curves` | no | no | polylines, polygons or Bezier/NURBS curves |
 
 **Parameters**
 
@@ -653,9 +995,10 @@ Resample curves (and polygon outlines) to even spacing; optional smoothing. Adds
 | `mode` | enum | `"length"` |  | `length`, `count` |  | segment length or a fixed segment count per curve |
 | `length` | float | `0.1` | 0.000001.. |  | `seglen`, `segment_length` | target segment length |
 | `count` | int | `20` | 1.. |  | `segments` | segments per curve (mode=count) |
-| `smooth` | bool | `false` |  |  |  | Catmull-Rom smooth before resampling |
+| `smooth` | bool | `false` |  |  |  | Catmull-Rom smooth before resampling (polylines) |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 | `tangent` | bool | `false` |  |  |  | also write point tangentu (unit tangent) |
+| `treat_splines` | enum | `"exact"` |  | `exact`, `control_polygon` |  | Bezier/NURBS prims: sample the curve itself by arc length (exact) or their control polygon as a polyline |
 
 **Writes:** point curveu (0..1 along each curve), optional tangentu
 
@@ -730,6 +1073,48 @@ None (generator).
 | `clockwise` | bool | `false` |  |  |  | turn direction when seen from above |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
+### spline_fit
+
+category: `curve` · aliases: `fit_curve`, `curve_fit`, `fitcurve`
+
+Least-squares NURBS through ordered points: smooth noisy polylines, compress dense curves to few CVs.
+
+Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all points in order) is approximated by a B-spline: cv_count CVs, or (cv_count 0) the fewest CVs that keep every point within tolerance (interpolating at worst). Open curves keep their end points. smoothing adds a penalty on the CVs' second differences (0 = none; around 1 irons out noise; larger flattens). Parameters are corrected (re-projected) twice. Output NURBS prims, or polylines sampled from the fit. Writes prim fit_error.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | no | no | polylines/polygons (each fitted), or ordered points without prims (one curve) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `order` | int | `4` | 2..11 |  |  | order of the fitted curve (4 = cubic) |
+| `cv_count` | int | `0` | 0.. |  | `cvs`, `count` | number of CVs; 0 = as few as the tolerance allows |
+| `tolerance` | float | `0.01` | 0.. |  | `tol`, `max_error` | largest allowed distance from a point to the curve (cv_count 0) |
+| `smoothing` | float | `0` | 0.. |  | `smooth` | second-difference penalty on the CVs (0 = none, ~1 smooths noise) |
+| `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns) |
+| `closed` | enum | `"auto"` |  | `auto`, `open`, `closed` |  | auto = as the input prim (open for point clouds) |
+| `output` | enum | `"nurbs"` |  | `nurbs`, `polyline` |  | NURBS prims or polylines sampled from the fit |
+| `segments` | int | `0` | 0.. |  |  | polyline output: segments per knot span; 0 = adaptive (tolerance / 4) |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** prim fit_error (largest distance from an input point to the fitted curve)
+
+**Example**
+
+```json
+{
+  "type": "spline_fit",
+  "params": {
+    "tolerance": 0.02,
+    "smoothing": 0.5
+  }
+}
+```
+
 ### sweep
 
 category: `curve`
@@ -740,7 +1125,7 @@ Sweep a cross-section along curves using rotation-minimising frames (tubes, ribb
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `backbone` | no | no | curves to sweep along |
+| 0 | `backbone` | no | no | curves to sweep along (Bezier/NURBS curves are sampled adaptively) |
 | 1 | `profile` | yes | no | cross-section curve drawn in the XY plane (optional; one per backbone or a single shared one) |
 
 **Parameters**
@@ -1759,7 +2144,7 @@ category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, 
 
 Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). Vertex colours (Cd) still win in exports: a material then supplies the PBR scalars. Assign several materials by chaining material nodes with different groups.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). Vertex colours (Cd) still win in exports: a material then supplies the PBR scalars. Assign several materials by chaining material nodes with different groups. Texture maps are file paths (PNG or JPEG, relative to the graph/workspace): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.
 
 **Inputs**
 
@@ -1780,6 +2165,9 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `alpha` | float | `1` | 0..1 |  | `opacity`, `opac` | opacity; below 1 exports with alphaMode BLEND |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
+| `base_color_map` | path | `""` |  |  | `basecolor_map`, `albedo_map`, `diffuse_map`, `color_map`, `basecolor_texture`, `base_color_texture` | base colour texture (sRGB PNG/JPEG path; "" = none); uses the uv attribute |
+| `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path, OpenGL convention: +Y up; "" = none) |
+| `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path; "" = none); glTF reads its green channel |
 
 **Writes:** prim "material" (string), detail "materials" (JSON table)
 
@@ -3186,7 +3574,7 @@ category: `copy` · aliases: `copytopoints`, `instance`, `copy_to_pts`
 
 Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over. pack:true makes packed instances (cheap at millions).
 
-pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, or the exact value, e.g. a string name); without that attribute the pieces cycle.
+pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner.
 
 **Inputs**
 
@@ -3206,6 +3594,10 @@ pack:false (default) makes real copies. pack:true makes one packed prim per temp
 | `variants` | enum | `"none"` |  | `none`, `name`, `piece` |  | split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set) |
 | `piece_attrib` | string | `""` |  |  |  | variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class") |
 | `variant_attrib` | string | `"variant"` |  |  |  | variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value) |
+| `variant_weights` | json | `[]` |  |  | `weights`, `variant_probabilities` | variants: weights per piece (in piece order) for a seeded weighted random pick when the template has no variant_attrib attribute, e.g. [3, 1, 1]; missing weights are 0 |
+| `seed` | float | `0` |  |  |  | variant_weights: random seed |
+| `scale_attrib` | string | `""` |  |  | `scale_by` | template point attribute multiplying the copy scale (float = uniform, vec3 = per axis), on top of pscale and scale |
+| `rotate_attrib` | string | `""` |  |  | `rotate_by` | template point attribute adding a local rotation after orient/N/rot: float = degrees about +Y (yaw), vec3 = Euler degrees (XYZ), vec4 = quaternion |
 
 **Writes:** prim copynum; template point attributes on copied points (pack: on the instance anchor points)
 
@@ -3296,7 +3688,9 @@ Each piece becomes a source geometry moved so its pivot is at the origin; the an
 
 category: `copy` · aliases: `scatter_points`, `distribute`
 
-Scatter points on surfaces (area-weighted, optional blue-noise relax), along curves, or inside volumes.
+Scatter points on surfaces (area-weighted, blue-noise spacing; by count or per m²; density attribute and 0..1 mask; relaxation; exact minimum distance), along curves, or inside volumes.
+
+Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or prim attribute, Houdini's density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; "^name" excludes). Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").
 
 **Inputs**
 
@@ -3312,12 +3706,70 @@ Scatter points on surfaces (area-weighted, optional blue-noise relax), along cur
 | `density` | float | `0` | 0.. |  |  | points per unit area/length/volume (overrides count when > 0) |
 | `mode` | enum | `"auto"` |  | `auto`, `surface`, `curve`, `volume` |  | auto = surface if polygons, curve if only polylines |
 | `relax` | bool | `true` |  |  |  | even (blue-noise) spacing via sample elimination |
-| `density_attrib` | string | `""` |  |  |  | point float attribute weighting where points land (e.g. a noise mask) |
+| `density_attrib` | string | `""` |  |  | `densityattrib`, `density_attribute` | point, vertex or prim float attribute (≥ 0) scaling the local density (e.g. a noise mask; 2 = twice as many points as 1) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
-| `keep_attribs` | bool | `true` |  |  |  | interpolate source point attributes onto scattered points |
+| `keep_attribs` | bool | `true` |  |  |  | carry source attributes onto the scattered points (see emit_attributes) |
+| `generate_by` | enum | `"auto"` |  | `auto`, `count`, `density` | `generateby`, `count_mode`, `method` | count = exactly count points; density = density × density_scale points per m² of area × weight; auto = density when density > 0, else count |
+| `density_mask` | string | `""` |  |  | `mask`, `mask_attrib`, `density_mask_attrib` | point, vertex or prim attribute 0..1 multiplying the density (e.g. "mask" from the mask node) |
+| `density_scale` | float | `1` | 0.. |  | `densityscale` | multiplies density (density and auto modes) |
+| `relax_iterations` | int | `0` | 0..100 |  | `relaxiterations`, `relax_iter`, `relax_passes` | surface: Lloyd-style relaxation passes (points push apart and are projected back onto the surface) |
+| `relax_radius` | float | `0` | 0.. |  |  | relaxation spacing in metres (0 = from the local density) |
+| `min_distance` | float | `0` | 0.. |  | `mindist`, `min_dist`, `poisson_radius` | exact minimum distance between points (0 = off); the count can come out lower |
+| `max_per_prim` | int | `0` | 0.. |  | `maxperprim` | at most this many points per source prim (0 = no limit) |
+| `emit_attributes` | string | `"*"` |  |  | `attributes`, `interpolate`, `emit` | source attributes carried onto the points (pattern: point/vertex interpolated, prim copied; "^Cd" excludes) |
+| `write_sourceprim` | bool | `true` |  |  | `source_prim`, `sourceprim` | write int sourceprim (the source prim of each point) |
+| `write_primuv` | bool | `false` |  |  | `prim_uv`, `sourceprimuv` | write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention) |
+| `write_seed` | bool | `false` |  |  | `seed_attrib`, `pcg_seed` | write int seed per point (PCG $Seed; a hash of seed and the point number) |
 
-**Writes:** point N (surface normal), sourceprim; interpolated source attributes
+**Writes:** point N (surface normal), sourceprim; optional sourceprimuv, seed; source attributes (emit_attributes)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size": [
+          20,
+          20
+        ],
+        "divisions": [
+          40,
+          40
+        ]
+      }
+    },
+    "m": {
+      "type": "mask",
+      "in": [
+        "ground"
+      ],
+      "params": {
+        "by": "noise",
+        "min": 0.5,
+        "max": 1,
+        "falloff": 0.1
+      }
+    },
+    "pts": {
+      "type": "scatter",
+      "in": [
+        "m"
+      ],
+      "params": {
+        "generate_by": "density",
+        "density": 2,
+        "density_mask": "mask",
+        "min_distance": 0.3
+      }
+    }
+  },
+  "output": "pts"
+}
+```
 
 ### unpack
 
@@ -5685,3 +6137,473 @@ None (generator).
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
 | `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances) |
 | `instancing` | enum | `"packed"` |  | `packed`, `expand` |  | glTF EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry |
+
+## pcg nodes
+
+### attribute_from_map
+
+category: `pcg` · aliases: `attribfrommap`, `attrib_from_image`, `texture_to_attrib`, `attrib_from_map`, `attribute_from_image`, `texture_sample`
+
+Sample a PNG image (8/16-bit grey or RGB(A)) into a point attribute by uv or by a planar projection (xz ground maps, xy/yz walls): density maps, masks, colour.
+
+Houdini: Attribute from Map; Unreal PCG: Get Texture Data + Sample Texture. projection uv reads the uv attribute (point or vertex; GPU convention: pixel centres at (i + 0.5) / width, v = 0 at the bottom of the image unless flip_v). Planar projections map the image onto a size × size rectangle around center with the first and last pixels on its edges (the layout heightfield_from_image and export png16/mask_png use): xz = top view, column along +X, row 0 at min Z; xy = facing +Z, column along +X, row 0 at max Y; yz = facing +X, column along −Z, row 0 at max Y. channel luminance (Rec. 709), r, g, b, a or rgb (a vector); remap maps black..white to remap[0]..remap[1]. Bilinear or nearest filtering; wrap repeat, clamp or mirror outside the image. class vertex writes per vertex (uv seams stay sharp); point averages a point's vertices when uv is a vertex attribute. The file is re-read when it changes.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | points or mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `path` | path | `""` |  |  | `file`, `filename`, `map`, `texture`, `image` | PNG file (relative to the workspace) or URL |
+| `name` | string | `""` |  |  | `attrib`, `attribute`, `output` | output attribute ("" = Cd for channel rgb, else mask) |
+| `channel` | enum | `"luminance"` |  | `luminance`, `r`, `g`, `b`, `a`, `rgb` |  | which channel (rgb writes a vector) |
+| `projection` | enum | `"uv"` |  | `uv`, `xz`, `xy`, `yz` | `mapping` | uv attribute or a planar projection (xz = top view) |
+| `uv_attrib` | string | `"uv"` |  |  |  | projection uv: the uv attribute (vertex or point) |
+| `size` | vec2 | `[10,10]` |  |  |  | planar: extent of the image in metres (columns, rows) |
+| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `origin` | planar: centre of the image rectangle |
+| `remap` | vec2 | `[0,1]` |  |  | `range` | output value for black and for white |
+| `wrap` | enum | `"clamp"` |  | `clamp`, `repeat`, `mirror` |  | outside the image: clamp to the edge, tile, or mirror |
+| `filter` | enum | `"bilinear"` |  | `bilinear`, `nearest` | `interpolation` | pixel interpolation |
+| `flip_v` | bool | `false` |  |  |  | flip the image vertically |
+| `class` | enum | `"point"` |  | `point`, `vertex` |  | write a point attribute or a vertex attribute |
+| `group` | group (point) | `""` |  |  |  | points to write ("" = all) |
+
+**Writes:** point (or vertex) float <name> (vec3 for channel rgb)
+
+**Example**
+
+```json
+{
+  "type": "attribute_from_map",
+  "in": [
+    "ground_pts"
+  ],
+  "params": {
+    "path": "density.png",
+    "projection": "xz",
+    "size": [
+      100,
+      100
+    ],
+    "name": "density"
+  }
+}
+```
+
+### cluster
+
+category: `pcg` · aliases: `pcg_cluster`, `kmeans`, `clusterpoints`, `cluster_points`
+
+Cluster points: k-means (count clusters) or by radius; writes an int cluster id (optionally the cluster centre and a debug colour). Piece assignment, grouping scattered objects, LOD cells.
+
+Houdini: Cluster Points SOP (k-means, attribute "cluster"); Unreal PCG: no direct node (use cluster ids with Attribute Partition). kmeans: seeded k-means++ start, then Lloyd iterations (stops when nothing changes); radius: leader clustering, points visited in a seeded random order take every unassigned point within radius, so each cluster fits in a ball of that radius. Cluster ids are numbered in point order (cluster 0 holds the first point). center writes cluster_center (the centroid of the cluster); color writes Cd per cluster for a debug render. Points outside group get cluster -1. Packed instances are clustered by their anchors.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | no | no | points (or any geometry: its points are clustered) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `method` | enum | `"kmeans"` |  | `kmeans`, `radius` | `mode` | k-means with count clusters, or radius clusters |
+| `count` | int | `8` | 1..100000 |  | `clusters`, `k`, `num_clusters` | kmeans: number of clusters |
+| `iterations` | int | `10` | 1..1000 |  | `iter` | kmeans: Lloyd iterations at most |
+| `radius` | float | `1` | 0.. |  |  | radius: cluster radius in metres |
+| `seed` | float | `0` |  |  |  | random seed |
+| `name` | string | `"cluster"` |  |  | `attrib`, `output` | output point int attribute |
+| `center` | bool | `false` |  |  | `write_center`, `cluster_center` | also write cluster_center (vec3) |
+| `color` | bool | `false` |  |  | `colorize`, `visualize` | also write Cd per cluster (debug view) |
+| `group` | group (point) | `""` |  |  |  | points to cluster ("" = all); the others get -1 |
+
+**Writes:** point int cluster (or <name>); optional cluster_center, Cd
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "g": {
+      "type": "grid",
+      "params": {
+        "size": [
+          20,
+          20
+        ]
+      }
+    },
+    "s": {
+      "type": "scatter",
+      "in": [
+        "g"
+      ],
+      "params": {
+        "count": 400
+      }
+    },
+    "c": {
+      "type": "cluster",
+      "in": [
+        "s"
+      ],
+      "params": {
+        "count": 6,
+        "color": true
+      }
+    }
+  },
+  "output": "c"
+}
+```
+
+### mask
+
+category: `pcg` · aliases: `pcg_mask`, `scatter_mask`, `mask_by_feature`, `maskbyfeature`, `point_mask`
+
+Write a 0..1 point mask from a feature (slope, height, curvature, occlusion, distance, direction, noise, attribute, group, inside), shaped by a band with falloff and a ramp, and combined with an existing mask. Feed scatter density_mask or prune.
+
+Houdini: Mask by Feature / attribute from features; Unreal PCG: Density Filter inputs (Normal To Density, Distance, Spatial Noise). The feature value v becomes 1 inside [min, max] and fades linearly to 0 over `falloff` outside it (a hard edge when falloff is 0), then ramp reshapes it, invert flips it, and combine merges it with the existing mask attribute (replace, multiply = and, max = or, add, subtract, min). Units of min/max per feature: slope = degrees between N and up (0 flat, 90 vertical; default 0..30 = gentle ground); height = metres along up (Y); curvature = mean curvature in 1/m (positive convex: ridges, bumps; negative concave: valleys); occlusion = 0..1 ambient occlusion (rays against the geometry and input 1); distance = metres to input 1 (mesh, curves or points; e.g. away from a road: min 3, max 1e9); direction = degrees between N and `direction` (e.g. north faces); noise = 0..1 fractal noise (frequency, octaves, seed); attribute = the value of source_attrib (first component); group = 1 for points matching `pattern`; inside = 1 inside input 1's closed mesh (falloff = soft edge in metres outside it). Normals: the point N, else for a point cloud the normal of input 1 at the closest point, else computed from the polygons. Packed instances keep their anchors.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | points or mesh to mask (the mask is a point attribute) |
+| 1 | `reference` | yes | no | distance / inside: what to measure to; slope, direction, curvature, occlusion of a point cloud: the surface it lies on |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `by` | enum | `"slope"` |  | `slope`, `height`, `curvature`, `occlusion`, `distance`, `direction`, `noise`, `attribute`, `group`, `inside` | `feature`, `type` | feature to mask by |
+| `min` | float | `0` |  |  | `min_value`, `low` | lowest feature value with mask 1 (units depend on `by`) |
+| `max` | float | `30` |  |  | `max_value`, `high` | highest feature value with mask 1 |
+| `falloff` | float | `0` | 0.. |  | `fade`, `soft` | linear fade outside [min, max] in feature units (inside: metres outside the mesh); 0 = hard edge |
+| `ramp` | ramp | `[[0,0],[1,1]]` |  |  |  | reshape the 0..1 mask before combining |
+| `invert` | bool | `false` |  |  |  | invert the feature mask (1 - mask) before combining |
+| `combine` | enum | `"replace"` |  | `replace`, `multiply`, `add`, `subtract`, `max`, `min` | `mode`, `operation`, `blend` | merge with the existing mask attribute: multiply = and, max = or (missing attribute = start from scratch) |
+| `name` | string | `"mask"` |  |  | `output`, `output_attrib`, `mask_name` | output point float attribute |
+| `up` | vec3 | `[0,1,0]` |  |  | `up_vector`, `axis` | slope: the "flat" normal; height: the axis heights are measured along |
+| `direction` | vec3 | `[1,0,0]` |  |  | `facing` | direction: the facing direction measured against N (angle in degrees) |
+| `source_attrib` | string | `""` |  |  | `from_attrib`, `input_attrib`, `feature_attrib` | attribute: the point attribute to read (vectors: first component) |
+| `pattern` | group (point) | `""` |  |  |  | group: point group pattern that gets 1 (e.g. "top", "@P.y>2") |
+| `frequency` | float | `0.2` | 0.. |  | `freq` | noise: spatial frequency (1/m) |
+| `octaves` | int | `3` | 1..8 |  |  | noise: fractal octaves |
+| `samples` | int | `16` | 1..256 |  | `rays` | occlusion: rays per point |
+| `max_distance` | float | `0` | 0.. |  | `radius`, `maxdist` | occlusion: rays only count hits closer than this (0 = unlimited) |
+| `seed` | float | `0` |  |  |  | random seed |
+| `group` | group (point) | `""` |  |  |  | points to write ("" = all); the others keep their mask (0 when new) |
+
+**Writes:** point float mask (or <name>)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "land": {
+      "type": "terrain",
+      "params": {
+        "size": [
+          60,
+          60
+        ],
+        "height": 8
+      }
+    },
+    "flat": {
+      "type": "mask",
+      "in": [
+        "land"
+      ],
+      "params": {
+        "by": "slope",
+        "min": 0,
+        "max": 20,
+        "falloff": 10
+      }
+    },
+    "low": {
+      "type": "mask",
+      "in": [
+        "flat"
+      ],
+      "params": {
+        "by": "height",
+        "min": -100,
+        "max": 4,
+        "falloff": 1,
+        "combine": "multiply"
+      }
+    },
+    "pts": {
+      "type": "scatter",
+      "in": [
+        "low"
+      ],
+      "params": {
+        "generate_by": "density",
+        "density": 0.5,
+        "density_mask": "mask"
+      }
+    }
+  },
+  "output": "pts"
+}
+```
+
+### orient
+
+category: `pcg` · aliases: `pcg_orient`, `align`, `orient_points`, `transform_points`
+
+Orient points for instancing: write orient (quaternion), N and up from the point normal + up, a surface (input 1), the nearest curve tangent (RMF), a fixed direction, a look-at target or random rotations; plus random yaw, tilt and scale ranges.
+
+Houdini: Attribute Randomize (orient, pscale) + Orient Along Curve + Scatter and Align; Unreal PCG: Transform Points (rotation and scale ranges). Frame convention as copy_to_points: +Z = N, +Y = up. mode gives the main direction: normal_up = the point N (and the point up, else the up param); surface = the normal of input 1 (or of the input's own polygons) at the closest point (snap moves the points onto it); curve_tangent = the tangent of the closest curve of input 1 (or of the input's own curves) with a rotation-minimising up; direction = the direction param; look_at = towards target; random = a random rotation of up to max_angle about axis ([0,0,0] = any axis) applied to the normal_up frame. align_axis z (default) puts the main direction on +Z (N) and makes the up param perpendicular for +Y; align_axis y puts it on +Y (upright models such as trees, rocks or posts follow the surface) and takes +Z from the direction param (the up param in direction mode). upright keeps +Y on the up param and only turns the heading (posts along a sloped road). Then random_yaw turns about the instance's +Y and tilt leans it by an angle in the range towards a random side (degrees). Scale: scale_min..scale_max, random per point or picked by scale_attrib (0..1, e.g. a mask): uniform → pscale, per axis → scale. Points outside group keep their attributes.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | no | no | points to orient |
+| 1 | `reference` | yes | no | surface (mode surface) or curves (mode curve_tangent) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"normal_up"` |  | `normal_up`, `surface`, `curve_tangent`, `direction`, `random`, `look_at` |  | where the main direction comes from |
+| `align_axis` | enum | `"z"` |  | `z`, `y` | `axis_mode`, `align_to` | instance axis that follows the main direction: z = N (Houdini copy), y = up (upright models) |
+| `up` | vec3 | `[0,1,0]` |  |  | `up_vector` | reference up (+Y) when the main direction drives +Z |
+| `direction` | vec3 | `[0,0,1]` |  |  | `dir`, `heading` | mode direction: the main direction; align_axis y: the reference for +Z |
+| `target` | vec3 | `[0,0,0]` |  |  | `look_at_point` | look_at: the point instances face |
+| `axis` | vec3 | `[0,1,0]` |  |  |  | random: rotation axis ([0,0,0] = a random axis per point) |
+| `max_angle` | float | `180` | 0..180 |  |  | random: largest rotation in degrees (either way) |
+| `random_yaw` | vec2 | `[0,0]` |  |  | `yaw`, `random_heading`, `rotation_range` | random turn about the instance up axis, degrees [min, max] (e.g. [0, 360]) |
+| `tilt` | vec2 | `[0,0]` |  |  | `random_tilt`, `lean` | random lean away from up, degrees [min, max], towards a random side |
+| `scale_min` | vec3 | `[1,1,1]` |  |  | `min_scale` | smallest scale (a number for all axes) |
+| `scale_max` | vec3 | `[1,1,1]` |  |  | `max_scale` | largest scale |
+| `uniform_scale` | bool | `true` |  |  |  | one random factor (x component of the range) → pscale; off: per-axis factors → scale |
+| `scale_attrib` | string | `""` |  |  |  | point attribute 0..1 picking the scale between min and max instead of a random value (a scale ramp by mask) |
+| `upright` | bool | `false` |  |  | `keep_upright`, `yaw_only` | keep +Y on the up param: only the heading (+Z projected onto the horizontal plane) follows the mode (lamp posts on a sloped road, buildings) |
+| `snap` | bool | `false` |  |  |  | surface: move the points onto the surface |
+| `write` | enum | `"both"` |  | `both`, `orient`, `n_up` |  | attributes to write: orient + N + up, only orient, or only N + up |
+| `seed` | float | `0` |  |  |  | random seed |
+| `group` | group (point) | `""` |  |  |  | points to orient ("" = all) |
+
+**Writes:** point orient (quaternion), N, up; pscale or scale when a scale range is set
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size": [
+          20,
+          20
+        ]
+      }
+    },
+    "pts": {
+      "type": "scatter",
+      "in": [
+        "ground"
+      ],
+      "params": {
+        "count": 200
+      }
+    },
+    "o": {
+      "type": "orient",
+      "in": [
+        "pts"
+      ],
+      "params": {
+        "mode": "direction",
+        "align_axis": "z",
+        "random_yaw": [
+          0,
+          360
+        ],
+        "tilt": [
+          0,
+          8
+        ],
+        "scale_min": 0.7,
+        "scale_max": 1.3
+      }
+    }
+  },
+  "output": "o"
+}
+```
+
+### points_along_curve
+
+category: `pcg` · aliases: `pcg_spline_sampler`, `curve_points`, `spline_sampler`, `points_along_spline`, `sample_curve`
+
+Points along curves at a spacing (metres, with start/end offsets), a count, per segment or at the curve points; writes curveu, tangent, N, up (rotation-minimising), orient and curve_id. Lamp posts, fence posts, road markings.
+
+Houdini: Resample (+ Orient Along Curve) to points; Unreal PCG: Spline Sampler (distance / subdivision modes). mode distance: points every `spacing` metres of arc length from start_offset to the curve length − end_offset (count > 0 instead spreads exactly count points evenly over that range); subdivision: per_segment points on every segment (the vertices and evenly between them); at_points: one point per curve vertex. jitter moves points randomly by up to ±jitter metres along the curve. side_offset shifts them sideways (positive = right of the direction of travel, T × up), both_sides adds the mirrored point on the left (side = -1). Attributes: curveu (0..1 of the arc length), tangent = N (unit, along the curve), up (rotation-minimising frame starting from the up param), orient (+Z along the curve), curve_id (source prim); source point attributes are interpolated and prim attributes copied. Closed curves (polygons) are walked as loops.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines or polygons (outlines); Bezier/NURBS curves are sampled adaptively |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"distance"` |  | `distance`, `subdivision`, `at_points` |  | distance = by spacing (or count); subdivision = per segment; at_points = the curve vertices |
+| `spacing` | float | `1` | 0.0001.. |  | `step`, `length`, `seglen`, `distance` | distance: metres of arc length between points |
+| `count` | int | `0` | 0.. |  | `npts`, `points` | distance: exactly this many points per curve, evenly spread (0 = use spacing) |
+| `per_segment` | int | `1` | 1..10000 |  | `segments`, `subdivisions` | subdivision: points per segment |
+| `start_offset` | float | `0` | 0.. |  | `start` | skip this many metres at the start |
+| `end_offset` | float | `0` | 0.. |  | `end` | skip this many metres at the end |
+| `jitter` | float | `0` | 0.. |  |  | random move along the curve, metres (±) |
+| `side_offset` | float | `0` |  |  | `offset`, `lateral_offset` | sideways offset in metres (positive = right of the direction of travel) |
+| `both_sides` | bool | `false` |  |  |  | also place the mirrored point on the other side (side_offset ≠ 0) |
+| `up` | vec3 | `[0,1,0]` |  |  | `up_vector` | up vector the rotation-minimising frame starts from |
+| `seed` | float | `0` |  |  |  | random seed |
+| `group` | group (prim) | `""` |  |  |  | curves to sample ("" = all) |
+
+**Writes:** points: curveu, tangent, N, up, orient, curve_id (side with a side offset); source point/prim attributes
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "road": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            -20,
+            0,
+            -5
+          ],
+          [
+            0,
+            0,
+            5
+          ],
+          [
+            20,
+            0,
+            0
+          ]
+        ],
+        "smooth": true
+      }
+    },
+    "lamps": {
+      "type": "points_along_curve",
+      "in": [
+        "road"
+      ],
+      "params": {
+        "spacing": 8,
+        "start_offset": 2,
+        "side_offset": 4,
+        "both_sides": true
+      }
+    }
+  },
+  "output": "lamps"
+}
+```
+
+### prune
+
+category: `pcg` · aliases: `pcg_prune`, `self_prune`, `bounds_prune`, `density_filter`, `self_pruning`, `point_filter`
+
+Remove points: overlapping spheres (pscale × radius; largest or random wins), a random fraction by a mask (density filter), an attribute expression (@mask<0.5), or points near / inside other geometry (input 1).
+
+Unreal PCG: Self Pruning (overlap), Density Filter (density), Attribute Filter (expression), Difference / Bounds Modifier (near_geometry); Houdini: Delete by expression, Fuse/Scatter relax. overlap: each point is a sphere of radius × pscale (radius alone without use_pscale or pscale); spheres are kept in priority order (largest first, smallest first, random, point order, or by priority_attrib, highest first) and any sphere overlapping a kept one is removed, so no two kept spheres overlap (exact). density: keep each point with probability attrib × fraction (seeded; a missing attrib counts as 1). expression: remove points matching a point group pattern (@mask<0.5, "@P.y>3 @height<0.2" = either, "!top"). near_geometry: remove points within distance of input 1 (mesh surface, curves or points) and, with inside, points inside its closed polygons (e.g. buildings, roads). invert keeps what would be removed. Points outside group are kept and do not take part. Removing a point removes the prims using it; packed instances go with their anchor points.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | no | no | points to prune |
+| 1 | `blocker` | yes | no | near_geometry: the geometry points must keep away from |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"overlap"` |  | `overlap`, `density`, `expression`, `near_geometry` |  | how to choose the points to remove |
+| `radius` | float | `0.5` | 0.. |  | `rad`, `bounds_radius` | overlap: sphere radius in metres (times pscale) |
+| `use_pscale` | bool | `true` |  |  |  | overlap: multiply radius by the point pscale |
+| `priority` | enum | `"largest"` |  | `largest`, `smallest`, `random`, `order`, `attribute` |  | overlap: which sphere wins (ties are broken randomly) |
+| `priority_attrib` | string | `""` |  |  |  | overlap, priority attribute: point attribute, highest value wins |
+| `attrib` | string | `"mask"` |  |  | `density_attrib`, `mask_attrib` | density: keep probability attribute (0..1) |
+| `fraction` | float | `1` | 0.. |  | `keep_fraction`, `ratio` | density: multiplies the keep probability (0.3 = keep about 30% where the mask is 1) |
+| `expression` | string | `"@mask<0.5"` |  |  | `expr`, `filter` | expression: point group pattern of the points to remove |
+| `distance` | float | `1` | 0.. |  | `dist`, `clearance` | near_geometry: remove points closer than this to input 1 (metres) |
+| `inside` | bool | `true` |  |  |  | near_geometry: also remove points inside input 1's closed polygons |
+| `invert` | bool | `false` |  |  |  | keep the points that would be removed instead |
+| `seed` | float | `0` |  |  |  | random seed |
+| `group` | group (point) | `""` |  |  |  | points to test ("" = all); the others are kept |
+
+**Writes:** the kept points (and the prims whose points all survive)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "g": {
+      "type": "grid",
+      "params": {
+        "size": [
+          10,
+          10
+        ]
+      }
+    },
+    "s": {
+      "type": "scatter",
+      "in": [
+        "g"
+      ],
+      "params": {
+        "count": 300,
+        "relax": false
+      }
+    },
+    "o": {
+      "type": "orient",
+      "in": [
+        "s"
+      ],
+      "params": {
+        "scale_min": 0.5,
+        "scale_max": 1.5
+      }
+    },
+    "p": {
+      "type": "prune",
+      "in": [
+        "o"
+      ],
+      "params": {
+        "mode": "overlap",
+        "radius": 0.3
+      }
+    }
+  },
+  "output": "p"
+}
+```

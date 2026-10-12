@@ -65,9 +65,12 @@ function arrayStats(a: Attribute, count: number, sel?: Uint8Array | null): strin
 
 export function summarize(g: Geometry): string {
   const lines: string[] = [];
-  let polys = 0, lines_ = 0, tris = 0, quads = 0, packed = 0;
+  let polys = 0, lines_ = 0, tris = 0, quads = 0, packed = 0, bezier = 0, nurbs = 0;
   for (let p = 0; p < g.numPrims; p++) {
-    if (g.primKind && g.primKind[p]) packed++;
+    const k = g.primKind ? g.primKind[p] : 0;
+    if (k === 1) packed++;
+    else if (k === 2) bezier++;
+    else if (k === 3) nurbs++;
     else if (g.primClosed[p]) { polys++; const s = g.primSize(p); if (s === 3) tris++; else if (s === 4) quads++; } else lines_++;
   }
   const parts = [`${n(g.numPoints)} points`, `${n(g.numPrims)} prims`];
@@ -75,6 +78,8 @@ export function summarize(g: Geometry): string {
   if (polys) kinds.push(`${n(polys)} polygons (${n(tris)} tri, ${n(quads)} quad, ${n(polys - tris - quads)} ngon)`);
   if (lines_) kinds.push(`${n(lines_)} polylines`);
   if (packed) kinds.push(`${n(packed)} packed`);
+  if (bezier) kinds.push(`${n(bezier)} Bezier curve${bezier === 1 ? '' : 's'}`);
+  if (nurbs) kinds.push(`${n(nurbs)} NURBS curve${nurbs === 1 ? '' : 's'}`);
   lines.push(`geometry: ${parts.join(', ')}${kinds.length ? ' = ' + kinds.join(' + ') : ''}, ${n(g.numVertices)} vertices${g.volumes.length ? `, ${volumeCounts(g)}` : ''}`);
   const pk = packedSummaryLine(g);
   if (pk) lines.push(pk);
@@ -190,6 +195,9 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
       if (cls === 'prim' && g.isPacked(i)) {
         const X = g.packedXform!, o9 = i * 9;
         vals.unshift(`packed pt ${g.primPoints(i)[0]} source ${g.packedSource![i]} xform[${Array.from({ length: 9 }, (_, k) => fmtNum(X[o9 + k])).join(' ')}]`);
+      } else if (cls === 'prim' && g.isSpline(i)) {
+        const oa = g.prims.get('spline_order');
+        vals.unshift(`${g.primKind![i] === 2 ? 'bezier' : 'nurbs'}${g.primClosed[i] ? ' closed' : ''} order ${oa ? Number(oa.get(i)) : 4} cvs[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
       } else if (cls === 'prim') vals.unshift(`${g.primClosed[i] ? 'poly' : 'line'} pts[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
       if (cls === 'vertex') vals.unshift(`pt ${g.vertexPoint[i]}`);
       out.push(`  ${i}: ${vals.join('  ')}`);

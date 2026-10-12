@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3", "uv:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0, 1],
+      "min": [-1, 0, -1]
+    },
+    "counts": {
+      "points": 49,
+      "prims": 36,
+      "vertices": 144,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "2987a0e5c4b49e4f",
+      "attributes": {
+        "point.Cd": "3636f206b12d7f8c",
+        "point.uv": "caf95c61b10871bb"
+      },
+      "topology": "618482d81e5bdd62"
+    }
+  },
+  "name": "node.attribute_from_map",
+  "ok": true,
+  "source": "fixture for node type \"attribute_from_map\" (test/fixtures.ts)",
+  "warnings": []
+}

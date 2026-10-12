@@ -79,6 +79,8 @@ export interface Fingerprint {
   }[];
   /** packed instances (only present when there are some): count, per-source fingerprint hashes, per-prim source + xform hash */
   packed?: { instances: number; sources: string[]; hash: string };
+  /** spline prims (only when present): counts per kind and a hash of (prim, kind) */
+  splines?: { bezier: number; nurbs: number; hash: string };
 }
 
 const CLASSES = ['point', 'vertex', 'prim', 'detail'] as const;
@@ -175,12 +177,23 @@ export function fingerprint(g: Geometry): Fingerprint {
     const k = g.primKind!, S = g.packedSource!, X = g.packedXform!;
     let n = 0;
     for (let p = 0; p < k.length; p++) {
-      if (!k[p]) continue;
+      if (k[p] !== 1) continue;
       n++;
       h.int(p).str(srcs[S[p]]);
       for (let c = 0; c < 9; c++) h.float(X[p * 9 + c], ATTR_Q);
     }
     fp.packed = { instances: n, sources: srcs, hash: h.hex() };
+  }
+
+  if (g.hasSplines()) {
+    const h = new Hasher(), k = g.primKind!;
+    let bz = 0, nb = 0;
+    for (let p = 0; p < k.length; p++) {
+      if (k[p] < 2) continue;
+      if (k[p] === 2) bz++; else nb++;
+      h.int(p).int(k[p]);
+    }
+    fp.splines = { bezier: bz, nurbs: nb, hash: h.hex() };
   }
 
   if (g.volumes.length) {

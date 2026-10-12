@@ -6,6 +6,7 @@
 // vector glyphs (N, up, orient, v), point/prim numbers, group/piece/attribute labels, legends,
 // flat/matcap/AO shading and a self-describing annotation footer. With none of them set the
 // output is exactly what it always was.
+import { readMaterials, primMaterials } from '../core/materials.ts';
 import { Geometry } from '../core/geometry.ts';
 import { buildEdges, connectivity, primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { halfEdges } from '../core/halfedge.ts';
@@ -192,8 +193,8 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
 
 /** Render the geometry; returns RGBA pixels. */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
-  // packed instances are drawn expanded (within a triangle budget), see core/packed.ts
-  if (g.hasPacked()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
+  // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
+  if (g.hasPacked() || g.hasSplines()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
   g = withHeightfieldPreview(g); // heightfields draw as their (decimated) grid mesh with layers as attributes
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   const views: ViewName[] = vlist?.length ? vlist : ['persp', 'front', 'right', 'top'];
@@ -304,6 +305,18 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const get = (i: number) => { const x = a.get(i); return Array.isArray(x) ? x : [x as number, x as number, x as number]; };
       colorOf = (v) => get(elemIndex(f.cls, v));
       if (f.cls === 'point') pointColorOf = (p) => get(p);
+    }
+    // material base colours where there is no colour (no Cd, or Houdini's default white), as glTF export does
+    const pm = primMaterials(g), table = pm ? readMaterials(g) : null;
+    if (pm && table && Object.keys(table).length) {
+      const cd = colorOf, hasCd = !!(f && f.attr.type === 'float');
+      colorOf = (v) => {
+        const m = table[pm[vprim[v]]];
+        if (!m) return cd(v);
+        if (!hasCd) return m.baseColor;
+        const c = cd(v);
+        return c[0] === 1 && c[1] === 1 && c[2] === 1 ? m.baseColor : c;
+      };
     }
   }
   const hl = o.highlight;

@@ -7,62 +7,104 @@ import { rng } from '../core/random.ts';
 import { connectivity, primNormals, triangulate } from '../core/topology.ts';
 import { composePackedXforms } from '../core/packed.ts';
 import { KDTree, TriBVH, neighbourBuffer } from '../core/spatial.ts';
-import { lookAtBasis, m4apply, m4applyDir, m4basis, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize } from '../core/math.ts';
-import type { Mat4, Vec3 } from '../core/math.ts';
+import { TriSurface, elementSeed, minDistanceSelect, relaxPoints } from '../core/pcg.ts';
+import type { TriPoint } from '../core/pcg.ts';
+import { lookAtBasis, m4apply, m4applyDir, m4basis, m4euler, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize, qAxisAngle, qFromMat, qMul, qNormalize } from '../core/math.ts';
+import type { Mat4, Quat, Vec3 } from '../core/math.ts';
 import { P, mask } from './util.ts';
 
 // ---------------------------------------------------------------- scatter
-
 /**
- * Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates.
+ * Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. With `scale`, candidate i has
+ * the radius rmax × scale[i] (pairs use the mean of their radii), so the spacing follows a varying density (smaller
+ * radii where points should be denser); without it every candidate has rmax.
  *
- * Neighbour lists (within 2·rmax, nearest first, as KDTree.within orders them) and each neighbour's weight
- * contribution (1 - d / r)^8 are computed once into CSR typed arrays; a removal reuses them to lower its neighbours'
- * weights. Everything runs on the KD-tree's slot numbering (points in tree order), so neighbouring points sit next to
- * each other in memory; the max-heap is the same heap over the same weights (initial slot k holds point k), only its
- * entries are labelled by tree slot. A pair's contribution is computed once and shared by both of its lists (|a - b| is
- * symmetric bit for bit). Same arithmetic, same heap operations, same subset as the straightforward version.
+ * Typed arrays throughout: each point's neighbour list (as KDTree.within orders it) and each pair's weight contribution
+ * (1 - d / r)^8 are computed once into CSR arrays and reused when a removal lowers the neighbours' weights; the max-heap
+ * keeps the weights of its slots next to the slots. Without scale, everything runs on the KD-tree's slot numbering
+ * (points in tree order, for locality) and a pair's contribution is computed once for both lists (|a - b| is symmetric
+ * bit for bit); with scale, pairs are found in point order as before (their weights accumulate in that order). The
+ * heap does the same operations on the same weights (entries relabelled), so the kept subset is the same as the
+ * straightforward version's.
  */
-export function sampleEliminate(pos: Float64Array, target: number, rmax: number): Int32Array {
+export function sampleEliminate(pos: Float64Array, target: number, rmax: number, scale?: ArrayLike<number>): Int32Array {
   const n = pos.length / 3;
   if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
   const kd = new KDTree(pos);
   const r2 = 2 * rmax;
-  const order = kd.idx, TP = kd.TP;
-  const slotOf = new Int32Array(n);
-  for (let a = 0; a < n; a++) slotOf[order[a]] = a;
-  // neighbour lists by slot
-  const start = new Int32Array(n + 1);
-  let nbr = new Int32Array(Math.max(16, n * 20));
   const buf = neighbourBuffer();
-  let len = 0;
-  for (let a = 0; a < n; a++) {
-    const i = order[a];
-    const m = kd.neighbours(TP[a * 3], TP[a * 3 + 1], TP[a * 3 + 2], r2, buf);
-    if (len + m > nbr.length) { const g = new Int32Array(Math.max(len + m, nbr.length * 2)); g.set(nbr); nbr = g; }
-    const idx = buf.idx;
-    for (let k = 0; k < m; k++) { const j = idx[k]; if (j !== i) nbr[len++] = slotOf[j]; }
-    start[a + 1] = len;
-  }
-  // weights: w[a] = sum over a's list (in list order) of (1 - min(d, r2) / r2)^8, d = |pos_a - pos_b|
-  const con = new Float64Array(len), w = new Float64Array(n);
-  for (let a = 0; a < n; a++) {
-    const ax = TP[a * 3], ay = TP[a * 3 + 1], az = TP[a * 3 + 2];
-    for (let e = start[a]; e < start[a + 1]; e++) {
-      const b = nbr[e];
-      let c = -1;
-      if (b < a) for (let f = start[b]; f < start[b + 1]; f++) if (nbr[f] === a) { c = con[f]; break; }
-      if (c < 0) {
-        const d = Math.hypot(ax - TP[b * 3], ay - TP[b * 3 + 1], az - TP[b * 3 + 2]);
-        c = Math.pow(1 - Math.min(d, r2) / r2, 8);
+  // neighbour lists in CSR form over labels (KD slots without scale, point indices with scale); w by label
+  const start = new Int32Array(n + 1), w = new Float64Array(n);
+  let nbr: Int32Array, con: Float64Array;
+  let labelOf: Int32Array | null = null;
+  if (!scale) {
+    const order = kd.idx, TP = kd.TP;
+    labelOf = new Int32Array(n);
+    for (let a = 0; a < n; a++) labelOf[order[a]] = a;
+    let list = new Int32Array(Math.max(16, n * 20)), len = 0;
+    for (let a = 0; a < n; a++) {
+      const i = order[a];
+      const m = kd.neighbours(TP[a * 3], TP[a * 3 + 1], TP[a * 3 + 2], r2, buf);
+      if (len + m > list.length) { const g = new Int32Array(Math.max(len + m, list.length * 2)); g.set(list); list = g; }
+      const idx = buf.idx;
+      for (let k = 0; k < m; k++) { const j = idx[k]; if (j !== i) list[len++] = labelOf[j]; }
+      start[a + 1] = len;
+    }
+    nbr = list;
+    // w[a] = sum over a's list (in list order) of (1 - min(d, r2) / r2)^8, d = |pos_a - pos_b|
+    con = new Float64Array(len);
+    for (let a = 0; a < n; a++) {
+      const ax = TP[a * 3], ay = TP[a * 3 + 1], az = TP[a * 3 + 2];
+      for (let e = start[a]; e < start[a + 1]; e++) {
+        const b = nbr[e];
+        let c = -1;
+        if (b < a) for (let f = start[b]; f < start[b + 1]; f++) if (nbr[f] === a) { c = con[f]; break; }
+        if (c < 0) {
+          const d = Math.hypot(ax - TP[b * 3], ay - TP[b * 3 + 1], az - TP[b * 3 + 2]);
+          c = Math.pow(1 - Math.min(d, r2) / r2, 8);
+        }
+        con[e] = c;
+        w[a] += c;
       }
-      con[e] = c;
-      w[a] += c;
+    }
+  } else {
+    // a pair interacts below rmax × (s_i + s_j) ≤ 2 rmax × max(s_i, s_j): it is found from the side with the larger radius
+    let pi = new Int32Array(1024), pj = new Int32Array(1024), pf = new Float64Array(1024), np = 0;
+    const deg = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      const si = scale[i];
+      const m = kd.neighbours(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 2 * rmax * si, buf);
+      const idx = buf.idx;
+      for (let k = 0; k < m; k++) {
+        const j = idx[k];
+        if (j === i || scale[j] > si || (scale[j] === si && j < i)) continue;
+        const rr = rmax * (si + scale[j]);
+        const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
+        if (d >= rr) continue;
+        const f = Math.pow(1 - d / rr, 8);
+        w[i] += f; w[j] += f;
+        if (np === pi.length) {
+          const gi = new Int32Array(np * 2), gj = new Int32Array(np * 2), gf = new Float64Array(np * 2);
+          gi.set(pi); gj.set(pj); gf.set(pf); pi = gi; pj = gj; pf = gf;
+        }
+        pi[np] = i; pj[np] = j; pf[np] = f; np++;
+        deg[i]++; deg[j]++;
+      }
+    }
+    // each pair is listed at both ends in discovery order; the removal weight of a pair equals its creation weight
+    // (same distance, same summed radius), so it is stored with it
+    for (let i = 0; i < n; i++) start[i + 1] = start[i] + deg[i];
+    nbr = new Int32Array(start[n]); con = new Float64Array(start[n]);
+    const fill = start.slice(0, n);
+    for (let k = 0; k < np; k++) {
+      const i = pi[k], j = pj[k], f = pf[k];
+      nbr[fill[i]] = j; con[fill[i]++] = f;
+      nbr[fill[j]] = i; con[fill[j]++] = f;
     }
   }
-  // max-heap on w: heap[k] = slot of the point in heap position k, hw[k] = its weight, where[slot] = heap position
+  // max-heap on w: heap[k] = label in heap position k, hw[k] = its weight, where[label] = heap position
   const heap = new Int32Array(n), where = new Int32Array(n), hw = new Float64Array(n);
-  for (let i = 0; i < n; i++) { const a = slotOf[i]; heap[i] = a; where[a] = i; hw[i] = w[a]; }
+  for (let i = 0; i < n; i++) { const a = labelOf ? labelOf[i] : i; heap[i] = a; where[a] = i; hw[i] = w[a]; }
   let size = n;
   const swap = (x: number, y: number) => {
     const t = heap[x]; heap[x] = heap[y]; heap[y] = t;
@@ -96,21 +138,22 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number)
     }
   }
   let kept = 0;
-  for (let i = 0; i < n; i++) if (!removed[slotOf[i]]) kept++;
+  for (let i = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) kept++;
   const out = new Int32Array(kept);
-  for (let i = 0, o = 0; i < n; i++) if (!removed[slotOf[i]]) out[o++] = i;
+  for (let i = 0, o = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) out[o++] = i;
   return out;
 }
 
 /**
- * The surface-scatter result for candidates keep (triangle candT[k], barycentric weights candW[3k..3k+2], position
- * pos[3k..3k+2]): what GeoBuilder.build gives for points added with provenance {i: corners, w} plus the N and sourceprim
- * attributes, assembled in typed arrays. Source point attributes not in skip are interpolated (floats blended with the
- * weights, others from the heaviest corner), P follows them, then N and sourceprim; no prims, no groups.
+ * The surface-scatter result for the points keep[k] (triangle candT[c], barycentric weights candW[3c..3c+2], position
+ * pos[3c..3c+2] for c = keep[k]): what GeoBuilder.build gives for points added with provenance {i: corners, w} plus the
+ * N, sourceprim and sourceprimuv attributes (the scatter node's builder path without emitted vertex/prim attributes),
+ * assembled in typed arrays. Source point attributes not in skip are interpolated (floats blended with the weights,
+ * others from the heaviest corner), P follows them, then N, sourceprim and sourceprimuv; no prims, no groups.
  */
 function scatterSurfaceGeo(
-  g: Geometry, skip: Set<string>, keep: Int32Array, candT: Int32Array, candW: Float64Array, pos: Float64Array,
-  tris: ArrayLike<number>, triPrim: ArrayLike<number>, fn: Float64Array,
+  g: Geometry, skip: Set<string>, keep: ArrayLike<number>, candT: Int32Array, candW: Float64Array, pos: Float64Array,
+  tris: ArrayLike<number>, triPrim: ArrayLike<number>, fn: Float64Array, writeSourceprim: boolean, writePrimuv: boolean,
 ): Geometry {
   const n = keep.length, vp = g.vertexPoint;
   const corner = new Int32Array(n * 3), wt = new Float64Array(n * 3), dom = new Int32Array(n);
@@ -142,8 +185,13 @@ function scatterSurfaceGeo(
       const sd = a.data as string[], dd = d.data as string[];
       for (let k = 0; k < n; k++) if (dom[k] >= 0) dd[k] = String(sd[dom[k]]);
     } else {
-      const sd = a.data as Int32Array, dd = d.data as Int32Array;
-      for (let k = 0; k < n; k++) { const j = dom[k]; if (j >= 0) for (let c = 0; c < sz; c++) dd[k * sz + c] = sd[j * sz + c]; }
+      const sd = a.data as Int32Array, dd = d.data as Int32Array, cnt = a.count;
+      for (let k = 0; k < n; k++) {
+        const j = dom[k];
+        if (j < 0) continue;
+        if (j < cnt) for (let c = 0; c < sz; c++) dd[k * sz + c] = sd[j * sz + c];
+        else d.set(k, a.get(j));
+      }
     }
     pts.map.set(name, d);
   }
@@ -167,10 +215,23 @@ function scatterSurfaceGeo(
       if (l > 1e-20) { Nd[k * 3] = x / l; Nd[k * 3 + 1] = y / l; Nd[k * 3 + 2] = z / l; } else { Nd[k * 3] = 0; Nd[k * 3 + 1] = 0; Nd[k * 3 + 2] = 0; }
     } else { Nd[k * 3] = fn[pr * 3]; Nd[k * 3 + 1] = fn[pr * 3 + 1]; Nd[k * 3 + 2] = fn[pr * 3 + 2]; }
   }
-  const exS = pts.get('sourceprim');
-  const SA = exS && exS.type === 'int' && exS.size === 1 ? exS : pts.add('sourceprim', 'int', 1, defaultValueFor('sourceprim', 1, 'int'));
-  const Sd = SA.data as Int32Array;
-  for (let k = 0; k < n; k++) Sd[k] = triPrim[candT[keep[k]]];
+  if (writeSourceprim) {
+    const ex = pts.get('sourceprim');
+    const SA = ex && ex.type === 'int' && ex.size === 1 ? ex : pts.add('sourceprim', 'int', 1, defaultValueFor('sourceprim', 1, 'int'));
+    const Sd = SA.data as Int32Array;
+    for (let k = 0; k < n; k++) Sd[k] = triPrim[candT[keep[k]]];
+  }
+  if (writePrimuv) {
+    const ex = pts.get('sourceprimuv');
+    const UA = ex && ex.type === 'float' && ex.size === 3 ? ex : pts.add('sourceprimuv', 'float', 3, defaultValueFor('sourceprimuv', 3, 'float'));
+    const Ud = UA.data as Float64Array;
+    for (let k = 0; k < n; k++) {
+      const c = keep[k], t = candT[c], pr = triPrim[t];
+      let u = 0, v = 0;
+      for (let j = 0; j < 3; j++) { const q = cornerPrimUV(g, tris[t * 3 + j], pr); u += candW[c * 3 + j] * q[0]; v += candW[c * 3 + j] * q[1]; }
+      Ud[k * 3] = u; Ud[k * 3 + 1] = v; Ud[k * 3 + 2] = 0;
+    }
+  }
   out.points = pts;
   out.vertices = g.vertices.gather(new Int32Array(0));
   out.prims = g.prims.gather(new Int32Array(0));
@@ -186,10 +247,76 @@ function scatterSurfaceGeo(
   return out;
 }
 
+/** Most points one scatter may make (guards against runaway densities). */
+const MAX_SCATTER = 10_000_000;
+
+/** A numeric point, vertex or prim attribute (looked up in that order) read per triangle corner / segment end. */
+type CornerReader = (v: number, pt: number, pr: number) => number;
+
+function cornerReader(g: Geometry, name: string, param: string): CornerReader | null {
+  if (!name) return null;
+  const ok = (a: Attribute | undefined): a is Attribute => !!a && a.type !== 'string' && !a.isArray;
+  const pa = g.points.get(name), va = g.vertices.get(name), ra = g.prims.get(name);
+  if (ok(pa)) { const d = pa.data as Float64Array, s = pa.size; return (_v, pt) => d[pt * s]; }
+  if (ok(va)) { const d = va.data as Float64Array, s = va.size; return (v) => d[v * s]; }
+  if (ok(ra)) { const d = ra.data as Float64Array, s = ra.size; return (_v, _pt, pr) => d[pr * s]; }
+  const list = (t: AttribTable) => t.names().filter((n) => ok(t.get(n))).join(', ') || 'none';
+  throw new NodeError(`${param} "${name}" is not a numeric point, vertex or prim attribute`, `point: ${list(g.points)} · vertex: ${list(g.vertices)} · prim: ${list(g.prims)}`);
+}
+
+/**
+ * Attribute name pattern: globs separated by spaces or commas, "^glob" excludes ("" matches nothing, "*" everything;
+ * only exclusions = everything else).
+ */
+export function namePattern(pattern: string): (name: string) => boolean {
+  const toks = String(pattern ?? '').split(/[\s,]+/).filter(Boolean);
+  const re = (s: string) => new RegExp('^' + s.replace(/[.+?${}()|[\]\\^]/g, '\\$&').replace(/\*/g, '.*') + '$');
+  const inc = toks.filter((t) => !t.startsWith('^')).map(re), exc = toks.filter((t) => t.startsWith('^')).map((t) => re(t.slice(1)));
+  const all = !inc.length && exc.length > 0;
+  return (n) => (all || inc.some((r) => r.test(n))) && !exc.some((r) => r.test(n));
+}
+
+/** Prim uv of corner vertex v of prim pr (the SurfaceQuery convention: triangle barycentrics, quad bilinear corners, n-gon polar). */
+function cornerPrimUV(g: Geometry, v: number, pr: number): [number, number] {
+  const s = g.primStart[pr], n = g.primStart[pr + 1] - s, c = v - s;
+  if (n === 3) return [c === 1 ? 1 : 0, c === 2 ? 1 : 0];
+  if (n === 4) return [c === 1 || c === 2 ? 1 : 0, c >= 2 ? 1 : 0];
+  const a = (2 * Math.PI * c) / n;
+  return [0.5 + 0.5 * Math.cos(a), 0.5 + 0.5 * Math.sin(a)];
+}
+
+/** Points to make: count, or density × density_scale × measure (see the generate_by param). */
+function scatterCount(p: Record<string, any>, weighted: number, autoMeasure: number, warn: (m: string) => void): number {
+  let n: number;
+  if (p.generate_by === 'count' || (p.generate_by === 'auto' && !(p.density > 0))) n = p.count;
+  else {
+    n = Math.round(p.density * p.density_scale * (p.generate_by === 'density' ? weighted : autoMeasure));
+    if (p.generate_by === 'density' && !(p.density > 0)) warn('generate_by "density" with density 0 makes no points: set density (points per square metre)');
+  }
+  if (!(n >= 0)) n = 0;
+  if (n > MAX_SCATTER) throw new NodeError(`scatter: ${n.toLocaleString('en-US')} points is too many (max ${MAX_SCATTER.toLocaleString('en-US')}); lower count, density or density_scale`);
+  return n;
+}
+
+const clamp01 = (x: number) => (x > 0 ? (x < 1 ? x : 1) : 0);
+
 defineNode({
   type: 'scatter',
   category: 'copy',
-  summary: 'Scatter points on surfaces (area-weighted, optional blue-noise relax), along curves, or inside volumes.',
+  summary: 'Scatter points on surfaces (area-weighted, blue-noise spacing; by count or per m²; density attribute and 0..1 mask; relaxation; exact minimum distance), along curves, or inside volumes.',
+  description:
+    'Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). ' +
+    'generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, ' +
+    'per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib ' +
+    'only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or ' +
+    'prim attribute, Houdini\'s density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise ' +
+    'spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib ' +
+    'keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface ' +
+    'mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface ' +
+    'through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart ' +
+    'throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source ' +
+    'prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; ' +
+    '"^name" excludes). Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").',
   aliases: ['scatter_points', 'distribute'],
   inputs: [{ name: 'geo', desc: 'surface, curves, or closed mesh (volume mode)' }],
   params: {
@@ -197,48 +324,111 @@ defineNode({
     density: { type: 'float', default: 0, min: 0, desc: 'points per unit area/length/volume (overrides count when > 0)' },
     mode: { type: 'enum', options: ['auto', 'surface', 'curve', 'volume'], default: 'auto', desc: 'auto = surface if polygons, curve if only polylines' },
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing via sample elimination' },
-    density_attrib: { type: 'string', default: '', desc: 'point float attribute weighting where points land (e.g. a noise mask)' },
+    density_attrib: { type: 'string', default: '', desc: 'point, vertex or prim float attribute (≥ 0) scaling the local density (e.g. a noise mask; 2 = twice as many points as 1)', aliases: ['densityattrib', 'density_attribute'] },
     seed: P.seed(),
     group: P.group('prim'),
-    keep_attribs: { type: 'bool', default: true, desc: 'interpolate source point attributes onto scattered points' },
+    keep_attribs: { type: 'bool', default: true, desc: 'carry source attributes onto the scattered points (see emit_attributes)' },
+    generate_by: { type: 'enum', options: ['auto', 'count', 'density'], default: 'auto', desc: 'count = exactly count points; density = density × density_scale points per m² of area × weight; auto = density when density > 0, else count', aliases: ['generateby', 'count_mode', 'method'] },
+    density_mask: { type: 'string', default: '', desc: 'point, vertex or prim attribute 0..1 multiplying the density (e.g. "mask" from the mask node)', aliases: ['mask', 'mask_attrib', 'density_mask_attrib'] },
+    density_scale: { type: 'float', default: 1, min: 0, desc: 'multiplies density (density and auto modes)', aliases: ['densityscale'] },
+    relax_iterations: { type: 'int', default: 0, min: 0, max: 100, desc: 'surface: Lloyd-style relaxation passes (points push apart and are projected back onto the surface)', aliases: ['relaxiterations', 'relax_iter', 'relax_passes'] },
+    relax_radius: { type: 'float', default: 0, min: 0, desc: 'relaxation spacing in metres (0 = from the local density)' },
+    min_distance: { type: 'float', default: 0, min: 0, desc: 'exact minimum distance between points (0 = off); the count can come out lower', aliases: ['mindist', 'min_dist', 'poisson_radius'] },
+    max_per_prim: { type: 'int', default: 0, min: 0, desc: 'at most this many points per source prim (0 = no limit)', aliases: ['maxperprim'] },
+    emit_attributes: { type: 'string', default: '*', desc: 'source attributes carried onto the points (pattern: point/vertex interpolated, prim copied; "^Cd" excludes)', aliases: ['attributes', 'interpolate', 'emit'] },
+    write_sourceprim: { type: 'bool', default: true, desc: 'write int sourceprim (the source prim of each point)', aliases: ['source_prim', 'sourceprim'] },
+    write_primuv: { type: 'bool', default: false, desc: 'write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention)', aliases: ['prim_uv', 'sourceprimuv'] },
+    write_seed: { type: 'bool', default: false, desc: 'write int seed per point (PCG $Seed; a hash of seed and the point number)', aliases: ['seed_attrib', 'pcg_seed'] },
   },
-  outputs: 'point N (surface normal), sourceprim; interpolated source attributes',
-  cook: ({ input, p }) => {
+  outputs: 'point N (surface normal), sourceprim; optional sourceprimuv, seed; source attributes (emit_attributes)',
+  example: {
+    nodes: {
+      ground: { type: 'grid', params: { size: [20, 20], divisions: [40, 40] } },
+      m: { type: 'mask', in: ['ground'], params: { by: 'noise', min: 0.5, max: 1, falloff: 0.1 } },
+      pts: { type: 'scatter', in: ['m'], params: { generate_by: 'density', density: 2, density_mask: 'mask', min_distance: 0.3 } },
+    },
+    output: 'pts',
+  },
+  cook: ({ input, p, warn }) => {
     const g = input(0);
     const r = rng(p.seed + 0.5);
     const sel = mask(g, 'prim', p.group);
     let hasPoly = false, hasLine = false;
     for (let pr = 0; pr < g.numPrims; pr++) if (!sel || sel[pr]) { if (g.primClosed[pr]) hasPoly = true; else hasLine = true; }
     const mode = p.mode === 'auto' ? (hasPoly ? 'surface' : hasLine ? 'curve' : 'volume') : p.mode;
-    const dA = p.density_attrib ? g.points.get(p.density_attrib) : null;
-    if (p.density_attrib && !dA) throw new NodeError(`density_attrib "${p.density_attrib}" is not a point attribute`);
-    const dw = (pt: number) => (dA ? Math.max(0, dA.get(pt) as number) : 1);
+    const dA = cornerReader(g, p.density_attrib, 'density_attrib');
+    const mA = cornerReader(g, p.density_mask, 'density_mask');
+    const weighted = !!(dA || mA);
+    const dw = (v: number, pt: number, pr: number) => (dA ? Math.max(0, dA(v, pt, pr)) : 1) * (mA ? clamp01(mA(v, pt, pr)) : 1);
+    const mw = (v: number, pt: number, pr: number) => (mA ? clamp01(mA(v, pt, pr)) : 1);
+    const md = Math.max(0, p.min_distance || 0), cap = Math.max(0, Math.floor(p.max_per_prim || 0));
+    const extra = md > 0 || cap > 0;
+    const emitOk = namePattern(p.emit_attributes);
     const b = new GeoBuilder(g);
     if (!p.keep_attribs) for (const n of g.points.names()) b.skip.point.add(n);
+    else for (const n of g.points.names()) if (n !== 'P' && !emitOk(n)) b.skip.point.add(n);
     b.skip.point.add('N');
     b.keepSrcGroups = false;
     const Nout = b.attrib('point', 'N', 3);
-    const sp = b.attrib('point', 'sourceprim', 1, 'int');
-    const Pd = g.P;
+    const sp = p.write_sourceprim ? b.attrib('point', 'sourceprim', 1, 'int') : null;
+    const puv = p.write_primuv ? b.attrib('point', 'sourceprimuv', 3) : null;
+    // vertex and prim attributes carried onto the points (point attributes travel through the builder's provenance)
+    const reserved = new Set(['P', 'N', 'sourceprim', 'sourceprimuv', 'seed']);
+    const emits: { name: string; cls: 'vertex' | 'prim'; a: Attribute; out: ReturnType<GeoBuilder['attrib']> }[] = [];
+    if (p.keep_attribs)
+      for (const cls of ['vertex', 'prim'] as const)
+        for (const name of g.table(cls).names()) {
+          if (reserved.has(name) || g.points.has(name) || emits.some((e) => e.name === name) || !emitOk(name)) continue;
+          const a = g.table(cls).get(name)!;
+          emits.push({ name, cls, a, out: b.attrib('point', name, a.size, a.type, a.def) });
+        }
+    const emitAt = (id: number, verts: number[], w: number[], pr: number) => {
+      for (const e of emits) {
+        const a = e.a;
+        if (e.cls === 'prim') { e.out.set(id, a.isArray ? a.getArray(pr) : a.get(pr)); continue; }
+        if (a.type === 'float' && !a.isArray) {
+          const s = a.size, d = a.data as Float64Array;
+          const v = new Array(s).fill(0);
+          for (let k = 0; k < verts.length; k++) for (let c = 0; c < s; c++) v[c] += d[verts[k] * s + c] * w[k];
+          e.out.set(id, s === 1 ? v[0] : v);
+        } else {
+          let best = 0;
+          for (let k = 1; k < verts.length; k++) if (w[k] > w[best]) best = k;
+          e.out.set(id, a.isArray ? a.getArray(verts[best]) : a.get(verts[best]));
+        }
+      }
+    };
+    const finish = (built?: Geometry): Geometry => {
+      const out = built ?? b.build();
+      for (const e of emits) { out.vertices.delete(e.name); out.prims.delete(e.name); }
+      if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }
+      return out;
+    };
+    const Pd = g.P, vp = g.vertexPoint;
 
     if (mode === 'surface') {
       if (!hasPoly) throw new NodeError('no polygons to scatter on (use mode=curve for polylines or volume for a bounding box)');
       const { tris, triPrim } = triangulate(g, sel);
       const nt = tris.length / 3;
       const cdf = new Float64Array(nt);
-      let total = 0, area = 0;
+      let total = 0, area = 0, maskedArea = 0;
       for (let t = 0; t < nt; t++) {
-        const a = g.vertexPoint[tris[t * 3]], bb = g.vertexPoint[tris[t * 3 + 1]], c = g.vertexPoint[tris[t * 3 + 2]];
+        const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2], pr = triPrim[t];
+        const a = vp[va], bb = vp[vb], c = vp[vc];
         const ux = Pd[bb * 3] - Pd[a * 3], uy = Pd[bb * 3 + 1] - Pd[a * 3 + 1], uz = Pd[bb * 3 + 2] - Pd[a * 3 + 2];
         const vx = Pd[c * 3] - Pd[a * 3], vy = Pd[c * 3 + 1] - Pd[a * 3 + 1], vz = Pd[c * 3 + 2] - Pd[a * 3 + 2];
         const ar = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
         area += ar;
-        total += ar * (dw(a) + dw(bb) + dw(c)) / 3;
+        total += ar * (dw(va, a, pr) + dw(vb, bb, pr) + dw(vc, c, pr)) / 3;
+        if (mA) maskedArea += ar * (mw(va, a, pr) + mw(vb, bb, pr) + mw(vc, c, pr)) / 3;
         cdf[t] = total;
       }
-      if (total <= 0) throw new NodeError('zero scatter area (or density attribute is 0 everywhere)');
-      const count = p.density > 0 ? Math.round(p.density * area) : p.count;
-      const ncand = p.relax ? count * 5 : count;
+      if (!(total > 0)) {
+        if (mA && area > 0) { warn(`density_mask "${p.density_mask}" is 0 everywhere: no points`); return finish(); }
+        throw new NodeError('zero scatter area (or density attribute is 0 everywhere)');
+      }
+      const count = scatterCount(p, total, mA ? maskedArea : area, warn);
+      const ncand = p.relax || extra ? count * 5 : count;
       const fn = primNormals(g);
       // candidates: triangle, barycentric weights and position, in typed arrays
       const candT = new Int32Array(ncand), candW = new Float64Array(ncand * 3);
@@ -250,41 +440,159 @@ defineNode({
         const t = lo;
         const s1 = Math.sqrt(r()), s2 = r();
         const w0 = 1 - s1, w1 = s1 * (1 - s2), w2 = s1 * s2;
-        const i0 = g.vertexPoint[tris[t * 3]] * 3, i1 = g.vertexPoint[tris[t * 3 + 1]] * 3, i2 = g.vertexPoint[tris[t * 3 + 2]] * 3;
+        const i0 = vp[tris[t * 3]] * 3, i1 = vp[tris[t * 3 + 1]] * 3, i2 = vp[tris[t * 3 + 2]] * 3;
         for (let c = 0; c < 3; c++) pos[k * 3 + c] = w0 * Pd[i0 + c] + w1 * Pd[i1 + c] + w2 * Pd[i2 + c];
         candT[k] = t; candW[k * 3] = w0; candW[k * 3 + 1] = w1; candW[k * 3 + 2] = w2;
       }
-      const keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count))) : Int32Array.from({ length: ncand }, (_, i) => i);
-      return scatterSurfaceGeo(g, b.skip.point, keep, candT, candW, pos, tris, triPrim, fn);
+      // weight at a point of triangle t (barycentrics w)
+      const wAt = (t: number, w: ArrayLike<number>, o = 0) => {
+        let s = 0;
+        for (let j = 0; j < 3; j++) { const v = tris[t * 3 + j]; s += w[o + j] * dw(v, vp[v], triPrim[t]); }
+        return s;
+      };
+      const wMean = total / area;
+      // spacing that follows the weights (sqrt(mean / local) of the uniform spacing); the legacy auto mode with only
+      // density_attrib keeps uniform radii, which even the density out
+      const adaptive = weighted && (!!mA || p.generate_by !== 'auto');
+      let rscale: Float64Array | undefined;
+      if (adaptive && p.relax && count > 0) {
+        rscale = new Float64Array(ncand);
+        for (let k = 0; k < ncand; k++) { const wl = wAt(candT[k], candW, k * 3); rscale[k] = wl > 0 ? Math.min(4, Math.max(0.25, Math.sqrt(wMean / wl))) : 4; }
+      }
+      let keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count)), rscale) : Int32Array.from({ length: ncand }, (_, i) => i);
+      const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
+      if (extra) {
+        // the well-spaced selection first, the other candidates as refill; exact distance test and per-prim cap
+        const inKeep = new Uint8Array(ncand), order = new Int32Array(ncand);
+        let o = 0;
+        for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
+        for (let k = 0; k < ncand; k++) if (!inKeep[k]) order[o++] = k;
+        keep = minDistanceSelect(pos, order, md, count,
+          perPrim ? (k) => perPrim[triPrim[candT[k]]] < cap : undefined,
+          perPrim ? (k) => { perPrim[triPrim[candT[k]]]++; } : undefined).sort();
+      }
+      // the chosen candidates, as indices into the candidate arrays
+      let outKeep: ArrayLike<number> = keep, outT = candT, outW = candW, outPos = pos;
+      if (p.relax_iterations > 0 && keep.length > 1) {
+        const surf = new TriSurface(g, tris);
+        let pts = Array.from(keep, (k) => ({ t: candT[k], w: [candW[k * 3], candW[k * 3 + 1], candW[k * 3 + 2]], pos: [pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]] }));
+        const n = pts.length;
+        const RP = new Float64Array(n * 3);
+        pts = pts.map((c, i) => { RP.set(c.pos, i * 3); return { t: c.t, w: c.w.slice(), pos: c.pos.slice() }; });
+        const dBar = Math.sqrt((2 * area) / (Math.sqrt(3) * n));
+        const spacingAt = (t: number, w: number[]) => {
+          if (p.relax_radius > 0) return p.relax_radius;
+          if (!weighted) return dBar;
+          const wl = wAt(t, w);
+          const s = wl > 0 ? dBar * Math.sqrt(wMean / wl) : 4 * dBar;
+          return Math.min(4 * dBar, Math.max(0.25 * dBar, s));
+        };
+        const spacing = Float64Array.from(pts, (c) => spacingAt(c.t, c.w));
+        const tp: TriPoint = { x: 0, y: 0, z: 0, b0: 1, b1: 0, b2: 0 };
+        relaxPoints(RP, spacing, p.relax_iterations, (i, x, y, z) => {
+          const t = surf.closest(x, y, z, tp);
+          if (t < 0) return;
+          RP[i * 3] = tp.x; RP[i * 3 + 1] = tp.y; RP[i * 3 + 2] = tp.z;
+          const c = pts[i];
+          c.t = t; c.w = [tp.b0, tp.b1, tp.b2]; c.pos = [tp.x, tp.y, tp.z];
+          spacing[i] = spacingAt(t, c.w);
+        });
+        // points relaxed into zero-density areas go; the distance and per-prim limits are enforced again
+        let order: Int32Array = Int32Array.from({ length: n }, (_, i) => i);
+        if (weighted) order = order.filter((i) => wAt(pts[i].t, pts[i].w) > 0);
+        if (extra) {
+          if (perPrim) perPrim.fill(0);
+          order = minDistanceSelect(RP, order, md, Infinity,
+            perPrim ? (i) => perPrim[triPrim[pts[i].t]] < cap : undefined,
+            perPrim ? (i) => { perPrim[triPrim[pts[i].t]]++; } : undefined).sort();
+        }
+        if (order.length < n) pts = Array.from(order, (i) => pts[i]);
+        // the relaxed points become the candidate arrays of the output
+        const m = pts.length;
+        outT = new Int32Array(m); outW = new Float64Array(m * 3); outPos = new Float64Array(m * 3);
+        for (let i = 0; i < m; i++) {
+          const c = pts[i];
+          outT[i] = c.t;
+          outW[i * 3] = c.w[0]; outW[i * 3 + 1] = c.w[1]; outW[i * 3 + 2] = c.w[2];
+          outPos[i * 3] = c.pos[0]; outPos[i * 3 + 1] = c.pos[1]; outPos[i * 3 + 2] = c.pos[2];
+        }
+        outKeep = Int32Array.from({ length: m }, (_, i) => i);
+      }
+      // no emitted vertex/prim attributes: assemble the result directly (what the builder path below gives)
+      if (!emits.length) return finish(scatterSurfaceGeo(g, b.skip.point, outKeep, outT, outW, outPos, tris, triPrim, fn, !!sp, !!puv));
+      const nA = g.points.get('N');
+      for (let o = 0; o < outKeep.length; o++) {
+        const k = outKeep[o];
+        const c = { t: outT[k], w: [outW[k * 3], outW[k * 3 + 1], outW[k * 3 + 2]], pos: [outPos[k * 3], outPos[k * 3 + 1], outPos[k * 3 + 2]] };
+        const verts = [tris[c.t * 3], tris[c.t * 3 + 1], tris[c.t * 3 + 2]];
+        const ids = verts.map((v) => vp[v]);
+        const id = b.addPoint(c.pos[0], c.pos[1], c.pos[2], { i: ids, w: c.w });
+        const pr = triPrim[c.t];
+        let n: number[] = [fn[pr * 3], fn[pr * 3 + 1], fn[pr * 3 + 2]];
+        if (nA && nA.size === 3) {
+          const d = nA.data as Float64Array;
+          n = normalize([0, 1, 2].map((cc) => c.w[0] * d[ids[0] * 3 + cc] + c.w[1] * d[ids[1] * 3 + cc] + c.w[2] * d[ids[2] * 3 + cc]) as Vec3);
+        }
+        Nout.set(id, n);
+        if (sp) sp.set(id, pr);
+        if (puv) {
+          let u = 0, v = 0;
+          for (let j = 0; j < 3; j++) { const q = cornerPrimUV(g, verts[j], pr); u += c.w[j] * q[0]; v += c.w[j] * q[1]; }
+          puv.set(id, [u, v, 0]);
+        }
+        if (emits.length) emitAt(id, verts, c.w, pr);
+      }
+      return finish();
     }
 
     if (mode === 'curve') {
-      const segs: { a: number; b: number; pr: number; len: number }[] = [];
+      const segs: { a: number; b: number; va: number; vb: number; pr: number; len: number; u0: number; u1: number }[] = [];
       let total = 0;
       for (let pr = 0; pr < g.numPrims; pr++) {
         if (sel && !sel[pr]) continue;
         const s = g.primStart[pr], e = g.primStart[pr + 1];
         const last = g.primClosed[pr] ? e : e - 1;
+        const nseg = Math.max(1, last - s);
         for (let v = s; v < last; v++) {
-          const a = g.vertexPoint[v], bb = g.vertexPoint[v + 1 < e ? v + 1 : s];
-          const len = Math.hypot(Pd[bb * 3] - Pd[a * 3], Pd[bb * 3 + 1] - Pd[a * 3 + 1], Pd[bb * 3 + 2] - Pd[a * 3 + 2]) * (dw(a) + dw(bb)) / 2;
+          const vb = v + 1 < e ? v + 1 : s;
+          const a = vp[v], bb = vp[vb];
+          const len = Math.hypot(Pd[bb * 3] - Pd[a * 3], Pd[bb * 3 + 1] - Pd[a * 3 + 1], Pd[bb * 3 + 2] - Pd[a * 3 + 2]) * (dw(v, a, pr) + dw(vb, bb, pr)) / 2;
           total += len;
-          segs.push({ a, b: bb, pr, len: total });
+          segs.push({ a, b: bb, va: v, vb, pr, len: total, u0: (v - s) / nseg, u1: (v - s + 1) / nseg });
         }
       }
-      if (!segs.length || total <= 0) throw new NodeError('no curve length to scatter along');
-      const count = p.density > 0 ? Math.round(p.density * total) : p.count;
+      if (!segs.length || !(total > 0)) {
+        if (mA && segs.length) { warn(`density_mask "${p.density_mask}" is 0 everywhere: no points`); return finish(); }
+        throw new NodeError('no curve length to scatter along');
+      }
+      const count = scatterCount(p, total, total, warn);
+      const picks: { sg: number; f: number }[] = [];
+      const pos = new Float64Array(count * 3);
       for (let k = 0; k < count; k++) {
         const x = p.relax ? ((k + 0.5) / count) * total : r() * total;
         let lo = 0, hi = segs.length - 1;
         while (lo < hi) { const mid = (lo + hi) >> 1; if (segs[mid].len < x) lo = mid + 1; else hi = mid; }
         const sg = segs[lo], prev = lo ? segs[lo - 1].len : 0;
         const f = sg.len > prev ? (x - prev) / (sg.len - prev) : 0;
+        picks.push({ sg: lo, f });
+        for (let c = 0; c < 3; c++) pos[k * 3 + c] = Pd[sg.a * 3 + c] * (1 - f) + Pd[sg.b * 3 + c] * f;
+      }
+      let order: ArrayLike<number> = Int32Array.from({ length: count }, (_, i) => i);
+      if (extra) {
+        const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
+        order = minDistanceSelect(pos, order, md, Infinity,
+          perPrim ? (k) => perPrim[segs[picks[k].sg].pr] < cap : undefined,
+          perPrim ? (k) => { perPrim[segs[picks[k].sg].pr]++; } : undefined);
+      }
+      for (let o = 0; o < order.length; o++) {
+        const { sg: si, f } = picks[order[o]], sg = segs[si];
         const id = b.blendPoint([sg.a, sg.b], [1 - f, f]);
         Nout.set(id, normalize([Pd[sg.b * 3] - Pd[sg.a * 3], Pd[sg.b * 3 + 1] - Pd[sg.a * 3 + 1], Pd[sg.b * 3 + 2] - Pd[sg.a * 3 + 2]]));
-        sp.set(id, sg.pr);
+        if (sp) sp.set(id, sg.pr);
+        if (puv) puv.set(id, [sg.u0 + (sg.u1 - sg.u0) * f, 0, 0]);
+        if (emits.length) emitAt(id, [sg.va, sg.vb], [1 - f, f], sg.pr);
       }
-      return b.build();
+      return finish();
     }
 
     // volume
@@ -292,8 +600,8 @@ defineNode({
     const ext = [0, 1, 2].map((a) => bb.max[a] - bb.min[a]);
     const closed = hasPoly ? new TriBVH(g) : null;
     const vol = Math.max(1e-12, ext[0] * ext[1] * ext[2]);
-    const count = p.density > 0 ? Math.round(p.density * vol) : p.count;
-    const ncand = p.relax ? count * 5 : count;
+    const count = scatterCount(p, vol, vol, warn);
+    const ncand = p.relax || md > 0 ? count * 5 : count;
     const pos: number[] = [];
     let tries = 0;
     while (pos.length / 3 < ncand && tries++ < ncand * 200) {
@@ -303,8 +611,16 @@ defineNode({
     }
     const P0 = Float64Array.from(pos);
     const nc = P0.length / 3;
-    const keep = p.relax && count > 0 && nc > count ? sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6) : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
+    let keep = p.relax && count > 0 && nc > count ? sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6) : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
+    if (md > 0) {
+      const inKeep = new Uint8Array(nc), order = new Int32Array(nc);
+      let o = 0;
+      for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
+      for (let k = 0; k < nc; k++) if (!inKeep[k]) order[o++] = k;
+      keep = minDistanceSelect(P0, order, md, count).sort();
+    }
     const out = new Geometry({ positions: Array.from(keep).flatMap((k) => [P0[k * 3], P0[k * 3 + 1], P0[k * 3 + 2]]) });
+    if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }
     return out;
   },
 });
@@ -312,6 +628,39 @@ defineNode({
 // ---------------------------------------------------------------- copy to points
 
 const XFORM_ATTRIBS = new Set(['P', 'N', 'v', 'up', 'orient', 'pscale', 'scale', 'rot', 'trans', 'pivot', 'transform', 'Alpha', 'sourceprim', 'variant']);
+
+/**
+ * Template points with copy_to_points' scale_attrib / rotate_attrib folded into the standard attributes, so packed and
+ * real copies share one transform path: scale ← scale × factor (float = uniform, vec3 per axis), rot ← rot · extra
+ * (float = yaw degrees about +Y, vec3 = Euler XYZ degrees, vec4 = quaternion).
+ */
+function foldExtraXforms(t: Geometry, scaleAttrib: string, rotateAttrib: string): Geometry {
+  const numeric = (name: string, what: string) => {
+    const a = t.points.get(name);
+    if (!a || a.type === 'string' || a.isArray) throw new NodeError(`${what} "${name}" is not a numeric point attribute of the template points`, `point attributes: ${t.points.names().join(', ') || 'none'}`);
+    return a;
+  };
+  const sA = scaleAttrib ? numeric(scaleAttrib, 'scale_attrib') : null;
+  const rA = rotateAttrib ? numeric(rotateAttrib, 'rotate_attrib') : null;
+  const g = t.clone();
+  const n = g.numPoints;
+  if (sA) {
+    const sc = g.points.add('scale', 'float', 3).data as Float64Array, d = sA.data as Float64Array, s = sA.size;
+    for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) sc[i * 3 + c] *= s >= 3 ? d[i * s + c] : d[i * s];
+  }
+  if (rA) {
+    const rot = g.points.add('rot', 'float', 4).data as Float64Array, d = rA.data as Float64Array, s = rA.size;
+    for (let i = 0; i < n; i++) {
+      let e: Quat;
+      if (s === 4) e = qNormalize([d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]]);
+      else if (s === 3) e = qFromMat(m4euler([d[i * 3], d[i * 3 + 1], d[i * 3 + 2]]));
+      else e = qAxisAngle([0, 1, 0], d[i * s]);
+      const q = qMul([rot[i * 4], rot[i * 4 + 1], rot[i * 4 + 2], rot[i * 4 + 3]], e);
+      rot.set(q, i * 4);
+    }
+  }
+  return g;
+}
 
 /** Instance transform for template point i (Houdini attribute conventions). */
 export function pointTransform(t: Geometry, i: number): Mat4 {
@@ -470,7 +819,9 @@ defineNode({
     'nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). ' +
     'Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; ' +
     'the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, ' +
-    'or the exact value, e.g. a string name); without that attribute the pieces cycle.',
+    'or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random ' +
+    'with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from ' +
+    'any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner.',
   inputs: [{ name: 'geo', desc: 'geometry to copy' }, { name: 'points', desc: 'template points' }],
   params: {
     group: P.group('point', 'template points to use ("" = all)'),
@@ -480,11 +831,16 @@ defineNode({
     variants: { type: 'enum', options: ['none', 'name', 'piece'], default: 'none', desc: 'split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set)' },
     piece_attrib: { type: 'string', default: '', desc: 'variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class")' },
     variant_attrib: { type: 'string', default: 'variant', desc: 'variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value)' },
+    variant_weights: { type: 'json', default: [], desc: 'variants: weights per piece (in piece order) for a seeded weighted random pick when the template has no variant_attrib attribute, e.g. [3, 1, 1]; missing weights are 0', aliases: ['weights', 'variant_probabilities'] },
+    seed: { type: 'float', default: 0, desc: 'variant_weights: random seed' },
+    scale_attrib: { type: 'string', default: '', desc: 'template point attribute multiplying the copy scale (float = uniform, vec3 = per axis), on top of pscale and scale', aliases: ['scale_by'] },
+    rotate_attrib: { type: 'string', default: '', desc: 'template point attribute adding a local rotation after orient/N/rot: float = degrees about +Y (yaw), vec3 = Euler degrees (XYZ), vec4 = quaternion', aliases: ['rotate_by'] },
   },
   outputs: 'prim copynum; template point attributes on copied points (pack: on the instance anchor points)',
   example: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_attrib: 'variant' } },
-  cook: ({ input, p }) => {
-    const src = input(0), t = input(1);
+  cook: ({ input, p, warn }) => {
+    const src = input(0);
+    const t = p.scale_attrib || p.rotate_attrib ? foldExtraXforms(input(1), p.scale_attrib, p.rotate_attrib) : input(1);
     const sel = mask(t, 'point', p.group);
     const tpts: number[] = [];
     for (let i = 0; i < t.numPoints; i++) if (!sel || sel[i]) tpts.push(i);
@@ -510,9 +866,25 @@ defineNode({
         values = [...new Set(Array.from({ length: src.numPrims }, (_, i) => pa.get(i) as any))].sort((a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0));
         for (const v of values) subsets.set(v, src.subsetPrims(Uint8Array.from({ length: src.numPrims }, (_, i) => (pa.get(i) === v ? 1 : 0))));
       }
-      const va = t.points.get(p.variant_attrib);
+      const va = p.variant_attrib ? t.points.get(p.variant_attrib) : undefined;
+      const wts = Array.isArray(p.variant_weights) ? p.variant_weights.map((x: any) => Math.max(0, Number(x) || 0)) : [];
+      let wcdf: Float64Array | null = null;
+      if (wts.length && va) warn(`variant_weights ignored: the template points have "${p.variant_attrib}", which picks the variants`);
+      else if (wts.length && values.length) {
+        if (wts.length !== values.length) warn(`variant_weights has ${wts.length} weight(s) for ${values.length} variant(s) (${values.join(', ')}); missing weights are 0`);
+        wcdf = new Float64Array(values.length);
+        let acc = 0;
+        for (let k = 0; k < values.length; k++) { acc += wts[k] ?? 0; wcdf[k] = acc; }
+        if (!(acc > 0)) throw new NodeError('variant_weights are all 0: no variant can be picked');
+      }
       pieceKey = (i) => {
         if (!values.length) return undefined;
+        if (!va && wcdf) {
+          const x = (elementSeed(p.seed, i) / 2147483648) * wcdf[wcdf.length - 1];
+          let k = 0;
+          while (k < wcdf.length - 1 && !(x < wcdf[k])) k++;
+          return values[k];
+        }
         if (!va) return values[i % values.length];
         const v = va.get(i) as any;
         if (subsets!.has(v)) return v;
@@ -520,7 +892,7 @@ defineNode({
         return undefined;
       };
       pieceOf = (i) => subsets!.get(pieceKey!(i)) ?? new Geometry();
-    }
+    } else if (Array.isArray(p.variant_weights) && p.variant_weights.length) warn('variant_weights needs variants ("name" or "piece") or piece_attrib to split the source into variants');
     const copyNames = new Set<string>();
     const pats = String(p.copy_attribs).split(/[\s,]+/).filter(Boolean);
     const matches = (n: string) => pats.some((pt) => !pt.startsWith('^') && new RegExp('^' + pt.replace(/\*/g, '.*') + '$').test(n)) && !pats.some((pt) => pt.startsWith('^') && new RegExp('^' + pt.slice(1).replace(/\*/g, '.*') + '$').test(n));

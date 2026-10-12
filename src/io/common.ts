@@ -1,5 +1,5 @@
 // Shared export options and helpers (axis/scale conversion, splitting by name, packed instances).
-import type { Geometry } from '../core/geometry.ts';
+import type { Attribute, Geometry } from '../core/geometry.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { qFromMat } from '../core/math.ts';
 import type { Quat } from '../core/math.ts';
@@ -42,8 +42,99 @@ export interface ExportOptions {
    * 'expand' always writes real geometry.
    */
   instancing?: 'packed' | 'expand';
+  /**
+   * csv / points.json with packed prims: 'rows' (default) = the instance stream, one row per instance with its full
+   * transform (P, orient, scale; PCG Position/Rotation/Scale), a Mesh column naming the source and the anchor
+   * attributes; 'expand' = the points of the expanded geometry (as with instancing 'expand').
+   */
+  instances?: 'rows' | 'expand';
+  /** glb/gltf: reads texture files named by the material table (usually Host.readFile); without it maps are skipped */
+  readFile?: (path: string) => Promise<Uint8Array>;
+  /** usda: maps a material texture path to the asset path written into the file (e.g. relative to the output) */
+  texturePath?: (path: string) => string;
+  /** internal: texture bytes preloaded by exportGLB/exportGLTF for the synchronous document builder (null = unreadable) */
+  textureData?: Map<string, Uint8Array | null>;
   /** receives non-fatal notes (instances expanded for a format without instancing, shear dropped, …) */
   warn?: (msg: string) => void;
+}
+
+// ---------------------------------------------------------------- packed instances: names, prims, anchor attributes
+
+/**
+ * Attributes that define an instance's transform. copy_to_points and pack fold them into the packed transform, so
+ * instance streams carry the decomposed transform instead of them.
+ */
+export const TRANSFORM_ATTRIBS = new Set(['P', 'N', 'up', 'orient', 'rot', 'scale', 'pscale', 'trans', 'pivot', 'transform']);
+
+/** Per-instance attributes for glTF / USD: everything but P and the rotation/scale inputs (pscale stays, informative). */
+export const INSTANCE_ATTRIB_SKIP = new Set(['P', 'N', 'up', 'orient', 'rot', 'scale', 'trans', 'pivot', 'transform']);
+
+/** Name usable as a file, mesh or Unreal asset name. */
+export const safeName = (s: string) => String(s).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || '';
+
+/**
+ * Unique, file-name-safe names of the packed sources of g (index = source index): the source's single prim "name"
+ * value, else source_<i>. glTF node/mesh names, USD prototypes, the instance stream's Mesh column and the meshes
+ * sidecar all use these, so they match across files.
+ */
+export function packedSourceNames(g: Geometry): string[] {
+  const used = new Set<string>();
+  return g.packedSources.map((src, k) => {
+    const na = src.prims.get('name');
+    const vals = na && na.type === 'string' ? new Set(na.data as string[]) : null;
+    const base = (vals && vals.size === 1 ? safeName([...vals][0] ?? '') : '') || `source_${k}`;
+    let n = base, i = 1;
+    while (used.has(n.toLowerCase())) n = `${base}_${i++}`;
+    used.add(n.toLowerCase());
+    return n;
+  });
+}
+
+/** Packed prims of g (one vertex each) in prim order. */
+export function packedPrims(g: Geometry): number[] {
+  const out: number[] = [];
+  const kind = g.primKind;
+  if (!kind) return out;
+  for (let p = 0; p < kind.length; p++) if (kind[p] === 1 && g.primStart[p + 1] - g.primStart[p] === 1) out.push(p);
+  return out;
+}
+
+export interface AnchorAttrib { name: string; cls: 'point' | 'prim'; attr: Attribute }
+
+/**
+ * Attributes an instance carries: its anchor point's (point class) and its packed prim's (prim class, when the name
+ * is not a point attribute too), float/int of any size and single strings; array attributes and `skip` excluded.
+ */
+export function anchorAttribs(g: Geometry, skip: Set<string>): AnchorAttrib[] {
+  const out: AnchorAttrib[] = [];
+  const ok = (a: Attribute) => !a.isArray && (a.type === 'float' || a.type === 'int' || (a.type === 'string' && a.size === 1));
+  for (const [name, attr] of g.points.map) if (!skip.has(name) && ok(attr)) out.push({ name, cls: 'point', attr });
+  for (const [name, attr] of g.prims.map) if (!skip.has(name) && !g.points.has(name) && ok(attr)) out.push({ name, cls: 'prim', attr });
+  return out;
+}
+
+/** Value of an anchor attribute for packed prim p (numbers as an array, strings as a string). */
+export function anchorValue(g: Geometry, a: AnchorAttrib, p: number): number[] | string {
+  const v = a.attr.get(a.cls === 'point' ? g.vertexPoint[g.primStart[p]] : p);
+  if (a.attr.type === 'string') return String(v ?? '');
+  return Array.isArray(v) ? (v as number[]) : [v as number];
+}
+
+/** Directory part of a path ("" for a bare name), either separator. */
+export function dirOf(p: string): string {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return i >= 0 ? p.slice(0, i) : '';
+}
+
+/** File name part of a path. */
+export function baseOf(p: string): string {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+/** Join path parts with "/" (empty parts skipped). */
+export function joinPath(...parts: string[]): string {
+  return parts.filter(Boolean).join('/').replace(/[\\/]+/g, '/');
 }
 
 /** A packed prim's 3×3 (9 numbers at X[o..]) in export space: C·X·Cᵀ with C the axis conversion (scale excluded). */

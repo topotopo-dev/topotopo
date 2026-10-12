@@ -15,6 +15,8 @@
 // --strict also fails on node errors that look like internal JS errors (TypeError etc.).
 // On failure the graph JSON is printed; reproduce with --seed S --only I.
 import { allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
+import { expandedTriangles } from '../src/core/packed.ts';
+import type { Geometry } from '../src/core/geometry.ts';
 import { hash32, rng } from '../src/core/random.ts';
 import type { Engine, CookReport } from '../src/graph/engine.ts';
 import type { GraphSpec, NodeDef, NodeSpec, ParamDef } from '../src/graph/types.ts';
@@ -33,7 +35,7 @@ const VERBOSE = args.includes('--verbose');
 const STRICT = args.includes('--strict');
 
 /** Fixtures a chain may start from. */
-const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'PACKED', 'HFN'];
+const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'PACKED', 'HFN', 'NURBS', 'BEZIER'];
 
 /** Per-node param ranges that keep cooks fast ('keep' = leave the default). Vector ranges apply per component. */
 const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
@@ -68,12 +70,16 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   heightfield_mask_by_feature: { occlusion_radius: [0, 2] },
   remesh_isotropic: { target_length: 'keep', iterations: [0, 3], relax_passes: [1, 2], max_triangles: 'keep' },
   lod: { levels: [1, 4] },
+  cluster: { count: [1, 20], iterations: [1, 10] },
+  points_along_curve: { spacing: [0.01, 1], count: [0, 50], per_segment: [1, 8] },
+  mask: { samples: [1, 8] },
+  prune: { radius: [0, 0.5] },
 };
 
 /** Node types that get slow on big inputs: only chained when the incoming geometry has at most this many prims. */
 const MAX_INPUT_PRIMS: Record<string, number> = {
   minkowski: 400, convex_hull: 20000, voronoi_fracture: 3000, boolean: 20000, remesh: 20000, sdf_from_mesh: 20000,
-  smooth_solid: 3000, decimate: 50000, remesh_isotropic: 20000, mesh_repair: 50000, lod: 50000, uv_unwrap: 3000, uv_autoseam: 3000, uv_flatten: 20000, uv_layout: 20000, foreach: 2000, copy_to_points: 5000, triangulate2d: 20000, voronoi2d: 20000,
+  smooth_solid: 3000, mask: 20000, decimate: 50000, remesh_isotropic: 20000, mesh_repair: 50000, lod: 50000, uv_unwrap: 3000, uv_autoseam: 3000, uv_flatten: 20000, uv_layout: 20000, foreach: 2000, copy_to_points: 5000, triangulate2d: 20000, voronoi2d: 20000,
 };
 
 const GROUP_PATTERNS = ['', '', '', '@P.y>0', '0-10', '!0-5', '@P.x<0.2', '*', 'top', '0-100:2'];
@@ -171,6 +177,9 @@ const CHAINABLE = allNodeDefs().filter((d) => d.inputs.length > 0 && !SKIP.has(d
 
 interface Built { graph: GraphSpec; chain: string[]; truncated: string }
 
+/** Prims a node will see: packed instances count with the triangles they expand to (nodes that need polygons unpack). */
+const effectivePrims = (g: Geometry | null | undefined) => (g ? g.numPrims + (g.hasPacked() ? expandedTriangles(g) : 0) : 0);
+
 /** Build a chain incrementally, cooking as it grows so it can stop before outputs get large or slow. */
 async function buildGraph(engine: Engine, seed: number): Promise<Built> {
   const r = rng(seed);
@@ -182,7 +191,7 @@ async function buildGraph(engine: Engine, seed: number): Promise<Built> {
   let prevPrims = 0;
   try {
     const first = await engine.cook({ nodes: structuredClone(nodes), output: src });
-    prevPrims = first.geo?.numPrims ?? 0;
+    prevPrims = effectivePrims(first.geo);
   } catch { /* reported by the checks below */ }
   const want = randInt(r, 1, 4);
   let truncated = '';
@@ -208,7 +217,7 @@ async function buildGraph(engine: Engine, seed: number): Promise<Built> {
     Object.assign(nodes, trial);
     chain.push(def.type);
     prev = name;
-    prevPrims = g?.numPrims ?? 0;
+    prevPrims = effectivePrims(g);
   }
   return { graph: { nodes, output: prev }, chain, truncated };
 }
