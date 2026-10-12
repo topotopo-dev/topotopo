@@ -27,6 +27,7 @@ import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geome
 import type { AttribType } from '../core/geometry.ts';
 import { materialBasename } from '../core/materials.ts';
 import { EdgeSet } from '../core/edges.ts';
+import { expandForExport } from './common.ts';
 import type { ExportOptions } from './common.ts';
 
 const PAGE = 1024;
@@ -105,6 +106,7 @@ function rle(counts: number[]): number[] {
 
 /** Serialise to Houdini .geo JSON text. Positions are written as they are (Houdini is Y-up metres too). */
 export function exportHoudiniGeo(g: Geometry, o: ExportOptions = {}): string {
+  g = expandForExport(g, o, 'geo');
   const prec: 32 | 64 = o.precision === 32 ? 32 : 64;
   const bb = g.bbox();
   const prims: any[] = [];

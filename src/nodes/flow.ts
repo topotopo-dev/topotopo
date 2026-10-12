@@ -8,10 +8,12 @@ import { hashString } from '../core/random.ts';
 import { importFormatFromPath, importGeometryAsync } from '../io/import.ts';
 import { mergeMaterialTables, writeMaterials } from '../core/materials.ts';
 import { fusePoints } from './transform.ts';
+import { DEFAULT_TRANSFER, composePackedXforms, expandPacked } from '../core/packed.ts';
 
 defineNode({
   type: 'merge',
   category: 'flow',
+  packed: 'keep',
   summary: 'Combine any number of inputs into one geometry (attributes, groups and material tables are unioned).',
   aliases: ['combine', 'join'],
   inputs: [{ name: 'inputs', desc: 'any number of geometries', multi: true }],
@@ -28,6 +30,7 @@ defineNode({
 defineNode({
   type: 'switch',
   category: 'flow',
+  packed: 'keep',
   summary: 'Pass through one of several inputs by index (use "=expr" to drive it from vars).',
   inputs: [{ name: 'inputs', desc: 'candidate geometries', multi: true }],
   params: { index: { type: 'int', default: 0, desc: 'which input to output (clamped)', aliases: ['input'] } },
@@ -41,6 +44,7 @@ defineNode({
 defineNode({
   type: 'null',
   category: 'flow',
+  packed: 'keep',
   summary: 'Pass-through. Use as a named output/marker (e.g. "OUT").',
   aliases: ['output', 'out', 'passthrough'],
   inputs: [{ name: 'geo', desc: 'geometry', optional: true }],
@@ -64,6 +68,7 @@ defineNode({
 defineNode({
   type: 'foreach',
   category: 'flow',
+  packed: 'keep',
   summary: 'Loop a subgraph over connected pieces, attribute values, points, prims, or N times (with optional feedback).',
   aliases: ['for_each', 'loop', 'foreach_piece', 'for_loop'],
   description:
@@ -118,6 +123,7 @@ defineNode({
         const one = src.subsetPoints(m);
         one.primStart = new Int32Array(1); one.vertexPoint = new Int32Array(0); one.primClosed = new Uint8Array(0);
         one.prims = one.prims.gather([]); one.vertices = one.vertices.gather([]); one.primGroups = new Map(); one.vertexGroups = new Map(); one.edgeGroups = new Map();
+        one.clearPacked();
         items.push({ geo: one, value: i, attr: attrsOf(src, 'point', i) });
       }
     } else if (p.mode === 'prims') {
@@ -174,6 +180,7 @@ const r9 = (x: number) => Math.round(x * 1e9) / 1e9;
 defineNode({
   type: 'solver',
   category: 'flow',
+  packed: 'keep',
   summary: 'Feedback over frames (Houdini SOP Solver): run a body graph once per frame on the previous frame\'s result, for growth, accumulation and settling.',
   aliases: ['sop_solver', 'sopsolver'],
   description:
@@ -286,6 +293,7 @@ defineNode({
 defineNode({
   type: 'graph_ref',
   category: 'flow',
+  packed: 'keep',
   summary: 'Use the output (or any node) of another graph in the workspace — compose scenes from separate graphs.',
   aliases: ['object_merge', 'reference', 'ref'],
   inputs: [],
@@ -313,6 +321,7 @@ defineNode({
 defineNode({
   type: 'file',
   category: 'io',
+  packed: 'keep',
   summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo/.bgeo, CSV, points JSON or polyforge JSON. Z-up files can be converted.',
   aliases: ['import', 'load', 'read'],
   inputs: [],
@@ -321,15 +330,18 @@ defineNode({
     format: { type: 'enum', options: ['auto', 'obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'bgeo', 'csv', 'pointsjson'], default: 'auto', desc: 'file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
-    weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans)' },
+    weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances)' },
+    instancing: { type: 'enum', options: ['packed', 'expand'], default: 'packed', desc: 'glTF EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry' },
   },
   signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
   async cook({ p, engine, warn }) {
     if (!p.path) throw new NodeError('path is empty');
     const bytes = await engine.host.readFile(p.path).catch((e: any) => { throw new NodeError(`cannot read "${p.path}": ${e.message}`); });
     const fmt = p.format === 'auto' ? importFormatFromPath(p.path) : p.format;
-    const g = await importGeometryAsync(bytes, fmt, { path: p.path, readFile: (f) => engine.host.readFile(f), warn });
+    let g = await importGeometryAsync(bytes, fmt, { path: p.path, readFile: (f) => engine.host.readFile(f), warn, instancing: p.instancing });
     if (p.up_axis === 'z' || p.scale !== 1) {
+      // packed instances: anchors convert like points, the conversion composes into their transforms (sources stay)
+      if (g.primKind) composePackedXforms(g, p.up_axis === 'z' ? Float64Array.from([p.scale, 0, 0, 0, 0, 0, -p.scale, 0, 0, p.scale, 0, 0, 0, 0, 0, 1]) : Float64Array.from([p.scale, 0, 0, 0, 0, p.scale, 0, 0, 0, 0, p.scale, 0, 0, 0, 0, 1]));
       const P = g.P;
       for (let i = 0; i < P.length; i += 3) {
         let x = P[i], y = P[i + 1], z = P[i + 2];
@@ -343,6 +355,7 @@ defineNode({
       }
     }
     if (p.weld) {
+      if (g.hasPacked()) g = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
       const b = g.bbox();
       const diag = Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1;
       return fusePoints(g, diag * 1e-7);

@@ -8,6 +8,7 @@ import './material.ts';
 import './topology.ts';
 import './polyedit.ts';
 import './copy.ts';
+import './packed.ts';
 import './solid.ts';
 import './sdf.ts';
 import './procedural.ts';

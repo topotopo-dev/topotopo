@@ -13,16 +13,20 @@
 //   scalars; the original material is kept in material extras (polyforge.material) for lossless re-import.
 //   Options: quantize (KHR_mesh_quantization), compress 'meshopt' (EXT_meshopt_compression, implies quantize),
 //   compress 'draco' (KHR_draco_mesh_compression, only when the optional draco3dgltf package is installed).
+//   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
+//   (TRANSLATION / ROTATION / SCALE per instance; a 3×3 with shear is written as its nearest rotation and the
+//   scale of its columns, with a warning); the rest of the geometry as above. instancing 'expand' writes real copies.
 //
 // Import
-//   node hierarchy flattened with world transforms, EXT_mesh_gpu_instancing expanded, every primitive mode,
+//   node hierarchy flattened with world transforms, EXT_mesh_gpu_instancing as packed prims (one source per mesh;
+//   instancing 'expand' = real geometry), every primitive mode,
 //   meshopt (meshoptimizer decoder) and Draco (when draco3dgltf is installed) decoded, external .bin files read
 //   relative to the file. Mesh/node names → prim "name", materials → prim "material" + table, COLOR_0 → Cd/Alpha,
 //   TEXCOORD_0/1 → uv/uv2, custom `_X` → attributes. Textures are not read.
 import { Document, GLB_BUFFER, MathUtils, PlatformIO, Primitive } from '@gltf-transform/core';
 import type { Accessor, JSONDocument, Material as GMaterial, Node as GNode } from '@gltf-transform/core';
 import {
-  ALL_EXTENSIONS, EXTMeshoptCompression, KHRDracoMeshCompression, KHRMaterialsEmissiveStrength, KHRMaterialsUnlit, KHRMeshQuantization,
+  ALL_EXTENSIONS, EXTMeshGPUInstancing, EXTMeshoptCompression, KHRDracoMeshCompression, KHRMaterialsEmissiveStrength, KHRMaterialsUnlit, KHRMeshQuantization,
 } from '@gltf-transform/extensions';
 import type { EmissiveStrength, InstancedMesh } from '@gltf-transform/extensions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
@@ -33,8 +37,9 @@ import { DEFAULT_MATERIAL, normalizeMaterial, primMaterials, readMaterials, writ
 import type { Material, MaterialTable } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
 import type { Mat4 } from '../core/math.ts';
-import { isolatedMask, pieces, xf, xfDir } from './common.ts';
+import { decomposeXform, isolatedMask, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
+import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked } from '../core/packed.ts';
 
 /** Above this many polylines per material and mesh, curves go into one LINES primitive instead of LINE_STRIPs. */
 const MAX_LINE_STRIPS = 256;
@@ -270,8 +275,14 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const st: MatState = { doc, table: useMaterials ? readMaterials(g) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material };
   const custom = o.custom !== false;
   const lineMode = o.lineMode ?? 'strip';
+  // what to write: the geometry, or (packed) its non-instanced part plus one instanced mesh per packed source
+  const split = o.splitByName ?? true;
+  const jobs: MeshJob[] = [];
+  if (!g.hasPacked()) jobs.push({ src: g, split });
+  else if (o.instancing === 'expand') jobs.push({ src: expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo, split });
+  else jobs.push({ src: stripPacked(g), split }, ...instanceJobs(doc, buffer, g, o, quantize));
 
-  for (const { name, geo } of pieces(g, { ...o, splitByName: o.splitByName ?? true })) {
+  for (const job of jobs) for (const { name, geo } of pieces(job.src, { ...o, splitByName: job.split })) {
     const outs: PrimOut[] = [];
     const info: Record<string, CustomInfo> = {};
     const used = new Set<string>();
@@ -384,14 +395,75 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
       outs.push(out);
     }
     if (!outs.length) continue;
-    writeMesh(doc, buffer, scene, name, outs, info, quantize);
+    const w = writeMesh(doc, buffer, scene, name, outs, info, quantize);
+    job.onMesh?.(w);
   }
   if (quantize) doc.createExtension(KHRMeshQuantization).setRequired(true);
   return doc;
 }
 
+interface WrittenMesh { node: GNode; center: number[]; extent: number }
+interface MeshJob { src: Geometry; split: boolean; onMesh?: (w: WrittenMesh) => void }
+
+/**
+ * One job per packed source: its geometry (nested instances expanded) as a single mesh whose node gets
+ * EXT_mesh_gpu_instancing with every instance's TRS in export space (axis conversion and scale applied).
+ */
+function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']>, g: Geometry, o: ExportOptions, quantize: boolean): MeshJob[] {
+  const kind = g.primKind!, S = g.packedSource!, X = g.packedXform!, P = g.P;
+  const bySrc = new Map<number, number[]>();
+  for (let p = 0; p < kind.length; p++) {
+    if (!kind[p] || g.primStart[p + 1] - g.primStart[p] !== 1) continue;
+    let l = bySrc.get(S[p]);
+    if (!l) { l = []; bySrc.set(S[p], l); }
+    l.push(p);
+  }
+  const ext = doc.createExtension(EXTMeshGPUInstancing).setRequired(true);
+  let sheared = 0;
+  const jobs: MeshJob[] = [];
+  for (const [s, prims] of bySrc) {
+    const n = prims.length;
+    const T = new Float64Array(n * 3), L = new Float64Array(n * 9), Q = new Float32Array(n * 4), SC = new Float64Array(n * 3);
+    prims.forEach((p, i) => {
+      const a = g.vertexPoint[g.primStart[p]];
+      T.set(xf(P[a * 3], P[a * 3 + 1], P[a * 3 + 2], o), i * 3);
+      L.set(xfLinear(X, p * 9, o), i * 9); // linear part in export space (axis conversion)
+      const d = decomposeXform(L, i * 9);
+      if (d.shear) sheared++;
+      Q.set(d.q, i * 4);
+      SC.set(d.s, i * 3);
+    });
+    const src = flattenSource(g.packedSources[s]);
+    const na = src.prims.get('name');
+    const names = na && na.type === 'string' ? new Set(na.data as string[]) : null;
+    const label = names && names.size === 1 ? [...names][0] || `instances_${s}` : `instances_${s}`;
+    jobs.push({
+      src, split: false,
+      onMesh: ({ node, center, extent }) => {
+        node.setName(label);
+        node.getMesh()?.setName(label);
+        // the quantization volume of the mesh (node TRS) folds into each instance: T·R·S·(Tc·Se) = T(t + RS·c)·R·(S·e)
+        if (quantize) node.setTranslation([0, 0, 0]).setScale([1, 1, 1]);
+        const tr = new Float32Array(n * 3), sc = new Float32Array(n * 3);
+        const e = quantize ? extent : 1;
+        for (let i = 0; i < n; i++) for (let r = 0; r < 3; r++) {
+          const off = quantize ? L[i * 9 + r] * center[0] + L[i * 9 + 3 + r] * center[1] + L[i * 9 + 6 + r] * center[2] : 0;
+          tr[i * 3 + r] = T[i * 3 + r] + off;
+          sc[i * 3 + r] = SC[i * 3 + r] * e;
+        }
+        const ro = Q;
+        const acc = (arr: Float32Array, type: 'VEC3' | 'VEC4') => doc.createAccessor().setArray(arr as Float32Array<ArrayBuffer>).setType(type).setBuffer(buffer);
+        node.setExtension('EXT_mesh_gpu_instancing', ext.createInstancedMesh()
+          .setAttribute('TRANSLATION', acc(tr, 'VEC3')).setAttribute('ROTATION', acc(ro, 'VEC4')).setAttribute('SCALE', acc(sc, 'VEC3')));
+      },
+    });
+  }
+  if (sheared) o.warn?.(`glTF instancing: ${sheared} instance transform(s) have shear (non-uniform scale after rotation), written as rotation + per-axis scale; use instancing "expand" for exact geometry`);
+  return jobs;
+}
+
 /** Create accessors (optionally quantized), the mesh and its node. */
-function writeMesh(doc: Document, buffer: ReturnType<Document['createBuffer']>, scene: ReturnType<Document['createScene']>, name: string, outs: PrimOut[], info: Record<string, CustomInfo>, quantize: boolean) {
+function writeMesh(doc: Document, buffer: ReturnType<Document['createBuffer']>, scene: ReturnType<Document['createScene']>, name: string, outs: PrimOut[], info: Record<string, CustomInfo>, quantize: boolean): WrittenMesh {
   const mesh = doc.createMesh(name);
   const node = doc.createNode(name).setMesh(mesh);
   // quantization volume: uniform scale keeps normals undistorted
@@ -443,6 +515,7 @@ function writeMesh(doc: Document, buffer: ReturnType<Document['createBuffer']>, 
   }
   if (Object.keys(info).length) mesh.setExtras({ polyforge: { attributes: info } });
   scene.addChild(node);
+  return { node, center, extent };
 }
 
 async function exportIO(doc: Document, o: ExportOptions): Promise<HostIO> {
@@ -493,6 +566,8 @@ export interface GLTFImportOptions {
   /** path of the file being read, to resolve relative URIs */
   path?: string;
   warn?: (msg: string) => void;
+  /** EXT_mesh_gpu_instancing: 'packed' (default) = packed prims sharing one source per mesh; 'expand' = real geometry */
+  instancing?: 'packed' | 'expand';
 }
 
 const isGLB = (b: Uint8Array) => b.byteLength >= 12 && new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true) === 0x46546c67;
@@ -630,7 +705,7 @@ function instanceMatrices(inst: InstancedMesh): Mat4[] {
 }
 
 /** Geometry from a gltf-transform Document (all scenes' nodes flattened into world space). */
-export function documentToGeometry(doc: Document, warn: (m: string) => void = () => {}): Geometry {
+export function documentToGeometry(doc: Document, warn: (m: string) => void = () => {}, instancing: 'packed' | 'expand' = 'packed'): Geometry {
   const root = doc.getRoot();
   const table: MaterialTable = {};
   const matNames = new Map<GMaterial, string | null>();
@@ -648,17 +723,40 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
   };
   const parts: Geometry[] = [];
   const localCache = new Map<object, Geometry | null>();
+  const sourceCache = new Map<object, Map<string, Geometry>>();
   let instanced = false;
   const visitNode = (node: GNode) => {
     const mesh = node.getMesh();
     if (!mesh) return;
     const world = Float64Array.from(node.getWorldMatrix()) as unknown as Mat4;
     const inst = node.getExtension('EXT_mesh_gpu_instancing') as InstancedMesh | null;
-    // TODO(P2-A packed prims): keep instances as packed prims instead of expanding them
     const mats = inst ? instanceMatrices(inst).map((m) => m4mul(world, m)) : [world];
-    if (inst) instanced = true;
     const info = ((mesh.getExtras() as any)?.polyforge?.attributes ?? {}) as Record<string, CustomInfo>;
     const label = node.getName() || mesh.getName();
+    if (inst && instancing === 'packed') {
+      // one packed source per mesh (and node name): the mesh in its local space, the instances as packed prims
+      let byLabel = sourceCache.get(mesh);
+      if (!byLabel) { byLabel = new Map(); sourceCache.set(mesh, byLabel); }
+      let src = byLabel.get(label);
+      if (!src) {
+        const ps: Geometry[] = [];
+        for (const prim of mesh.listPrimitives()) {
+          let local = localCache.get(prim);
+          if (local === undefined) { local = primitiveGeometry(prim, info, warn); localCache.set(prim, local); }
+          if (!local) continue;
+          const g = local.clone();
+          const mname = matName(prim.getMaterial());
+          if (label) { const a = g.prims.add('name', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, label); }
+          if (mname) { const a = g.prims.add('material', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, mname); }
+          ps.push(g);
+        }
+        src = Geometry.merge(ps);
+        byLabel.set(label, src);
+      }
+      parts.push(packedFromMatrices(src, mats));
+      return;
+    }
+    if (inst) instanced = true;
     for (const prim of mesh.listPrimitives()) {
       let local = localCache.get(prim);
       if (local === undefined) { local = primitiveGeometry(prim, info, warn); localCache.set(prim, local); }
@@ -694,5 +792,5 @@ export async function importGLTFAsync(bytes: Uint8Array, opts: GLTFImportOptions
   const base = opts.path ? opts.path.replace(/[?#].*$/, '').replace(/[^\\/]*$/, '').replace(/[\\/]$/, '') : '';
   await io.loadExternal(jsonDoc, base);
   const doc = await io.readJSON(jsonDoc);
-  return documentToGeometry(doc, opts.warn);
+  return documentToGeometry(doc, opts.warn, opts.instancing ?? 'packed');
 }

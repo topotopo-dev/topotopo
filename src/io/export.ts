@@ -9,8 +9,9 @@ import { geoToJSON } from './json.ts';
 import { exportGLB, exportGLTF } from './gltf.ts';
 import { exportHoudiniGeo } from './hgeo.ts';
 import { exportCSV, exportPointsJSON } from './points.ts';
-import { isolatedMask, pieces, xf } from './common.ts';
+import { decomposeXform, expandForExport, isolatedMask, pieces, xf, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
+import { DEFAULT_TRANSFER, expandPacked, flattenSource, stripPacked } from '../core/packed.ts';
 
 export type { ExportOptions } from './common.ts';
 export { exportGLB, exportGLTF } from './gltf.ts';
@@ -33,6 +34,7 @@ function isolatedPoints(g: Geometry, o: ExportOptions) {
 // ---------------------------------------------------------------- OBJ
 
 export function exportOBJ(g: Geometry, o: ExportOptions = {}): string {
+  g = expandForExport(g, o, 'obj');
   const lines: string[] = ['# polyforge OBJ'];
   const Pd = g.P;
   const cd = g.points.get('Cd');
@@ -68,6 +70,7 @@ export function exportOBJ(g: Geometry, o: ExportOptions = {}): string {
 // ---------------------------------------------------------------- STL
 
 export function exportSTL(g: Geometry, o: ExportOptions = {}): Uint8Array {
+  g = expandForExport(g, o, 'stl');
   const { tris } = triangulate(g);
   const nt = tris.length / 3;
   const out = new Uint8Array(84 + nt * 50);
@@ -90,6 +93,7 @@ export function exportSTL(g: Geometry, o: ExportOptions = {}): Uint8Array {
 // ---------------------------------------------------------------- PLY
 
 export function exportPLY(g: Geometry, o: ExportOptions = {}): Uint8Array {
+  g = expandForExport(g, o, 'ply');
   const np = g.numPoints;
   const N = g.points.get('N'), Cd = g.points.get('Cd');
   const custom = o.custom !== false ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && (a.type === 'float' || a.type === 'int') && a.size <= 4) : [];
@@ -126,10 +130,73 @@ const usdName = (s: string) => (s.replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, '').replace(/\.$/, ''));
 const tup = (a: ArrayLike<number>, k: number, n: number) => '(' + Array.from({ length: n }, (_, c) => fmt(a[k * n + c])).join(', ') + ')';
 
+/**
+ * USDA stage: meshes, curves and points under /root, split by prim name. Packed instances (instancing 'packed', the
+ * default) become one PointInstancer /root/instances whose prototypes (one per packed source, under its
+ * "prototypes" scope) are written the same way; instancing 'expand' writes real copies instead.
+ */
 export function exportUSDA(g: Geometry, o: ExportOptions = {}): string {
   const out: string[] = ['#usda 1.0', '(', '    defaultPrim = "root"', '    metersPerUnit = 1', `    upAxis = "${o.upAxis === 'z' ? 'Z' : 'Y'}"`, ')', '', 'def Xform "root"', '{'];
   const used = new Set<string>();
   const uniq = (n: string) => { let k = usdName(n), i = 1; while (used.has(k)) k = usdName(n) + '_' + i++; used.add(k); return k; };
+  let inst: Geometry | null = null;
+  if (g.hasPacked()) {
+    if (o.instancing === 'expand') g = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
+    else { inst = g; g = stripPacked(g); }
+  }
+  usdaPrims(g, o, uniq, out);
+  if (inst) usdaInstancer(inst, o, uniq, out);
+  out.push('}', '');
+  return out.join('\n');
+}
+
+/** PointInstancer for the packed prims of g (prototypes = packed sources), appended to out under /root. */
+function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => string, out: string[]) {
+  const kind = g.primKind!, S = g.packedSource!, X = g.packedXform!, P = g.P;
+  const name = uniq('instances');
+  const protoUsed = new Set<string>();
+  const protoNames = g.packedSources.map((src, k) => {
+    const na = src.prims.get('name');
+    const vals = na && na.type === 'string' ? new Set(na.data as string[]) : null;
+    let n = usdName(vals && vals.size === 1 && [...vals][0] ? [...vals][0] : `proto_${k}`), i = 1;
+    const b = n;
+    while (protoUsed.has(n)) n = b + '_' + i++;
+    protoUsed.add(n);
+    return n;
+  });
+  const idx: number[] = [], pos: number[] = [], ori: string[] = [], scl: number[] = [];
+  let sheared = 0;
+  for (let p = 0; p < kind.length; p++) {
+    if (!kind[p] || g.primStart[p + 1] - g.primStart[p] !== 1) continue;
+    const a = g.vertexPoint[g.primStart[p]];
+    idx.push(S[p]);
+    pos.push(...xf(P[a * 3], P[a * 3 + 1], P[a * 3 + 2], o));
+    const d = decomposeXform(xfLinear(X, p * 9, o));
+    if (d.shear) sheared++;
+    ori.push(`(${fmt(d.q[3])}, ${fmt(d.q[0])}, ${fmt(d.q[1])}, ${fmt(d.q[2])})`);
+    scl.push(...d.s);
+  }
+  out.push(`    def PointInstancer "${name}"`, '    {');
+  out.push(`        rel prototypes = [${protoNames.map((n) => `</root/${name}/prototypes/${n}>`).join(', ')}]`);
+  out.push(`        int[] protoIndices = [${idx.join(', ')}]`);
+  out.push(`        point3f[] positions = [${Array.from({ length: pos.length / 3 }, (_, k) => tup(pos, k, 3)).join(', ')}]`);
+  out.push(`        quath[] orientations = [${ori.join(', ')}]`);
+  out.push(`        float3[] scales = [${Array.from({ length: scl.length / 3 }, (_, k) => tup(scl, k, 3)).join(', ')}]`);
+  out.push('        def Scope "prototypes"', '        {');
+  g.packedSources.forEach((src, k) => {
+    out.push(`            def Xform "${protoNames[k]}"`, '            {');
+    const lines: string[] = [];
+    const pu = new Set<string>();
+    usdaPrims(flattenSource(src), o, (n) => { let s = usdName(n), i = 1; while (pu.has(s)) s = usdName(n) + '_' + i++; pu.add(s); return s; }, lines);
+    for (const l of lines) out.push('            ' + l);
+    out.push('            }');
+  });
+  out.push('        }', '    }');
+  if (sheared) o.warn?.(`usda PointInstancer: ${sheared} instance transform(s) have shear (non-uniform scale after rotation), written as orientation + per-axis scale; use instancing "expand" for exact geometry`);
+}
+
+/** Mesh, BasisCurves and Points prims of g (split by prim name) as USDA lines at the indentation of /root's children. */
+function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, out: string[]) {
   for (const { name, geo } of pieces(g, { splitByName: true, ...o })) {
     const polys: number[] = [];
     for (let p = 0; p < geo.numPrims; p++) if (geo.primClosed[p]) polys.push(p);
@@ -192,8 +259,6 @@ export function exportUSDA(g: Geometry, o: ExportOptions = {}): string {
     const n = iso.positions.length / 3;
     out.push('    def Points "points"', '    {', `        point3f[] points = [${Array.from({ length: n }, (_, k) => tup(iso.positions, k, 3)).join(', ')}]`, `        float[] widths = [${new Array(n).fill('0.02').join(', ')}]`, '    }');
   }
-  out.push('}', '');
-  return out.join('\n');
 }
 
 export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson';

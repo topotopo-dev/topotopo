@@ -13,11 +13,16 @@ import { TriBVH } from '../core/spatial.ts';
 import { primNormals } from '../core/topology.ts';
 import { AXES, P, getPointNormals, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
+import { composePackedXforms } from '../core/packed.ts';
 
-/** Apply a matrix to positions and vector-like attributes of selected points. */
+/**
+ * Apply a matrix to positions and vector-like attributes of selected points. Packed prims move with their anchor
+ * point and compose the matrix's rotation/scale into their transform.
+ */
 export function applyMatrix(src: Geometry, m: Mat4, ptMask: Uint8Array | null = null): Geometry {
   const g = src.clone();
   const Pd = g.P, np = g.numPoints;
+  if (g.primKind) composePackedXforms(g, m, ptMask);
   const nm = m4normalMatrix(m);
   // rotation part: normalise the basis columns (exact for uniform scale)
   const rot = new Float64Array(m);
@@ -77,6 +82,7 @@ const invertAffine = (m: Mat4): Mat4 => m4invert(m);
 defineNode({
   type: 'transform',
   category: 'transform',
+  packed: 'keep',
   summary: 'Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, orient and SDF volumes.',
   aliases: ['xform', 'move', 'rotate', 'scale'],
   inputs: [{ name: 'geo', desc: 'geometry to transform' }],
@@ -108,6 +114,7 @@ defineNode({
 defineNode({
   type: 'match_size',
   category: 'transform',
+  packed: 'keep',
   summary: 'Align / fit the bounding box: e.g. sit on the ground (justify y=min), center, or scale to a target size.',
   aliases: ['matchsize', 'fit', 'align', 'center'],
   inputs: [{ name: 'geo', desc: 'geometry to move' }, { name: 'reference', desc: 'optional geometry to match (its bbox becomes the target)', optional: true }],
@@ -246,6 +253,7 @@ export function removeDegenerate(g: Geometry): Geometry {
 defineNode({
   type: 'copy_xform',
   category: 'copy',
+  packed: 'keep',
   summary: 'Make N copies, each transformed cumulatively (Houdini Copy and Transform): stairs, radial arrays, stacks.',
   aliases: ['copy', 'copyxform', 'array', 'duplicate'],
   inputs: [{ name: 'geo', desc: 'geometry to copy' }],
@@ -276,6 +284,7 @@ defineNode({
 defineNode({
   type: 'noise_displace',
   category: 'deform',
+  packed: 'keep',
   summary: 'Displace points with fractal noise (Houdini Mountain): along normals, a fixed direction, or in 3D.',
   aliases: ['mountain', 'displace', 'noise'],
   inputs: [{ name: 'geo', desc: 'geometry to deform' }],
@@ -349,6 +358,7 @@ function axisRange(g: Geometry, ax: number) {
 defineNode({
   type: 'twist',
   category: 'deform',
+  packed: 'keep',
   summary: 'Twist around an axis: rotation grows linearly along that axis across the bounding box.',
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
@@ -376,6 +386,7 @@ defineNode({
 defineNode({
   type: 'bend',
   category: 'deform',
+  packed: 'keep',
   summary: 'Bend along an axis into an arc of the given angle (like a simple-deform bend).',
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
@@ -408,6 +419,7 @@ defineNode({
 defineNode({
   type: 'taper',
   category: 'deform',
+  packed: 'keep',
   summary: 'Scale cross-sections along an axis (linear or ramp), e.g. tapering columns or horns.',
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
@@ -503,6 +515,7 @@ defineNode({
 defineNode({
   type: 'jitter',
   category: 'deform',
+  packed: 'keep',
   summary: 'Random offset per point (deterministic by seed).',
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
