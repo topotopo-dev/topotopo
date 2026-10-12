@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-102 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+107 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -11,7 +11,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [generate](#generate-nodes): [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
 - [curve](#curve-nodes): [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [curve](#curve) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [line](#line) · [loft](#loft) · [offset_curve](#offset_curve) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
-- [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [noise_displace](#noise_displace) · [peak](#peak) · [ray](#ray) · [smooth](#smooth) · [taper](#taper) · [twist](#twist)
+- [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [measure](#measure)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [normal](#normal) · [poly_extrude](#poly_extrude) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
@@ -915,6 +915,88 @@ Random offset per point (deterministic by seed).
 | `seed` | float | `0` |  |  |  | random seed |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
+### lattice
+
+category: `deform` · aliases: `latticedeform`, `ffd`
+
+Free-form deformation: bend geometry by moving the points of a coarse lattice box (trilinear or Bezier).
+
+Embeds the geometry in a lattice and moves it with the lattice. Three inputs: geo, rest lattice, deformed lattice (same point count and order). The rest lattice can be any axis-aligned grid of points (point_grid, box or bound with divisions, any spacing); the interior nodes a box lacks are filled harmonically. Two inputs: input 2 is the DEFORMED lattice; its rest is its "rest" attribute if present, else the bounding box of geo with `divisions` (box order when the lattice has faces, point_grid order when it is points only), so geo → bound(divisions) → bend → lattice is the simplest graph. Points outside the lattice are extrapolated. Houdini: Lattice SOP; interp = bernstein is the classic Sederberg–Parry FFD (assumes evenly spaced rest nodes).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry to deform |
+| 1 | `lattice` | no | no | rest lattice (axis-aligned point_grid / box / bound); with only two inputs: the deformed lattice |
+| 2 | `deformed` | yes | no | deformed lattice: the rest lattice with its points moved (same count and order) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `divisions` | ivec3 | `[2,2,2]` | 1.. |  | `divs`, `div` | two-input form without a "rest" attribute: lattice divisions, matching the box/bound (or point_grid counts - 1) that was deformed; inferred with a warning when they do not match |
+| `interp` | enum | `"trilinear"` |  | `trilinear`, `bernstein` | `interpolation`, `mode` | trilinear = piecewise per lattice cell (local); bernstein = smooth Bezier volume over the whole lattice (global; evenly spaced lattices) |
+| `group` | group (point) | `""` |  |  |  | points to deform ("" = all) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "column": {
+      "type": "tube",
+      "params": {
+        "radius": 0.25,
+        "height": 3,
+        "rows": 30,
+        "center": [
+          0,
+          1.5,
+          0
+        ]
+      }
+    },
+    "cage": {
+      "type": "bound",
+      "in": [
+        "column"
+      ],
+      "params": {
+        "divisions": [
+          1,
+          4,
+          1
+        ]
+      }
+    },
+    "bent": {
+      "type": "bend",
+      "in": [
+        "cage"
+      ],
+      "params": {
+        "angle": 70
+      }
+    },
+    "out": {
+      "type": "lattice",
+      "in": [
+        "column",
+        "bent"
+      ],
+      "params": {
+        "divisions": [
+          1,
+          4,
+          1
+        ]
+      }
+    }
+  }
+}
+```
+
 ### noise_displace
 
 category: `deform` · aliases: `mountain`, `displace`, `noise`
@@ -945,7 +1027,94 @@ Displace points with fractal noise (Houdini Mountain): along normals, a fixed di
 | `seed` | float | `0` |  |  |  | random seed |
 | `mask_attrib` | string | `""` |  |  |  | point float attribute that scales the amplitude per point |
 | `store` | string | `""` |  |  |  | also store the scalar noise value in this point attribute ("" = off) |
+| `rest_attrib` | string | `"rest"` |  |  |  | sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P) |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+### path_deform
+
+category: `deform` · aliases: `pathdeform`, `curve_deform`, `curvedeform`
+
+Bend geometry along a curve: the geometry axis (default Z) follows the path with rotation-minimising frames, twist and stretch.
+
+The geometry coordinate along `axis` becomes arc length on the curve; the other two coordinates become offsets in the curve frame (for axis z: x → side, y → up; the frame starts from `up`, so a straight curve along +Z from the origin leaves the geometry unchanged). The reference is the straight line along `axis` through the origin, or the bounding box along `axis` when `stretch` is on (then it maps onto `length` or the whole curve). With a rest curve in input 3, each point binds to its closest point on that curve instead, so geometry modelled along one curve moves to another. Open curves continue straight past their ends; closed curves wrap. Point N, up, v and orient rotate with the frame. Houdini: Path Deform SOP (the rest-curve form is like Wire/Curve deform).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry laid out along `axis` |
+| 1 | `curve` | no | no | the path: the first curve (polyline; a closed polygon loops) |
+| 2 | `rest_curve` | yes | no | optional curve the geometry was modelled along (points bind to their closest point on it) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `axis` | enum | `"z"` |  | `z`, `x`, `y` |  | geometry axis mapped along the curve |
+| `offset` | float | `0` |  |  | `shift`, `path_offset` | slide along the path, in metres |
+| `stretch` | bool | `false` |  |  | `fit`, `stretch_to_fit` | scale the geometry along the path so its extent along `axis` covers `length` (or the whole curve) |
+| `length` | float | `0` | 0.. |  |  | stretch: target length along the path (0 = the curve length) |
+| `twist` | float | `0` |  |  |  | twist in degrees about the path, accumulated linearly over the whole curve length |
+| `roll` | float | `0` |  |  |  | constant rotation about the path in degrees |
+| `up` | vec3 | `[0,1,0]` |  |  |  | up hint: the frame Y starts closest to it (rmf) or follows it everywhere (frame = up); a curve point attribute "up" overrides |
+| `frame` | enum | `"rmf"` |  | `rmf`, `up` |  | rmf = rotation-minimising frames (no flips on 3D curves); up = keep Y toward `up` at every point (roads, rails that stay level) |
+| `group` | group (point) | `""` |  |  |  | points to deform ("" = all) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "link": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.12,
+          0.04,
+          0.25
+        ]
+      }
+    },
+    "links": {
+      "type": "copy_xform",
+      "in": [
+        "link"
+      ],
+      "params": {
+        "count": 40,
+        "translate": [
+          0,
+          0,
+          0.3
+        ],
+        "rotate": [
+          0,
+          0,
+          90
+        ]
+      }
+    },
+    "path": {
+      "type": "spiral",
+      "params": {
+        "radius": 1,
+        "height": 2,
+        "turns": 2
+      }
+    },
+    "out": {
+      "type": "path_deform",
+      "in": [
+        "links",
+        "path"
+      ],
+      "params": {
+        "stretch": true
+      }
+    }
+  }
+}
+```
 
 ### peak
 
@@ -965,6 +1134,92 @@ Push points along their normals by a distance (inflate / shrink).
 |---|---|---|---|---|---|---|
 | `distance` | float | `0.05` |  |  | `dist`, `amount` | offset along N |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+### point_deform
+
+category: `deform` · aliases: `pointdeform`, `proxy_deform`
+
+Deform geometry by a proxy: points follow their nearest proxy points, including the local rotation (Houdini Point Deform).
+
+Each geometry point is captured by its `max_points` nearest rest proxy points (within `radius` when it is > 0), with inverse-distance weights that fade to zero at the next-nearest point, so the capture is smooth. Each proxy point gets a local transform fitted to how its neighbours moved (`mode`: rigid rotation, affine with stretch, or plain offsets), and the geometry point moves with the weighted blend of those transforms, so bends and twists of a coarse proxy (a point cloud, a simulated low-res mesh, a point lattice) rotate the detail instead of shearing it. Rest and deformed proxy need the same point count and order. Two inputs: input 2 is the deformed proxy and its "rest" attribute is the rest. The capture is cached by content, so re-cooks where only the deformed proxy changes re-use it. Houdini: Point Deform SOP.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry to deform (e.g. the high-res mesh) |
+| 1 | `rest` | no | no | rest proxy points (point cloud or mesh); with only two inputs: the deformed proxy carrying a "rest" attribute |
+| 2 | `deformed` | yes | no | deformed proxy: the rest proxy with its points moved (same count and order) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `radius` | float | `0` | 0.. |  |  | capture radius around each geometry point (0 = unlimited: always the nearest max_points); points with no proxy point in range stay put |
+| `max_points` | int | `4` | 1..64 |  | `maxpts`, `max_pts`, `k` | proxy points each geometry point is bound to |
+| `power` | float | `2` | 0..8 |  |  | inverse-distance weight exponent (higher = each point follows its nearest proxy point more closely) |
+| `mode` | enum | `"rigid"` |  | `rigid`, `affine`, `translate` |  | local transform of each proxy point: rigid = rotation (detail keeps its shape), affine = rotation + stretch/shear, translate = offsets only (no rotation) |
+| `fit_points` | int | `8` | 2..64 |  |  | neighbours used to fit each proxy point's local transform *(advanced)* |
+| `group` | group (point) | `""` |  |  |  | points to deform ("" = all) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "geo": {
+      "type": "tube",
+      "params": {
+        "radius": 0.3,
+        "height": 2,
+        "rows": 20,
+        "center": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "rest": {
+      "type": "point_grid",
+      "params": {
+        "counts": [
+          3,
+          6,
+          3
+        ],
+        "size": [
+          0.8,
+          2,
+          0.8
+        ],
+        "center": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "bent": {
+      "type": "bend",
+      "in": [
+        "rest"
+      ],
+      "params": {
+        "angle": 90
+      }
+    },
+    "out": {
+      "type": "point_deform",
+      "in": [
+        "geo",
+        "rest",
+        "bent"
+      ]
+    }
+  }
+}
+```
 
 ### ray
 
@@ -994,6 +1249,75 @@ Project points onto a target surface (along a direction, along N, or to the clos
 
 **Writes:** point N (orient), hitprim, hitdist
 
+### rest
+
+category: `deform` · aliases: `rest_position`, `restpos`
+
+Store the current positions in a "rest" point attribute, so noise and textures stay put while the geometry deforms.
+
+Copies P (or P of the second input, which must have the same point count) into a vec3 point attribute. Nodes that sample noise in space (noise_displace, attrib_noise) read "rest" instead of P when it exists, so a noise pattern sticks to the surface through later transforms and deformers. lattice and point_deform also read a "rest" attribute on a deformed cage as its rest shape. Houdini: Rest Position SOP (rest, rnml).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+| 1 | `rest_from` | yes | no | optional geometry with the same point count whose positions become the rest |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `name` | string | `"rest"` |  |  | `attrib`, `attribute` | attribute name |
+| `normals` | bool | `false` |  |  | `rnml`, `rest_normals` | also store the point normals as "rnml" (computed from the faces when there is no N) |
+
+**Writes:** point rest (vec3), rnml (vec3, normals = true)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 4
+      }
+    },
+    "rest": {
+      "type": "rest",
+      "in": [
+        "ball"
+      ]
+    },
+    "moved": {
+      "type": "transform",
+      "in": [
+        "rest"
+      ],
+      "params": {
+        "translate": [
+          3,
+          0,
+          0
+        ]
+      }
+    },
+    "out": {
+      "type": "noise_displace",
+      "in": [
+        "moved"
+      ],
+      "params": {
+        "amplitude": 0.2,
+        "frequency": 2
+      }
+    }
+  }
+}
+```
+
 ### smooth
 
 category: `deform` · aliases: `relax`, `laplacian`
@@ -1015,6 +1339,75 @@ Relax point positions (Laplacian or volume-preserving Taubin smoothing).
 | `method` | enum | `"taubin"` |  | `taubin`, `laplacian` |  | taubin avoids shrinking |
 | `preserve_boundary` | bool | `true` |  |  |  | pin open-boundary and curve end points |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+### soft_transform
+
+category: `deform` · aliases: `softxform`, `soft_xform`, `edit`, `soft_edit`
+
+Move / rotate / scale a point group with a soft falloff around it (Houdini Soft Transform / Edit with a soft radius).
+
+Points in `group` get the full transform; other points within `radius` of the group get a partial one, weighted by the `falloff` curve of their distance (1 at the group, 0 at the radius). The transform is blended by scaling its parameters (translate·w, rotate·w, scale lerped from 1), so rotations sweep along arcs. `distance: "surface"` measures along mesh edges (Dijkstra) instead of straight lines, so the edit does not jump across gaps (a lip, a finger next to another). Houdini: Soft Transform SOP / Edit SOP with a soft radius; `weight_attrib` exposes the soft weights.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry to edit |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (point) | `""` |  |  |  | points that get the full transform ("" = all points: a plain rigid transform) |
+| `translate` | vec3 | `[0,0,0]` |  |  | `t`, `move`, `offset` | translation of the group |
+| `rotate` | vec3 | `[0,0,0]` |  |  | `r`, `rot`, `rotation` | rotation in degrees about X, Y, Z (applied in xyz order) |
+| `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale about the pivot (a single number = uniform) |
+| `pivot_mode` | enum | `"centroid"` |  | `centroid`, `param` |  | centroid = average position of the group; param = the `pivot` value |
+| `pivot` | vec3 | `[0,0,0]` |  |  | `p` | pivot for rotate/scale when pivot_mode = param |
+| `radius` | float | `1` | 0.. |  | `soft_radius`, `rad`, `falloff_radius` | soft radius beyond the group; the weight falls to 0 at this distance (0 = only the group moves) |
+| `falloff` | enum | `"smooth"` |  | `smooth`, `linear`, `ease_in`, `ease_out`, `sharp`, `ramp` | `soft_type`, `kernel` | falloff shape over the normalised distance d: smooth (smoothstep), linear, ease_in ((1-d)^2, peaked), ease_out (1-d^2, dome), sharp ((1-sqrt d)^2, spike), ramp (the `ramp` param) |
+| `ramp` | ramp | `[[0,1],[1,0]]` |  |  |  | falloff = ramp: weight over the normalised distance (0 = at the group, 1 = at the radius) |
+| `distance` | enum | `"euclidean"` |  | `euclidean`, `surface` | `metric`, `distance_metric` | euclidean = straight-line distance to the nearest group point; surface = shortest path along edges from the group |
+| `weight_attrib` | string | `""` |  |  | `weight` | also write the soft weight (0..1) to this point float attribute ("" = off) |
+
+**Writes:** point <weight_attrib> (optional)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "grid": {
+      "type": "grid",
+      "params": {
+        "size": [
+          4,
+          4
+        ],
+        "divisions": [
+          40,
+          40
+        ]
+      }
+    },
+    "out": {
+      "type": "soft_transform",
+      "in": [
+        "grid"
+      ],
+      "params": {
+        "group": "@P.x>-0.05 ^@P.x>0.05",
+        "translate": [
+          0,
+          1,
+          0
+        ],
+        "radius": 1.5
+      }
+    }
+  }
+}
+```
 
 ### taper
 
@@ -1149,6 +1542,7 @@ Write fractal noise into a float or vector attribute (e.g. for masks, colour var
 | `octaves` | int | `3` | 1..12 |  |  | octaves |
 | `contrast` | float | `1` |  |  |  | contrast around the midpoint |
 | `seed` | float | `0` |  |  |  | random seed |
+| `rest_attrib` | string | `"rest"` |  |  |  | sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P) |
 
 ### attrib_promote
 
