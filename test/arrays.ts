@@ -6,7 +6,7 @@ import '../src/nodes/index.ts';
 import { Attribute, AttribTable, Geometry, GeoBuilder } from '../src/core/geometry.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
-import { exportGeometry } from '../src/io/export.ts';
+import { exportGeometryAsync } from '../src/io/export.ts';
 import { summarize, inspect } from '../src/inspect.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { fingerprint } from './fingerprint.ts';
@@ -341,7 +341,7 @@ const WITH_ARRAYS = (input: string): Record<string, NodeSpec> => ({
   let ok = true;
   for (const fmt of ['glb', 'obj', 'usda', 'ply', 'stl'] as const) for (const custom of [false, true]) {
     try {
-      const a = exportGeometry(g, fmt, { custom }), b = exportGeometry(plain, fmt, { custom });
+      const a = await exportGeometryAsync(g, fmt, { custom }), b = await exportGeometryAsync(plain, fmt, { custom });
       if (fmt === 'ply' || fmt === 'glb' || fmt === 'stl') if (a.byteLength !== b.byteLength) { ok = false; console.log(`  ${fmt} custom=${custom}: ${a.byteLength} vs ${b.byteLength} bytes`); }
     } catch (e: any) { ok = false; console.log(`  ${fmt} custom=${custom} threw ${e.message}`); }
   }

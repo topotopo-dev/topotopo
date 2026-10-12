@@ -67,7 +67,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P2-B | `copy_to_points` variants, scatter v2 (density attr/map/mask, relax, min distance, collision prune), masks by slope/height/curvature/occlusion/distance, `attribute_from_map` (PNG/EXR), orient helpers, points along splines, clustering | queued | after P2-A |
 | P2-C | Heightfield prim + suite: create/from mesh/from image/noise/remap/blur/terrace/cutout/mask by feature/project/path/scatter/to mesh/to sdf, erosion, 16-bit PNG/RAW export | running (agent) | started 2026-10-12 from ac5f6b9 |
 | P2-D | Spline toolkit: bezier/nurbs prims, fillet, 3D offset, spline fit, project to surface, curveu/ramp attributes | queued | |
-| P2-E | Exports: gltf-transform writer with instancing/materials/compression/LOD, USD PointInstancer + materials, Houdini `.geo` JSON read/write, PCG point stream, CSV/JSON points, material attribute + table | running (agent) | part 1 (gltf-transform, .geo, CSV/points JSON, materials) started 2026-10-12 from 97719bb; part 2 (instancing, USD PointInstancer, PCG stream) after P2-A |
+| P2-E | Exports: gltf-transform writer with instancing/materials/compression/LOD, USD PointInstancer + materials, Houdini `.geo` JSON read/write, PCG point stream, CSV/JSON points, material attribute + table | part 1 merged | 0d1ec15, 2026-10-12. gltf-transform GLB/glTF (validated), Houdini .geo/.bgeo read + .geo write (verified on SideFX Labs files), CSV/points JSON with PCG columns, material node + table. Open: external checks in Houdini/Blender/Unreal (scratchpad verify/ files); .geo key layout unconfirmed against a Houdini-written ASCII file; part 2 (packed instancing, USD PointInstancer) after P2-A |
 | P2-F | Asset shelf: 30+ curated graph assets (fence, rail, stairs, road, roof, window grid, tree, rock, cliff, pipes, cable, crate, barrel, bricks, tiles, hex grid, scaffold, pillar, arch) with golden renders | queued | after P2-B |
 | P2-G | Houdini parity tests through the Houdini MCP; Unreal round trip through the Unreal MCP | queued | needs apps running |
 
@@ -75,6 +75,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-12: P2-E1 merged (0d1ec15). Dependency note: manifold-3d pulls @gltf-transform/functions → sharp (LGPL libvips, optional native, unused by us). Blender addon not reachable for the GLB check.
 - 2026-10-12: P0-E, P1-D, P1-B merged (5b11ce0, 522dc77, 80ed39a). P2-C, P1-E, P1-G launched. Running: P2-E1, P1-A, P1-F, P2-C, P1-E, P1-G.
 - 2026-10-12: P0-C2 merged (3506ba8): array attributes. P1-F launched.
 - 2026-10-12: P1-C merged (553beb1): soft_transform, lattice, path_deform, point_deform, rest.
