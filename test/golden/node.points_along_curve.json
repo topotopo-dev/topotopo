@@ -1,0 +1,51 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "N:float:3",
+        "P:float:3",
+        "curve_id:int:1",
+        "curveu:float:1",
+        "orient:float:4",
+        "tangent:float:3",
+        "up:float:3"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [2.8931, 0.4792, 0.4996],
+      "min": [0.0862, 0.0161, 0.0168]
+    },
+    "counts": {
+      "points": 12,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "d7cf713b8686435d",
+      "attributes": {
+        "point.N": "cca59957cb9904e9",
+        "point.curve_id": "3ad731454dadb31f",
+        "point.curveu": "fb26c1fb99a86d05",
+        "point.orient": "1801336ff0196709",
+        "point.tangent": "cca59957cb9904e9",
+        "point.up": "dce1789d7d4bd2ff"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.points_along_curve",
+  "ok": true,
+  "source": "fixture for node type \"points_along_curve\" (test/fixtures.ts)",
+  "warnings": []
+}

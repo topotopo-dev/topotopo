@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "description": "PCG on a terrain with a road: the road curve is draped on the terrain (ray) and swept into a strip that is draped again across its width; lamp posts stand along it every 9 m on both sides (points_along_curve side_offset + both_sides → ray onto the ground → orient upright → packed copies); rocks are scattered by a mask that keeps 5 m away from the road and prefers slopes over 16° (mask distance × mask slope → scatter density_mask with an exact min_distance), aligned to the terrain normal with random yaw, tilt and scale (orient surface, align_axis y), pruned where they overlap, and coloured by k-means cluster for a debug view (cluster color) before packed copying.",
+  "vars": { "seed": 7, "rock_density": 0.12 },
+  "nodes": {
+    "terrain": { "type": "terrain", "params": { "size": [60, 60], "divisions": [90, 90], "height": 5, "frequency": 0.04, "octaves": 4, "seed": "=seed" } },
+    "ground": { "type": "color", "in": ["terrain"], "params": { "color": "#9aa383" } },
+    "road_plan": { "type": "curve", "params": { "points": [[-30, 0, -12], [-12, 0, -4], [0, 0, 6], [14, 0, 2], [30, 0, 12]], "smooth": true, "subdivisions": 12 } },
+    "road_fine": { "type": "resample", "in": ["road_plan"], "params": { "length": 0.5 } },
+    "road": { "type": "ray", "in": ["road_fine", "terrain"], "params": { "lift": 0.06, "orient": false } },
+    "road_profile": { "type": "line", "params": { "origin": [-2.2, 0, 0], "direction": [1, 0, 0], "length": 4.4, "points": 9 } },
+    "road_strip": { "type": "sweep", "in": ["road", "road_profile"] },
+    "road_drape": { "type": "ray", "in": ["road_strip", "terrain"], "params": { "lift": 0.08, "orient": false } },
+    "asphalt": { "type": "color", "in": ["road_drape"], "params": { "color": "#3a3a40" } },
+
+    "lamp_pts": { "type": "points_along_curve", "in": ["road"], "params": { "spacing": 9, "start_offset": 3, "end_offset": 3, "side_offset": 3.4, "both_sides": true } },
+    "lamp_ground": { "type": "ray", "in": ["lamp_pts", "terrain"], "params": { "orient": false } },
+    "lamp_xf": { "type": "orient", "in": ["lamp_ground"], "params": { "mode": "normal_up", "upright": true } },
+    "pole": { "type": "tube", "params": { "radius": 0.12, "height": 4.5, "center": [0, 2.25, 0], "cols": 6 } },
+    "pole_c": { "type": "color", "in": ["pole"], "params": { "color": "#55585e", "class": "prim" } },
+    "bulb": { "type": "sphere", "params": { "type": "ico", "level": 1, "radius": 0.4, "center": [0, 4.7, 0] } },
+    "bulb_c": { "type": "color", "in": ["bulb"], "params": { "color": "#ffd76a", "class": "prim" } },
+    "lamp": { "type": "merge", "in": ["pole_c", "bulb_c"] },
+    "lamps": { "type": "copy_to_points", "in": ["lamp", "lamp_xf"], "params": { "pack": true } },
+
+    "away": { "type": "mask", "in": ["terrain", "road"], "params": { "by": "distance", "min": 5, "max": 1e9, "falloff": 3 } },
+    "rocky": { "type": "mask", "in": ["away"], "params": { "by": "slope", "min": 16, "max": 90, "falloff": 6, "combine": "multiply" } },
+    "rock_pts": { "type": "scatter", "in": ["rocky"], "params": { "generate_by": "density", "density": "=rock_density", "density_mask": "mask", "min_distance": 1.2, "seed": "=seed" } },
+    "rock_xf": { "type": "orient", "in": ["rock_pts", "terrain"], "params": { "mode": "surface", "align_axis": "y", "random_yaw": [0, 360], "tilt": [0, 12], "scale_min": 0.5, "scale_max": 1.4, "seed": "=seed" } },
+    "rock_keep": { "type": "prune", "in": ["rock_xf"], "params": { "mode": "overlap", "radius": 0.75 } },
+    "rock_groups": { "type": "cluster", "in": ["rock_keep"], "params": { "count": 6, "color": true, "seed": "=seed" } },
+    "rock_ball": { "type": "sphere", "params": { "type": "ico", "level": 2, "radius": 0.7 } },
+    "rock_shape": { "type": "noise_displace", "in": ["rock_ball"], "params": { "amplitude": 0.25, "frequency": 1.5 } },
+    "rock_src": { "type": "transform", "in": ["rock_shape"], "params": { "scale": [1, 0.6, 1], "translate": [0, 0.15, 0] } },
+    "rocks": { "type": "copy_to_points", "in": ["rock_src", "rock_groups"], "params": { "pack": true } },
+
+    "scene": { "type": "merge", "in": ["ground", "asphalt", "lamps", "rocks"] }
+  },
+  "output": "scene",
+  "meta": { "render": { "elevation": 35 } }
+}

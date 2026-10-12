@@ -549,8 +549,8 @@ defineNode({
 // ---------------------------------------------------------------- offset_curve_3d
 
 /**
- * Offset of one polyline by d along each edge's side vector (up × direction), corners per `corner`; lift moves along
- * the up vectors. Returns points with the local vertex they come from.
+ * Offset of one polyline by d along each edge's side vector (direction × up: the right of the direction of travel),
+ * corners per `corner`; lift moves along the up vectors. Returns points with the local vertex they come from.
  */
 function offsetPolyline(
   X: Float64Array, closed: boolean, ups: Vec3[], plane: Vec3 | null, d: number, lift: number,
@@ -572,8 +572,8 @@ function offsetPolyline(
   if (zero(dir[0])) for (let s = 0; s < segs; s++) dir[s] = [1, 0, 0];
   for (let s = 0; s < segs; s++) {
     const u = plane ?? normalize([ups[s][0] + ups[(s + 1) % n][0], ups[s][1] + ups[(s + 1) % n][1], ups[s][2] + ups[(s + 1) % n][2]]);
-    let x = cross(u, dir[s]);
-    if (Math.hypot(...x) < 1e-9) x = s ? side[s - 1] : cross(Math.abs(dir[s][1]) < 0.9 ? [0, 1, 0] : [1, 0, 0], dir[s]);
+    let x = cross(dir[s], u);
+    if (Math.hypot(...x) < 1e-9) x = s ? side[s - 1] : cross(dir[s], Math.abs(dir[s][1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]);
     side.push(normalize(x));
   }
   const liftOf = (k: number): Vec3 => (plane ?? ups[k]);
@@ -614,12 +614,12 @@ defineNode({
   type: 'offset_curve_3d',
   category: 'curve',
   summary: 'Offset curves sideways in 3D (rotation-minimising frame or a fixed plane normal): rails, kerbs, parallel paths.',
-  description: 'Each edge moves by distance along its side vector up × direction (positive = to the left of the direction of travel, up being up), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.',
+  description: 'Each edge moves by distance along its side vector direction × up (positive = to the right of the direction of travel, like side_offset of points_along_curve), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.',
   aliases: ['curve_offset', 'offset3d', 'polyoffset'],
   inputs: [{ name: 'curves', desc: 'polylines/polygons (Bezier/NURBS curves are sampled adaptively)' }],
   splines: 'keep',
   params: {
-    distance: { type: 'float', default: 0.25, desc: 'side offset, positive = left of the direction of travel (negative = right)', aliases: ['offset', 'dist'] },
+    distance: { type: 'float', default: 0.25, desc: 'side offset, positive = right of the direction of travel (negative = left)', aliases: ['offset', 'dist'] },
     lift: { type: 'float', default: 0, desc: 'offset along up (e.g. rail height)', aliases: ['height', 'up_offset'] },
     frame: { type: 'enum', options: ['rmf', 'plane'], default: 'rmf', desc: 'rmf = rotation-minimising frame along each curve; plane = fixed up normal' },
     up: { type: 'vec3', default: [0, 1, 0], desc: 'initial up (rmf) or the plane normal (plane)', aliases: ['normal', 'plane_normal'] },

@@ -11,6 +11,7 @@ import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { exportOBJ } from '../src/io/export.ts';
 import { encodeGreyPNG } from '../src/io/heightmap.ts';
+import { encodePNG } from '../src/render/png.ts';
 import zlib from 'node:zlib';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 
@@ -89,6 +90,8 @@ export const INPUTS: Record<string, string[]> = {
   heightfield_erode: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
   heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
   remesh_isotropic: ['BOX'], mesh_repair: ['BROKEN'],
+  // PCG (P2-B): masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
+  attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
   curve_attribs: ['NURBS'],
 };
@@ -138,6 +141,12 @@ export const PARAMS: Record<string, any> = {
   remesh_isotropic: { target_length: 0.2, iterations: 4 },
   mesh_repair: { self_intersections: 'report' },
   lod: { levels: 3 },
+  mask: { by: 'slope', min: 0, max: 45, falloff: 15 },
+  // attribute_from_map: { path } is filled in by createFixtureEngine() (an RGBA PNG written to the temp dir)
+  orient: { random_yaw: [0, 360], tilt: [0, 10], scale_min: 0.8, scale_max: 1.2 },
+  points_along_curve: { spacing: 0.3, start_offset: 0.1 },
+  cluster: { count: 5, center: true, color: true },
+  prune: { radius: 0.15 },
   nurbs: { weights: [1, 1, 3, 1, 1, 1] },
   convert_curve: { to: 'bezier' },
   spline_fit: { tolerance: 0.08, smoothing: 0.2 },
@@ -261,6 +270,15 @@ export async function createFixtureEngine(): Promise<{ engine: Engine; tmp: stri
   const pngPath = path.join(tmp, 'height16.png');
   fs.writeFileSync(pngPath, encodeGreyPNG(px, W, H, 16, (d) => zlib.deflateSync(d)));
   PARAMS.heightfield_from_image = { path: pngPath, size: [4, 2], height_min: 0, height_max: 2 };
+  // attribute_from_map: a 24 × 12 RGBA colour map (red across, green down, blue checker) sampled by the grid's uv
+  const MW = 24, MH = 12, rgba = new Uint8Array(MW * MH * 4);
+  for (let j = 0; j < MH; j++) for (let i = 0; i < MW; i++) {
+    const o = (j * MW + i) * 4;
+    rgba[o] = Math.round((255 * i) / (MW - 1)); rgba[o + 1] = Math.round((255 * j) / (MH - 1)); rgba[o + 2] = ((i >> 2) + (j >> 2)) % 2 ? 220 : 30; rgba[o + 3] = 255;
+  }
+  const mapPath = path.join(tmp, 'colormap.png');
+  fs.writeFileSync(mapPath, encodePNG(rgba, MW, MH, (d) => zlib.deflateSync(d)));
+  PARAMS.attribute_from_map = { path: mapPath, channel: 'rgb' };
   return { engine, tmp, objPath };
 }
 

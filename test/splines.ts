@@ -194,6 +194,11 @@ const primPos = (g: Geometry, p: number) => {
   check(!t.warnings.length && t.geo.numSplines === 1 && t.geo.numPoints === 6, 'transform keeps the NURBS (moves its CVs, no warning)');
   const cp2 = await run({ a: { type: 'bezier' }, pts: { type: 'point_grid', params: { counts: [2, 1, 2] } }, c: { type: 'copy_to_points', in: ['a', 'pts'] } }, 'c');
   check(!cp2.warnings.length && cp2.geo.numSplines === 4 && !checkGeo(cp2.geo).length, 'copy_to_points copies spline prims as splines');
+  const pac = await run({ a: { type: 'nurbs' }, p: { type: 'points_along_curve', in: ['a'], params: { spacing: 0.5 } } }, 'p');
+  const sn = splineFromPrim(await cook({ a: { type: 'nurbs' } }, 'a'), 0);
+  let pd = 0;
+  for (let i = 0; i < pac.geo.numPoints; i++) pd = Math.max(pd, closestPoint(sn, [pac.geo.P[i * 3], pac.geo.P[i * 3 + 1], pac.geo.P[i * 3 + 2]]).dist);
+  check(!pac.warnings.length && pac.geo.numPoints > 8 && pd < 5e-3, `points_along_curve samples a NURBS itself (no warning; ${pac.geo.numPoints} points within ${e(pd)} of the curve)`);
   const sw = await run({ a: { type: 'nurbs' }, s: { type: 'sweep', in: ['a'] } }, 's');
   check(!sw.warnings.length && sw.geo.numPrims > 100, 'sweep samples a NURBS backbone itself (no warning)');
 }
@@ -274,12 +279,12 @@ const primPos = (g: Geometry, p: number) => {
   check(rails.numPrims === 2 && side[0] === 1 && side[1] === -1, 'both:true writes two rails with prim side ±1');
   const nOff = await run({ a: { type: 'nurbs' }, o: { type: 'offset_curve_3d', in: ['a'], params: { distance: 0.2 } } }, 'o');
   check(!nOff.warnings.length && !nOff.geo.hasSplines() && nOff.geo.numPoints > 20, 'offset_curve_3d samples a NURBS itself');
-  const mit = await cook({ c: { type: 'curve', params: { points: [[0, 0, 0], [2, 0, 0], [2, 0, 2]] } }, o: { type: 'offset_curve_3d', in: ['c'], params: { distance: 0.5, frame: 'plane' } } }, 'o');
-  // the mitre point lies 0.5 from both edge lines: (2.5, 0, -0.5) (side = up × direction)
+  const mit = await cook({ c: { type: 'curve', params: { points: [[0, 0, 0], [2, 0, 0], [2, 0, 2]] } }, o: { type: 'offset_curve_3d', in: ['c'], params: { distance: -0.5, frame: 'plane' } } }, 'o');
+  // the mitre point lies 0.5 from both edge lines: (2.5, 0, -0.5) (positive = right of travel = direction × up, so -0.5 is the outer side)
   const mp = [mit.P[3], mit.P[4], mit.P[5]];
   const md = Math.hypot(mp[0] - 2.5, mp[1], mp[2] + 0.5);
   check(mit.numPoints === 3 && md < 1e-12, `mitre corner of a right angle: the offset edges meet at (2.5, 0, -0.5) (${e(md)})`);
-  const rnd = await cook({ c: { type: 'curve', params: { points: [[0, 0, 0], [2, 0, 0], [2, 0, 2]] } }, o: { type: 'offset_curve_3d', in: ['c'], params: { distance: 0.5, frame: 'plane', corner: 'round' } } }, 'o');
+  const rnd = await cook({ c: { type: 'curve', params: { points: [[0, 0, 0], [2, 0, 0], [2, 0, 2]] } }, o: { type: 'offset_curve_3d', in: ['c'], params: { distance: -0.5, frame: 'plane', corner: 'round' } } }, 'o');
   let rd = 0;
   for (let i = 1; i < rnd.numPoints - 1; i++) rd = Math.max(rd, Math.abs(Math.hypot(rnd.P[i * 3] - 2, rnd.P[i * 3 + 1], rnd.P[i * 3 + 2]) - 0.5));
   check(rnd.numPoints === 7 && rd < 1e-12, `round corner: an arc of radius 0.5 around the corner (${rnd.numPoints} points)`);

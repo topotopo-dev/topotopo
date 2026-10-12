@@ -3,18 +3,18 @@
   "fingerprint": {
     "attributes": {
       "detail": [],
-      "point": ["Cd:float:3", "N:float:3", "P:float:3", "density:float:1", "height:float:1", "uv:float:3"],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3", "height:float:1", "mask:float:1", "uv:float:3"],
       "prim": ["copynum:int:1"],
       "vertex": []
     },
     "bbox": {
-      "max": [53.6434, 8.775, 53.7867],
-      "min": [-53.6563, -6.0063, -53.157]
+      "max": [53.7688, 8.8168, 53.9975],
+      "min": [-53.3131, -6.0063, -53.157]
     },
     "counts": {
-      "points": 49881,
-      "prims": 49600,
-      "vertices": 108400,
+      "points": 32734,
+      "prims": 32453,
+      "vertices": 91253,
       "volumes": 0
     },
     "groups": {
@@ -24,21 +24,21 @@
       "vertex": []
     },
     "hashes": {
-      "P": "dad2758d2081e827",
+      "P": "d74dd49c585b590a",
       "attributes": {
-        "point.Cd": "8484ac9e1ea76bd0",
-        "point.N": "bff32e24e86d4dfe",
-        "point.density": "d3e61eafec88c039",
-        "point.height": "ffa000a2b2819d00",
-        "point.uv": "d5a132b298526c98",
-        "prim.copynum": "e74fc5750575c28f"
+        "point.Cd": "71fbb35feb9a48bd",
+        "point.N": "e683a5a4f607fd3e",
+        "point.height": "16ec179e8b5c5b80",
+        "point.mask": "3731f5edba85053b",
+        "point.uv": "c0c8846b59df9579",
+        "prim.copynum": "f1155ce38fc6bd79"
       },
-      "topology": "c2c4a56939610b5f"
+      "topology": "8066287589f5f5f3"
     },
     "packed": {
-      "hash": "0e25fce8f90da7fa",
-      "instances": 30000,
-      "sources": ["51ec275edbbf0bd0", "29135fd52849853b", "5fe0cbf4cb7d7f8a"]
+      "hash": "d54d935b6da4eb31",
+      "instances": 12853,
+      "sources": ["29135fd52849853b", "51ec275edbbf0bd0", "5fe0cbf4cb7d7f8a"]
     }
   },
   "name": "example.forest",
