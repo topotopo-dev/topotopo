@@ -55,18 +55,29 @@ interface ShapeFacts {
   diag: number;
   pca: ReturnType<typeof principalAxes>;
   symmetric: string[];
-  thickness: { min: number; p5: number; median: number; at: Vec3; count: number } | null;
+  thickness: Thickness | null;
 }
 
-/** "box-like", "sphere-like", … from the oriented extents and the fill ratio of a closed piece. */
+interface Thickness {
+  min: number;
+  p5: number;
+  median: number;
+  at: Vec3;
+  count: number;
+  /** thickness relative to the size of the sample's piece: 5% quantile and median */
+  p5Ratio: number;
+  medianRatio: number;
+}
+
+/** "box-like", "sphere-like", … from the oriented extents (largest first) and the fill ratio of a closed piece. */
 function shapeWord(ext: number[], volume: number, closed: boolean, genus: number): string {
   const [e0, e1, e2] = ext;
   if (!(e0 > 0)) return 'degenerate (zero size)';
   const words: string[] = [];
-  const flat = e2 < 0.02 * e0, plate = e2 < 0.15 * e0, rod = e1 < 0.25 * e0;
+  const flat = e2 < 0.02 * e0, rod = e1 < 0.25 * e0, plate = !rod && e2 < 0.15 * e0;
   if (!closed) {
     if (flat) words.push(rod ? 'flat strip' : 'flat sheet');
-    else words.push('curved open surface');
+    else words.push(rod ? 'open elongated surface' : 'open surface (not flat)');
   } else {
     const fill = e0 * e1 * e2 > 0 ? Math.abs(volume) / (e0 * e1 * e2) : 0;
     const near = (a: number, b: number) => Math.abs(a - b) <= 0.15 * Math.max(a, b);
@@ -98,41 +109,52 @@ function readsAs(g: Geometry, f: ShapeFacts): string {
     }
     return `${plural(mix.lines, 'curve')}, total length ${fmtLen(len)}, spanning ${size3(f.size)}`;
   }
-  const solids = pr.pieces.filter((x) => !x.cavity), cavities = pr.pieces.length - solids.length;
+  // surfaces (pieces with polygons, cavity walls excluded) and curve-only pieces
+  const solids = pr.pieces.filter((x) => x.polys > 0 && !x.cavity), cavities = pr.pieces.filter((x) => x.cavity).length;
+  const curves = pr.pieces.filter((x) => !x.polys).length;
   const closed = solids.filter((x) => x.closed).length, open = solids.length - closed;
   const parts: string[] = [];
   const cav = cavities ? ` with ${cavities === 1 ? 'an inner cavity' : `${n(cavities)} inner cavities`} (hollow)` : '';
   if (solids.length === 1) parts.push((closed ? 'one closed piece' : 'one open surface') + cav);
   else parts.push(`${n(solids.length)} pieces (${n(closed)} closed, ${n(open)} open)${cav}`);
   const main = solids.reduce((b, x) => (x.area > b.area ? x : b), solids[0]);
-  const ext = solids.length === 1 ? f.pca.extents : [0, 1, 2].map((i) => main.max[i] - main.min[i]).sort((x, y) => y - x);
+  const ext = solids.length === 1 && !curves ? f.pca.extents : [0, 1, 2].map((i) => main.max[i] - main.min[i]).sort((x, y) => y - x);
   if (solids.length > 1) parts.push(`largest ${shapeWord(ext, main.volume, main.closed, main.genus).split(', fills')[0]} (${size3([0, 1, 2].map((i) => main.max[i] - main.min[i]))})`, `overall ${size3(f.size)}`);
   else parts.push(shapeWord(ext, main.volume, main.closed, main.genus).split(', fills')[0], size3(f.size));
-  if (f.thickness && f.thickness.p5 < 0.15 * Math.max(...f.size)) parts.push(`${fmtLen(f.thickness.p5)} thin walls/parts`);
+  const t = f.thickness;
+  if (t && t.medianRatio < 0.1) parts.push(`${fmtLen(t.median)} thin walls`);
+  else if (t && t.p5Ratio < 0.05) parts.push(`thin parts down to ${fmtLen(t.p5)}`);
   if (f.symmetric.length) parts.push(`mirror-symmetric in ${f.symmetric.join(', ')}`);
-  if (mix.lines) parts.push(`plus ${plural(mix.lines, 'curve')}`);
+  if (curves) parts.push(`plus ${plural(mix.lines, 'curve')}`);
   return parts.join(', ');
 }
 
 /** Thickness at sampled surface points of the closed pieces (inward rays from the outward face normals). */
-function sampleThickness(g: Geometry, pr: PieceReport, diag: number, query: SurfaceQuery | null) {
+function sampleThickness(g: Geometry, pr: PieceReport, diag: number, query: SurfaceQuery | null): Thickness | null {
   if (!pr.pieces.some((x) => x.closed)) return null;
   const s = sampleSurface(g, 384, 7);
-  const keep: number[] = [];
+  const keep: number[] = [], size: number[] = [];
   for (let i = 0; i < s.prim.length; i++) {
     const k = s.prim[i] >= 0 ? pr.primPiece[s.prim[i]] : -1;
     if (k < 0 || !pr.pieces[k].closed) continue;
-    if (pr.pieces[k].volume < 0) { s.N[i * 3] *= -1; s.N[i * 3 + 1] *= -1; s.N[i * 3 + 2] *= -1; }
+    const pc = pr.pieces[k];
+    // inward-facing pieces are flipped: measure into their material; cavity walls already face away from it
+    if (pc.volume < 0 && !pc.cavity) { s.N[i * 3] *= -1; s.N[i * 3 + 1] *= -1; s.N[i * 3 + 2] *= -1; }
     keep.push(i);
+    size.push(Math.max(pc.max[0] - pc.min[0], pc.max[1] - pc.min[1], pc.max[2] - pc.min[2]) || 1);
   }
   if (!keep.length) return null;
   const P = new Float64Array(keep.length * 3), N = new Float64Array(keep.length * 3);
   keep.forEach((i, j) => { for (let c = 0; c < 3; c++) { P[j * 3 + c] = s.P[i * 3 + c]; N[j * 3 + c] = s.N[i * 3 + c]; } });
   const scene = query?.rays ?? RayScene.of(g);
   const t = rayMeasure(P, N, scene, { mode: 'thickness', samples: 6, maxDistance: diag, bias: 1e-5 * diag, coneAngle: 15, seed: 3 });
+  const ratio = Array.from(t, (x, j) => x / size[j]);
   let mi = 0;
   for (let i = 1; i < t.length; i++) if (t[i] < t[mi]) mi = i;
-  return { min: t[mi], p5: quantile(t, 0.05), median: quantile(t, 0.5), at: [P[mi * 3], P[mi * 3 + 1], P[mi * 3 + 2]] as Vec3, count: t.length };
+  return {
+    min: t[mi], p5: quantile(t, 0.05), median: quantile(t, 0.5), at: [P[mi * 3], P[mi * 3 + 1], P[mi * 3 + 2]], count: t.length,
+    p5Ratio: quantile(ratio, 0.05), medianRatio: quantile(ratio, 0.5),
+  };
 }
 
 /** Compact text description of a cooked geometry for an LLM (about 15–35 lines). */
@@ -160,8 +182,10 @@ export function explainGeometry(g: Geometry, label = ''): string {
 
   // pieces
   if (g.numPrims) {
-    const closed = pr.pieces.filter((x) => x.closed).length;
-    out.push(`pieces: ${n(pr.pieces.length)} (${n(closed)} closed, ${n(pr.pieces.length - closed)} open)${pr.pieces.length > 6 ? ', 6 largest by area:' : ':'}`);
+    const closed = pr.pieces.filter((x) => x.closed).length, curves = pr.pieces.filter((x) => !x.polys).length;
+    const kinds = [`${n(closed)} closed`, `${n(pr.pieces.length - closed - curves)} open`];
+    if (curves) kinds.push(`${n(curves)} curve-only`);
+    out.push(`pieces: ${n(pr.pieces.length)} (${kinds.join(', ')})${pr.pieces.length > 6 ? ', 6 largest by area:' : ':'}`);
     const order = pr.pieces.map((x, k) => ({ x, k })).sort((p, q) => q.x.area - p.x.area || p.k - q.k).slice(0, 6);
     for (const { x, k } of order) {
       const sz = [0, 1, 2].map((i) => x.max[i] - x.min[i]), c = [0, 1, 2].map((i) => (x.min[i] + x.max[i]) / 2);
@@ -173,9 +197,10 @@ export function explainGeometry(g: Geometry, label = ''): string {
   // topology and orientation
   if (mix.polys) {
     const be = pr.pieces.reduce((s, x) => s + x.boundaryEdges, 0), nme = pr.pieces.reduce((s, x) => s + x.nonManifoldEdges, 0);
-    const loops = pr.pieces.reduce((s, x) => s + x.boundaryLoops, 0), genus = pr.pieces.reduce((s, x) => s + x.genus, 0);
+    const loops = pr.pieces.reduce((s, x) => s + x.boundaryLoops, 0), genus = pr.pieces.reduce((s, x) => s + (x.closed ? x.genus : 0), 0);
     const water = be === 0 && nme === 0 && mix.lines === 0;
-    out.push(`topology: ${water ? 'watertight (every edge shared by two polygons)' : `not watertight: ${n(be)} boundary edges in ${plural(loops, 'boundary loop')}${nme ? `, ${n(nme)} edges shared by 3+ polygons` : ''}`}; total genus ${genus}`);
+    const hasClosed = pr.pieces.some((x) => x.closed);
+    out.push(`topology: ${water ? 'watertight (every edge shared by two polygons)' : `not watertight: ${n(be)} boundary edges in ${plural(loops, 'boundary loop')}${nme ? `, ${n(nme)} edges shared by 3+ polygons` : ''}`}${hasClosed ? `; genus of the closed pieces ${genus}` : ''}`);
     const inward = pr.pieces.filter((x) => x.closed && x.volume < 0 && !x.cavity).length, cav = pr.pieces.filter((x) => x.cavity).length;
     const sides = inward ? `${inward} closed piece(s) face INWARD (negative volume: use reverse)` : pr.pieces.some((x) => x.closed) ? 'closed pieces face outward' : 'no closed pieces';
     out.push(`orientation: ${pr.flippedEdges ? `${n(pr.flippedEdges)} edges between oppositely wound polygons (flipped normals)` : 'winding consistent'}; ${sides}${cav ? `; ${cav} cavity wall(s) face into their cavity (correct for a hollow solid)` : ''}`);
