@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-102 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+109 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -14,7 +14,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [noise_displace](#noise_displace) · [peak](#peak) · [ray](#ray) · [smooth](#smooth) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [measure](#measure)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
-- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [normal](#normal) · [poly_extrude](#poly_extrude) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
+- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [normal](#normal) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
@@ -494,7 +494,7 @@ Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon cap
 
 ### fill
 
-category: `curve` · aliases: `polyfill`, `fill_curves`
+category: `curve` · aliases: `fill_curves`, `fill_outlines`
 
 Fill closed outlines into faces, cutting holes (even-odd), e.g. text outlines or nested shapes.
 
@@ -1331,9 +1331,10 @@ Delete (or keep only) points/prims/vertices matching a group pattern, or the pri
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `group` | group | `""` |  |  |  | what to delete: group name, "!name", range "0-10", or "@P.y<0" |
-| `class` | enum | `"prim"` |  | `prim`, `point`, `vertex`, `edge` |  | element class of the pattern. vertex: removes those corners (polygons losing one are deleted, polylines shrink); edge: deletes every prim that uses one of the edges (dissolving edges is a separate polygon-modelling op) |
+| `class` | enum | `"prim"` |  | `prim`, `point`, `vertex`, `edge` |  | element class of the pattern. vertex: removes those corners (polygons losing one are deleted, polylines shrink); edge: deletes every prim that uses one of the edges (edge_mode dissolve, or the dissolve node, merges faces instead) |
 | `keep` | bool | `false` |  |  | `invert`, `negate`, `delete_non_selected` | invert: keep the matches, delete the rest |
 | `remove_unused_points` | bool | `true` |  |  |  | drop points no longer used by prims (prim, vertex and edge modes) |
+| `edge_mode` | enum | `"prims"` |  | `prims`, `dissolve` |  | class edge: prims = delete the prims using the edges (leaves holes); dissolve = remove the edges and merge their faces (dissolve node with defaults) |
 
 ### group
 
@@ -1581,6 +1582,113 @@ Reduce triangle count while preserving shape (meshoptimizer). Output is triangle
 | `lock_border` | bool | `true` |  |  |  | keep open borders fixed |
 | `aggressive` | bool | `false` |  |  |  | sloppy mode: ignores topology, reaches any target |
 
+### dissolve
+
+category: `topology` · aliases: `polydissolve`, `edge_dissolve`, `dissolve_edges`, `dissolve_points`
+
+Remove edges (or points) and merge the polygons around them into one; inline points of the dissolved edges removed.
+
+class edge: each set of faces joined by grouped edges becomes one polygon (its outline); edges whose two faces end up in the same polygon vanish too. Boundary and non-manifold edges cannot be dissolved and are skipped, and a region whose outline is not a single loop (a ring of faces, a whole closed surface) is left as it was. remove_inline_points then removes points of the dissolved edges that are left with exactly two edges (e.g. the points of a dissolved edge loop), keeping polygons at three corners or more. class point (Blender "dissolve vertices"): every polygon edge at the selected points is dissolved and the points are removed. Unlike delete (class edge), no hole is left. Merged polygons keep the attributes of their lowest-numbered face; all points are kept 1:1, so groups survive.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (edge) | `""` |  |  | `edges` | edges to dissolve ("" = all interior edges); class point: a point pattern |
+| `class` | enum | `"edge"` |  | `edge`, `point` | `type`, `dissolve_class` | edge = dissolve the edges; point = dissolve the points (merge all their faces) |
+| `remove_inline_points` | bool | `true` |  |  | `inline`, `removeinlinepoints` | remove points of dissolved edges left with two edges |
+| `remove_degenerate` | bool | `true` |  |  |  | drop polygons with fewer than 3 distinct points or no area |
+
+**Writes:** prim group dissolved (merged polygons)
+
+**Example**
+
+```json
+{
+  "type": "dissolve",
+  "params": {
+    "group": "loop:p4-5"
+  }
+}
+```
+
+### edge_collapse
+
+category: `topology` · aliases: `collapse`, `collapse_edges`, `edgecollapse`, `merge_edges`
+
+Collapse edges to points (midpoint, or the first/last point); chains collapse to one point; degenerate faces are removed.
+
+Points joined by grouped edges merge (connected chains and loops become one point at their centroid in center mode, the midpoint for a single edge). Polygons drop repeated corners; polygons left with fewer than three corners (polylines: two) are removed, so collapsing an edge of a triangle removes the triangle and a quad becomes a triangle. Attributes of merged points are averaged (center) or taken from the kept point. Edge groups follow the merge.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygons and/or polylines |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (edge) | `""` |  |  |  | edges to collapse ("" = all), e.g. "p0-1", "length<0.05", an edge group |
+| `mode` | enum | `"center"` |  | `center`, `first`, `last` | `position`, `collapse_to` | where merged points go: centre of the merged points, or the lowest / highest point number among them |
+
+**Writes:** point group collapsed (the merged points)
+
+**Example**
+
+```json
+{
+  "type": "edge_collapse",
+  "params": {
+    "group": "length<0.05"
+  }
+}
+```
+
+### edge_divide
+
+category: `topology` · aliases: `divide_edges`, `edgedivide`, `subdivide_edges`, `split_edges`
+
+Split edges into equal segments (polygons using them gain the new points); optionally connect them across quads like a loop cut.
+
+Every edge in "group" gets divisions-1 evenly spaced new points; all polygons (and polylines) using the edge gain them, so closed meshes stay closed. connect: a quad whose two opposite sides were divided (and whose other two were not) is split by edges joining their new points, so dividing a ring of parallel edges (e.g. group "ring:p0-1") inserts edge loops, like polysplit.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygons and/or polylines |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (edge) | `""` |  |  |  | edges to divide ("" = all), e.g. "p0-1", "ring:p0-1", "boundary", an edge group |
+| `divisions` | int | `2` | 2..256 |  | `numdivs`, `segments` | segments per edge (2 = one new point in the middle) |
+| `connect` | bool | `false` |  |  |  | join the new points across quads with exactly two opposite sides divided |
+
+**Writes:** point group divided (new points); edge group divided (connecting edges, with connect)
+
+**Example**
+
+```json
+{
+  "type": "edge_divide",
+  "params": {
+    "group": "ring:p0-1",
+    "divisions": 3,
+    "connect": true
+  }
+}
+```
+
 ### facet
 
 category: `topology` · aliases: `unique_points`, `split_points`
@@ -1663,6 +1771,53 @@ Split quads into a grid of cells by target size (facades → window cells) or fi
 
 **Writes:** prim int cell_u, cell_v (cell indices within the original quad)
 
+### knife
+
+category: `topology` · aliases: `polycut_plane`, `plane_cut`, `cut_plane`, `polyknife_plane`
+
+Cut polygons along planes keeping topology: new points on crossed edges, crossed polygons split in two, the cut in edge and point group "cut".
+
+Unlike clip, both sides stay connected (keep both) and the mesh stays watertight: a point is inserted once per crossed edge, so every polygon using the edge gets it. Concave polygons are split into as many pieces as the plane makes (crossings are paired along the cut line). Points within tolerance of the plane are used as cut points instead of making new ones. Polylines are split at the plane (or trimmed with keep above/below). Several planes ("planes") cut one after another; keep above/below then keeps the region on that side of every plane. The cut edge group holds the edges lying in a cutting plane (new and existing). Polygons outside "group" are not split but gain the new points of shared edges. Point/vertex attributes are interpolated at the cut.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygons and/or polylines |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `origin` | vec3 | `[0,0,0]` |  |  | `center`, `position`, `pos` | a point on the cutting plane |
+| `direction` | vec3 | `[0,1,0]` |  |  | `normal`, `dir`, `n` | plane normal; "above" is the side it points to |
+| `keep` | enum | `"both"` |  | `both`, `above`, `below` |  | both = split and keep everything (prim groups above/below); above/below = drop the other side, like clip but with the cut grouped |
+| `planes` | json | `[]` |  |  |  | several cutting planes as [[origin, normal], ...], applied in order (replaces origin/direction when not empty), e.g. [[[0,0,0],[1,0,0]], [[0,0,0],[0,0,1]]] |
+| `group` | group (prim) | `""` |  |  |  | polygons/polylines to cut ("" = all) |
+| `tolerance` | float | `0.000001` | 0.. |  |  | points closer than this to a plane count as on it |
+
+**Writes:** edge group cut (edges lying in a cutting plane), point group cut; prim groups above/below (keep both, single plane)
+
+**Example**
+
+```json
+{
+  "type": "knife",
+  "params": {
+    "origin": [
+      0,
+      0.1,
+      0
+    ],
+    "direction": [
+      0.2,
+      1,
+      0
+    ]
+  }
+}
+```
+
 ### normal
 
 category: `topology` · aliases: `normals`, `compute_normals`
@@ -1707,6 +1862,123 @@ Extrude/inset faces along normals (individually or as connected regions). Groups
 | `keep_back` | bool | `false` |  |  |  | keep the original faces (reversed) underneath |
 
 **Writes:** prim groups front, side
+
+### polybridge
+
+category: `topology` · aliases: `bridge`, `bridge_loops`, `bridge_edges`, `bridge_edge_loops`
+
+Connect two edge chains/loops with a strip of quads (divisions, twist, curved blend); optionally removes the faces the loops enclose.
+
+source and target are edge patterns that must each form one open or closed chain, e.g. "border:hole_a" (the border of a prim group), "boundary" edges selected by group nodes, or "p0-1-2-3-0". Where a chain is a mesh boundary the bridge winds against the existing edges, so the result is consistent and bridging two holes of a closed mesh gives a closed mesh; otherwise the target direction is chosen geometrically. Closed chains are aligned by the rotation with the shortest rungs, then rotated by twist. Chains with different point counts are matched by normalised arc length (intermediate rows take the larger count; the smaller chain is zipped to them with triangles where needed). blend bends the rungs into cubic curves that leave and enter along the openings' directions (each loop's Newell normal, signed to point out of the opening). delete_inner_faces removes the faces each loop cuts off (the smaller side), so selecting the borders of two faces and bridging them punches a tunnel.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh containing both chains |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `source` | group (edge) | `""` |  |  | `source_group`, `from`, `a` | first chain as an edge pattern, e.g. "border:hole1", "p0-1-2-3-0", an edge group |
+| `target` | group (edge) | `""` |  |  | `target_group`, `to`, `b` | second chain as an edge pattern |
+| `divisions` | int | `1` | 1..256 |  | `segments`, `rows` | rows of polygons along the bridge |
+| `twist` | int | `0` |  |  | `offset`, `pairing_shift` | closed chains: rotate the target by this many points |
+| `blend` | float | `0` | 0..1 |  | `curvature`, `smoothness`, `tangent` | 0 = straight rungs; 1 = curves leaving/entering along the openings' normals |
+| `reverse` | bool | `false` |  |  | `flip`, `reverse_winding` | flip the winding of the bridge polygons |
+| `delete_inner_faces` | bool | `false` |  |  | `delete_faces`, `remove_caps` | remove the faces each closed chain encloses (the smaller side), e.g. to bridge two faces into a tunnel |
+
+**Writes:** prim group bridge
+
+**Example**
+
+```json
+{
+  "type": "polybridge",
+  "params": {
+    "source": "border:hole_a",
+    "target": "border:hole_b",
+    "divisions": 4,
+    "delete_inner_faces": true
+  }
+}
+```
+
+### polyfill
+
+category: `topology` · aliases: `fill_quads`, `quad_fill`, `grid_fill`, `poly_fill`, `cap_quads`
+
+Fill boundary loops (holes) with quads, a quad grid, triangles or one n-gon. New faces in prim group "fill".
+
+quads: loops that are star-shaped around their centroid get a quad fan around a centre point (Houdini "Quadrilateral Fan"; an odd loop keeps one triangle), other loops are ear-clipped and the triangles paired into convex quads by quality (quad-dominant); interior points then get smooth_iterations Laplacian steps projected onto the loop plane. grid (Houdini "Quadrilateral Grid"): loops with an even point count are split into four sides a, b, a, b at their sharpest turns and filled with an a×b Coons-patch grid (smoothed by smooth_iterations); odd loops fall back to quads. triangles: ear clipping. single: one n-gon (fill_holes). New faces wind like the surrounding surface, so filling the holes of a mesh makes it watertight; they take point/vertex attributes from the loop and prim attributes from a neighbouring face.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh with holes |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"quads"` |  | `quads`, `grid`, `triangles`, `single` | `fill_mode`, `fillmode` | quads = quad fan / paired quads; grid = Coons quad grid (even loops); triangles = ear clipping; single = one n-gon |
+| `group` | group (point) | `""` |  |  |  | only loops touching these points ("" = every boundary loop) |
+| `max_edges` | int | `0` | 0.. |  | `max_size` | skip loops with more edges than this (0 = no limit) |
+| `smooth_iterations` | int | `10` | 0..1000 |  | `smooth`, `iterations`, `relax` | Laplacian relaxation steps for interior points |
+
+**Writes:** prim group fill
+
+**Example**
+
+```json
+{
+  "type": "polyfill",
+  "params": {
+    "mode": "grid"
+  }
+}
+```
+
+### polysplit
+
+category: `topology` · aliases: `edge_loop_insert`, `loopcut`, `loop_cut`, `insert_edge_loop`, `polysplit2`
+
+Insert edge loops across a ring of quads (loop cut), or split polygons along a path of points. New edges in edge group "split".
+
+loop mode: the seed edge (first edge matching "edge") defines an edge ring: the opposite sides of successive quads, stopping at non-quads and boundaries (a closed ring goes all the way round). Every quad of the ring is split by "count" parallel loops. count 1: the loop sits at "fraction" along the seed edge, measured from its lower to its higher point number (flip measures from the other end) and at the same fraction along every rung. count > 1: loops evenly spaced at k/(count+1); fraction slides them together (0.5 = even). Faces next to the ring that are not quads get the new points on their shared edges, so the mesh stays watertight. path mode: "points" lists tokens "pN" (existing point N) or "pA-B:t" (new point at fraction t from A to B on edge A-B; t defaults to 0.5). Consecutive tokens must lie on a common polygon (corner or point on one of its edges); the polygon is split between them. Repeat the first token at the end to close the path. New points are shared by every polygon using their edge.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"loop"` |  | `loop`, `path` |  | loop = insert loops across a quad ring; path = split along "points" |
+| `edge` | group (edge) | `""` |  |  | `seed`, `seed_edge` | loop: seed edge as an edge pattern; the first matching edge is used, e.g. "p3-7" or an edge group name ("" = edge 0) |
+| `fraction` | float | `0.5` | 0..1 |  | `position`, `slide`, `percent` | loop: position along the seed edge (lower → higher point number); with count > 1 slides all loops |
+| `count` | int | `1` | 1..64 |  | `cuts`, `number`, `numloops` | loop: number of parallel loops |
+| `flip` | bool | `false` |  |  |  | loop: measure fraction from the higher-numbered point of the seed edge |
+| `points` | json | `[]` |  |  | `path` | path: tokens "pN" (existing point) or "pA-B:t" (point at fraction t on edge A-B), e.g. ["p0", "p5-6:0.5", "p12"]; a string "p0 p5-6:0.5 p12" also works |
+
+**Writes:** edge group split (new edges), point group split (new points)
+
+**Example**
+
+```json
+{
+  "type": "polysplit",
+  "params": {
+    "edge": "p0-1",
+    "count": 2
+  }
+}
+```
 
 ### remesh
 

@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 206,
+      "prims": 364,
+      "vertices": 1136,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": ["cut"],
+      "point": ["cut"],
+      "prim": ["above", "below"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "b1dc996f2500f689",
+      "attributes": {
+        "group.edge.cut": "c324422843d384ae",
+        "group.point.cut": "6f43636b375e6d51",
+        "group.prim.above": "abea78b1b4215be7",
+        "group.prim.below": "3cff574d8dee4a73",
+        "point.N": "fe8bb754145eb57a"
+      },
+      "topology": "4f80f6208713d902"
+    }
+  },
+  "name": "node.knife",
+  "ok": true,
+  "source": "fixture for node type \"knife\" (test/fixtures.ts)",
+  "warnings": []
+}

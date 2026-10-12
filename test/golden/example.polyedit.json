@@ -1,0 +1,70 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [7, 1.2, 1],
+      "min": [-3.7, -0.0849, -1]
+    },
+    "counts": {
+      "points": 381,
+      "prims": 337,
+      "vertices": 1394,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": ["cut", "split"],
+      "point": ["cut", "split"],
+      "prim": [
+        "above",
+        "band",
+        "below",
+        "bottom",
+        "bridge",
+        "dissolved",
+        "fill",
+        "front",
+        "hole_a",
+        "hole_b",
+        "middle",
+        "side",
+        "top"
+      ],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "3f26b521efff436f",
+      "attributes": {
+        "group.edge.cut": "c324422843d384ae",
+        "group.edge.split": "c324422843d384ae",
+        "group.point.cut": "cd8bc952bb72cbc4",
+        "group.point.split": "d3d69852e401d1e4",
+        "group.prim.above": "01598c0f7c6243d1",
+        "group.prim.band": "2e9971ae9e237690",
+        "group.prim.below": "46eb1bcff1a73731",
+        "group.prim.bottom": "23b2c4816401bd9f",
+        "group.prim.bridge": "378e14cf730d41f1",
+        "group.prim.dissolved": "fdc5a5663e806868",
+        "group.prim.fill": "deaf12207b55755e",
+        "group.prim.front": "3b90c349e971b45b",
+        "group.prim.hole_a": "f093990f63427971",
+        "group.prim.hole_b": "f093990f63427971",
+        "group.prim.middle": "fdc5a5663e806868",
+        "group.prim.side": "6f4b17415e43807f",
+        "group.prim.top": "f093990f63427971",
+        "prim.Cd": "d0adf7c67d9dacc4",
+        "vertex.uv": "c42d39d3cd08ff19"
+      },
+      "topology": "ae0c2ac0c3e8580a"
+    }
+  },
+  "name": "example.polyedit",
+  "ok": true,
+  "source": "examples/polyedit.json",
+  "warnings": []
+}

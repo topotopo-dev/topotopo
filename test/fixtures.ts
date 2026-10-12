@@ -30,6 +30,8 @@ export const SRC: Record<string, NodeSpec> = {
   LOFT: { type: 'merge', in: ['CIRCLE', 'CIRCLE_UP'] },
   CIRCLE_UP: { type: 'circle', params: { radius: 0.3, segments: 24, center: [0, 1, 0] } },
   COLORED: { type: 'color', in: ['MESH'], params: { mode: 'random' } },
+  CUBE: { type: 'box' },
+  OPENTUBE: { type: 'tube', params: { cols: 12, caps: false } },
 };
 
 /** Fixture inputs per node type. Nodes not listed get MESH when their first input is required, else nothing. */
@@ -42,6 +44,7 @@ export const INPUTS: Record<string, string[]> = {
   triangulate2d: ['PTS'], voronoi2d: ['PTS'], merge: ['MESH', 'BOX'], switch: ['MESH', 'BOX'],
   uv_transform: ['BOX'], poly_extrude: ['BOX'], subdivide: ['BOX'], fill_holes: ['GRID'], clip: ['MESH'], slice: ['MESH'],
   scatter: ['MESH'], decimate: ['MESH'], remesh: ['BOX'], smooth_solid: ['BOX'], foreach: ['BOX'],
+  polysplit: ['BOX'], edge_divide: ['BOX'], dissolve: ['GRID'], polybridge: ['CUBE'], polyfill: ['OPENTUBE'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -61,6 +64,12 @@ export const PARAMS: Record<string, any> = {
   text: { text: 'Hi', depth: 0.2 },
   lsystem: { generations: 3 },
   graph_ref: null,
+  knife: { origin: [0, 0.1, 0], direction: [0.3, 1, 0.2] },
+  polysplit: { count: 2 },
+  edge_divide: { group: 'ring:0', divisions: 3, connect: true },
+  dissolve: { group: '@P.x>0.1' },
+  edge_collapse: { group: '0-40:8' },
+  polybridge: { source: '@P.y>0.4', target: '@P.y<-0.4', divisions: 2, blend: 0.5, delete_inner_faces: true },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */
