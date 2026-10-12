@@ -16,7 +16,7 @@ import {
 } from '../core/splines.ts';
 import type { ConvertedCV, FitResult, Parameterization, PolylineOptions, Spline, SplineType } from '../core/splines.ts';
 import { TriBVH } from '../core/spatial.ts';
-import { primNormals } from '../core/topology.ts';
+import { primNormals, resolveVertexNormals } from '../core/topology.ts';
 import { heightfieldPreviewMesh, heightfieldsOf } from '../core/heightfield.ts';
 import { rmFrames } from './curves.ts';
 import { P, mask } from './util.ts';
@@ -720,6 +720,7 @@ defineNode({
     max_distance: { type: 'float', default: 1e9, min: 0, desc: 'ignore hits further than this' },
     misses: { type: 'enum', options: ['keep', 'delete'], default: 'keep', desc: 'points without a hit: stay where they are (hit 0) or are deleted' },
     normals: { type: 'bool', default: true, desc: 'write point N from the surface' },
+    smooth_normals: { type: 'bool', default: true, desc: 'N (and lift) from the interpolated vertex normals of the surface (60° cusp); false = the normal of the hit face' },
     group: P.group('point'),
   },
   outputs: 'point hit (int), N (surface normal)',
@@ -735,15 +736,27 @@ defineNode({
     const hf = heightfieldsOf(tgt)[0] ?? null;
     const vertical = Math.abs(dir[1]) > 1 - 1e-9;
     const exactHF = !polys && hf && p.mode === 'direction' && vertical ? hf : null;
-    let bvh: TriBVH | null = null, fn: Float64Array | null = null;
+    let bvh: TriBVH | null = null, fn: Float64Array | null = null, vn: Float64Array | null = null;
     if (!exactHF) {
       const mesh = polys ? tgt : hf ? heightfieldPreviewMesh(hf) : tgt;
       bvh = new TriBVH(mesh);
       if (!bvh.numTris) throw new NodeError('target has no polygons or heightfield to project onto');
       fn = primNormals(mesh) as Float64Array;
+      if (p.smooth_normals) vn = resolveVertexNormals(mesh, 60);
     }
+    /** Surface normal at a hit: barycentric blend of the triangle's vertex normals, or its face normal. */
+    const normalAt = (tri: number, prim: number, b0: number, b1: number, b2: number): Vec3 => {
+      if (!vn) return [fn![prim * 3], fn![prim * 3 + 1], fn![prim * 3 + 2]];
+      const T = bvh!.triVtx, a = T[tri * 3] * 3, b = T[tri * 3 + 1] * 3, c = T[tri * 3 + 2] * 3;
+      const n = normalize([b0 * vn[a] + b1 * vn[b] + b2 * vn[c], b0 * vn[a + 1] + b1 * vn[b + 1] + b2 * vn[c + 1], b0 * vn[a + 2] + b1 * vn[b + 2] + b2 * vn[c + 2]]);
+      return Math.hypot(...n) > 0 ? n : [fn![prim * 3], fn![prim * 3 + 1], fn![prim * 3 + 2]];
+    };
     const sel = mask(g, 'point', p.group);
     const Pd = g.P;
+    // origin nudges perpendicular to the ray (1e-7 of the target size) for rays that hit a triangle edge exactly
+    const tb = tgt.bbox(true), eps = 1e-7 * Math.max(1e-6, Math.hypot(tb.max[0] - tb.min[0], tb.max[1] - tb.min[1], tb.max[2] - tb.min[2]));
+    const e1 = normalize(cross(dir, Math.abs(dir[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), e2 = cross(dir, e1);
+    const nudges: Vec3[] = [[0, 0, 0], [e1[0] * eps, e1[1] * eps, e1[2] * eps], [(e1[0] + e2[0]) * -eps, (e1[1] + e2[1]) * -eps, (e1[2] + e2[2]) * -eps]];
     const hitA = g.points.add('hit', 'int', 1).data as Int32Array;
     const NA = p.normals ? (g.points.add('N', 'float', 3).data as Float64Array) : null;
     const miss = new Uint8Array(g.numPoints);
@@ -763,12 +776,16 @@ defineNode({
         }
       } else if (p.mode === 'closest') {
         const c = bvh!.closest(x, y, z, p.max_distance);
-        if (c) { pos = c.pos; nrm = [fn![c.prim * 3], fn![c.prim * 3 + 1], fn![c.prim * 3 + 2]]; }
+        if (c) { pos = c.pos; nrm = normalAt(c.tri, c.prim, c.bary[0], c.bary[1], c.bary[2]); }
       } else {
-        const a = bvh!.raycast(x, y, z, dir[0], dir[1], dir[2], p.max_distance, 0);
-        const bk = p.bidirectional ? bvh!.raycast(x, y, z, -dir[0], -dir[1], -dir[2], p.max_distance, 0) : null;
-        const best = a && (!bk || a.t <= bk.t) ? a : bk;
-        if (best) { pos = best.pos; nrm = [fn![best.prim * 3], fn![best.prim * 3 + 1], fn![best.prim * 3 + 2]]; }
+        // a ray exactly along a shared triangle edge can slip between both triangles: retry from nudged origins
+        for (let k = 0; k < nudges.length && !pos; k++) {
+          const ox = x + nudges[k][0], oy = y + nudges[k][1], oz = z + nudges[k][2];
+          const a = bvh!.raycast(ox, oy, oz, dir[0], dir[1], dir[2], p.max_distance, 0);
+          const bk = p.bidirectional ? bvh!.raycast(ox, oy, oz, -dir[0], -dir[1], -dir[2], p.max_distance, 0) : null;
+          const best = a && (!bk || a.t <= bk.t) ? a : bk;
+          if (best) { pos = [best.pos[0] - nudges[k][0], best.pos[1] - nudges[k][1], best.pos[2] - nudges[k][2]]; nrm = normalAt(best.tri, best.prim, 1 - best.u - best.v, best.u, best.v); }
+        }
       }
       if (!pos) { miss[i] = 1; hitA[i] = 0; continue; }
       Pd[i * 3] = pos[0] + nrm[0] * p.lift; Pd[i * 3 + 1] = pos[1] + nrm[1] * p.lift; Pd[i * 3 + 2] = pos[2] + nrm[2] * p.lift;

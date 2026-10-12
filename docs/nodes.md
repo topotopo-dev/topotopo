@@ -2,14 +2,14 @@
 
 # Polyforge node reference
 
-153 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+161 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
 - [generate](#generate-nodes): [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
-- [curve](#curve-nodes): [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [curve](#curve) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [line](#line) · [loft](#loft) · [offset_curve](#offset_curve) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
+- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
@@ -368,6 +368,64 @@ None (generator).
 
 ## curve nodes
 
+### bezier
+
+category: `curve` · aliases: `bezier_curve`, `beziercurve`
+
+Bezier curve prim from control points (CVs) and an order; evaluates exactly wherever it is used.
+
+Houdini Curve SOP in Bezier mode (a BezierCurve prim). Segments of `order` CVs share their end CVs: 7 CVs of order 4 make two cubic segments (CVs 0-3 and 3-6); a closed curve wraps back to CV 0 (segments × (order-1) CVs). The CVs are ordinary points: transform, deformers, wrangles and attribute nodes move or edit them, and point attributes (Cd, width, Pw weights) blend along the curve. Nodes that need polylines get the evaluated curve automatically (with a note); convert_curve/resample choose the resolution. With an input, each polyline/polygon (or, without prims, all points in order) becomes a Bezier prim on those points.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | yes | no | optional: polylines/polygons (or ordered points) whose points become CVs |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `points` | json | `[[0,0,0],[0.6,1.2,0],[1.6,1.2,0],[2.2,0,0],[2.8,-1.2,0],[3.8,-1.2,0],[4.4,0,0]]` |  |  | `cvs`, `positions`, `pts` | CVs [[x,y,z], …] when no input is connected (2-number entries → [x, 0, z]) |
+| `order` | int | `4` | 2..11 |  |  | order = degree + 1 (4 = cubic, 3 = quadratic, 2 = linear) |
+| `closed` | bool | `false` |  |  |  | closed curve (wraps back to the first CV; regular with a multiple of order-1 CVs) |
+| `weights` | json | `[]` |  |  |  | rational weight per CV (point attribute Pw; [] = all 1); larger pulls the curve toward the CV |
+
+**Writes:** Bezier prims (prim spline_order; point Pw with weights)
+
+**Example**
+
+```json
+{
+  "type": "bezier",
+  "params": {
+    "points": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        3,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        0
+      ]
+    ],
+    "order": 4
+  }
+}
+```
+
 ### boolean2d
 
 category: `curve` · aliases: `curve_boolean`, `shape_boolean`
@@ -399,7 +457,7 @@ Trim curves to a portion of their length (u range 0..1).
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | polylines |
+| 0 | `curves` | no | no | polylines (Bezier/NURBS curves are evaluated first) |
 
 **Parameters**
 
@@ -430,6 +488,44 @@ None (generator).
 | `arc` | vec2 | `[0,360]` |  |  |  | begin/end angle in degrees (anything < 360 makes an open arc) |
 | `open` | bool | `false` |  |  |  | output an open polyline instead of a closed polygon face |
 
+### convert_curve
+
+category: `curve` · aliases: `convert`, `curve_convert`
+
+Convert curves between polyline, Bezier and NURBS (exact between spline types; fit to pass through points).
+
+Houdini Convert SOP for curves. Spline → polyline evaluates the curve (adaptive by tolerance, or segments per span); closed splines become closed polygons. Bezier ↔ NURBS is exact (multiple knots / blossoming; a short last Bezier segment is degree-elevated). Polyline → spline uses the points as CVs, or with fit passes through them (NURBS: global interpolation; Bezier: smooth cubic segments). Attributes follow (CV blends). Use convert to polyline before nodes that need a specific resolution; others convert automatically.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines, polygons, Bezier or NURBS curves |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `to` | enum | `"polyline"` |  | `polyline`, `bezier`, `nurbs` | `type`, `target` | target type |
+| `order` | int | `4` | 2..11 |  |  | order of curves made from polylines (fit Bezier is always cubic) |
+| `fit` | bool | `false` |  |  | `interpolate` | polylines → spline: pass through the points instead of using them as CVs |
+| `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | knots of NURBS made from polylines (parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns)) |
+| `segments` | int | `0` | 0.. |  | `divisions`, `lod` | to polyline: segments per knot span / Bezier segment; 0 = adaptive (tolerance) |
+| `tolerance` | float | `0` | 0.. |  |  | to polyline: largest chord-to-curve distance; 0 = 1/2000 of each curve's CV box diagonal |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Example**
+
+```json
+{
+  "type": "convert_curve",
+  "params": {
+    "to": "polyline",
+    "tolerance": 0.001
+  }
+}
+```
+
 ### curve
 
 category: `curve` · aliases: `polyline`, `path`, `spline`
@@ -449,9 +545,63 @@ None (generator).
 | `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points |
 | `subdivisions` | int | `8` | 1.. |  |  | smooth: samples per segment |
 
+### curve_attribs
+
+category: `curve` · aliases: `curveu`, `curve_attributes`, `orient_along_curve`, `orientalongcurve`
+
+Write curveu, arclength, tangent, frames (N/up), curvature, segment index and ramps along curves.
+
+Houdini Orient Along Curve plus the measure/attribute parts of Resample. Per point of each curve: curveu (0..1 by arc length), arclength (distance from the start), tangentu (unit tangent), with frame: N = tangent and up = rotation-minimising up (what copy_to_points needs to align copies along the curve; sweep reads up), curvature (1/radius; polylines: circle through the point and its neighbours), segment (index of the edge that starts at the point; splines: knot span / Bezier segment). ramp_attrib evaluates `ramp` at curveu into a float attribute (e.g. width for polywire, pscale for copies). On Bezier/NURBS prims the values are written on the CVs, evaluated on the curve at each CV's natural parameter (Greville abscissa).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines, polygons, Bezier or NURBS curves |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `curveu` | bool | `true` |  |  |  | write point curveu (0..1 by arc length) |
+| `arclength` | bool | `true` |  |  | `length` | write point arclength (distance from the curve start) |
+| `tangent` | bool | `true` |  |  |  | write point tangentu (unit tangent) |
+| `frame` | bool | `false` |  |  | `orient`, `frames` | write point N (= tangent) and up (rotation-minimising), for copy_to_points/sweep |
+| `curvature` | bool | `false` |  |  |  | write point curvature (1/radius) |
+| `segment` | bool | `false` |  |  |  | write point int segment (edge / span index) |
+| `up` | vec3 | `[0,1,0]` |  |  |  | initial up of the frames (point attribute up is not overridden) |
+| `ramp_attrib` | string | `""` |  |  | `attrib`, `name` | float point attribute to fill with ramp(curveu), e.g. "width" ("" = none) |
+| `ramp` | ramp | `[[0,1],[1,1]]` |  |  |  | value along the curve (u 0..1) for ramp_attrib |
+| `ramp_scale` | float | `1` |  |  |  | multiplier of the ramp values |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** point curveu, arclength, tangentu, N + up (frame), curvature, segment, ramp_attrib
+
+**Example**
+
+```json
+{
+  "type": "curve_attribs",
+  "params": {
+    "frame": true,
+    "ramp_attrib": "width",
+    "ramp": [
+      [
+        0,
+        0.3
+      ],
+      [
+        1,
+        0.05
+      ]
+    ]
+  }
+}
+```
+
 ### ends
 
-category: `curve` · aliases: `convert_curve`, `unroll`
+category: `curve` · aliases: `unroll`
 
 Convert between closed polygons and open polylines (unroll outlines / close curves).
 
@@ -459,7 +609,7 @@ Convert between closed polygons and open polylines (unroll outlines / close curv
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | polygons or polylines |
+| 0 | `geo` | no | no | polygons or polylines (Bezier/NURBS curves are evaluated first) |
 
 **Parameters**
 
@@ -513,6 +663,46 @@ Fill closed outlines into faces, cutting holes (even-odd), e.g. text outlines or
 | `rule` | enum | `"EvenOdd"` |  | `EvenOdd`, `NonZero` |  | fill rule for overlapping contours |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane |
 
+### fillet_curve
+
+category: `curve` · aliases: `curve_fillet`, `polyline_fillet`, `polyfillet`
+
+Round, chamfer or Bezier-blend the corners of polylines and polygons (3D, any plane per corner).
+
+Like Houdini's PolyPath/fillet tools for curves (Fillet SOP is for surfaces). Each corner whose turn exceeds angle_min (and whose point is in group) is replaced by an arc of `radius` tangent to both edges (round), a straight cut at the same tangent points (chamfer) or a quadratic Bezier through the corner's handle (bezier). clamp shrinks radii that do not fit between neighbouring corners. Corners of open curves at their ends are never filleted. Attributes are blended from the corner and its neighbours; new points join point group "fillet". Bezier/NURBS input is converted to polylines first (a smooth curve has no corners).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines or polygons |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `radius` | float | `0.2` | 0.. |  | `rad`, `r` | fillet radius (chamfer/bezier: the same tangent points) |
+| `type` | enum | `"round"` |  | `round`, `chamfer`, `bezier` | `shape`, `mode` | corner shape |
+| `segments` | int | `6` | 1.. |  | `divisions` | segments per round/bezier corner |
+| `angle_min` | float | `1` | 0..180 |  |  | leave corners that turn less than this (degrees) |
+| `group` | group (point) | `""` |  |  |  | corner points to fillet ("" = all), e.g. "@P.y>0", "0-4" |
+| `clamp` | bool | `true` |  |  |  | shrink radii that do not fit between neighbouring corners |
+| `radius_attrib` | string | `""` |  |  |  | optional point float attribute multiplying the radius per corner |
+
+**Writes:** point group fillet (new corner points)
+
+**Example**
+
+```json
+{
+  "type": "fillet_curve",
+  "params": {
+    "radius": 0.5,
+    "segments": 8
+  }
+}
+```
+
 ### line
 
 category: `curve`
@@ -553,6 +743,67 @@ Skin a surface through a sequence of curves (in prim order). Curves are resample
 
 **Writes:** vertex uv
 
+### nurbs
+
+category: `curve` · aliases: `nurbs_curve`, `nurbscurve`
+
+NURBS curve prim from control points (CVs), order, knots and weights; or through points with fit.
+
+Houdini Curve SOP in NURBS mode (a NURBCurve prim). Open curves have n + order knots (automatic: clamped, so the curve starts and ends on its end CVs); closed curves are periodic with n + 1 breakpoints. fit:true makes the curve pass through the points (global interpolation; the CVs are computed). The CVs are ordinary points (transform/deform/wrangle move them, attributes blend along the curve); nodes that need polylines get the evaluated curve automatically. With an input, each polyline/polygon (or all points in order) becomes a NURBS prim.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | yes | no | optional: polylines/polygons (or ordered points) whose points become CVs (or are interpolated with fit) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `points` | json | `[[0,0,0],[1,0,1.5],[2.5,0.5,1.5],[3,1,0],[4.5,0.5,-0.5],[5.5,0,0.5]]` |  |  | `cvs`, `positions`, `pts` | CVs [[x,y,z], …] when no input is connected (2-number entries → [x, 0, z]) |
+| `order` | int | `4` | 2..11 |  |  | order = degree + 1 (4 = cubic); lowered when there are fewer CVs |
+| `closed` | bool | `false` |  |  |  | closed (periodic) curve |
+| `knots` | json | `[]` |  |  |  | explicit knots: open n + order non-decreasing values, closed n + 1 breakpoints; [] = automatic |
+| `parameterization` | enum | `"uniform"` |  | `uniform`, `chord`, `centripetal` | `knot_spacing`, `parameterisation` | automatic knot spacing (parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns)) |
+| `weights` | json | `[]` |  |  |  | rational weight per CV (point attribute Pw; [] = all 1) |
+| `fit` | bool | `false` |  |  | `interpolate`, `through_points` | interpolate: the curve passes through the points (CVs computed) instead of using them as CVs |
+
+**Writes:** NURBS prims (prim spline_order, prim float[] knots; point Pw with weights)
+
+**Example**
+
+```json
+{
+  "type": "nurbs",
+  "params": {
+    "points": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        0,
+        2
+      ],
+      [
+        4,
+        0,
+        0
+      ],
+      [
+        6,
+        0,
+        2
+      ]
+    ],
+    "fit": true
+  }
+}
+```
+
 ### offset_curve
 
 category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
@@ -574,6 +825,50 @@ category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
 | `segments` | int | `16` | 3.. |  |  | segments per full circle for round joins |
 | `output` | enum | `"outlines"` |  | `outlines`, `faces` |  | outlines = closed polygons per contour; faces = filled with holes cut |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
+
+### offset_curve_3d
+
+category: `curve` · aliases: `curve_offset`, `offset3d`, `polyoffset`
+
+Offset curves sideways in 3D (rotation-minimising frame or a fixed plane normal): rails, kerbs, parallel paths.
+
+Each edge moves by distance along its side vector up × direction (positive = left when looking down `up` with the curve heading away), where up comes from a rotation-minimising frame started at `up` (point attribute up overrides) or, with frame "plane", is the fixed `up` normal (keeps both rails level on a sloped path). Corners: mitre (sharp; beyond mitre_limit × distance becomes bevel), round or bevel on the outer side; inner corners always meet at the mitre point. lift raises the result along up. both:true writes the -distance offset too (prim int side ±1) — a double rail for sweep. Bezier/NURBS curves are sampled first. offset_curve is the 2D (Clipper) offset of closed shapes in a plane: use it for outlines/insets of flat shapes, this one for open 3D paths.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | polylines/polygons (Bezier/NURBS curves are sampled adaptively) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `distance` | float | `0.25` |  |  | `offset`, `dist`, `width` | side offset (negative = other side) |
+| `lift` | float | `0` |  |  | `height`, `up_offset` | offset along up (e.g. rail height) |
+| `frame` | enum | `"rmf"` |  | `rmf`, `plane` |  | rmf = rotation-minimising frame along each curve; plane = fixed up normal |
+| `up` | vec3 | `[0,1,0]` |  |  | `normal`, `plane_normal` | initial up (rmf) or the plane normal (plane) |
+| `corner` | enum | `"mitre"` |  | `mitre`, `round`, `bevel` | `join`, `miter` | outer corner style |
+| `mitre_limit` | float | `4` | 1.. |  | `miter_limit` | mitres longer than this × distance are bevelled |
+| `round_segments` | int | `4` | 1.. |  |  | segments per 90° of round corners |
+| `both` | bool | `false` |  |  | `both_sides`, `double` | also output the -distance offset (two rails; prim int side = +1 / -1) |
+| `keep_input` | bool | `false` |  |  |  | keep the input curves as well |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** prim int side (+1 / -1) with both
+
+**Example**
+
+```json
+{
+  "type": "offset_curve_3d",
+  "params": {
+    "distance": 0.6,
+    "lift": 1,
+    "both": true
+  }
+}
+```
 
 ### parametric_curve
 
@@ -621,7 +916,7 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | polylines (or polygon edges) |
+| 0 | `curves` | no | no | polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively |
 
 **Parameters**
 
@@ -634,17 +929,63 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 **Writes:** vertex uv; prim groups caps, sides
 
+### project_curve
+
+category: `curve` · aliases: `curve_project`, `ray_curve`, `projectcurve`
+
+Project curves onto a surface or heightfield (along a direction or to the closest point): roads and paths on terrain.
+
+Houdini Ray SOP applied to curves. Optionally resamples each curve by spacing first (splines exactly), so the projected curve follows the surface between the original points. direction mode casts rays (both ways with bidirectional); closest snaps to the nearest surface point. Writes point hit (1/0) and N (surface normal at the hit); misses stay where they are or are deleted. lift raises the result along the normal. Targets: polygons (input 1), or a heightfield (sampled exactly for vertical rays, through its preview mesh otherwise).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `curves` | no | no | curves (or points) to project |
+| 1 | `target` | no | no | surface mesh or heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"direction"` |  | `direction`, `closest` |  | rays along direction, or the closest surface point |
+| `direction` | vec3 | `[0,-1,0]` |  |  | `dir` | ray direction (mode direction) |
+| `bidirectional` | bool | `true` |  |  |  | also cast the opposite direction (the nearer hit wins) |
+| `spacing` | float | `0` | 0.. |  | `resample`, `length` | resample curves to this segment length first (0 = keep the points) |
+| `lift` | float | `0` |  |  |  | offset from the surface along its normal |
+| `max_distance` | float | `1000000000` | 0.. |  |  | ignore hits further than this |
+| `misses` | enum | `"keep"` |  | `keep`, `delete` |  | points without a hit: stay where they are (hit 0) or are deleted |
+| `normals` | bool | `true` |  |  |  | write point N from the surface |
+| `smooth_normals` | bool | `true` |  |  |  | N (and lift) from the interpolated vertex normals of the surface (60° cusp); false = the normal of the hit face |
+| `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** point hit (int), N (surface normal)
+
+**Example**
+
+```json
+{
+  "type": "project_curve",
+  "params": {
+    "spacing": 0.25,
+    "lift": 0.05
+  }
+}
+```
+
 ### resample
 
 category: `curve`
 
 Resample curves (and polygon outlines) to even spacing; optional smoothing. Adds curveu.
 
+Bezier/NURBS prims are sampled on the true curve, evenly by arc length (treat_splines "exact"; their CV attributes are blended with the curve's own basis weights), or along their control polygon ("control_polygon"); either way the result is a polyline.
+
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | polylines or polygons |
+| 0 | `curves` | no | no | polylines, polygons or Bezier/NURBS curves |
 
 **Parameters**
 
@@ -653,9 +994,10 @@ Resample curves (and polygon outlines) to even spacing; optional smoothing. Adds
 | `mode` | enum | `"length"` |  | `length`, `count` |  | segment length or a fixed segment count per curve |
 | `length` | float | `0.1` | 0.000001.. |  | `seglen`, `segment_length` | target segment length |
 | `count` | int | `20` | 1.. |  | `segments` | segments per curve (mode=count) |
-| `smooth` | bool | `false` |  |  |  | Catmull-Rom smooth before resampling |
+| `smooth` | bool | `false` |  |  |  | Catmull-Rom smooth before resampling (polylines) |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 | `tangent` | bool | `false` |  |  |  | also write point tangentu (unit tangent) |
+| `treat_splines` | enum | `"exact"` |  | `exact`, `control_polygon` |  | Bezier/NURBS prims: sample the curve itself by arc length (exact) or their control polygon as a polyline |
 
 **Writes:** point curveu (0..1 along each curve), optional tangentu
 
@@ -730,6 +1072,48 @@ None (generator).
 | `clockwise` | bool | `false` |  |  |  | turn direction when seen from above |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
+### spline_fit
+
+category: `curve` · aliases: `fit_curve`, `curve_fit`, `fitcurve`
+
+Least-squares NURBS through ordered points: smooth noisy polylines, compress dense curves to few CVs.
+
+Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all points in order) is approximated by a B-spline: cv_count CVs, or (cv_count 0) the fewest CVs that keep every point within tolerance (interpolating at worst). Open curves keep their end points. smoothing adds a penalty on the CVs' second differences (0 = none; around 1 irons out noise; larger flattens). Parameters are corrected (re-projected) twice. Output NURBS prims, or polylines sampled from the fit. Writes prim fit_error.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `points` | no | no | polylines/polygons (each fitted), or ordered points without prims (one curve) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `order` | int | `4` | 2..11 |  |  | order of the fitted curve (4 = cubic) |
+| `cv_count` | int | `0` | 0.. |  | `cvs`, `count` | number of CVs; 0 = as few as the tolerance allows |
+| `tolerance` | float | `0.01` | 0.. |  | `tol`, `max_error` | largest allowed distance from a point to the curve (cv_count 0) |
+| `smoothing` | float | `0` | 0.. |  | `smooth` | second-difference penalty on the CVs (0 = none, ~1 smooths noise) |
+| `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns) |
+| `closed` | enum | `"auto"` |  | `auto`, `open`, `closed` |  | auto = as the input prim (open for point clouds) |
+| `output` | enum | `"nurbs"` |  | `nurbs`, `polyline` |  | NURBS prims or polylines sampled from the fit |
+| `segments` | int | `0` | 0.. |  |  | polyline output: segments per knot span; 0 = adaptive (tolerance / 4) |
+| `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Writes:** prim fit_error (largest distance from an input point to the fitted curve)
+
+**Example**
+
+```json
+{
+  "type": "spline_fit",
+  "params": {
+    "tolerance": 0.02,
+    "smoothing": 0.5
+  }
+}
+```
+
 ### sweep
 
 category: `curve`
@@ -740,7 +1124,7 @@ Sweep a cross-section along curves using rotation-minimising frames (tubes, ribb
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `backbone` | no | no | curves to sweep along |
+| 0 | `backbone` | no | no | curves to sweep along (Bezier/NURBS curves are sampled adaptively) |
 | 1 | `profile` | yes | no | cross-section curve drawn in the XY plane (optional; one per backbone or a single shared one) |
 
 **Parameters**

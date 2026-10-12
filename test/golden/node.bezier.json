@@ -1,0 +1,44 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["knots:float[]:1", "spline_order:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [4.4, 1.2, 0],
+      "min": [0, -1.2, 0]
+    },
+    "counts": {
+      "points": 7,
+      "prims": 1,
+      "vertices": 7,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "8254e8fa18bcb75c",
+      "attributes": {
+        "prim.knots": "3c3fe767723a671d",
+        "prim.spline_order": "265bf4e19742f21b"
+      },
+      "topology": "ef11f4c13f8a499b"
+    },
+    "splines": {
+      "bezier": 1,
+      "hash": "242bd747a9151f9d",
+      "nurbs": 0
+    }
+  },
+  "name": "node.bezier",
+  "ok": true,
+  "source": "fixture for node type \"bezier\" (test/fixtures.ts)",
+  "warnings": []
+}

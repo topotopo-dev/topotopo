@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3", "curveu:float:1", "hit:int:1"],
+      "prim": ["copynum:int:1", "side:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [13.0768, 4, 9],
+      "min": [-13.1196, -0.2429, -9]
+    },
+    "counts": {
+      "points": 4357,
+      "prims": 4136,
+      "vertices": 16240,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": ["fillet"],
+      "prim": ["caps", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "a46352a87fcd1c42",
+      "attributes": {
+        "group.point.fillet": "ac3b19d0b36b847a",
+        "group.prim.caps": "f43960056844c367",
+        "group.prim.sides": "2e6b7d6d9db6fbcf",
+        "point.Cd": "3c895ba69ceeeee8",
+        "point.curveu": "9432c625e11eb39f",
+        "point.hit": "b0bbaa25d63d561f",
+        "prim.copynum": "8e8b1c4587283e1f",
+        "prim.side": "ac986415a7a2bc2f",
+        "vertex.uv": "de67096de6c7a787"
+      },
+      "topology": "1be7d7cb6d1429ed"
+    }
+  },
+  "name": "example.splines",
+  "ok": true,
+  "source": "examples/splines.json",
+  "warnings": []
+}

@@ -37,6 +37,8 @@ src/core/      geometry model + algorithms (no I/O)
   geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF and heightfield volumes,
                  packed prims), GeoBuilder
   packed.ts      packed primitives: expansion (unpack, auto-unpack, render budget), transform composition, statistics
+  splines.ts     Bezier/NURBS curve prims: de Casteljau/de Boor evaluation, derivatives, arc length, closest point,
+                 adaptive polylines, exact Bezier ⇄ NURBS conversion, interpolation and least-squares fitting
   geohash.ts     content hash of a geometry (deduplicates packed sources)
   heightfield.ts heightfield volumes: grid + named layers, bilinear sampling, blur, distance transforms, rasterising meshes/curves, to-mesh, render preview
   erosion.ts     erodeStep: droplet hydraulic + thermal erosion over typed arrays (the WASM-replaceable kernel)
@@ -118,6 +120,27 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   through `Geometry.merge` in instance order, transforms P/N/v/up/orient per instance and copies anchor attributes
   where the source has none. The renderer expands within a triangle budget (an evenly spread subset beyond it); glTF
   writes `EXT_mesh_gpu_instancing`, USD a `PointInstancer`; formats without instancing expand.
+- **Spline primitives** are the prim kinds 2 (Bezier curve) and 3 (NURBS curve) in the same `primKind` array as packed
+  prims (Houdini's BezierCurve / NURBCurve). The prim's vertices are its control points (CVs) in order and `primClosed`
+  says whether the curve is closed; everything else is ordinary attributes, so it survives every generic operation:
+  the order (degree + 1) is the prim int `spline_order` (default 4), a NURBS knot vector the prim `float[]` `knots`
+  (open: n + order knots, clamped by default; closed: periodic, n + 1 breakpoints), rational weights the point float `Pw`
+  (default 1). Bezier curves are Houdini-style segments of `order` CVs that share their end CVs (7 CVs of order 4 = two
+  cubic segments). Spline prims have packedSource −1 and an identity packedXform, and code must test packed prims with
+  `primKind[p] === 1` (`isPacked`), never by truthiness. Clone, merge, subsets and `gatherPacked` keep the kinds;
+  `GeoBuilder` does not (a prim it builds from a spline prim is a polygon/polyline, so resampling or offsetting nodes
+  produce plain curves). Evaluation lives in `core/splines.ts`: de Casteljau per Bezier segment, de Boor in homogeneous
+  coordinates for NURBS, basis derivatives for tangents and curvature, Gauss–Legendre arc length per span, Newton closest
+  points, and polylines by adaptive subdivision (each chord within a tolerance, default 1/2000 of the CV box diagonal).
+  A knot vector that no longer fits (a CV deleted) is replaced by a uniform one with a note rather than failing.
+  A `NodeDef` declares `splines: 'keep'` when it handles spline prims; by default nodes that keep packed prims also keep
+  splines (they move points or edit attributes and groups, so transform and deformers move CVs exactly as Houdini does),
+  and the curve nodes that sample curves themselves (resample exactly by arc length, carve, ends, sweep, polywire, the
+  spline toolkit) keep them too. For every other node the engine converts spline prims to polylines before cooking,
+  cached under the input signature, with one warning — the same hook as the packed auto-unpack, chosen over a separate
+  mechanism so a node has one place that says what geometry it accepts. The renderer draws splines as their polylines
+  (inside `expandForRender`), exporters write them as polylines with a note (`json` keeps them losslessly; `.geo` writes
+  `PolygonCurve_run`, not NURBCurve/BezierCurve), and summaries name them ("2 Bezier curves").
 - **SDF volumes** travel inside the geometry as lazy sample functions, so implicit modelling composes like any other node.
 - **Heightfield volumes** are the second volume kind (`Volume = SdfVolume | HeightfieldVolume`, `core/heightfield.ts`),
   Houdini's terrain model: a regular grid of samples in the XZ plane, Y up, with named `Float32Array` layers (`height`
@@ -299,7 +322,9 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
 - PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
 - Heightfields (done in P2-C: 23 nodes, erosion, Unreal heightmap export). Next: a grid (pipe-model) erosion variant
   and the WASM erosion kernel behind `erodeStep`, heightfield tiles, and Unreal weight-layer import presets.
-- Curve toolkit: NURBS/Bezier evaluation, fillet, curve booleans, path offset in 3D.
+- Curve toolkit: Bezier/NURBS prims, fillet, 3D offset, spline fit, projection and curve attributes are in (P2-D).
+  Still open: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
+  bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Performance: move hot kernels (sdf sampling, rasteriser, subdivide) to Workers, WebGPU or WASM; add multithreaded cooking of
   independent branches.
 - Optional CAD context: an OpenCascade/replicad module for B-rep fillets and STEP export.
