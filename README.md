@@ -1,17 +1,18 @@
 # Polyforge
 
-A procedural geometry engine in the spirit of Houdini SOPs. You build JSON node graphs; the engine cooks them into
-geometry. It runs headless (Node + WebAssembly, no GPU) and plugs into LLM agents as an **MCP server**. The core is
-browser-ready, so it can sit under a future GUI.
+A procedural geometry engine: Houdini-style node graphs, headless, deterministic, exports to Unreal, Blender and
+Houdini. You build JSON node graphs; the engine cooks them into geometry. It runs on Node and WebAssembly with no
+GPU, every cook is reproducible from the graph and its seeds, and the core is browser-ready.
 
 - **over 100 node types**: generators, curves and sweeps, deformers, attributes and groups, polygon modelling, scattering and
   instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit, heightfield terrain (masks, hydraulic and
   thermal erosion, roads, scattering), L-systems, text, loops, a frame solver, assets, and code nodes.
 - **Time**: every cook happens at a frame. Only time-dependent nodes re-cook when the frame changes, and the `solver`
   node advances a simulation frame by frame from its cached previous state.
-- **Built for agents**: one-call graph builds, did-you-mean validation, text summaries, a multi-view **render** the
-  model can look at, incremental edits with content-hash caching, and JS escape hatches (`wrangle` with `@P` syntax,
-  `script`, `sdf_expr`).
+- **Agent and MCP support**: Polyforge ships an MCP server, so LLM agents can build graphs in one call, read text
+  summaries, look at a multi-view **render**, edit incrementally with content-hash caching, and verify their work with
+  `assert`, `explain` and `diff`. JS escape hatches (`wrangle` with `@P` syntax, `script`, `sdf_expr`) cover what the
+  node library does not.
 - **Pipeline output**: glTF/GLB through gltf-transform (materials from the `material` node, vertex colours, uv,
   custom attributes, polylines and points; optional meshopt compression and quantization), Houdini `.geo` (every
   attribute and group), CSV point streams with Unreal PCG columns, points JSON, OBJ, USDA, PLY, STL and lossless JSON,
@@ -234,3 +235,8 @@ CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test` on Node 
 the node library. The renderer is in `src/render`, import/export in `src/io`, and the MCP server, tools and docs in
 `src/mcp`. `src/viewer` has the live preview, and `src/host` the Node host (sandbox, files, fonts). The structure is
 described in [docs/DESIGN.md](docs/DESIGN.md).
+
+## Licence
+
+Apache-2.0 (see [LICENSE](LICENSE)). Third-party components and their licence texts are listed in [NOTICE](NOTICE).
+Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md).
