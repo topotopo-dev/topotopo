@@ -21,6 +21,13 @@
 // World transform of the instance = translate(P[anchor]) · packedXform. primClosed is 0 for packed prims. The three
 // per-prim arrays are allocated lazily (absent = no packed prims) and travel with clone, merge, subsets and GeoBuilder.
 //
+// Spline primitives (see splines.ts): primKind 2 = Bezier curve, 3 = NURBS curve. The prim's vertices are its control
+// points (CVs) in order, primClosed says whether the curve is closed; the order (degree + 1) is the prim int attribute
+// "spline_order", a NURBS knot vector the prim float[] attribute "knots", rational weights the point attribute "Pw"
+// (default 1). Spline prims have packedSource -1 and an identity packedXform. Clone, merge and subsets keep the kind;
+// GeoBuilder does not (a prim built from a spline prim is a new polygon/polyline). Test packed prims with
+// `primKind[p] === 1` (isPacked), never by truthiness.
+//
 // Cooked geometry is treated as immutable: nodes clone() before modifying. Packed sources are never modified.
 import type { Mat4, Vec3 } from './math.ts';
 import { EdgeSet, EDGE_KEY_LIMIT } from './edges.ts';
@@ -84,7 +91,7 @@ export function defaultValueFor(name: string, size: number, type: AttribType): n
   const ones = (n: number) => new Array(n).fill(1);
   switch (name) {
     case 'Cd': case 'scale': return ones(size);
-    case 'Alpha': case 'pscale': case 'density': case 'mass': return ones(size);
+    case 'Alpha': case 'pscale': case 'density': case 'mass': case 'Pw': return ones(size);
     case 'orient': case 'rot': return size === 4 ? [0, 0, 0, 1] : new Array(size).fill(0);
     case 'up': return size === 3 ? [0, 1, 0] : new Array(size).fill(0);
     default: return new Array(size).fill(0);
@@ -449,7 +456,10 @@ export class Geometry {
   // Object.create(Geometry.prototype) (fast paths in nodes) never sees them undefined.
   private _vertexGroups?: Map<string, Uint8Array>;
   private _edgeGroups?: Map<string, EdgeSet>;
-  /** Packed prims: 1 = packed instance, 0 = polygon/polyline (see the file comment). Absent = no packed prims. */
+  /**
+   * Prim kinds: 0 = polygon/polyline, 1 = packed instance, 2 = Bezier curve, 3 = NURBS curve (see the file comment).
+   * Absent = every prim is a polygon/polyline.
+   */
   primKind?: Uint8Array;
   /** Packed prims: index into packedSources per prim (-1 for other prims). Allocated with primKind. */
   packedSource?: Int32Array;
@@ -624,11 +634,38 @@ export class Geometry {
     const k = this.primKind;
     if (!k) return 0;
     let n = 0;
-    for (let i = 0; i < k.length; i++) n += k[i];
+    for (let i = 0; i < k.length; i++) if (k[i] === 1) n++;
     return n;
   }
 
-  /** Allocate the packed per-prim arrays (no packed prims yet) if absent, or pad them after prims were appended. */
+  // ------------------------------------------------------------ spline primitives (kinds 2 and 3, see splines.ts)
+
+  /** True when at least one prim is a Bezier or NURBS curve. */
+  hasSplines(): boolean {
+    const k = this.primKind;
+    if (!k) return false;
+    for (let i = 0; i < k.length; i++) if (k[i] >= 2) return true;
+    return false;
+  }
+
+  /** Is prim p a Bezier or NURBS curve? */
+  isSpline(p: number): boolean {
+    return this.primKind !== undefined && this.primKind[p] >= 2;
+  }
+
+  /** Number of Bezier and NURBS prims. */
+  get numSplines(): number {
+    const k = this.primKind;
+    if (!k) return 0;
+    let n = 0;
+    for (let i = 0; i < k.length; i++) if (k[i] >= 2) n++;
+    return n;
+  }
+
+  /**
+   * Allocate the per-prim kind arrays (primKind, packedSource, packedXform; every prim a polygon/polyline) if absent, or
+   * pad them after prims were appended. Needed before setting a packed or spline kind.
+   */
   ensurePacked(): this {
     const n = this.numPrims;
     if (this.primKind && this.primKind.length === n) return this;
@@ -646,7 +683,7 @@ export class Geometry {
     return this;
   }
 
-  /** Drop all packed bookkeeping (call after removing every packed prim by hand). */
+  /** Drop all prim-kind bookkeeping, spline kinds included (call after removing every packed/spline prim by hand). */
   clearPacked(): this {
     this.primKind = undefined;
     this.packedSource = undefined;
@@ -682,8 +719,9 @@ export class Geometry {
   }
 
   /**
-   * Set this geometry's packed arrays to src's, gathered by prim index (primIdx[i] = source prim of prim i, -1 = not
-   * packed), and drop sources no prim uses any more. Used by subsets and by nodes that reorder prims.
+   * Set this geometry's prim-kind arrays to src's, gathered by prim index (primIdx[i] = source prim of prim i, -1 = a
+   * polygon/polyline), and drop packed sources no prim uses any more. Spline kinds are gathered too. Used by subsets and
+   * by nodes that reorder prims.
    */
   gatherPacked(src: Geometry, primIdx: ArrayLike<number>): this {
     if (!src.primKind) { this.clearPacked(); return this; }
@@ -692,10 +730,13 @@ export class Geometry {
     const sk = src.primKind, ss = src.packedSource!, sx = src.packedXform!;
     for (let i = 0; i < n; i++) {
       const j = primIdx[i];
-      if (j >= 0 && sk[j]) {
+      if (j >= 0 && sk[j] === 1) {
         kind[i] = 1; s[i] = ss[j];
         for (let c = 0; c < 9; c++) X[i * 9 + c] = sx[j * 9 + c];
-      } else { s[i] = -1; X[i * 9] = 1; X[i * 9 + 4] = 1; X[i * 9 + 8] = 1; }
+      } else {
+        if (j >= 0 && sk[j] >= 2) kind[i] = sk[j];
+        s[i] = -1; X[i * 9] = 1; X[i * 9 + 4] = 1; X[i * 9 + 8] = 1;
+      }
     }
     this.primKind = kind;
     this.packedSource = s;
@@ -704,7 +745,10 @@ export class Geometry {
     return this.compactPackedSources();
   }
 
-  /** Renumber packed sources to the ones in use (first-use order kept); clears the packed arrays when none is left. */
+  /**
+   * Renumber packed sources to the ones in use (first-use order kept); clears the kind arrays when no packed or spline
+   * prim is left.
+   */
   compactPackedSources(): this {
     const kind = this.primKind;
     if (!kind) return this;
@@ -713,14 +757,18 @@ export class Geometry {
     const used: Geometry[] = [];
     let identity = true;
     for (let p = 0; p < kind.length; p++) {
-      if (!kind[p]) continue;
+      if (kind[p] !== 1) continue;
       const i = S[p];
       if (remap[i] < 0) { remap[i] = used.length; used.push(list[i]); }
       if (remap[i] !== i) identity = false;
     }
-    if (!used.length) return this.clearPacked();
+    if (!used.length) {
+      if (!this.hasSplines()) return this.clearPacked();
+      this._packedSources = undefined;
+      return this;
+    }
     if (identity && used.length === list.length) return this;
-    for (let p = 0; p < kind.length; p++) if (kind[p]) S[p] = remap[S[p]];
+    for (let p = 0; p < kind.length; p++) if (kind[p] === 1) S[p] = remap[S[p]];
     this.packedSources = used;
     return this;
   }
@@ -738,7 +786,7 @@ export class Geometry {
       let missing = 0;
       for (let v = s; v < e; v++) if (!keep[v]) missing++;
       if (missing && this.primClosed[p]) continue;
-      if (e - s - missing < (this.primClosed[p] || (kind && kind[p]) ? 1 : 2)) continue;
+      if (e - s - missing < (this.primClosed[p] || (kind && kind[p] === 1) ? 1 : 2)) continue;
       primIdx.push(p);
       for (let v = s; v < e; v++) if (keep[v]) vtxIdx.push(v);
       starts.push(vtxIdx.length);
@@ -803,7 +851,7 @@ export class Geometry {
       let missing = 0;
       for (let v = s; v < e; v++) if (remap[this.vertexPoint[v]] < 0) missing++;
       if (missing && this.primClosed[p]) continue;
-      if (e - s - missing < (this.primClosed[p] || (kind && kind[p]) ? 1 : 2)) continue;
+      if (e - s - missing < (this.primClosed[p] || (kind && kind[p] === 1) ? 1 : 2)) continue;
       primIdx.push(p);
       for (let v = s; v < e; v++) if (remap[this.vertexPoint[v]] >= 0) vtxIdx.push(v);
       starts.push(vtxIdx.length);
@@ -891,7 +939,8 @@ function mergePacked(out: Geometry, geos: Geometry[]) {
       const gk = g.primKind, gs = g.packedSource!, gx = g.packedXform!;
       for (let p = 0; p < gk.length; p++) {
         if (!gk[p]) continue;
-        kind[o + p] = 1;
+        kind[o + p] = gk[p];
+        if (gk[p] !== 1) continue; // spline kinds: nothing else to carry
         S[o + p] = map[gs[p]];
         X.set(gx.subarray(p * 9, p * 9 + 9), (o + p) * 9);
       }
@@ -909,7 +958,7 @@ export function packedAnchorOnly(g: Geometry): Uint8Array {
   if (!kind) return out;
   const other = new Uint8Array(np);
   for (let p = 0; p < g.numPrims; p++) {
-    const flag = kind[p] ? out : other;
+    const flag = kind[p] === 1 ? out : other;
     for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) flag[g.vertexPoint[v]] = 1;
   }
   for (let i = 0; i < np; i++) if (other[i]) out[i] = 0;
@@ -928,7 +977,7 @@ function packedBounds(g: Geometry, includeVolumes: boolean, min: Vec3, max: Vec3
     return c[k] ?? (c[k] = src.bbox(includeVolumes));
   });
   for (let p = 0; p < kind.length; p++) {
-    if (!kind[p] || g.primStart[p + 1] === g.primStart[p]) continue;
+    if (kind[p] !== 1 || g.primStart[p + 1] === g.primStart[p]) continue;
     const b = boxes[S[p]];
     if (!b || b.empty) continue;
     const a = g.vertexPoint[g.primStart[p]], o = p * 9;
@@ -1291,7 +1340,7 @@ export class GeoBuilder {
       const idx = new Int32Array(npr);
       for (let p = 0; p < npr; p++) {
         const s = this.primSrc[p];
-        idx[p] = s >= 0 && s < src.primKind.length && src.primKind[s] && this.starts[p + 1] - this.starts[p] === 1 ? s : -1;
+        idx[p] = s >= 0 && s < src.primKind.length && src.primKind[s] === 1 && this.starts[p + 1] - this.starts[p] === 1 ? s : -1;
       }
       g.gatherPacked(src, idx);
     }
