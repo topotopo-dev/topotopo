@@ -12,11 +12,24 @@
 //                the older "run" (runtype Poly, varyingfields, uniformfields) and per-prim "Poly" (vertex, closed) too.
 //   pointgroups / primitivegroups / vertexgroups → [[name], [selection: [unordered: bit array | ordered: indices]]]
 //   edgegroups → [[name], [points: [a0, b0, a1, b1, …]]]
+//   sharedprimitivedata → [primtype, [sharedtype, key, data], primtype, [...], …]: data shared by several prims, stored
+//                once (Houdini writes volume voxels this way: "Volume", ["geo:voxels", "voxels:<id>", tiles]).
+//
+// Packed prims (instancing 'packed', the default) are written as Houdini PackedGeometry prims with embedded geometry:
+//   [["type", "PackedGeometry"], ["vertex", v, "transform", [9 numbers], "pivot", [0, 0, 0],
+//     "parameters", {"embedded": "<key>", "pivot": [0, 0, 0], "viewportlod": "full"}]]
+// and each packed source once in sharedprimitivedata as "PackedGeometry", ["geo:embedded", "<key>", <its .geo array>]
+// (nested instances expanded). The 3×3 is Houdini's row-vector matrix in row order, which is polyforge's column-major
+// packedXform as it is; the anchor point P is the instance position. This mirrors how Houdini stores shared volume
+// voxels; the exact key names Houdini uses for embedded packed geometry are not confirmed (verify in Houdini), so the
+// reader accepts any parameter that names a shared geometry, a flat or nested 3×3 / 4×4 transform and a pivot.
+// instancing 'expand' writes real geometry instead (the safe path for other readers).
 //
 // Written: every attribute (float as fpreal64 by default or fpreal32, int as int32, strings via the string table)
 // and every group, polygons as Polygon_run and polylines as PolygonCurve_run (open polygons), in Houdini's own
-// rawpagedata layout. Read: the same, plus the alternatives above. Prims of other types (volumes/VDB, packed,
-// spheres, NURBS…) are skipped with a warning.
+// rawpagedata layout, packed prims as above. Read: the same, plus the alternatives above; packed prims become packed
+// prims again (PackedDisk / Alembic references and other prim types — volumes/VDB, spheres, NURBS… — are skipped
+// with a warning).
 // Uncompressed binary .bgeo (Houdini's binary JSON encoding of the same tree) is read too; .bgeo.sc (Blosc) is not.
 //
 // Winding: Houdini polygons wind clockwise seen from the front (left-hand rule), polyforge counter-clockwise (like
@@ -29,6 +42,7 @@ import { materialBasename } from '../core/materials.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { expandForExport } from './common.ts';
 import type { ExportOptions } from './common.ts';
+import { flattenSource } from '../core/packed.ts';
 
 const PAGE = 1024;
 
@@ -106,15 +120,43 @@ function rle(counts: number[]): number[] {
 
 /** Serialise to Houdini .geo JSON text. Positions are written as they are (Houdini is Y-up metres too). */
 export function exportHoudiniGeo(g: Geometry, o: ExportOptions = {}): string {
-  g = expandForExport(g, o, 'geo');
+  return JSON.stringify(houdiniGeoJSON(g, o));
+}
+
+/** The .geo tree (a key/value array) of g; packed prims become PackedGeometry with shared embedded geometry. */
+function houdiniGeoJSON(g: Geometry, o: ExportOptions): any[] {
+  const keepPacked = g.hasPacked() && o.instancing !== 'expand';
+  if (!keepPacked) g = expandForExport(g, o, 'geo');
   const prec: 32 | 64 = o.precision === 32 ? 32 : 64;
   const bb = g.bbox();
   const prims: any[] = [];
+  const kind = keepPacked ? g.primKind! : null;
+  const isPacked = (p: number) => !!kind && kind[p] === 1 && g.primStart[p + 1] - g.primStart[p] === 1;
+  // shared embedded geometry: one entry per packed source in use
+  const keys: string[] = [];
+  const shared: any[] = [];
+  const keyOf = (s: number) => {
+    if (keys[s] === undefined) {
+      keys[s] = `embedded:${s.toString(16).padStart(16, '0')}`;
+      shared.push('PackedGeometry', ['geo:embedded', keys[s], houdiniGeoJSON(flattenSource(g.packedSources[s]), { ...o, instancing: 'expand', warn: undefined })]);
+    }
+    return keys[s];
+  };
+  let nPacked = 0;
   for (let p = 0; p < g.numPrims;) {
+    if (isPacked(p)) {
+      const X = g.packedXform!, xo = p * 9;
+      const t = Array.from({ length: 9 }, (_, k) => X[xo + k]);
+      prims.push([['type', 'PackedGeometry'], ['vertex', g.primStart[p], 'transform', t, 'pivot', [0, 0, 0],
+        'parameters', { embedded: keyOf(g.packedSource![p]), pivot: [0, 0, 0], viewportlod: 'full' }]]);
+      nPacked++;
+      p++;
+      continue;
+    }
     const closed = g.primClosed[p];
     const start = p;
     const counts: number[] = [];
-    while (p < g.numPrims && g.primClosed[p] === closed) { counts.push(g.primSize(p)); p++; }
+    while (p < g.numPrims && g.primClosed[p] === closed && !isPacked(p)) { counts.push(g.primSize(p)); p++; }
     prims.push([['type', closed ? 'Polygon_run' : 'PolygonCurve_run'], ['startvertex', g.primStart[start], 'nprimitives', counts.length, 'nvertices_rle', rle(counts)]]);
   }
   // file vertex k ← our vertex fileVtx[k] (closed polygons reversed, first vertex kept)
@@ -129,8 +171,8 @@ export function exportHoudiniGeo(g: Geometry, o: ExportOptions = {}): string {
   add('pointattributes', g.points);
   add('primitiveattributes', g.prims);
   add('globalattributes', g.detail);
-  const nPolys = g.primClosed.reduce((s, c) => s + c, 0), nCurves = g.numPrims - nPolys;
-  const summary = [nPolys ? `${nPolys} Polygons` : '', nCurves ? `${nCurves} Polygon Curves` : ''].filter(Boolean).join('\n');
+  const nPolys = g.primClosed.reduce((s, c) => s + c, 0), nCurves = g.numPrims - nPolys - nPacked;
+  const summary = [nPolys ? `${nPolys} Polygons` : '', nCurves ? `${nCurves} Polygon Curves` : '', nPacked ? `${nPacked} Packed Geos` : ''].filter(Boolean).join('\n');
   const out: any[] = [
     'fileversion', '20.0.0', 'hasindex', false,
     'pointcount', g.numPoints, 'vertexcount', g.numVertices, 'primitivecount', g.numPrims,
@@ -139,13 +181,14 @@ export function exportHoudiniGeo(g: Geometry, o: ExportOptions = {}): string {
     'attributes', attributes,
     'primitives', prims,
   ];
+  if (shared.length) out.push('sharedprimitivedata', shared); // after primitives, where Houdini writes it
   if (g.pointGroups.size) out.push('pointgroups', groupsJSON(g.pointGroups));
   if (g.primGroups.size) out.push('primitivegroups', groupsJSON(g.primGroups));
   const vg = (g as any).vertexGroups as GroupMap | undefined;
   if (vg && vg.size) out.push('vertexgroups', groupsJSON(new Map([...vg].map(([k, m]) => [k, Uint8Array.from(fileVtx, (v) => m[v])]))));
   const eg = (g as any).edgeGroups as Map<string, any> | undefined;
   if (eg && eg.size) out.push('edgegroups', [...eg].map(([name, e]) => [['name', name], ['points', edgePairs(e)]]));
-  return JSON.stringify(out);
+  return out;
 }
 
 // ------------------------------------------------------------------ read
@@ -253,10 +296,16 @@ function readGroup(entry: any, n: number): { name: string; mask: Uint8Array } | 
   return { name, mask };
 }
 
-/** Per-prim vertex lists (file vertex numbers) or null for skipped prims. */
-function readPrims(list: any[], warn: (m: string) => void): { prims: (number[] | null)[]; closed: boolean[] } {
+interface PackedRef { index: number; params: Record<string, any>; body: Record<string, any> }
+
+/** Packed prim types holding embedded geometry; others (PackedDisk, AlembicRef, …) are references we cannot follow. */
+const PACKED_EMBEDDED = new Set(['PackedGeometry', 'PackedFragment', 'PackedSharedData']);
+
+/** Per-prim vertex lists (file vertex numbers) or null for skipped prims; packed prims listed in `packed`. */
+function readPrims(list: any[], warn: (m: string) => void): { prims: (number[] | null)[]; closed: boolean[]; packed: PackedRef[] } {
   const prims: (number[] | null)[] = [];
   const closed: boolean[] = [];
+  const packed: PackedRef[] = [];
   const skipped = new Map<string, number>();
   const push = (verts: number[] | null, c: boolean) => { prims.push(verts); closed.push(c); };
   for (const entry of list ?? []) {
@@ -264,7 +313,13 @@ function readPrims(list: any[], warn: (m: string) => void): { prims: (number[] |
     const h = kv(entry[0]);
     const type = String(h.type ?? '');
     const body = entry[1];
-    if (type === 'Polygon_run' || type === 'p_r' || type === 'PolygonCurve_run' || type === 'c_r') {
+    if (PACKED_EMBEDDED.has(type)) {
+      const b = kv(body);
+      const v = Array.isArray(b.vertex) ? b.vertex[0] : b.vertex;
+      if (typeof v !== 'number' && typeof v !== 'string') { skipped.set(type, (skipped.get(type) ?? 0) + 1); push(null, false); continue; }
+      packed.push({ index: prims.length, params: kv(b.parameters), body: b });
+      push([Number(v)], false);
+    } else if (type === 'Polygon_run' || type === 'p_r' || type === 'PolygonCurve_run' || type === 'c_r') {
       const b = kv(body);
       const start = +(b.startvertex ?? b.s_v ?? 0), n = +(b.nprimitives ?? b.n_p ?? 0);
       let counts: number[] = [];
@@ -295,8 +350,29 @@ function readPrims(list: any[], warn: (m: string) => void): { prims: (number[] |
       push(null, false);
     }
   }
-  for (const [t, n] of skipped) warn(`skipped ${n} ${t} primitive${n > 1 ? 's' : ''}${/volume|vdb/i.test(t) ? ' (volumes/SDFs are not imported)' : ' (only polygons and polylines are imported)'}`);
-  return { prims, closed };
+  for (const [t, n] of skipped) warn(`skipped ${n} ${t} primitive${n > 1 ? 's' : ''}${/volume|vdb/i.test(t) ? ' (volumes/SDFs are not imported)' : /packed|alembic/i.test(t) ? ' (packed disk / Alembic references are not imported; unpack them or save embedded geometry)' : ' (only polygons, polylines and embedded packed geometry are imported)'}`);
+  return { prims, closed, packed };
+}
+
+/** sharedprimitivedata → key → data (the [primtype, [sharedtype, key, data], …] list, or a map). */
+function sharedData(x: any): Map<string, any> {
+  const out = new Map<string, any>();
+  const add = (e: any) => { if (Array.isArray(e) && e.length >= 3 && typeof e[1] === 'string') out.set(e[1], e[2]); };
+  if (Array.isArray(x)) for (const e of x) { if (Array.isArray(e)) add(e); }
+  else if (x && typeof x === 'object') for (const v of Object.values(x)) { if (Array.isArray(v) && Array.isArray(v[0])) v.forEach(add); else add(v); }
+  return out;
+}
+
+/** True for a value that looks like a .geo tree (key/value array or object with pointcount). */
+const isGeoTree = (x: any) => { const o = kv(x); return o.pointcount !== undefined || o.topology !== undefined; };
+
+/** A 3×3 (polyforge column-major = Houdini row-major) from a flat 9 / 16 list or nested rows; null if unreadable. */
+function matrix3(x: any): number[] | null {
+  if (!Array.isArray(x)) return null;
+  const f: number[] = (Array.isArray(x[0]) ? x.flat() : x).map(Number);
+  if (f.length === 9 && f.every(Number.isFinite)) return f;
+  if (f.length === 16 && f.every(Number.isFinite)) return [f[0], f[1], f[2], f[4], f[5], f[6], f[8], f[9], f[10]];
+  return null;
 }
 
 // ------------------------------------------------------------------ binary JSON (.bgeo)
@@ -371,7 +447,8 @@ export function decodeBinaryJSON(b: Uint8Array): any {
             return a;
           }
           const a: any[] = new Array(n);
-          for (let i = 0; i < n; i++) a[i] = scalar(et);
+          // uniform arrays of strings (0x27) or token references (0x26) occur in shared primitive data
+          for (let i = 0; i < n; i++) a[i] = et === 0x27 ? str() : et === 0x26 ? tokens.get(len()) ?? '' : scalar(et);
           return a;
         }
         default: return scalar(t);
@@ -392,7 +469,37 @@ export function importHoudiniGeo(src: string | any, warn: (m: string) => void = 
   const np = +(root.pointcount ?? 0), nvFile = +(root.vertexcount ?? 0), nprFile = +(root.primitivecount ?? 0);
   const pointref = kv(kv(root.topology).pointref);
   const vpFile = readValues(['rawpagedata', Array.isArray(pointref.indices) ? pointref.indices : []], nvFile, 1);
-  const { prims: primList, closed: closedList } = readPrims(Array.isArray(root.primitives) ? root.primitives : [], warn);
+  const { prims: primList, closed: closedList, packed } = readPrims(Array.isArray(root.primitives) ? root.primitives : [], warn);
+  // packed prims: resolve their embedded geometry (shared data) before the topology is built; unresolved ones drop out
+  const shared = packed.length ? sharedData(root.sharedprimitivedata) : new Map<string, any>();
+  const sources = new Map<string, Geometry>();
+  const packedInfo = new Map<number, { src: Geometry; X: number[] }>();
+  let unresolved = 0;
+  for (const pk of packed) {
+    let key: string | null = null;
+    for (const v of [...Object.values(pk.params), ...Object.values(pk.body)]) if (typeof v === 'string' && shared.has(v) && isGeoTree(shared.get(v))) { key = v; break; }
+    const embedded = key === null ? [pk.params.geometry, pk.body.geometry, pk.params.embedded, pk.body.embedded].find(isGeoTree) : null;
+    if (key === null && !embedded) { unresolved++; primList[pk.index] = null; continue; }
+    const cacheKey = key ?? `inline:${pk.index}`;
+    let src = sources.get(cacheKey);
+    if (!src) { src = importHoudiniGeo(key !== null ? shared.get(key) : embedded, warn); sources.set(cacheKey, src); }
+    const X = matrix3(pk.body.transform) ?? matrix3(pk.params.transform) ?? [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    const pv = (Array.isArray(pk.body.pivot) ? pk.body.pivot : Array.isArray(pk.params.pivot) ? pk.params.pivot : [0, 0, 0]).map(Number);
+    if (pv.some((x: number) => x !== 0 && Number.isFinite(x))) {
+      // Houdini: world = T(P) · X · T(-pivot) · source  →  a source moved by -pivot (one copy per pivot)
+      const pk2 = `${cacheKey}@${pv.join(',')}`;
+      let moved = sources.get(pk2);
+      if (!moved) {
+        moved = src.clone();
+        const P = moved.P;
+        for (let i = 0; i < P.length; i += 3) { P[i] -= pv[0]; P[i + 1] -= pv[1]; P[i + 2] -= pv[2]; }
+        sources.set(pk2, moved);
+      }
+      src = moved;
+    }
+    packedInfo.set(pk.index, { src, X });
+  }
+  if (unresolved) warn(`skipped ${unresolved} packed primitive${unresolved > 1 ? 's' : ''} whose embedded geometry was not found in sharedprimitivedata`);
   if (primList.length !== nprFile && nprFile) warn(`primitivecount ${nprFile} but ${primList.length} primitives read`);
   // kept prims and their vertices (file numbering → ours)
   const keptPrims: number[] = [], vtxSrc: number[] = [], starts: number[] = [0], closed: number[] = [];
@@ -433,6 +540,16 @@ export function importHoudiniGeo(src: string | any, warn: (m: string) => void = 
   });
   g.primStart = Int32Array.from(starts);
   g.primClosed = Uint8Array.from(closed);
+  if (packedInfo.size) {
+    g.ensurePacked();
+    keptPrims.forEach((fp, i) => {
+      const info = packedInfo.get(fp);
+      if (!info) return;
+      g.primKind![i] = 1;
+      g.packedSource![i] = g.addPackedSource(info.src);
+      g.packedXform!.set(info.X, i * 9);
+    });
+  }
   // Houdini material paths → material names (the original attribute is kept)
   const shop = g.prims.get('shop_materialpath');
   if (shop && shop.type === 'string' && !g.prims.has('material')) {
