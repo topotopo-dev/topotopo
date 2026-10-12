@@ -97,6 +97,13 @@ export function parallelMap(
   const min = Math.max(1, pool?.minElements ?? opts.minElements ?? k?.minElements ?? DEFAULT_MIN);
   if (!pool || !(pool.size > 0) || typeof SharedArrayBuffer === 'undefined' || !(job.count >= min) || job.count < 2)
     return serialRun(kernel, job, opts, stats);
+  // A cold pool (no thread started yet) would cost its start-up (~0.1-0.3 s) on this job: run it here and start the
+  // threads for the next one, which waits for them if they are still starting (their 'ready' messages are only read
+  // when this thread yields to the event loop). A forced pool (minElements override, tests) always uses the threads.
+  if (pool.minElements === undefined && pool.threads === 0) {
+    void pool.warm(true);
+    return serialRun(kernel, job, opts, stats);
+  }
 
   const chunks = Math.max(1, Math.min(job.count, Math.floor(opts.chunks ?? pool.size * (k?.chunksPerWorker ?? 1))));
   const arrays: Record<string, ArrayBufferView> = {};
