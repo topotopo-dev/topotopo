@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Command line: cook a graph JSON file, then render / export / inspect.
-//   node src/cli.ts <graph.json> [--node name] [--render out.png] [--views quad|persp|front,top]
-//                   [--color-by attr] [--export out.glb] [--inspect summary|attributes|topology|all]
+//   node src/cli.ts <graph.json> [--node name] [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv]
+//                   [--checker] [--color-by attr] [--export out.glb] [--inspect summary|attributes|topology|all]
 //   node src/cli.ts --catalog | --help-node scatter
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,7 +22,7 @@ const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
 
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
-  console.log('usage: node src/cli.ts <graph.json> [--node n] [--render out.png] [--views quad|persp|front,top] [--color-by attr] [--export out.glb] [--inspect all]\n       node src/cli.ts --catalog | --help-node <type>');
+  console.log('usage: node src/cli.ts <graph.json> [--node n] [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb] [--inspect all]\n       node src/cli.ts --catalog | --help-node <type>');
   process.exit(0);
 }
 if (argv.includes('--catalog')) { console.log(catalogText(allNodeDefs())); process.exit(0); }
@@ -45,8 +45,8 @@ console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary' }));
 const out = opt('--render');
 if (out) {
   const v = opt('--views') ?? 'quad';
-  const views = v === 'quad' ? undefined : (v.split(',') as ViewName[]);
-  const img = renderGeometry(r.geo, { views, colorBy: opt('--color-by') ?? null, title: path.basename(file, '.json') });
+  const views = v === 'quad' ? undefined : v === 'quad_uv' ? (['persp', 'uv'] as ViewName[]) : (v.split(',') as ViewName[]);
+  const img = renderGeometry(r.geo, { views, colorBy: opt('--color-by') ?? null, checker: argv.includes('--checker'), title: path.basename(file, '.json') });
   fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
   fs.writeFileSync(out, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
   console.log(`rendered ${out} (${img.width}x${img.height})${img.notes.length ? ' — ' + img.notes.join('; ') : ''}`);
