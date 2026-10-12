@@ -58,7 +58,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P1-D | UVs: `uv_unwrap` (xatlas), `uv_layout`, `uv_flatten` (LSCM), UV view in render | merged | 522dc77, 2026-10-12. xatlas-wasm 0.1.3 (MIT). Limits: uv_layout packs bounding rects; unwrap 2.7 s/20k tris; autoseam rough |
 | P1-E | `remesh_isotropic`, attribute-preserving `decimate` (meshopt), `mesh_repair`, `lod` | running (agent) | started 2026-10-12 from 2e787d2 |
 | P1-F | Measures: `curvature`, `occlusion`/`thickness` bake, `distance`, `assert`/`expect`, `explain` + `diff` MCP tools | merged | b55cdd2, 2026-10-12. 125 nodes. Limits: occlusion 50k×32 ≈ 2.3 s (TriBVH build sorts arrays; P0-F); `thickness` alias still runs occlusion mode because nodes cannot see the alias used (engine could pass ctx.alias); self-intersection test misses coplanar overlaps; assert expr cannot read vars |
-| P1-G | Render upgrades: wireframe/edge overlay, cross-section, normal/up glyphs, group/piece labels | running (agent) | started 2026-10-12 from 2e787d2 |
+| P1-G | Render upgrades: wireframe/edge overlay, cross-section, normal/up glyphs, group/piece labels | merged | 8a9db22, 2026-10-12. CLI render supersampling flag is --render-scale (--scale stays export units). Limits: section view has no labels/glyphs; clip caps sampled on a 2048-cell grid; points:true now sizes by pscale |
 
 ### Phase 2: PCG and instancing
 | id | item | status | notes |
@@ -75,6 +75,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-12: P1-G merged (8a9db22): overlays, section/clip, glyphs, labels, shading, presets. Running: P2-C, P1-E, P2-A.
 - 2026-10-12: P1-F merged (b55cdd2): curvature, occlusion, distance, assert; explain and diff tools. Running: P2-C, P1-E, P1-G, P2-A.
 - 2026-10-12: P1-A merged (db74e85). GitHub Actions stopped: the account budget for the private repo is exhausted; tests run locally at every merge. Running: P1-F, P2-C, P1-E, P1-G, P2-A.
 - 2026-10-12: P2-E1 merged (0d1ec15). Dependency note: manifold-3d pulls @gltf-transform/functions → sharp (LGPL libvips, optional native, unused by us). Blender addon not reachable for the GLB check.
