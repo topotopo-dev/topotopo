@@ -44,11 +44,11 @@ defineNode({
 defineNode({
   type: 'input',
   category: 'flow',
-  summary: 'Inside a subgraph (foreach body or asset): receives the parent input with this index.',
+  summary: 'Inside a subgraph (foreach/solver body or asset): receives the parent input with this index.',
   aliases: ['subnet_input', 'loop_input'],
   inputs: [],
   params: {
-    index: { type: 'int', default: 0, min: 0, desc: 'foreach: 0 = current piece/feedback, 1 = whole input, 2 = foreach second input. assets: input number' },
+    index: { type: 'int', default: 0, min: 0, desc: 'foreach: 0 = current piece/feedback, 1 = whole input, 2 = foreach second input. solver: 0 = previous frame, 1 = initial, 2/3 = extra inputs. assets: input number' },
     label: { type: 'string', default: '', desc: 'documentation label for asset inputs' },
   },
   cook: () => new Geometry(), // provided by the engine
@@ -63,7 +63,8 @@ defineNode({
     'The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} node yields the current piece ' +
     '(or the previous iteration\'s result in feedback mode); index 1 yields the whole input; index 2 the foreach\'s second input. ' +
     'Vars available to "=expr" params and code: iteration, numiterations, value (piece attribute value / element number), ' +
-    'attr (object of the element\'s attributes, e.g. attr.height), plus all parent vars.',
+    'attr (object of the element\'s attributes, e.g. attr.height), plus all parent vars. ' +
+    'feedback:true is count-based and runs all iterations in one cook at the current time; for feedback over frames use solver.',
   inputs: [
     { name: 'geo', desc: 'geometry to iterate over (optional for count mode)', optional: true },
     { name: 'extra', desc: 'available inside the body as input index 2', optional: true },
@@ -76,6 +77,8 @@ defineNode({
     body: { type: 'graph', desc: 'subgraph {nodes, output} run per iteration' },
     max_iterations: { type: 'int', default: 10000, min: 1, desc: 'safety limit' },
   },
+  // the body's "=expr" params read the parent vars, so they are part of the cache key
+  usesVars: true,
   example: {
     type: 'foreach',
     in: ['pieces'],
@@ -91,7 +94,7 @@ defineNode({
     },
   },
   async cook(ctx) {
-    const { p, engine } = ctx;
+    const { p } = ctx;
     if (!p.body || !p.body.nodes) throw new NodeError('foreach needs a "body" graph: {"nodes": {...}, "output": "..."}');
     const src = ctx.input(0), extra = ctx.input(1);
     const items: { geo: Geometry; value: any; attr: Record<string, any> }[] = [];
@@ -142,14 +145,13 @@ defineNode({
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       const pieceSig = p.mode === 'count' ? (p.feedback ? prev.sig : ctx.inputSigs[0] ?? 'none') : `${ctx.inputSigs[0]}:${p.mode}:${p.piece_attrib}:${i}`;
-      const r = await engine.cook(p.body, {
+      const r = await ctx.subcook(p.body, {
         vars: { ...ctx.vars, iteration: i, numiterations: items.length, value: it.value, attr: it.attr },
         inputs: [
           { geo: p.feedback ? prev.geo : it.geo, sig: pieceSig },
           { geo: src, sig: ctx.inputSigs[0] ?? 'none' },
           { geo: extra, sig: ctx.inputSigs[1] ?? 'none' },
         ],
-        depth: ctx.depth + 1,
       });
       if (!r.ok || !r.geo) throw new NodeError(`foreach iteration ${i}: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
       for (const w of r.warnings.slice(0, 3)) ctx.warn(`[iter ${i}] ${w.node}: ${w.message}`);
@@ -157,6 +159,120 @@ defineNode({
       else outs.push(r.geo);
     }
     return p.feedback ? prev.geo : Geometry.merge(outs);
+  },
+});
+
+const r9 = (x: number) => Math.round(x * 1e9) / 1e9;
+
+defineNode({
+  type: 'solver',
+  category: 'flow',
+  summary: 'Feedback over frames (Houdini SOP Solver): run a body graph once per frame on the previous frame\'s result, for growth, accumulation and settling.',
+  aliases: ['sop_solver', 'sopsolver'],
+  description:
+    'Cooking at frame N runs the body for every frame from start_frame to N (once per substep). Inside the body, {"type":"input","params":{"index":0}} ' +
+    'is the previous frame\'s result (the initial geometry on start_frame), index 1 the initial geometry, 2 and 3 the extra inputs cooked at that frame. ' +
+    'Before start_frame the initial geometry passes through. The body sees the vars iteration (frames since start_frame, from 0), substep, ' +
+    'frame, time and timeInc (the step\'s time; frames are fractional between substeps), plus parent vars; wrangles also get @Frame @Time @TimeInc. ' +
+    'Caching: the state after frame f has the signature S(f) = hash(S(f-1), f, extra-input signatures at f), starting from ' +
+    'S(start_frame-1) = hash(params, vars, initial input at start_frame). Every frame\'s state is cached under S(f), so cooking frame 11 after frame 10 ' +
+    'runs the body once, and going back to an earlier frame is a cache hit. ' +
+    'foreach with feedback:true is different: it is count-based (N iterations in one cook, no notion of time) and is cached as a whole.',
+  inputs: [
+    { name: 'initial', desc: 'geometry the solve starts from (cooked at start_frame)' },
+    { name: 'extra1', desc: 'available in the body as input 2, cooked at each simulated frame', optional: true },
+    { name: 'extra2', desc: 'available in the body as input 3, cooked at each simulated frame', optional: true },
+  ],
+  params: {
+    body: {
+      type: 'graph', default: { nodes: { prev: { type: 'input', params: { index: 0 } } }, output: 'prev' },
+      desc: 'subgraph {nodes, output} run per frame (and substep): input 0 = previous frame, 1 = initial, 2/3 = extra inputs (default: pass through)',
+    },
+    start_frame: { type: 'int', default: 1, desc: 'first frame the body runs on; earlier frames output the initial geometry' },
+    substeps: { type: 'int', default: 1, min: 1, max: 1000, desc: 'body runs per frame; timeInc = 1 / (fps * substeps)' },
+    max_frames: { type: 'int', default: 1000, min: 1, desc: 'safety limit: most frames simulated from start_frame' },
+  },
+  usesTime: true,
+  // the body's "=expr" params read the parent vars
+  usesVars: true,
+  example: {
+    type: 'solver',
+    in: ['seed'],
+    params: {
+      body: {
+        nodes: {
+          prev: { type: 'input', params: { index: 0 } },
+          grow: { type: 'poly_extrude', in: ['prev'], params: { group: '@N.y>0.9', distance: 0.1 } },
+        },
+        output: 'grow',
+      },
+    },
+  },
+  async cook(ctx) {
+    const { p, engine } = ctx;
+    if (!p.body || !p.body.nodes) throw new NodeError('solver needs a "body" graph: {"nodes": {...}, "output": "..."}');
+    const fps = ctx.fps;
+    const start: number = p.start_frame;
+    const last = Math.floor(ctx.frame + 1e-9);
+    if (last < start) {
+      ctx.stat('frames', 0);
+      ctx.stat('body_runs', 0);
+      return ctx.input(0);
+    }
+    const span = last - start + 1;
+    if (span > p.max_frames)
+      throw new NodeError(`solver: frame ${last} is ${span} frames from start_frame ${start}, more than max_frames (${p.max_frames})`, 'raise max_frames or move start_frame');
+    const init = await ctx.inputAt(0, start);
+    // chained state signatures (see description)
+    const chain: string[] = [];
+    const extras: { geo: Geometry; sig: string }[][] = [];
+    let s = String(hashString('solver|' + stableStringify(p) + '|' + stableStringify(ctx.vars) + '|' + fps + '|' + init.sig));
+    for (let f = start; f <= last; f++) {
+      const ex = [await ctx.inputAt(1, f), await ctx.inputAt(2, f)];
+      s = String(hashString(s + '|' + f + '|' + ex[0].sig + '|' + ex[1].sig));
+      chain.push(s);
+      extras.push(ex);
+    }
+    // resume from the latest cached frame state
+    let k = chain.length - 1;
+    let state: Geometry | undefined;
+    for (; k >= 0; k--) {
+      state = engine.cache.get('solver:' + chain[k]);
+      if (state) break;
+    }
+    let stateSig = k >= 0 ? chain[k] : 'solver-initial:' + init.sig;
+    if (!state) state = init.geo;
+    ctx.stat('resumed_from', start + k); // start_frame - 1 = from the initial geometry
+    const n: number = p.substeps;
+    const timeInc = 1 / (fps * n);
+    let runs = 0, warned = 0;
+    for (let j = k + 1; j < chain.length; j++) {
+      const f = start + j;
+      const ex = extras[j];
+      for (let sub = 0; sub < n; sub++) {
+        const fr = r9(f - 1 + (sub + 1) / n), time = r9((fr - 1) / fps);
+        const r = await ctx.subcook(p.body, {
+          frame: fr, time, timeInc, fps,
+          // also as vars, so code can read vars.frame / vars.time / vars.timeInc like vars.iteration
+          vars: { ...ctx.vars, iteration: j, substep: sub, frame: fr, time, timeInc },
+          inputs: [
+            { geo: state, sig: stateSig },
+            { geo: init.geo, sig: init.sig },
+            { geo: ex[0].geo, sig: ex[0].sig },
+            { geo: ex[1].geo, sig: ex[1].sig },
+          ],
+        });
+        runs++;
+        if (!r.ok || !r.geo) throw new NodeError(`solver frame ${f}${n > 1 ? ` substep ${sub}` : ''}: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
+        for (const w of r.warnings) if (warned++ < 10) ctx.warn(`[frame ${f}] ${w.node}: ${w.message}`);
+        state = r.geo;
+        stateSig = sub === n - 1 ? chain[j] : `${chain[j]}~${sub}`;
+      }
+      engine.cache.set('solver:' + chain[j], state);
+    }
+    ctx.stat('frames', chain.length - 1 - k);
+    ctx.stat('body_runs', runs);
+    return state;
   },
 });
 
@@ -175,12 +291,13 @@ defineNode({
     const g = (engine as any).graphResolver?.(p.graph);
     return g ? String(hashString(stableStringify(g))) : 'missing';
   },
-  async cook({ p, engine, depth }) {
+  async cook(ctx) {
+    const { p, engine } = ctx;
     const resolver = (engine as any).graphResolver as ((n: string) => any) | undefined;
     if (!resolver) throw new NodeError('graph_ref needs a workspace (not available in this host)');
     const g = resolver(p.graph);
     if (!g) throw new NodeError(`no graph named "${p.graph}" in the workspace`);
-    const r = await engine.cook(g, { target: p.node || undefined, vars: p.vars, depth: depth + 1 });
+    const r = await ctx.subcook(g, { target: p.node || undefined, vars: p.vars });
     if (!r.ok || !r.geo) throw new NodeError(`graph "${p.graph}" failed: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
     return r.geo;
   },
