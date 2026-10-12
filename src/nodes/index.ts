@@ -4,6 +4,7 @@ import './curves.ts';
 import './transform.ts';
 import './attributes.ts';
 import './groups.ts';
+import './material.ts';
 import './topology.ts';
 import './polyedit.ts';
 import './copy.ts';

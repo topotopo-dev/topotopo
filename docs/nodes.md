@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-119 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
+120 node types. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -12,7 +12,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [curve](#curve-nodes): [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [curve](#curve) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [line](#line) · [loft](#loft) · [offset_curve](#offset_curve) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
-- [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [measure](#measure)
+- [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [normal](#normal) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [scatter](#scatter)
@@ -1751,6 +1751,50 @@ Label connected pieces with an integer attribute (default "class"), optionally a
 
 **Writes:** class (int), optional prim name
 
+### material
+
+category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, `materialassign`
+
+Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims; exporters write it as a glTF material.
+
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). Vertex colours (Cd) still win in exports: a material then supplies the PBR scalars. Assign several materials by chaining material nodes with different groups.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `name` | string | `"material"` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name (also the glTF material name) |
+| `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
+| `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
+| `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 |
+| `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 |
+| `emissive` | color | `[0,0,0]` |  |  | `emission`, `emit` | emitted colour; components above 1 export with KHR_materials_emissive_strength |
+| `alpha` | float | `1` | 0..1 |  | `opacity`, `opac` | opacity; below 1 exports with alphaMode BLEND |
+| `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
+| `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
+
+**Writes:** prim "material" (string), detail "materials" (JSON table)
+
+**Example**
+
+```json
+{
+  "type": "material",
+  "params": {
+    "name": "brick",
+    "base_color": "#a5462e",
+    "roughness": 0.9,
+    "group": "@P.y<0.5"
+  }
+}
+```
+
 ### measure
 
 category: `attribute`
@@ -3348,7 +3392,7 @@ None (generator).
 
 category: `flow` · aliases: `combine`, `join`
 
-Combine any number of inputs into one geometry (attributes and groups are unioned).
+Combine any number of inputs into one geometry (attributes, groups and material tables are unioned).
 
 **Inputs**
 
@@ -3459,7 +3503,7 @@ Pass through one of several inputs by index (use "=expr" to drive it from vars).
 
 category: `io` · aliases: `import`, `load`, `read`
 
-Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, or polyforge JSON. Z-up files can be converted.
+Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo/.bgeo, CSV, points JSON or polyforge JSON. Z-up files can be converted.
 
 **Inputs**
 
@@ -3470,7 +3514,7 @@ None (generator).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `path` | path | `""` |  |  | `file`, `filename` | file path (relative to the workspace) or URL |
-| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `json` |  | file format (auto = by extension) |
+| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `json`, `geo`, `bgeo`, `csv`, `pointsjson` |  | file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
 | `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans) |

@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["material:string:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 1, 1],
+      "min": [-1, -1, -1]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "9ec54b8e97d6dcdc",
+      "attributes": {
+        "detail.materials": "4458d31d35801dc7",
+        "point.N": "3c28f9be0faf0b34",
+        "prim.material": "64642e0d844ccf9f"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.material",
+  "ok": true,
+  "source": "fixture for node type \"material\" (test/fixtures.ts)",
+  "warnings": []
+}

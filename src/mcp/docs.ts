@@ -10,7 +10,7 @@ WORKFLOW
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
-6. export to glb/obj/usda/ply/stl/json for Unreal, Blender, Houdini.
+6. export to glb/gltf (materials, meshopt), geo (Houdini), csv (Unreal PCG points), points.json, obj/usda/ply/stl/json for Unreal, Blender, Houdini.
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
@@ -170,6 +170,8 @@ Common names:
   pscale float uniform scale · scale vec3 · orient vec4 quaternion (x,y,z,w) · up vec3 · rot · trans · pivot   (copy_to_points)
   width float curve diameter (polywire, USD curves) · curveu 0..1 along curves (resample)
   name string piece name (export splits meshes by it) · class int piece id (connectivity) · copynum int (copy nodes)
+  material string prim: material name (material node); detail "materials" = JSON table name → {baseColor, metallic,
+    roughness, emissive, alpha, doubleSided, unlit} that exporters write as glTF materials (Houdini shop_materialpath is read too)
   id int · piece · variant int (copy_to_points variants) · height (terrain 0-1)
 Instancing transform: P + trans, rotation from orient, else N (+Z axis) and up (+Y axis), then rot; scale = pscale * scale.
 Types: float/int with tuple size 1-4 (up to 16), or string. Merging unions attributes; missing values take defaults
@@ -246,12 +248,40 @@ render checker:true shades 3D views with an 8×8 uv checker: squares should look
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
   export: `EXPORT
-export {path:"exports/thing.glb"} — format from extension: glb (glTF binary, recommended), obj, usda, ply, stl, json (lossless polyforge).
-Options: up_axis "y" (default, glTF/Houdini/Maya) or "z" (Blender/Unreal-style data), scale (e.g. 100 for cm), split_by_name
-(separate meshes per prim "name"), custom_attribs (extra float attributes as glTF _NAME / PLY properties / USD primvars).
-Normals: N if present, else computed with a 60° cusp (hard edges stay hard). uv → TEXCOORD_0 (V flipped for glTF), Cd → vertex colours.
-Unreal: import GLB (Interchange) or USD. Blender: File > Import > glTF. Houdini: File SOP reads glb/obj/usd/ply.
-Importing: the "file" node loads obj, stl, ply, glb/gltf, json (up_axis "z" converts Z-up sources).`,
+export {path:"exports/thing.glb"} — format from the extension:
+  glb / gltf    glTF 2.0 via gltf-transform (recommended for Unreal, Blender, web)
+  geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)
+  csv           point stream, one row per point: P.x,P.y,P.z,N.x,…,pscale,name (strings quoted); prims are ignored
+  points.json   {format:"polyforge-points", count, attributes:{P:{type,size,data}}} (same schema on import)
+  obj usda ply stl json (lossless polyforge)
+Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
+  custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
+  ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
+  quantize (KHR_mesh_quantization alone), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
+  precision 64 | 32 (geo). For Unreal and Blender keep the default uncompressed GLB.
+glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
+  (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. N → NORMAL (else computed, 60° cusp),
+  uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. Custom attributes: every other numeric point/vertex attribute
+  of size 1-4 → _NAME (upper-cased, float or the smallest int type); mesh extras keep the original names and types.
+MATERIALS: the material node writes prim "material" + the detail table. Vertex colours win: prims whose Cd is not all
+  white export baseColor white × COLOR_0 with the material's metallic/roughness/emissive; otherwise baseColor = the
+  material colour. alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
+UNREAL: import the GLB (Interchange): meshes, materials and vertex colours. PCG points: export csv with pcg:true
+  (Name, Position.X/Y/Z, Rotation.Roll/Pitch/Yaw, Scale.X/Y/Z, Density, Color.R/G/B/A, Seed, then other attributes).
+  Unreal space: X = x, Y = z, Z = y (Y/Z swap, like Unreal's glTF importer and Houdini Engine), centimetres (scale
+  default 100). Rotation from orient, else N (+Z) and up (+Y), then rot; Scale = scale × pscale; Seed = seed or a hash.
+  For a DataTable use pcg_struct:true: Position "(X=…,Y=…,Z=…)", Rotation "(Pitch=…,Yaw=…,Roll=…)", Scale, Density,
+  Color "(X=r,Y=g,Z=b,W=a)", Seed. Create a row struct {Vector Position; Rotator Rotation; Vector Scale; float Density;
+  Vector4 Color; int Seed} (+ any extra columns), import the CSV as a DataTable with it, then in a PCG graph use
+  "Load Data Table" (or Get Data Table Row) and map Position/Rotation/Scale/Density/Color/Seed onto the point
+  properties ($Position …) with Attribute Rename/Copy if your version keeps them as attributes; spawn with Static Mesh Spawner.
+HOUDINI: File SOP reads .geo (and glb/obj/usd). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
+  A material name becomes a Houdini material path with a wrangle: s@shop_materialpath = "/mat/" + s@material;
+BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME).
+IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; external .bin; node transforms and
+  EXT_mesh_gpu_instancing expanded; names → "name", materials → "material" + table), geo and uncompressed bgeo
+  (Houdini; not .bgeo.sc; volumes skipped), csv (P.x | x,y,z | P[x] | Unreal Position.X or struct cells), points.json,
+  json (polyforge, points stream or Houdini geo, detected). up_axis "z" converts Z-up sources.`,
 
   recipes: `RECIPES (copy, then adapt)
 1) Rocks on terrain:
