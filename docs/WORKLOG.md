@@ -63,7 +63,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 ### Phase 2: PCG and instancing
 | id | item | status | notes |
 |---|---|---|---|
-| P2-A | Packed primitives: `packed` prim kind, packed `copy_to_points`, `unpack`, auto-unpack, instanced rendering | running (agent) | started 2026-10-12 from 87ac66f |
+| P2-A | Packed primitives: `packed` prim kind, packed `copy_to_points`, `unpack`, auto-unpack, instanced rendering | merged | 7715c68, 2026-10-12. 127 nodes. 1M packed copies 0.23 s; unpack 100k×100 tris 0.4 s. Limits: no per-instance attributes in glTF/USD; renderer expands within a 600k-triangle budget; .glb import now packed by default |
 | P2-B | `copy_to_points` variants, scatter v2 (density attr/map/mask, relax, min distance, collision prune), masks by slope/height/curvature/occlusion/distance, `attribute_from_map` (PNG/EXR), orient helpers, points along splines, clustering | queued | after P2-A |
 | P2-C | Heightfield prim + suite: create/from mesh/from image/noise/remap/blur/terrace/cutout/mask by feature/project/path/scatter/to mesh/to sdf, erosion, 16-bit PNG/RAW export | running (agent) | started 2026-10-12 from ac5f6b9 |
 | P2-D | Spline toolkit: bezier/nurbs prims, fillet, 3D offset, spline fit, project to surface, curveu/ramp attributes | queued | |
@@ -75,6 +75,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-12: P2-A merged (7715c68). Found that test/uv.ts had been failing on main since P2-E1 (sync GLB export) and my summary grep hid it: from now on every test run checks the exit code. Fixed by P2-A.
 - 2026-10-12: P1-G merged (8a9db22): overlays, section/clip, glyphs, labels, shading, presets. Running: P2-C, P1-E, P2-A.
 - 2026-10-12: P1-F merged (b55cdd2): curvature, occlusion, distance, assert; explain and diff tools. Running: P2-C, P1-E, P1-G, P2-A.
 - 2026-10-12: P1-A merged (db74e85). GitHub Actions stopped: the account budget for the private repo is exhausted; tests run locally at every merge. Running: P1-F, P2-C, P1-E, P1-G, P2-A.
