@@ -15,10 +15,10 @@ import { renderGeometry } from '../render/raster.ts';
 import type { RenderOptions } from '../render/raster.ts';
 import { renderArgs } from '../render/options.ts';
 import { encodePNG } from '../render/png.ts';
-import { EXPORT_FORMATS, exportFormatFromPath, exportGeometryAsync } from '../io/export.ts';
+import { EXPORT_FORMATS, exportFormatFromPath } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
-import { HEIGHTMAP_FORMATS, heightmapExport, heightmapPaths } from '../io/heightmap.ts';
-import type { HeightmapFormat } from '../io/heightmap.ts';
+import { exportFilesAsync } from '../io/files.ts';
+import type { Host } from '../host/types.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 import { verifyTools } from './verify.ts';
@@ -71,16 +71,35 @@ function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: strin
   return { img: { type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, notes: r.notes, png };
 }
 
-/** Heightmap export: the main file, the JSON sidecar (png16/r16) or one PNG per mask layer. */
-function writeHeightmap(geo: Geometry, format: HeightmapFormat, p: string, a: any): string {
-  const res = heightmapExport(geo, format, {
+/**
+ * Write every file of an export (heightmap sidecars and layers, instance-stream sidecar and mesh GLBs, the Unreal
+ * Landscape bundle, or the single file of other formats). Textures are read through the host; USD texture paths are
+ * written relative to the output file. Returns the report text.
+ */
+export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host): Promise<string> {
+  const warnings: string[] = [];
+  const outDir = format === 'unreal_landscape' && !/\.json$/i.test(p) ? p : path.dirname(p);
+  const res = await exportFilesAsync(geo, format, p, {
+    upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
+    materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct,
+    precision: a.precision, instancing: a.instancing, instances: a.instances, meshes: a.meshes,
     layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield,
     deflate: (d) => zlib.deflateSync(d, { level: 6 }),
+    readFile: (t) => host.readFile(t),
+    texturePath: (t) => {
+      const abs = host.resolvePath(t);
+      return /^[a-z][a-z0-9+.-]*:\/\//i.test(abs) ? abs : path.relative(outDir, abs).split(path.sep).join('/');
+    },
+    warn: (m) => warnings.push(m),
   });
-  const paths = heightmapPaths(p, res.files);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  res.files.forEach((f, i) => fs.writeFileSync(paths[i], f.bytes));
-  return `wrote ${paths.join(', ')} (${format}): ${res.summary}`;
+  for (const f of res.files) {
+    fs.mkdirSync(path.dirname(f.path), { recursive: true });
+    fs.writeFileSync(f.path, f.bytes);
+  }
+  const total = res.files.reduce((s, f) => s + f.bytes.byteLength, 0);
+  const rel = (f: string) => path.relative(outDir, f).split(path.sep).join('/');
+  const list = res.files.length === 1 ? res.files[0].path : `${res.files.length} files in ${outDir}: ${res.files.slice(0, 12).map((f) => rel(f.path)).join(', ')}${res.files.length > 12 ? ', …' : ''}`;
+  return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${res.summary}${warnings.length ? '\nwarnings:\n  ' + [...new Set(warnings)].join('\n  ') : ''}`;
 }
 function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
@@ -304,13 +323,13 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials, vertex colours, uv, custom attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda, .ply, .stl, .geo (Houdini JSON geometry, every attribute and group), .csv (point stream; pcg:true for Unreal PCG columns), .points.json, .json (lossless polyforge). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers).',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless polyforge). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream).',
       inputSchema: {
         type: 'object',
         required: ['path'],
         properties: {
           graph: { type: 'string' }, node: { type: 'string' },
-          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap)' },
+          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap), "exports/level" (unreal_landscape: a directory)' },
           format: { type: 'string', enum: EXPORT_FORMATS, description: 'default: from the extension (.points.json = pointsjson)' },
           layer: { type: 'string', description: 'heightmaps: layer to write (png16/r16 default "height", mask_png default "mask")' },
           layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png)' },
@@ -328,7 +347,9 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           pcg: { type: 'boolean', description: 'csv: Unreal PCG columns (Position/Rotation/Scale/Density/Color/Seed) in Unreal space (Z-up, left-handed, cm)' },
           pcg_struct: { type: 'boolean', description: 'csv with pcg: Unreal struct-text cells ("(X=…,Y=…,Z=…)") for DataTable import with a row struct' },
           precision: { type: 'number', enum: [32, 64], description: 'geo: float storage (64 = lossless default, 32 = Houdini default)' },
-          instancing: { type: 'string', enum: ['packed', 'expand'], description: 'packed prims: glb/gltf (EXT_mesh_gpu_instancing) and usda (PointInstancer) keep instances by default; expand writes real copies' },
+          instancing: { type: 'string', enum: ['packed', 'expand'], description: 'packed prims: glb/gltf (EXT_mesh_gpu_instancing), usda (PointInstancer) and geo (PackedGeometry) keep instances by default; expand writes real copies' },
+          instances: { type: 'string', enum: ['rows', 'expand'], description: 'csv / points.json of packed prims: rows (default) = one row per instance (full transform, Mesh column, anchor attributes) + <name>.meshes.json + <name>_meshes/<Mesh>.glb; expand = the points of the expanded geometry' },
+          meshes: { type: 'boolean', description: 'instance rows: also write one GLB per packed source (default true)' },
           ...FRAME_PROP,
         },
       },
@@ -338,14 +359,8 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
         const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt0] ?? fmt0) as ExportFormat;
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
-        if (HEIGHTMAP_FORMATS.includes(ext as HeightmapFormat)) return text(writeHeightmap(geo, ext as HeightmapFormat, p, a) + ` (from ${name}/${r.target}${atFrame(r)})`);
-        const bytes = await exportGeometryAsync(geo, ext, {
-          upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
-          materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct, precision: a.precision, instancing: a.instancing,
-        });
-        fs.mkdirSync(path.dirname(p), { recursive: true });
-        fs.writeFileSync(p, bytes);
-        return text(`wrote ${p} (${ext}, ${(bytes.byteLength / 1024).toFixed(1)} KB) from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims`);
+        const report = await writeExport(geo, ext, p, a, engine.host);
+        return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)`);
       },
     },
     {

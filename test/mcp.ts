@@ -99,6 +99,25 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
   const y = await call('export', { path: 'exports/scene_pcg.csv', pcg: true, attributes: ['pscale'] });
   check(!x.isError && x.txt.includes('glb') && !y.isError && fs.readFileSync(path.join(wsDir, 'exports', 'scene_pcg.csv'), 'utf8').startsWith('Name,Position.X'), 'export meshopt glb and Unreal PCG csv');
 }
+{
+  // packed instances on a heightfield: the Unreal Landscape bundle and the instance stream with its meshes
+  const ue = await call('build', { name: 'ue', graph: { nodes: {
+    hf: { type: 'heightfield', params: { size: [32, 32], samples: [65, 65] } },
+    n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3, element_size: 10 } },
+    pts: { type: 'heightfield_scatter', in: ['n'], params: { count: 25, mask_layer: '' } },
+    s: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.4 } },
+    sn: { type: 'attrib_create', in: ['s'], params: { name: 'name', class: 'prim', value: 'shrub' } },
+    inst: { type: 'copy_to_points', in: ['sn', 'pts'], params: { pack: true } },
+    out: { type: 'merge', in: ['n', 'inst'] },
+  } } });
+  const b1 = await call('export', { graph: 'ue', format: 'unreal_landscape', path: 'exports/level' });
+  const man = path.join(wsDir, 'exports', 'level', 'landscape.json');
+  check(!ue.isError && !b1.isError && fs.existsSync(man) && fs.existsSync(path.join(wsDir, 'exports', 'level', 'meshes', 'shrub.glb')) && /Unreal Landscape bundle/.test(b1.txt) && /not an exact fit/.test(b1.txt),
+    `export unreal_landscape: ${b1.txt.split('\n')[0].slice(0, 120)}`);
+  const b2 = await call('export', { graph: 'ue', node: 'inst', path: 'exports/shrubs.csv', pcg: true });
+  check(!b2.isError && fs.existsSync(path.join(wsDir, 'exports', 'shrubs.meshes.json')) && fs.existsSync(path.join(wsDir, 'exports', 'shrubs_meshes', 'shrub.glb'))
+    && fs.readFileSync(path.join(wsDir, 'exports', 'shrubs.csv'), 'utf8').trim().split('\n').length === 26, `export instance rows + meshes sidecar: ${b2.txt.split('\n')[0].slice(0, 120)}`);
+}
 
 const gl = await call('graphs', { action: 'list' });
 check(gl.txt.includes('main:'), 'graphs list');

@@ -17,6 +17,7 @@
 // (or, for ch(), the referenced value) are mixed into the dependent node's signature.
 import { Geometry } from '../core/geometry.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
+import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
 import type { Host } from '../host/types.ts';
 import { allAliases, getNodeDef } from './registry.ts';
@@ -933,26 +934,48 @@ export class Engine {
   }
 
   /**
-   * Expand packed prims in the inputs of a node that does not handle them (NodeDef.packed, default 'unpack'), in
-   * place, with one warning. The expansion is cached under the input's signature, so it happens once per input.
+   * Expand packed prims in the inputs of a node that does not handle them (NodeDef.packed, default 'unpack'), and
+   * convert spline prims to polylines for a node that works on polygons/polylines (NodeDef.splines), in place, with one
+   * warning each. Both are cached under the input's signature, so they happen once per input.
    */
   private unpackInputs(def: NodeDef, p: Record<string, any>, inputs: (Geometry | null)[], sigs: string[], name: string, result: NodeResult) {
     const policy = typeof def.packed === 'function' ? def.packed(p) : def.packed ?? 'unpack';
-    if (policy === 'keep') return;
+    const expanded = new Uint8Array(inputs.length);
+    if (policy !== 'keep') {
+      let n = 0;
+      for (let i = 0; i < inputs.length; i++) {
+        const g = inputs[i];
+        if (!g || !g.hasPacked()) continue;
+        n += g.numPacked;
+        const key = 'unpack:' + sigs[i];
+        let u = this.cache.get(key);
+        if (!u) {
+          u = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
+          this.cache.set(key, u);
+        }
+        inputs[i] = u;
+        expanded[i] = 1;
+      }
+      if (n) result.warnings.push(`unpacked ${n} instances for ${name} (${def.type} needs real geometry; add an unpack node to choose what is transferred, or keep instances packed upstream)`);
+    }
+    // spline prims (Bezier/NURBS): NodeDef.splines, by default 'keep' for nodes that keep packed prims (they work on
+    // elements and points), else converted to polylines
+    const sp = typeof def.splines === 'function' ? def.splines(p) : def.splines ?? (policy === 'keep' ? 'keep' : 'polyline');
+    if (sp === 'keep') return;
     let n = 0;
     for (let i = 0; i < inputs.length; i++) {
       const g = inputs[i];
-      if (!g || !g.hasPacked()) continue;
-      n += g.numPacked;
-      const key = 'unpack:' + sigs[i];
-      let u = this.cache.get(key);
-      if (!u) {
-        u = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
-        this.cache.set(key, u);
+      if (!g || !g.hasSplines()) continue;
+      n += g.numSplines;
+      const key = (expanded[i] ? 'unpack-polyline:' : 'polyline:') + sigs[i];
+      let c = this.cache.get(key);
+      if (!c) {
+        c = splinesToPolylines(g).geo;
+        this.cache.set(key, c);
       }
-      inputs[i] = u;
+      inputs[i] = c;
     }
-    if (n) result.warnings.push(`unpacked ${n} instances for ${name} (${def.type} needs real geometry; add an unpack node to choose what is transferred, or keep instances packed upstream)`);
+    if (n) result.warnings.push(`converted ${n} spline curve${n === 1 ? '' : 's'} to polylines for ${name} (${def.type} works on polygons/polylines; add convert_curve or resample to choose the resolution)`);
   }
 }
 

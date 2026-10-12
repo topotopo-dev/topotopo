@@ -13,17 +13,22 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   summaries, look at a multi-view **render**, edit incrementally with content-hash caching, and verify their work with
   `assert`, `explain` and `diff`. JS escape hatches (`wrangle` with `@P` syntax, `script`, `sdf_expr`) cover what the
   node library does not.
-- **Pipeline output**: glTF/GLB through gltf-transform (materials from the `material` node, vertex colours, uv,
-  custom attributes, polylines and points; optional meshopt compression and quantization), Houdini `.geo` (every
-  attribute and group), CSV point streams with Unreal PCG columns, points JSON, OBJ, USDA, PLY, STL and lossless JSON,
-  with Y/Z-up and scale. Mesh splitting follows the `name` attribute, for Unreal, Blender and Houdini. The `file` node
-  reads the same formats back (glTF with meshopt and external buffers, `.geo` and uncompressed `.bgeo`, CSV).
+- **Pipeline output**: glTF/GLB through gltf-transform (materials from the `material` node with embedded base colour,
+  normal and roughness maps, vertex colours, uv, custom attributes, polylines and points; optional meshopt compression
+  and quantization), Houdini `.geo` (every attribute and group, packed prims as `PackedGeometry`), CSV point streams
+  with Unreal PCG columns, points JSON, USDA (UsdPreviewSurface materials), OBJ, PLY, STL and lossless JSON, with
+  Y/Z-up and scale. Mesh splitting follows the `name` attribute, for Unreal, Blender and Houdini. The `file` node reads
+  the same formats back (glTF with meshopt and external buffers, `.geo` and uncompressed `.bgeo`, CSV).
 - **Instancing**: packed primitives (Houdini's packed prims) keep a million copies as a million points plus one shared
   mesh: `copy_to_points {pack: true}` (with variants), `pack`, `unpack`. Transforms, merges, deletes and attribute nodes
   work on the instances; other nodes unpack them automatically with a warning. GLB export writes
-  `EXT_mesh_gpu_instancing`, USDA a `PointInstancer`, and the renderer draws them within a triangle budget.
+  `EXT_mesh_gpu_instancing` with per-instance attributes, USDA a `PointInstancer` with per-instance primvars, CSV and
+  points JSON an instance stream (one row per instance with its transform and a `Mesh` column, plus a sidecar and one
+  GLB per source mesh, for Unreal PCG), and the renderer draws them within a triangle budget.
 - **Terrain**: heightfield volumes with noise, masks, droplet erosion, roads and scatter; export as Unreal Landscape
-  heightmaps (16-bit PNG or RAW `.r16` with a JSON sidecar holding the import scale) and 8-bit weight layers.
+  heightmaps (16-bit PNG or RAW `.r16` with a JSON sidecar holding the import scale) and 8-bit weight layers, or as one
+  `unreal_landscape` bundle: heightmap, every layer, a manifest with the exact Landscape import settings, the meshes and
+  the instance stream.
 - **Live preview**: a local three.js page that refreshes whenever a graph changes. Click any node to see its result.
 
 The design notes, including whether the browser is a limitation, are in [docs/DESIGN.md](docs/DESIGN.md).
@@ -84,12 +89,12 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, heightfield, loops, instancing, pcg, assets, uv, render, export, verify, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, heightfield, loops, instancing, pcg, curves, assets, uv, render, export, verify, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
 | `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `scale: 2`; a footer line names what is shown (help topic `render`) |
-| `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json; heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png |
+| `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json (packed instances: instance rows + meshes sidecar + one GLB per source); heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png / unreal_landscape (a directory bundle) |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a shelf asset into the workspace to edit |
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
@@ -134,7 +139,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | category | nodes |
 |---|---|
 | generate | `box` `grid` `sphere` `tube` `torus` `platonic` `points` `point_grid` `parametric_surface` `terrain` `lsystem` `text` |
-| curve | `parametric_curve` `line` `circle` `curve` `spiral` `shape2d` `resample` `carve` `ends` `sweep` `polywire` `revolve` `extrude` `offset_curve` `boolean2d` `fill` `loft` `voronoi2d` `triangulate2d` |
+| curve | `parametric_curve` `line` `circle` `curve` `spiral` `shape2d` `resample` `carve` `ends` `sweep` `polywire` `revolve` `extrude` `offset_curve` `boolean2d` `fill` `loft` `voronoi2d` `triangulate2d` `bezier` `nurbs` (Bezier/NURBS curve prims, evaluated exactly wherever they are used) `convert_curve` `spline_fit` `fillet_curve` `offset_curve_3d` `project_curve` `curve_attribs` |
 | transform | `transform` `match_size` `mirror` |
 | deform | `noise_displace` `twist` `bend` `taper` `smooth` `peak` `jitter` `ray` `soft_transform` `lattice` `path_deform` `point_deform` `rest` |
 | attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_array` `attrib_noise` `color` `material` `measure` `connectivity` (float/int tuples, strings, and float[]/int[]/string[] array attributes) |
@@ -157,15 +162,36 @@ Every node's inputs, parameters (types, defaults, ranges, options, aliases) and 
 
 ## Examples
 
-[examples/](examples) has seventeen graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
+[examples/](examples) has twenty-three graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
 rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
 grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
 bracket, a solver growth animation (rendered at the frame named by its `meta.frame`), polygon editing (loop cuts, knife,
 bridge, quad fill, dissolve), bevels (rounded box, chamfered top edges, a star with a rounded rim), a UV toolkit demo, and a
 render-overlay demo (`render_modes`: section view, hard edges, normal glyphs, group labels, matcap). A graph's `meta.render`
 takes any `render` tool option. The forest example is the PCG chain (mask → scatter → orient → prune → packed copies of three weighted tree variants from 30,000 candidates), `pcg_scatter` puts lamp posts along a road and cluster-coloured rocks away from it, and `terrain_erosion` is an eroded
-heightfield with a road and rocks on its steep slopes. `shelf_street` is a street block built only from shelf assets
-(see below).
+heightfield with a road and rocks on its steep slopes. `unreal_demo` is the Unreal 5.8 demo scene: an eroded 253 × 253 heightfield that fits an
+Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with variants and materials; `npm run export:demo` writes its file set
+(landscape bundle, `scene.glb`, `scene.usda`, `scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`.
+`splines` shows the curve toolkit: a NURBS road projected onto bumpy ground, a boardwalk with filleted corners and
+offset handrails, and a Bezier letter extruded. `shelf_street` is a street block built only from shelf assets (see
+[Shelf](#shelf)).
+
+To cook a graph from the command line:
+
+```bash
+node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
+node src/cli.ts examples/csg_bracket.json --render out/bracket.png --section x:0.3 --wireframe hard --labels groups --shading matcap
+node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
+node src/cli.ts examples/unreal_demo.json --node landscape --format unreal_landscape --export out/level   # Landscape bundle
+node src/cli.ts examples/forest.json --node forest --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
+```
+
+Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`, output paths may contain `{frame}` or
+`{frame:04}`; without a pattern, `.0001`-style frame numbers are inserted before the extension:
+
+```bash
+node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{frame:04}.png" --export out/growth.glb
+```
 
 ## Shelf
 
@@ -217,21 +243,6 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 
 <!-- shelf:end -->
 
-To cook a graph from the command line:
-
-```bash
-node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
-node src/cli.ts examples/csg_bracket.json --render out/bracket.png --section x:0.3 --wireframe hard --labels groups --shading matcap
-node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
-```
-
-Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`, output paths may contain `{frame}` or
-`{frame:04}`; without a pattern, `.0001`-style frame numbers are inserted before the extension:
-
-```bash
-node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{frame:04}.png" --export out/growth.glb
-```
-
 ## Testing
 
 `npm test` runs these layers in order; each can also run alone.
@@ -243,6 +254,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions |
 | io | `node test/io.ts` | export → import round trips for every format |
+| interop | `npm run test:interop` | glTF (validator), Houdini `.geo`/`.bgeo`, CSV/PCG and points JSON round trips; instance rows and their Unreal transforms, per-instance glTF/USD attributes, packed `.geo`, textures, the Unreal Landscape bundle, `export:demo` |
 | uv | `npm run test:uv` | unwrap/flatten/layout: finite uv in 0..1, topology kept, LSCM angle error, no island overlaps, uniform texel density, GLB round trip, uv view size |
 | render | `node test/render.ts` | every render option renders at the expected size; pixel probes for edge overlays, section caps (incl. inside-out), clip, glyphs, labels, legends, shading, the footer line; default output unchanged by the new code paths |
 | remesh | `npm run test:remesh` | remesh_isotropic edge lengths, watertightness, Cd continuity, box features, adaptive size, group/boundary/seams, timing; decimate seams, lock_border, points; mesh_repair winding, duplicates, holes, non-manifold split, slivers, self-intersections; lod levels and names |
@@ -251,6 +263,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | packed | `node test/packed.ts` | packed prims: model (clone, subsets, merge dedup, builder, bbox), pack/unpack round trips, packed copies equal real copies, transforms, auto-unpack, JSON/GLB/USD, render budget, every node type fed instances |
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, erosion determinism and mass conservation, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
+| splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
 | shelf | `npm run test:shelf [-- filter]` | every shelf asset: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; index, thumbnails and README table current; workspace override precedence; `assets` list / delete / fork |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
