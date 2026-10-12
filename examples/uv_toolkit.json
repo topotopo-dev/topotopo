@@ -1,0 +1,29 @@
+{
+  "description": "UV toolkit: a small house unwrapped automatically with xatlas (uv_unwrap), next to a noise-displaced open tube whose uv is deleted and re-made with LSCM along one manual seam (uv_flatten, seams as point pairs), then everything packed into one 0..1 square with uniform texel density (uv_layout). Rendered with the persp view shaded by a uv checker and the uv view.",
+  "meta": { "render": { "views": ["persp", "uv"], "checker": true } },
+  "nodes": {
+    "body": { "type": "box", "params": { "size": [4, 2.6, 3], "center": [0, 1.3, 0] } },
+    "roof": { "type": "tube", "params": { "radius": 2, "height": 4.4, "cols": 3, "caps": true, "axis": "x" } },
+    "roof_sq": { "type": "transform", "in": ["roof"], "params": { "scale": [1, 0.8, 1], "rotate": [180, 0, 0], "translate": [0, 3.4, 0] } },
+    "door": { "type": "box", "params": { "size": [0.9, 1.8, 0.3], "center": [0, 0.9, 1.55] } },
+    "chimney": { "type": "box", "params": { "size": [0.5, 1.4, 0.5], "center": [1.1, 4.0, -0.4] } },
+    "house": { "type": "merge", "in": ["body", "roof_sq", "door", "chimney"] },
+    "unwrap": { "type": "uv_unwrap", "in": ["house"], "params": { "padding": 4, "resolution": 512 } },
+    "tube": { "type": "tube", "params": { "radius": 0.9, "height": 3, "cols": 24, "rows": 12, "caps": false, "center": [0, 1.5, 0] } },
+    "bumpy": { "type": "noise_displace", "in": ["tube"], "params": { "amplitude": 0.15, "frequency": 1.2 } },
+    "bare": { "type": "attrib_delete", "in": ["bumpy"], "params": { "names": "uv" } },
+    "flat": {
+      "type": "uv_flatten",
+      "in": ["bare"],
+      "params": {
+        "use_seams": false,
+        "seams": [[0, 24], [24, 48], [48, 72], [72, 96], [96, 120], [120, 144], [144, 168], [168, 192], [192, 216], [216, 240], [240, 264], [264, 288]]
+      }
+    },
+    "tube_place": { "type": "transform", "in": ["flat"], "params": { "translate": [4.5, 0, 0] } },
+    "house_place": { "type": "transform", "in": ["unwrap"], "params": { "translate": [-1.5, 0, 0] } },
+    "both": { "type": "merge", "in": ["house_place", "tube_place"] },
+    "out": { "type": "uv_layout", "in": ["both"], "params": { "padding": 4, "resolution": 1024, "iterations": 6 } }
+  },
+  "output": "out"
+}

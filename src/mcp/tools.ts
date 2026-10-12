@@ -67,13 +67,14 @@ function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: strin
   return { img: { type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, notes: r.notes, png };
 }
 
-const VIEW_ENUM = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom'];
+const VIEW_ENUM = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', 'uv'];
+const VIEW_PRESETS: Record<string, ViewName[]> = { quad: ['persp', 'front', 'right', 'top'], quad_uv: ['persp', 'uv'] };
 
 function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   let views: ViewName[] | undefined;
-  if (typeof a.views === 'string') views = a.views === 'quad' ? ['persp', 'front', 'right', 'top'] : (a.views.split(/[\s,]+/) as ViewName[]);
+  if (typeof a.views === 'string') views = VIEW_PRESETS[a.views] ?? (a.views.split(/[\s,]+/) as ViewName[]);
   else if (Array.isArray(a.views)) views = a.views;
-  if (views) for (const v of views) if (!VIEW_ENUM.includes(v)) throw new Error(`unknown view "${v}" (use ${VIEW_ENUM.join(', ')} or "quad")`);
+  if (views) for (const v of views) if (!VIEW_ENUM.includes(v)) throw new Error(`unknown view "${v}" (use ${VIEW_ENUM.join(', ')}, "quad" or "quad_uv")`);
   let highlight: RenderOptions['highlight'] = null;
   if (a.highlight) {
     const cls = a.highlight_class === 'point' ? 'point' : 'prim';
@@ -83,12 +84,13 @@ function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   return {
     views, size: a.size, wireframe: a.wireframe ?? 'auto', colorBy: a.color_by ?? null, highlight,
     points: a.points ?? 'auto', grid: a.grid ?? true, azimuth: a.azimuth, elevation: a.elevation, zoom: a.zoom,
-    target: a.target ?? null, title: label,
+    target: a.target ?? null, title: label, checker: !!a.checker,
   };
 }
 
 const RENDER_PROPS = {
-  views: { description: 'views: "quad" (persp+front+right+top, default), a single view, or a list of persp/front/back/left/right/top/bottom', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), a single view, or a list of persp/front/back/left/right/top/bottom/uv. "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+  checker: { type: 'boolean', description: 'shade 3D views with an 8×8 uv checker (light cells tinted red along u, green along v) to see stretch, seams and flips' },
   size: { type: 'number', description: 'pixels per view tile (default 512 for quad, 800 single)' },
   color_by: { type: 'string', description: 'colour by attribute (e.g. "height", "class", "N", "P.y"); ints/strings get categorical colours' },
   highlight: { type: 'string', description: 'group pattern to highlight in orange (e.g. "front", "@P.y>1")' },

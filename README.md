@@ -74,11 +74,11 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, assets, export, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, loops, assets, uv, export, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings |
-| `render` | PNG with persp/front/right/top views, colour by attribute, group highlight, flipped normals in blue |
+| `render` | PNG with persp/front/right/top views and a `uv` view (`quad_uv`), uv checker, colour by attribute, group highlight, flipped normals in blue |
 | `export` | glb / obj / usda / ply / stl / json |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete |
@@ -131,7 +131,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | copy | `copy_xform` `scatter` `copy_to_points` |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
-| uv | `uv_project` `uv_transform` |
+| uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, json) |
@@ -170,6 +170,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 | property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions |
 | io | `node test/io.ts` | export → import round trips for every format |
+| uv | `npm run test:uv` | unwrap/flatten/layout: finite uv in 0..1, topology kept, LSCM angle error, no island overlaps, uniform texel density, GLB round trip, uv view size |
 | mcp | `node test/mcp.ts` | the MCP server end to end over stdio |
 | arrays | `node test/arrays.ts` | array attributes: storage, merge and builder rules, wrangle `f[]@`/`i[]@`/`s[]@` and helpers, `attrib_array`, JSON, inspect, fingerprints, every node type fed array attributes |
 

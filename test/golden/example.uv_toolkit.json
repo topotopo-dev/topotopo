@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["chart:int:1", "island:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [5.426, 5, 1.7321],
+      "min": [-3.7, 0, -1.7321]
+    },
+    "counts": {
+      "points": 342,
+      "prims": 311,
+      "vertices": 1242,
+      "volumes": 0
+    },
+    "groups": {
+      "point": [],
+      "prim": []
+    },
+    "hashes": {
+      "P": "7d37a5396745abbb",
+      "attributes": {
+        "prim.chart": "cd333db24fbedae8",
+        "prim.island": "fc429c32d3589b08",
+        "vertex.uv": "9a821dfbfddee471"
+      },
+      "topology": "5b89777deb7743a7"
+    }
+  },
+  "name": "example.uv_toolkit",
+  "ok": true,
+  "source": "examples/uv_toolkit.json",
+  "warnings": []
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Command line: cook a graph JSON file, then render / export / inspect.
 //   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
-//                   [--render out.png] [--views quad|persp|front,top] [--color-by attr] [--export out.glb]
+//                   [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb]
 //                   [--inspect summary|attributes|topology|all]
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
@@ -29,7 +29,7 @@ const fail = (msg: string): never => { console.error(msg); process.exit(1); };
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     'usage: node src/cli.ts <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]',
-    '         [--render out.png] [--views quad|persp|front,top] [--color-by attr] [--export out.glb] [--inspect all]',
+    '         [--render out.png] [--views quad|quad_uv|persp|front,top|persp,uv] [--checker] [--color-by attr] [--export out.glb] [--inspect all]',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     '       node src/cli.ts --catalog | --help-node <type>',
   ].join('\n'));
@@ -92,9 +92,9 @@ function writeOutputs(r: CookReport, frame?: number) {
   const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
   if (out) {
     const v = opt('--views') ?? 'quad';
-    const views = v === 'quad' ? undefined : (v.split(',') as ViewName[]);
+    const views = v === 'quad' ? undefined : v === 'quad_uv' ? (['persp', 'uv'] as ViewName[]) : (v.split(',') as ViewName[]);
     const title = path.basename(file, '.json') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
-    const img = renderGeometry(geo, { views, colorBy: opt('--color-by') ?? null, title });
+    const img = renderGeometry(geo, { views, colorBy: opt('--color-by') ?? null, checker: argv.includes('--checker'), title });
     const p = at(out);
     fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
     fs.writeFileSync(p, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
