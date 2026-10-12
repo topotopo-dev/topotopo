@@ -7,7 +7,7 @@
     "mcp": "node src/mcp/server.ts",
     "preview": "node scripts/preview.ts --examples",
     "cook": "node src/cli.ts",
-    "test": "node test/smoke.ts && node test/io.ts && node test/mcp.ts",
+    "test": "node test/smoke.ts && node test/io.ts && node test/mcp.ts && node test/topology.ts",
     "test:smoke": "node test/smoke.ts",
     "showcase": "node test/showcase.ts",
     "typecheck": "tsc --noEmit"
