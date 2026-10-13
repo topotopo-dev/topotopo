@@ -505,9 +505,11 @@ QUESTION → OPTION
   What shape is it?                                shading:"matcap" (clay, reads form) · "ao" (ambient occlusion: creases and
                    cavities darken; ao_radius px) · "flat" (facets, ignores N)
 Labels never overlap: ones without room are skipped (note says how many; raise size or lower max_labels).
+view_labels:false drops each view's name label and the persp axis gizmo (clean thumbnails, e.g. the shelf's).
 Examples: render {views:["persp","section"], section_axis:"z", wireframe:"hard", label_groups:true}
           render {views:"turntable", shading:"matcap"} · render {glyphs:"N", clip:{axis:"x", offset:0.5}}
-CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2`,
+CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
+  --no-view-labels`,
 
   export: `EXPORT
 export {path:"exports/thing.glb"} — format from the extension:

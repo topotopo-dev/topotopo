@@ -153,6 +153,7 @@ const RENDER_PROPS = {
   ortho_scale: { type: 'number', description: 'ortho/section views: world width across a view (default: fit the bbox)' },
   scale: { type: 'number', description: '2 (up to 4) for a 2× image: tiles, text, lines and markers scaled' },
   annotate: { type: 'boolean', description: 'second footer line naming the active overlays plus geometry notes (pieces, open edges, back-facing %); default on whenever an overlay option is used' },
+  view_labels: { type: 'boolean', description: 'false hides the name label of every view and the persp axis gizmo (clean thumbnails); default true' },
   textures: { type: 'boolean', description: '3D views show the base colour maps of materials with image textures (texture_to_material; needs uv); texture × Cd like glTF' },
   texture: { type: 'string', description: 'adds the "texture" view and picks what it shows: an image name, "image/layer", or a material name (its maps as a labelled strip); "" = every image. A geometry holding only images renders as the texture view by default' },
 };
