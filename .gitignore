@@ -3,6 +3,7 @@ workspace/
 tmp/
 out/
 dist/
+/site/
 *.tgz
 *.log
 .claude/worktrees/

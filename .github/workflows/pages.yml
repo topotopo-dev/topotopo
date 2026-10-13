@@ -1,0 +1,55 @@
+# The documentation site, https://topotopo.dev: scripts/gen-site.ts builds it from the repository into site/
+# (`npm run site`), scripts/check-site.ts fails on broken internal links or missing images (`npm run site:check`), and
+# the official Pages actions deploy it.
+#
+# One-time setup in the repository settings (Pages from GitHub Actions needs a public repository, or a paid plan for
+# a private one):
+#   - Settings → Pages → Build and deployment → Source: "GitHub Actions" (not "Deploy from a branch").
+#   - Settings → Pages → Custom domain: topotopo.dev, then "Enforce HTTPS" once the certificate is issued. The domain
+#     is set there; site/CNAME carries the same name for completeness.
+#   - DNS records at the registrar (Cloudflare) and the domain verification: docs/release/site-dns.md.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deployment at a time; a newer push waits instead of cancelling a deployment in progress
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run site
+      - run: npm run site:check
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+          # keep .nojekyll (v4+ drops dotfiles by default); harmless for an Actions deployment, needed if the site is
+          # ever published from a branch instead
+          include-hidden-files: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
