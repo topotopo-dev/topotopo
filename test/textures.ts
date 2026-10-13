@@ -401,6 +401,14 @@ let tg: Geometry;
   const gltfText = new TextDecoder().decode(await exportGeometryAsync(tg, 'gltf', {}));
   check((JSON.parse(gltfText).images ?? []).length === 3 && gltfText.includes('data:image/png;base64,'), '.gltf embeds the images as data URIs (stored PNG blocks without deflate)');
 
+  // packed instances of a textured mesh: the images live in the source, exports find them, unpacking carries them once
+  const inst = await geo({ ...textured, pts: { type: 'point_grid', params: { counts: [3, 1, 1], size: [4, 0, 0] } }, cp: { type: 'copy_to_points', in: ['mat', 'pts'], params: { pack: true } } }, 'cp');
+  const unpacked = await geo({ ...textured, pts: { type: 'point_grid', params: { counts: [3, 1, 1], size: [4, 0, 0] } }, cp: { type: 'copy_to_points', in: ['mat', 'pts'], params: { pack: true } }, u: { type: 'unpack', in: ['cp'] } }, 'u');
+  const iw: string[] = [];
+  const instGlb = await exportGeometryAsync(inst, 'glb', { warn: (m) => iw.push(m) });
+  const ij = JSON.parse(new TextDecoder().decode(instGlb.subarray(20, 20 + new DataView(instGlb.buffer, instGlb.byteOffset).getUint32(12, true))));
+  check(inst.numPacked === 3 && (ij.images ?? []).length === 3 && !iw.length, 'packed copies of a textured mesh export their textures (EXT_mesh_gpu_instancing)');
+  check(imagesOf(unpacked).map((i) => i.name).sort().join(',') === 'brick_color,brick_normal,brick_orm' && unpacked.numPrims === 72, 'unpack carries the source images once');
   // USD: PNGs next to the .usda, referenced relative to it, ORM through r/g/b
   const usdPath = path.join(tmp, 'out', 'brick.usda');
   const u = await exportFilesAsync(tg, 'usda', usdPath, { deflate: (d) => zlib.deflateSync(d) });
