@@ -1,7 +1,7 @@
 // The asset shelf: shelf/<name>.json are graph assets the engine registers as node types (category "shelf").
 // This script keeps the derived files in step with them:
 //   shelf/index.json         the asset list the engine reads through its Host (dependencies first)
-//   shelf/thumbs/<name>.png  a 256 px matcap thumbnail of each asset cooked at its defaults
+//   shelf/thumbs/<name>.png  a 256 px matcap thumbnail of each asset cooked at its defaults (no view label or gizmo)
 //   README.md                the thumbnail table between the shelf markers
 //
 //   node scripts/gen-shelf.ts             write all three, print cook and render times
@@ -113,10 +113,10 @@ export function checkShelf(files = readShelfFiles()): string[] {
   return out;
 }
 
-/** Render options of a thumbnail: one persp view, 256 px, matcap, plus the asset's meta.thumbnail_render. */
+/** Render options of a thumbnail: one persp view, 256 px, matcap, no view label, plus the asset's meta.thumbnail_render. */
 export function thumbOptions(g: GraphSpec) {
   const extra = g.meta?.thumbnail_render ?? {};
-  return { ...renderArgs({ views: 'persp', size: 256, shading: 'matcap', wireframe: false, annotate: false, ...extra }) };
+  return { ...renderArgs({ views: 'persp', size: 256, shading: 'matcap', wireframe: false, annotate: false, view_labels: false, ...extra }) };
 }
 
 /** Render a thumbnail PNG (the view tile only, without the footer). */

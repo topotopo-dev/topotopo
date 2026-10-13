@@ -31,6 +31,14 @@ defineNode({
     operation: { type: 'enum', options: ['union', 'subtract', 'intersect'], default: 'subtract', desc: 'A ∪ B, A − B, or A ∩ B', aliases: ['op', 'mode'] },
   },
   outputs: 'prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated',
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      ball: { type: 'sphere', params: { type: 'ico', level: 3, radius: 0.65 } },
+      cut: { type: 'boolean', in: ['box', 'ball'], params: { operation: 'subtract' } },
+    },
+    output: 'cut',
+  },
   cook: ({ input, hasInput, p }) => withManifolds((track) => {
     const A = input(0), B = hasInput(1) ? input(1) : null;
     const L = propLayout(B ? [A, B] : [A]);
@@ -63,6 +71,7 @@ defineNode({
     cap: { type: 'bool', default: false, desc: 'close the cut with faces (prim group "cap")' },
   },
   outputs: 'prim groups above/below (keep=both), cap',
+  example: { type: 'clip', params: { origin: [0, 0.2, 0], normal: [0, 1, 0], keep: 'below', cap: true } },
   cook: ({ input, p }) => {
     const g = input(0);
     const n = normalize(p.normal);
@@ -156,6 +165,14 @@ defineNode({
   params: {
     operation: { type: 'enum', options: ['sum', 'difference'], default: 'sum', desc: 'sum grows A by B; difference erodes A by B' },
   },
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      ball: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.1 } },
+      rounded: { type: 'minkowski', in: ['box', 'ball'] },
+    },
+    output: 'rounded',
+  },
   cook: ({ input, p }) => withManifolds((track) => {
     const L = propLayout([]);
     const a = track(toManifold(input(0), L)), b = track(toManifold(input(1), L));
@@ -175,6 +192,7 @@ defineNode({
     sharp_angle: { type: 'float', default: 60, min: 0, max: 180, desc: 'edges with a dihedral angle sharper than this stay sharp (180 = smooth everything)' },
     smoothness: { type: 'float', default: 0, min: 0, max: 1, desc: 'smoothness kept on sharp edges (0 = crisp)' },
   },
+  example: { type: 'smooth_solid', params: { refine: 4, sharp_angle: 80 } },
   cook: ({ input, p }) => withManifolds((track) => {
     const L = propLayout([input(0)]);
     const m = track(toManifold(input(0), L));
@@ -197,6 +215,7 @@ defineNode({
     neighbors: { type: 'int', default: 24, min: 4, desc: 'nearest sites considered per cell (raise if cells look wrong)' },
   },
   outputs: 'prim name ("piece0"...), class (int), group inside; point/prim attributes from the source',
+  example: { type: 'voronoi_fracture', params: { count: 20, gap: 0.02, seed: 4 } },
   cook: ({ input, hasInput, p }) => withManifolds((track) => {
     const src = input(0);
     const L = propLayout([src]);
@@ -259,6 +278,7 @@ defineNode({
     margin: { type: 'float', default: 0.001, min: 0, desc: 'keep slices this far inside the bbox ends' },
   },
   outputs: 'prim float height, int slice',
+  example: { type: 'slice', params: { count: 12, axis: 'y' } },
   cook: ({ input, p }) => withManifolds((track) => {
     const g = input(0);
     const plane = p.axis === 'y' ? 'xz' : p.axis === 'z' ? 'xy' : 'yz';

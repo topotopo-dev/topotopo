@@ -4,9 +4,17 @@ A procedural geometry engine: Houdini-style node graphs, headless, deterministic
 Houdini. You build JSON node graphs; the engine cooks them into geometry. It runs on Node and WebAssembly with no
 GPU, every cook is reproducible from the graph and its seeds, and the core is browser-ready.
 
-- **over 100 node types**: generators, curves and sweeps, deformers, attributes and groups, polygon modelling, scattering and
-  instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit, heightfield terrain (masks, hydraulic and
-  thermal erosion, roads, scattering), L-systems, text, loops, a frame solver, assets, and code nodes.
+- **200+ node types**: generators, curves and splines (Bezier/NURBS), sweeps, deformers, attributes and groups, polygon
+  modelling (bevel, knife, bridge, quad fill), UVs (xatlas unwrap, LSCM), remeshing (isotropic, quad, voxel) and LOD,
+  scattering and instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit and sampled SDF grids,
+  heightfield terrain (masks, hydraulic and thermal erosion, roads, scattering), procedural textures and bakes,
+  L-systems, text, loops, a frame solver, in-graph checks, and code nodes. A shelf of ready-made graph assets (walls,
+  roofs, stairs, props, trees, rocks, PCG helpers) is used like nodes. Every node documents its params and carries an
+  example that is cooked in the tests.
+- **Rust/WASM kernels**: a straight skeleton (pitched roofs and polygon offsets from any footprint, holes included),
+  sampled SDF grids with CSG, morphology and sharp dual contouring (`voxel_remesh`), field-aligned quad remeshing
+  (`remesh_quad`), and heightfield erosion and drainage (virtual-pipe and stream-power models, D8/D-infinity flow) are
+  compiled from a Rust crate in [kernels/](kernels) to WebAssembly: deterministic, no native build.
 - **Time**: every cook happens at a frame. Only time-dependent nodes re-cook when the frame changes, and the `solver`
   node advances a simulation frame by frame from its cached previous state.
 - **Agent and MCP support**: Polyforge ships an MCP server, so LLM agents can build graphs in one call, read text
@@ -25,10 +33,10 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   `EXT_mesh_gpu_instancing` with per-instance attributes, USDA a `PointInstancer` with per-instance primvars, CSV and
   points JSON an instance stream (one row per instance with its transform and a `Mesh` column, plus a sidecar and one
   GLB per source mesh, for Unreal PCG), and the renderer draws them within a triangle budget.
-- **Terrain**: heightfield volumes with noise, masks, droplet erosion, roads and scatter; export as Unreal Landscape
-  heightmaps (16-bit PNG or RAW `.r16` with a JSON sidecar holding the import scale) and 8-bit weight layers, or as one
-  `unreal_landscape` bundle: heightmap, every layer, a manifest with the exact Landscape import settings, the meshes and
-  the instance stream.
+- **Terrain**: heightfield volumes with noise, masks, erosion (droplet, virtual pipes, stream power, thermal), drainage
+  maps, roads and scatter; export as Unreal Landscape heightmaps (16-bit PNG or RAW `.r16` with a JSON sidecar holding
+  the import scale) and 8-bit weight layers, or as one `unreal_landscape` bundle: heightmap, every layer, a manifest
+  with the exact Landscape import settings, the meshes and the instance stream.
 - **Textures**: a Substance-Designer-style image node family (noise, patterns, cells, shapes, blends, levels, warps,
   normal and AO from height, channel packing) and bakes from meshes in uv space (AO, curvature, thickness, normals and
   height from a high-res mesh, island ids, masks, vertex colour). Images travel with the geometry, materials reference
@@ -52,9 +60,9 @@ npm test
 ```
 
 `npm test` cooks every node type and checks geometry invariants, compares golden fingerprints, runs random-graph
-property tests and a wrangle fuzz, checks the node reference is current, round-trips every file format and runs the
-MCP server end to end, the way a real client would. See [Testing](#testing). To re-render the examples into
-`examples/renders`:
+property tests and a wrangle fuzz, checks the node reference is current and cooks every node's documented example,
+round-trips every file format and runs the MCP server end to end, the way a real client would. See
+[Testing](#testing). To re-render the examples into `examples/renders`:
 
 ```bash
 npm run showcase
@@ -103,7 +111,7 @@ Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings, images (size and per-layer ranges) |
-| `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `scale: 2`; a footer line names what is shown (help topic `render`) |
+| `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the shelf thumbnails); a footer line names what is shown (help topic `render`) |
 | `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json (packed instances: instance rows + meshes sidecar + one GLB per source); heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png / unreal_landscape (a directory bundle); images: textures (one PNG per image; glb/gltf embed and usda writes the textures materials use) |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a shelf asset into the workspace to edit |
@@ -159,21 +167,21 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | copy | `copy_xform` `scatter` (count or density per m², density attribute + 0..1 mask, blue noise, relaxation, exact min distance, per-prim cap) `copy_to_points` (real copies or packed instances; variants by attribute or weights) `pack` `unpack` |
 | pcg | `mask` (slope, height, curvature, occlusion, distance, direction, noise, attribute, group, inside; combine) `attribute_from_map` (PNG → attribute by uv or planar projection) `orient` (orient/N/up from normals, a surface, curve tangents, a direction or target; random yaw, tilt, scale) `points_along_curve` `cluster` (k-means, radius) `prune` (overlap, density, expression, near geometry) |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
-| sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` |
+| sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` (implicit, lazily sampled); sampled grids (Rust/WASM): `sdf_grid` `grid_combine` `grid_offset` `grid_blur` `grid_dilate` `grid_erode` `grid_resample` `grid_to_mesh` (sharp dual contouring or marching cubes) `grid_to_sdf` `voxel_remesh` |
 | heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_flow` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
 | uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
 | texture | generators `tex_noise` `tex_pattern` `tex_cells` `tex_gradient` `tex_shape` `tex_splatter` `tex_scratches` `tex_text`; filters `tex_blend` `tex_levels` `tex_curves` `tex_blur` `tex_warp` `tex_transform` `tex_edge_detect` `tex_invert` `tex_threshold` `tex_histogram_scan` `tex_normal_from_height` `tex_height_to_ao` `tex_channel` (ORM packing) `tex_colorize` `tex_tile_sampler` `tex_output`; bakes in uv space `bake_ao` `bake_curvature` `bake_thickness` `bake_position` `bake_normal` `bake_world_normal` `bake_height` `bake_island_id` `bake_mask` `bake_vertex_color`; `texture_to_material` `tex_to_heightfield` `heightfield_to_tex` (images are 2D float layers carried on the geometry; glb/usda embed them, export format `textures` writes PNGs) |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json) |
-| shelf | 35 graph assets used like nodes (see [Shelf](#shelf)): `wall_segment` `window_frame` `door_frame` `stairs` `spiral_stairs` `railing` `fence` `pillar` `arch` `roof_gable` `roof_hip` `brick_wall` `tile_floor` `hex_grid_floor` `scaffold` `beam_truss` `crate` `barrel` `pallet` `log` `rock` `cliff_block` `tree_lowpoly` `bush` `lamp_post` `bollard` `bench` `sign_post` `sandbag_wall` `cable` `pipe_run` `road_strip` `scatter_rocks` `forest_patch` `grass_clumps` |
+| shelf | graph assets used like nodes, e.g. `stairs` `railing` `roof_skeleton` `house` `crate` `tree_lowpoly` `forest_patch`; every asset is listed with its thumbnail under [Shelf](#shelf) |
 
 Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated
 [node reference](docs/nodes.md).
 
 ## Examples
 
-[examples/](examples) has twenty-six graphs, each rendered by `node test/showcase.ts` into [examples/renders](examples/renders):
+[examples/](examples) holds the showcase graphs, each rendered by `npm run showcase` into [examples/renders](examples/renders):
 rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
 grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
 bracket, a solver growth animation (rendered at the frame named by its `meta.frame`), polygon editing (loop cuts, knife,
@@ -187,6 +195,13 @@ Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with
 offset handrails, and a Bezier letter extruded. `shelf_street` is a street block built only from shelf assets (see
 [Shelf](#shelf)). `textures` is a brick wall material made only from texture nodes and the shelf crate with baked AO and
 curvature turned into worn paint on its edges and an ORM map, rendered with `textures: true` next to the texture view.
+`house_city` spawns the `house` shelf asset on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
+straight-skeleton roofs (an L-shaped house, a courtyard roof around a hole, nested offsets). `deformers` (lattice,
+path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert) and `remesh_lod` (isotropic remesh,
+repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
+sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube, and
+`erosion_models` erodes one ridged terrain four ways (TypeScript and WASM droplets, virtual pipes, pipes plus stream
+power).
 
 To cook a graph from the command line:
 
@@ -207,9 +222,10 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 
 ## Shelf
 
-[shelf/](shelf) holds 35 ready-made graph assets (Polyforge's answer to a shelf of HDAs): walls with windows and doors,
-roofs, stairs, railings and fences, bricks and tiles, props, trees and rocks, and PCG helpers that dress a road or a
-terrain. The engine registers them on startup as node types of category `shelf`, so a graph uses one like any node:
+[shelf/](shelf) holds ready-made graph assets (Polyforge's answer to a shelf of HDAs): walls with windows and doors,
+whole houses, roofs (gable, hip, and straight-skeleton roofs for any footprint), stairs, railings and fences, bricks and
+tiles, props, trees and rocks, and PCG helpers that dress a road or a terrain. The engine registers them on startup as
+node types of category `shelf`, so a graph uses one like any node:
 
 ```json
 { "nodes": { "stairs": { "type": "stairs", "params": { "steps": 16, "style": "open" } } } }
@@ -264,11 +280,12 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
 | golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every shelf asset matches its fingerprint in `test/golden/` |
 | property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) |
-| docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions |
+| docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions; this README's node table lists every node type |
+| examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors: a node spec on the node's fixture inputs, a graph as written |
 | io | `node test/io.ts` | export → import round trips for every format |
 | interop | `npm run test:interop` | glTF (validator), Houdini `.geo`/`.bgeo`, CSV/PCG and points JSON round trips; instance rows and their Unreal transforms, per-instance glTF/USD attributes, packed `.geo`, textures, the Unreal Landscape bundle, `export:demo` |
 | uv | `npm run test:uv` | unwrap/flatten/layout: finite uv in 0..1, topology kept, LSCM angle error, no island overlaps, uniform texel density, GLB round trip, uv view size |
-| render | `node test/render.ts` | every render option renders at the expected size; pixel probes for edge overlays, section caps (incl. inside-out), clip, glyphs, labels, legends, shading, the footer line; default output unchanged by the new code paths |
+| render | `node test/render.ts` | every render option renders at the expected size; pixel probes for edge overlays, section caps (incl. inside-out), clip, glyphs, labels, legends, shading, the footer line, `view_labels: false`; default output unchanged by the new code paths |
 | remesh | `npm run test:remesh` | remesh_isotropic edge lengths, watertightness, Cd continuity, box features, adaptive size, group/boundary/seams, timing; decimate seams, lock_border, points; mesh_repair winding, duplicates, holes, non-manifold split, slivers, self-intersections; lod levels and names |
 | quad remesh | `node test/remeshquad.ts` | Rust/WASM quad extraction, provenance, continuous UVs and seams, groups, determinism and pool parity; `node bench/remeshquad.ts` measures the 100k-triangle case |
 | mcp | `node test/mcp.ts` | the MCP server end to end over stdio |

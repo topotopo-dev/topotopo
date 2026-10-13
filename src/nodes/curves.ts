@@ -139,6 +139,7 @@ defineNode({
     length: { type: 'float', default: 1, desc: 'length', aliases: ['dist'] },
     points: { type: 'int', default: 2, min: 2, desc: 'number of points', aliases: ['count', 'npts'] },
   },
+  example: { type: 'line', params: { direction: [1, 0, 0], length: 5, points: 11 } },
   cook: ({ p }) => {
     const d = normalize(p.direction);
     const pts = Array.from({ length: p.points }, (_, i) => add(p.origin, scale(d, (p.length * i) / (p.points - 1))));
@@ -161,6 +162,7 @@ defineNode({
     arc: { type: 'vec2', default: [0, 360], desc: 'begin/end angle in degrees (anything < 360 makes an open arc)' },
     open: { type: 'bool', default: false, desc: 'output an open polyline instead of a closed polygon face' },
   },
+  example: { type: 'circle', params: { radius: 2, segments: 48, arc: [0, 180] } },
   cook: ({ p }) => {
     const span = p.arc[1] - p.arc[0];
     const full = Math.abs(span) >= 360 - 1e-9;
@@ -189,6 +191,7 @@ defineNode({
     smooth: { type: 'bool', default: false, desc: 'Catmull-Rom interpolate through the points' },
     subdivisions: { type: 'int', default: 8, min: 1, desc: 'smooth: samples per segment' },
   },
+  example: { type: 'curve', params: { points: [[0, 0, 0], [2, 0, 1], [4, 0, -1], [6, 0, 0]], smooth: true, subdivisions: 12 } },
   cook: ({ p }) => {
     if (!Array.isArray(p.points) || p.points.length < 2) throw new NodeError('points must be a list of at least 2 [x,y,z]');
     let pts: number[][] = p.points.map((q: any) => (q.length === 2 ? [+q[0], 0, +q[1]] : [+q[0], +q[1], +q[2]]));
@@ -212,6 +215,7 @@ defineNode({
     clockwise: { type: 'bool', default: false, desc: 'turn direction when seen from above' },
     center: P.center(),
   },
+  example: { type: 'spiral', params: { radius: 1, radius_end: 0.3, height: 3, turns: 5 } },
   cook: ({ p }) => {
     const n = Math.max(2, Math.ceil(p.turns * p.points_per_turn) + 1);
     const r1 = p.radius_end < 0 ? p.radius : p.radius_end;
@@ -243,6 +247,7 @@ defineNode({
     plane: P.plane('xz'),
     center: P.center(),
   },
+  example: { type: 'shape2d', params: { shape: 'gear', radius: 1, inner_radius: 0.8, sides: 16 } },
   cook: ({ p }) => {
     const [w, d] = p.size;
     let pts2: number[][] = [];
@@ -302,6 +307,13 @@ defineNode({
     treat_splines: { type: 'enum', options: ['exact', 'control_polygon'], default: 'exact', desc: 'Bezier/NURBS prims: sample the curve itself by arc length (exact) or their control polygon as a polyline' },
   },
   outputs: 'point curveu (0..1 along each curve), optional tangentu',
+  example: {
+    nodes: {
+      path: { type: 'curve', params: { points: [[0, 0, 0], [3, 0, 2], [6, 0, 0]] } },
+      even: { type: 'resample', in: ['path'], params: { length: 0.25, smooth: true, tangent: true } },
+    },
+    output: 'even',
+  },
   cook: ({ input, p }) => {
     const g = input(0);
     const sel = mask(g, 'prim', p.group);
@@ -389,6 +401,13 @@ defineNode({
     start: { type: 'float', default: 0, min: 0, max: 1, desc: 'start u (0..1 of arc length)' },
     end: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'end u' },
   },
+  example: {
+    nodes: {
+      path: { type: 'spiral', params: { turns: 2 } },
+      part: { type: 'carve', in: ['path'], params: { start: 0.25, end: 0.75 } },
+    },
+    output: 'part',
+  },
   cook: ({ input, p }) => {
     const g = evaluateSplines(input(0));
     const b = new GeoBuilder(g);
@@ -423,6 +442,13 @@ defineNode({
   params: {
     mode: { type: 'enum', options: ['unroll', 'close', 'open'], default: 'unroll', desc: 'unroll: polygon → polyline outline (ends meet); close: polyline → polygon; open: polygon → polyline (drops closing edge)' },
     group: P.group('prim'),
+  },
+  example: {
+    nodes: {
+      ring: { type: 'circle', params: { radius: 1, segments: 32 } },
+      outline: { type: 'ends', in: ['ring'], params: { mode: 'unroll' } },
+    },
+    output: 'outline',
   },
   cook: ({ input, p }) => {
     const g = evaluateSplines(input(0));
@@ -528,6 +554,13 @@ defineNode({
     uv_length: { type: 'bool', default: false, desc: 'v coordinate in world length instead of 0..1' },
   },
   outputs: 'vertex uv; prim groups caps, sides',
+  example: {
+    nodes: {
+      path: { type: 'curve', params: { points: [[0, 0, 0], [1, 1, 0], [3, 1.5, 1], [4, 3, 1]], smooth: true } },
+      horn: { type: 'sweep', in: ['path'], params: { radius: 0.3, divisions: 16, scale_ramp: [[0, 1], [1, 0.1]] } },
+    },
+    output: 'horn',
+  },
   cook: ({ input, hasInput, p }) => {
     const g = evaluateSplines(input(0));
     let profiles: Profile[];
@@ -559,6 +592,13 @@ defineNode({
     use_width: { type: 'bool', default: true, desc: 'use point "width" attribute (diameter) when present' },
   },
   outputs: 'vertex uv; prim groups caps, sides',
+  example: {
+    nodes: {
+      tree: { type: 'lsystem', params: { generations: 4 } },
+      branches: { type: 'polywire', in: ['tree'], params: { divisions: 6 } },
+    },
+    output: 'branches',
+  },
   cook: ({ input, p }) => {
     const g = evaluateSplines(input(0));
     const wA = p.use_width ? g.points.get('width') : undefined;
@@ -584,6 +624,13 @@ defineNode({
     flip: { type: 'bool', default: false, desc: 'reverse face orientation' },
   },
   outputs: 'vertex uv',
+  example: {
+    nodes: {
+      profile: { type: 'curve', params: { points: [[0, 0, 0], [0.4, 0, 0], [0.25, 0.6, 0], [0.45, 1.2, 0], [0, 1.2, 0]], smooth: true } },
+      vase: { type: 'revolve', in: ['profile'], params: { segments: 48 } },
+    },
+    output: 'vase',
+  },
   cook: ({ input, p }) => {
     const g = input(0);
     const span = p.angle[1] - p.angle[0], full = Math.abs(span) >= 360 - 1e-9;
@@ -663,6 +710,13 @@ defineNode({
     caps: { type: 'bool', default: true, desc: 'add top/bottom caps' },
   },
   outputs: 'prim groups top, bottom, side',
+  example: {
+    nodes: {
+      star: { type: 'shape2d', params: { shape: 'star', radius: 1, inner_radius: 0.5, sides: 5 } },
+      solid: { type: 'extrude', in: ['star'], params: { height: 0.3, scale_top: [0.8, 0.8] } },
+    },
+    output: 'solid',
+  },
   cook: ({ input, p }) => {
     const g = input(0);
     if (!g.numPrims) throw new NodeError('extrude needs closed shapes (polygons) as input');
@@ -731,6 +785,13 @@ defineNode({
     output: { type: 'enum', options: ['outlines', 'faces'], default: 'outlines', desc: 'outlines = closed polygons per contour; faces = filled with holes cut' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'shape plane' },
   },
+  example: {
+    nodes: {
+      plan: { type: 'shape2d', params: { shape: 'L', size: [4, 3], thickness: 1.2 } },
+      inner: { type: 'offset_curve', in: ['plan'], params: { distance: -0.2, join: 'miter' } },
+    },
+    output: 'inner',
+  },
   cook: ({ input, p, warn }) => {
     const g = input(0);
     const plane: Plane = p.plane === 'auto' ? detectPlane(g) : p.plane;
@@ -756,6 +817,14 @@ defineNode({
     operation: { type: 'enum', options: ['union', 'subtract', 'intersect', 'xor'], default: 'union', desc: 'boolean op', aliases: ['op', 'mode'] },
     output: { type: 'enum', options: ['outlines', 'faces'], default: 'faces', desc: 'faces = filled (holes cut, triangulated where needed); outlines = closed contour polygons' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'shape plane' },
+  },
+  example: {
+    nodes: {
+      plate: { type: 'shape2d', params: { shape: 'rounded_rect', size: [3, 1.5], corner_radius: 0.2 } },
+      hole: { type: 'circle', params: { radius: 0.4, segments: 32 } },
+      cut: { type: 'boolean2d', in: ['plate', 'hole'], params: { operation: 'subtract' } },
+    },
+    output: 'cut',
   },
   cook: ({ input, hasInput, p, warn }) => {
     const A = input(0), B = hasInput(1) ? input(1) : null;
@@ -788,6 +857,7 @@ defineNode({
     rule: { type: 'enum', options: ['EvenOdd', 'NonZero'], default: 'EvenOdd', desc: 'fill rule for overlapping contours' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'plane' },
   },
+  example: { nodes: { glyph: { type: 'text', params: { text: 'B', output: 'outlines' } }, face: { type: 'fill', in: ['glyph'] } }, output: 'face' },
   cook: ({ input, p, warn }) => {
     const g = input(0);
     const plane: Plane = p.plane === 'auto' ? detectPlane(g) : p.plane;
@@ -811,6 +881,16 @@ defineNode({
     caps: { type: 'bool', default: false, desc: 'cap the first and last curves (when they are closed)' },
   },
   outputs: 'vertex uv',
+  example: {
+    nodes: {
+      a: { type: 'circle', params: { radius: 1, segments: 32 } },
+      b: { type: 'circle', params: { radius: 0.5, segments: 32, center: [0, 1, 0] } },
+      c: { type: 'circle', params: { radius: 0.8, segments: 32, center: [0, 2, 0] } },
+      rings: { type: 'merge', in: ['a', 'b', 'c'] },
+      skin: { type: 'loft', in: ['rings'], params: { caps: true } },
+    },
+    output: 'skin',
+  },
   cook: ({ input, p }) => {
     const g = input(0);
     if (g.numPrims < 2) throw new NodeError('loft needs at least 2 curves');

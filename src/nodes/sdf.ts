@@ -118,6 +118,7 @@ defineNode({
     rotate: { type: 'vec3', default: [0, 0, 0], desc: 'rotation in degrees' },
     name: { type: 'string', default: 'sdf', desc: 'volume name' },
   },
+  example: { type: 'sdf_shape', params: { shape: 'round_box', size: [1, 0.5, 1], radius2: 0.1 } },
   cook: ({ p }) => {
     const { f, r } = shapeFn(p);
     const rot = p.rotate.some((v: number) => v !== 0);
@@ -185,6 +186,15 @@ defineNode({
     operation: { type: 'enum', options: ['union', 'subtract', 'intersect', 'smooth_union', 'smooth_subtract', 'smooth_intersect'], default: 'smooth_union', desc: 'operation', aliases: ['op', 'mode'] },
     k: { type: 'float', default: 0.2, min: 0, desc: 'blend radius for smooth operations', aliases: ['smoothness', 'blend', 'radius'] },
   },
+  example: {
+    nodes: {
+      body: { type: 'sdf_shape', params: { shape: 'capsule', radius: 0.3, height: 1 } },
+      head: { type: 'sdf_shape', params: { shape: 'sphere', radius: 0.35, center: [0, 0.8, 0] } },
+      blob: { type: 'sdf_combine', in: ['body', 'head'], params: { operation: 'smooth_union', k: 0.2 } },
+      mesh: { type: 'sdf_to_mesh', in: ['blob'] },
+    },
+    output: 'mesh',
+  },
   cook: ({ input, hasInput, p }) => {
     const A = input(0);
     let vs: Volume[];
@@ -231,6 +241,14 @@ defineNode({
     period: { type: 'vec3', default: [1, 0, 1], desc: 'repeat: spacing per axis (0 = no repetition on that axis)' },
     count: { type: 'ivec3', default: [3, 1, 3], min: 1, desc: 'repeat: number of copies per axis (limits the domain)' },
     seed: P.seed(),
+  },
+  example: {
+    nodes: {
+      ball: { type: 'sdf_shape', params: { shape: 'sphere', radius: 0.8 } },
+      rough: { type: 'sdf_modify', in: ['ball'], params: { operation: 'noise', amount: 0.08, frequency: 4 } },
+      mesh: { type: 'sdf_to_mesh', in: ['rough'] },
+    },
+    output: 'mesh',
   },
   cook: ({ input, p }) => {
     const g = input(0).clone();
@@ -403,6 +421,14 @@ defineNode({
     divisions: { type: 'int', default: 64, min: 8, max: 256, desc: 'voxels across the largest dimension when voxel_size = 0' },
     keep_mesh: { type: 'bool', default: false, desc: 'keep the input polygons alongside the volume' },
   },
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      field: { type: 'sdf_from_mesh', in: ['box'], params: { divisions: 48 } },
+      grown: { type: 'sdf_to_mesh', in: ['field'], params: { iso: 0.1 } },
+    },
+    output: 'grown',
+  },
   cook: ({ input, p }) => {
     const g = input(0);
     const voxel = p.voxel_size > 0 ? p.voxel_size : autoVoxel(g.bbox(), p.divisions);
@@ -447,6 +473,13 @@ defineNode({
     normals: { type: 'bool', default: true, desc: 'write point N from the field gradient' },
     keep_input: { type: 'bool', default: false, desc: 'also keep the input polygons' },
   },
+  example: {
+    nodes: {
+      ring: { type: 'sdf_shape', params: { shape: 'torus', radius: 0.8, radius2: 0.25 } },
+      mesh: { type: 'sdf_to_mesh', in: ['ring'], params: { divisions: 80 } },
+    },
+    output: 'mesh',
+  },
   cook: ({ input, p }) => {
     const g = input(0);
     const v = unionVolumes(g, 'sdf_to_mesh');
@@ -475,6 +508,7 @@ defineNode({
     divisions: { type: 'int', default: 48, min: 8, max: 256, desc: 'resolution across the largest dimension when edge_length = 0' },
     offset: { type: 'float', default: 0, desc: 'grow (+) / shrink (−) the surface' },
   },
+  example: { type: 'remesh', params: { divisions: 40, offset: 0.02 } },
   cook: ({ input, p }) => {
     const g = input(0);
     const edge = p.edge_length > 0 ? p.edge_length : autoVoxel(g.bbox(), p.divisions);
