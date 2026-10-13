@@ -184,7 +184,7 @@ Names are Houdini's; TopoTopo aliases should accept them.
 ### Simulation-lite
 | node | notes |
 |---|---|
-| `rbd` settle/stack via Rapier (drop rocks, stack crates, fill containers) | |
+| `rbd` settle/stack via Rapier (drop rocks, stack crates, fill containers) | shipped (P3-A): `rbd_settle`, `rbd_stack` |
 | `particles` | advect by velocity/noise/curl fields, collide with meshes, trails to curves |
 | `cloth`/`drape` via XPBD (Vellum-lite) | tarps, cables, banners |
 | `solver` | generic frame feedback (growth, reaction-diffusion, erosion steps) |
@@ -219,6 +219,7 @@ Versions and licences checked against npm on 2026-10-12.
 | library | licence | role |
 |---|---|---|
 | manifold-3d 3.5 | Apache-2.0 | booleans, hull, Minkowski, level sets, Clipper2 2D (offset, 2D booleans) |
+| `@dimforge/rapier3d-compat` 0.21 | Apache-2.0 | rigid bodies (`rbd_settle`, `rbd_stack`); also offers convex decomposition and shape/ray queries |
 | meshoptimizer 1.3 | MIT | decimation; extend to `simplifyWithAttributes`, `simplifyPoints`, cache/overdraw optimisation, meshopt compression |
 | earcut, d3-delaunay, simplex-noise, opentype.js, three | ISC/MIT | triangulation, 2D Delaunay/Voronoi, noise, fonts, viewer |
 
@@ -227,7 +228,6 @@ Versions and licences checked against npm on 2026-10-12.
 |---|---|---|---|
 | `xatlas-three` 0.2 / `xatlas-web` 0.1 | MIT | UV unwrap and pack (xatlas WASM) | low |
 | `@gltf-transform/core` + `extensions` 4.5 | MIT | production glTF writer: instancing, materials, Draco/meshopt, LOD | low |
-| `@dimforge/rapier3d-compat` 0.21 | Apache-2.0 | rigid bodies, colliders, convex decomposition, shape/ray queries | medium |
 | `verb-nurbs` 3.0 | MIT | NURBS curves/surfaces, intersections, tessellation (old but pure JS; own B-spline eval is also small) | low |
 | `bezier-js` 6.1 | MIT | Bezier utilities (split, offset, arc length) | low |
 | straight skeleton | own code | `straight-skeleton` 3.x on npm wraps CGAL (GPL), so it is out. Its v1 branch is pure TypeScript under MIT and can serve as a reference; otherwise port Felkel–Obdržálek in-house | medium |

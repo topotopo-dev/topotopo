@@ -21,7 +21,8 @@ GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {..
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
-TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".`;
+TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
+PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".`;
 
 export const TOPICS: Record<string, string> = {
   graph: `GRAPH FORMAT
@@ -377,6 +378,42 @@ Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named 
   USD PointInstancer → HISM.
 Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
   with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
+
+  rbd: `RIGID BODIES: SETTLE AND STACK (Houdini RBD drop / settle, Rapier physics; category "sim")
+Use it when placed pieces must rest physically: rocks on a terrain, props on a floor, crates in a pile, a container filled.
+  rbd_settle {in: [pieces, collision?]}   every piece falls under gravity and comes to rest; the output is the input with
+                                each piece moved rigidly (packed input stays packed: only anchors and instance transforms change).
+  rbd_stack  {interval, order, lift}       the same, but pieces drop one at a time (every interval steps), each lifted
+                                above whatever is already under it: give crates the SAME position and they pile up.
+PIECES (input 0): every packed prim is one piece (copy_to_points {pack:true} or pack); its convex hull is computed once per
+  source and shared by all instances (fast: 1,000 pieces in about 1–3 s). Polygons are grouped by pieces: auto = prim
+  attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; or connectivity / name /
+  attrib + piece_attrib. Points shared by two pieces are split. Pieces must NOT start inside each other or the ground
+  (they are pushed apart violently; a warning counts them): lift the template points (transform translate [0, 1, 0]),
+  space them (scatter min_distance), or use rbd_stack.
+COLLISION (input 1): terrain mesh, heightfield, container, settled pieces from an earlier rbd node (merge them): exact
+  triangles, static. Not connected: a ground plane at y = ground (ground_plane on adds it to input 1 too).
+ATTRIBUTES IN: active (prim or point int, default 1) = 0 → the piece stays put but others collide with it; v (m/s) and
+  w (rad/s) on the points (anchors) = initial velocity. OUT (points; packed: anchors): v, w, settled (0/1), contacts
+  (how many colliders touch it), group "fallen" (fell off the collision geometry; delete_fallen removes them).
+PARAMS: collision_shape convex_hull | box | sphere | mesh (exact triangles, static pieces only); hull_points (64: hulls
+  of smooth pieces are reduced, pieces may sink in by a few % of their radius; 0 = exact); friction 0.7, restitution 0,
+  density, gravity; duration (s, upper bound: the simulation ends once every piece has stayed below sleep_threshold
+  for 0.5 s), steps_per_second 60; angular_damping 0.5 (stops round pieces rolling forever) and rest_damping (damps
+  pieces that are nearly at rest so wobbling ends); seed + jitter (a tiny random start offset/tilt that breaks
+  perfectly symmetric stacks, deterministic); max_pieces guard; keep_packed.
+DETERMINISTIC: same inputs + params + seed → the same result, bit for bit (Rapier's WASM build; bodies are inserted in
+  a spatial order, so the input order does not matter). A different Rapier version may settle differently.
+TIME: by default the node ignores the frame and shows the settled result on every frame. animate:true shows the
+  simulation at (frame - start_frame) / fps seconds; cooking a later frame resumes the previous frame's world.
+STATS: the build/inspect report lists steps, sim_time, pieces, settled, fallen per rbd node; warnings say when pieces
+  started overlapping, fell off, or were still moving at the end (raise duration or angular_damping).
+Example: rocks on a terrain, then a crate pile on the terrain and the settled rocks:
+  "rocks": {"type":"copy_to_points","in":["rock","pts_lifted"],"params":{"pack":true}},
+  "settled": {"type":"rbd_settle","in":["rocks","terrain"],"params":{"delete_fallen":true}},
+  "ground2": {"type":"merge","in":["terrain","settled"]},
+  "crates": {"type":"copy_to_points","in":["crate","same_spot_x16"],"params":{"pack":true}},
+  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (examples/rbd_settle.json)`,
 
   pcg: `PCG: SCATTERING AND INSTANCING (Houdini scatter/copy toolkit, Unreal PCG point filters)
 THE CHAIN
