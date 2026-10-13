@@ -47,7 +47,8 @@ const problems: string[] = [];
 for (const b of new Set(bins)) {
   const f = path.join(ROOT, b);
   if (!fs.existsSync(f)) { problems.push(`bin ${b} was not built`); continue; }
-  if (!fs.readFileSync(f, 'utf8').startsWith('#!/usr/bin/env node')) problems.push(`bin ${b} has no #!/usr/bin/env node line`);
+  // exactly this line: "node\r" (a CRLF checkout) is not found by env on Linux and macOS
+  if (fs.readFileSync(f, 'utf8').split('\n')[0] !== '#!/usr/bin/env node') problems.push(`bin ${b} does not start with exactly #!/usr/bin/env node (LF)`);
   fs.chmodSync(f, 0o755);
 }
 
@@ -84,4 +85,4 @@ if (problems.length) {
   for (const p of problems) console.error('build: ' + p);
   process.exit(1);
 }
-console.log(`built dist/: ${js.length} modules, ${copied} asset file(s), bin ${bins.join(', ')} (${Date.now() - t0} ms)`);
+console.log(`built dist/: ${js.length} modules, ${copied} asset file(s), bin ${[...new Set(bins)].join(', ')} (${Date.now() - t0} ms)`);

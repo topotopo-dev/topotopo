@@ -1,25 +1,48 @@
+# The release gates on Linux and Windows: typecheck, the full test suite, the npm package (build + pack test: the
+# tarball installed into an empty project, its CLI, library and MCP server) and the documentation site's link check.
+# Standard GitHub-hosted runners only (free for public repositories). The text node uses the bundled font
+# (assets/fonts), so the runners need no system fonts; kernels/pkg* are committed, so no Rust toolchain either
+# (NOTICE --check keeps the committed Rust section while kernels/Cargo.lock is unchanged).
 name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# a newer push to the same branch or pull request cancels the run in progress
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }}, Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        node: [22, 24]
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+        include:
+          # the newest Node line on Linux only (engines: node >= 22.18)
+          - os: ubuntu-latest
+            node: 24
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # the text node needs a system font that opentype.js can parse (DejaVu's GSUB table is rejected)
-      - name: Install fonts
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-liberation fonts-freefont-ttf
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build
+      - run: npm run pack:test
+      - run: npm run site
+      - run: npm run site:check

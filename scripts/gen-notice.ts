@@ -19,6 +19,8 @@
 //   match the machine, so reading their files would make NOTICE depend on the platform. Each line names its npm page.
 // - Every other entry must be installed with the locked version (npm ci); otherwise the script stops instead of
 //   writing a different file.
+// - Lists are sorted with a fixed collation ('en'), not the machine's locale; licence files are read with their line
+//   endings normalised; directory listings are sorted (their order differs by file system).
 // - The Rust section records a fingerprint of kernels/Cargo.lock. --check regenerates it with `cargo metadata
 //   --offline` when cargo and the crate sources are present (identical output on every OS: the texts come from the
 //   crate packages); where they are not (CI, machines without Rust; npm test needs no Rust) it keeps the committed
@@ -84,6 +86,8 @@ interface OptionalDep { name: string; version: string; licence: string; platform
 interface Crate { name: string; version: string; licence: string; repository?: string; buildOnly: boolean; texts: { file: string; text: string }[] }
 
 const lf = (s: string) => s.replace(/\r\n?/g, '\n');
+/** A fixed collation: localeCompare without a locale follows LANG (Danish sorts "aa" last, Lithuanian puts y after i). */
+const collate = (a: string, b: string) => a.localeCompare(b, 'en');
 function stop(msg: string): never { console.error(msg); process.exit(1); }
 
 function findLicenceFile(dir: string): string | null {
@@ -137,7 +141,7 @@ function npmPackages(): { deps: Dep[]; optional: OptionalDep[] } {
     deps.set(id, { name, version, licence, homepage: extra?.homepage ?? homepage, text });
   }
   if (unsynced.length) stop(`node_modules (${base}) does not match package-lock.json; run npm ci:\n  ${unsynced.join('\n  ')}`);
-  const byId = <T extends { name: string; version: string }>(a: T, b: T) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version);
+  const byId = <T extends { name: string; version: string }>(a: T, b: T) => collate(a.name, b.name) || collate(a.version, b.version);
   return { deps: [...deps.values()].sort(byId), optional: [...optional.values()].sort(byId) };
 }
 
@@ -193,7 +197,7 @@ function cargoCrates(offline: boolean): Crate[] | string {
       texts: files.map((f: string) => ({ file: f, text: lf(fs.readFileSync(path.join(dir, f), 'utf8')).trim() })),
     });
   }
-  return crates.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
+  return crates.sort((a, b) => collate(a.name, b.name) || collate(a.version, b.version));
 }
 
 /** The Rust section: summary lines, then each distinct licence text once with the crates that carry it. */

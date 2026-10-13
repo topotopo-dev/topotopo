@@ -26,7 +26,10 @@ npm run showcase     # then look at examples/renders/*.png
 ```
 
 `npm test` runs smoke, golden, property, fuzz, docs, examples, io, interop, MCP and the per-feature suites. It fails on
-missing goldens, stale `docs/nodes.md` or a stale `NOTICE`.
+missing goldens, stale `docs/nodes.md` or a stale `NOTICE`. CI (`.github/workflows/ci.yml`) runs typecheck, `npm test`,
+the build, the pack test and the site check on Linux and Windows, so code must not assume either: build paths with
+`path.join`, spell file names with their exact case, sort with a fixed locale (`localeCompare(b, 'en')`) and keep
+generated files byte-identical on every OS (`test/portability.ts` checks what it can).
 
 Development needs no build: Node runs `src/*.ts` directly. Only the npm package is compiled (`npm run build` writes
 `dist/`, and `npm pack` / `npm publish` run it through `prepack`). Code that finds files relative to its own module

@@ -57,7 +57,8 @@ const shelfAssets = await shelfDefs();
 const defs = [...nodeDefs, ...shelfAssets];
 const categories = [...CATEGORY_ORDER, ...[...new Set(defs.map((d) => d.category))].filter((c) => !CATEGORY_ORDER.includes(c)).sort()]
   .filter((c) => defs.some((d) => d.category === c));
-const byCat = new Map(categories.map((c) => [c, defs.filter((d) => d.category === c).sort((a, b) => a.type.localeCompare(b.type))]));
+// a fixed collation: localeCompare without a locale follows the machine's LANG
+const byCat = new Map(categories.map((c) => [c, defs.filter((d) => d.category === c).sort((a, b) => a.type.localeCompare(b.type, 'en'))]));
 const catOf = new Map(defs.map((d) => [d.type, d.category]));
 const nodeCategories = categories.filter((c) => c !== 'shelf');
 /** Canonical node type of a name or alias used in a graph (null for saved assets and unknown names). */
