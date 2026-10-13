@@ -104,9 +104,12 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   };
   // running any script drains the realm's microtask queue afterwards (inside the timeout)
   const drain = new vm.Script('undefined', { filename: 'drain.js' });
-  const checkBody = (body: string, parsingContext: any) => {
+  // Parsed in the engine's own context, not in a realm: a SyntaxError of the script realm would format its stack (read
+  // below, outside any time limit) with that realm's Error.prepareStackTrace, which user code may have replaced. Parsing
+  // runs nothing, and whether a function body parses does not depend on the context.
+  const checkBody = (body: string) => {
     try {
-      vm.compileFunction(body, [], { filename: 'check.js', parsingContext });
+      vm.compileFunction(body, [], { filename: 'check.js' });
       return null;
     } catch (e: any) {
       if (!(e instanceof SyntaxError) && e?.name !== 'SyntaxError') throw e;
@@ -134,7 +137,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   const exprJob = new vm.Script('__exprJob.f()', { filename: 'expression-job.js' });
   const exprSandbox: ExprSandbox = {
     compile: (source) => new vm.Script(source, { filename: 'expression.js' }).runInContext(exprCtx().ctx),
-    checkSyntax: (body) => checkBody(body, exprCtx().ctx),
+    checkSyntax: (body) => checkBody(body),
     run(job, timeoutMs) {
       const r = exprCtx();
       r.setJob(job);
@@ -194,7 +197,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
       return v;
     },
     checkSyntax(body) {
-      return checkBody(body, ctx);
+      return checkBody(body);
     },
     exprSandbox,
     runGuarded(fn, timeoutMs = 30000) {

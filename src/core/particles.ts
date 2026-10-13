@@ -540,7 +540,7 @@ export interface FieldData {
 
 /** The field of input 2 for the kernel: its first heightfield / SDF volume, else its points' v. */
 export function fieldFrom(
-  g: Geometry, opts: { sdfResolution: number; heightfields: Heightfield[] },
+  g: Geometry, opts: { sdfResolution: number; heightfields: Heightfield[]; sdfSample?: (x: number, y: number, z: number) => number },
 ): FieldData {
   const hf = opts.heightfields[0];
   if (hf && hf.layers.has('height')) {
@@ -564,11 +564,13 @@ export function fieldFrom(
     const nx = Math.max(2, Math.ceil((ext[0] * 1.5) / voxel) + 1), ny = Math.max(2, Math.ceil((ext[1] * 1.5) / voxel) + 1), nz = Math.max(2, Math.ceil((ext[2] * 1.5) / voxel) + 1);
     const ox = (bmin[0] + bmax[0]) / 2 - ((nx - 1) * voxel) / 2, oy = (bmin[1] + bmax[1]) / 2 - ((ny - 1) * voxel) / 2, oz = (bmin[2] + bmax[2]) / 2 - ((nz - 1) * voxel) / 2;
     const GV = new Float32Array(nx * ny * nz);
+    // sdfSample: the node passes a guarded sampler when the field runs user code (an sdf_expr upstream)
+    const sampleAt = opts.sdfSample ?? ((x: number, y: number, z: number) => vol.sample(x, y, z));
     const cap = Math.sqrt(((nx - 1) * voxel) ** 2 + ((ny - 1) * voxel) ** 2 + ((nz - 1) * voxel) ** 2) + voxel;
     for (let k = 0; k < nz; k++)
       for (let j = 0; j < ny; j++)
         for (let i = 0; i < nx; i++) {
-          const d = vol.sample(ox + i * voxel, oy + j * voxel, oz + k * voxel);
+          const d = sampleAt(ox + i * voxel, oy + j * voxel, oz + k * voxel);
           GV[i + nx * (j + ny * k)] = Number.isFinite(d) ? d : d < 0 ? -cap : cap;
         }
     return { type: 3, args: { grid: { nx, ny, nz, ox, oy, oz, voxel } }, shared: { gV: GV } };

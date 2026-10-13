@@ -31,6 +31,12 @@ export interface KernelJob {
   results?: Record<string, TypedArray>;
   /** large read-only data reused across chunks and cooks (cached in each worker under a content hash) */
   shared?: Record<string, TypedArray>;
+  /**
+   * The content key of `shared` when the caller already knows it (data reused by a series of jobs, e.g. a collider
+   * queried once per simulation step): the arrays are not hashed again and their shared copies are reused by later
+   * jobs with the same key. The key must change whenever the shared data does (hashArrays(shared) once is safe).
+   */
+  sharedKey?: string;
 }
 
 export interface ParallelOptions {
@@ -69,6 +75,9 @@ export interface PoolStats {
 const localCtx: KernelContext = { sharedKey: '', memo: (_key, make) => make() };
 
 const DEFAULT_MIN = 50000;
+
+/** Shared copies of the most recent jobs that named their sharedKey (reused while the key repeats; 4 keys kept). */
+const keyedShared = new Map<string, Record<string, ArrayBufferView>>();
 
 const isShared = (a: ArrayBufferView) => a.buffer instanceof SharedArrayBuffer;
 
@@ -131,9 +140,17 @@ export function parallelMap(
   }
   let shared: { key: string; arrays: Record<string, ArrayBufferView> } | undefined;
   if (job.shared && Object.keys(job.shared).length) {
-    const sa: Record<string, ArrayBufferView> = {};
-    for (const [n, v] of Object.entries(job.shared)) sa[n] = sharedCopy(v);
-    shared = { key: hashArrays(job.shared), arrays: sa };
+    const key = job.sharedKey ?? hashArrays(job.shared);
+    let sa = job.sharedKey ? keyedShared.get(key) : undefined;
+    if (!sa) {
+      sa = {};
+      for (const [n, v] of Object.entries(job.shared)) sa[n] = sharedView(v);
+      if (job.sharedKey) {
+        keyedShared.set(key, sa);
+        if (keyedShared.size > 4) keyedShared.delete(keyedShared.keys().next().value!);
+      }
+    }
+    shared = { key, arrays: sa };
   }
   const args = job.args;
   const tasks: Promise<PoolResult>[] = [];
@@ -157,7 +174,10 @@ export function parallelMap(
   });
 }
 
-/** `f(x)` when x is a value, `x.then(f)` when it is a promise: keeps a node synchronous when its kernel ran serially. */
-export function then<T, R>(x: T | Promise<T>, f: (v: T) => R): R | Promise<R> {
+/**
+ * `f(x)` when x is a value, `x.then(f)` when it is a promise: keeps a node synchronous when its kernel ran serially.
+ * (Not named `then`: a module exporting `then` is a thenable, so `await import()` of it would call that export.)
+ */
+export function andThen<T, R>(x: T | Promise<T>, f: (v: T) => R): R | Promise<R> {
   return x instanceof Promise ? x.then(f) : f(x);
 }

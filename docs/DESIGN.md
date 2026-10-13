@@ -62,6 +62,8 @@ src/core/      geometry model + algorithms (no I/O)
                  clusters, mask bands and combination, image sampling, instance frames (scatter v2, pcg nodes)
   scatter.ts     scatter kernels for the pool: candidate sampling, blue-noise sample elimination (neighbour lists, pairs,
                  conflicts), surface relaxation, KD build; the same code runs single-threaded (bit-identical)
+  xpbd.ts        XPBD cloth (drape, inflate): constraint model, stretch chains solved exactly, colour-sorted Gauss-Seidel,
+                 tethers, volume, collider contact planes (pseudo-normals; the "cloth_collide" kernel), floor, friction, wind
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
   particles.ts   particle simulation (the particles node): emission, the per-particle integration kernel (forces, analytic-
@@ -289,7 +291,20 @@ host (`Host.compile`), which has the snippet library installed. In the Node host
 call and inside that call's timeout.
 - `runGuarded(fn, ms)` runs synchronous code (wrangles, parametric expressions, `heightfield_layer` expressions over a
   whole layer, the `sdf_expr` probe at the origin) in a timed call. Code pasted into a wrapper function is parsed on
-  its own first (`Host.checkSyntax`), so it cannot close the wrapper and run while compiling, outside the timeout.
+  its own first (`Host.checkSyntax`; the `script` body through the realm's `AsyncFunction` constructor, which rejects
+  a body that closes its function), so it cannot close the wrapper and run while compiling, outside the timeout.
+- What user code throws is user code too: a `message` or `stack` getter, a `toString`, a realm's
+  `Error.prepareStackTrace`. `runUserCode` (`src/core/usercode.ts`) catches inside the timed call and reads the
+  message and stack there, so the node (and a pool worker running a point wrangle) only ever handles plain strings;
+  it also tells the host's timeout apart from a user error that merely says "timed out". The `script` node reads its
+  rejection reason with another timed call (`describeGuarded`, the rest of the time limit).
+- An `sdf_expr` field is sampled long after its node has cooked, by `sdf_to_mesh` (from inside manifold's WASM
+  level-set mesher) and `sdf_grid`. Volumes whose `sample` runs user code carry `scripted: true` (kept by
+  `transform`, `sdf_modify`, `sdf_combine`), and those nodes run the whole evaluation in one timed call (`evalSdf`);
+  analytic volumes run as before, unlimited and without overhead. The sampler also checks the deadline itself every
+  64 samples and throws an ordinary exception, so a merely slow field stops between samples; the watchdog, armed
+  `min(ms, 2 s)` later, only stops a sample that never returns (it then unwinds through the WASM mesher, whose working
+  memory is not freed; manifold keeps working).
 - `runGuardedAsync(fn, ms)` runs the `script` node. Its synchronous part and every continuation queued inside the
   realm (`await 0`, `await` on a realm promise) run in the first timed call, so `await 0; while (true) {}` is stopped
   like a synchronous loop. With the default shared microtask queue, continuations ran after `runInContext` had
@@ -420,6 +435,7 @@ What runs in chunks:
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
 | `particles` | `particles`: each particle through a whole run of steps (forces, drag, collisions, its trail ring) | births are decided first on the main thread, so the particles never interact; the collision BVH and the field (KD tree + v, heightfield gradients, a sampled SDF) are shared as arrays; threshold by particle-steps (200k); 4 chunks per thread (later births run fewer steps) |
 | `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_elim_lists`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists (with a density mask: the pairs, then each candidate's list and weight from them), conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
+| `drape`, `inflate` | `cloth_collide` (src/core/xpbd.ts): each cloth point's contact plane against the collider, once per step | the collider BVH and pseudo-normals are shared as arrays; 4096+ points. The constraint solve (Gauss-Seidel and chain solves, the order is the result) stays on the main thread |
 
 Not in chunks, and why:
 - `heightfield_erode`: droplets run one after another over the terrain the previous ones left; a split would change
@@ -447,6 +463,68 @@ warm-up, two rounds; other jobs shared the machine, so ±10%):
 The point normals that bound noise_displace are a scatter-add over the vertices, memory-bound and not split: computing
 the per-polygon Newell vectors on the pool and summing them here (bit-identical) was tried and saved nothing, because
 the sums and the normalisation are most of pointNormals' cost.
+
+### Cloth (XPBD)
+
+`drape` and `inflate` (category `sim`, `src/nodes/cloth.ts`) run the extended position-based dynamics solver of
+`src/core/xpbd.ts` from the input positions for `steps` steps of 1/fps s and output the last state with the input's
+topology and attributes (P moved, `v`, `rest_P`, `N`, `pinned`). The cook is not time-dependent; a graph animates a
+drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solver.
+- **Model.** One particle per point, mass from the triangle areas (`density`, kg/m²) or a `mass` attribute, inverse
+  mass 0 when pinned. Polygons are triangulated for the constraints only. Every constraint is in compliance form
+  (α = 1/k, α̃ = α/h²), so stiffnesses are physical and do not change with the step size: stretch on the polygon sides
+  (N/m), shear on both quad diagonals (N/m), bending across shared edges (bending rigidity N·m scaled by 3|e|²/(A₁+A₂),
+  the discrete-shells weight, so it is resolution independent), tethers from every point to its nearest pin
+  (`tethers`), and for `inflate` one volume constraint C = V − pressure·V₀ with compliance V₀²/(k·area). Hinges that are
+  flat at rest (every hinge of a grid) use the isometric bending of Bergou et al. 2006: q = Σ Kᵢxᵢ over a cotangent
+  stencil is a linear vector constraint (no trigonometry, a precomputed denominator; a sweep is ~4× cheaper than the
+  dihedral one), its compliance (K₃h)²/k matches ½kθ² for small folds, and a hinge folded past 90° (|q|² > 2(K₃h)²,
+  where the quadratic energy ∝ 1 − cos θ stops pulling) is projected with the dihedral constraint instead. Hinges curved
+  at rest (the edges of an inflated box) use the dihedral angle towards the input's rest angle (Bridson gradients, well
+  defined at the flat state; a polynomial atan2 so the angle has the same bits everywhere).
+- **Stretch chains.** Point-wise Gauss-Seidel moves a correction one edge per sweep, so cloth hanging N edges deep keeps a
+  steady-state stretch that grows like N²·g·h² (a 1 m cloth on 20 rows, pinned at the top, 4 substeps × 2 sweeps: mean
+  strain 6.5 %, max 48 %; a tablecloth over a box: max 100 %+ at the box edges). Over-relaxation made it worse (the PBD
+  velocity update turns the overshoot into energy) and a height-ordered sweep turned unstable with one sweep per substep.
+  The stretch edges are therefore grouped into straight chains (`stretchChains`: the rows and columns of a quad grid,
+  greedy straightest paths on any mesh, each edge in one chain) and every chain is one block whose linearised system is
+  tridiagonal and solved exactly (Thomas algorithm, `solveChains`), the block Gauss-Seidel of direct rod solvers. Points
+  resting on a contact plane get the mobility w·(I − ννᵀ) in that solve: a correction slides them along the surface
+  instead of pushing them in, where the contact projection would undo it (a rope over a box kept its edge link 20 %
+  long). A sweep runs the point-wise constraints (shear, bend, tethers, volume, self collision) first and the chains
+  last before the contacts, so the stiffest constraint has the last word. Measured (60 × 60 cloth, 150 steps, defaults):
+  hanging cloth max strain 3 % without tethers, 0.00 % with them; tablecloth over a box mean 0.9 % (the remaining peaks
+  are the one quad that tents over each sharp top corner); over a sphere mean 0.5 %, p99 3.1 % (was 9.2 % / 61 %).
+  `inflate` solves stretch point-wise instead: exact chains are inextensible hoops, which buckle into lumps when the
+  volume constraint pushes outwards (a sphere at pressure 1.5 ended 24 % out of round), while the point-wise sweep lets
+  the skin stretch evenly (1 %). Its target volume also rises along a smoothstep over the first half of the steps: the
+  volume constraint is effectively hard, and a jump to the full target threw the skin outwards in one substep.
+- **Collisions** are speculative contact planes found once per step (`collideRange`, kernel `cloth_collide`): a point
+  within its query radius (1.5 × thickness plus twice its travel in the step) of a collider triangle gets the plane
+  through the closest point with the normal towards its side; the substeps keep it `thickness` in front. On closed,
+  consistently wound pieces the side comes from angle-weighted pseudo-normals (Bærentzen & Aanæs), so points that end
+  up inside are pushed out; on open pieces a point keeps the side it started the step on (a sheet collides from both
+  sides). The floor is the plane y = floor_height. Coulomb friction removes tangential motion up to friction × the
+  normal correction of the substep. Self collision is point-point with a spatial hash (pairs found per step, minimum
+  distance 2 × thickness or the rest distance). Initial overlaps are pushed out without velocity. Point contacts let a
+  sharp collider corner poke between cloth points (a tarp over crates showed the crate corners), so sharp convex
+  corners of closed pieces facing up (a face normal more than 25° off the pseudo-normal, every neighbour below the
+  tangent plane) get a corner-triangle contact per step: the cloth triangle around the nearest contacting point into
+  which the corner projects is kept `thickness` in front of it (barycentric shares of the correction). Query cost:
+  a point with a contact keeps its plane while it moves less than thickness/4, a point skips the query while the
+  distance found at its last query (a miss searches twice the radius) minus its travel exceeds the radius, and the BVH
+  search starts from the point's last triangle; on the 100 × 100 drape this halves the query time.
+- **Determinism and threads.** The point-wise constraints are colour-sorted (no two constraints of a colour share a point),
+  chains run in build order, sweeps within a substep alternate direction starting forward (alternating across substeps
+  with one sweep each pumped a period-2 mode: a closed sphere crumpled from a 10⁻³ jitter), and the solve runs on the
+  cooking thread. Only the collider
+  queries go through `ctx.parallelMap`; they are pure per point, so a cook is bit-identical with and without the pool
+  (test/cloth.ts checks it with a forced pool).
+- **Limits** (against Vellum): static colliders only; per-point collision plus corner contacts (a sharp collider edge
+  can still pass between the points of a coarse cloth, a cloth edge can slip past a thin collider), contacts found once per
+  step; folded-over micro-wrinkles can remain where wrapping compresses the cloth (no self collision by default); no tearing,
+  plasticity, welds/stitches, attach-to-animated-geometry, cloth-on-cloth friction, or edge-edge self collision;
+  `inflate` uses one global volume constraint (no per-piece pressure).
 
 ### Particles
 
@@ -665,8 +743,9 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
   `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on; since R-11
   they run in the host's vm sandbox with a timeout. Since R-12 the code params of `heightfield_layer` and `sdf_expr`
   run under the script timeout too (loops, also after an await or in a thrown object's message getter, and wrapper
-  escapes are fuzzed with the pool off and on); an `sdf_expr` volume sampled later (`sdf_to_mesh`, the grid nodes)
-  still runs without a time limit.
+  escapes are fuzzed with the pool off and on). Since R-13 so do the parametric nodes, an `sdf_expr` field sampled
+  later by `sdf_to_mesh` and `sdf_grid` (also through transform/modify/combine), and what wrangles and scripts throw
+  (message/stack/toString getters that never return, in workers too); `test/examples.ts` fails on any example warning.
 - **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
 - **Examples**: every `NodeDef` carries an `example` (a node spec or a small graph, shown by `help` and in the node
   reference) and `test/examples.ts` cooks each one: node specs on the node's fixture inputs, graphs as written.

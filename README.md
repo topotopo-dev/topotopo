@@ -10,7 +10,7 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   modelling (bevel, knife, bridge, quad fill), UVs (xatlas unwrap, LSCM), remeshing (isotropic, quad, voxel) and LOD,
   scattering and instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit and sampled SDF grids,
   heightfield terrain (masks, hydraulic and thermal erosion, roads, scattering), procedural textures and bakes,
-  L-systems, text, loops, a frame solver, in-graph checks, and code nodes. A shelf of ready-made graph assets (walls,
+  cloth draping and inflation (XPBD), L-systems, text, loops, a frame solver, in-graph checks, and code nodes. A shelf of ready-made graph assets (walls,
   roofs, stairs, props, trees, rocks, PCG helpers) is used like nodes. Every node documents its params and carries an
   example that is cooked in the tests.
 - **Rust/WASM kernels**: a straight skeleton (pitched roofs and polygon offsets from any footprint, holes included),
@@ -190,7 +190,9 @@ A graph is code: `"=expr"` params and the code of `wrangle`, `script`, `sdf_expr
 taken from the graph JSON. On Node, expressions and wrangles run sandboxed in separate `vm` realms with a timeout
 (`TOPOTOPO_SCRIPT_TIMEOUT_MS`, default 30 s): an expression sees only graph vars, the cook time, `Math` and the
 documented helpers (no `process`, `require`, `import`, `fetch` or `globalThis`), and a runaway loop fails its node
-instead of hanging the process. That contains mistakes, not attackers: sandboxed code can still allocate memory and
+instead of hanging the process. The same timeout covers `script`, `heightfield_layer` and the parametric nodes, an
+`sdf_expr` field wherever it is sampled (`sdf_to_mesh` and `sdf_grid` run their whole sampling under it), and reading
+whatever such code throws. That contains mistakes, not attackers: sandboxed code can still allocate memory and
 burn CPU until the timeout, and a `vm` realm is not a hard security boundary. Do not cook graphs from untrusted sources
 in a privileged process.
 
@@ -213,7 +215,7 @@ in a privileged process.
 | heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_flow` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
 | uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
 | texture | generators `tex_noise` `tex_pattern` `tex_cells` `tex_gradient` `tex_shape` `tex_splatter` `tex_scratches` `tex_text`; filters `tex_blend` `tex_levels` `tex_curves` `tex_blur` `tex_warp` `tex_transform` `tex_edge_detect` `tex_invert` `tex_threshold` `tex_histogram_scan` `tex_normal_from_height` `tex_height_to_ao` `tex_channel` (ORM packing) `tex_colorize` `tex_tile_sampler` `tex_output`; bakes in uv space `bake_ao` `bake_curvature` `bake_thickness` `bake_position` `bake_normal` `bake_world_normal` `bake_height` `bake_island_id` `bake_mask` `bake_vertex_color`; `texture_to_material` `tex_to_heightfield` `heightfield_to_tex` (images are 2D float layers carried on the geometry; glb/usda embed them, export format `textures` writes PNGs) |
-| sim | `particles` (Houdini POPs in one node: emission from points, gravity, drag, wind, curl noise, point/heightfield/SDF fields, attraction, floor and mesh collisions with die/slide/bounce, trails as polylines; steps with the frame, each frame's state cached; bit-identical on the worker pool) `rbd_settle` (drop pieces onto a terrain, container or ground until they rest; Rapier rigid bodies, packed instances stay packed) `rbd_stack` (drop them one at a time into piles) |
+| sim | `particles` (Houdini POPs in one node: emission from points, gravity, drag, wind, curl noise, point/heightfield/SDF fields, attraction, floor and mesh collisions with die/slide/bounce, trails as polylines; steps with the frame, each frame's state cached; bit-identical on the worker pool) `rbd_settle` (drop pieces onto a terrain, container or ground until they rest; Rapier rigid bodies, packed instances stay packed) `rbd_stack` (drop them one at a time into piles) `drape` (XPBD cloth: colliders, floor, pins, wind, self collision) `inflate` (pressure: cushions, balloons) |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json) |
@@ -247,7 +249,8 @@ sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a b
 power). `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
 collision surface, curl noise, sliding contacts; trails coloured by age) next to a fountain bouncing on a plane.
 `rbd_settle` drops shelf rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
-crates on a pad with `rbd_stack`.
+crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of shelf crates, a
+banner pinned between two poles in the wind, and a box inflated into a cushion.
 
 To cook a graph from the command line:
 
@@ -325,9 +328,9 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 |---|---|---|
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
 | golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every shelf asset matches its fingerprint in `test/golden/` |
-| property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) and hostile `=expr` expressions (escapes and endless loops, pool off and on) |
+| property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets), hostile `=expr` expressions (escapes and endless loops, pool off and on), hostile code params (`heightfield_layer`, `sdf_expr`, parametric nodes), `sdf_expr` fields that hang only when `sdf_to_mesh`/`sdf_grid` sample them, and thrown values whose message never comes back (wrangle, script; also with a poisoned realm) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions; this README's node table lists every node type |
-| examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors: a node spec on the node's fixture inputs, a graph as written |
+| examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors or warnings: a node spec on the node's fixture inputs, a graph as written |
 | io | `node test/io.ts` | export → import round trips for every format |
 | interop | `npm run test:interop` | glTF (validator), Houdini `.geo`/`.bgeo`, CSV/PCG and points JSON round trips; instance rows and their Unreal transforms, per-instance glTF/USD attributes, packed `.geo`, textures, the Unreal Landscape bundle, `export:demo` |
 | uv | `npm run test:uv` | unwrap/flatten/layout: finite uv in 0..1, topology kept, LSCM angle error, no island overlaps, uniform texel density, GLB round trip, uv view size |
@@ -344,6 +347,7 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
 | particles | `npm run test:particles` | the particles node: emission counts and lifetimes, attribute and group carry, determinism, pool on/off bit-identical (noise, fields, mesh and floor collisions, trails), particles never below the floor or a mesh and never inside a closed one, spheres kept pscale off a mesh, trail lengths/curveu/ages, max_particles, frames = one long run (resume, jump back, substeps, moving emitter), point/heightfield/SDF fields, wind, attraction, analytic Perlin gradients and divergence-free curl noise, 100k particles × 200 steps |
 | rbd | `npm run test:rbd` | rbd_settle / rbd_stack: rocks rest on the ground plane, a terrain mesh and a heightfield (exact hulls checked independently: no vertex below the surface or inside another piece beyond 5 mm / 1 cm; reduced hulls within 5 % of a radius), every piece settled and touching something, bit-identical across cooks, engines and pool on/off, input order independent, packed = unpacked, static `active` = 0 pieces, initial `v`, fallen pieces and `delete_fallen`, the overlap warning, `max_pieces`, a 12-crate pile that keeps every crate, animate (frame 1, resumed frames, last frame = settled), every collision shape, and the 1,000-piece timing |
+| cloth | `npm run test:cloth` | drape and inflate: pinned cloth hangs without NaN or stretch (with and without tethers), draped cloth rests outside a box and above the floor within the thickness with its rest lengths kept, sharp box corners stay under the cloth, open colliders from both sides, determinism and pool on/off bit-identical, max_points, pins input and pin_snap, the pin attribute, wind, self collision stacking two layers, inflate volume monotonic in pressure, stencil/colouring/chain helpers |
 | pool | `npm run test:pool` | worker pool: lazy start, close, transfer round trips, every ported node bit-identical with the pool on and off, concurrent branches and shared in-flight cooks, the lazy switch, kernel errors, crashes and timeouts, the size threshold, the CLI and MCP server exiting; `test:pool` also runs the golden layer with every kernel forced onto the pool. `npm test` passes with `TOPOTOPO_WORKERS=0` and with the default |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
