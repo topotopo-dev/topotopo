@@ -10,6 +10,16 @@ Generation Framework (PCG)** and **Interchange Framework**, then restart the edi
 installation needs UE 5.8 and Visual Studio's C++ toolchain. A packaged plugin includes the Win64 binaries.
 The `TopoTopoPCG` runtime module contains the parser and PCG nodes; `TopoTopoPCGEditor` contains the Tools command.
 
+The descriptor supports **Win64**. In the project's `.uproject` `Plugins` array, keep this entry consistent
+with `TopoTopoPCG.uplugin` (including when upgrading an existing installation):
+
+```json
+{ "Name": "TopoTopoPCG", "Enabled": true, "SupportedTargetPlatforms": ["Win64"] }
+```
+
+An entry containing only `Name` and `Enabled` triggers UE 5.8's startup warning that the
+`SupportedTargetPlatforms` value differs. This is the plugin reference, not the project's target-platform list.
+
 From the repository root in PowerShell:
 
 ```powershell
@@ -26,9 +36,19 @@ gitignored. Do not copy new binaries over a plugin loaded by a running editor.
 ## Workflow 1: import a complete scene
 
 Run `npm run export:demo`. The bundle is `out/unreal_demo/landscape/`: five `meshes/*.glb` prototypes,
-`instances.csv`, `instances.meshes.json`, `objects_expanded.glb`, `heightmap.png` and `landscape.json`.
+`instances.csv`, `instances.meshes.json`, `objects_expanded.glb`, `heightmap.png`, `landscape.json`, and ten
+`layers/*.png` weightmaps.
 In a fresh level, use **Tools > Import TopoTopo scene** with that absolute bundle directory and a new content
-folder, for example `/Game/TopoTopo/PluginDemo`. Enable Landscape import for the demo terrain.
+folder, for example `/Game/TopoTopo/PluginDemo`. Enable Landscape import for the demo terrain; weight layers
+and a generated terrain material default on. The console equivalent is:
+
+```text
+TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo/landscape" /Game/TopoTopo/PluginDemo landscape=1 layers=1 material=1 objects=1
+```
+
+`layers=0` skips the weight PNGs and layer-info assets. `material=0` skips generated material creation and
+assignment. With `layers=0 material=1`, the generated material is a simple grass fallback. These options have
+no effect when `landscape=0` (the default); the dialog enables their controls when Landscape import is selected.
 
 See [the editor command and detailed import limits](EDITOR_WORKFLOW.md). The command uses native Interchange
 GLB pipelines, keeps the mesh split by name and imports materials. Prototypes go into `<set>/Meshes`, expanded
@@ -37,7 +57,27 @@ expanded file; placing its tree/rock reference meshes too would duplicate the CS
 changes remain unsaved for review. Repeated imports require a fresh destination folder.
 
 Expected demo: 536 instances in five groups (117 pine, 81 fir, 94 oak, 119 rock_a, 125 rock_b), plus the road,
-and optionally one 253 x 253 Landscape. Heightfield materials and weight layers are assigned manually.
+and optionally one 253 x 253 Landscape with ten assigned weight layers and a readable demo material.
+With all Landscape options enabled, `/Game/TopoTopo/PluginDemo/Landscape/` contains:
+
+```text
+LI_mask       LI_sediment  LI_debris  LI_flow  LI_water
+LI_path       LI_rock      LI_road    LI_grass LI_trees
+M_TopoTopo_PluginDemo
+```
+
+The layer-info assets and material inputs follow manifest order. The shader uses weight-blend Landscape
+Layer Blend inputs for colour and roughness, a surface-following normal, grass green for `mask`, grey rock,
+tan sediment/debris, dark blue flow/water, beige path and dark asphalt road. It normalizes overlapping masks
+in the shader and fills uncovered areas with grass. The stored PNG weights remain independent: layer infos
+use UE 5.8's `BlendMethod=None` (the successor to non-weight-blended paint layers), preventing import-time
+renormalization. In particular, `sediment` and `debris` PNG bytes are already **normalised to 0..255** from
+their recorded source ranges; the importer preserves those bytes and does not reconstruct their physical values.
+
+This is an editable starter material. Select the Landscape and replace **Landscape Material** with your own
+material or instance. Keep the same layer names to reuse the assigned `LI_*` assets and painted weights;
+use Landscape Paint > Target Layers to assign layer infos for any new names. Save the generated assets and
+level explicitly after review. Full API details and the colour mapping are in [EDITOR_WORKFLOW.md](EDITOR_WORKFLOW.md).
 
 ## Workflow 2: generate instances with PCG
 
@@ -58,6 +98,11 @@ by default and reuses the engine element unchanged: asset loading, descriptor gr
 managed resource reuse and cleanup all stay under PCG. The built-in **Static Mesh Spawner** configured with
 the same selector and attribute is equivalent. Change its template descriptor Component Class to HISM if
 needed; PCG can optimize the descriptor (for example for Nanite) when Allow Descriptor Changes is enabled.
+
+This release remains code-only (`CanContainContent: false`); no binary sample graph is shipped. UE's standalone
+BuildPlugin can package content, but a serialized graph has not been created and editor-verified in this
+no-editor build session. The steps above define the sample; `TopoTopo.PCG.GraphSpawns536` builds that same
+two-node graph transiently for automation, without an MCP node registry or saved graph asset.
 
 The sibling `<stream>.meshes.json` sidecar supplies valid source names. A source `pine` maps to
 `<Mesh Folder>/pine.pine`. **Mesh Mapping** provides explicit per-name Static Mesh assets and takes precedence;
@@ -85,13 +130,23 @@ Other columns become metadata. Numeric scalars are double or int64; strings stay
 groups become Vector2/Vector/Vector4 (including RGBA colours). JSON retains declared float/int/string types.
 PCG represents colours as Vector4. **Attribute Include/Exclude** filter metadata by exact, case-sensitive names;
 empty include means all and exclude wins. They do not discard transforms or native point properties.
-The CSV `Name` row key is consumed separately from the real lowercase `name` attribute. CSV has no type
+The CSV `Name` row key is consumed separately from the real `name_attr` attribute. The exporter suffixes
+attributes that differ only by case from canonical `Name`, `Position`, `Rotation`, `Scale`, `Density`, `Color`,
+`Seed` or `Mesh`: for example, `name` becomes `name_attr` and `mesh` becomes `mesh_attr`. Old CSVs with both
+spellings are also accepted: the loader keeps the canonical spelling and renames the other to `<name>_attr`,
+with a warning, before metadata filtering. Canonical columns win regardless of header order. A suffix that
+would itself collide, an exact duplicate, or ambiguous noncanonical duplicates remain errors; no value is overwritten.
+CSV has no type
 schema: known integer names (`id`, `class`, `seed`, `copynum`, `piece`, `variant`, `ptnum`, `primnum`) become
 int64 when all values are integral; other numeric scalars become double. Quoted scalar cells remain strings.
 Tuples of 5..16 components become `name_0`, `name_1`, etc. Select their base name to include all components.
 Invalid or case-colliding metadata names are rejected with a rename instruction, because Unreal metadata
 names are case insensitive and do not allow periods. Additional metadata vectors retain source values;
 coordinate conversion applies to the point transform, not arbitrary vector attributes.
+
+Version 1 format tags accept both current and pre-rename bundles throughout the plugin:
+`topotopo-points` / `polyforge-points`, `topotopo-instance-meshes` / `polyforge-instance-meshes`, and
+`topotopo-unreal-landscape` / `polyforge-unreal-landscape`. Unknown tags and unsupported versions remain errors.
 
 ## Coordinates
 
@@ -123,12 +178,15 @@ the editor verification step; compilation alone does not prove rendering, import
 For an installed copy of the plugin, provide the CSV explicitly when starting the editor:
 
 ```text
--TopoTopoDemoCSV="C:/WORK/polyforge/.claude/worktrees/codex-kernels/out/unreal_demo/landscape/instances.csv"
+-TopoTopoDemoCSV="C:/WORK/polyforge/out/unreal_demo/landscape/instances.csv"
 ```
 
 Alternatively set the `TOPOTOPO_DEMO_CSV` environment variable before starting it, or keep the repository's
-`out/unreal_demo/landscape/instances.csv` reachable by walking up from the plugin folder. The demo test fails
-with setup instructions if the file is missing; it never silently passes without the fixture.
+`out/unreal_demo/landscape/instances.csv` reachable by walking up from the plugin folder. Both point-stream
+demo tests fail with setup instructions if the CSV is missing; neither silently passes without that fixture.
+The Landscape test also accepts that CSV path, or an explicit `-TopoTopoDemoBundle="<absolute bundle directory>"`
+or `TOPOTOPO_DEMO_BUNDLE` directory. It emits an explicit `SKIPPED` warning if `landscape.json` is absent;
+a present but malformed/incomplete bundle fails.
 
 Open **Session Frontend** from the Tools menu, select **Automation**, refresh and filter `TopoTopo`; run the tests. The
 Output Log console command for the acceptance fixture is:
@@ -138,13 +196,65 @@ Automation RunTests TopoTopo.UnrealDemo.PointStream
 ```
 
 The fixture checks 536 points and the first pine at `(3740.23858,-6233.69197,396.099846)`, rotator
-`(Pitch=0,Yaw=-105.954505,Roll=0)`, uniform scale `2.02927671`, mesh counts, types and PCG metadata.
-Run `Automation RunTests TopoTopo` for the in-memory parser/conversion and spawner-default tests as well.
+`(Pitch=0,Yaw=-105.954505,Roll=0)`, uniform scale `2.02927671`, mesh counts, types and `name_attr` PCG metadata.
+
+After importing the five meshes into `/Game/TopoTopo/PluginDemo/Meshes`, run the actual PCG path:
+
+```text
+Automation RunTests TopoTopo.PCG.GraphSpawns536
+```
+
+The test constructs **Point Stream > Instance Spawner > Output** on a transient component in an isolated
+world, with an offset owner to verify world-space transforms. It uses `GenerateLocalGetTaskId(true)` and
+`UPCGSubsystem::ScheduleGeneric` with that task as a dependency. A latent automation command ticks only that
+world's PCG subsystem while editor frames service asynchronous work. A synchronous spin would block the
+next-frame callbacks used by PCG. Completion or a 60-second timeout cancels pending work, cleans up managed
+resources and destroys the test world. The current level and content assets are not saved or changed.
+
+Expect 536 graph-output points, exactly five ISM/HISM components, counts pine 117 / fir 81 / oak 94 /
+rock_a 119 / rock_b 125, and the first pine world transform above. ISM float storage is checked within
+0.01 cm for position and 0.0001 for rotation degrees and scale. If any required mesh is absent, the test emits
+**SKIPPED TopoTopo.PCG.GraphSpawns536** with the missing paths and import instructions. UE simple automation
+displays this as success with a warning, **not an accepted PCG run**; import the meshes and rerun.
+
+Run the Landscape import acceptance independently of the imported mesh assets:
+
+```text
+Automation RunTests TopoTopo.Editor.WeightLayers
+```
+
+It runs the command's heightmap/layer/material import path in an isolated transient editor world. Expect ten
+layer infos and material layer references in manifest order, exact vertex-weight byte readback (including
+all-zero maps), every layer's mean within 2% of its PNG mean, and connected colour/roughness/normal inputs.
+The engine's built-in visibility target is excluded from the ten imported layers. Small 8x8 fixtures also
+check `layers=0 material=1` (grass fallback) and `layers=1 material=0` (weights without an assigned material).
+The world and generated assets are transient; the current level and Content Browser assets are not changed
+or saved. **SKIPPED TopoTopo.Editor.WeightLayers** is a warning, **not Landscape acceptance**; supply the demo
+bundle and rerun. Shader compilation and visual inspection still belong to the editor verification step.
+
+`Automation RunTests TopoTopo` runs all thirteen tests. Individual names and expected results:
+
+| Test | Expected result |
+|---|---|
+| `TopoTopo.UnrealDemo.PointStream` | 536 fixture points; five mesh totals, transforms, typed metadata including `name_attr`, mapping override. Requires CSV, no mesh assets. |
+| `TopoTopo.PCG.GraphSpawns536` | Real graph generation and component/transform checks above. Requires CSV and five imported meshes; no skip for acceptance. |
+| `TopoTopo.Stream.CSVCollisionCompatibility` | Canonical columns and suffixed attributes preserved, independent of column order; warnings and exact metadata filtering checked. |
+| `TopoTopo.Stream.LegacyFormats` | Legacy points JSON keeps native conversion; both mesh-sidecar tags resolve identical paths and reject version 2. |
+| `TopoTopo.Editor.LandscapeManifestCompatibility` | Both Landscape v1 tags decode the same 8x8 heightmap; unknown/v2/non-exact manifests rejected. Creates only temporary fixture files. |
+| `TopoTopo.Editor.WeightPNGDecode` | 8-bit greyscale and greyscale-plus-alpha PNG samples decode unchanged; alpha is ignored and unsupported/malformed inputs are rejected. |
+| `TopoTopo.Editor.WeightLayerManifest` | Manifest layer order, names, paths, min/max and encoding retained; invalid layers rejected without partial output. |
+| `TopoTopo.Editor.WeightLayers` | Demo heightmap, ten assigned layer infos, PNG/readback means within 2% and exact bytes, assigned material with all layers and simple surface inputs; independent layer/material switches. Requires bundle; no skip for acceptance. |
+| `TopoTopo.Stream.CSVAttributes` | RFC 4180, metadata types/vectors, native properties and filters pass. |
+| `TopoTopo.Stream.JSONTransforms` | Native transform/axis conversion, seed, density, colour and metadata pass. |
+| `TopoTopo.Stream.CSVVariants` | Native, flat PCG and struct PCG CSV variants pass. |
+| `TopoTopo.Stream.RejectMalformed` | Invalid CSV/JSON and unresolved name collisions fail cleanly without partial output. |
+| `TopoTopo.PCG.SpawnerDefaults` | `MeshPath` defaults survive duplication; customized copies retain their selector without changing fresh defaults. |
 
 For visual validation use workflow 2's two-node graph in an empty level; check those five mesh counts and
 the first pine transform. Force-generate twice, then Cleanup: components should be reused/removed by PCG,
 not accumulated. Separately use workflow 1 with Landscape enabled; inspect the road and tree bases and
-assign a Landscape material/layers. Do not run both instance workflows in the same level simultaneously.
+check the generated terrain colours (`mask` green base and dark `road`), the ten Paint target layers, and
+save/reload the Landscape/material/infos. Do not run both instance workflows in the same level simultaneously.
 Save/reload the graph and copy/paste its spawner node; verify that `MeshPath` remains the mesh selector.
 
 ## Limits
@@ -153,9 +263,10 @@ Save/reload the graph and copy/paste its spawner node; verify that `MeshPath` re
   cross-platform bit identity of Unreal/libm operations has not been measured.
 - File loading/parsing and editor import are synchronous. Large streams can stall generation; no 100k-point
   performance claim is made. External files are not automatically staged in packaged games.
-- Landscape import supports a single exact-fit heightmap, not resampling, tiled/world-partition streaming,
-  automatic layer-info/material creation or automatic weightmap assignment. Manual steps are in
-  `landscape.json`'s `manual_import` list.
+- Landscape import supports a single exact-fit heightmap with optional PNG weightmaps, layer infos and a
+  generated demo material. Resampling, tiled/world-partition streaming, runtime virtual textures, Nanite
+  Landscape and foliage are not implemented. `landscape.json`'s `manual_import` list remains useful for
+  importing without this plugin; it is not a list of remaining plugin steps.
 - `scene.glb` / `objects.glb` use `EXT_mesh_gpu_instancing`. The utility deliberately uses prototype GLBs plus
   the CSV; expanded reference GLBs are for the remaining ordinary objects and comparison.
 - The optional **Cook with TopoTopo** subprocess element is not implemented. Cook/export externally, then

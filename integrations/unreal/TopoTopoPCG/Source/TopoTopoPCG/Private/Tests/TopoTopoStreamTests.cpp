@@ -6,14 +6,17 @@
 #include "PCGTopoTopoPointStreamSettings.h"
 #include "PCGTopoTopoInstanceSpawnerSettings.h"
 #include "Data/PCGPointArrayData.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Interfaces/IPluginManager.h"
 #include "Metadata/PCGMetadata.h"
 #include "MeshSelectors/PCGMeshSelectorByAttribute.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -174,7 +177,7 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
     Attribute(*this, First, TEXT("id"), ETopoTopoAttributeType::Integer);
     Attribute(*this, First, TEXT("copynum"), ETopoTopoAttributeType::Integer);
     Attribute(*this, First, TEXT("material"), ETopoTopoAttributeType::String);
-    Attribute(*this, First, TEXT("name"), ETopoTopoAttributeType::String);
+    Attribute(*this, First, TEXT("name_attr"), ETopoTopoAttributeType::String);
     TestEqual(TEXT("All 12 CSV extras plus resolved MeshPath"), Stream.AttributeNames.Num(), 13);
 
     TMap<FString, int32> Counts;
@@ -218,7 +221,7 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
         MetadataAttribute<double>(*this, Data, Name);
     }
     MetadataAttribute<FString>(*this, Data, TEXT("material"));
-    MetadataAttribute<FString>(*this, Data, TEXT("name"));
+    MetadataAttribute<FString>(*this, Data, TEXT("name_attr"));
 
     // A manual asset rename wins over the sidecar's suggested folder/name path.
     Options.MeshMapping.Add(TEXT("pine"), FSoftObjectPath(TEXT("/Game/Custom/SM_Pine.SM_Pine")));
@@ -319,6 +322,151 @@ bool FTopoTopoCSVAttributesTest::RunTest(const FString& Parameters)
         TestFalse(TEXT("Other generic attributes excluded"), Filtered.Rows[0].Attributes.Contains(TEXT("velocity")));
         TestEqual(TEXT("Filtering does not change native seed"), Filtered.Rows[0].Seed, -2);
         Near(*this, TEXT("Filtering does not change native density"), Filtered.Rows[0].Density, 0.35);
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoCSVCollisionCompatibilityTest, "TopoTopo.Stream.CSVCollisionCompatibility", TopoTopoTests::Flags)
+
+bool FTopoTopoCSVCollisionCompatibilityTest::RunTest(const FString& Parameters)
+{
+    using namespace TopoTopoTests;
+    const FString CanonicalHeader = TEXT("Name,Position.X,Position.Y,Position.Z,Rotation.Roll,Rotation.Pitch,Rotation.Yaw,")
+        TEXT("Scale.X,Scale.Y,Scale.Z,Density,Color.R,Color.G,Color.B,Color.A,Seed,Mesh");
+    const FString CanonicalRow = TEXT("0,12,-23,34,9,17,-31,-2,3,4,0.9,0.1,0.2,0.3,0.4,13,pine");
+    const FString ExtraHeader = TEXT("name,position.x,position.y,position.z,rotation.x,rotation.y,rotation.z,")
+        TEXT("scale.x,scale.y,scale.z,density,color.r,color.g,color.b,color.a,seed,mesh");
+    const FString ExtraRow = TEXT("source_name,101,102,103,11,12,13,4,5,6,0.25,0.6,0.7,0.8,0.9,99,oak");
+    FTopoTopoStreamOptions Options;
+    Options.MeshMapping.Add(TEXT("pine"), FSoftObjectPath(TEXT("/Game/Trees/Pine.Pine")));
+    FTopoTopoStream Stream;
+    FString Error;
+    for (bool bCanonicalFirst : {true, false})
+    {
+        const FString CSV = bCanonicalFirst
+            ? CanonicalHeader + TEXT(",") + ExtraHeader + TEXT("\n") + CanonicalRow + TEXT(",") + ExtraRow + TEXT("\n")
+            : ExtraHeader + TEXT(",") + CanonicalHeader + TEXT("\n") + ExtraRow + TEXT(",") + CanonicalRow + TEXT("\n");
+        if (!TestTrue(TEXT("Case-only canonical collisions load in either column order"), TopoTopoStream::ParseText(CSV, false, Options, Stream, Error)) ||
+            !TestEqual(TEXT("One collision fixture row"), Stream.Rows.Num(), 1))
+        {
+            AddError(Error);
+            return false;
+        }
+        const FTopoTopoStreamRow& Row = Stream.Rows[0];
+        TestEqual(TEXT("One warning for each of eight renamed attributes"), Stream.Warnings.Num(), 8);
+        for (const TCHAR* Name : {TEXT("name_attr"), TEXT("position_attr"), TEXT("rotation_attr"), TEXT("scale_attr"),
+            TEXT("density_attr"), TEXT("color_attr"), TEXT("seed_attr"), TEXT("mesh_attr")})
+        {
+            TestTrue(TEXT("Warning names the imported attribute: ") + FString(Name),
+                Stream.Warnings.ContainsByPredicate([&](const FString& Warning) { return Warning.Contains(Name, ESearchCase::CaseSensitive); }));
+        }
+        TransformNear(*this, TEXT("Canonical transform wins"), Row.Transform,
+            FVector(12, -23, 34), FRotator(17, -31, 9), FVector(-2, 3, 4));
+        Near(*this, TEXT("Canonical density wins"), Row.Density, 0.9);
+        TestEqual(TEXT("Canonical seed wins"), Row.Seed, 13);
+        TestTrue(TEXT("Canonical color wins"), Row.Color.Equals(FVector4(0.1, 0.2, 0.3, 0.4), 1.e-6));
+        TestFalse(TEXT("Canonical row key is not metadata"), Row.Attributes.Contains(TEXT("Name")));
+        if (const auto* Value = Attribute(*this, Row, TEXT("name_attr"), ETopoTopoAttributeType::String))
+            TestEqual(TEXT("Source name is retained"), Value->StringValue, FString(TEXT("source_name")));
+        if (const auto* Value = Attribute(*this, Row, TEXT("Mesh"), ETopoTopoAttributeType::String))
+            TestEqual(TEXT("Canonical Mesh is retained"), Value->StringValue, FString(TEXT("pine")));
+        if (const auto* Value = Attribute(*this, Row, TEXT("mesh_attr"), ETopoTopoAttributeType::String))
+            TestEqual(TEXT("Case-only mesh metadata is retained"), Value->StringValue, FString(TEXT("oak")));
+        if (const auto* Value = Attribute(*this, Row, TEXT("MeshPath"), ETopoTopoAttributeType::String))
+            TestEqual(TEXT("Mapping uses canonical Mesh"), Value->StringValue, FString(TEXT("/Game/Trees/Pine.Pine")));
+        if (const auto* Value = Attribute(*this, Row, TEXT("position_attr"), ETopoTopoAttributeType::Vector))
+            VectorNear(*this, TEXT("Source position vector is retained"), FVector(Value->VectorValue), FVector(101, 102, 103));
+        if (const auto* Value = Attribute(*this, Row, TEXT("rotation_attr"), ETopoTopoAttributeType::Vector))
+            VectorNear(*this, TEXT("Source rotation vector is retained"), FVector(Value->VectorValue), FVector(11, 12, 13));
+        if (const auto* Value = Attribute(*this, Row, TEXT("scale_attr"), ETopoTopoAttributeType::Vector))
+            VectorNear(*this, TEXT("Source scale vector is retained"), FVector(Value->VectorValue), FVector(4, 5, 6));
+        if (const auto* Value = Attribute(*this, Row, TEXT("density_attr"), ETopoTopoAttributeType::Float))
+            Near(*this, TEXT("Source density is retained"), Value->FloatValue, 0.25);
+        if (const auto* Value = Attribute(*this, Row, TEXT("seed_attr"), ETopoTopoAttributeType::Integer))
+            TestEqual(TEXT("Source seed keeps its integer type"), Value->IntValue, int64(99));
+        if (const auto* Value = Attribute(*this, Row, TEXT("color_attr"), ETopoTopoAttributeType::Vector4))
+            TestTrue(TEXT("Source color vector is retained"), Value->VectorValue.Equals(FVector4(0.6, 0.7, 0.8, 0.9), 1.e-6));
+        UPCGPointArrayData* Data = TopoTopoPCG::CreatePointData(Stream);
+        if (TestNotNull(TEXT("Renamed attributes create PCG metadata"), Data))
+        {
+            MetadataAttribute<FString>(*this, Data, TEXT("name_attr"));
+            MetadataAttribute<FString>(*this, Data, TEXT("mesh_attr"));
+            MetadataAttribute<FVector>(*this, Data, TEXT("position_attr"));
+            MetadataAttribute<FVector4>(*this, Data, TEXT("color_attr"));
+        }
+    }
+    const FString NativeCSV = TEXT("P.x,P.y,P.z,mesh,Mesh\n1,2,3,oak,pine\n");
+    if (TestTrue(TEXT("Native CSV canonical Mesh collision is compatible"), TopoTopoStream::ParseText(NativeCSV, false, Options, Stream, Error)) &&
+        TestEqual(TEXT("One native collision row"), Stream.Rows.Num(), 1))
+    {
+        TestEqual(TEXT("Native Mesh collision emits one warning"), Stream.Warnings.Num(), 1);
+        Attribute(*this, Stream.Rows[0], TEXT("mesh_attr"), ETopoTopoAttributeType::String);
+    }
+    const FString ModernCSV = TEXT("Name,\" Position.X \",Position.Y,Position.Z,name_attr\n0,1,2,3,source_name\n");
+    if (TestTrue(TEXT("Already-renamed exporter CSV loads"), TopoTopoStream::ParseText(ModernCSV, false, Options, Stream, Error)))
+        TestEqual(TEXT("Modern exporter CSV needs no compatibility warning"), Stream.Warnings.Num(), 0);
+    Options.AttributeInclude = {TEXT("NAME_ATTR")};
+    if (TestTrue(TEXT("Filter with differently-cased include loads"), TopoTopoStream::ParseText(ModernCSV, false, Options, Stream, Error)) &&
+        TestEqual(TEXT("One filtered row"), Stream.Rows.Num(), 1))
+        TestFalse(TEXT("Include matches only the exact attribute case"), Stream.Rows[0].Attributes.Contains(TEXT("name_attr")));
+    Options.AttributeInclude = {TEXT("name_attr")};
+    Options.AttributeExclude = {TEXT("NAME_ATTR")};
+    if (TestTrue(TEXT("Filter with differently-cased exclude loads"), TopoTopoStream::ParseText(ModernCSV, false, Options, Stream, Error)) &&
+        TestEqual(TEXT("One filtered row"), Stream.Rows.Num(), 1))
+        Attribute(*this, Stream.Rows[0], TEXT("name_attr"), ETopoTopoAttributeType::String);
+    Options.AttributeExclude = {TEXT("name_attr")};
+    if (TestTrue(TEXT("Filter with exact exclude loads"), TopoTopoStream::ParseText(ModernCSV, false, Options, Stream, Error)) &&
+        TestEqual(TEXT("One filtered row"), Stream.Rows.Num(), 1))
+        TestFalse(TEXT("Exact exclude takes precedence"), Stream.Rows[0].Attributes.Contains(TEXT("name_attr")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoLegacyFormatsTest, "TopoTopo.Stream.LegacyFormats", TopoTopoTests::Flags)
+
+bool FTopoTopoLegacyFormatsTest::RunTest(const FString& Parameters)
+{
+    using namespace TopoTopoTests;
+    FTopoTopoStreamOptions Options;
+    Options.CoordinateMode = ETopoTopoCoordinateMode::FromTopoTopoYUp;
+    FTopoTopoStream Stream;
+    FString Error;
+    const FString LegacyJSON = FString(OrientJSON).Replace(TEXT("topotopo-points"), TEXT("polyforge-points"));
+    if (TestTrue(TEXT("Legacy polyforge-points format loads"), TopoTopoStream::ParseText(LegacyJSON, true, Options, Stream, Error)) &&
+        TestEqual(TEXT("One legacy JSON row"), Stream.Rows.Num(), 1))
+    {
+        TransformNear(*this, TEXT("Legacy points keep the native conversion"), Stream.Rows[0].Transform,
+            FVector(225, 550, -375), FRotator(55.597031, -39.7742267, 21.4685804), FVector(-3.4, 0.85, 5.1));
+        Attribute(*this, Stream.Rows[0], TEXT("id"), ETopoTopoAttributeType::Integer);
+        TestEqual(TEXT("Legacy seed remains JS rounded"), Stream.Rows[0].Seed, -2);
+    }
+
+    const FString Directory = FPaths::ProjectSavedDir() / TEXT("Automation/TopoTopoStreams");
+    if (!TestTrue(TEXT("Create temporary fixture directory"), IFileManager::Get().MakeDirectory(*Directory, true))) return false;
+    const FString CSVPath = FPaths::CreateTempFilename(*Directory, TEXT("LegacyFormats_"), TEXT(".csv"));
+    const FString SidecarPath = FPaths::GetPath(CSVPath) / (FPaths::GetBaseFilename(CSVPath) + TEXT(".meshes.json"));
+    ON_SCOPE_EXIT
+    {
+        IFileManager::Get().Delete(*CSVPath);
+        IFileManager::Get().Delete(*SidecarPath);
+    };
+    if (!TestTrue(TEXT("Write temporary CSV fixture"), FFileHelper::SaveStringToFile(
+        TEXT("Name,Position.X,Position.Y,Position.Z,Mesh\n0,1,2,3,pine\n"), *CSVPath))) return false;
+    Options.CoordinateMode = ETopoTopoCoordinateMode::AsWritten;
+    Options.MeshFolder = TEXT("/Game/TopoTopo/PluginDemo/Meshes");
+    for (const TCHAR* Format : {TEXT("topotopo-instance-meshes"), TEXT("polyforge-instance-meshes")})
+    {
+        const FString Sidecar = FString::Printf(TEXT("{\"format\":\"%s\",\"version\":1,\"meshes\":[{\"name\":\"pine\"}]}"), Format);
+        if (!TestTrue(TEXT("Write mesh-sidecar fixture"), FFileHelper::SaveStringToFile(Sidecar, *SidecarPath))) return false;
+        if (TestTrue(FString(Format) + TEXT(" sidecar loads"), TopoTopoStream::LoadFile(CSVPath, Options, Stream, Error)) &&
+            TestEqual(TEXT("One sidecar fixture row"), Stream.Rows.Num(), 1))
+        {
+            if (const auto* Value = Attribute(*this, Stream.Rows[0], TEXT("MeshPath"), ETopoTopoAttributeType::String))
+                TestEqual(TEXT("Both sidecar formats resolve the same asset"), Value->StringValue, FString(TEXT("/Game/TopoTopo/PluginDemo/Meshes/pine.pine")));
+        }
+        const FString FutureSidecar = Sidecar.Replace(TEXT("\"version\":1"), TEXT("\"version\":2"));
+        if (!TestTrue(TEXT("Write unsupported sidecar version"), FFileHelper::SaveStringToFile(FutureSidecar, *SidecarPath))) return false;
+        TestFalse(TEXT("Compatibility does not relax sidecar version validation"), TopoTopoStream::LoadFile(CSVPath, Options, Stream, Error));
+        TestEqual(TEXT("Rejected sidecar leaves no rows"), Stream.Rows.Num(), 0);
     }
     return true;
 }
@@ -510,7 +658,13 @@ bool FTopoTopoMalformedStreamTest::RunTest(const FString& Parameters)
         TEXT("Position.X,Position.Y,Position.Z\n1,2\n"),
         TEXT("Position.X,Position.Y,Position.Z\nNaN,2,3\n"),
         TEXT("Position.X,Position.Y,Position.Z,note\n1,2,3,\"unterminated\n"),
-        TEXT("Position.X,Position.Y,Position.Z,id,ID\n1,2,3,1,2\n")
+        TEXT("Position.X,Position.Y,Position.Z,id,ID\n1,2,3,1,2\n"),
+        TEXT("Position.X,Position.Y,Position.Z,Name,Name\n1,2,3,0,1\n"),
+        TEXT("Position.X,Position.Y,Position.Z,Position.x\n1,2,3,4\n"),
+        TEXT("Position.X,Position.Y,Position.Z,density,DENSITY\n1,2,3,0.2,0.3\n"),
+        TEXT("Name,Position.X,Position.Y,Position.Z,name,name_attr\n0,1,2,3,original,existing\n"),
+        TEXT("Name,Position.X,Position.Y,Position.Z,name,NAME_ATTR\n0,1,2,3,original,existing\n"),
+        TEXT("Name,Position.X,Position.Y,Position.Z,name,NAME\n0,1,2,3,first,second\n")
     };
     const TCHAR* BadJSON[] = {
         TEXT("{unclosed"),

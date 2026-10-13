@@ -8,8 +8,8 @@ public class TopoTopoPCGEditor : ModuleRules
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PrivateDependencyModuleNames.AddRange(new[]
         {
-            "Core", "CoreUObject", "Engine", "TopoTopoPCG", "UnrealEd", "ToolMenus",
-            "Slate", "SlateCore", "Json", "AssetRegistry", "InterchangeCore",
+            "Core", "CoreUObject", "Engine", "TopoTopoPCG", "PCG", "Projects", "UnrealEd", "ToolMenus",
+            "Slate", "SlateCore", "Json", "ImageCore", "AssetRegistry", "InterchangeCore",
             "InterchangeEngine", "InterchangePipelines", "Landscape", "LandscapeEditor"
         });
     }
