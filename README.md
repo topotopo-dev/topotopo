@@ -49,7 +49,23 @@ The design notes, including whether the browser is a limitation, are in [docs/DE
 
 ## Setup
 
-Requires Node ≥ 22.18 (it runs the TypeScript sources directly; no build step).
+Requires Node ≥ 22.18.
+
+**As a package.** The npm package ships compiled JavaScript (`dist/`) with a `polyforge` command:
+
+```bash
+npx polyforge --catalog                                      # node types by category
+npx polyforge --help-node scatter                            # one node's params, defaults and example
+npx polyforge graph.json --render out.png --export out.glb   # cook, render, export
+npx polyforge mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
+```
+
+The package is not on npm yet. Until it is, build the tarball from a clone and install that:
+`npm pack`, then `npm install -g ./polyforge-0.1.0.tgz` (or into a project), and run `polyforge …`.
+`import { Engine } from 'polyforge'` gives the engine API (`src/index.ts`) with its type declarations.
+
+**From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for
+working on the code or running the tests. `npm run build` (run by `npm pack`) compiles `src/` to `dist/` for the package.
 
 ```bash
 npm install
@@ -81,24 +97,34 @@ off). Threads start on first use and stop after 30 s idle (`POLYFORGE_WORKERS_ID
 thread. Details in [docs/DESIGN.md](docs/DESIGN.md#worker-pool).
 
 ### Connect to Claude Code
-The repository includes [.mcp.json](.mcp.json), so opening a Claude Code session in this folder offers the `polyforge` server.
-To register it from anywhere, use an absolute path:
+With the package, the server is the `mcp` subcommand of the `polyforge` command:
+
+```bash
+claude mcp add polyforge -- npx -y polyforge mcp --workspace /absolute/path/to/workspace
+```
+
+From a clone, the repository includes [.mcp.json](.mcp.json) (it runs `node src/mcp/server.ts`), so opening a Claude
+Code session in this folder offers the `polyforge` server. To register a clone from anywhere, use an absolute path:
 
 ```bash
 claude mcp add polyforge -- node /absolute/path/to/polyforge/src/mcp/server.ts --workspace /absolute/path/to/polyforge/workspace
 ```
 
 ### Other MCP clients (Claude Desktop, …)
+With the package:
 ```json
 {
   "mcpServers": {
     "polyforge": {
-      "command": "node",
-      "args": ["C:/path/to/polyforge/src/mcp/server.ts", "--workspace", "C:/path/to/polyforge/workspace"]
+      "command": "npx",
+      "args": ["-y", "polyforge", "mcp", "--workspace", "C:/path/to/workspace"]
     }
   }
 }
 ```
+From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/to/polyforge/src/mcp/server.ts",
+"--workspace", "C:/path/to/polyforge/workspace"]` (`node src/cli.ts mcp …` is the same server).
+
 Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT`, `POLYFORGE_WORKSPACE`,
 `POLYFORGE_SCRIPT_TIMEOUT_MS` and `POLYFORGE_WORKERS`. The server exits when the client closes its stdin.
 
@@ -329,12 +355,18 @@ never failing). Compare with the thread pool off: `POLYFORGE_WORKERS=0 npm run b
 
 CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test` on Node 22 and 24 for every push and pull request.
 
+**Package.** `npm run pack:test` builds and packs the npm tarball, installs it into an empty project in a temp
+directory and uses it from there: the `polyforge` bin (help, cooking an example with a render), the library import and
+its types, the shelf, the bundled font, the worker pool, the WASM kernels and the MCP server over stdio. It takes about
+a minute and is not part of `npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
 ## Layout
 
 `src/core` holds the geometry model and algorithms. `src/graph` holds the node system and cooking engine, and `src/nodes`
 the node library. The renderer is in `src/render`, import/export in `src/io`, and the MCP server, tools and docs in
 `src/mcp`. `src/viewer` has the live preview, and `src/host` the Node host (sandbox, files, fonts). The structure is
-described in [docs/DESIGN.md](docs/DESIGN.md).
+described in [docs/DESIGN.md](docs/DESIGN.md). `dist/` (not in git) is the compiled package: `npm run build` mirrors
+`src/` there one to one, so the shelf, fonts, kernels and worker entry are found relative to either.
 
 ## Licence
 
