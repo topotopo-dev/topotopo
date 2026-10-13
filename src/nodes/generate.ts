@@ -314,6 +314,7 @@ defineNode({
     center: P.center(),
   },
   outputs: 'point uv',
+  example: { type: 'grid', params: { size: [10, 6], divisions: [20, 12] } },
   cook: ({ p }) => makeGrid(p.size, p.divisions, p.plane, p.center),
 });
 
@@ -333,6 +334,7 @@ defineNode({
     divisions: { type: 'int', default: 8, min: 1, desc: 'quad: quads per cube-face edge' },
   },
   outputs: 'point N; uv (uv type)',
+  example: { type: 'sphere', params: { type: 'quad', radius: 0.5, divisions: 6 } },
   cook: ({ p }) => {
     const g = p.type === 'ico' ? icoSphere(p.radius, p.level) : p.type === 'quad' ? quadSphere(p.radius, p.divisions) : uvSphere(p.radius, p.rows, p.cols);
     const Pd = g.P;
@@ -359,6 +361,7 @@ defineNode({
     center: P.center(),
   },
   outputs: 'vertex uv',
+  example: { type: 'tube', params: { radius: 0.3, radius_top: 0.1, height: 2, cols: 16 } },
   cook: ({ p }) => makeTube(p.radius, p.radius_top < 0 ? p.radius : p.radius_top, p.height, p.rows, p.cols, p.caps, p.center, p.axis),
 });
 
@@ -375,6 +378,7 @@ defineNode({
     center: P.center(),
   },
   outputs: 'vertex uv',
+  example: { type: 'torus', params: { radius: 1.5, radius2: 0.3, rows: 12, cols: 36 } },
   cook: ({ p }) => translate(makeTorus(p.radius, p.radius2, p.rows, p.cols), p.center),
 });
 
@@ -388,6 +392,7 @@ defineNode({
     radius: { type: 'float', default: 1, desc: 'circumradius' },
     center: P.center(),
   },
+  example: { type: 'platonic', params: { shape: 'dodecahedron', radius: 0.5 } },
   cook: ({ p }) => translate(platonic(p.shape, p.radius), p.center),
 });
 
@@ -438,6 +443,7 @@ defineNode({
     jitter: { type: 'float', default: 0, min: 0, desc: 'random offset as a fraction of the spacing' },
     seed: P.seed(),
   },
+  example: { type: 'point_grid', params: { counts: [10, 1, 10], size: [9, 0, 9], jitter: 0.3, seed: 1 } },
   cook: ({ p }) => {
     const [cx, cy, cz] = p.counts;
     const r = rng(p.seed);
@@ -506,6 +512,7 @@ defineNode({
   },
   usesVars: true,
   outputs: 'vertex uv',
+  example: { type: 'parametric_surface', params: { expr: '[(u - 0.5) * 4, 0.25 * sin(u * TAU * 2), (v - 0.5) * 2]', divisions: [64, 16] } },
   cook: ({ p, engine }) => {
     const f = compileFn(engine, ['u', 'v'], p.expr);
     const [nu, nv] = p.divisions;
@@ -559,6 +566,7 @@ defineNode({
     center: P.center(),
   },
   outputs: 'point height (0..1), point N, point uv',
+  example: { type: 'terrain', params: { size: [40, 40], divisions: [96, 96], height: 6, fractal: 'ridged', falloff: 0.5, seed: 3 } },
   cook: ({ p }) => {
     const g = makeGrid(p.size, p.divisions, 'xz', [0, 0, 0]);
     const base = makeNoise(p.noise, p.seed);

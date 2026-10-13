@@ -386,7 +386,15 @@ defineNode({
     delete_inner_faces: { type: 'bool', default: false, desc: 'remove the faces each closed chain encloses (the smaller side), e.g. to bridge two faces into a tunnel', aliases: ['delete_faces', 'remove_caps'] },
   },
   outputs: 'prim group bridge',
-  example: { type: 'polybridge', params: { source: 'border:hole_a', target: 'border:hole_b', divisions: 4, delete_inner_faces: true } },
+  example: {
+    nodes: {
+      box: { type: 'box', params: { divisions: [3, 3, 3] } },
+      front: { type: 'group', in: ['box'], params: { name: 'hole_a', bbox_min: [-0.1, -0.1, 0.4], bbox_max: [0.1, 0.1, 0.6] } },
+      back: { type: 'group', in: ['front'], params: { name: 'hole_b', bbox_min: [-0.1, -0.1, -0.6], bbox_max: [0.1, 0.1, -0.4] } },
+      tunnel: { type: 'polybridge', in: ['back'], params: { source: 'border:hole_a', target: 'border:hole_b', divisions: 4, delete_inner_faces: true } },
+    },
+    output: 'tunnel',
+  },
   cook: ({ input, p }) => {
     const g0 = input(0);
     if (!String(p.source).trim() || !String(p.target).trim())

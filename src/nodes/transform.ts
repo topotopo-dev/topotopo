@@ -103,6 +103,7 @@ defineNode({
     rotate_order: { type: 'enum', options: ['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'], default: 'xyz', desc: 'rotation order', aliases: ['rord'] },
     group: P.group('point', 'point group to transform ("" = all)'),
   },
+  example: { type: 'transform', params: { translate: [0, 1, 0], rotate: [0, 45, 0], uniform_scale: 2 } },
   cook: ({ input, p }) => {
     const g = input(0);
     let pivot = p.pivot as Vec3;
@@ -130,6 +131,7 @@ defineNode({
     scale_to_fit: { type: 'bool', default: false, desc: 'scale uniformly so the largest dimension equals target_size' },
     target_size: { type: 'float', default: 1, desc: 'size for scale_to_fit' },
   },
+  example: { type: 'match_size', params: { justify: ['center', 'min', 'center'], scale_to_fit: true, target_size: 2 } },
   cook: ({ input, hasInput, p }) => {
     const g = input(0);
     const b = g.bbox(true);
@@ -165,6 +167,14 @@ defineNode({
     origin: { type: 'vec3', default: [0, 0, 0], desc: 'point on the mirror plane' },
     keep_original: { type: 'bool', default: true, desc: 'output original + mirrored copy' },
     fuse: { type: 'float', default: 1e-5, min: 0, desc: 'weld points on the seam within this distance (0 = off)' },
+  },
+  example: {
+    nodes: {
+      box: { type: 'box', params: { divisions: [2, 2, 2] } },
+      half: { type: 'clip', in: ['box'], params: { normal: [1, 0, 0], keep: 'below' } },
+      both: { type: 'mirror', in: ['half'], params: { axis: 'x' } },
+    },
+    output: 'both',
   },
   cook: ({ input, p }) => {
     const g = input(0);
@@ -417,6 +427,7 @@ defineNode({
     copy_attrib: { type: 'string', default: 'copynum', desc: 'prim int attribute storing the copy index ("" = none)' },
   },
   outputs: 'prim copynum',
+  example: { type: 'copy_xform', params: { count: 12, translate: [0, 0.2, 0], rotate: [0, 30, 0] } },
   cook: ({ input, p }) => {
     const g = input(0);
     const step = m4trs(p.translate, p.rotate, p.scale, p.pivot);
@@ -457,6 +468,7 @@ defineNode({
     rest_attrib: { type: 'string', default: 'rest', desc: 'sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P)' },
     group: P.group('point'),
   },
+  example: { type: 'noise_displace', params: { amplitude: 0.15, frequency: 3, fractal: 'ridged', seed: 2 } },
   cook: ({ input, p, parallelMap, engine }) => {
     const g = input(0).clone();
     const sel = mask(g, 'point', p.group);
@@ -526,6 +538,7 @@ defineNode({
     center: { type: 'vec3', default: [0, 0, 0], desc: 'axis passes through this point (use_bbox_center overrides)' },
     use_bbox_center: { type: 'bool', default: true, desc: 'twist about the bbox center' },
   },
+  example: { type: 'twist', params: { axis: 'y', angle: 180 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const ax = 'xyz'.indexOf(p.axis), u = (ax + 1) % 3, v = (ax + 2) % 3;
@@ -553,6 +566,7 @@ defineNode({
     toward: { type: 'enum', options: ['x', 'y', 'z', '-x', '-y', '-z'], default: 'x', desc: 'direction the end bends toward' },
     angle: { type: 'float', default: 90, desc: 'total bend angle in degrees' },
   },
+  example: { type: 'bend', params: { axis: 'y', toward: 'x', angle: 90 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const ax = 'xyz'.indexOf(p.axis);
@@ -587,6 +601,7 @@ defineNode({
     scale_end: { type: 'float', default: 0.5, desc: 'scale at the bbox end' },
     ramp: { type: 'ramp', default: [[0, 0], [1, 1]], desc: 'interpolation profile from start (0) to end (1)' },
   },
+  example: { type: 'taper', params: { axis: 'y', scale_start: 1, scale_end: 0.3 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const ax = 'xyz'.indexOf(p.axis), u = (ax + 1) % 3, v = (ax + 2) % 3;
@@ -616,6 +631,7 @@ defineNode({
     preserve_boundary: { type: 'bool', default: true, desc: 'pin open-boundary and curve end points' },
     group: P.group('point'),
   },
+  example: { type: 'smooth', params: { iterations: 20, strength: 0.5, method: 'taubin' } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const sel = mask(g, 'point', p.group);
@@ -662,6 +678,7 @@ defineNode({
     distance: { type: 'float', default: 0.05, desc: 'offset along N', aliases: ['dist', 'amount'] },
     group: P.group('point'),
   },
+  example: { type: 'peak', params: { distance: 0.02 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const sel = mask(g, 'point', p.group);
@@ -682,6 +699,7 @@ defineNode({
     seed: P.seed(),
     group: P.group('point'),
   },
+  example: { type: 'jitter', params: { scale: 0.02, seed: 5 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const sel = mask(g, 'point', p.group);
@@ -711,6 +729,14 @@ defineNode({
     group: P.group('point'),
   },
   outputs: 'point N (orient), hitprim, hitdist',
+  example: {
+    nodes: {
+      ground: { type: 'terrain', params: { size: [10, 10], divisions: [40, 40], height: 1 } },
+      pts: { type: 'point_grid', params: { counts: [8, 1, 8], size: [8, 0, 8], center: [0, 5, 0] } },
+      drop: { type: 'ray', in: ['pts', 'ground'], params: { direction: [0, -1, 0] } },
+    },
+    output: 'drop',
+  },
   cook: ({ input, p }) => {
     const g = input(0).clone(), tgt = input(1);
     const bvh = new TriBVH(tgt);

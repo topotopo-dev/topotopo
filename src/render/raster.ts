@@ -99,6 +99,8 @@ export interface RenderOptions {
   scale?: number;
   /** second footer line naming the active overlays plus geometry notes (default: on when any overlay option is used) */
   annotate?: boolean;
+  /** each view's name label (top left) and the persp axis gizmo (default true); false for clean thumbnails */
+  viewLabels?: boolean;
   /** 3D views sample base colour maps of materials with "image:<name>" textures (needs uv; render/texview.ts) */
   textures?: boolean;
   /** 'texture' view: "" = every image, an image name, "image/layer", or a material name (its maps as a strip) */
@@ -228,6 +230,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   if (o.clip && clipK < 0) throw new Error(`unknown clip axis "${o.clip.axis}" (use x, y or z)`);
   const annotate = o.annotate ?? !!(wireMode || o.pointNumbers || o.primNumbers || hasSection || clipK >= 0 || glyphMode || o.labelGroups || o.labelPieces || o.labelAttrib || o.legend || shadingMode);
   const footerH = 22 * ui + (annotate ? 16 * ui : 0);
+  const viewLabels = o.viewLabels ?? true;
   const outW = cols * tile + (cols - 1) * 2, outH = rows * tile + (rows - 1) * 2 + footerH;
   const notes: string[] = [];
 
@@ -675,7 +678,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv;
         }
       if (post) post();
-      drawText(out, outW, outH, tx + 6 * ui, ty + 6 * ui, label, [1, 1, 1], 2 * ui);
+      if (viewLabels) drawText(out, outW, outH, tx + 6 * ui, ty + 6 * ui, label, [1, 1, 1], 2 * ui);
     };
     if (vname === 'uv') {
       blit(drawUVView(g, col, W, H, ss * ui, uvd, tris, colorOf, colorByActive, notes));
@@ -1020,7 +1023,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     }
 
     // axis gizmo
-    if (kind === 'persp') {
+    if (kind === 'persp' && viewLabels) {
       const ox = 34 * ss * ui, oy = H - 34 * ss * ui, len = 22 * ss * ui;
       for (const [ax, colr, lab] of [[[1, 0, 0], [0.95, 0.3, 0.3], 'X'], [[0, 1, 0], [0.4, 0.9, 0.4], 'Y'], [[0, 0, 1], [0.4, 0.6, 1], 'Z']] as [number[], number[], string][]) {
         const ex = ox + dot3(ax, cam.r) * len, ey = oy - dot3(ax, cam.u) * len;

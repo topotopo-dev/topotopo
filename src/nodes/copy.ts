@@ -842,7 +842,19 @@ defineNode({
     rotate_attrib: { type: 'string', default: '', desc: 'template point attribute adding a local rotation after orient/N/rot: float = degrees about +Y (yaw), vec3 = Euler degrees (XYZ), vec4 = quaternion', aliases: ['rotate_by'] },
   },
   outputs: 'prim copynum; template point attributes on copied points (pack: on the instance anchor points)',
-  example: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_attrib: 'variant' } },
+  example: {
+    nodes: {
+      pine: { type: 'tube', params: { radius: 0.4, radius_top: 0, height: 1.5, center: [0, 0.75, 0] } },
+      pine_named: { type: 'attrib_create', in: ['pine'], params: { name: 'name', class: 'prim', value: 'pine' } },
+      rock: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.3 } },
+      rock_named: { type: 'attrib_create', in: ['rock'], params: { name: 'name', class: 'prim', value: 'rock' } },
+      library: { type: 'merge', in: ['pine_named', 'rock_named'] },
+      ground: { type: 'grid', params: { size: [20, 20] } },
+      pts: { type: 'scatter', in: ['ground'], params: { count: 200 } },
+      forest: { type: 'copy_to_points', in: ['library', 'pts'], params: { pack: true, variants: 'name', variant_weights: [3, 1] } },
+    },
+    output: 'forest',
+  },
   cook: ({ input, p, warn }) => {
     const src = input(0);
     const t = p.scale_attrib || p.rotate_attrib ? foldExtraXforms(input(1), p.scale_attrib, p.rotate_attrib) : input(1);
