@@ -11,27 +11,27 @@ failure, or an export the consumer rejects; **Low** = validation or consistency 
 
 ## Findings
 
-| id | where (at 3289c6b) | severity | status | summary |
-|---|---|---|---|---|
-| F1 | src/core/particles.ts:660, 672, 699 | High | fixed 95e5812 | refused births looped one by one (hang on a large `emit_rate`); the refused count wrapped at 2^31 |
-| F2 | src/host/node.ts:215, 217 | High | fixed 5666c03 (+674710a typing) | `runGuardedAsync` read and called the script promise's `then` outside the time limit: a replaced `Promise.prototype.then` hangs the process |
-| F3 | src/host/pool.ts:179 | Medium | fixed 6bad69d | a task retried after "shared data missing" went by key only and failed when another worker that had also dropped the key took it |
-| F4 | src/io/points.ts:132, 145 | Medium | fixed 40121ea | PCG CSV: attributes named exactly `Seed`/`Name`/`Density` (and `Position` in the flat layout) repeat a column; `name` + `NAME` both become `name_attr`; `constructor` looked up through `Object.prototype` |
-| F5 | src/graph/params.ts:200 | Low | fixed 8201263 | numeric strings were not checked for finiteness (`"Infinity"`, `"1e999"`), unlike numbers; `resample {count: "Infinity"}` crashed the process (heap OOM) |
-| F6 | src/core/particles.ts:564 | Low | fixed 017c647 | an SDF field whose bounds overflow the sampling grid gave NaN velocities on every particle |
-| N1 | src/host/node.ts:98-102; src/core/wrangle.ts:353, 360 | High | not fixed (documented gap, R-13) | the engine assigns realm globals `__job` / `__cur`: a script that defines a setter for them hangs the process |
-| N2 | src/nodes/code.ts:183 | High | not fixed (documented gap, R-13) | `res instanceof Geometry` on a Proxy a script returns runs its trap outside the time limit |
-| N3 | src/core/particles.ts:646; src/nodes/particles.ts:211-238 | Medium | not fixed | births per run are not capped (max_particles caps live particles): high rate × short life × many steps exhausts the heap |
-| N4 | src/nodes/curves.ts:303 and other unbounded int params; src/nodes/rbd.ts:92; src/nodes/cloth.ts steps × substeps × iterations | Medium | not fixed | resource exhaustion: huge finite counts crash the process (fatal OOM), long simulations have no time limit |
-| N5 | src/core/rbd.ts:553; src/nodes/rbd.ts:112, 117 | Low | not fixed | an exception inside the `RbdSim` constructor leaks its Rapier world |
-| N6 | src/nodes/rbd.ts:85 | Low | not fixed | `ground_plane: auto` adds the ground when input 1 is connected but has no triangles; the param says "only when input 1 is not connected" |
-| N7 | src/core/rbd.ts:607 | Low | not fixed | body order rounds origins to 1e-6 m and breaks ties by input index: permuting coincident pieces of different shapes changes the result |
-| N8 | src/io/points.ts:438 | Low | not fixed (design) | the CSV reader keeps the `_attr` suffix: a topotopo round trip turns `name` into `name_attr` (since 8ae9ec6) |
-| N9 | src/host/pool.ts:183; src/host/worker.ts:70 | Low | not fixed | a `transfer: true` task with shared data would retry with detached arrays (no caller combines them) |
-| N10 | src/core/kernels.ts:293 | Low | not fixed | `hashArrays` (64-bit, non-cryptographic) keys worker-cached shared data: a collision would reuse another job's data |
-| N11 | src/core/particles.ts:689 | Low | not fixed | particle `id` is int32: wraps after 2^31 births in one simulation |
-| N12 | src/core/xpbd.ts:109; src/nodes/cloth.ts:69 | Low | not fixed | point-pair keys are exact only below 2^26 points (`max_points` has no upper bound) |
-| N13 | src/graph/engine.ts:1146 | Info | not fixed | the engine's finite check resets only P; NaN in v, packedXform and other attributes passes downstream |
+| id | where (at 3289c6b) | severity | status | summary | resolved |
+|---|---|---|---|---|---|
+| F1 | src/core/particles.ts:660, 672, 699 | High | fixed 95e5812 | refused births looped one by one (hang on a large `emit_rate`); the refused count wrapped at 2^31 |  |
+| F2 | src/host/node.ts:215, 217 | High | fixed 5666c03 (+674710a typing) | `runGuardedAsync` read and called the script promise's `then` outside the time limit: a replaced `Promise.prototype.then` hangs the process |  |
+| F3 | src/host/pool.ts:179 | Medium | fixed 6bad69d | a task retried after "shared data missing" went by key only and failed when another worker that had also dropped the key took it |  |
+| F4 | src/io/points.ts:132, 145 | Medium | fixed 40121ea | PCG CSV: attributes named exactly `Seed`/`Name`/`Density` (and `Position` in the flat layout) repeat a column; `name` + `NAME` both become `name_attr`; `constructor` looked up through `Object.prototype` |  |
+| F5 | src/graph/params.ts:200 | Low | fixed 8201263 | numeric strings were not checked for finiteness (`"Infinity"`, `"1e999"`), unlike numbers; `resample {count: "Infinity"}` crashed the process (heap OOM) |  |
+| F6 | src/core/particles.ts:564 | Low | fixed 017c647 | an SDF field whose bounds overflow the sampling grid gave NaN velocities on every particle |  |
+| N1 | src/host/node.ts:98-102; src/core/wrangle.ts:353, 360 | High | not fixed (documented gap, R-13) | the engine assigns realm globals `__job` / `__cur`: a script that defines a setter for them hangs the process | R-18 62e2709: the job and the geometry API are closure variables behind a frozen realm control object (a global `const`); the host never touches the realm's global object after setup |
+| N2 | src/nodes/code.ts:183 | High | not fixed (documented gap, R-13) | `res instanceof Geometry` on a Proxy a script returns runs its trap outside the time limit | R-18 62e2709: geometries carry a brand (WeakSet, `isGeometry`); script results and `lib.run` inputs are brand-checked without traps, `lib.run` params copied with `structuredClone` inside the call |
+| N3 | src/core/particles.ts:646; src/nodes/particles.ts:211-238 | Medium | not fixed | births per run are not capped (max_particles caps live particles): high rate × short life × many steps exhausts the heap | R-18 852429f: `max_births` (default 1,000,000): runs are emitted and integrated in batches (same result), at most `max_births` births per step |
+| N4 | src/nodes/curves.ts:303 and other unbounded int params; src/nodes/rbd.ts:92; src/nodes/cloth.ts steps × substeps × iterations | Medium | not fixed | resource exhaustion: huge finite counts crash the process (fatal OOM), long simulations have no time limit | R-18 59eee9b: 69 count params got a max (test/limits.ts lists the 13 non-counts), `point_grid` product guard; `engine.simTimeoutMs` (600 s, `TOPOTOPO_SIM_TIMEOUT_MS`) stops the seven long nodes, the WASM calls on a pool worker |
+| N5 | src/core/rbd.ts:553; src/nodes/rbd.ts:112, 117 | Low | not fixed | an exception inside the `RbdSim` constructor leaks its Rapier world |  |
+| N6 | src/nodes/rbd.ts:85 | Low | not fixed | `ground_plane: auto` adds the ground when input 1 is connected but has no triangles; the param says "only when input 1 is not connected" | R-18 63ee16e: auto adds the ground only when input 1 is not connected (as documented), with a warning when a connected input has no triangles |
+| N7 | src/core/rbd.ts:607 | Low | not fixed | body order rounds origins to 1e-6 m and breaks ties by input index: permuting coincident pieces of different shapes changes the result | R-18 ff7d2e9: ties go by a 64-bit hash of the piece (shape in the body frame, exact pose, velocities, active); `rbd_stack` order height breaks ties by the same rank |
+| N8 | src/io/points.ts:438 | Low | not fixed (design) | the CSV reader keeps the `_attr` suffix: a topotopo round trip turns `name` into `name_attr` (since 8ae9ec6) |  |
+| N9 | src/host/pool.ts:183; src/host/worker.ts:70 | Low | not fixed | a `transfer: true` task with shared data would retry with detached arrays (no caller combines them) |  |
+| N10 | src/core/kernels.ts:293 | Low | not fixed | `hashArrays` (64-bit, non-cryptographic) keys worker-cached shared data: a collision would reuse another job's data |  |
+| N11 | src/core/particles.ts:689 | Low | not fixed | particle `id` is int32: wraps after 2^31 births in one simulation |  |
+| N12 | src/core/xpbd.ts:109; src/nodes/cloth.ts:69 | Low | not fixed | point-pair keys are exact only below 2^26 points (`max_points` has no upper bound) |  |
+| N13 | src/graph/engine.ts:1146 | Info | not fixed | the engine's finite check resets only P; NaN in v, packedXform and other attributes passes downstream |  |
 
 ## Fixed
 
@@ -174,3 +174,45 @@ On the branch after merging `main` (a0a9622), Windows 11, Node 24.14: `npm run t
 poisoned-`then` layer, examples 222/222, particles 76/76, pool 79/79, interop all passed, engine 111/111); `npm run
 showcase` exit 0 with `examples/renders/*.png` byte-identical (`git status` clean). Baseline before any change (3289c6b):
 the same gates green.
+
+## R-18: closing N1–N4, N6, N7
+
+Branch `worktree-agent-acb8f744ac791d9cb`, one commit per finding (N1 and N2 together), each with a test that fails
+(or hangs, or crashes the process) on `592e69a` and passes after the fix. N5 and N8–N13 stay as documented above;
+`drape`/`inflate` `max_points` now has a max of 10,000,000, below N12's 2^26.
+
+- **N1** (62e2709). `SCRIPT_REALM_SETUP` (src/core/snippet-lib.ts) declares the realm's control object `__topotopo` as a
+  global `const`: a frozen object of realm functions (`run`, `setJob`, `setCur`) over closure variables for the job of a
+  timed call and the wrangle's geometry API. The host keeps the object from setup on and never touches a property of the
+  realm's global object again; workers no longer write `__cur` either. Test: test/fuzz.ts "poisoned realm slots" (a
+  script, a detail wrangle and a pooled point wrangle give `__job`/`__cur` looping accessors; each poison and three later
+  cooks succeed, pool off and on). Before: exit 124 under `timeout 20` (pool off), a 10.5 s pool timeout (pool on).
+- **N2** (62e2709). A brand: the Geometry constructor and `Geometry.blank()` (which replaces every
+  `Object.create(Geometry.prototype)`) add the object to a WeakSet, `isGeometry` checks it without running any code of
+  the value. The script node and the engine accept only branded results with the original prototype; `lib.run` refuses
+  unbranded inputs and copies its params with `structuredClone` inside the call (an async node such as `foreach` read
+  both after the timed call: a Proxy input or a `body` getter armed after `lib.run` hung the process the same way).
+  Test: test/fuzz.ts "values a script hands back" (9 cases, pool off and on).
+- **N3** (852429f). `particles` `max_births` (default 1,000,000, max 10,000,000): emission stops at the end of the step at
+  which a batch's births reach it, the batch is integrated and compacted, the next one continues (same bits as one run);
+  one step gives at most `max_births` births, the rest are refused with a warning. Test: test/particles.ts "max_births".
+- **N4** (59eee9b). 69 int count params got a max (test/limits.ts scans the registry; the 13 int params that are not
+  counts are listed there); `point_grid` refuses more than 20 M points; `group_expand` stops when a step changes nothing.
+  `engine.simTimeoutMs` (600 s, `TOPOTOPO_SIM_TIMEOUT_MS`) stops rbd_settle, rbd_stack, drape, inflate, particles and
+  heightfield_erode (JS) with an error naming the node; remesh_quad and the erosion kernels run their WASM call on a pool
+  worker under the rest of the limit when the call is big (without a pool they still cannot be stopped). Test:
+  test/limits.ts (new, part of `npm test`).
+- **N6** (63ee16e). `ground_plane: auto` follows its documentation (ground only when input 1 is not connected); a
+  connected input without triangles gets a warning naming `ground_plane: on`. Test: test/rbd.ts.
+- **N7** (ff7d2e9). Coincident pieces are ordered by a 64-bit content hash (shape in the body frame, exact pose,
+  velocities, `active`) instead of the input index; `rbd_stack` order `height` breaks equal heights by the same rank.
+  Test: test/rbd.ts (four coincident pieces of different shapes, three input orders: 1e-15 m apart now, up to 1.8 m
+  before). Goldens unchanged.
+
+Gates on the branch after merging `main` (eae1bc4), Windows 11, Node 24.14: `npm run typecheck` exit 0; `npm test` exit 0
+(1,934 PASS lines, no FAIL; golden 290/290 unchanged, examples 222/222, fuzz layers 0 failed including the two new ones,
+particles 81/81, rbd 50/50, pool 79/79, limits 28/28); `npm run test:pool` (golden layer with every kernel and WASM call
+on the pool) 290/290; `npm run docs` regenerates nothing; `npm run showcase` exit 0 with `examples/renders/*.png`
+byte-identical; `npm run build` and `npm run pack:test` pass. The new tests run against `592e69a`: rbd 4 FAIL (N6, N7),
+particles FAIL (N3), limits FAIL then the process dies of a heap OOM (exit 134, N4), fuzz hangs at the first poisoned
+slot until its 240 s limit (N1; the N2 cases hung with exit 124 as standalone repros).
