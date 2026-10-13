@@ -34,7 +34,8 @@
 //
 // Determinism: the point-wise constraint arrays are sorted by a greedy graph colouring (no two constraints of one colour
 // share a point), so a sweep is Gauss-Seidel across colours and Jacobi within one (the order inside a colour does not
-// matter, which a parallel solve would need); chains run in their build order. Every sweep alternates direction. The
+// matter, which a parallel solve would need); chains run in their build order. Sweeps within a substep alternate
+// direction (forward first: alternating across substeps with one sweep each pumped a period-2 mode). The
 // solve itself runs on one thread in that fixed order; only the collision queries (collideRange, the kernel
 // "cloth_collide") may run in chunks, and they are pure per point, so results are the same bits with or without a pool.
 //
@@ -780,6 +781,8 @@ export interface SimOptions {
   /** volume constraint (inflate): target / rest volume, and its stiffness in N/m (0 = no volume constraint) */
   pressure?: number;
   pressureStiffness?: number;
+  /** steps over which the pressure rises from 1 to its value (0 = at once); an instant jump would throw the cloth outwards */
+  pressureRamp?: number;
 }
 
 /** Simulation state of a cloth model. Positions start at `x0`; pinned points never move. */
@@ -826,6 +829,9 @@ export class XpbdCloth {
   vRest = 0;
   vSign = 1;
   vAlpha = 0;
+  /** current target volume ratio (ramps to o.pressure) and the number of steps taken */
+  vTarget = 1;
+  stepIndex = 0;
   private dAlphaT: Float64Array;
   private dInvDen: Float64Array;
   private bAlphaT: Float64Array;
@@ -840,7 +846,6 @@ export class XpbdCloth {
   private penC: Float64Array;
   private grad: Float64Array | null = null;
   private acc: Float64Array | null = null;
-  private sweep = 0;
   /** first distance constraint of the one-by-one sweep (nStretch when the stretch edges are solved as chains) */
   private firstPoint = 0;
   /** chain solve scratch per link: direction, inverse pivot, eliminated super-diagonal, right-hand side / Δλ */
@@ -1092,6 +1097,12 @@ export class XpbdCloth {
     const gx = o.gravity[0], gy = o.gravity[1], gz = o.gravity[2];
     const damp = Math.exp(-Math.max(0, o.damping) * h);
     if (this.acc) this.aero();
+    if (this.grad) {
+      // inflate gradually: the target volume ratio rises from 1 to the pressure along a smoothstep over pressureRamp steps
+      const ramp = this.o.pressureRamp ?? 0, u = ramp > 0 ? Math.min(1, (this.stepIndex + 1) / ramp) : 1;
+      this.vTarget = 1 + ((this.o.pressure ?? 1) - 1) * u * u * (3 - 2 * u);
+    }
+    this.stepIndex++;
     const acc = this.acc;
     for (let sub = 0; sub < o.substeps; sub++) {
       for (let i = 0; i < n; i++) {
@@ -1110,7 +1121,9 @@ export class XpbdCloth {
       this.penF.fill(0);
       this.penC.fill(0);
       for (let it = 0; it < o.iterations; it++) {
-        const fwd = (this.sweep++ & 1) === 0;
+        // forward, backward, ... within a substep, forward again at the next: alternating across substeps with one sweep each
+        // pumps a period-2 mode (a closed sphere crumpled from a 1e-3 jitter), a symmetric sweep within a substep does not
+        const fwd = (it & 1) === 0;
         // soft and point-wise constraints first; the stiff, contact-aware stretch chains last before the contacts
         if (lam) this.solveDistances(fwd); else this.solveDistancesOnce(fwd);
         if (this.m.bAlpha.length) this.solveBends(fwd, lam);
@@ -1396,7 +1409,7 @@ export class XpbdCloth {
       gr[c] += ay * bz - az * by; gr[c + 1] += az * bx - ax * bz; gr[c + 2] += ax * by - ay * bx;
     }
     V = (sign * V) / 6;
-    const C = V - (this.o.pressure ?? 1) * this.vRest;
+    const C = V - this.vTarget * this.vRest;
     let den = 0;
     const s6 = sign / 6;
     for (let i = 0; i < this.n; i++) {

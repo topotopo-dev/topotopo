@@ -10545,7 +10545,7 @@ category: `sim` · aliases: `vellum_pressure`, `pressure`, `balloon`
 
 Inflate a closed mesh with an XPBD volume constraint (Vellum pressure): cushions, balloons, bulging sacks.
 
-Simulates the `geo` input as a closed cloth bag whose volume is driven towards `pressure` × its rest volume, against the same stretch, shear and bend constraints as drape (and the same collider, floor, pins and wind). pressure 1 keeps the volume, 1.5 puffs a box into a cushion, < 1 deflates it; pressure_stiffness sets how hard the volume pushes against the cloth (a stiff cloth caps the volume). Gravity and the floor are off by default (the shape inflates in place); turn them on to rest a cushion on the ground. Houdini: Vellum Pressure constraint.
+Simulates the `geo` input as a closed cloth bag whose volume is driven towards `pressure` × its rest volume, against the same stretch, shear and bend constraints as drape (and the same collider, floor, pins and wind). pressure 1 keeps the volume, 1.5 puffs a box into a cushion, < 1 deflates it; pressure_stiffness sets how hard the volume pushes against the cloth (a stiff cloth caps the volume: a sphere needs a soft stretch_stiffness to grow, a box bulges into a pillow). The pressure rises smoothly over the first half of the steps, and the skin is solved edge by edge so it stretches evenly. Gravity and the floor are off by default (the shape inflates in place); turn them on to rest a cushion on the ground. Houdini: Vellum Pressure constraint.
 
 **Inputs**
 
