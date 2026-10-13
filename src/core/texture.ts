@@ -133,7 +133,7 @@ export function genPattern(o: PatternOptions, w: number, h: number): { C: Float3
         case 'grid': v = 1 - aa(Math.min(dx, dy)); break;
         case 'dots': {
           const r = Math.max(0, (1 - Math.max(0, Math.min(1, o.gap))) * s) / 2;
-          const d = r - Math.hypot((fx - 0.5) * cw, (fy - 0.5) * chh);
+          const d = r - Math.sqrt(((fx - 0.5) * cw) ** 2 + ((fy - 0.5) * chh) ** 2);
           v = (b > 0 ? smooth(0, b, d) : clamp01(d / pix + 0.5)) * vary(cx, cy);
           break;
         }
@@ -180,7 +180,7 @@ export function genGradient(mode: string, angle: number, center: [number, number
       const u = (i + 0.5) / w, v = 1 - (j + 0.5) / h;
       let t: number;
       switch (mode) {
-        case 'radial': t = Math.hypot(u - center[0], v - center[1]) / r; break;
+        case 'radial': t = Math.sqrt((u - center[0]) ** 2 + (v - center[1]) ** 2) / r; break;
         case 'diamond': t = (Math.abs(u - center[0]) + Math.abs(v - center[1])) / r; break;
         case 'angular': t = (((Math.atan2(v - center[1], u - center[0]) - a) / (2 * Math.PI)) % 1 + 1) % 1; break;
         case 'mirror': { const l = ((u - 0.5) * dx + (v - 0.5) * dy) / ext * 0.5 + 0.5; t = 1 - Math.abs(2 * l - 1); break; }
@@ -250,9 +250,9 @@ export function genShape(o: ShapeOptions, w: number, h: number): Float32Array {
       let sd: number;
       switch (o.shape) {
         case 'square': sd = Math.max(Math.abs(x), Math.abs(y)) - r; break;
-        case 'ring': { const ri = r * Math.max(0, Math.min(0.99, o.inner)), d = Math.hypot(x, y); sd = Math.max(d - r, ri - d); break; }
+        case 'ring': { const ri = r * Math.max(0, Math.min(0.99, o.inner)), d = Math.sqrt(x * x + y * y); sd = Math.max(d - r, ri - d); break; }
         case 'polygon': case 'star': sd = polygonSD(poly!, x, y); break;
-        default: sd = Math.hypot(x, y) - r;
+        default: sd = Math.sqrt(x * x + y * y) - r;
       }
       out[j * w + i] = fall > 0 ? smooth(0, fall, -sd) : clamp01(0.5 - sd / px);
     }
@@ -366,7 +366,7 @@ export function genSplatter(o: SplatterOptions, w: number, h: number): Float32Ar
     const soft = Math.max(0.5, Math.max(0, o.softness) * rad);
     for (let y = Math.floor(cy - rmax - 1); y <= Math.ceil(cy + rmax + 1); y++)
       for (let x = Math.floor(cx - rmax - 1); x <= Math.ceil(cx + rmax + 1); x++) {
-        const ex = x + 0.5 - cx, ey = y + 0.5 - cy, d = Math.hypot(ex, ey), th = Math.atan2(ey, ex);
+        const ex = x + 0.5 - cx, ey = y + 0.5 - cy, d = Math.sqrt(ex * ex + ey * ey), th = Math.atan2(ey, ex);
         const wob = 0.4 * Math.sin(3 * th + ph[0]) + 0.3 * Math.sin(5 * th + ph[1]) + 0.2 * Math.sin(8 * th + ph[2]) + 0.1 * Math.sin(13 * th + ph[3]);
         const rr = rad * (1 + irr * 0.6 * wob);
         const v = smooth(0, soft, rr - d) * inten;
@@ -444,23 +444,36 @@ export function histogramScanFn(position: number, contrast: number): (x: number)
 
 // ---------------------------------------------------------------- neighbourhood filters
 
-/** One box pass of half-width r along rows (horizontal) or columns, every channel, wrapping or clamping at borders. */
+/**
+ * One box pass of half-width r along rows (horizontal) or columns, every channel, wrapping or clamping at borders:
+ * running sums in float64. The vertical pass keeps one running sum per column and walks the rows in memory order.
+ */
 function boxPass(src: Float32Array, w: number, h: number, ch: number, r: number, horizontal: boolean, wrap: boolean): Float32Array {
   const out = new Float32Array(src.length);
-  const n = horizontal ? w : h, lines = horizontal ? h : w;
-  const idx = (line: number, k: number) => (horizontal ? line * w + k : k * w + line);
   const fix = wrap ? wrapI : clampI;
   const inv = 1 / (2 * r + 1);
-  const sum = new Float64Array(ch);
-  for (let line = 0; line < lines; line++) {
-    sum.fill(0);
-    for (let k = -r; k <= r; k++) { const p = idx(line, fix(k, n)) * ch; for (let c = 0; c < ch; c++) sum[c] += src[p + c]; }
-    for (let k = 0; k < n; k++) {
-      const o = idx(line, k) * ch;
-      for (let c = 0; c < ch; c++) out[o + c] = sum[c] * inv;
-      const add = idx(line, fix(k + r + 1, n)) * ch, sub = idx(line, fix(k - r, n)) * ch;
-      for (let c = 0; c < ch; c++) sum[c] += src[add + c] - src[sub + c];
+  if (horizontal) {
+    const rw = w * ch;
+    // source column of window position k (only the first r + 1 and last r + 1 positions need fixing)
+    const col = new Int32Array(w + 2 * r + 1);
+    for (let k = -r; k <= w + r; k++) col[k + r] = fix(k, w) * ch;
+    const sum = new Float64Array(ch);
+    for (let y = 0; y < h; y++) {
+      const row = y * rw;
+      sum.fill(0);
+      for (let k = -r; k <= r; k++) { const p = row + col[k + r]; for (let c = 0; c < ch; c++) sum[c] += src[p + c]; }
+      for (let x = 0; x < w; x++) {
+        const o = row + x * ch, a = row + col[x + 2 * r + 1], s = row + col[x];
+        for (let c = 0; c < ch; c++) { out[o + c] = sum[c] * inv; sum[c] += src[a + c] - src[s + c]; }
+      }
     }
+    return out;
+  }
+  const rw = w * ch, sums = new Float64Array(rw);
+  for (let k = -r; k <= r; k++) { const p = fix(k, h) * rw; for (let q = 0; q < rw; q++) sums[q] += src[p + q]; }
+  for (let y = 0; y < h; y++) {
+    const o = y * rw, a = fix(y + r + 1, h) * rw, s = fix(y - r, h) * rw;
+    for (let q = 0; q < rw; q++) { out[o + q] = sums[q] * inv; sums[q] += src[a + q] - src[s + q]; }
   }
   return out;
 }
@@ -492,14 +505,16 @@ export function blurLayer(a: Float32Array, ch: number, w: number, h: number, rad
   return x === a ? a.slice() : x;
 }
 
-/** Height difference across a pixel (Sobel, per pixel): gx along +i (u), gy along +j (down). */
-function sobel(g: Float32Array, w: number, h: number, i: number, j: number, wrap: boolean): [number, number] {
+/** Sobel scratch: sobel() writes gx, gy here (no allocation per pixel). */
+const SB = new Float64Array(2);
+/** Height difference across a pixel (Sobel, per pixel) into SB: gx along +i (u), gy along +j (down). */
+function sobel(g: Float32Array, w: number, h: number, i: number, j: number, wrap: boolean): void {
   const fix = wrap ? wrapI : clampI;
   const il = fix(i - 1, w), ir = fix(i + 1, w), ju = fix(j - 1, h), jd = fix(j + 1, h);
   const a = g[ju * w + il], b = g[ju * w + i], c = g[ju * w + ir];
   const d = g[j * w + il], f = g[j * w + ir];
   const p = g[jd * w + il], q = g[jd * w + i], s = g[jd * w + ir];
-  return [(c + 2 * f + s - a - 2 * d - p) / 8, (p + 2 * q + s - a - 2 * b - c) / 8];
+  SB[0] = (c + 2 * f + s - a - 2 * d - p) / 8; SB[1] = (p + 2 * q + s - a - 2 * b - c) / 8;
 }
 
 /**
@@ -512,11 +527,11 @@ export function normalFromHeight(g: Float32Array, w: number, h: number, strength
   const k = (strength * w) / 64; // Sobel / 8 is dh per pixel; a rise of 1 over w/64 pixels then gives slope 1 (45°)
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
-      const [gx, gy] = sobel(g, w, h, i, j, wrap);
+      sobel(g, w, h, i, j, wrap); const gx = SB[0], gy = SB[1];
       // dh/du = gx per pixel; dh/dv = -gy (rows go down)
       let nx = -gx * k, ny = gy * k;
       if (directx) ny = -ny;
-      const l = Math.hypot(nx, ny, 1);
+      const l = Math.sqrt(nx * nx + ny * ny + 1);
       const o = (j * w + i) * 4;
       out[o] = 0.5 + (0.5 * nx) / l; out[o + 1] = 0.5 + (0.5 * ny) / l; out[o + 2] = 0.5 + 0.5 / l; out[o + 3] = 1;
     }
@@ -528,8 +543,8 @@ export function edgeDetect(g: Float32Array, w: number, h: number, strength: numb
   let out: Float32Array = new Float32Array(w * h);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
-      const [gx, gy] = sobel(g, w, h, i, j, wrap);
-      out[j * w + i] = clamp01(Math.hypot(gx, gy) * 2 * strength);
+      sobel(g, w, h, i, j, wrap); const gx = SB[0], gy = SB[1];
+      out[j * w + i] = clamp01(Math.sqrt(gx * gx + gy * gy) * 2 * strength);
     }
   const r = Math.round(width);
   if (r >= 1) out = maxFilter(out, w, h, r, wrap);
@@ -590,7 +605,7 @@ export function warpLayer(a: Float32Array, ch: number, w: number, h: number, W: 
   const ox = new Float32Array(n), oy = new Float32Array(n);
   if (mode === 'slope') {
     let mx = 0;
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const [gx, gy] = sobel(gW, w, h, i, j, wrap); ox[j * w + i] = gx; oy[j * w + i] = gy; mx = Math.max(mx, Math.hypot(gx, gy)); }
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { sobel(gW, w, h, i, j, wrap); const gx = SB[0], gy = SB[1]; ox[j * w + i] = gx; oy[j * w + i] = gy; mx = Math.max(mx, Math.hypot(gx, gy)); }
     const k = mx > 0 ? (intensity * w) / mx : 0;
     for (let i = 0; i < n; i++) { ox[i] *= k; oy[i] *= k; }
   } else if (mode === 'vector') {

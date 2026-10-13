@@ -53,8 +53,8 @@ interface Bake {
   uv: Float64Array;
   s: BakeSamples;
   /** per-sample world position and unit normal of the low mesh */
-  P: Float64Array;
-  N: Float64Array;
+  readonly P: Float64Array;
+  readonly N: Float64Array;
   diag: number;
 }
 
@@ -87,10 +87,16 @@ function setup(ctx: CookContext): Bake {
   const s = bakeSamples(uv, tris, W, H, S, skip);
   if (s.outside) ctx.warn(`${type}: ${s.outside} triangle(s) reach outside the 0..1 uv square (clipped; UDIM tiles are not baked)`);
   if (!s.n) ctx.warn(`${type}: no texel is covered (uv collapsed or outside 0..1)`);
-  const P = interpolate(s, tris, vertexPositions(g), 3);
-  const N = interpolate(s, tris, resolveVertexNormals(g, 60), 3);
-  normalize3(N);
-  return { ctx, g, tris, triPrim, uv, s, P, N, diag: bboxDiagonal(g) || 1 };
+  // per-sample positions and normals, interpolated on first use (id, mask and colour bakes do not need them)
+  let P: Float64Array | null = null, N: Float64Array | null = null;
+  return {
+    ctx, g, tris, triPrim, uv, s, diag: bboxDiagonal(g) || 1,
+    get P() { return (P ??= interpolate(s, tris, vertexPositions(g), 3)); },
+    get N() {
+      if (!N) { N = interpolate(s, tris, resolveVertexNormals(g, 60), 3); normalize3(N); }
+      return N;
+    },
+  };
 }
 
 /** Resolve per-sample values into the output image (C + mask + extra layers), pad, and wrap it as the node's output. */
@@ -301,7 +307,7 @@ defineBake({
       const V = new Float64Array(b.s.n);
       ctx.stat('edges', edges.count);
       const run = ctx.parallelMap('bake_curvature', {
-        count: b.s.n, args, inputs: { P, N }, results: { V }, shared: { E: edges.E, K: edges.K, FN: edges.FN, start: grid.start, items: grid.items },
+        count: b.s.n, args, inputs: { P, N }, results: { V }, shared: { E: edges.E, D: edges.D, K: edges.K, FN: edges.FN, start: grid.start, items: grid.items },
       });
       return then(run, () => {
         const k = p.strength, n = b.s.n;
