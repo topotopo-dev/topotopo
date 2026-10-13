@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-216 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+217 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -19,7 +19,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
-- [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
+- [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_flow](#heightfield_flow) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
 - [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
@@ -4822,9 +4822,9 @@ Houdini: HeightField Cutout by Object. With a shape connected (closed polygons, 
 
 category: `heightfield` · aliases: `hf_erode`, `erosion`, `heightfield_erosion`, `heightfield_hydro_erode`
 
-Hydraulic + thermal erosion: rain droplets carve gullies and drop sediment fans, talus slides off steep slopes. Writes flow, sediment, debris, water.
+Droplet or virtual-pipe hydraulic erosion with thermal talus relaxation and optional stream-power incision.
 
-Houdini: HeightField Erode (hydro + thermal). Each iteration rains rain_density × samples droplets (seeded, deterministic) that run downhill with inertia, erode where fast and under capacity (capacity = slope × speed × water × sediment_capacity) and deposit where they slow down, climb or evaporate; then one thermal pass moves material steeper than thermal_talus_angle to lower neighbours. Material is conserved with boundary closed. Layers: height (updated), sediment (+thickness of loose material water deposited, added to an existing layer), debris (+thickness of talus/scree from thermal erosion), flow (0..1, where water ran: rivers and gullies), water (0..1, where water came to rest). Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain. Cost ~ samples × rain_density × iterations × max_lifetime: 512² × 100 iterations takes about 2–3 s.
+Houdini: HeightField Erode. The default droplet/js path retains the original seeded droplet model and outputs. Droplets erode below carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Kernel droplet uses the same parameters and layer meanings. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.
 
 **Inputs**
 
@@ -4836,26 +4836,33 @@ Houdini: HeightField Erode (hydro + thermal). Each iteration rains rain_density 
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
+| `method` | enum | `"droplet"` |  | `droplet`, `pipe`, `stream_power` |  | droplet = seeded particles; pipe = shallow-water grid; stream_power = pipe plus drainage-driven incision |
+| `backend` | enum | `"js"` |  | `auto`, `kernel`, `js` |  | js preserves the original droplet result; kernel loads WASM; auto uses WASM only if already loaded, otherwise js (pipe methods require WASM) |
 | `iterations` | int | `50` | 0..5000 |  | `iter`, `steps` | rain passes (each followed by a thermal pass) |
 | `seed` | float | `0` |  |  |  | random seed |
-| `erosion_rate` | float | `0.3` | 0..1 |  | `erodability`, `erode_rate`, `erosion` | fraction of the free capacity a droplet picks up per step |
-| `deposition_rate` | float | `0.3` | 0..1 |  | `deposit_rate`, `deposition` | fraction of the excess sediment dropped per step |
+| `erosion_rate` | float | `0.3` | 0..1 |  | `erodability`, `erode_rate`, `erosion` | fraction of free capacity picked up per droplet step, or erosion rate per second for pipe |
+| `deposition_rate` | float | `0.3` | 0..1 |  | `deposit_rate`, `deposition` | fraction of excess sediment deposited per droplet step, or deposition rate per second for pipe |
 | `sediment_capacity` | float | `1` | 0.. |  | `capacity` | how much sediment fast, steep water can carry (higher = deeper gullies, bigger fans) |
-| `evaporation` | float | `0.1` | 0..1 |  | `evaporation_rate` | fraction of a droplet's water lost per step: its load settles gradually as it dries (lower = longer rivers) |
-| `rain_amount` | float | `1` | 0.. |  | `rain`, `water_amount` | water per droplet |
-| `rain_density` | float | `0.02` | 0..1 |  | `droplets` | droplets per sample per iteration |
-| `inertia` | float | `0.1` | 0..1 |  |  | droplet momentum: 0 = always steepest descent, higher = smoother, longer channels |
+| `evaporation` | float | `0.1` | 0..1 |  | `evaporation_rate` | water fraction lost per droplet step, or evaporation rate per second for pipe |
+| `rain_amount` | float | `1` | 0.. |  | `rain`, `water_amount` | water per droplet; pipe rainfall depth in metres per second, multiplied by rain_layer if set |
+| `rain_density` | float | `0.02` | 0..1 |  | `droplets` | droplet only: droplets per sample per iteration |
+| `inertia` | float | `0.1` | 0..1 |  |  | droplet only: momentum, 0 = always steepest descent, higher = smoother, longer channels |
 | `gravity` | float | `4` | 0.. |  |  | acceleration on slopes |
-| `min_slope` | float | `0.01` | 0.. |  |  | minimum capacity (as a slope), keeps flats eroding a little |
-| `erosion_radius` | int | `3` | 1..8 |  | `brush_radius` | droplet erosion footprint radius (samples) |
-| `max_lifetime` | int | `30` | 1..256 |  | `lifetime`, `max_steps` | maximum steps per droplet |
+| `min_slope` | float | `0.01` | 0.. |  |  | droplet only: minimum capacity (as a slope), keeps flats eroding a little |
+| `erosion_radius` | int | `3` | 1..8 |  | `brush_radius` | droplet only: erosion footprint radius (samples) |
+| `max_lifetime` | int | `30` | 1..256 |  | `lifetime`, `max_steps` | droplet only: maximum steps per particle |
 | `thermal_talus_angle` | float | `40` | 0..89 |  | `talus_angle`, `repose_angle`, `cut_angle` | thermal: angle of repose in degrees (steeper slopes shed material) |
 | `thermal_rate` | float | `0.1` | 0..1 |  | `thermal` | thermal: fraction of the excess moved per iteration (0 = no thermal erosion) |
 | `hardness_layer` | string | `""` |  |  |  | optional 0..1 layer: 1 = rock that does not erode |
 | `freeze_layer` | string | `""` |  |  |  | optional 0..1 layer: 1 = frozen (unchanged), e.g. under buildings or roads |
-| `boundary` | enum | `"closed"` |  | `closed`, `open` |  | closed: water stops at the border and drops its sediment (mass conserved); open: it leaves with it |
+| `rain_layer` | string | `""` |  |  |  | pipe only: optional nonnegative layer multiplying uniform rain_amount (0 = dry) |
+| `time_step` | float | `0` | 0.. |  |  | pipe only: maximum timestep in seconds; 0 chooses it automatically from cell size, gravity and water velocity (CFL) |
+| `stream_power_k` | float | `0.01` | 0.. |  | `incision_k` | stream_power only: incision coefficient K in K × drainage^m × slope^n |
+| `stream_power_m` | float | `0.5` | 0.. |  | `incision_m` | stream_power only: exponent m of contributing drainage area |
+| `stream_power_n` | float | `1` | 0.. |  | `incision_n` | stream_power only: exponent n of downhill slope |
+| `boundary` | enum | `"closed"` |  | `closed`, `open` |  | closed: water remains inside (material conserved); open: water exits, carrying sediment for droplet, while pipe retains sediment |
 
-**Writes:** layers height, flow, sediment, debris, water
+**Writes:** layers height, flow, sediment, debris, water; kernel backends also write wear
 
 **Example**
 
@@ -4895,6 +4902,66 @@ Houdini: HeightField Erode (hydro + thermal). Each iteration rains rain_density 
     }
   },
   "output": "e"
+}
+```
+
+### heightfield_flow
+
+category: `heightfield` · aliases: `hf_flow`, `heightfield_drainage`
+
+Compute downhill drainage accumulation and flow direction for river masks.
+
+Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. Local minima retain drainage (no depression filling). The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Without normalise or log_scale, drainage is contributing area in square metres. Loads the erosion WASM kernel.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a height layer |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `method` | enum | `"dinf"` |  | `d8`, `dinf` |  | D8 chooses one steepest receiver; D-infinity splits contributing area between two downslope receivers |
+| `normalise` | bool | `true` |  |  | `normalize` | scale drainage to 0..1 after applying log_scale |
+| `log_scale` | bool | `true` |  |  |  | apply log(1 + drainage) to reveal small tributaries alongside main rivers |
+
+**Writes:** layers drainage and direction; all existing layers preserved
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          20,
+          20
+        ],
+        "resolution": 0.5
+      }
+    },
+    "n": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "fractal": "ridged",
+        "amplitude": 4
+      }
+    },
+    "f": {
+      "type": "heightfield_flow",
+      "in": [
+        "n"
+      ]
+    }
+  },
+  "output": "f"
 }
 ```
 

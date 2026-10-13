@@ -10,6 +10,14 @@ repository = "https://github.com/topotopo-dev/polyforge"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+simd = []
+
+[[bench]]
+name = "erosion"
+harness = false
+
 [[bench]]
 name = "wavefront"
 harness = false
