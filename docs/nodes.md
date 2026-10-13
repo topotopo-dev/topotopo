@@ -10691,6 +10691,7 @@ Steps of dt = 1 / (fps × substeps). Each step, every emitter point (input 0: po
 | `field_resolution` | int | `64` | 4..256 |  |  | SDF field: samples along the longest side of the grid the distance is sampled on *(advanced)* |
 | `seed` | float | `0` |  |  |  | random seed (emission phases, birth offsets, lifetimes, velocities, noise) |
 | `max_particles` | int | `1000000` | 0.. |  |  | births are refused while this many particles hold a slot (from birth to the end of their life) |
+| `max_births` | int | `1000000` | 1..10000000 |  |  | guard: most particles born in one step (the rest of the step's births are refused, with a warning). Steps are also simulated in batches of about this many births, so memory stays bounded however many particles are born and die over a run (the result does not depend on it otherwise) |
 | `trails` | int | `0` | 0..10000 |  | `trail_length` | positions kept per particle and output as a polyline (0 = no trails; 2 or more) |
 | `output` | enum | `"both"` |  | `both`, `points`, `trails` |  | points (the particles), trails (one polyline per particle) or both (points first; no trails when trails < 2) |
 
