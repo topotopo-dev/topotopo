@@ -28,8 +28,8 @@
 //   cargo metadata, which fetches missing crates; without cargo it keeps the committed section on a matching
 //   fingerprint and stops otherwise.
 //
-// Licence policy (CONTRIBUTING.md, AGENTS.md): what ships is MIT, Apache-2.0, BSD, ISC or MPL-2.0; build-time-only
-// tooling (proc-macro crates, build scripts) may also use other permissive licences (Unicode-3.0, Zlib, CC0); no GPL
+// Licence policy (CONTRIBUTING.md, AGENTS.md): what ships must be permissive (MIT, Apache-2.0, BSD, ISC, MPL-2.0,
+// Unicode-3.0, Zlib, 0BSD, Unlicense, CC0); LGPL only for optional native modules our code never calls; no GPL
 // or AGPL anywhere. Writing NOTICE lists every package whose licence falls outside that so it gets looked at.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -292,8 +292,8 @@ function spdxAllowed(expr: string, ok: (id: string) => boolean): boolean {
   const any = (): boolean => { let v = all(); while (toks[i] === 'OR') { i++; v = all() || v; } return v; };
   return any();
 }
-const SHIPS = (id: string) => /^(MIT|MIT-0|Apache-2\.0|0BSD|BSD-[1-4]-Clause|ISC|MPL-2\.0)$/.test(id);
-const BUILD_TIME = (id: string) => SHIPS(id) || /^(Unicode-3\.0|Unicode-DFS-2016|Zlib|CC0-1\.0|Unlicense)$/.test(id);
+const SHIPS = (id: string) => /^(MIT|MIT-0|Apache-2\.0|0BSD|BSD-[1-4]-Clause|ISC|MPL-2\.0|Unicode-3\.0|Unicode-DFS-2016|Zlib|CC0-1\.0|Unlicense)$/.test(id);
+const BUILD_TIME = SHIPS;
 
 // ---------------------------------------------------------------------------------------------------------------
 const { deps, optional } = npmPackages();
