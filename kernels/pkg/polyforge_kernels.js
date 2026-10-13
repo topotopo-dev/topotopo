@@ -25,6 +25,103 @@ export function dual_contour(g, iso, qef_tolerance, sharp, clamp_to_cell) {
 }
 
 /**
+ * @param {Float32Array} height
+ * @param {Float32Array} hardness
+ * @param {Float32Array} freeze
+ * @param {number} w
+ * @param {number} h
+ * @param {number} cell
+ * @param {any} params
+ * @param {bigint} seed
+ * @returns {object}
+ */
+export function erode_droplet(height, hardness, freeze, w, h, cell, params, seed) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF32ToWasm0(height, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(hardness, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF32ToWasm0(freeze, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.erode_droplet(retptr, ptr0, len0, ptr1, len1, ptr2, len2, w, h, cell, addHeapObject(params), seed);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float32Array} height
+ * @param {Float32Array} hardness
+ * @param {Float32Array} freeze
+ * @param {Float32Array} rain
+ * @param {number} w
+ * @param {number} h
+ * @param {number} cell
+ * @param {any} params
+ * @param {bigint} seed
+ * @returns {object}
+ */
+export function erode_pipe(height, hardness, freeze, rain, w, h, cell, params, seed) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF32ToWasm0(height, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(hardness, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF32ToWasm0(freeze, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF32ToWasm0(rain, wasm.__wbindgen_export);
+        const len3 = WASM_VECTOR_LEN;
+        wasm.erode_pipe(retptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, w, h, cell, addHeapObject(params), seed);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float32Array} height
+ * @param {number} w
+ * @param {number} h
+ * @param {number} cell
+ * @param {string} method
+ * @returns {object}
+ */
+export function flow_accumulation(height, w, h, cell, method) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF32ToWasm0(height, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(method, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.flow_accumulation(retptr, ptr0, len0, w, h, cell, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * @param {any} g
  * @param {number} radius
  * @returns {object}
@@ -55,7 +152,7 @@ export function grid_blur(g, radius) {
 export function grid_csg(a, b, op, k) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(op, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        const ptr0 = passStringToWasm0(op, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.grid_csg(retptr, addHeapObject(a), addHeapObject(b), ptr0, len0, k);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -163,7 +260,7 @@ export function grid_resample(g, voxel) {
 export function offset_polygon(outer, hole_arrays, distance) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passArrayF64ToWasm0(outer, wasm.__wbindgen_export2);
+        const ptr0 = passArrayF64ToWasm0(outer, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
         wasm.offset_polygon(retptr, ptr0, len0, addHeapObject(hole_arrays), distance);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -187,9 +284,9 @@ export function offset_polygon(outer, hole_arrays, distance) {
 export function remesh_quad(positions, tris, options) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passArrayF64ToWasm0(positions, wasm.__wbindgen_export2);
+        const ptr0 = passArrayF64ToWasm0(positions, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArray32ToWasm0(tris, wasm.__wbindgen_export2);
+        const ptr1 = passArray32ToWasm0(tris, wasm.__wbindgen_export);
         const len1 = WASM_VECTOR_LEN;
         wasm.remesh_quad(retptr, ptr0, len0, ptr1, len1, addHeapObject(options));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -214,9 +311,9 @@ export function remesh_quad(positions, tris, options) {
 export function roof(outer, hole_arrays, pitch, height_cap) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passArrayF64ToWasm0(outer, wasm.__wbindgen_export2);
+        const ptr0 = passArrayF64ToWasm0(outer, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(pitch, wasm.__wbindgen_export2);
+        const ptr1 = passArrayF64ToWasm0(pitch, wasm.__wbindgen_export);
         const len1 = WASM_VECTOR_LEN;
         wasm.roof(retptr, ptr0, len0, addHeapObject(hole_arrays), ptr1, len1, !isLikeNone(height_cap), isLikeNone(height_cap) ? 0 : height_cap);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -243,9 +340,9 @@ export function roof(outer, hole_arrays, pitch, height_cap) {
 export function sdf_from_mesh(positions, tris, voxel, band, padding, fill) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passArrayF64ToWasm0(positions, wasm.__wbindgen_export2);
+        const ptr0 = passArrayF64ToWasm0(positions, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArray32ToWasm0(tris, wasm.__wbindgen_export2);
+        const ptr1 = passArray32ToWasm0(tris, wasm.__wbindgen_export);
         const len1 = WASM_VECTOR_LEN;
         wasm.sdf_from_mesh(retptr, ptr0, len0, ptr1, len1, voxel, band, padding, fill);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -269,11 +366,42 @@ export function sdf_from_mesh(positions, tris, voxel, band, padding, fill) {
 export function straight_skeleton(outer, hole_arrays, weights) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passArrayF64ToWasm0(outer, wasm.__wbindgen_export2);
+        const ptr0 = passArrayF64ToWasm0(outer, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
-        var ptr1 = isLikeNone(weights) ? 0 : passArrayF64ToWasm0(weights, wasm.__wbindgen_export2);
+        var ptr1 = isLikeNone(weights) ? 0 : passArrayF64ToWasm0(weights, wasm.__wbindgen_export);
         var len1 = WASM_VECTOR_LEN;
         wasm.straight_skeleton(retptr, ptr0, len0, addHeapObject(hole_arrays), ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float32Array} height
+ * @param {Float32Array} hardness
+ * @param {number} w
+ * @param {number} h
+ * @param {number} cell
+ * @param {number} talus_angle
+ * @param {number} rate
+ * @param {number} iterations
+ * @returns {object}
+ */
+export function thermal_erode(height, hardness, w, h, cell, talus_angle, rate, iterations) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF32ToWasm0(height, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(hardness, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.thermal_erode(retptr, ptr0, len0, ptr1, len1, w, h, cell, talus_angle, rate, iterations);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -311,6 +439,14 @@ function __wbg_get_imports() {
             const ret = typeof(obj) === 'number' ? obj : undefined;
             getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
+        __wbg___wbindgen_string_get_0380ccaa2f57f0d9: function(arg0, arg1) {
+            const obj = getObject(arg1);
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
         __wbg___wbindgen_throw_41e9ee4f547fc59a: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
@@ -536,7 +672,7 @@ function handleError(f, args) {
     try {
         return f.apply(this, args);
     } catch (e) {
-        wasm.__wbindgen_export(addHeapObject(e));
+        wasm.__wbindgen_export3(addHeapObject(e));
     }
 }
 
@@ -552,6 +688,13 @@ function isLikeNone(x) {
 function passArray32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getFloat32ArrayMemory0().set(arg, ptr / 4);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }

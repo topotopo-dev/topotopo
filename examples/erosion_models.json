@@ -1,0 +1,25 @@
+{
+  "description": "Identical ridged terrain in four erosion modes: back row JS droplet (left), WASM droplet (right); front row virtual pipes (left), virtual pipes plus stream power (right). Terrain colour uses flow, deposited sediment and thermal debris. Each tile is 12 m square with 0.1 m cells. Compare gullies, smooth fans and drainage without grid streaks or checkerboards.",
+  "meta": { "render": { "views": ["persp"], "azimuth": 25, "elevation": 55 } },
+  "nodes": {
+    "field": { "type": "heightfield", "params": { "size": [12, 12], "resolution": 0.1 } },
+    "massif": { "type": "heightfield_layer", "in": ["field"], "params": { "expression": "1.3 * (1 - smoothstep(0, 7, sqrt(x*x + z*z)))" } },
+    "ridges": { "type": "heightfield_noise", "in": ["massif"], "params": { "fractal": "ridged", "amplitude": 1.8, "element_size": 5, "range": "positive", "seed": 11 } },
+    "detail": { "type": "heightfield_noise", "in": ["ridges"], "params": { "amplitude": 0.15, "element_size": 1.5, "seed": 5 } },
+    "terrain": { "type": "heightfield_layer", "in": ["detail"], "params": { "expression": "height * (0.3 + 0.7 * (1 - smoothstep(2, 6.5, sqrt(x*x + z*z))))" } },
+    "droplet_js": { "type": "heightfield_erode", "in": ["terrain"], "params": { "method": "droplet", "backend": "js", "iterations": 60, "seed": 1 } },
+    "droplet_kernel": { "type": "heightfield_erode", "in": ["terrain"], "params": { "method": "droplet", "backend": "kernel", "iterations": 60, "seed": 1 } },
+    "pipe": { "type": "heightfield_erode", "in": ["terrain"], "params": { "method": "pipe", "backend": "kernel", "iterations": 200, "rain_amount": 0.03, "sediment_capacity": 3, "erosion_rate": 0.5, "thermal_rate": 0.03, "seed": 1 } },
+    "stream": { "type": "heightfield_erode", "in": ["terrain"], "params": { "method": "stream_power", "backend": "kernel", "iterations": 200, "rain_amount": 0.03, "sediment_capacity": 3, "erosion_rate": 0.5, "thermal_rate": 0.03, "stream_power_k": 0.04, "seed": 1 } },
+    "js_mesh": { "type": "heightfield_to_mesh", "in": ["droplet_js"], "params": { "color": "terrain" } },
+    "kernel_mesh": { "type": "heightfield_to_mesh", "in": ["droplet_kernel"], "params": { "color": "terrain" } },
+    "pipe_mesh": { "type": "heightfield_to_mesh", "in": ["pipe"], "params": { "color": "terrain" } },
+    "stream_mesh": { "type": "heightfield_to_mesh", "in": ["stream"], "params": { "color": "terrain" } },
+    "js_tile": { "type": "transform", "in": ["js_mesh"], "params": { "translate": [-7, 0, -7] } },
+    "kernel_tile": { "type": "transform", "in": ["kernel_mesh"], "params": { "translate": [7, 0, -7] } },
+    "pipe_tile": { "type": "transform", "in": ["pipe_mesh"], "params": { "translate": [-7, 0, 7] } },
+    "stream_tile": { "type": "transform", "in": ["stream_mesh"], "params": { "translate": [7, 0, 7] } },
+    "out": { "type": "merge", "in": ["js_tile", "kernel_tile", "pipe_tile", "stream_tile"] }
+  },
+  "output": "out"
+}
