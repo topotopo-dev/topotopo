@@ -65,6 +65,8 @@
     "export:demo": "node scripts/export-demo.ts",
     "bench": "node bench/bench.ts",
     "docs": "node scripts/gen-docs.ts",
+    "site": "node scripts/gen-site.ts",
+    "site:check": "node scripts/check-site.ts",
     "shelf": "node scripts/gen-shelf.ts",
     "typecheck": "tsc --noEmit",
     "notice": "node scripts/gen-notice.ts",
@@ -105,6 +107,7 @@
     "@types/node": "^26.6.4",
     "@types/three": "^0.186.0",
     "gltf-validator": "^2.0.0-dev.3.10",
+    "marked": "^18.0.14",
     "typescript": "^7.0.2"
   },
   "engines": {
