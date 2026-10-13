@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["kind:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [10, 0, 9],
+      "min": [0, 0, 0]
+    },
+    "counts": {
+      "points": 10,
+      "prims": 15,
+      "vertices": 30,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "1e4ead7c8c098daa",
+      "attributes": {
+        "prim.kind": "3eb25c85d6b4e4df"
+      },
+      "topology": "9f9f7bc54e8691bf"
+    }
+  },
+  "name": "node.straight_skeleton",
+  "ok": true,
+  "source": "fixture for node type \"straight_skeleton\" (test/fixtures.ts)",
+  "warnings": []
+}

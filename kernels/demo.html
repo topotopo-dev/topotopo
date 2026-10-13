@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Polyforge kernels browser smoke</title>
+<style>body{font:16px/1.5 system-ui;max-width:880px;margin:3rem auto;padding:1rem;background:#151921;color:#e5eaf1}h1{font-size:1.5rem}pre{white-space:pre-wrap;color:#a8e4c0}</style>
+<h1>Polyforge kernels: browser smoke</h1><p>The committed WebAssembly file is fetched and initialized once. Results below are computed in this browser.</p><pre id="result">Loading…</pre>
+<script type="module">
+import init,{straight_skeleton,offset_polygon,roof} from './pkg/polyforge_kernels.js';
+const result=document.querySelector('#result');
+try {
+  const response=await fetch('./pkg/polyforge_kernels_bg.wasm');
+  if(!response.ok) throw new Error(`WASM fetch failed: ${response.status}`);
+  await init({module_or_path:await response.arrayBuffer()});
+  const cases=[['rectangle',[0,0,6,0,6,4,0,4],[]],['L-shape',[0,0,6,0,6,2,2,2,2,6,0,6],[]],['courtyard',[0,0,8,0,8,8,0,8],[[2,2,2,6,6,6,6,2]]]];
+  const digest=o=>JSON.stringify(Object.fromEntries(Object.entries(o).map(([k,v])=>[k,Array.from(v)])));
+  const lines=[];
+  for(const [name,points,holePoints] of cases){
+    const outer=new Float64Array(points),holes=holePoints.map(p=>new Float64Array(p));
+    for(const [mode,run] of [['skeleton',()=>straight_skeleton(outer,holes)],['offset',()=>offset_polygon(outer,holes,0.3)],['roof',()=>roof(outer,holes,new Float64Array([35]),0.5)]]){
+      const a=run(),b=run();if(digest(a)!==digest(b))throw new Error(`${name} ${mode} is nondeterministic`);
+      if(!Array.from(a.vertices).every(Number.isFinite))throw new Error(`${name} ${mode} has nonfinite vertices`);
+      lines.push(`PASS ${name}: ${mode}, ${a.face_edge?.length??a.polygon_hole.length} faces/loops, identical repeat`);
+    }
+  }
+  result.textContent=lines.join('\n')+'\n\n9 browser kernel checks passed.';
+  document.documentElement.dataset.status='passed';
+}catch(error){result.textContent=`FAILED: ${error?.message??error}`;document.documentElement.dataset.status='failed';throw error;}
+</script></html>
