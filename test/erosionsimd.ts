@@ -239,6 +239,19 @@ for (const size of [7, 8]) for (const impulse of [0, 0.125, -0.125]) {
 }
 
 // A new public binding cannot quietly ship without a scalar/SIMD result comparison.
+const scatterP = Float64Array.from({ length: 384 * 3 }, (_, i) => i % 3 === 1 ? 0 : i % 3 === 0 ? (Math.floor(i / 3) % 24) / 10 : Math.floor(i / 72) / 10);
+const scatterScale = Float64Array.from({ length: 384 }, (_, i) => 0.5 + (i % 7) / 10);
+const scatterP32 = Float32Array.from(scatterP), scatterScale32 = Float32Array.from(scatterScale);
+const scatterOrder = Int32Array.from({ length: 384 }, (_, i) => 383 - i), scatterGroups = Int32Array.from({ length: 384 }, (_, i) => i % 7);
+compare('scatter_eliminate_f64', 'adaptive planar candidates', k => k.scatter_eliminate_f64(scatterP, scatterScale, 77, 0.2));
+compare('scatter_eliminate', 'f32 adaptive planar candidates', k => k.scatter_eliminate(scatterP32, scatterScale32, 77, 0.2));
+compare('scatter_min_distance_f64', 'ordered capped rejection', k => k.scatter_min_distance_f64(scatterP, scatterOrder, 0.2, 384, scatterGroups, 3));
+compare('scatter_min_distance', 'f32 ordered capped rejection', k => k.scatter_min_distance(scatterP32, scatterOrder, 0.2, 384, scatterGroups, 3));
+const scatterCorners = new Float64Array([0, 0, 0, 5, 0, 0, 0, 0, 5]);
+const scatterBary = new Float64Array(384 * 3); for (let i = 0; i < 384; i++) scatterBary[i * 3] = 1;
+compare('scatter_relax', 'planar projection', k => k.scatter_relax(scatterP, new Float64Array(384).fill(0.2), new Int32Array(384), scatterBary,
+  scatterCorners, new Float64Array([0, 0, 0, 5, 0, 5]), new Int32Array([-1, 1]), new Int32Array([0]), new Uint32Array([0]),
+  scatterCorners, new Float64Array(), 3, { radius: 0, weighted: false, d_bar: 0.2, w_mean: 1 }));
 assert.deepEqual([...coverage.keys()].sort(), Object.keys(scalar).filter(name => name !== 'default' && name !== 'initSync').sort());
 assert.deepEqual(Object.keys(simd).sort(), Object.keys(scalar).sort(), 'identical public bindings');
 console.log(`erosionsimd: ${checks} scalar/SIMD bit-exact result comparisons passed across ${coverage.size} kernels`);

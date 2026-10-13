@@ -27,7 +27,7 @@
     },
     "bbox": {
       "max": [19, 3.767, 10],
-      "min": [-10.7679, -0.2271, -11.3186]
+      "min": [-10.9328, -0.4847, -11.3186]
     },
     "counts": {
       "points": 51222,
@@ -42,23 +42,23 @@
       "vertex": []
     },
     "hashes": {
-      "P": "26989d5d5ebc1b3f",
+      "P": "b12aaaa63f63b7f8",
       "attributes": {
         "point.Cd": "de7f0ecda2341c0f",
-        "point.N": "8bc2c40e827e9bec",
+        "point.N": "f5f28ea1c3d6b2e7",
         "point.age": "d8cd48f8964dfe2e",
-        "point.curveu": "b0fb9db798c1d259",
+        "point.curveu": "bb4d73d4e4264e0e",
         "point.debris": "43359b8f3eed29fd",
         "point.flow": "c0fe78b25a01b4a0",
-        "point.height": "a66e35ee29eeb838",
+        "point.height": "c5572f0925d0645b",
         "point.id": "51d29b100d5fb416",
         "point.life": "891b0e6a833ca554",
-        "point.mask": "f99ffad7880da66d",
+        "point.mask": "c0c84e1b9f9303d5",
         "point.pscale": "e1117ae5f340bc07",
         "point.sediment": "77a1420da45748e3",
-        "point.slope": "d55db727f945a1d1",
+        "point.slope": "f0c2ec8666e583c0",
         "point.uv": "8e6222d59dad4f7f",
-        "point.v": "4abf796628d6c994",
+        "point.v": "42f92ab8b3db90da",
         "point.water": "923e788e84a8071c",
         "prim.id": "b641a903c78b8039"
       },

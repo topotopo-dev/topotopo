@@ -6,6 +6,87 @@ SIMD and scalar WebAssembly builds; normal TopoTopo users do not install Rust.
 The loader feature-detects simd128 and defaults to SIMD, with scalar fallback.
 See [BUILD.md](BUILD.md).
 
+## Scatter selection (session 12)
+
+`scatter_eliminate(positions, scale, target_count, r_max)` and
+`scatter_min_distance(positions, order, radius, limit, groups, group_cap)` expose
+flat `Float32Array` positions; the `_f64` entry points use `Float64Array` and retain
+the precision of the engine's existing geometry. Both return candidate indices in
+an `Int32Array`; inputs are never modified. The loader adapters select the matching
+precision and pass empty arrays for absent scale/groups. `scale[i]` multiplies the
+elimination radius at candidate i, rather than acting as an acceptance probability.
+
+Weighted sample elimination uses an original port of the existing Yuksel-style
+selection: the same middle-pivot KD quickselect, widest-axis ties, stable
+distance-sorted preorder, neighbour contribution `(1 - d / radius)^8`, indexed
+binary max-heap, and left-child heap ties as the TypeScript implementation. Uniform
+samples use KD slot labels for locality. Variable-radius samples enumerate each
+pair from its larger-radius endpoint (point-index ties), append the pair at both
+ends in discovery order, and sum contributions in that order. Arithmetic is f64,
+with the same scaled Kahan hypotenuse and three repeated squarings for the eighth
+power. The TypeScript fallback uses those same three multiplies: V8 `Math.pow`
+and Rust `libm::pow` can differ by an ulp, which changes close heap comparisons.
+This is a documented deterministic arithmetic variant of the previous scatter
+implementation, while all traversal, addition and heap tie rules are retained. Exactly
+`min(target_count, candidate_count)` ascending indices are returned.
+
+Compact candidate domains use a dense grid, limited to four cells per candidate
+and 16M cells, with outward-rounded query bounds. Neighbours are sorted by squared
+distance and KD preorder rank, retaining the reference's exact list order; sparse
+domains and extreme radii use the KD search. Large selection buffers reserve
+fallibly, and geometric growth is capped at the neighbour budget, so spare capacity
+cannot silently double past that limit.
+
+Elimination improves spacing but does not promise a hard minimum distance for an
+arbitrary candidate set. `scatter_min_distance` provides that guarantee: greedy
+dart throwing visits the supplied order, checks previously accepted candidates in
+a hashed grid, and accepts pairs at exactly the requested radius. Optional
+nonnegative per-candidate group IDs and a uniform positive group cap express the
+node's per-primitive limit. Hash collisions only add distance checks; bucket order
+and randomized group-map hashes do not affect the result. Radius zero applies the
+order, output limit and group cap without distance rejection. The output retains
+acceptance order and may contain fewer than the requested limit.
+
+Checked limits are 5,000,000 candidates and 64,000,000 directed neighbour entries.
+Positions must be finite, with magnitude at most `1e150`; elimination radii and
+scaled radii must remain positive and bounded. Malformed shapes, invalid indices,
+nonfinite or negative parameters, invalid groups, underflowing scaled radii or
+positive minimum distances whose squares underflow to zero, and
+excessive pair lists return errors. Minimum-distance grid coordinates are limited
+to the exact integer range `abs(position / radius) <= 2^52 - 4`, so hostile tiny
+radii cannot produce overflowing or nonadvancing cell loops. No dependencies were
+added. See [BENCH.md](BENCH.md) for measured parity, timing and remaining limits.
+
+`scatter_relax` accepts f64 positions, per-point spacing, triangle indices and
+barycentrics, plus the existing `TriSurface.arrays()` buffers (`T`, `nodes`, `child`,
+`order`, `triPrim`, `C`), optional corner weights, iterations and spacing options.
+It rebuilds a KD tree for each repulsion pass, caps each movement at half its
+spacing and projects through the supplied BVH, preserving its closest-triangle
+ties and recomputing barycentrics in the original corner order. Returned arrays
+are `positions`, `spacing`, `triangles`, `barycentrics`; inputs remain unchanged.
+The only direction change is for pairs closer than `1e-12`: normalized hash-bit
+directions replace host trigonometry in both JS and Rust for deterministic rounding.
+Point/triangle budgets are 4M each, iterations at most 1024, finite coordinates,
+weights and spacing bounded by `1e50`. BVH validation rejects invalid indices,
+cycles, multiple parents and unreachable nodes before traversal.
+
+The scatter node defaults to `backend:auto`: already loaded kernels, otherwise JS;
+`kernel` loads the shipped package, and `js` forces the reference path. Auto uses JS
+for candidate/relaxation counts beyond the kernel budgets. Sampling and attribute
+interpolation remain in TS; heightfield_scatter retains its TS integration.
+`cargo bench --manifest-path kernels/Cargo.toml --features profile --bench scatter`
+prints native KD/search/heap stage timings. `bench/bench.ts` measures Node acceptance
+with ABI copies, while `bench/scatter-placement.ts` compares full worker round trips.
+For 1M+ candidates, the node sends elimination to one warmed pool worker with
+cloned inputs; the candidate arrays remain available for attribute interpolation.
+Small/cold-pool jobs, minimum-distance rejection and projected relaxation run on the
+cooking thread. The host initializes WASM once per worker on its first such job;
+the full-stage registry entry rejects split ranges, and an unavailable pool falls
+back to the loaded main-thread kernel.
+The pool threshold override can force this path for parity tests. The conservative
+default only offloads the size measured by the placement benchmark; smaller jobs
+retain the main-thread path.
+
 ## Heightfield erosion (session 4)
 
 `src/wasm/kernels.ts` exposes `erode_droplet`, `erode_pipe`, `thermal_erode`, and

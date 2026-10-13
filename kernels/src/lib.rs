@@ -13,6 +13,8 @@ pub mod erosion_droplet;
 pub mod erosion_flow;
 mod erosion_profile;
 pub mod remesh_quad;
+pub mod scatter;
+pub mod scatter_relax;
 pub mod sdf;
 
 #[cfg(target_arch = "wasm32")]

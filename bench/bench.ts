@@ -5,6 +5,8 @@
 //   npm run bench -- --filter boolean     only cases whose name contains "boolean"
 //   npm run bench -- --runs 5             timed runs per case (default 3, after one warm-up)
 //   npm run bench -- --write-baseline     also store the results as bench/baseline.json
+//   npm run bench -- --filter scatter --backend kernel   preload WASM and select the scatter backend
+//   npm run bench -- --output out/run.json               preserve a named report instead of bench/last.json
 //
 // Each case cooks a graph with a cleared cache (warm-up run, then best of N). The time reported is the target node's
 // own cook time (inputs are cooked first and not counted); "total" is the whole graph. Targets come from
@@ -17,6 +19,9 @@ import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { sampleEliminate } from '../src/core/scatter.ts';
+import { rng } from '../src/core/random.ts';
+import { getLoadedKernels, kernelsWasmURL, kernelsWasmVariant, loadKernels } from '../src/wasm/kernels.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 
 const args = process.argv.slice(2);
@@ -27,6 +32,9 @@ const flag = (name: string) => {
 const QUICK = args.includes('--quick');
 const FILTER = flag('--filter');
 const RUNS = Math.max(1, Number(flag('--runs') ?? 3));
+const BACKEND = flag('--backend');
+if (BACKEND !== undefined && !['auto', 'kernel', 'js'].includes(BACKEND)) throw new Error('--backend must be auto, kernel or js');
+const OUTPUT = flag('--output');
 const benchDir = path.dirname(fileURLToPath(import.meta.url));
 
 interface Case {
@@ -39,7 +47,9 @@ interface Case {
   /** target for the full size (ms); quick runs scale it by quickScale */
   target: number;
   targetSource: string;
-  graph: (q: boolean) => GraphSpec;
+  graph?: (q: boolean) => GraphSpec;
+  /** Prepare inputs outside the timed region, then measure the complete direct kernel call, including WASM copies. */
+  direct?: (q: boolean) => () => ArrayLike<number>;
 }
 
 const k = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(n));
@@ -51,6 +61,22 @@ const sphereRows = (tris: number) => Math.round(Math.sqrt(tris / 4));
 const uvSphereTris = (rows: number) => 2 * (rows - 2) * (2 * rows) + 2 * (2 * rows);
 
 const CASES: Case[] = [
+  {
+    name: 'scatter_eliminate_1m',
+    what: (q) => `weighted elimination of ${k(q ? 1e5 : 1e6)} uniform candidates to ${k(q ? 1e4 : 1e5)} points (KD build + heap + ABI copies)`,
+    elements: (q) => q ? 1e5 : 1e6, unit: 'candidates',
+    target: 1500, targetSource: 'K-10 session 12 (1M candidates to 100k under 1.5 s)',
+    direct: (q) => {
+      const count = q ? 1e5 : 1e6, target = q ? 1e4 : 1e5, random = rng(1);
+      const positions = new Float64Array(count * 3);
+      for (let i = 0; i < count; i++) { positions[i * 3] = random() * 100; positions[i * 3 + 2] = random() * 100; }
+      const radius = Math.sqrt(10000 / (2 * Math.sqrt(3) * target));
+      return () => {
+        const kernels = BACKEND === 'js' ? undefined : getLoadedKernels();
+        return kernels ? kernels.scatter_eliminate(positions, target, radius) : sampleEliminate(positions, target, radius);
+      };
+    },
+  },
   {
     name: 'scatter_1m',
     what: (q) => `scatter ${k(q ? 1e5 : 1e6)} points on a grid (relax off)`,
@@ -291,7 +317,7 @@ const CASES: Case[] = [
     name: 'scatter_relax_100k',
     what: (q) => `scatter ${k(q ? 1e4 : 1e5)} points on a grid with relax (sample elimination of 5× candidates)`,
     elements: (q) => (q ? 1e4 : 1e5), unit: 'points',
-    target: 3000, targetSource: 'goal (P0-F; relax is the scatter default)',
+    target: 500, targetSource: 'K-10 session 12 (100k relaxed blue-noise points under 0.5 s)',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
@@ -303,7 +329,7 @@ const CASES: Case[] = [
     name: 'scatter_relax_mask_100k',
     what: (q) => `scatter ${k(q ? 1e4 : 1e5)} points by a noise density mask, relax (radii follow the density)`,
     elements: (q) => (q ? 1e4 : 1e5), unit: 'points',
-    target: 2000, targetSource: 'R-8 (blue-noise scatter of 100k under 2 s with the pool)',
+    target: 1000, targetSource: 'K-10 session 12 (100k density-mask blue-noise points under 1 s)',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
@@ -446,6 +472,7 @@ function booleanGraph(rows: number): GraphSpec {
 
 const engine = new Engine(createNodeHost({ baseDir: benchDir }));
 await engine.init();
+if (BACKEND === 'kernel') await loadKernels(fs.readFileSync(kernelsWasmURL));
 
 const baselinePath = path.join(benchDir, 'baseline.json');
 const baseline = fs.existsSync(baselinePath) ? JSON.parse(fs.readFileSync(baselinePath, 'utf8')) : null;
@@ -461,13 +488,25 @@ let failed = 0;
 const selected = CASES.filter((c) => !FILTER || c.name.includes(FILTER));
 if (!selected.length) { console.log(`no benchmark matches "${FILTER}". Cases: ${CASES.map((c) => c.name).join(', ')}`); process.exit(1); }
 
-console.log(`topotopo bench${QUICK ? ' (quick)' : ''}: ${selected.length} case(s), warm-up + best of ${RUNS} · node ${process.version} · ${os.cpus()[0]?.model ?? os.arch()}\n`);
+console.log(`topotopo bench${QUICK ? ' (quick)' : ''}: ${selected.length} case(s), warm-up + best of ${RUNS} · node ${process.version} · ${os.cpus()[0]?.model ?? os.arch()} · backend ${BACKEND ?? 'default'}${getLoadedKernels() ? ` (${kernelsWasmVariant})` : ''}\n`);
 for (const c of selected) {
-  const graph = c.graph(QUICK);
+  const graph = c.graph?.(QUICK), direct = c.direct?.(QUICK);
+  if (graph && BACKEND) for (const node of Object.values(graph.nodes))
+    if (node.type === 'scatter') node.params = { ...node.params, backend: BACKEND };
   const times: number[] = [], totals: number[] = [];
   let out = '', error = '';
   for (let run = 0; run <= RUNS; run++) {
     engine.cache.clear();
+    if (direct) {
+      const t = performance.now();
+      try {
+        const kept = direct(), ms = performance.now() - t;
+        out = `${k(kept.length)} kept`;
+        if (run > 0) { times.push(ms); totals.push(ms); }
+      } catch (e) { error = String(e); break; }
+      continue;
+    }
+    if (!graph) throw new Error(`${c.name}: missing graph or direct runner`);
     const r = await engine.cook(graph, { target: 'target' });
     if (!r.ok || !r.geo) { error = r.errors.map((e) => `[${e.node}] ${e.message}`).join('; '); break; }
     out = `${k(r.geo.numPoints)} pts, ${k(r.geo.numPrims)} prims`;
@@ -508,12 +547,16 @@ if (QUICK) console.log('\n(quick sizes: targets apply to full-size runs only)');
 const report = {
   generated: new Date().toISOString(),
   node: process.version, platform: `${process.platform}-${process.arch}`, cpu: os.cpus()[0]?.model ?? '', cpus: os.cpus().length,
-  quick: QUICK, runs: RUNS, results,
+  quick: QUICK, runs: RUNS, backend: BACKEND ?? 'default', wasm: getLoadedKernels() ? kernelsWasmVariant : null,
+  workers: process.env.TOPOTOPO_WORKERS ?? 'default', results,
+  peak_rss_bytes: process.resourceUsage().maxRSS * 1024,
 };
-fs.writeFileSync(path.join(benchDir, 'last.json'), JSON.stringify(report, null, 2) + '\n');
+const outputPath = OUTPUT ? path.resolve(OUTPUT) : path.join(benchDir, 'last.json');
+fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+fs.writeFileSync(outputPath, JSON.stringify(report, null, 2) + '\n');
 if (args.includes('--write-baseline')) {
   if (FILTER) console.log('not writing baseline: run without --filter');
   else { fs.writeFileSync(baselinePath, JSON.stringify(report, null, 2) + '\n'); console.log('wrote bench/baseline.json'); }
 }
-console.log(`\nwrote bench/last.json${failed ? ` · ${failed} case(s) failed to cook` : ''}`);
+console.log(`\nwrote ${OUTPUT ?? 'bench/last.json'}${failed ? ` · ${failed} case(s) failed to cook` : ''}`);
 process.exit(failed ? 1 : 0);
