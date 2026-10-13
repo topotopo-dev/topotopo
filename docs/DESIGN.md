@@ -692,9 +692,13 @@ so the dependency costs nothing until a graph uses it, and a browser bundle spli
   fallen pieces are in point group `fallen` (or deleted). `active` defaults to 1, so geometry merged without it moves.
 - **Determinism.** Same inputs, params and seed give the same bits: Rapier's WASM arithmetic is IEEE-754 without
   platform-dependent rounding (no SIMD build, no threads), bodies are inserted in a spatial order (y, x, z of their
-  input pose) so permuting the input changes nothing, and the jitter is seeded by that rank. Tested: two engines with
-  another simulation in between, pool off and on, reversed prim and point order. A different Rapier version may
-  settle differently (goldens would change).
+  input pose to 1e-6 m, then a 64-bit hash of the piece's shape in its body frame, exact pose, velocities and
+  `active`) so permuting the input changes nothing, and the jitter is seeded by that rank. Until R-18 pieces at the same
+  position were ordered by input index, so permuting coincident pieces of different shapes changed the result;
+  identical pieces still tie, and being interchangeable they give the same set of results. `rbd_stack`'s order
+  `height` breaks equal heights by the same rank (order `input` follows the input by definition). Tested: two engines
+  with another simulation in between, pool off and on, reversed prim and point order, four coincident pieces of
+  different shapes in three orders. A different Rapier version may settle differently (goldens would change).
 - **Time.** By default the nodes ignore the frame (a plain cook is the settled result, cached across frames). With
   `animate` the cook reads the frame and fps and simulates `(frame - start_frame) / fps` seconds; the node keeps the
   world of its last two signatures, so cooking frame 11 after frame 10 runs only the steps in between, and the last

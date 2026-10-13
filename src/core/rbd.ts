@@ -524,6 +524,26 @@ interface Inst {
   extent: number;
 }
 
+const SHAPE_KINDS = ['hull', 'box', 'sphere', 'mesh'];
+
+/**
+ * A content key of a piece, to order pieces at the same position: a 64-bit FNV-style hash of its collision shape in the
+ * body frame (hull or mesh vertices and triangles, box/sphere bounds), its exact origin and rotation, its initial
+ * velocities and whether it moves. Independent of the input order (hull points are sorted before the hull is built).
+ */
+function pieceKey(p: RbdPiece, b: Inst): string {
+  let h1 = 0x811c9dc5, h2 = 0x050c5d1f;
+  const mix = (w: number) => {
+    h1 = Math.imul(h1 ^ w, 0x01000193);
+    h2 = Math.imul(h2 ^ (w >>> 16) ^ (w << 16), 0x01000193) ^ (h1 >>> 7);
+  };
+  const head = Float64Array.of(SHAPE_KINDS.indexOf(b.kind), p.fixed ? 1 : 0, ...p.origin, ...p.rot, ...p.v, ...p.w, ...b.center, ...b.half, b.radius, b.vertices.length, b.indices?.length ?? 0);
+  for (const w of new Int32Array(head.buffer)) mix(w);
+  for (const w of new Int32Array(b.vertices.buffer, b.vertices.byteOffset, b.vertices.length)) mix(w);
+  if (b.indices) for (const i of b.indices) mix(i);
+  return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
+}
+
 /**
  * A Rapier world for one rbd cook. Construction builds every collider and body (stack mode: only the static ones);
  * advance(n) steps until step n or until the pieces have settled; read() returns the poses. free() releases the WASM
@@ -602,13 +622,23 @@ export class RbdSim {
         world.createCollider(R.ColliderDesc.trimesh(statics.vertices, statics.indices).setFriction(o.friction).setRestitution(o.restitution));
       }
     }
-    // bodies in a stable order: by input position (so permuting the input does not change the result), ties by index
+    // bodies in a stable order: by input position (so permuting the input does not change the result); pieces at the
+    // same position (to 1e-6 m: rbd_stack's "every crate at the same spot") by a hash of what they are, so permuting
+    // coincident pieces of different shapes changes nothing either (R-17 N7: ties went by input index). Pieces that
+    // tie on that too are interchangeable: same shape, pose and velocities, so the set of results is the same.
     const order = pieces.map((_, i) => i);
     const q6 = (x: number) => Math.round(x * 1e6);
+    const keys: string[] = [];
+    const key = (i: number) => (keys[i] ??= pieceKey(pieces[i], inst[i]));
     order.sort((a, b) => {
       const A = pieces[a].origin, B = pieces[b].origin;
-      return q6(A[1]) - q6(B[1]) || q6(A[0]) - q6(B[0]) || q6(A[2]) - q6(B[2]) || a - b;
+      const d = q6(A[1]) - q6(B[1]) || q6(A[0]) - q6(B[0]) || q6(A[2]) - q6(B[2]);
+      if (d) return d;
+      const ka = key(a), kb = key(b);
+      return ka < kb ? -1 : ka > kb ? 1 : a - b;
     });
+    const rankOf = new Int32Array(pieces.length);
+    order.forEach((i, rank) => { rankOf[i] = rank; });
     this.states = pieces.map((p) => ({ body: null, collider: null, castShape: null, castOffset: [0, 0, 0], t: p.origin, q: p.rot, fallen: false, last: null, slow: 0, braked: false }));
     // jitter, seeded by the rank in that order (input order independent)
     if (o.jitter > 0) {
@@ -631,7 +661,8 @@ export class RbdSim {
     const moving = order.filter((i) => !pieces[i].fixed);
     if (o.stack) {
       if (o.stack.order === 'input') moving.sort((a, b) => a - b);
-      else if (o.stack.order === 'height') moving.sort((a, b) => pieces[a].origin[1] - pieces[b].origin[1] || a - b);
+      // equal heights in the spatial order (input order independent, like everything but order "input")
+      else if (o.stack.order === 'height') moving.sort((a, b) => pieces[a].origin[1] - pieces[b].origin[1] || rankOf[a] - rankOf[b]);
       else {
         // seeded shuffle of the spatial order
         const keyed = moving.map((i, rank) => ({ i, k: rand(rank * 8 + 7, o.seed + 1) }));

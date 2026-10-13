@@ -263,6 +263,39 @@ if (!perfOnly) {
     const ex = expandPacked(p).geo;
     check(!pu.hasPacked() && pu.numPrims === ex.numPrims && same(pu.P, ex.P), 'keep_packed false returns the unpacked result');
   }
+  {
+    // R-17 N7: pieces at the same position were ordered by input index, so permuting coincident pieces of different
+    // shapes changed the result (bodies and jitter follow that order). Ties now go by a hash of the piece's content.
+    const tag = (n: number) => ({ type: 'attrib_create', params: { name: 'tag', class: 'prim', type: 'int', value: n } });
+    const nodes: Record<string, NodeSpec> = {
+      a: { type: 'box', params: { size: [0.4, 0.4, 0.4], center: [0, 0.6, 0] } },
+      b: { type: 'box', params: { size: [0.7, 0.2, 0.3], center: [0, 0.6, 0] } },
+      c: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.25, center: [0, 0.6, 0] } },
+      d: { type: 'tube', params: { radius: 0.15, height: 0.5, center: [0, 0.6, 0], cols: 12 } },
+      ta: { ...tag(1), in: ['a'] }, tb: { ...tag(2), in: ['b'] }, tc: { ...tag(3), in: ['c'] }, td: { ...tag(4), in: ['d'] },
+      m: { type: 'merge', in: ['ta', 'tb', 'tc', 'td'] },
+      r: { type: 'sort', in: ['m'], params: { class: 'prim', by: 'reverse' } },
+      r2: { type: 'merge', in: ['tc', 'ta', 'td', 'tb'] },
+    };
+    const perTag = (g: Geometry) => {
+      const t = g.prims.get('tag')!.data as Int32Array, s = new Map<number, number[]>();
+      for (let p = 0; p < g.numPrims; p++) {
+        const c = s.get(t[p]) ?? [0, 0, 0, 0];
+        for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) { const pt = g.vertexPoint[v]; c[0] += g.P[pt * 3]; c[1] += g.P[pt * 3 + 1]; c[2] += g.P[pt * 3 + 2]; c[3]++; }
+        s.set(t[p], c);
+      }
+      return [...s.entries()].sort((x, y) => x[0] - y[0]).map(([, c]) => c);
+    };
+    for (const [type, params] of [['rbd_settle', {}], ['rbd_stack', { order: 'height', interval: 20 }], ['rbd_stack', { order: 'random', interval: 20 }]] as const) {
+      const run = (input: string) => cook({ ...nodes, s: { type, in: [input], params: { pieces: 'attrib', piece_attrib: 'tag', duration: 4, ...params } } }, 's');
+      const [x, y, z] = [await run('m'), await run('r'), await run('r2')];
+      const px = perTag(x.geo), py = perTag(y.geo), pz = perTag(z.geo);
+      // (centroids summed in point order, which the permutation changes: compared to 1e-9 m)
+      let dmax = px.length === py.length && px.length === pz.length ? 0 : Infinity;
+      for (let i = 0; i < px.length && dmax < Infinity; i++) for (let k = 0; k < 3; k++) dmax = Math.max(dmax, Math.abs(px[i][k] / px[i][3] - py[i][k] / py[i][3]), Math.abs(px[i][k] / px[i][3] - pz[i][k] / pz[i][3]));
+      check(px.length === 4 && dmax < 1e-9, `${type}${'order' in params ? ` order ${params.order}` : ''}: four coincident pieces of different shapes settle the same in any input order (largest difference ${dmax.toExponential(1)} m)`);
+    }
+  }
 
   // ---------------------------------------------------------------- pieces: name, connectivity, shared points, static, velocity
   {

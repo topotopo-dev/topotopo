@@ -10935,7 +10935,7 @@ rbd_settle for pieces that overlap where they are: give every crate the same pos
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `interval` | int | `15` | 1..10000 |  |  | solver steps between two drops (15 at 60 steps/s = four pieces per second) |
-| `order` | enum | `"input"` |  | `input`, `height`, `random` |  | drop order: input = prim order, height = lowest first, random = seeded shuffle |
+| `order` | enum | `"input"` |  | `input`, `height`, `random` |  | drop order: input = prim order, height = lowest first (equal heights in the input-independent spatial order), random = seeded shuffle |
 | `lift` | bool | `true` |  |  |  | raise each piece above whatever already lies under its drop position (a shape cast from above), so pieces given the same position stack |
 | `clearance` | float | `0.02` | 0..10 |  |  | lift: gap left between a dropped piece and the pile under it (m) |
 | `pieces` | enum | `"auto"` |  | `auto`, `connectivity`, `name`, `attrib` |  | how polygons form pieces (packed prims are always one piece each): auto = prim attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; connectivity; name; attrib (piece_attrib) |

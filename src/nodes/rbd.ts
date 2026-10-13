@@ -40,7 +40,7 @@ const COMMON: Record<string, ParamDef> = {
 
 const STACK: Record<string, ParamDef> = {
   interval: { type: 'int', default: 15, min: 1, max: 10000, desc: 'solver steps between two drops (15 at 60 steps/s = four pieces per second)' },
-  order: { type: 'enum', options: ['input', 'height', 'random'], default: 'input', desc: 'drop order: input = prim order, height = lowest first, random = seeded shuffle' },
+  order: { type: 'enum', options: ['input', 'height', 'random'], default: 'input', desc: 'drop order: input = prim order, height = lowest first (equal heights in the input-independent spatial order), random = seeded shuffle' },
   lift: { type: 'bool', default: true, desc: 'raise each piece above whatever already lies under its drop position (a shape cast from above), so pieces given the same position stack' },
   clearance: { type: 'float', default: 0.02, min: 0, max: 10, desc: 'lift: gap left between a dropped piece and the pile under it (m)' },
 };
