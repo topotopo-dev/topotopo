@@ -219,6 +219,29 @@ function sortByDistance(buf: NeighbourBuffer, m: number) {
 export interface ClosestHit { dist: number; pos: [number, number, number]; tri: number; prim: number; bary: [number, number, number] }
 export interface RayHit { t: number; tri: number; prim: number; u: number; v: number; pos: [number, number, number] }
 
+/** Most triangles in a leaf: a range this small is not split. */
+const BVH_LEAF = 4;
+/** SAH bins per axis. */
+const BVH_BINS = 16;
+/** Below this depth splits follow the SAH; deeper ranges are halved at their centroid median (bounds the depth). */
+const BVH_SAH_DEPTH = 48;
+
+/** The arrays a TriBVH's queries read (RayScene.toArrays shares them with worker threads). */
+export interface TriBVHArrays {
+  T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array; triPt?: Int32Array; triPrim?: Uint32Array;
+}
+
+/**
+ * Bounding volume hierarchy over the triangles of a geometry (triangulated polygons), built with the surface area
+ * heuristic: every range of more than BVH_LEAF triangles is split where the binned SAH (BVH_BINS centroid bins on the
+ * axis of widest centroid spread) is cheapest, so rays and closest-point queries visit few nodes. Binning all three
+ * axes was measured too: ~1.7× the build time for a few percent faster queries, not worth it here. Layout: node n has
+ * bounds nodes[6n..6n+5] (min xyz, max xyz) and children child[2n], child[2n+1]; a leaf stores -1 - start and its
+ * count, its triangles being order[start .. start+count). Nodes are numbered depth first (a node before its subtrees,
+ * left subtree first); within a leaf the triangles keep ascending index order (stable partitions). Depth is at most
+ * BVH_SAH_DEPTH + log2(triangles) + 1, so the fixed traversal stacks of RayScene (512) suffice. The build is
+ * deterministic.
+ */
 export class TriBVH {
   /** triangle corner positions, 9 per triangle */
   T: Float64Array;
@@ -233,138 +256,203 @@ export class TriBVH {
   triPt: Int32Array;
   /** per triangle edge k (corner k → k+1): the triangle across it, -1 = none (boundary), -2 = several; built on demand */
   private edgeNbr: Int32Array | null = null;
+  /** traversal stack of closest() (grown on demand) */
+  private cstack = new Int32Array(128);
+  /** traversal stack and hit scratch of raycast() / raycastAll() */
+  private rstack = new Int32Array(128);
+  private rhit = new Float64Array(3);
 
   constructor(g: Geometry) {
     const { tris, triPrim } = triangulate(g);
-    const P = g.P, nt = tris.length / 3;
+    const P = g.P, nt = tris.length / 3, vpt = g.vertexPoint;
     this.T = new Float64Array(nt * 9);
     this.triPrim = triPrim;
     this.triVtx = tris;
     this.triPt = new Int32Array(nt * 3);
     for (let t = 0; t < nt; t++)
       for (let k = 0; k < 3; k++) {
-        const pt = g.vertexPoint[tris[t * 3 + k]], p = pt * 3;
+        const pt = vpt[tris[t * 3 + k]], p = pt * 3;
         this.triPt[t * 3 + k] = pt;
         this.T[t * 9 + k * 3] = P[p]; this.T[t * 9 + k * 3 + 1] = P[p + 1]; this.T[t * 9 + k * 3 + 2] = P[p + 2];
       }
     this.order = new Int32Array(nt);
     for (let t = 0; t < nt; t++) this.order[t] = t;
-    this.nodes = new Float64Array(Math.max(1, nt * 2) * 6);
-    this.child = new Int32Array(Math.max(1, nt * 2) * 2);
-    const cen = new Float64Array(nt * 3);
-    for (let t = 0; t < nt; t++) for (let c = 0; c < 3; c++) cen[t * 3 + c] = (this.T[t * 9 + c] + this.T[t * 9 + 3 + c] + this.T[t * 9 + 6 + c]) / 3;
-    let finite = true;
-    for (let k = 0; k < cen.length && finite; k++) if (!Number.isFinite(cen[k])) finite = false;
-    if (nt) { if (finite) this.buildSelect(0, nt, cen, -1, -1, -1); else this.build(0, nt, cen); }
+    this.nodes = new Float64Array(6);
+    this.child = new Int32Array(2);
+    if (nt) this.build(nt);
+  }
+
+  /**
+   * A BVH over arrays from another TriBVH (TriBVH.arrays(), e.g. shared with a worker thread): no build. Ray queries,
+   * the watertight edge test (it needs T and triPt) and closest-point queries work; triVtx is empty.
+   */
+  static fromArrays(a: TriBVHArrays): TriBVH {
+    const bvh = Object.create(TriBVH.prototype) as TriBVH;
+    const nt = a.order.length;
+    Object.assign(bvh as any, {
+      T: a.T, nodes: a.nodes, child: a.child, order: a.order, triPt: a.triPt ?? new Int32Array(0),
+      triPrim: a.triPrim ?? Uint32Array.from({ length: nt }, (_, i) => i), triVtx: new Uint32Array(0),
+      nodeCount: a.nodes.length / 6, edgeNbr: null,
+      cstack: new Int32Array(128), rstack: new Int32Array(128), rhit: new Float64Array(3),
+    });
+    return bvh;
+  }
+
+  /** The arrays the queries read (fromArrays rebuilds a BVH over them). */
+  arrays(): Required<TriBVHArrays> {
+    return { T: this.T, nodes: this.nodes, child: this.child, order: this.order, triPt: this.triPt, triPrim: this.triPrim };
   }
 
   get numTris() { return this.order.length; }
 
   /**
-   * The tree build() makes (same nodes, numbering, bounds, splits and leaf order) without sorting at every node.
-   *
-   * build() stably sorts each node's range by the centroid on its split axis and halves it, so a node's range is
-   * ordered by (its axis, its parent's axis, ..., the root's axis, triangle index): a total order. Halving only needs
-   * the smaller half of that order, found by quickselect; a leaf (<= 4 triangles) keeps its parent's order, so leaves
-   * are sorted by the parent's key. (c0, c1, c2) = the axes of the key this range arrived in, most recent first (-1 =
-   * none; repeated axes add nothing). Centroids must be finite (build() is used otherwise).
+   * Binned SAH build (see the class comment). Each range bins its triangles by centroid along the axis where the
+   * centroids spread most (BVH_BINS bins, each with its triangles' bounds), takes the cheapest split
+   * area(left) · count(left) + area(right) · count(right), and partitions stably; the children's bounds come from the
+   * bins and their centroid bounds from the partition pass, so every level costs two passes over its triangles.
    */
-  private buildSelect(lo: number, hi: number, cen: Float64Array, c0: number, c1: number, c2: number): number {
-    const id = this.nodeCount++;
-    const T = this.T, o = this.order, nb = id * 6;
-    const leaf = hi - lo <= 4;
-    // a leaf keeps its arrival order: sort it by the arrival key
-    if (leaf)
-      for (let i = lo + 1; i < hi; i++) {
-        const t = o[i];
-        let j = i - 1;
-        while (j >= lo && keyLess(cen, t, o[j], c0, c1, c2)) { o[j + 1] = o[j]; j--; }
-        o[j + 1] = t;
-      }
-    // bounds; zs flags which signs of zero occur per axis (bit 2a: -0, bit 2a+1: +0)
-    let mn0 = Infinity, mn1 = Infinity, mn2 = Infinity, mx0 = -Infinity, mx1 = -Infinity, mx2 = -Infinity, zs = 0;
-    for (let i = lo; i < hi; i++) {
-      const b = o[i] * 9;
-      for (let k = 0; k < 9; k += 3) {
-        const x = T[b + k], y = T[b + k + 1], z = T[b + k + 2];
-        if (x < mn0) mn0 = x; if (x > mx0) mx0 = x;
-        if (y < mn1) mn1 = y; if (y > mx1) mx1 = y;
-        if (z < mn2) mn2 = z; if (z > mx2) mx2 = z;
-        if (x === 0) zs |= 1 / x < 0 ? 1 : 2;
-        if (y === 0) zs |= 1 / y < 0 ? 4 : 8;
-        if (z === 0) zs |= 1 / z < 0 ? 16 : 32;
-      }
-    }
-    // build() scans the range in arrival order, so a bound of zero takes the sign of the first zero in that order;
-    // an internal node's range is not in arrival order here, so settle that case explicitly (rare)
-    if (!leaf && zs) {
-      if ((zs & 3) === 3) { if (mn0 === 0) mn0 = firstZero(T, o, lo, hi, cen, 0, c0, c1, c2); if (mx0 === 0) mx0 = firstZero(T, o, lo, hi, cen, 0, c0, c1, c2); }
-      if ((zs & 12) === 12) { if (mn1 === 0) mn1 = firstZero(T, o, lo, hi, cen, 1, c0, c1, c2); if (mx1 === 0) mx1 = firstZero(T, o, lo, hi, cen, 1, c0, c1, c2); }
-      if ((zs & 48) === 48) { if (mn2 === 0) mn2 = firstZero(T, o, lo, hi, cen, 2, c0, c1, c2); if (mx2 === 0) mx2 = firstZero(T, o, lo, hi, cen, 2, c0, c1, c2); }
-    }
-    this.nodes[nb] = mn0; this.nodes[nb + 1] = mn1; this.nodes[nb + 2] = mn2;
-    this.nodes[nb + 3] = mx0; this.nodes[nb + 4] = mx1; this.nodes[nb + 5] = mx2;
-    if (leaf) {
-      this.child[id * 2] = -1 - lo;
-      this.child[id * 2 + 1] = hi - lo;
-      return id;
-    }
-    let cn0 = Infinity, cn1 = Infinity, cn2 = Infinity, cx0 = -Infinity, cx1 = -Infinity, cx2 = -Infinity;
-    for (let i = lo; i < hi; i++) {
-      const b = o[i] * 3, x = cen[b], y = cen[b + 1], z = cen[b + 2];
-      if (x < cn0) cn0 = x; if (x > cx0) cx0 = x;
-      if (y < cn1) cn1 = y; if (y > cx1) cx1 = y;
-      if (z < cn2) cn2 = z; if (z > cx2) cx2 = z;
-    }
-    const ex0 = cx0 - cn0, ex1 = cx1 - cn1, ex2 = cx2 - cn2;
-    const ax = ex0 >= ex1 && ex0 >= ex2 ? 0 : ex1 >= ex2 ? 1 : 2;
-    // this node's key: ax, then the arrival key's axes without ax
-    const d1 = c0 === ax ? c1 : c0, d2 = c0 === ax || c1 === ax ? c2 : c1;
-    const mid = (lo + hi) >> 1;
-    selectKey(o, lo, hi - 1, mid, cen, ax, d1, d2);
-    const l = this.buildSelect(lo, mid, cen, ax, d1, d2);
-    const r = this.buildSelect(mid, hi, cen, ax, d1, d2);
-    this.child[id * 2] = l;
-    this.child[id * 2 + 1] = r;
-    return id;
-  }
-
-  /** The original build: a stable sort per node (used when a centroid is not finite). */
-  private build(lo: number, hi: number, cen: Float64Array): number {
-    const id = this.nodeCount++;
-    const T = this.T, o = this.order, nb = id * 6;
+  private build(nt: number) {
+    const T = this.T, order = this.order;
+    // per-triangle bounds and centroids
+    const tb = new Float64Array(nt * 6), cen = new Float64Array(nt * 3);
     let mn0 = Infinity, mn1 = Infinity, mn2 = Infinity, mx0 = -Infinity, mx1 = -Infinity, mx2 = -Infinity;
-    for (let i = lo; i < hi; i++) {
-      const b = o[i] * 9;
-      for (let k = 0; k < 9; k += 3) {
-        const x = T[b + k], y = T[b + k + 1], z = T[b + k + 2];
-        if (x < mn0) mn0 = x; if (x > mx0) mx0 = x;
-        if (y < mn1) mn1 = y; if (y > mx1) mx1 = y;
-        if (z < mn2) mn2 = z; if (z > mx2) mx2 = z;
+    let cn0 = Infinity, cn1 = Infinity, cn2 = Infinity, cx0 = -Infinity, cx1 = -Infinity, cx2 = -Infinity;
+    for (let t = 0; t < nt; t++) {
+      const o = t * 9, b = t * 6, q = t * 3;
+      for (let c = 0; c < 3; c++) {
+        const x = T[o + c], y = T[o + 3 + c], z = T[o + 6 + c];
+        let mn = x, mx = x;
+        if (y < mn) mn = y; if (y > mx) mx = y;
+        if (z < mn) mn = z; if (z > mx) mx = z;
+        tb[b + c] = mn; tb[b + 3 + c] = mx;
+        cen[q + c] = (x + y + z) / 3;
       }
+      let v = tb[b]; if (v < mn0) mn0 = v;
+      v = tb[b + 1]; if (v < mn1) mn1 = v;
+      v = tb[b + 2]; if (v < mn2) mn2 = v;
+      v = tb[b + 3]; if (v > mx0) mx0 = v;
+      v = tb[b + 4]; if (v > mx1) mx1 = v;
+      v = tb[b + 5]; if (v > mx2) mx2 = v;
+      v = cen[q]; if (v < cn0) cn0 = v; if (v > cx0) cx0 = v;
+      v = cen[q + 1]; if (v < cn1) cn1 = v; if (v > cx1) cx1 = v;
+      v = cen[q + 2]; if (v < cn2) cn2 = v; if (v > cx2) cx2 = v;
     }
-    this.nodes[nb] = mn0; this.nodes[nb + 1] = mn1; this.nodes[nb + 2] = mn2;
-    this.nodes[nb + 3] = mx0; this.nodes[nb + 4] = mx1; this.nodes[nb + 5] = mx2;
-    if (hi - lo <= 4) {
-      this.child[id * 2] = -1 - lo;
-      this.child[id * 2 + 1] = hi - lo;
-      return id;
+    const maxNodes = 2 * nt - 1;
+    const nodes = new Float64Array(maxNodes * 6), child = new Int32Array(maxNodes * 2);
+    const tmp = new Int32Array(nt);
+    const B = BVH_BINS;
+    const bcnt = new Int32Array(B), bbox = new Float64Array(B * 6), rbox = new Float64Array(B * 6), rcnt = new Int32Array(B);
+    // ranges to build: (lo, hi, child slot receiving the id or -1, depth) and their node + centroid bounds (12 numbers)
+    let st = new Int32Array(4 * 64), sb = new Float64Array(12 * 64), sp = 0, count = 0;
+    const push = (lo: number, hi: number, slot: number, depth: number, bx: ArrayLike<number>, bo: number) => {
+      if ((sp + 1) * 4 > st.length) {
+        const g = new Int32Array(st.length * 2), h = new Float64Array(sb.length * 2);
+        g.set(st); h.set(sb); st = g; sb = h;
+      }
+      st[sp * 4] = lo; st[sp * 4 + 1] = hi; st[sp * 4 + 2] = slot; st[sp * 4 + 3] = depth;
+      for (let k = 0; k < 12; k++) sb[sp * 12 + k] = bx[bo + k];
+      sp++;
+    };
+    const rootBox = [mn0, mn1, mn2, mx0, mx1, mx2, cn0, cn1, cn2, cx0, cx1, cx2];
+    push(0, nt, -1, 0, rootBox, 0);
+    const kids = new Float64Array(24); // left then right: node bounds, centroid bounds
+    while (sp > 0) {
+      sp--;
+      const lo = st[sp * 4], hi = st[sp * 4 + 1], slot = st[sp * 4 + 2], depth = st[sp * 4 + 3], so = sp * 12;
+      const id = count++;
+      if (slot >= 0) child[slot] = id;
+      const nb = id * 6;
+      for (let k = 0; k < 6; k++) nodes[nb + k] = sb[so + k];
+      const n = hi - lo;
+      if (n <= BVH_LEAF) { child[id * 2] = -1 - lo; child[id * 2 + 1] = n; continue; }
+      const c0 = sb[so + 6], c1 = sb[so + 7], c2 = sb[so + 8], e0 = sb[so + 9] - c0, e1 = sb[so + 10] - c1, e2 = sb[so + 11] - c2;
+      // the axis where the centroids spread most (NaN extents count as 0)
+      const ax = e0 >= e1 && e0 >= e2 ? 0 : e1 >= e2 ? 1 : 2;
+      const ext = ax === 0 ? e0 : ax === 1 ? e1 : e2, cmin = ax === 0 ? c0 : ax === 1 ? c1 : c2;
+      let mid = -1;
+      if (depth < BVH_SAH_DEPTH && ext > 0 && ext < Infinity) {
+        const k = B / ext;
+        bcnt.fill(0);
+        for (let j = 0; j < B * 6; j += 6) {
+          bbox[j] = bbox[j + 1] = bbox[j + 2] = Infinity;
+          bbox[j + 3] = bbox[j + 4] = bbox[j + 5] = -Infinity;
+        }
+        for (let i = lo; i < hi; i++) {
+          const t = order[i], b = t * 6, f = (cen[t * 3 + ax] - cmin) * k;
+          // bin(c) = floor((c - min) · B / extent), clamped; NaN → 0
+          const j = f >= B ? B - 1 : f | 0, o = j * 6;
+          bcnt[j]++;
+          let v = tb[b]; if (v < bbox[o]) bbox[o] = v;
+          v = tb[b + 1]; if (v < bbox[o + 1]) bbox[o + 1] = v;
+          v = tb[b + 2]; if (v < bbox[o + 2]) bbox[o + 2] = v;
+          v = tb[b + 3]; if (v > bbox[o + 3]) bbox[o + 3] = v;
+          v = tb[b + 4]; if (v > bbox[o + 4]) bbox[o + 4] = v;
+          v = tb[b + 5]; if (v > bbox[o + 5]) bbox[o + 5] = v;
+        }
+        // suffix unions (bins j..B-1), then the prefix sweep picks the cheapest split
+        let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity, c = 0;
+        for (let j = B - 1; j > 0; j--) {
+          const o = j * 6;
+          if (bbox[o] < x0) x0 = bbox[o]; if (bbox[o + 1] < y0) y0 = bbox[o + 1]; if (bbox[o + 2] < z0) z0 = bbox[o + 2];
+          if (bbox[o + 3] > x1) x1 = bbox[o + 3]; if (bbox[o + 4] > y1) y1 = bbox[o + 4]; if (bbox[o + 5] > z1) z1 = bbox[o + 5];
+          c += bcnt[j];
+          rcnt[j] = c;
+          rbox[o] = x0; rbox[o + 1] = y0; rbox[o + 2] = z0; rbox[o + 3] = x1; rbox[o + 4] = y1; rbox[o + 5] = z1;
+        }
+        let best = Infinity, split = -1;
+        x0 = y0 = z0 = Infinity; x1 = y1 = z1 = -Infinity; c = 0;
+        for (let j = 0; j < B - 1; j++) {
+          const o = j * 6;
+          if (bbox[o] < x0) x0 = bbox[o]; if (bbox[o + 1] < y0) y0 = bbox[o + 1]; if (bbox[o + 2] < z0) z0 = bbox[o + 2];
+          if (bbox[o + 3] > x1) x1 = bbox[o + 3]; if (bbox[o + 4] > y1) y1 = bbox[o + 4]; if (bbox[o + 5] > z1) z1 = bbox[o + 5];
+          c += bcnt[j];
+          const rc = rcnt[j + 1];
+          if (!c || !rc) continue;
+          const r = (j + 1) * 6;
+          const rArea = boxArea(rbox[r], rbox[r + 1], rbox[r + 2], rbox[r + 3], rbox[r + 4], rbox[r + 5]);
+          const cost = boxArea(x0, y0, z0, x1, y1, z1) * c + rArea * rc;
+          if (cost < best) {
+            best = cost; split = j;
+            kids[0] = x0; kids[1] = y0; kids[2] = z0; kids[3] = x1; kids[4] = y1; kids[5] = z1;
+            for (let q = 0; q < 6; q++) kids[12 + q] = rbox[r + q];
+          }
+        }
+        if (split >= 0) {
+          // stable partition (bins <= split to the left), gathering the children's centroid bounds
+          let l = lo, r = 0;
+          let a0 = Infinity, a1 = Infinity, a2 = Infinity, b0 = -Infinity, b1 = -Infinity, b2 = -Infinity;
+          let p0 = Infinity, p1 = Infinity, p2 = Infinity, q0 = -Infinity, q1 = -Infinity, q2 = -Infinity;
+          for (let i = lo; i < hi; i++) {
+            const t = order[i], q = t * 3, f = (cen[q + ax] - cmin) * k;
+            const x = cen[q], y = cen[q + 1], z = cen[q + 2];
+            if ((f >= B ? B - 1 : f | 0) <= split) {
+              order[l++] = t;
+              if (x < a0) a0 = x; if (x > b0) b0 = x; if (y < a1) a1 = y; if (y > b1) b1 = y; if (z < a2) a2 = z; if (z > b2) b2 = z;
+            } else {
+              tmp[r++] = t;
+              if (x < p0) p0 = x; if (x > q0) q0 = x; if (y < p1) p1 = y; if (y > q1) q1 = y; if (z < p2) p2 = z; if (z > q2) q2 = z;
+            }
+          }
+          for (let i = 0; i < r; i++) order[l + i] = tmp[i];
+          mid = l;
+          kids[6] = a0; kids[7] = a1; kids[8] = a2; kids[9] = b0; kids[10] = b1; kids[11] = b2;
+          kids[18] = p0; kids[19] = p1; kids[20] = p2; kids[21] = q0; kids[22] = q1; kids[23] = q2;
+        }
+      }
+      if (mid < 0) {
+        // no usable SAH split (all centroids in one bin, or too deep): halve at the median centroid on that axis
+        mid = (lo + hi) >> 1;
+        medianSplit(order, tmp, lo, hi, mid, cen, ax);
+        rangeBounds(order, lo, mid, tb, cen, kids, 0);
+        rangeBounds(order, mid, hi, tb, cen, kids, 12);
+      }
+      // right pushed first so the left subtree is numbered (and built) first
+      push(mid, hi, id * 2 + 1, depth + 1, kids, 12);
+      push(lo, mid, id * 2, depth + 1, kids, 0);
     }
-    let cmn = [Infinity, Infinity, Infinity], cmx = [-Infinity, -Infinity, -Infinity];
-    for (let i = lo; i < hi; i++) for (let c = 0; c < 3; c++) {
-      const v = cen[o[i] * 3 + c];
-      if (v < cmn[c]) cmn[c] = v; if (v > cmx[c]) cmx[c] = v;
-    }
-    const ex = [cmx[0] - cmn[0], cmx[1] - cmn[1], cmx[2] - cmn[2]];
-    const ax = ex[0] >= ex[1] && ex[0] >= ex[2] ? 0 : ex[1] >= ex[2] ? 1 : 2;
-    const sub = Array.from(o.subarray(lo, hi)).sort((a, b) => cen[a * 3 + ax] - cen[b * 3 + ax]);
-    o.set(sub, lo);
-    const mid = (lo + hi) >> 1;
-    const l = this.build(lo, mid, cen);
-    const r = this.build(mid, hi, cen);
-    this.child[id * 2] = l;
-    this.child[id * 2 + 1] = r;
-    return id;
+    this.nodeCount = count;
+    this.nodes = nodes.slice(0, count * 6);
+    this.child = child.slice(0, count * 2);
   }
 
   /** Triangles across each triangle edge, from the corner point indices (welded edges only). */
@@ -447,57 +535,78 @@ export class TriBVH {
     return (U > 0 && V > 0 && W > 0) || (U < 0 && V < 0 && W < 0);
   }
 
+  /** Squared distance from (x, y, z) to node n's box. */
   private boxDist2(n: number, x: number, y: number, z: number) {
     const b = this.nodes, i = n * 6;
-    const dx = Math.max(b[i] - x, 0, x - b[i + 3]);
-    const dy = Math.max(b[i + 1] - y, 0, y - b[i + 4]);
-    const dz = Math.max(b[i + 2] - z, 0, z - b[i + 5]);
+    let d = b[i] - x, e = x - b[i + 3];
+    const dx = d > e ? (d > 0 ? d : 0) : e > 0 ? e : 0;
+    d = b[i + 1] - y; e = y - b[i + 4];
+    const dy = d > e ? (d > 0 ? d : 0) : e > 0 ? e : 0;
+    d = b[i + 2] - z; e = z - b[i + 5];
+    const dz = d > e ? (d > 0 ? d : 0) : e > 0 ? e : 0;
     return dx * dx + dy * dy + dz * dz;
   }
 
-  closest(x: number, y: number, z: number, maxDist = Infinity): ClosestHit | null {
-    if (!this.numTris) return null;
+  /**
+   * closest() without allocations: the triangle of the closest surface point within maxDist (-1 when none), its
+   * squared distance, position and barycentrics written to out. Same traversal (nearer child first) and ties (the
+   * first triangle found keeps it) as closest().
+   */
+  closestInto(x: number, y: number, z: number, maxDist: number, out: ClosestScratch): number {
+    if (!this.numTris) return -1;
     let best2 = maxDist === Infinity ? Infinity : maxDist * maxDist, bestT = -1;
-    const bp = [0, 0, 0], bb = [0, 0, 0], tmp = [0, 0, 0], tb = [0, 0, 0];
-    const stack = [0];
-    while (stack.length) {
-      const n = stack.pop()!;
+    const tmp = out.tmp, tb = out.tmpBary, child = this.child, order = this.order, T = this.T;
+    let st = this.cstack, sp = 0;
+    st[sp++] = 0;
+    while (sp > 0) {
+      const n = st[--sp];
       if (this.boxDist2(n, x, y, z) >= best2) continue;
-      const c0 = this.child[n * 2], c1 = this.child[n * 2 + 1];
+      const c0 = child[n * 2], c1 = child[n * 2 + 1];
       if (c0 < 0) {
         const s = -1 - c0;
         for (let i = s; i < s + c1; i++) {
-          const t = this.order[i];
-          const d2 = closestOnTri(this.T, t * 9, x, y, z, tmp, tb);
-          if (d2 < best2) { best2 = d2; bestT = t; bp[0] = tmp[0]; bp[1] = tmp[1]; bp[2] = tmp[2]; bb[0] = tb[0]; bb[1] = tb[1]; bb[2] = tb[2]; }
+          const t = order[i];
+          const d2 = closestOnTri(T, t * 9, x, y, z, tmp, tb);
+          if (d2 < best2) { best2 = d2; bestT = t; out.x = tmp[0]; out.y = tmp[1]; out.z = tmp[2]; out.b0 = tb[0]; out.b1 = tb[1]; out.b2 = tb[2]; }
         }
       } else {
+        if (sp + 2 > st.length) { const g = new Int32Array(st.length * 2); g.set(st); this.cstack = st = g; }
         const d0 = this.boxDist2(c0, x, y, z), d1 = this.boxDist2(c1, x, y, z);
-        if (d0 < d1) { stack.push(c1, c0); } else { stack.push(c0, c1); }
+        if (d0 < d1) { st[sp++] = c1; st[sp++] = c0; } else { st[sp++] = c0; st[sp++] = c1; }
       }
     }
-    if (bestT < 0) return null;
-    return { dist: Math.sqrt(best2), pos: [bp[0], bp[1], bp[2]], tri: bestT, prim: this.triPrim[bestT], bary: [bb[0], bb[1], bb[2]] };
+    out.d2 = best2;
+    return bestT;
+  }
+
+  closest(x: number, y: number, z: number, maxDist = Infinity): ClosestHit | null {
+    const s = closestScratch();
+    const t = this.closestInto(x, y, z, maxDist, s);
+    if (t < 0) return null;
+    return { dist: Math.sqrt(s.d2), pos: [s.x, s.y, s.z], tri: t, prim: this.triPrim[t], bary: [s.b0, s.b1, s.b2] };
   }
 
   /** Nearest hit along a ray (dir need not be normalised; t is in units of |dir|). */
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, tmax = Infinity, tmin = 1e-9): RayHit | null {
     if (!this.numTris) return null;
     let bestT = tmax, bestTri = -1, bu = 0, bv = 0;
-    const inv = [1 / dx, 1 / dy, 1 / dz];
-    const stack = [0];
-    while (stack.length) {
-      const n = stack.pop()!;
-      if (!this.rayBox(n, ox, oy, oz, inv, bestT)) continue;
-      const c0 = this.child[n * 2], c1 = this.child[n * 2 + 1];
+    const ix = invDir(dx), iy = invDir(dy), iz = invDir(dz), child = this.child, order = this.order, T = this.T, h = this.rhit;
+    let st = this.rstack, sp = 0;
+    st[sp++] = 0;
+    while (sp > 0) {
+      const n = st[--sp];
+      if (!this.rayBox(n, ox, oy, oz, ix, iy, iz, bestT)) continue;
+      const c0 = child[n * 2], c1 = child[n * 2 + 1];
       if (c0 < 0) {
         const s = -1 - c0;
         for (let i = s; i < s + c1; i++) {
-          const t = this.order[i];
-          const r = rayTri(this, this.T, t * 9, ox, oy, oz, dx, dy, dz);
-          if (r && r[0] > tmin && r[0] < bestT) { bestT = r[0]; bestTri = t; bu = r[1]; bv = r[2]; }
+          const t = order[i];
+          if (rayTri(this, T, t * 9, ox, oy, oz, dx, dy, dz, h) && h[0] > tmin && h[0] < bestT) { bestT = h[0]; bestTri = t; bu = h[1]; bv = h[2]; }
         }
-      } else stack.push(c0, c1);
+      } else {
+        if (sp + 2 > st.length) { const g = new Int32Array(st.length * 2); g.set(st); this.rstack = st = g; }
+        st[sp++] = c0; st[sp++] = c1;
+      }
     }
     if (bestTri < 0) return null;
     return { t: bestT, tri: bestTri, prim: this.triPrim[bestTri], u: bu, v: bv, pos: [ox + dx * bestT, oy + dy * bestT, oz + dz * bestT] };
@@ -507,19 +616,20 @@ export class TriBVH {
   raycastAll(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): number[] {
     const hits: number[] = [];
     if (!this.numTris) return hits;
-    const inv = [1 / dx, 1 / dy, 1 / dz];
-    const stack = [0];
-    while (stack.length) {
-      const n = stack.pop()!;
-      if (!this.rayBox(n, ox, oy, oz, inv, Infinity)) continue;
-      const c0 = this.child[n * 2], c1 = this.child[n * 2 + 1];
+    const ix = invDir(dx), iy = invDir(dy), iz = invDir(dz), child = this.child, order = this.order, T = this.T, h = this.rhit;
+    let st = this.rstack, sp = 0;
+    st[sp++] = 0;
+    while (sp > 0) {
+      const n = st[--sp];
+      if (!this.rayBox(n, ox, oy, oz, ix, iy, iz, Infinity)) continue;
+      const c0 = child[n * 2], c1 = child[n * 2 + 1];
       if (c0 < 0) {
         const s = -1 - c0;
-        for (let i = s; i < s + c1; i++) {
-          const r = rayTri(this, this.T, this.order[i] * 9, ox, oy, oz, dx, dy, dz);
-          if (r && r[0] > 0) hits.push(r[0]);
-        }
-      } else stack.push(c0, c1);
+        for (let i = s; i < s + c1; i++) if (rayTri(this, T, order[i] * 9, ox, oy, oz, dx, dy, dz, h) && h[0] > 0) hits.push(h[0]);
+      } else {
+        if (sp + 2 > st.length) { const g = new Int32Array(st.length * 2); g.set(st); this.rstack = st = g; }
+        st[sp++] = c0; st[sp++] = c1;
+      }
     }
     return hits.sort((a, b) => a - b);
   }
@@ -532,74 +642,95 @@ export class TriBVH {
     return votes >= 2;
   }
 
-  private rayBox(n: number, ox: number, oy: number, oz: number, inv: number[], tmax: number) {
+  /** Does the ray enter node n's box within [0, tmax]? (slabs; an axis the ray lies in a face plane of is unconstrained) */
+  private rayBox(n: number, ox: number, oy: number, oz: number, ix: number, iy: number, iz: number, tmax: number) {
     const b = this.nodes, i = n * 6;
-    let t0 = 0, t1 = tmax;
-    const o = [ox, oy, oz];
-    for (let a = 0; a < 3; a++) {
-      let ta = (b[i + a] - o[a]) * inv[a], tb = (b[i + 3 + a] - o[a]) * inv[a];
-      if (ta > tb) { const t = ta; ta = tb; tb = t; }
-      if (Number.isNaN(ta)) ta = -Infinity;
-      if (Number.isNaN(tb)) tb = Infinity;
-      t0 = ta > t0 ? ta : t0;
-      t1 = tb < t1 ? tb : t1;
-      if (t0 > t1 * 1.0000001 + 1e-12) return false;
-    }
-    return true;
+    let t0 = 0, t1 = tmax, s: number;
+    let ta = (b[i] - ox) * ix, tb = (b[i + 3] - ox) * ix;
+    if (ta > tb) { s = ta; ta = tb; tb = s; }
+    if (ta !== ta) ta = -Infinity;
+    if (tb !== tb) tb = Infinity;
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1 * 1.0000001 + 1e-12) return false;
+    ta = (b[i + 1] - oy) * iy; tb = (b[i + 4] - oy) * iy;
+    if (ta > tb) { s = ta; ta = tb; tb = s; }
+    if (ta !== ta) ta = -Infinity;
+    if (tb !== tb) tb = Infinity;
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1 * 1.0000001 + 1e-12) return false;
+    ta = (b[i + 2] - oz) * iz; tb = (b[i + 5] - oz) * iz;
+    if (ta > tb) { s = ta; ta = tb; tb = s; }
+    if (ta !== ta) ta = -Infinity;
+    if (tb !== tb) tb = Infinity;
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    return !(t0 > t1 * 1.0000001 + 1e-12);
   }
 }
 
-/** Does triangle a come before b in the order (centroid on k0, then k1, then k2, then index)? k = -1 skips. */
-function keyLess(cen: Float64Array, a: number, b: number, k0: number, k1: number, k2: number): boolean {
-  if (k0 >= 0) { const x = cen[a * 3 + k0], y = cen[b * 3 + k0]; if (x !== y) return x < y; }
-  if (k1 >= 0) { const x = cen[a * 3 + k1], y = cen[b * 3 + k1]; if (x !== y) return x < y; }
-  if (k2 >= 0) { const x = cen[a * 3 + k2], y = cen[b * 3 + k2]; if (x !== y) return x < y; }
-  return a < b;
+/**
+ * 1 / d for slab tests, with +Infinity for a zero component of either sign. With -0 the slab products of a ray lying
+ * exactly in a box's face plane came out as (NaN, -Infinity) and culled the box: a vertical ray (direction (-0, 1, -0),
+ * e.g. the negated (0, -1, 0)) through a terrain vertex on a leaf boundary missed the terrain.
+ */
+export const invDir = (d: number): number => (d === 0 ? Infinity : 1 / d);
+
+/** Scratch result of TriBVH.closestInto (reused across queries). */
+export interface ClosestScratch {
+  d2: number; x: number; y: number; z: number; b0: number; b1: number; b2: number;
+  tmp: number[]; tmpBary: number[];
+}
+
+export function closestScratch(): ClosestScratch {
+  return { d2: Infinity, x: 0, y: 0, z: 0, b0: 0, b1: 0, b2: 0, tmp: [0, 0, 0], tmpBary: [0, 0, 0] };
+}
+
+/** Half the surface area of a box (the SAH only compares them). */
+function boxArea(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number {
+  const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+  return dx * dy + dy * dz + dz * dx;
 }
 
 /**
- * The first zero coordinate on axis c in arrival order (triangles by keyLess, corners in order) among o[lo..hi): -0 or
- * +0. Only called when the range has a zero on that axis.
+ * Split order[lo..hi) at mid: the mid - lo triangles first in (centroid on axis ax, index) order (NaN centroids last) go
+ * to the front, both halves keeping their relative order (stable).
  */
-function firstZero(T: Float64Array, o: Int32Array, lo: number, hi: number, cen: Float64Array, c: number, k0: number, k1: number, k2: number): number {
-  let best = -1;
+/** Bounds of the triangles order[lo..hi) (from their boxes tb) and of their centroids, into out[o..o+11]. */
+function rangeBounds(order: Int32Array, lo: number, hi: number, tb: Float64Array, cen: Float64Array, out: Float64Array, o: number) {
+  let mn0 = Infinity, mn1 = Infinity, mn2 = Infinity, mx0 = -Infinity, mx1 = -Infinity, mx2 = -Infinity;
+  let cn0 = Infinity, cn1 = Infinity, cn2 = Infinity, cx0 = -Infinity, cx1 = -Infinity, cx2 = -Infinity;
   for (let i = lo; i < hi; i++) {
-    const t = o[i], b = t * 9;
-    if (T[b + c] !== 0 && T[b + 3 + c] !== 0 && T[b + 6 + c] !== 0) continue;
-    if (best < 0 || keyLess(cen, t, best, k0, k1, k2)) best = t;
+    const t = order[i], b = t * 6, q = t * 3;
+    let v = tb[b]; if (v < mn0) mn0 = v;
+    v = tb[b + 1]; if (v < mn1) mn1 = v;
+    v = tb[b + 2]; if (v < mn2) mn2 = v;
+    v = tb[b + 3]; if (v > mx0) mx0 = v;
+    v = tb[b + 4]; if (v > mx1) mx1 = v;
+    v = tb[b + 5]; if (v > mx2) mx2 = v;
+    v = cen[q]; if (v < cn0) cn0 = v; if (v > cx0) cx0 = v;
+    v = cen[q + 1]; if (v < cn1) cn1 = v; if (v > cx1) cx1 = v;
+    v = cen[q + 2]; if (v < cn2) cn2 = v; if (v > cx2) cx2 = v;
   }
-  const b = best * 9;
-  return T[b + c] === 0 ? T[b + c] : T[b + 3 + c] === 0 ? T[b + 3 + c] : T[b + 6 + c];
+  out[o] = mn0; out[o + 1] = mn1; out[o + 2] = mn2; out[o + 3] = mx0; out[o + 4] = mx1; out[o + 5] = mx2;
+  out[o + 6] = cn0; out[o + 7] = cn1; out[o + 8] = cn2; out[o + 9] = cx0; out[o + 10] = cx1; out[o + 11] = cx2;
 }
 
-/**
- * Quickselect on o[l..r] (inclusive) under keyLess: afterwards o[l..k-1] hold the k - l smallest. The key is a total
- * order, so the halves are the same sets whatever the pivots. Falls back to a full sort after many rounds.
- */
-function selectKey(o: Int32Array, l: number, r: number, k: number, cen: Float64Array, k0: number, k1: number, k2: number) {
-  const lo0 = l, hi0 = r;
-  let rounds = 0;
-  while (r > l) {
-    if (++rounds > 64) {
-      const sub = Array.from(o.subarray(lo0, hi0 + 1)).sort((a, b) => (keyLess(cen, a, b, k0, k1, k2) ? -1 : keyLess(cen, b, a, k0, k1, k2) ? 1 : 0));
-      o.set(sub, lo0);
-      return;
-    }
-    const m = (l + r) >> 1;
-    // median of three into o[m]
-    let t: number;
-    if (keyLess(cen, o[m], o[l], k0, k1, k2)) { t = o[m]; o[m] = o[l]; o[l] = t; }
-    if (keyLess(cen, o[r], o[l], k0, k1, k2)) { t = o[r]; o[r] = o[l]; o[l] = t; }
-    if (keyLess(cen, o[r], o[m], k0, k1, k2)) { t = o[r]; o[r] = o[m]; o[m] = t; }
-    const pv = o[m];
-    let i = l, j = r;
-    while (i <= j) {
-      while (keyLess(cen, o[i], pv, k0, k1, k2)) i++;
-      while (keyLess(cen, pv, o[j], k0, k1, k2)) j--;
-      if (i <= j) { t = o[i]; o[i] = o[j]; o[j] = t; i++; j--; }
-    }
-    if (k <= j) r = j; else if (k >= i) l = i; else break;
+function medianSplit(order: Int32Array, tmp: Int32Array, lo: number, hi: number, mid: number, cen: Float64Array, ax: number) {
+  const less = (a: number, b: number) => {
+    const x = cen[a * 3 + ax], y = cen[b * 3 + ax], xn = x !== x, yn = y !== y;
+    if (xn || yn) return xn && yn ? a < b : yn;
+    return x !== y ? x < y : a < b;
+  };
+  const sorted = order.slice(lo, hi).sort((a, b) => (less(a, b) ? -1 : 1));
+  const pivot = sorted[mid - lo - 1];
+  let l = lo, r = 0;
+  for (let i = lo; i < hi; i++) {
+    const t = order[i];
+    if (t === pivot || less(t, pivot)) order[l++] = t; else tmp[r++] = t;
   }
+  for (let i = 0; i < r; i++) order[l + i] = tmp[i];
 }
 
 /**
@@ -611,23 +742,26 @@ export const EDGE_BAND = 1e-9;
 
 const axisOf = (k: number, x: number, y: number, z: number) => (k === 0 ? x : k === 1 ? y : z);
 
-/** Möller–Trumbore, two-sided, watertight on edges (see EDGE_BAND). Returns [t, u, v] or null. */
-function rayTri(bvh: TriBVH, T: Float64Array, o: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number) {
+/** Möller–Trumbore, two-sided, watertight on edges (see EDGE_BAND). On a hit writes [t, u, v] to out and returns true. */
+function rayTri(
+  bvh: TriBVH, T: Float64Array, o: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, out: Float64Array,
+): boolean {
   const e1x = T[o + 3] - T[o], e1y = T[o + 4] - T[o + 1], e1z = T[o + 5] - T[o + 2];
   const e2x = T[o + 6] - T[o], e2y = T[o + 7] - T[o + 1], e2z = T[o + 8] - T[o + 2];
   const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
   const det = e1x * px + e1y * py + e1z * pz;
-  if (Math.abs(det) < 1e-18) return null;
+  if (Math.abs(det) < 1e-18) return false;
   const inv = 1 / det;
   const tx = ox - T[o], ty = oy - T[o + 1], tz = oz - T[o + 2];
   const u = (tx * px + ty * py + tz * pz) * inv;
-  if (u < -EDGE_BAND || u > 1 + EDGE_BAND) return null;
+  if (u < -EDGE_BAND || u > 1 + EDGE_BAND) return false;
   const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
   const v = (dx * qx + dy * qy + dz * qz) * inv;
-  if (v < -EDGE_BAND || u + v > 1 + EDGE_BAND) return null;
-  if ((u < EDGE_BAND || v < EDGE_BAND || u + v > 1 - EDGE_BAND) && !bvh.crossesTri(o / 9, ox, oy, oz, dx, dy, dz)) return null;
+  if (v < -EDGE_BAND || u + v > 1 + EDGE_BAND) return false;
+  if ((u < EDGE_BAND || v < EDGE_BAND || u + v > 1 - EDGE_BAND) && !bvh.crossesTri(o / 9, ox, oy, oz, dx, dy, dz)) return false;
   const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
-  return [t, u, v];
+  out[0] = t; out[1] = u; out[2] = v;
+  return true;
 }
 
 /** Closest point on triangle (Ericson). Writes point to out, barycentrics to bary; returns squared distance. */

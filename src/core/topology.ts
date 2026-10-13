@@ -1,6 +1,7 @@
 // Topology helpers: normals, areas, adjacency, edges, triangulation.
 import earcut from 'earcut';
 import { Geometry } from './geometry.ts';
+import { hypot3 } from './math.ts';
 import type { Vec3 } from './math.ts';
 import type { EdgeSet } from './edges.ts';
 import { halfEdges } from './halfedge.ts';
@@ -71,20 +72,42 @@ export function primPerimeter(g: Geometry, p: number): number {
   return L;
 }
 
-/** Area-weighted point normals. Points not on any polygon get (0,1,0). */
+/**
+ * Area-weighted point normals. Points not on any polygon get (0,1,0).
+ *
+ * One pass over the closed prims: each prim's Newell vector (primNewell's operations, in its order, walking the
+ * corners with the previous one in registers) is added to its points, then every sum is normalised. No per-prim
+ * allocation or attribute lookup, and hypot3 (Math.hypot bit for bit) for the length, so the result is bit for bit
+ * what primNewell + accumulate + Math.hypot gives (test/spatial-props.ts checks it).
+ */
 export function pointNormals(g: Geometry): Float64Array {
-  const N = new Float64Array(g.numPoints * 3), t = [0, 0, 0];
-  for (let p = 0; p < g.numPrims; p++) {
-    if (!g.primClosed[p]) continue;
-    primNewell(g, p, t);
-    for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) {
-      const i = g.vertexPoint[v] * 3;
-      N[i] += t[0]; N[i + 1] += t[1]; N[i + 2] += t[2];
+  const np = g.numPoints, nprim = g.numPrims;
+  const N = new Float64Array(np * 3);
+  const P = g.P, vp = g.vertexPoint, ps = g.primStart, closed = g.primClosed;
+  for (let p = 0; p < nprim; p++) {
+    if (!closed[p]) continue;
+    const s = ps[p], e = ps[p + 1];
+    if (e <= s) continue;
+    let nx = 0, ny = 0, nz = 0;
+    const f = vp[s] * 3;
+    let ax = P[f], ay = P[f + 1], az = P[f + 2];
+    for (let v = s; v < e; v++) {
+      const b = (v + 1 < e ? vp[v + 1] : vp[s]) * 3;
+      const bx = P[b], by = P[b + 1], bz = P[b + 2];
+      nx += (ay - by) * (az + bz);
+      ny += (az - bz) * (ax + bx);
+      nz += (ax - bx) * (ay + by);
+      ax = bx; ay = by; az = bz;
+    }
+    for (let v = s; v < e; v++) {
+      const i = vp[v] * 3;
+      N[i] += nx; N[i + 1] += ny; N[i + 2] += nz;
     }
   }
   for (let i = 0; i < N.length; i += 3) {
-    const l = Math.hypot(N[i], N[i + 1], N[i + 2]);
-    if (l > 1e-20) { N[i] /= l; N[i + 1] /= l; N[i + 2] /= l; } else { N[i] = 0; N[i + 1] = 1; N[i + 2] = 0; }
+    const x = N[i], y = N[i + 1], z = N[i + 2];
+    const l = hypot3(x, y, z);
+    if (l > 1e-20) { N[i] = x / l; N[i + 1] = y / l; N[i + 2] = z / l; } else { N[i] = 0; N[i + 1] = 1; N[i + 2] = 0; }
   }
   return N;
 }
