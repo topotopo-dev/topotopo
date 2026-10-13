@@ -63,6 +63,7 @@
     "test:interop": "node test/interop.ts",
     "showcase": "node test/showcase.ts",
     "export:demo": "node scripts/export-demo.ts",
+    "demo:footage": "node scripts/demo-footage.ts",
     "bench": "node bench/bench.ts",
     "docs": "node scripts/gen-docs.ts",
     "site": "node scripts/gen-site.ts",

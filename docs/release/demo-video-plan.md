@@ -168,9 +168,11 @@ them on the recording day.
   window exactly 960 × 1080 (a window-sizing utility or OBS crop).
 - **Windows used:** VS Code (graph JSON), Windows Terminal (CLI and export), a browser on the live viewer
   (`localhost`), Unreal Editor 5.8, Blender 5.2, Houdini 22, Claude Code (terminal or desktop app).
-- **TopoTopo render sequences** (no screen capture needed, sharper than recording the viewer): the CLI renders one
-  frame per azimuth. Example for shot 2, 120 frames (4 s at 30 fps), one full turn starting at the example's own
-  camera angle:
+- **TopoTopo render sequences** (no screen capture needed, sharper than recording the viewer):
+  `npm run demo:footage -- --assemble` renders and encodes every engine shot from `docs/release/demo-shots.json`
+  (see Assets to prepare); it cooks each orbit once and only moves the camera, and gives the same frames as the CLI
+  with the same options. The commands below are the manual equivalent with the CLI, one frame per azimuth. Example for
+  shot 2, 120 frames (4 s at 30 fps), one full turn starting at the example's own camera angle:
 
   ```bash
   mkdir -p out/video/house_city
@@ -184,11 +186,9 @@ them on the recording day.
 
   Starting angles from each example's `meta.render`: house_city 38/28, erosion_models 25/55, unreal_demo 30/32,
   drape 32/22, rbd_settle 30/30 (zoom 2), particles 30/32 (azimuth/elevation). Frames are 960 px wide and square plus
-  the footer line (node name, counts, bbox), which stays on because it shows real numbers. Each frame re-cooks the
-  graph; erosion_models runs two 200-step pipe models per frame, so start that loop first [verify: time per frame; if
-  it is too slow, export the cooked result once with `--export out/video/erosion_models.json` and orbit a one-node
-  graph whose `file` node reads it]. `drape.json` cooks in about 2 s per process, so its 210-frame orbit (7 s; 1° per
-  frame from azimuth 32) takes a few minutes.
+  the footer line (node name, counts, bbox), which stays on because it shows real numbers. With the CLI each frame
+  re-cooks the graph (erosion_models runs two 200-step pipe models per frame); the script does not, and renders a
+  960 px frame in 0.5–1.6 s (measured 2026-10-13, see Assets to prepare).
 - **Simulation sequences for shot 5** (one CLI process each; `--frames` cooks the frames in order and reuses the
   previous frame's state, about 0.2 s of cooking per frame on the test machine):
 
@@ -206,10 +206,11 @@ them on the recording day.
     -c:v libx264 -pix_fmt yuv420p out/video/rbd_settle.mp4
   ```
 
-  Both were tried on a few frames at 480 px (2026-10-13): the crates appear one every 0.5 s of simulation (four by
-  frame 61), and the runoff trails start from bare terrain. The particles run at their own 24 fps, so 210 frames
-  played at 30 fps are slightly faster than real time. [verify: time per frame at 960 px; that the 16th crate has
-  landed before frame 300, otherwise extend the range and trim in the edit]
+  The crates appear one every 0.5 s of simulation (four by frame 61), and the runoff trails start from bare terrain.
+  The particles run at their own 24 fps, so 210 frames played at 30 fps are slightly faster than real time. Rendered
+  in full at 960 px on 2026-10-13: the 16th crate has landed and the pile is at rest from frame 272 (frames 272–300
+  are identical, a still hold to trim or keep). The script leaves "@ frame N" out of the footer title, which the CLI
+  adds and which pushes the footer past 960 px.
 - **Unreal:** Level Sequence with one Cine Camera, two or three keys over 12 s, rendered with Movie Render Queue at
   1920 × 1080, 30 fps, anti-aliasing 8 spatial samples [verify: Movie Render Queue plugin enabled in topotopotest].
   Fallback: OBS capture of the viewport in Game View (G) with the editor UI hidden (F11).
@@ -229,10 +230,29 @@ The day before:
       `skeleton_roofs.png`, `forest.png`, `terrain_erosion.png`).
 - [ ] `npm run export:demo`; check `out/unreal_demo/demo.json` reports 536 instances and 5 sources, and that
       `landscape/landscape.json`, `scene.glb`, `scene.geo`, `scene.usda` and `instances.csv` exist.
-- [ ] Render the orbit sequences (they can run overnight): house_city (seed 7 and seed 8; copy the graph to
-      `out/video/house_city_seed8.json` and change `vars.seed` there instead of editing the example; the shelf is
-      found from any folder), erosion_models, drape, unreal_demo; and the two simulation sequences for shot 5
-      (crate drop, runoff). Encode each to MP4.
+- [ ] Engine footage: `npm run demo:footage -- --assemble` (`scripts/demo-footage.ts`; the shot list with every
+      camera, frame range and graph change is `docs/release/demo-shots.json`). It renders each engine shot to
+      `out/video/<shot>/frame_0001.png …` and encodes `out/video/<shot>.mp4` (H.264 High, yuv420p, BT.709, 30 fps)
+      and `out/video/contact_sheet.png` (one frame per shot). The right-pane clips are 960 × 1080: the 960 px frame
+      centred between bands of the footer colour for the captions. Split-screen shots have the graph JSON for their
+      left pane in `out/video/<shot>/left.txt` (the lines verbatim, headed by file and line numbers). The whole set
+      took 5 min 50 s on the test machine on 2026-10-13 (8 processes per shot, `--jobs N` to change; per-shot times in
+      `out/video/timings.json`). After an interruption, run it again: frames on disk are kept. `--shot <id>` runs one
+      shot; a shot whose entry or graph changed is re-rendered from scratch. Shots:
+  - [ ] `s01_title_bg` (shot 1): the unreal_demo persp view at 1920 px (zoom 1.5), cropped to 1920 × 1080, 10 s;
+        dim it under the title.
+  - [ ] `s02a_house_city`, `s02b_house_city_seed8` (shot 2): 360 frames each, one full turn from azimuth 38 at 1°
+        per frame. At the seed change, cut from frame N of s02a to frame N + 1 of s02b so the camera keeps moving.
+        The seed is changed in memory, not in the example. The second footer line (shading, pieces, open edges) is
+        off.
+  - [ ] `s03_erosion_models` (shot 3): 480 frames, one full turn at 0.75° per frame.
+  - [ ] `s04a_quad_remesh`, `s04b_textures` (shot 4): 7 s stills, the showcase views re-rendered 960 px wide without
+        view labels (quad_remesh framed slightly closer; textures is 960 × 501, both views side by side).
+  - [ ] `s05a_rbd_settle` (300 frames, the crate drop; at rest from frame 272), `s05b_drape` (210 frames, 1° per
+        frame from azimuth 32), `s05c_particles` (210 frames from zero steps) (shot 5).
+  - [ ] `s06_unreal_demo` (shot 6): 420 frames, 315° at 0.75° per frame (14 s, then the 4 s folder capture).
+  - [ ] In the erosion_models and unreal_demo frames the footer's last field (CENTER) runs past the right edge;
+        leave it or cover it with the caption band.
 - [ ] Unreal: open project `topotopotest` in Unreal 5.8 [verify: project path on disk]. Open
       `/Game/Polyforge/Demo/L_Demo` (the folder was created before the rename); rename the folder to
       `/Game/TopoTopo/Demo` or keep the Content Browser out of frame. Check:
@@ -251,7 +271,8 @@ The day before:
       `out/video/scene_houdini.hip` [verify: licence edition and whether its watermark shows].
 - [ ] Claude Code with the TopoTopo MCP server configured (see the MCP section of
       `docs/release/v0.2-release-notes.md`); run the shot 9 prompt twice and keep the cleaner take.
-- [ ] Title card and closing card (1920 × 1080 PNG); caption text from this file.
+- [ ] Title card and closing card (1920 × 1080 PNG); caption text from this file (also in `demo-shots.json`); the
+      title card's background is `out/video/s01_title_bg.mp4`.
 - [ ] Narration script printed from this file; microphone level checked.
 
 ## Schedule for the day
