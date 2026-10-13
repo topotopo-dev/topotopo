@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-219 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+220 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -26,7 +26,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [io](#io-nodes): [file](#file)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [roof_skeleton](#roof_skeleton) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
-- [sim](#sim-nodes): [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
+- [sim](#sim-nodes): [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
 - [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_curves](#tex_curves) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
@@ -10436,6 +10436,141 @@ None (generator).
 | `sill_depth` | float | `0.08` | 0..0.5 |  |  | how far the sill reaches in front of the frame (m) |
 
 ## sim nodes
+
+### particles
+
+category: `sim` · aliases: `pop`, `pop_network`, `popnet`, `particle`, `particle_system`
+
+Particle simulation (Houdini POPs in one node): emit from points, gravity, drag, wind, curl noise, velocity fields, attraction, floor and mesh collisions (die/slide/bounce), trails as polylines. Deterministic, steps with the frame.
+
+Steps of dt = 1 / (fps × substeps). Each step, every emitter point (input 0: points, or the points of any geometry) gives birth to emit_rate particles (fractions accumulate with a random phase per point; emit_all also emits one particle per point at time 0). A particle starts at its emitter point with the point's v, plus speed along the point's N (+Y without N), plus a random velocity up to velocity_var, and carries the point's attributes and groups (Cd, pscale, …; a point id seeds its randomness, so reordering points keeps each one's stream). Each step: acceleration = gravity + noise (curl: divergence-free) + field force + attraction; drag pulls the velocity toward the air velocity (wind + air fields) at rate drag; then the particle moves and collides with the floor plane and with the polygons (and heightfields) of input 1: die removes it, slide keeps the tangential motion, bounce reflects it with restitution bounce; friction is Coulomb (μ). Points collide as points unless use_pscale (spheres of radius pscale). Input 2 is a field: points with v (nearest or inverse-distance weighted), a heightfield (force = -gradient of height × field_scale: downhill) or an SDF (force = -gradient of the distance: toward the surface; sampled on a grid). Particles die when age reaches life (0 = never) or on a die collision; the output has the live ones: P, v, age, life, id (birth order), pscale and the carried attributes; trails > 1 keeps the last positions as one polyline per particle (point age at that position, curveu 0..1 tail to head, prim id). Time: a cook at start_frame (or any cook with animate false) runs `steps` steps; with animate, frame f runs steps + (f - start_frame) × substeps, reading the inputs at each frame, and every frame's state is cached like the solver's (stepping 10 → 11 runs one frame; jumping back re-simulates from the latest cached frame before it, or from the start). The result is the same bit for bit however the steps are split into frames and with or without the worker pool. max_particles counts a particle from birth to the end of its life, also when a collision removed it earlier.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `emitter` | no | no | points that emit (any geometry: its points); point v, N, pscale, Cd, id and other attributes are used and carried |
+| 1 | `collision` | yes | no | polygons (and heightfields) to collide with; also the surface for attract_to surface |
+| 2 | `field` | yes | no | velocity field: points with v, a heightfield (downhill gradient) or an SDF volume (gradient toward the surface) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `steps` | int | `48` | 0..100000 |  |  | steps simulated at start_frame (a plain cook); with animate, later frames add substeps steps each |
+| `fps` | float | `24` | 0.001.. |  |  | simulation frames per second; dt = 1 / (fps × substeps) |
+| `substeps` | int | `1` | 1..100 |  |  | steps per frame |
+| `animate` | bool | `true` |  |  |  | advance with the cook frame (frame f > start_frame runs (f - start_frame) × substeps more steps, cached per frame); false = always `steps` steps, not time-dependent |
+| `start_frame` | int | `1` |  |  |  | frame that shows the state after `steps` steps (earlier frames show it too) |
+| `emit_rate` | float | `1` | 0.. |  | `rate`, `birth_rate` | particles born per step per emitter point (0.25 = one every 4 steps) |
+| `emit_all` | bool | `false` |  |  |  | also emit one particle from every emitter point at time 0 (with emit_rate 0: a single burst) |
+| `speed` | float | `0` |  |  |  | initial speed (m/s) along the emitter point normal N (+Y without N), added to the point v |
+| `velocity_var` | float | `0` | 0.. |  | `spread`, `velocity_variance` | random initial velocity, uniform in a ball of this radius (m/s) |
+| `life` | float | `0` | 0.. |  | `lifetime`, `life_expectancy` | lifetime in seconds (0 = forever) |
+| `life_var` | float | `0` | 0.. |  | `life_variance` | random ± variation of the lifetime (s) |
+| `pscale` | float | `0.05` | 0.. |  |  | pscale of particles whose emitter point has none |
+| `gravity` | vec3 | `[0,-9.81,0]` |  |  |  | acceleration (m/s²) |
+| `drag` | float | `0` | 0.. |  | `air_resistance` | air resistance (1/s): the velocity approaches the air velocity (wind, air fields) at this rate; wind needs drag > 0 |
+| `wind` | vec3 | `[0,0,0]` |  |  |  | air velocity (m/s); acts through drag |
+| `noise` | float | `0` |  |  | `noise_amplitude`, `turbulence` | noise force amplitude (m/s²); 0 = off |
+| `noise_size` | float | `1` | 0.001.. |  | `element_size` | noise element size (m) |
+| `curl` | bool | `true` |  |  |  | curl noise (divergence-free swirls, no sinks) instead of three independent noises |
+| `noise_octaves` | int | `2` | 1..8 |  |  | fractal octaves of the noise (each costs one more evaluation) |
+| `attract` | float | `0` |  |  |  | attraction strength (1/s²: acceleration per metre of distance to the target); negative repels |
+| `attract_to` | enum | `"point"` |  | `point`, `surface` |  | target: attract_point, or the closest point of the collision surface (input 1) |
+| `attract_point` | vec3 | `[0,0,0]` |  |  |  | target of attract_to point |
+| `collide` | enum | `"bounce"` |  | `none`, `die`, `slide`, `bounce` |  | response to the floor and the collision input: none, die (removed), slide (normal velocity removed), bounce |
+| `bounce` | float | `0.5` | 0..1 |  | `elasticity`, `restitution` | restitution of bounce (0 = no rebound, 1 = elastic) |
+| `friction` | float | `0.2` | 0.. |  |  | Coulomb friction coefficient on contact (tangential speed lost = friction × normal speed lost) |
+| `floor` | bool | `false` |  |  | `ground_plane` | collide with the plane y = floor_height |
+| `floor_height` | float | `0` |  |  |  | height of the floor plane |
+| `use_pscale` | bool | `false` |  |  |  | collide as spheres of radius pscale (rest on surfaces) instead of as points |
+| `field_mode` | enum | `"force"` |  | `force`, `air` |  | how the field (input 2) acts: force = added to the acceleration (× field_scale); air = added to the air velocity (acts through drag, like wind) |
+| `field_scale` | float | `1` |  |  |  | multiplier of the field vector |
+| `field_sample` | enum | `"nearest"` |  | `nearest`, `idw` |  | points field: the nearest point's v, or inverse-distance weighted v of field_neighbours points |
+| `field_neighbours` | int | `6` | 2..32 |  | `field_neighbors` | points field, idw: points averaged |
+| `field_max_distance` | float | `0` | 0.. |  |  | points field: ignore points farther than this (0 = unlimited) |
+| `field_resolution` | int | `64` | 4..256 |  |  | SDF field: samples along the longest side of the grid the distance is sampled on *(advanced)* |
+| `seed` | float | `0` |  |  |  | random seed (emission phases, birth offsets, lifetimes, velocities, noise) |
+| `max_particles` | int | `1000000` | 0.. |  |  | births are refused while this many particles hold a slot (from birth to the end of their life) |
+| `trails` | int | `0` | 0..10000 |  | `trail_length` | positions kept per particle and output as a polyline (0 = no trails; 2 or more) |
+| `output` | enum | `"both"` |  | `both`, `points`, `trails` |  | points (the particles), trails (one polyline per particle) or both (points first; no trails when trails < 2) |
+
+**Writes:** points: P, v, age, life, id, pscale + emitter attributes and groups; trails: polylines with point age, curveu and the particle attributes, prim id
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size": [
+          6,
+          6
+        ],
+        "divisions": [
+          12,
+          12
+        ]
+      }
+    },
+    "nozzle": {
+      "type": "points",
+      "params": {
+        "positions": [
+          [
+            0,
+            0.2,
+            0
+          ]
+        ]
+      }
+    },
+    "fountain": {
+      "type": "particles",
+      "in": [
+        "nozzle",
+        "ground"
+      ],
+      "params": {
+        "steps": 60,
+        "emit_rate": 4,
+        "speed": 5,
+        "velocity_var": 1.2,
+        "life": 2.5,
+        "seed": 1,
+        "collide": "bounce",
+        "bounce": 0.4,
+        "trails": 6
+      }
+    },
+    "tint": {
+      "type": "color",
+      "in": [
+        "fountain"
+      ],
+      "params": {
+        "mode": "ramp",
+        "attrib": "age",
+        "range": [
+          0,
+          2.5
+        ]
+      }
+    },
+    "out": {
+      "type": "merge",
+      "in": [
+        "ground",
+        "tint"
+      ]
+    }
+  },
+  "output": "out"
+}
+```
 
 ### rbd_settle
 

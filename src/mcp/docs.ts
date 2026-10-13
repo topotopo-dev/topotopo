@@ -19,6 +19,7 @@ CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); conver
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
+PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".`;
@@ -91,7 +92,9 @@ SOLVER (Houdini SOP Solver): feedback over frames.
   Each frame's state is cached, so stepping 10 → 11 runs the body once; jumping back is a cache hit.
   Body vars: iteration (frames since start_frame, from 0), substep, and frame/time/timeInc = the step's time (fractional between substeps).
 SOLVER vs FOREACH: foreach feedback:true is count-based (N iterations in one cook, no time, cached as a whole);
-  the solver's result depends on the frame you cook at and is advanced frame by frame.`,
+  the solver's result depends on the frame you cook at and is advanced frame by frame.
+PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_frame) × substeps steps, every frame's state is
+  cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}
@@ -492,6 +495,30 @@ Recipes:
   Letter / logo outline: bezier {closed:true, points} (+ inner contours for holes) → convert_curve → extrude.
   Cable with sag: nurbs {points:[a, mid lowered, b]} → resample {length:0.05} → polywire; taper with curve_attribs.
 See examples/splines.json.`,
+
+  particles: `PARTICLES (Houdini POP network in one node; category "sim")
+{"type":"particles","in":["emitter","collision","field"],"params":{...}}: inputs 1 and 2 are optional.
+EMIT: every point of input 0 emits emit_rate particles per step (0.25 = one every 4 steps; per-point random phase);
+  emit_all: one per point at time 0 (emit_rate 0 = a single burst). Start velocity = point v + speed × point N (+Y without N)
+  + a random vector up to velocity_var. Point attributes and groups (Cd, pscale, custom) are copied at birth; a point id seeds
+  that point's random stream. life (s, 0 = forever) ± life_var; max_particles caps the particles holding a slot (birth to end of life).
+FORCES (per step, dt = 1/(fps × substeps)): gravity; noise (m/s², noise_size m, curl:true = divergence-free swirls, noise_octaves);
+  drag pulls the velocity toward the air velocity = wind + air fields (wind does nothing without drag); attract (spring 1/s²)
+  to attract_point or, with attract_to:"surface", to the closest point of input 1.
+FIELD (input 2): points with v (field_sample nearest | idw over field_neighbours, field_max_distance), a heightfield
+  (-gradient of height: flows downhill) or an SDF volume (-gradient of the distance: toward the surface); field_mode force (an
+  acceleration, × field_scale) or air (adds to the air velocity, acts through drag).
+COLLIDE: floor:true (+ floor_height) and the polygons / heightfields of input 1; collide none | die | slide | bounce (bounce 0..1,
+  friction = Coulomb μ). Particles collide as points (a 1e-5 × scene-size skin off the surface) or, use_pscale, as spheres.
+OUTPUT: points with P v age life id (birth order) pscale + carried attributes; trails N (>= 2) keeps the last N positions per
+  particle as an open polyline (point age at that position, curveu 0 tail → 1 head, prim id); output both | points | trails.
+TIME: a cook at start_frame (default 1) runs "steps" steps; frame f runs steps + (f - start_frame) × substeps, each frame's state
+  cached (stepping forward runs one frame; jumping back re-simulates from the latest cached earlier frame or the start).
+  animate:false = always "steps" steps, time-independent. Same bits with or without the worker pool and however it is stepped.
+RECIPES: fountain = one point, speed 6, velocity_var 1.3, life 3, floor:true, collide bounce, trails 6. Runoff on terrain =
+  emitters scattered on ridges (heightfield_mask_by_feature curvature convex + heightfield_scatter), the heightfield as input 1
+  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age
+  (examples/particles.json). Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1. Swarm on a mesh: attract_to surface.`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
