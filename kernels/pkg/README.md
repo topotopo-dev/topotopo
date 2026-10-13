@@ -1,8 +1,10 @@
 # topotopo-kernels
 
 Original Rust implementation of a kinetic, weighted straight skeleton, mitered polygon
-offsets, and hip/gable roof surfaces. The checked-in `pkg/` is the browser-compatible
-WebAssembly build; normal TopoTopo users do not install Rust. See [BUILD.md](BUILD.md).
+offsets, and hip/gable roof surfaces. The checked-in `pkg-simd/` and `pkg/` are the
+SIMD and scalar WebAssembly builds; normal TopoTopo users do not install Rust.
+The loader feature-detects simd128 and defaults to SIMD, with scalar fallback.
+See [BUILD.md](BUILD.md).
 
 ## Heightfield erosion (session 4)
 
@@ -37,8 +39,15 @@ to a 0.45-cell travel distance per step. Carry capacity depends on slope, veloci
 and water depth; hardness scales excavation. Hydraulic/stream incision cannot remove
 more than a quarter of the local downward relief per step.
 
-Sediment follows forward semi-Lagrangian characteristics with a conservative
-bilinear scatter and a subtraction remainder on the last receiver. Remaining load
+Sediment follows conservative, dimension-split characteristics: an X transfer and
+then a Z transfer, each retaining the donor's load minus its outgoing amount and
+gathering incoming amounts from adjacent donors. This is bilinear remapping for
+constant velocity, and conserves mass in converging/diverging flow without global
+rescaling. With spatially varying velocity, Z uses the intermediate receiver's
+velocity; the fixed X-then-Z order introduces directional splitting bias. Frozen
+receivers reflect transfers at each stage, so sediment cannot cross a frozen wall
+(unlike the previous diagonal scatter, which could bypass frozen cardinal cells).
+Remaining load
 settles at the end of a call; `sediment` records deposited thickness, `debris` thermal
 deposits, `water` actual depth and `flow` normalised integrated speed. Closed edges
 keep water/material; open pipe edges lose water **only**, keeping rock in-grid.
@@ -47,16 +56,21 @@ Pipe thermal transport is a separate conservative eight-neighbour talus pass.
 Optional stream power is `K * A^m * S^n`; reference contributing area is calculated
 from the incoming terrain, so the drainage network does not jump during a solve.
 
-The session-5 pipe implementation reuses padded, separate flux arrays and row
+The pipe implementation reuses padded, separate flux arrays and row
 scratch buffers. Rain/flux and water/erosion/transport form two fluid sweeps;
+sediment gathering streams through a three-row transfer ring instead of storing
+full-grid velocities or scattering into shared destinations. Four-cell SIMD
+water updates skip the limiter division and second square root when no lane
+requires limiting. All arithmetic retains scalar operation order;
 terrain slopes are refreshed only around actual height changes. A conservative
 talus margin can prove thermal transport inactive; once that proof expires the
-ordinary thermal stencil runs every iteration. Frozen receivers and conservative
-transport remainders retain their original semantics. The droplet implementation
+ordinary thermal stencil runs every iteration. The droplet implementation
 keeps f64 arithmetic and RNG order: f32 and reassociated interpolation experiments
 failed the full-reference flow-correlation threshold. Row bounds are validated
 before the small unchecked stencil/scatter loops; no work buffers allocate inside
-either iteration loop. See the session-5 measurements and limits in [BENCH.md](BENCH.md).
+either iteration loop. SIMD droplet smoothing retains the original addition order,
+and paired thermal inactivity checks preserve scalar transfers for active cells.
+See the session-6 measurements and limits in [BENCH.md](BENCH.md).
 
 `flow_accumulation` offers D8 and triangular-facet D-infinity routing. Accumulation
 includes each sample's own cell area. Stable height/index ordering fixes the sum
@@ -76,9 +90,12 @@ extreme/nonfinite inputs fail with a useful error. f32 rounding limits conservat
 precision. The pipe model is single-layer terrain, without undercuts, stratigraphy,
 bank collapse or turbulence; its four directions can show grid bias. Fixed operation
 order and libm avoid platform-dependent transcendental paths, but exhaustive platform
-bit-identity is not established by one native/WASM comparison. `simd` opts into a
-wasm32 simd128 evaporation loop with identical per-lane arithmetic; default builds
-remain scalar. No dependencies were added; existing crate licences below still apply.
+bit-identity is not established by one native/WASM comparison. The `simd` build
+uses strict simd128, without relaxed SIMD, fast-math or fused multiply-add.
+Scalar/SIMD corpus parity compares every returned byte, with no floating tolerance;
+golden and pool tests exercise the default SIMD path. `TOPOTOPO_WASM=scalar|simd`
+selects an explicit path before import. No dependencies were added; existing crate
+licences below still apply.
 See [BENCH.md](BENCH.md) for measured acceptance and performance, and
 `examples/renders/erosion_models.png` for the four-model comparison.
 

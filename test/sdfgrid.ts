@@ -11,7 +11,7 @@ import { SdfGrid, gridsOf, gridFromImplicit } from '../src/core/sdfgrid.ts';
 import { geoToJSON, geoFromJSON } from '../src/io/json.ts';
 import { topologyReport, primArea, triangulate } from '../src/core/topology.ts';
 import { selfIntersections } from '../src/core/analysis.ts';
-import { kernelsWasmURL, loadKernels } from '../src/wasm/kernels.ts';
+import { kernelsWasmURL, kernelsWasmVariant, loadKernels } from '../src/wasm/kernels.ts';
 import { fingerprint } from './fingerprint.ts';
 
 const off = new Engine(createNodeHost({ workers: 0 })), on = new Engine(createNodeHost({ workers: 2, pool: { minElements: 1 } }));
@@ -147,7 +147,9 @@ for (const method of ['dual_contouring', 'marching_cubes']) {
   check(!mesh.points.has('Cd') && !mesh.prims.has('material') && !mesh.detail.has('source_tag') && !mesh.detail.has('materials'), `${method} deliberately drops all source attribute tables`);
 }
 // Exercise the raw generated exports as well as the TS convenience wrapper.
-const raw = await import('../kernels/pkg/topotopo_kernels.js');
+const raw = kernelsWasmVariant === 'simd'
+  ? await import('../kernels/pkg-simd/topotopo_kernels.js')
+  : await import('../kernels/pkg/topotopo_kernels.js');
 const rawGrid = { dims: new Uint32Array([2, 2, 2]), origin: new Float64Array(3), voxel: 1, values: new Float32Array(8) };
 for (const invalid of [
   { ...rawGrid, dims: [2, 2, 2] }, { ...rawGrid, origin: [0, 0, 0] }, { ...rawGrid, values: new Float64Array(8) },

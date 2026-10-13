@@ -582,6 +582,76 @@ fn hydraulic_layers(height: &[f64], before: &[f64], sediment: &mut [f64], wear: 
     }
 }
 
+/// Interior gather with the scalar scatter's three ordered additions. Selecting
+/// the unchanged height for zero contributors retains signed-zero behavior while
+/// removing per-lane branches from the dense smoothing/layer pass.
+#[cfg(all(target_arch = "wasm32", feature = "simd"))]
+#[allow(clippy::too_many_arguments)]
+#[inline]
+#[target_feature(enable = "simd128")]
+unsafe fn smooth_interior_row(
+    above: &[f64],
+    row: &[f64],
+    below: &[f64],
+    height: &mut [f64],
+    before: &[f64],
+    sediment: &mut [f64],
+    wear: &mut [f64],
+) {
+    use std::arch::wasm32::{
+        f64x2_add, f64x2_gt, f64x2_mul, f64x2_ne, f64x2_neg, f64x2_splat, f64x2_sub,
+        v128_bitselect, v128_load, v128_store,
+    };
+    let w = height.len();
+    assert_eq!(above.len(), w);
+    assert_eq!(row.len(), w);
+    assert_eq!(below.len(), w);
+    assert_eq!(before.len(), w);
+    assert_eq!(sediment.len(), w);
+    assert_eq!(wear.len(), w);
+    let quarter = f64x2_splat(0.25);
+    let half = f64x2_splat(0.5);
+    let zero = f64x2_splat(0.0);
+    let paired = w & !1;
+    for i in (0..paired).step_by(2) {
+        // SAFETY: all slices have length w, and i + 1 < paired <= w.
+        // Unaligned loads/stores are supported by the WASM intrinsics.
+        unsafe {
+            let mut value = v128_load(height.as_ptr().add(i).cast());
+            for (source, factor) in [(above, quarter), (row, half), (below, quarter)] {
+                let contribution = v128_load(source.as_ptr().add(i).cast());
+                let sum = f64x2_add(value, f64x2_mul(contribution, factor));
+                value = v128_bitselect(sum, value, f64x2_ne(contribution, zero));
+            }
+            let change = f64x2_sub(value, v128_load(before.as_ptr().add(i).cast()));
+            v128_store(height.as_mut_ptr().add(i).cast(), value);
+            let previous_sediment = v128_load(sediment.as_ptr().add(i).cast());
+            v128_store(
+                sediment.as_mut_ptr().add(i).cast(),
+                f64x2_add(previous_sediment, change),
+            );
+            let removed = f64x2_neg(change);
+            let removed = v128_bitselect(removed, zero, f64x2_gt(removed, zero));
+            let previous_wear = v128_load(wear.as_ptr().add(i).cast());
+            v128_store(
+                wear.as_mut_ptr().add(i).cast(),
+                f64x2_add(previous_wear, removed),
+            );
+        }
+    }
+    if paired < w {
+        let i = paired;
+        for (source, factor) in [(above, 0.25), (row, 0.5), (below, 0.25)] {
+            if source[i] != 0.0 {
+                height[i] += source[i] * factor;
+            }
+        }
+        let change = height[i] - before[i];
+        sediment[i] += change;
+        wear[i] += finite_max(-change, 0.0);
+    }
+}
+
 #[inline(never)]
 fn smooth_deposits(
     f: &mut Field<'_>,
@@ -639,6 +709,23 @@ fn smooth_deposits(
         } else {
             &[]
         };
+        #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+        if j >= 2 && j + 2 < f.h {
+            // Only the interior uses 1/4, 1/2, 1/4 coefficients. The adjacent
+            // border rows below retain their exact 1/3 divisions.
+            unsafe {
+                smooth_interior_row(
+                    above,
+                    row,
+                    below,
+                    &mut f.height[base..base + w],
+                    &before[base..base + w],
+                    &mut sediment[base..base + w],
+                    &mut wear[base..base + w],
+                );
+            }
+            continue;
+        }
         for (i, (((height, before), sediment), wear)) in f.height[base..base + w]
             .iter_mut()
             .zip(&before[base..base + w])
@@ -679,6 +766,47 @@ fn smooth_deposits(
 
 const OX: [isize; 8] = [1, -1, 0, 0, 1, 1, -1, -1];
 const OZ: [isize; 8] = [0, 0, 1, -1, 1, -1, 1, -1];
+
+/// Test two adjacent thermal cells together. Most cells of a smooth heightfield
+/// have no excess slope, so their eight comparisons need no scalar transfer
+/// bookkeeping. Active cells still use the original arithmetic and scatter order.
+#[cfg(all(target_arch = "wasm32", feature = "simd"))]
+#[inline]
+#[target_feature(enable = "simd128")]
+unsafe fn thermal_pair_active(
+    previous: &[f64],
+    current: &[f64],
+    next: &[f64],
+    i: usize,
+    talus: f64,
+    diagonal: f64,
+) -> u8 {
+    use std::arch::wasm32::{f64x2_gt, f64x2_splat, f64x2_sub, i64x2_bitmask, v128_load, v128_or};
+    // SAFETY: thermal_row checks all row lengths, and calls only for
+    // 1 <= i < w - 2. Every two-lane load at i - 1, i, or i + 1 is in bounds.
+    unsafe {
+        let center = v128_load(current.as_ptr().add(i).cast());
+        let cardinal = f64x2_splat(talus);
+        let diagonal = f64x2_splat(diagonal);
+        let zero = f64x2_splat(0.0);
+        let mut active = zero;
+        for (row, offset, threshold) in [
+            (current, i + 1, cardinal),
+            (current, i - 1, cardinal),
+            (next, i, cardinal),
+            (previous, i, cardinal),
+            (next, i + 1, diagonal),
+            (previous, i + 1, diagonal),
+            (next, i - 1, diagonal),
+            (previous, i - 1, diagonal),
+        ] {
+            let neighbor = v128_load(row.as_ptr().add(offset).cast());
+            let excess = f64x2_sub(f64x2_sub(center, neighbor), threshold);
+            active = v128_or(active, f64x2_gt(excess, zero));
+        }
+        i64x2_bitmask(active)
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 fn thermal_cell(
@@ -756,7 +884,35 @@ fn thermal_row(
     assert_eq!(delta.len(), w);
     assert_eq!(next_delta.len(), w);
     assert!(hardness.is_none_or(|a| a.len() == w));
+    #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+    let mut active_pair = 0;
     for i in 1..w - 1 {
+        #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+        {
+            if i & 1 == 1 {
+                active_pair = if i + 2 < w {
+                    // SAFETY: row lengths are checked above, i >= 1 and
+                    // i + 2 < w bounds every neighbor of both adjacent cells.
+                    unsafe {
+                        thermal_pair_active(
+                            previous_height,
+                            height,
+                            next_height,
+                            i,
+                            talus,
+                            diagonal,
+                        )
+                    }
+                } else {
+                    1
+                };
+            }
+            let active = active_pair & 1 != 0;
+            active_pair >>= 1;
+            if !active {
+                continue;
+            }
+        }
         // SAFETY: every row has the checked length w and 1 <= i < w - 1,
         // hence i - 1, i and i + 1 are valid in every row. No pointer escapes.
         let mut excess = unsafe {

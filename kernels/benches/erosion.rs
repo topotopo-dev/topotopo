@@ -1,6 +1,6 @@
+use std::{hint::black_box, time::Instant};
 use topotopo_kernels::erosion::{PipeParams, erode_pipe};
 use topotopo_kernels::erosion_droplet::{DropletParams, erode_droplet};
-use std::{hint::black_box, time::Instant};
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();

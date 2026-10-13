@@ -3,10 +3,14 @@
 //!
 //! Based on Mei, Decaudin and Hu (Pacific Graphics 2007). Closed cells share
 //! exactly the same face flux; outgoing flux is limited to available water.
-//! Sediment follows forward semi-Lagrangian characteristics and is scattered
-//! bilinearly, preserving mass without a global rescaling of the sediment map.
+//! Sediment uses conservative X-then-Z characteristic remapping with adjacent
+//! gathers, preserving mass without a global rescaling of the sediment map.
 
 use crate::erosion_flow::{FlowMethod, flow_accumulation, validate_grid};
+
+#[cfg(all(target_arch = "wasm32", feature = "simd"))]
+#[path = "erosion_simd.rs"]
+mod simd;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ErosionResult {
@@ -184,6 +188,9 @@ pub fn erode_pipe(
     let mut suspended = vec![0.0f32; n];
     let mut remapped = vec![0.0f32; n];
     let mut velocity = vec![[0.0f32; 2]; w];
+    let mut transport_flux = vec![0.0f32; 3 * w];
+    let mut horizontal_flux = vec![0.0f32; w];
+    let mut horizontal_load = vec![0.0f32; w];
     let mut row_speed = vec![0.0f32; w];
     let mut row_limited_speed = vec![0.0f32; w];
     let mut row_change = vec![0.0f32; w];
@@ -384,13 +391,7 @@ pub fn erode_pipe(
         let erosion_dt = lower(p.erosion_rate * dt, 1.0);
         let deposition_dt = lower(p.deposition_rate * dt, 1.0);
         let evaporation_factor = upper(1.0 - p.evaporation * dt, 0.0);
-        // A receiver lies at most one row ahead. Clear that row immediately
-        // before the first possible scatter, keeping its writes in cache.
-        remapped[..w].fill(0.0);
         for z in 0..h {
-            if z + 1 < h {
-                remapped[(z + 1) * w..(z + 2) * w].fill(0.0);
-            }
             let start = z * w;
             let base = (z + 1) * stride + 1;
             let qw = &flux_west[base..base + w];
@@ -510,33 +511,56 @@ pub fn erode_pipe(
                 evaporate_simd(water, evaporation_factor);
             }
             profile.mark("reductions/evaporation");
-            let first = z.saturating_sub(1);
-            let end = (z + 2).min(h);
-            let destination = &mut remapped[first * w..end * w];
-            let receiver_mobility = &mobility[first * w..end * w];
+            let above = &mobility[z.saturating_sub(1) * w..z.saturating_sub(1) * w + w];
+            let below = &mobility[(z + 1).min(h - 1) * w..(z + 1).min(h - 1) * w + w];
+            let flux = &mut transport_flux[(z % 3) * w..(z % 3 + 1) * w];
+            let output = &mut remapped[start..start + w];
             if has_frozen {
-                transport_row::<true>(
+                transport_prepare_row::<true>(
                     suspended,
                     velocity,
-                    receiver_mobility,
-                    destination,
+                    row_mobility,
+                    above,
+                    below,
+                    &mut horizontal_flux,
+                    &mut horizontal_load,
+                    flux,
+                    output,
                     z,
                     h,
                     flow_dt,
                 );
             } else {
-                transport_row::<false>(
+                transport_prepare_row::<false>(
                     suspended,
                     velocity,
-                    receiver_mobility,
-                    destination,
+                    row_mobility,
+                    above,
+                    below,
+                    &mut horizontal_flux,
+                    &mut horizontal_load,
+                    flux,
+                    output,
                     z,
                     h,
                     flow_dt,
                 );
             }
+            // Once row z's outgoing transfers exist, both neighbors of z-1
+            // are available. Three flux rows suffice, with no full-grid velocity.
+            if z > 0 {
+                let above = if z > 1 {
+                    &transport_flux[((z - 2) % 3) * w..((z - 2) % 3 + 1) * w]
+                } else {
+                    &[]
+                };
+                let below = &transport_flux[(z % 3) * w..(z % 3 + 1) * w];
+                transport_receive_row(&mut remapped[(z - 1) * w..z * w], above, below);
+            }
             profile.mark("transport");
         }
+        let above = &transport_flux[((h - 2) % 3) * w..((h - 2) % 3 + 1) * w];
+        transport_receive_row(&mut remapped[(h - 1) * w..h * w], above, &[]);
         std::mem::swap(&mut suspended, &mut remapped);
         if thermal_margin >= 0.0 {
             // Neighbor differences can grow by at most twice the largest actual
@@ -723,7 +747,31 @@ fn update_water_row(
             && capacity_speed.len() == n
             && limited_speed.len() == n
     );
-    for x in 0..n {
+    #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+    // Slice bounds are checked in the helper; selection requires simd128.
+    let start = unsafe {
+        simd::update_water_prefix(
+            qw,
+            qe,
+            qn,
+            qs,
+            iw,
+            ie,
+            it,
+            ib,
+            water,
+            flow,
+            velocity,
+            capacity_speed,
+            limited_speed,
+            dt,
+            flow_dt,
+            velocity_limit,
+        )
+    };
+    #[cfg(not(all(target_arch = "wasm32", feature = "simd")))]
+    let start = 0;
+    for x in start..n {
         let old = water[x];
         let depth = upper(
             old + flow_dt * (iw[x] + ie[x] + it[x] + ib[x] - qw[x] - qe[x] - qn[x] - qs[x]),
@@ -809,94 +857,148 @@ fn erode_row<const STREAM: bool>(
     }
 }
 
+// Conservative, dimension-split characteristic remapping. Each donor retains
+// its load minus its outgoing transfer; each receiver gathers the two adjacent
+// transfers. Unlike backward bilinear sampling, this conserves sediment in
+// converging/diverging flow without a global mass correction. CFL bounds each
+// displacement by 0.45 cells. Frozen receivers and outer edges reflect sediment.
+// The fixed X then Z order introduces directional splitting on varying velocity.
 #[inline(never)]
-fn transport_row<const FROZEN: bool>(
-    suspended: &[f32],
+#[allow(clippy::too_many_arguments)]
+fn transport_prepare_row<const FROZEN: bool>(
+    source: &[f32],
     velocity: &[[f32; 2]],
     mobility: &[f32],
-    remapped: &mut [f32],
+    above_mobility: &[f32],
+    below_mobility: &[f32],
+    horizontal_flux: &mut [f32],
+    horizontal_load: &mut [f32],
+    vertical_flux: &mut [f32],
+    output: &mut [f32],
     z: usize,
     h: usize,
     flow_dt: f32,
 ) {
-    let w = suspended.len();
-    let first = z.saturating_sub(1);
-    let end = (z + 2).min(h);
+    let w = source.len();
     assert!(
         w >= 2
             && h >= 2
             && z < h
             && velocity.len() == w
-            && remapped.len() == (end - first) * w
-            && mobility.len() == remapped.len()
+            && mobility.len() == w
+            && above_mobility.len() == w
+            && below_mobility.len() == w
+            && horizontal_flux.len() == w
+            && horizontal_load.len() == w
+            && vertical_flux.len() == w
+            && output.len() == w
     );
     for x in 0..w {
-        let material = suspended[x];
-        if material == 0.0 {
-            continue;
-        }
-        let (x0, fx) = transport_coordinate(x, w, velocity[x][0] * flow_dt);
-        let (z0, fz) = transport_coordinate(z, h, velocity[x][1] * flow_dt);
-        let i = (z0 - first) * w + x0;
-        let w0 = (1.0 - fx) * (1.0 - fz);
-        let w1 = fx * (1.0 - fz);
-        let w2 = (1.0 - fx) * fz;
-        let w3 = fx * fz;
-        // Row bounds were checked once above. Integer transport_coordinate
-        // returns x0 in 0..w-1 and z0 in first..end-1, independently of float
-        // displacement (even NaN). Thus i, i+1, i+w, i+w+1 are all inside the
-        // checked 2/3-row window. No unchecked access escapes this proof.
-        unsafe {
-            if !FROZEN && w3 > 0.0 {
-                let sum = w0 + w1 + w2 + w3;
-                let inv_sum = if sum == 1.0 { 1.0 } else { 1.0 / sum };
-                let a = lower(material * w0 * inv_sum, material);
-                let remaining = material - a;
-                let b = lower(material * w1 * inv_sum, remaining);
-                let remaining = remaining - b;
-                let c = lower(material * w2 * inv_sum, remaining);
-                *remapped.get_unchecked_mut(i) += a;
-                *remapped.get_unchecked_mut(i + 1) += b;
-                *remapped.get_unchecked_mut(i + w) += c;
-                *remapped.get_unchecked_mut(i + w + 1) += remaining - c;
-            } else {
-                let indices = [i, i + 1, i + w, i + w + 1];
-                let mut weights = [w0, w1, w2, w3];
-                let mut sum = 0.0;
-                for k in 0..4 {
-                    if FROZEN && *mobility.get_unchecked(indices[k]) == 0.0 {
-                        weights[k] = 0.0;
-                    }
-                    sum += weights[k];
-                }
-                if sum <= 0.0 {
-                    *remapped.get_unchecked_mut((z - first) * w + x) += material;
-                    continue;
-                }
-                let inv_sum = if sum == 1.0 { 1.0 } else { 1.0 / sum };
-                let last = (0..4).rfind(|&k| weights[k] > 0.0).unwrap_or(0);
-                let mut remaining = material;
-                for k in 0..last {
-                    let part = lower(material * weights[k] * inv_sum, remaining);
-                    *remapped.get_unchecked_mut(indices[k]) += part;
-                    remaining -= part;
-                }
-                *remapped.get_unchecked_mut(indices[last]) += remaining;
-            }
-        }
+        let d = velocity[x][0] * flow_dt;
+        let allowed = if d < 0.0 {
+            x > 0 && (!FROZEN || mobility[x - 1] > 0.0)
+        } else {
+            x + 1 < w && (!FROZEN || mobility[x + 1] > 0.0)
+        };
+        let transfer = if allowed { source[x] * d.abs() } else { 0.0 };
+        horizontal_flux[x] = transfer.copysign(d);
+        horizontal_load[x] = source[x] - transfer;
+    }
+    // Separate interior from borders so the stencil has no lane-dependent bounds.
+    horizontal_load[0] += upper(-horizontal_flux[1], 0.0);
+    for x in 1..w - 1 {
+        horizontal_load[x] = horizontal_load[x]
+            + upper(horizontal_flux[x - 1], 0.0)
+            + upper(-horizontal_flux[x + 1], 0.0);
+    }
+    horizontal_load[w - 1] += upper(horizontal_flux[w - 2], 0.0);
+    for x in 0..w {
+        let d = velocity[x][1] * flow_dt;
+        let allowed = if d < 0.0 {
+            z > 0 && (!FROZEN || above_mobility[x] > 0.0)
+        } else {
+            z + 1 < h && (!FROZEN || below_mobility[x] > 0.0)
+        };
+        let transfer = if allowed {
+            horizontal_load[x] * d.abs()
+        } else {
+            0.0
+        };
+        vertical_flux[x] = transfer.copysign(d);
+        output[x] = horizontal_load[x] - transfer;
     }
 }
 
-#[inline(always)]
-fn transport_coordinate(index: usize, length: usize, displacement: f32) -> (usize, f32) {
-    if index == 0 {
-        (0, upper(displacement, 0.0))
-    } else if index + 1 == length {
-        (length - 2, 1.0 + lower(displacement, 0.0))
-    } else {
-        let backward = usize::from(displacement < 0.0);
-        (index - backward, displacement + backward as f32)
+#[inline(never)]
+fn transport_receive_row(output: &mut [f32], above: &[f32], below: &[f32]) {
+    let w = output.len();
+    assert!((above.is_empty() || above.len() == w) && (below.is_empty() || below.len() == w));
+    for x in 0..w {
+        let a = if above.is_empty() {
+            0.0
+        } else {
+            upper(above[x], 0.0)
+        };
+        let b = if below.is_empty() {
+            0.0
+        } else {
+            upper(-below[x], 0.0)
+        };
+        output[x] = output[x] + a + b;
     }
+}
+
+// Test adapter for the same streamed row functions used by erode_pipe. The
+// independent test oracle scatters in f64 and does not share this implementation.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn transport_gather<const FROZEN: bool>(
+    material: &mut [f32],
+    scratch: &mut [f32],
+    velocity: &[[f32; 2]],
+    mobility: &[f32],
+    w: usize,
+    h: usize,
+    flow_dt: f32,
+) {
+    let n = w * h;
+    assert!(
+        material.len() == n && scratch.len() == n && velocity.len() == n && mobility.len() == n
+    );
+    let mut horizontal_flux = vec![0.0; w];
+    let mut horizontal_load = vec![0.0; w];
+    let mut flux = vec![0.0; w * 3];
+    for z in 0..h {
+        let start = z * w;
+        let above = &mobility[z.saturating_sub(1) * w..z.saturating_sub(1) * w + w];
+        let below = &mobility[(z + 1).min(h - 1) * w..(z + 1).min(h - 1) * w + w];
+        transport_prepare_row::<FROZEN>(
+            &material[start..start + w],
+            &velocity[start..start + w],
+            &mobility[start..start + w],
+            above,
+            below,
+            &mut horizontal_flux,
+            &mut horizontal_load,
+            &mut flux[(z % 3) * w..(z % 3 + 1) * w],
+            &mut scratch[start..start + w],
+            z,
+            h,
+            flow_dt,
+        );
+        if z > 0 {
+            let above = if z > 1 {
+                &flux[((z - 2) % 3) * w..((z - 2) % 3 + 1) * w]
+            } else {
+                &[]
+            };
+            let below = &flux[(z % 3) * w..(z % 3 + 1) * w];
+            transport_receive_row(&mut scratch[(z - 1) * w..z * w], above, below);
+        }
+    }
+    let above = &flux[((h - 2) % 3) * w..((h - 2) % 3 + 1) * w];
+    transport_receive_row(&mut scratch[(h - 1) * w..h * w], above, &[]);
+    material.copy_from_slice(scratch);
 }
 
 // A nonnegative result proves every thermal stencil is inactive. Widening the
@@ -1109,36 +1211,220 @@ mod tests {
         assert!(checked > 0);
     }
     #[test]
-    fn unmasked_transport_matches_masked_path_and_conserves_material() {
-        let values = [-0.45, -f32::MIN_POSITIVE, 0.0, f32::MIN_POSITIVE, 0.45];
-        for (w, h) in [(2usize, 2usize), (3, 7), (19, 2), (17, 13)] {
-            for z in 0..h {
-                let count = ((z + 2).min(h) - z.saturating_sub(1)) * w;
-                let mobility = vec![1.0; count];
-                let material: Vec<f32> = (0..w).map(|x| (x + 1) as f32 / 16.0).collect();
-                for phase in 0..values.len() {
-                    let velocity: Vec<[f32; 2]> = (0..w)
-                        .map(|x| {
-                            [
-                                values[(x + phase) % values.len()],
-                                values[(x * 3 + phase) % values.len()],
-                            ]
-                        })
-                        .collect();
-                    let mut fast = vec![0.0; count];
-                    let mut reference = vec![0.0; count];
-                    transport_row::<false>(&material, &velocity, &mobility, &mut fast, z, h, 1.0);
-                    transport_row::<true>(
-                        &material,
+    fn gather_constant_velocity_impulse_has_bilinear_weights() {
+        let w = 7;
+        let h = 7;
+        let center = 3 * w + 3;
+        for dx in [-0.375f32, 0.0, 0.375] {
+            for dz in [-0.25f32, 0.0, 0.25] {
+                let mut material = vec![0.0; w * h];
+                material[center] = 8.0;
+                let velocity = vec![[dx * 2.0, dz * 2.0]; w * h];
+                transport_gather::<false>(
+                    &mut material,
+                    &mut vec![f32::NAN; w * h],
+                    &velocity,
+                    &vec![1.0; w * h],
+                    w,
+                    h,
+                    0.5,
+                );
+                let mut expected = vec![0.0; w * h];
+                let nx = if dx < 0.0 { 2 } else { 4 };
+                let nz = if dz < 0.0 { 2 } else { 4 };
+                // Exact binary fractions: no tolerance can hide a wrong receiver or weight.
+                expected[center] = 8.0 * (1.0 - dx.abs()) * (1.0 - dz.abs());
+                expected[3 * w + nx] = 8.0 * dx.abs() * (1.0 - dz.abs());
+                expected[nz * w + 3] = 8.0 * (1.0 - dx.abs()) * dz.abs();
+                expected[nz * w + nx] = 8.0 * dx.abs() * dz.abs();
+                assert_eq!(material, expected, "displacement ({dx}, {dz})");
+                assert_eq!(sum(&material), 8.0);
+            }
+        }
+    }
+
+    #[test]
+    fn gather_varying_velocity_matches_independent_forward_remap() {
+        // The oracle deposits donors into a new f64 buffer for each axis, independently
+        // of the production flux/gather implementation and its row-based addressing.
+        let values = [
+            -0.45,
+            -f32::MIN_POSITIVE,
+            -0.0,
+            0.0,
+            f32::MIN_POSITIVE,
+            0.25,
+            0.45,
+        ];
+        for (w, h) in [(2usize, 2usize), (2, 19), (19, 2), (3, 7), (8, 9), (17, 13)] {
+            let n = w * h;
+            for masked in [false, true] {
+                let mobility: Vec<f32> = (0..n)
+                    .map(|i| if masked && i % 7 == 0 { 0.0 } else { 1.0 })
+                    .collect();
+                let initial: Vec<f32> = (0..n)
+                    .map(|i| ((i * 17 % 29) + 1) as f32 / 32.0 * mobility[i])
+                    .collect();
+                let velocity: Vec<[f32; 2]> = (0..n)
+                    .map(|i| [values[i % values.len()], values[(i * 3 + 2) % values.len()]])
+                    .collect();
+                let mut expected: Vec<f64> = initial.iter().map(|&v| f64::from(v)).collect();
+                for (axis, length, stride) in [(0, w, 1), (1, h, w)] {
+                    let mut next = vec![0.0; n];
+                    for i in 0..n {
+                        let coordinate = if axis == 0 { i % w } else { i / w };
+                        let displacement = velocity[i][axis] * 0.75;
+                        let target = if displacement < 0.0 && coordinate > 0 {
+                            Some(i - stride)
+                        } else if displacement > 0.0 && coordinate + 1 < length {
+                            Some(i + stride)
+                        } else {
+                            None
+                        };
+                        let target = target.filter(|&j| mobility[j] > 0.0);
+                        if let Some(j) = target {
+                            let amount = expected[i] * f64::from(displacement.abs());
+                            next[i] += expected[i] - amount;
+                            next[j] += amount;
+                        } else {
+                            next[i] += expected[i];
+                        }
+                    }
+                    expected = next;
+                }
+                let mut material = initial.clone();
+                let mut scratch = vec![f32::NAN; n];
+
+                if masked {
+                    transport_gather::<true>(
+                        &mut material,
+                        &mut scratch,
                         &velocity,
                         &mobility,
-                        &mut reference,
-                        z,
+                        w,
+                        h,
+                        0.75,
+                    );
+                } else {
+                    transport_gather::<false>(
+                        &mut material,
+                        &mut scratch,
+                        &velocity,
+                        &mobility,
+                        w,
+                        h,
+                        0.75,
+                    );
+                    let mut frozen_path = initial;
+                    transport_gather::<true>(
+                        &mut frozen_path,
+                        &mut scratch,
+                        &velocity,
+                        &mobility,
+                        w,
+                        h,
+                        0.75,
+                    );
+                    assert_eq!(
+                        material, frozen_path,
+                        "unit mobility must not change remapping"
+                    );
+                }
+                for (i, (&actual, &want)) in material.iter().zip(&expected).enumerate() {
+                    assert!(actual.is_finite() && actual >= 0.0);
+                    assert!(
+                        (f64::from(actual) - want).abs() <= 2e-7 * want.max(1.0),
+                        "{w}x{h} masked={masked} sample {i}: {actual} != {want}"
+                    );
+                    if mobility[i] == 0.0 {
+                        assert_eq!(actual, 0.0, "frozen receiver {i}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gather_conserves_nonnegative_material_and_replays_over_hundreds_of_steps() {
+        for (w, h) in [(2usize, 2usize), (2, 19), (19, 2), (3, 7), (8, 9), (17, 13)] {
+            let n = w * h;
+            let initial: Vec<f32> = (0..n).map(|i| (i * 977 % 47 + 1) as f32 / 64.0).collect();
+            let total = sum(&initial);
+            let run = || {
+                let mut material = initial.clone();
+                let mut scratch = vec![f32::NAN; n];
+
+                let mobility = vec![1.0; n];
+                let mut velocity = vec![[0.0; 2]; n];
+                for step in 0..400 {
+                    for (i, value) in velocity.iter_mut().enumerate() {
+                        *value = [
+                            ((i * 17 + step * 13) % 91) as f32 / 100.0 - 0.45,
+                            ((i * 31 + step * 7) % 91) as f32 / 100.0 - 0.45,
+                        ];
+                    }
+                    transport_gather::<false>(
+                        &mut material,
+                        &mut scratch,
+                        &velocity,
+                        &mobility,
+                        w,
                         h,
                         1.0,
                     );
-                    assert_eq!(fast, reference);
-                    assert!((sum(&fast) - sum(&material)).abs() / sum(&material) < 1e-6);
+                    assert!(material.iter().all(|v| v.is_finite() && *v >= 0.0));
+                    assert!(
+                        (sum(&material) - total).abs() <= total * 2e-5,
+                        "{w}x{h}: step {step} changed total material"
+                    );
+                }
+                material.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+            };
+            assert_eq!(run(), run(), "{w}x{h}: bit-exact replay");
+        }
+    }
+
+    #[test]
+    fn gather_frozen_wall_and_interior_receivers_do_not_leak() {
+        let w = 9;
+        let h = 7;
+        let n = w * h;
+        let wall = 4;
+        let mut mobility = vec![1.0; n];
+        for z in 0..h {
+            mobility[z * w + wall] = 0.0;
+        }
+        let isolated = 3 * w + 2;
+        mobility[isolated] = 0.0;
+        let mut material: Vec<f32> = (0..n)
+            .map(|i| if i % w < wall { mobility[i] / 4.0 } else { 0.0 })
+            .collect();
+        let total = sum(&material);
+        let mut scratch = vec![f32::NAN; n];
+
+        for step in 0..400 {
+            let velocity: Vec<[f32; 2]> = (0..n)
+                .map(|i| {
+                    [
+                        0.45,
+                        if (i / w + step) % 2 == 0 {
+                            0.375
+                        } else {
+                            -0.375
+                        },
+                    ]
+                })
+                .collect();
+            transport_gather::<true>(&mut material, &mut scratch, &velocity, &mobility, w, h, 1.0);
+            assert!(material.iter().all(|v| v.is_finite() && *v >= 0.0));
+            assert!((sum(&material) - total).abs() <= total * 2e-5);
+            assert_eq!(material[isolated], 0.0);
+            for (i, &value) in material.iter().enumerate() {
+                if i % w >= wall {
+                    assert_eq!(
+                        value, 0.0,
+                        "step {step}: material crossed frozen wall at {i}"
+                    );
                 }
             }
         }
