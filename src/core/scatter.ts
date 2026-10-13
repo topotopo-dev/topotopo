@@ -6,8 +6,10 @@
 //   scatter_elim_neighbours  weighted sample elimination with one radius: each candidate's neighbour list and the
 //                            weight contributions (1 - d / r)^8, per KD-tree slot; the heap that removes candidates
 //                            stays serial (sampleEliminate).
-//   scatter_elim_pairs       the same with radii that follow the density: each candidate's interacting pairs, summed
-//                            into the weights here in discovery order.
+//   scatter_elim_pairs       the same with radii that follow the density: each candidate's interacting pairs, in
+//                            discovery order;
+//   scatter_elim_lists       then each candidate's neighbour list and weight, the pairs at both ends in discovery
+//                            order (every chunk scans all pairs and writes only its candidates' lists).
 //   scatter_conflicts        exact minimum distance: each candidate's earlier candidates closer than r, on the hash
 //                            grid PointGrid uses; the greedy pass over them is serial (minDistanceSelectWith).
 //   scatter_relax            one relaxation pass: each point's repulsion from its neighbours, then the closest point
@@ -40,6 +42,17 @@ export type RunKernel = (kernel: string, job: ScatterJob, opts?: { minElements?:
 type Maybe<T> = T | Promise<T>;
 /** f(x) for a value, x.then(f) for a promise (f may return a promise: it is flattened either way). */
 const then = <T, R>(x: Maybe<T>, f: (v: T) => R | Promise<R>): Maybe<R> => (x instanceof Promise ? x.then(f) : f(x));
+
+type ArrayCtor<T> = { new (b: ArrayBuffer | SharedArrayBuffer): T; new (n: number): T; BYTES_PER_ELEMENT: number };
+
+/**
+ * A zeroed array for data that goes through several pool jobs: in shared memory when there is a RunKernel (and the
+ * platform has SharedArrayBuffer), so parallelMap hands it to the workers without copying it in or out.
+ */
+function poolArray<T>(C: ArrayCtor<T>, length: number, run: RunKernel | undefined): T {
+  if (!run || typeof SharedArrayBuffer === 'undefined') return new C(length);
+  return new C(new SharedArrayBuffer(length * C.BYTES_PER_ELEMENT));
+}
 
 /** Run a kernel through `run`, or here over all elements with `range` when there is none. The chunks' return values. */
 function runKernel(
@@ -191,17 +204,63 @@ export function elimPairsRange(a: { rmax: number }, A: Record<string, any>, star
 }
 
 /**
+ * Neighbour lists (CSR: lstart, nbr, con) and weights w of candidates [start, end) from the pairs of elimPairsRange
+ * end to end (PJ: far end, PF: contribution, pstart: where candidate i's pairs start, n + 1 entries). A candidate's
+ * list holds every pair it is in, in discovery order (pairs found from smaller indices, its own pairs, pairs found
+ * from larger indices), as the serial loop filled them, and w[x] sums the list's contributions in that order from 0:
+ * the serial loop's w[i] += f; w[j] += f over the pairs, bit for bit. Every chunk scans all pairs twice and writes
+ * only its own candidates: first their degrees and where their lists start (after one entry per pair found from a
+ * smaller index, pstart[start], and one per pair whose far end is smaller), then the lists. lstart[n] is the caller's
+ * (twice the pair count).
+ */
+export function elimListsRange(_a: unknown, A: Record<string, any>, start: number, end: number): void {
+  const PJ: Int32Array = A.PJ, PF: Float64Array = A.PF, pstart: Int32Array = A.pstart;
+  const lstart: Int32Array = A.lstart, nbr: Int32Array = A.nbr, con: Float64Array = A.con, w: Float64Array = A.w;
+  const span = end - start, fill = new Int32Array(span);
+  let below = 0;
+  for (let q = 0, m = PJ.length; q < m; q++) {
+    const s = PJ[q] - start;
+    if (s < 0) below++;
+    else if (s < span) fill[s]++;
+  }
+  for (let x = start, o = pstart[start] + below; x < end; x++) {
+    const d = pstart[x + 1] - pstart[x] + fill[x - start];
+    lstart[x] = o; fill[x - start] = o;
+    o += d;
+  }
+  for (let i = 0, q = 0, n = pstart.length - 1; i < n; i++) {
+    const qe = pstart[i + 1];
+    if (i >= start && i < end) {
+      // i's own pairs, in list order
+      let f = fill[i - start];
+      for (let e = q; e < qe; e++) { nbr[f] = PJ[e]; con[f] = PF[e]; f++; }
+      fill[i - start] = f;
+    }
+    for (; q < qe; q++) {
+      const s = PJ[q] - start;
+      if (s >= 0 && s < span) { const f = fill[s]++; nbr[f] = i; con[f] = PF[q]; }
+    }
+  }
+  // fill[x - start] is now the end of x's list
+  for (let x = start; x < end; x++) {
+    let ws = 0;
+    for (let e = lstart[x], e1 = fill[x - start]; e < e1; e++) ws += con[e];
+    w[x] = ws;
+  }
+}
+
+/**
  * Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. With `scale`, candidate i has
  * the radius rmax × scale[i] (pairs use the mean of their radii), so the spacing follows a varying density (smaller
  * radii where points should be denser); without it every candidate has rmax.
  *
  * Each point's neighbour list (as KDTree.neighbours orders it) and each pair's weight contribution (1 - d / r)^8 are
- * computed once into CSR arrays (in chunks on the pool when `run` is given: scatter_elim_neighbours /
- * scatter_elim_pairs) and reused when a removal lowers the neighbours' weights; the max-heap keeps the weights of its
- * slots next to the slots. Without scale, everything runs on the KD-tree's slot numbering (points in tree order, for
- * locality); with scale, pairs are found in point order and their weights accumulate in that order. The heap does the
- * same operations on the same weights (entries relabelled), so the kept subset is the same as the straightforward
- * version's, with or without the pool. Returns the kept indices, ascending.
+ * computed once into CSR arrays (in chunks on the pool when `run` is given: scatter_elim_neighbours, or
+ * scatter_elim_pairs and scatter_elim_lists) and reused when a removal lowers the neighbours' weights; the max-heap
+ * keeps the weights of its slots next to the slots. Without scale, everything runs on the KD-tree's slot numbering
+ * (points in tree order, for locality); with scale, pairs are found in point order and their weights accumulate in
+ * that order. The heap does the same operations on the same weights (entries relabelled), so the kept subset is the
+ * same as the straightforward version's, with or without the pool. Returns the kept indices, ascending.
  */
 export function sampleEliminate(pos: Float64Array, target: number, rmax: number, scale?: ArrayLike<number>): Int32Array;
 export function sampleEliminate(pos: Float64Array, target: number, rmax: number, scale: ArrayLike<number> | undefined, run: RunKernel | undefined): Maybe<Int32Array>;
@@ -231,28 +290,21 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number,
       if (chunks.length > 1) {
         let total = 0, o = 0;
         for (const ch of chunks) total += ch.pj.length;
-        PJ = new Int32Array(total); PF = new Float64Array(total);
+        PJ = poolArray(Int32Array, total, run); PF = poolArray(Float64Array, total, run);
         for (const ch of chunks) { PJ.set(ch.pj, o); PF.set(ch.pf, o); o += ch.pj.length; }
       }
-      // weights summed in discovery order; each pair is listed at both ends, and its removal weight equals its
-      // creation weight (same distance, same summed radius): stored with it
-      const w = new Float64Array(n), deg = new Int32Array(n);
-      for (let i = 0, q = 0; i < n; i++)
-        for (let k = pc[i]; k > 0; k--, q++) {
-          const j = PJ[q], f = PF[q];
-          w[i] += f; w[j] += f;
-          deg[i]++; deg[j]++;
-        }
-      const start = new Int32Array(n + 1);
-      for (let i = 0; i < n; i++) start[i + 1] = start[i] + deg[i];
-      const nbr = new Int32Array(start[n]), con = new Float64Array(start[n]), fill = start.slice(0, n);
-      for (let i = 0, q = 0; i < n; i++)
-        for (let k = pc[i]; k > 0; k--, q++) {
-          const j = PJ[q], f = PF[q];
-          nbr[fill[i]] = j; con[fill[i]++] = f;
-          nbr[fill[j]] = i; con[fill[j]++] = f;
-        }
-      return eliminate(n, target, start, nbr, con, w, null);
+      // each pair is listed at both ends, and its removal weight equals its creation weight (same distance, same
+      // summed radius): stored with it. The lists and the weights (summed in discovery order) in chunks of candidates
+      // (scatter_elim_lists), in shared memory that the pool's workers write in place
+      const pstart = poolArray(Int32Array, n + 1, run);
+      for (let i = 0; i < n; i++) pstart[i + 1] = pstart[i] + pc[i];
+      const m = 2 * PJ.length, start = poolArray(Int32Array, n + 1, run);
+      const nbr = poolArray(Int32Array, m, run), con = poolArray(Float64Array, m, run), w = poolArray(Float64Array, n, run);
+      const job: ScatterJob = { count: n, inputs: { PJ, PF, pstart }, results: { lstart: start, nbr, con, w } };
+      return then(runKernel(run, 'scatter_elim_lists', job, 32768, elimListsRange), () => {
+        start[n] = m;
+        return eliminate(n, target, start, nbr, con, w, null);
+      });
     });
   });
 }
