@@ -1,0 +1,55 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [
+        "edge_length_max:float:1",
+        "edge_length_mean:float:1",
+        "edge_length_min:float:1",
+        "planarity_max:float:1",
+        "planarity_mean:float:1",
+        "quad_fraction:float:1",
+        "singularities:int:1",
+        "target_edge_length:float:1"
+      ],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 94,
+      "prims": 95,
+      "vertices": 374,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "618e43f8c3a3fb4a",
+      "attributes": {
+        "detail.edge_length_max": "16521be824487cba",
+        "detail.edge_length_mean": "605c22c34fcc9889",
+        "detail.edge_length_min": "a3852ba447654ed2",
+        "detail.planarity_max": "9be171658ea4219f",
+        "detail.planarity_mean": "9be171658ea4219f",
+        "detail.quad_fraction": "5051b8b105a8acfb",
+        "detail.singularities": "71f763759cb3658f",
+        "detail.target_edge_length": "fa9a7fd81852d586",
+        "vertex.uv": "3a9c405507d92917"
+      },
+      "topology": "88471abfe8c81009"
+    }
+  },
+  "name": "node.remesh_quad",
+  "ok": true,
+  "source": "fixture for node type \"remesh_quad\" (test/fixtures.ts)",
+  "warnings": []
+}

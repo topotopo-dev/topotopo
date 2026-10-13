@@ -11,6 +11,8 @@ cargo test --manifest-path kernels/Cargo.toml
 cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings
 cargo fmt --manifest-path kernels/Cargo.toml --check
 cargo bench --manifest-path kernels/Cargo.toml --bench wavefront
+cargo bench --manifest-path kernels/Cargo.toml --bench remesh_quad
+node bench/remeshquad.ts
 ```
 
 Toolchain used on 2026-10-13:
@@ -27,7 +29,9 @@ target wasm32-unknown-unknown
 unit, stripped symbols and panic=abort. Invalid geometry is handled by Rust `Result`
 errors, not panics. `wasm-pack` runs `wasm-opt -O3 --enable-bulk-memory
 --enable-nontrapping-float-to-int`. The session's budget is strictly below 1,000,000 bytes
-for session 1; session 2's total WASM budget is 1,500,000 bytes. See [BENCH.md](BENCH.md)
+for session 1; session 2's total WASM budget is 1,500,000 bytes and session 3's is
+2,000,000 bytes. The existing Node smoke test also retains its stricter 1,000,000-byte
+check. See [BENCH.md](BENCH.md)
 for the measured size.
 
 The speed-focused release settings are intentional: sampled-grid BVH traversal and
@@ -44,3 +48,5 @@ For a browser smoke test, serve the repository over HTTP and open `kernels/demo.
 It fetches the same committed WASM bytes and checks rectangle, L-shape and courtyard
 skeleton, offset, roof and replay determinism. `file://` access is not supported by the
 browser's fetch rules. The production host-agnostic loader lives in `src/wasm/kernels.ts`.
+The current demo also checks three SDF contours and both quad remeshing modes,
+including deterministic replay and point provenance.
