@@ -394,7 +394,10 @@ wrangle, SDF meshing, triangulate, merge, fuse) against targets from the roadmap
 never failing). Compare with the thread pool off: `TOPOTOPO_WORKERS=0 npm run bench -- --filter noise`.
 `node bench/expr.ts` cooks graphs with 1000 `"=expr"` params (cold and cached) to time the expression sandbox.
 
-CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test` on Node 22 and 24 for every push and pull request.
+CI (`.github/workflows/ci.yml`) runs `npm run typecheck`, `npm test`, `npm run build`, `npm run pack:test` and
+`npm run site:check` on Linux and Windows (Node 22, plus Node 24 on Linux) for every pull request and every push to
+`main`. `test/portability.ts` (part of `npm test`) covers what one platform cannot see: generated files that must not
+depend on the locale, exact file-name case, a symlinked checkout and LF line endings.
 
 **Package.** `npm run pack:test` builds and packs the npm tarball, installs it into an empty project in a temp
 directory and uses it from there: the `topotopo` bin (help, cooking an example with a render), the library import and

@@ -103,7 +103,9 @@ export function checkSite(dir = SITE_DIR, siteUrl = 'https://topotopo.dev'): Che
   return { problems, pages: pages.length, links, files: files.length, bytes };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// realpath on both sides: started through a symlinked path, argv[1] keeps the link while the module URL does not (the
+// check would then do nothing and exit 0)
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   const dir = process.argv[2] ? path.resolve(process.argv[2]) : SITE_DIR;
   const r = checkSite(dir);
   for (const p of r.problems) console.log('FAIL ' + p);
