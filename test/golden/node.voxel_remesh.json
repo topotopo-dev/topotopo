@@ -2,7 +2,7 @@
   "errors": [],
   "fingerprint": {
     "attributes": {
-      "detail": [],
+      "detail": ["adaptive_collapses:int:1", "fallback_cells:int:1"],
       "point": ["P:float:3", "grid_cell:int:1"],
       "prim": [],
       "vertex": []
@@ -12,9 +12,9 @@
       "min": [-0.5, -0.5, -0.5]
     },
     "counts": {
-      "points": 4802,
-      "prims": 9600,
-      "vertices": 28800,
+      "points": 3443,
+      "prims": 4938,
+      "vertices": 16758,
       "volumes": 0
     },
     "groups": {
@@ -24,11 +24,13 @@
       "vertex": []
     },
     "hashes": {
-      "P": "cf1bd90cff4a6ee6",
+      "P": "02b1c0b4d150b02a",
       "attributes": {
-        "point.grid_cell": "dcd69c17daaf5195"
+        "detail.adaptive_collapses": "9be171658ea4219f",
+        "detail.fallback_cells": "20dbd3d59850e9eb",
+        "point.grid_cell": "a9dbcb37bcfa9e85"
       },
-      "topology": "9014071103275a37"
+      "topology": "598587d59cb8ad33"
     }
   },
   "name": "node.voxel_remesh",

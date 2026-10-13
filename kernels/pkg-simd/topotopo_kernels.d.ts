@@ -1,7 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 
-export function dual_contour(g: any, iso: number, qef_tolerance: number, sharp: boolean, clamp_to_cell: boolean): object;
+export function dual_contour(g: any, iso: number, qef_tolerance: number, sharp: boolean, clamp_to_cell: boolean, conservative?: boolean | null, adaptive?: number | null, sharp_threshold?: number | null): object;
 
 export function erode_droplet(height: Float32Array, hardness: Float32Array, freeze: Float32Array, w: number, h: number, cell: number, params: any, seed: bigint): object;
 
@@ -37,7 +37,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly dual_contour: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly dual_contour: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly erode_droplet: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: bigint) => void;
     readonly erode_pipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: bigint) => void;
     readonly flow_accumulation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;

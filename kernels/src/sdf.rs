@@ -316,6 +316,21 @@ pub(crate) fn fill_distances(grid: &mut Grid) -> Result<(), String> {
     let dims = grid.dims.map(|d| d as usize);
     let strides = [1, dims[0], dims[0] * dims[1]];
     let mut distance: Vec<f32> = grid.values.iter().map(|v| v.abs()).collect();
+    // 0: neighbours unchanged since the last solve; 1: needs solving; 2: exact
+    // fixed band sample. Re-solving a cell with identical neighbours cannot
+    // change it. Dependency marks preserve the original sweep order and cycle
+    // limit, but omit the expensive Eikonal solve after convergence locally.
+    // Row counts also omit whole converged spans from later sweep directions.
+    let mut pending: Vec<u8> = grid
+        .values
+        .iter()
+        .map(|v| if v.is_finite() { 2 } else { 1 })
+        .collect();
+    let mut pending_rows: Vec<usize> = pending
+        .chunks_exact(dims[0])
+        .map(|row| row.iter().filter(|&&value| value == 1).count())
+        .collect();
+    let row_strides = [0, 1, dims[1]];
     for _cycle in 0..4 {
         let mut changed = false;
         for order in 0..8 {
@@ -323,12 +338,19 @@ pub(crate) fn fill_distances(grid: &mut Grid) -> Result<(), String> {
                 let z = if order & 4 == 0 { iz } else { dims[2] - 1 - iz };
                 for iy in 0..dims[1] {
                     let y = if order & 2 == 0 { iy } else { dims[1] - 1 - iy };
+                    let row_index = y + dims[1] * z;
+                    if pending_rows[row_index] == 0 {
+                        continue;
+                    }
+                    let row = dims[0] * row_index;
                     for ix in 0..dims[0] {
                         let x = if order & 1 == 0 { ix } else { dims[0] - 1 - ix };
-                        let i = x + dims[0] * (y + dims[1] * z);
-                        if grid.values[i].is_finite() {
+                        let i = row + x;
+                        if pending[i] != 1 {
                             continue;
                         }
+                        pending[i] = 0;
+                        pending_rows[row_index] -= 1;
                         let xyz = [x, y, z];
                         let mut neighbours = [f64::INFINITY; 3];
                         for axis in 0..3 {
@@ -344,6 +366,24 @@ pub(crate) fn fill_distances(grid: &mut Grid) -> Result<(), String> {
                         if candidate < distance[i] {
                             distance[i] = candidate;
                             changed = true;
+                            // The upwind Eikonal solution cannot improve a
+                            // neighbour already no larger than this value.
+                            for axis in 0..3 {
+                                if xyz[axis] > 0 {
+                                    let neighbour = i - strides[axis];
+                                    if pending[neighbour] == 0 && distance[neighbour] > candidate {
+                                        pending[neighbour] = 1;
+                                        pending_rows[row_index - row_strides[axis]] += 1;
+                                    }
+                                }
+                                if xyz[axis] + 1 < dims[axis] {
+                                    let neighbour = i + strides[axis];
+                                    if pending[neighbour] == 0 && distance[neighbour] > candidate {
+                                        pending[neighbour] = 1;
+                                        pending_rows[row_index + row_strides[axis]] += 1;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -383,4 +423,137 @@ fn eikonal(mut v: [f64; 3], h: f64) -> f64 {
         d = (sum + libm::sqrt((sum * sum - 3.0 * (square - h * h)).max(0.0))) / 3.0;
     }
     d
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fill_reference(grid: &mut Grid) {
+        let dims = grid.dims.map(|d| d as usize);
+        let strides = [1, dims[0], dims[0] * dims[1]];
+        let mut distance: Vec<f32> = grid.values.iter().map(|v| v.abs()).collect();
+        for _cycle in 0..4 {
+            let mut changed = false;
+            for order in 0..8 {
+                for iz in 0..dims[2] {
+                    let z = if order & 4 == 0 { iz } else { dims[2] - 1 - iz };
+                    for iy in 0..dims[1] {
+                        let y = if order & 2 == 0 { iy } else { dims[1] - 1 - iy };
+                        for ix in 0..dims[0] {
+                            let x = if order & 1 == 0 { ix } else { dims[0] - 1 - ix };
+                            let i = x + dims[0] * (y + dims[1] * z);
+                            if grid.values[i].is_finite() {
+                                continue;
+                            }
+                            let xyz = [x, y, z];
+                            let mut neighbours = [f64::INFINITY; 3];
+                            for axis in 0..3 {
+                                if xyz[axis] > 0 {
+                                    neighbours[axis] = distance[i - strides[axis]] as f64;
+                                }
+                                if xyz[axis] + 1 < dims[axis] {
+                                    neighbours[axis] =
+                                        neighbours[axis].min(distance[i + strides[axis]] as f64);
+                                }
+                            }
+                            let candidate = eikonal(neighbours, grid.voxel) as f32;
+                            if candidate < distance[i] {
+                                distance[i] = candidate;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        for (value, distance) in grid.values.iter_mut().zip(distance) {
+            *value = distance.copysign(*value);
+        }
+    }
+
+    #[test]
+    fn dependency_sweeps_are_byte_exact_with_original_traversal() {
+        let mut state = 0x71d5_ab83_u32;
+        for case in 0..80 {
+            let dims = [9 + case % 4, 10 + case % 3, 8 + case % 5];
+            let voxel = [0.03125, 0.13, 0.7, 1.1][case as usize % 4];
+            let mut values = Vec::new();
+            for z in 0..dims[2] {
+                for y in 0..dims[1] {
+                    for x in 0..dims[0] {
+                        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                        let p = [x as f64 - 4.3, y as f64 - 5.1, z as f64 - 3.7];
+                        let d = if case % 2 == 0 {
+                            libm::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) - 3.
+                        } else {
+                            p[0].abs().max(p[1].abs()).max(p[2].abs()) - 2.7
+                        } * voxel;
+                        let exact = d.abs() < voxel * 1.7 || state.is_multiple_of(19);
+                        values.push(if exact {
+                            d as f32
+                        } else {
+                            f32::INFINITY.copysign(d as f32)
+                        });
+                    }
+                }
+            }
+            let mut actual = Grid {
+                dims,
+                origin: [0.; 3],
+                voxel,
+                values,
+            };
+            let mut expected = actual.clone();
+            fill_reference(&mut expected);
+            fill_distances(&mut actual).unwrap();
+            assert!(
+                actual
+                    .values
+                    .iter()
+                    .zip(&expected.values)
+                    .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "sweep mismatch in case {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn dependency_sweeps_preserve_sparse_extreme_and_signed_samples() {
+        let mut state = 0xbde9_020d_u32;
+        for exponent in [-35, -16, -4, 0, 5, 16, 30] {
+            let voxel = 10_f64.powi(exponent);
+            let mut values = vec![f32::INFINITY; 13 * 11 * 9];
+            for value in &mut values {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                let sign = if state & 1 == 0 { -1. } else { 1. };
+                if state.is_multiple_of(23) {
+                    *value = ((state % 177) as f64 * voxel * sign) as f32;
+                } else {
+                    *value = f32::INFINITY.copysign(sign as f32);
+                }
+            }
+            values[37] = -0.;
+            let mut actual = Grid {
+                dims: [13, 11, 9],
+                origin: [0.; 3],
+                voxel,
+                values,
+            };
+            let mut expected = actual.clone();
+            fill_reference(&mut expected);
+            fill_distances(&mut actual).unwrap();
+            assert!(
+                actual
+                    .values
+                    .iter()
+                    .zip(&expected.values)
+                    .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "sweep mismatch at exponent {exponent}"
+            );
+        }
+    }
 }

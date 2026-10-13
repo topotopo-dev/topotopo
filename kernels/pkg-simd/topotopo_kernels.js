@@ -6,12 +6,15 @@
  * @param {number} qef_tolerance
  * @param {boolean} sharp
  * @param {boolean} clamp_to_cell
+ * @param {boolean | null} [conservative]
+ * @param {number | null} [adaptive]
+ * @param {number | null} [sharp_threshold]
  * @returns {object}
  */
-export function dual_contour(g, iso, qef_tolerance, sharp, clamp_to_cell) {
+export function dual_contour(g, iso, qef_tolerance, sharp, clamp_to_cell, conservative, adaptive, sharp_threshold) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.dual_contour(retptr, addHeapObject(g), iso, qef_tolerance, sharp, clamp_to_cell);
+        wasm.dual_contour(retptr, addHeapObject(g), iso, qef_tolerance, sharp, clamp_to_cell, isLikeNone(conservative) ? 0xFFFFFF : conservative ? 1 : 0, !isLikeNone(adaptive), isLikeNone(adaptive) ? 0 : adaptive, !isLikeNone(sharp_threshold), isLikeNone(sharp_threshold) ? 0 : sharp_threshold);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);

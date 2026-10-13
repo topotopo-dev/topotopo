@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use topotopo_kernels::dual_contour::{DualMesh, dual_contour};
+use topotopo_kernels::dual_contour::{DualMesh, dual_contour, dual_contour_with_options};
 use topotopo_kernels::sdf::Grid;
 
 fn field(n: u32, voxel: f64, origin: [f64; 3], sample: impl Fn(f64, f64, f64) -> f64) -> Grid {
@@ -198,14 +198,15 @@ fn no_proper_intersections(mesh: &DualMesh) {
 }
 
 #[test]
-fn sphere_area_within_two_percent_and_outward_winding() {
+fn sphere_area_within_one_percent_and_outward_winding() {
     let grid = field(33, 0.075, [-1.2; 3], sphere);
     let mesh = contour(&grid);
-    let digest = mesh
+    let legacy = dual_contour_with_options(&grid, 0., 1e-6, true, true, true, 0., 0.5).unwrap();
+    let digest = legacy
         .positions
         .iter()
         .flat_map(|v| v.to_bits().to_le_bytes())
-        .chain(mesh.vertex_point.iter().flat_map(|v| v.to_le_bytes()))
+        .chain(legacy.vertex_point.iter().flat_map(|v| v.to_le_bytes()))
         .fold(0xcbf29ce484222325u64, |h, b| {
             (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
         });
@@ -215,7 +216,7 @@ fn sphere_area_within_two_percent_and_outward_winding() {
     let analytic = 4. * std::f64::consts::PI;
     let error = (area(&mesh) / analytic - 1.).abs();
     println!("sphere surface area relative error: {:.6}%", error * 100.);
-    assert!(error < 0.02, "sphere area relative error: {error}");
+    assert!(error < 0.01, "sphere area relative error: {error}");
     assert_eq!(manifold(&mesh), 2);
     assert!(signed_volume(&mesh) > 4.);
     assert_eq!(mesh.cell_index.len() * 3, mesh.positions.len());
@@ -223,7 +224,7 @@ fn sphere_area_within_two_percent_and_outward_winding() {
 }
 
 #[test]
-fn box_corners_and_edges_are_within_half_a_voxel() {
+fn box_corners_and_edges_are_within_a_tenth_voxel_and_straight() {
     let center = [0.023, -0.031, 0.017];
     let half = [0.67, 0.53, 0.59];
     let voxel = 0.08;
@@ -250,15 +251,59 @@ fn box_corners_and_edges_are_within_half_a_voxel() {
             .map(|v| libm::sqrt((0..3).map(|i| (v[i] - p[i]).powi(2)).sum()))
             .fold(f64::INFINITY, f64::min);
         assert!(
-            distance <= voxel * 0.5,
-            "box corner {corner} error {distance}, half voxel {}",
-            voxel * 0.5
+            distance <= voxel * 0.1,
+            "box corner {corner} error {distance}, tenth voxel {}",
+            voxel * 0.1
         );
         max_corner_error = max_corner_error.max(distance);
     }
+    assert_eq!(mesh.fallback_cells, 0);
+    assert!(
+        mesh.prim_start
+            .windows(2)
+            .all(|bounds| bounds[1] - bounds[0] == 4)
+    );
+    assert_eq!(
+        mesh.cell_index.iter().collect::<BTreeSet<_>>().len(),
+        mesh.cell_index.len()
+    );
+    let mut straightness: f64 = 0.;
+    for axis in 0..3 {
+        let u = (axis + 1) % 3;
+        let v = (axis + 2) % 3;
+        for a in [-1., 1.] {
+            for b in [-1., 1.] {
+                let target = [center[u] + a * half[u], center[v] + b * half[v]];
+                let points: Vec<_> = mesh
+                    .positions
+                    .chunks_exact(3)
+                    .filter(|p| {
+                        (p[u] - target[0]).abs() < voxel * 0.1
+                            && (p[v] - target[1]).abs() < voxel * 0.1
+                            && (p[axis] - center[axis]).abs() < half[axis] - voxel
+                    })
+                    .collect();
+                assert!(points.len() > 4);
+                let mean = [
+                    points.iter().map(|p| p[u]).sum::<f64>() / points.len() as f64,
+                    points.iter().map(|p| p[v]).sum::<f64>() / points.len() as f64,
+                ];
+                for p in points {
+                    straightness = straightness.max(libm::sqrt(
+                        (p[u] - mean[0]).powi(2) + (p[v] - mean[1]).powi(2),
+                    ));
+                }
+            }
+        }
+    }
+    assert!(straightness < 0.05 * voxel);
     println!(
-        "box maximum corner error: {max_corner_error:.9} (half voxel {})",
-        voxel * 0.5
+        "box maximum edge straightness deviation: {:.9} voxels",
+        straightness / voxel
+    );
+    println!(
+        "box maximum corner error: {max_corner_error:.9} (tenth voxel {})",
+        voxel * 0.1
     );
     for axis in 0..3 {
         for a in [-1., 1.] {
@@ -279,7 +324,7 @@ fn box_corners_and_edges_are_within_half_a_voxel() {
                             )
                         })
                         .fold(f64::INFINITY, f64::min);
-                    assert!(distance <= voxel * 0.5, "box edge error {distance}");
+                    assert!(distance <= voxel * 0.1, "box edge error {distance}");
                 }
             }
         }
@@ -294,6 +339,22 @@ fn torus_has_genus_one() {
         libm::sqrt(ring * ring + y * y) - 0.27
     });
     let mesh = contour(&grid);
+    let max_error = mesh
+        .positions
+        .chunks_exact(3)
+        .map(|p| {
+            let ring = libm::sqrt(p[0] * p[0] + p[2] * p[2]) - 0.73;
+            (libm::sqrt(ring * ring + p[1] * p[1]) - 0.27).abs() / grid.voxel
+        })
+        .fold(0., f64::max);
+    assert!(max_error <= 0.1, "torus residual {max_error} voxels");
+    println!("torus max analytic distance residual={max_error:.9} voxels");
+    println!(
+        "torus vertices={}, faces={}, fallback_cells={}",
+        mesh.positions.len() / 3,
+        mesh.prim_start.len() - 1,
+        mesh.fallback_cells
+    );
     assert_eq!(manifold(&mesh), 0);
     assert!(signed_volume(&mesh) > 0.);
     no_proper_intersections(&mesh);
@@ -327,6 +388,27 @@ fn seeded_random_unions_are_manifold_deterministic_and_do_not_cross() {
         });
         let mesh = dual_contour(&grid, 0., 1e-6, true, true)
             .unwrap_or_else(|e| panic!("case {case}: {e}"));
+        let max_error = mesh
+            .positions
+            .chunks_exact(3)
+            .map(|p| {
+                balls
+                    .iter()
+                    .map(|(c, r)| {
+                        libm::sqrt((0..3).map(|a| (p[a] - c[a]).powi(2)).sum::<f64>()) - r
+                    })
+                    .fold(f64::INFINITY, f64::min)
+                    .abs()
+                    / grid.voxel
+            })
+            .fold(0., f64::max);
+        println!("union {case}: max analytic distance residual={max_error:.9} voxels");
+        println!(
+            "union {case}: vertices={}, faces={}, fallback_cells={}",
+            mesh.positions.len() / 3,
+            mesh.prim_start.len() - 1,
+            mesh.fallback_cells
+        );
         manifold(&mesh);
         no_proper_intersections(&mesh);
         let again = contour(&grid);
@@ -354,7 +436,7 @@ fn validation_empty_and_infinite_band_samples() {
     assert!(dual_contour(&grid, 0., 0., true, true).is_err());
     assert!(dual_contour(&grid, 0., f64::NAN, true, true).is_err());
     let smooth = dual_contour(&grid, 0., 1e-6, false, true).unwrap();
-    assert_eq!(smooth.vertex_point, mesh.vertex_point);
+    assert_eq!(manifold(&smooth), 2);
     assert_ne!(smooth.positions, mesh.positions);
     grid.values.fill(1.);
     let empty = contour(&grid);
@@ -412,5 +494,64 @@ fn grid_aligned_zero_faces_and_internal_negative_zero_do_not_degenerate() {
             message.contains("unconstrained QEF leaves its source cell"),
             "{message}"
         ),
+    }
+}
+
+#[test]
+fn extraction_controls_preserve_manifold_and_unsupported_octree_retains_uniform() {
+    let grid = field(17, 0.15, [-1.2; 3], sphere);
+    let uniform = dual_contour_with_options(&grid, 0., 1e-6, true, true, false, 0., 0.5).unwrap();
+    let adaptive = dual_contour_with_options(&grid, 0., 1e-6, true, true, false, 0.1, 0.5).unwrap();
+    assert_eq!(adaptive.positions, uniform.positions);
+    assert_eq!(adaptive.prim_start, uniform.prim_start);
+    assert_eq!(adaptive.vertex_point, uniform.vertex_point);
+    assert_eq!(adaptive.adaptive_collapses, 0);
+    assert_eq!(manifold(&adaptive), 2);
+    let sensitive = dual_contour_with_options(&grid, 0., 1e-6, true, true, false, 0., 0.).unwrap();
+    let relaxed = dual_contour_with_options(&grid, 0., 1e-6, true, true, false, 0., 1.).unwrap();
+    assert_ne!(sensitive.positions, relaxed.positions);
+    assert!(sensitive.fallback_cells > relaxed.fallback_cells);
+    assert_eq!(manifold(&sensitive), 2);
+    assert_eq!(manifold(&relaxed), 2);
+    no_proper_intersections(&sensitive);
+    no_proper_intersections(&relaxed);
+    for tolerance in [-0.1, f64::NAN, f64::INFINITY] {
+        assert!(
+            dual_contour_with_options(&grid, 0., 1e-6, true, true, false, tolerance, 0.5).is_err()
+        );
+    }
+    for threshold in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+        assert!(
+            dual_contour_with_options(&grid, 0., 1e-6, true, true, false, 0., threshold).is_err()
+        );
+    }
+}
+
+#[test]
+fn axial_affine_reconstruction_respects_scaled_implicit_values() {
+    let make = |scale: f64| {
+        field(27, 0.08, [-1.04; 3], |x, y, z| {
+            let center = [0.023, -0.031, 0.017];
+            let half = [0.67, 0.53, 0.59];
+            let q = std::array::from_fn::<_, 3, _>(|i| ([x, y, z][i] - center[i]).abs() - half[i]);
+            scale
+                * (libm::sqrt(q.iter().map(|v| v.max(0.).powi(2)).sum::<f64>())
+                    + q[0].max(q[1]).max(q[2]).min(0.))
+        })
+    };
+    let expected = contour(&make(1.));
+    for scale in [0.2, 2.] {
+        let actual = contour(&make(scale));
+        assert_eq!(actual.vertex_point, expected.vertex_point);
+        assert_eq!(actual.prim_start, expected.prim_start);
+        assert_eq!(actual.fallback_cells, 0);
+        let max_error = actual
+            .positions
+            .iter()
+            .zip(&expected.positions)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0., f64::max);
+        assert!(max_error < 0.08 * 1e-5, "scale {scale}: {max_error}");
+        assert_eq!(manifold(&actual), 2);
     }
 }

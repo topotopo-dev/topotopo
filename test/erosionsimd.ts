@@ -52,20 +52,21 @@ const contourErrors = new Set([
   'dual_contour: level set reaches the grid boundary; enlarge the grid padding or reduce the iso/offset',
   'dual_contour: a sign-changing edge has an infinite sample; increase band width or fill the grid',
 ]);
-function compareContour(grid: GridInput, index: number, iso: number, tolerance: number, sharp: boolean, clamp: boolean): void {
+function compareContour(grid: GridInput, index: number, iso: number, tolerance: number, sharp: boolean, clamp: boolean,
+  conservative = false, adaptive = 0, sharpThreshold = 0.5): void {
   // Safe extraction rejects boundary surfaces, infinite sign-changing edges and
   // unclamped QEF solutions outside their cell. Keep rejection counts separate.
-  const label = `dual_contour: grid ${index}, iso ${iso}, sharp ${sharp}, clamp ${clamp}`;
+  const label = `dual_contour: grid ${index}, iso ${iso}, sharp ${sharp}, clamp ${clamp}, conservative ${conservative}, adaptive ${adaptive}, sharp threshold ${sharpThreshold}`;
   let expected: object;
   try {
-    expected = scalar.dual_contour(grid, iso, tolerance, sharp, clamp);
+    expected = scalar.dual_contour(grid, iso, tolerance, sharp, clamp, conservative, adaptive, sharpThreshold);
   } catch (error) {
     assert.ok(typeof error === 'string' && contourErrors.has(error), `${label}: known ABI validation error`);
-    assert.throws(() => simd.dual_contour(grid, iso, tolerance, sharp, clamp), actual => actual === error, label);
+    assert.throws(() => simd.dual_contour(grid, iso, tolerance, sharp, clamp, conservative, adaptive, sharpThreshold), actual => actual === error, label);
     rejections++;
     return;
   }
-  exact(simd.dual_contour(grid, iso, tolerance, sharp, clamp), expected, label);
+  exact(simd.dual_contour(grid, iso, tolerance, sharp, clamp, conservative, adaptive, sharpThreshold), expected, label);
   coverage.set('dual_contour', (coverage.get('dual_contour') ?? 0) + 1);
   checks++;
 }
@@ -137,7 +138,29 @@ for (const [index, grid] of grids.entries()) {
   for (const sharp of [false, true]) for (const clamp of [false, true])
     compareContour(grid, index, 0, 1e-6, sharp, clamp);
   compareContour(grid, index, 0.125, 1e-4, true, true);
+  compareContour(grid, index, 0, 1e-6, true, true, true);
+  compareContour(grid, index, 0, 1e-6, true, true, false, 0.1, 0.25);
 }
+
+// Contouring parity includes retained quads, nonplanar splits, sharp features,
+// topology fallback and adaptive requests, including their reported counts.
+const contourCorpus = [
+  analytic([21, 21, 21], [-1.25, -1.25, -1.25], 0.125, (x, y, z) => Math.hypot(Math.hypot(x, z) - 0.7, y) - 0.23),
+  analytic([21, 21, 21], [-1.25, -1.25, -1.25], 0.125, (x, y, z) => {
+    const q = [Math.abs(x - 0.023) - 0.63, Math.abs(y + 0.037) - 0.55, Math.abs(z - 0.019) - 0.47];
+    return Math.hypot(...q.map(v => Math.max(0, v))) + Math.min(Math.max(...q), 0);
+  }),
+  analytic([21, 21, 21], [-1.25, -1.25, -1.25], 0.125, (x, y, z) => Math.min(
+    Math.hypot(x + 0.23, y - 0.07, z + 0.13) - 0.58,
+    Math.hypot(x - 0.31, y + 0.17, z - 0.09) - 0.51,
+    Math.hypot(x - 0.11, y - 0.41, z + 0.27) - 0.38)),
+  // Isolated alternating negative samples exercise cells with multiple sheets.
+  analytic([9, 9, 9], [-1, -1, -1], 0.25, (x, y, z) => Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) > 0.5
+    ? 1 : ((Math.round((x + y + z) * 4) & 1) ? -0.1 : 0.2)),
+];
+for (const [index, grid] of contourCorpus.entries()) for (const conservative of [false, true])
+  for (const adaptive of [0, 0.1, 0.4]) for (const threshold of [0, 0.5, 1])
+    compareContour(grid, grids.length + index, 0, 1e-6, true, true, conservative, adaptive, threshold);
 
 function triangleGrid(w: number, h: number, noisy: boolean): { positions: Float64Array; tris: Uint32Array } {
   const positions = new Float64Array(w * h * 3), tris: number[] = [];
