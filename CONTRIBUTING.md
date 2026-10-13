@@ -40,7 +40,12 @@ npm test
 npm run notice       # NOTICE for the current npm and Rust dependencies (Rust needs cargo), then commit it
 npm run pack:test    # builds and packs the tarball, installs it in a temp project, runs the CLI, library and MCP server
 npm pack --dry-run   # the file list that will be published
+npm run site         # the documentation site (https://topotopo.dev) into site/, from the README, registry, shelf, examples and docs
+npm run site:check   # fails on broken internal links or anchors, missing images, unused files or a site over 25 MB
 ```
+
+`.github/workflows/pages.yml` runs `npm run site` and `npm run site:check` on every push to `main` and deploys `site/`
+to GitHub Pages; DNS and repository settings for the domain are in `docs/release/site-dns.md`.
 
 `npm run pack:test` is not part of `npm test` (it takes about a minute and needs the npm cache or network for the
 install). It fails if the tarball misses a runtime file or carries sources, tests or examples, or if anything that

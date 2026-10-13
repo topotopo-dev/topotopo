@@ -45,6 +45,9 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   them as `image:<name>`, and glTF/USD exports carry them, so assets ship with textures whose licence is the graph's.
 - **Live preview**: a local three.js page that refreshes whenever a graph changes. Click any node to see its result.
 
+**Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, the shelf and example galleries, the
+design notes and the release notes, generated from this repository (`npm run site`).
+
 The design notes, including whether the browser is a limitation, are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ![city](examples/renders/voronoi_city.png)
