@@ -187,7 +187,9 @@ A graph is code: `"=expr"` params and the code of `wrangle`, `script`, `sdf_expr
 taken from the graph JSON. On Node, expressions and wrangles run sandboxed in separate `vm` realms with a timeout
 (`TOPOTOPO_SCRIPT_TIMEOUT_MS`, default 30 s): an expression sees only graph vars, the cook time, `Math` and the
 documented helpers (no `process`, `require`, `import`, `fetch` or `globalThis`), and a runaway loop fails its node
-instead of hanging the process. That contains mistakes, not attackers: sandboxed code can still allocate memory and
+instead of hanging the process. The same timeout covers `script`, `heightfield_layer` and the parametric nodes, an
+`sdf_expr` field wherever it is sampled (`sdf_to_mesh` and `sdf_grid` run their whole sampling under it), and reading
+whatever such code throws. That contains mistakes, not attackers: sandboxed code can still allocate memory and
 burn CPU until the timeout, and a `vm` realm is not a hard security boundary. Do not cook graphs from untrusted sources
 in a privileged process.
 
@@ -323,9 +325,9 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 |---|---|---|
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
 | golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every shelf asset matches its fingerprint in `test/golden/` |
-| property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) and hostile `=expr` expressions (escapes and endless loops, pool off and on) |
+| property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets), hostile `=expr` expressions (escapes and endless loops, pool off and on), hostile code params (`heightfield_layer`, `sdf_expr`, parametric nodes), `sdf_expr` fields that hang only when `sdf_to_mesh`/`sdf_grid` sample them, and thrown values whose message never comes back (wrangle, script; also with a poisoned realm) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions; this README's node table lists every node type |
-| examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors: a node spec on the node's fixture inputs, a graph as written |
+| examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors or warnings: a node spec on the node's fixture inputs, a graph as written |
 | io | `node test/io.ts` | export → import round trips for every format |
 | interop | `npm run test:interop` | glTF (validator), Houdini `.geo`/`.bgeo`, CSV/PCG and points JSON round trips; instance rows and their Unreal transforms, per-instance glTF/USD attributes, packed `.geo`, textures, the Unreal Landscape bundle, `export:demo` |
 | uv | `npm run test:uv` | unwrap/flatten/layout: finite uv in 0..1, topology kept, LSCM angle error, no island overlaps, uniform texel density, GLB round trip, uv view size |

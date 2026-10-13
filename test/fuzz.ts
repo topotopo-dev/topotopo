@@ -12,9 +12,15 @@
 //   - "=expr" params that reach for process, globalThis, this.constructor.constructor, import(), fetch, require or
 //     the engine realm through any object fail their node with a clear error, and loops (also after an await, in a
 //     getter of the result, in a thrown object, in a regular expression) are stopped by the expression timeout,
-//   - the code params of heightfield_layer and sdf_expr run under the script timeout (loops, also in one sample, after
-//     an await or in a thrown object's message getter, fail the node) and cannot close the wrapper they are compiled
-//     in (syntax error instead of code that runs while compiling).
+//   - the code params of heightfield_layer, sdf_expr, parametric_curve and parametric_surface run under the script
+//     timeout (loops, also in one sample, after an await or in a thrown object's message getter, fail the node) and
+//     cannot close the wrapper they are compiled in (syntax error instead of code that runs while compiling),
+//   - an sdf_expr field sampled later (sdf_to_mesh, inside manifold's WASM mesher, and sdf_grid; also through
+//     transform/sdf_modify/sdf_combine) runs under the script timeout: loops away from the origin, a slow field, and
+//     message getters of what it throws fail the sampling node with its own error, and manifold still works after,
+//   - what wrangle and script code throws is read inside the timeout (message, stack and toString getters that never
+//     return), with the pool off and on (point wrangles in workers), and a script cannot close its function either;
+//     ordinary error texts are unchanged.
 import { spawnSync } from 'node:child_process';
 import { rng } from '../src/core/random.ts';
 import { heightfieldsOf } from '../src/core/heightfield.ts';
@@ -311,15 +317,18 @@ for (const workers of [0, 2]) {
 }
 console.log(`expression sandbox: ${EXPR_CASES.length} hostile expressions × pool off/on, ${exprFail} failed (${((performance.now() - te) / 1000).toFixed(1)}s)`);
 
-// ------------------------------------------------------------------ code params: heightfield_layer, sdf_expr
+// ------------------------------------------------------------------ code params: heightfield_layer, sdf_expr, parametric
 
 /**
  * Hostile code in the code params that run in the scripting realm outside a wrangle: heightfield_layer's expression
- * (run once per sample) and sdf_expr's code (probed at the origin). Loops (also in one sample only, after an await, in
- * the message getter of a thrown object) must be stopped by the script timeout, and code that tries to close the
- * wrapper it is compiled in (which would run its loop while compiling, outside any time limit) must be a syntax error.
+ * (run once per sample), sdf_expr's code (probed at the origin) and the parametric nodes' expressions (once per point).
+ * Loops (also in one sample only, after an await, in the message getter or toString of a thrown object) must be
+ * stopped by the script timeout, and code that tries to close the wrapper it is compiled in (which would run its loop
+ * while compiling, outside any time limit) must be a syntax error.
  */
-const CODE_CASES: { code: string; want: RegExp; loop?: boolean; only?: 'heightfield_layer' | 'sdf_expr' }[] = [
+type CodeType = 'heightfield_layer' | 'sdf_expr' | 'parametric_curve' | 'parametric_surface';
+const CODE_TYPES: CodeType[] = ['heightfield_layer', 'sdf_expr', 'parametric_curve', 'parametric_surface'];
+const CODE_CASES: { code: string; want: RegExp; loop?: boolean; only?: CodeType | CodeType[] }[] = [
   { code: 'while (true) {}\nreturn 0;', want: /exceeded \d+ ms/, loop: true },
   { code: '(() => { for (;;) {} })()', want: /exceeded \d+ ms/, loop: true },
   { code: 'i == 10 && j == 10 ? (() => { while (true) {} })() : height', want: /exceeded \d+ ms/, loop: true, only: 'heightfield_layer' },
@@ -329,9 +338,19 @@ const CODE_CASES: { code: string; want: RegExp; loop?: boolean; only?: 'heightfi
   { code: '0); } })((() => { while (true) {} })()), (function () { return function () { return (0', want: /syntax error/ },
   { code: 'return 0; } })((() => { while (true) {} })()), (function () { return function () { return 0;', want: /syntax error/ },
   { code: 'return 0; }; })((() => { while (true) {} })()), (function () { return function () { return 0;', want: /syntax error/ },
+  // R-13: the parametric nodes' wrapper, their loops part-way along, a thrown object's toString, an ordinary error
+  { code: 'return 0; })((() => { while (true) {} })()), (function () { return [0,0,0];', want: /syntax error/ },
+  { code: 'return 0; }), (() => { while (true) {} })(), (function () { return [0,0,0];', want: /syntax error/ },
+  { code: 't > 0.5 ? (() => { while (true) {} })() : [t, 0, 0]', want: /^parametric_curve: code exceeded \d+ ms \(infinite loop\?\)$/, loop: true, only: 'parametric_curve' },
+  { code: 'u > 0.5 && v > 0.5 ? (() => { while (true) {} })() : [u, 0, v]', want: /^parametric_surface: code exceeded \d+ ms \(infinite loop\?\)$/, loop: true, only: 'parametric_surface' },
+  { code: 't > 0.5 ? (() => { throw { get message() { while (true) {} } } })() : [t, 0, 0]', want: /exceeded \d+ ms/, loop: true, only: 'parametric_curve' },
+  { code: '(() => { throw { toString() { while (true) {} } } })()', want: /exceeded \d+ ms/, loop: true },
+  { code: '(() => { throw new Error("boom") })()', want: /: boom$/ },
 ];
-const codeGraph = (type: 'heightfield_layer' | 'sdf_expr', code: string): GraphSpec => type === 'sdf_expr'
+const codeGraph = (type: CodeType, code: string): GraphSpec => type === 'sdf_expr'
   ? { nodes: { t: { type: 'sdf_expr', params: { code } } }, output: 't' }
+  : type === 'parametric_curve' ? { nodes: { t: { type: 'parametric_curve', params: { expr: code, count: 50 } } }, output: 't' }
+  : type === 'parametric_surface' ? { nodes: { t: { type: 'parametric_surface', params: { expr: code, divisions: [8, 8] } } }, output: 't' }
   : { nodes: { hf: { type: 'heightfield', params: { size: [4, 4], resolution: 0.2 } }, t: { type: 'heightfield_layer', in: ['hf'], params: { layer: 'mask', expression: code } } }, output: 't' };
 let codeFail = 0, codeRuns = 0;
 const tc = performance.now();
@@ -341,9 +360,9 @@ for (const workers of [0, 2]) {
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const mode = workers ? 'pool on' : 'pool off';
   const problems: string[] = [];
-  for (const type of ['heightfield_layer', 'sdf_expr'] as const) {
+  for (const type of CODE_TYPES) {
     for (const c of CODE_CASES) {
-      if (c.only && c.only !== type) continue;
+      if (c.only && ![c.only].flat().includes(type)) continue;
       codeRuns++;
       const t = performance.now();
       let r;
@@ -367,8 +386,171 @@ for (const workers of [0, 2]) {
   if (!sdf.ok || !(sdf.geo!.numPrims > 0)) problems.push(`${mode}: sdf_expr no longer works after the hostile code: ${sdf.errors.map((x) => x.message).join('; ')}`);
   const wr = await e.cook({ nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P.y += 1;' } } }, output: 'w' });
   if (!wr.ok || Math.abs(wr.geo!.bbox().max[1] - 1.5) > 1e-9) problems.push(`${mode}: a wrangle no longer works after the hostile code: ${wr.errors.map((x) => x.message).join('; ')}`);
+  const curve = await e.cook(codeGraph('parametric_curve', '[t, 2 * t, 0]'));
+  if (!curve.ok || Math.abs(curve.geo!.bbox().max[1] - 2) > 1e-9) problems.push(`${mode}: parametric_curve no longer works after the hostile code: ${curve.errors.map((x) => x.message).join('; ')}`);
   await e.host.pool?.close();
   for (const p of problems) { codeFail++; console.log(`FAIL code params, ${mode}: ${p}`); }
 }
-console.log(`code params: ${codeRuns} hostile heightfield_layer/sdf_expr cooks over pool off/on, ${codeFail} failed (${((performance.now() - tc) / 1000).toFixed(1)}s)`);
-process.exit(fail || exprFail || codeFail ? 1 : 0);
+console.log(`code params: ${codeRuns} hostile heightfield_layer/sdf_expr/parametric cooks over pool off/on, ${codeFail} failed (${((performance.now() - tc) / 1000).toFixed(1)}s)`);
+
+// ------------------------------------------------------------------ fields sampled later; what wrangles and scripts throw
+
+/**
+ * User code that runs after its own node has cooked: an sdf_expr field is only probed at the origin by sdf_expr and is
+ * sampled later by sdf_to_mesh (from inside manifold's WASM level-set mesher) and sdf_grid. Code that loops only away
+ * from the origin, a field that is merely slow, and thrown objects whose message never comes back must fail the
+ * sampling node with its own error within the timeout, also when the field passed through transform, sdf_modify and
+ * sdf_combine (the "user code" mark travels with it). Analytic fields keep running without a limit.
+ */
+type SampleType = 'sdf_to_mesh' | 'sdf_grid' | 'sdf_to_mesh (chain)';
+const SAMPLE_TYPES: SampleType[] = ['sdf_to_mesh', 'sdf_grid', 'sdf_to_mesh (chain)'];
+const SAMPLE_CASES: { code: string; want: RegExp; loop?: boolean }[] = [
+  { code: 'p[0] > 0.5 ? (() => { while (true) {} })() : sdSphere(p, 0.5)', want: /: SDF code \(sdf_expr\) exceeded \d+ ms \(infinite loop\?\)$/, loop: true },
+  { code: 'p[0] > 0.5 ? (() => { throw { get message() { while (true) {} } } })() : sdSphere(p, 0.5)', want: /exceeded \d+ ms/, loop: true },
+  { code: 'p[0] > 0.5 ? (() => { throw { toString() { while (true) {} } } })() : sdSphere(p, 0.5)', want: /exceeded \d+ ms/, loop: true },
+  { code: '(p[0] > 0.5 && (async () => { await 0; while (true) {} })(), sdSphere(p, 0.5))', want: /exceeded \d+ ms/, loop: true },
+  // slow everywhere (2 ms a sample): stopped between samples by the sampler's own deadline check
+  { code: '(() => { const t = Date.now(); while (Date.now() - t < 2) {} })(), sdSphere(p, 0.5)', want: /exceeded \d+ ms/, loop: true },
+  { code: "p[0] > 0.5 ? (() => { throw new Error('boom') })() : sdSphere(p, 0.5)", want: /: SDF code \(sdf_expr\) failed: boom$/ },
+];
+const sampleGraph = (type: SampleType, code: string): GraphSpec => {
+  const field: NodeSpec = { type: 'sdf_expr', params: { code } };
+  if (type === 'sdf_grid') return { nodes: { s: field, t: { type: 'sdf_grid', in: ['s'], params: { voxel_size: 0.1 } } }, output: 't' };
+  if (type === 'sdf_to_mesh') return { nodes: { s: field, t: { type: 'sdf_to_mesh', in: ['s'], params: { divisions: 24 } } }, output: 't' };
+  return {
+    nodes: {
+      s: field, moved: { type: 'transform', in: ['s'], params: { translate: [0.1, 0, 0] } },
+      grown: { type: 'sdf_modify', in: ['moved'], params: { operation: 'offset', amount: 0.01 } },
+      box: { type: 'sdf_shape', params: { shape: 'box', size: [0.2, 0.2, 0.2], center: [0, 1, 0] } },
+      both: { type: 'sdf_combine', in: ['grown', 'box'], params: { operation: 'union' } },
+      t: { type: 'sdf_to_mesh', in: ['both'], params: { divisions: 24 } },
+    },
+    output: 't',
+  };
+};
+
+/**
+ * What wrangle and script code throws is user code too: a message or stack getter, or a toString, that never returns
+ * hung the process when the node read the error after the guarded run. Also a script body that closes its function
+ * (it ran while compiling, with no time limit). Ordinary errors keep their texts. With the pool on, point wrangles run
+ * in workers (minElements 1), where the worker reads the error.
+ */
+interface ThrowCase { node: 'wrangle' | 'script'; code: string; want: RegExp; loop?: boolean }
+const THROW_CASES: ThrowCase[] = [
+  { node: 'wrangle', code: 'throw { get message() { while (true) {} } };', want: /^wrangle exceeded \d+ ms \(infinite loop\?\)$/, loop: true },
+  { node: 'wrangle', code: "throw { message: 'x', get stack() { while (true) {} } };", want: /^wrangle exceeded \d+ ms/, loop: true },
+  { node: 'wrangle', code: 'throw { toString() { while (true) {} } };', want: /^wrangle exceeded \d+ ms/, loop: true },
+  { node: 'wrangle', code: '@P.y += 1;\nif (@ptnum == 3) throw { get message() { while (true) {} } };', want: /^wrangle exceeded \d+ ms/, loop: true },
+  { node: 'wrangle', code: '@P.y += 1;\nnull.foo;', want: /^wrangle error: Cannot read properties of null \(reading 'foo'\) \(line 2: null\.foo;\)$/ },
+  { node: 'wrangle', code: "throw 'plain';", want: /^wrangle error: plain$/ },
+  // a user error that says "timed out" is not taken for the timeout
+  { node: 'wrangle', code: "throw { message: 'timed out on purpose' };", want: /^wrangle error: timed out on purpose$/ },
+  { node: 'script', code: 'throw { get message() { while (true) {} } };', want: /^script exceeded \d+ ms \(infinite loop\?\)$/, loop: true },
+  { node: 'script', code: 'await 0;\nthrow { get message() { while (true) {} } };', want: /^script exceeded \d+ ms/, loop: true },
+  { node: 'script', code: "await lib.run('box');\nthrow { toString() { while (true) {} } };", want: /^script exceeded \d+ ms/, loop: true },
+  { node: 'script', code: 'return geo; }), (() => { while (true) {} })(), (async function () {', want: /^script syntax error: / },
+  { node: 'script', code: 'return geo; })((() => { while (true) {} })()), (async function () {', want: /^script syntax error: / },
+  { node: 'script', code: 'null.foo;', want: /^script error: Cannot read properties of null \(reading 'foo'\)$/ },
+  { node: 'script', code: 'return geo +;', want: /^script syntax error: Unexpected token ';'$/ },
+];
+const throwGraph = (c: { node: 'wrangle' | 'script'; code: string }): GraphSpec => c.node === 'script'
+  ? { nodes: { t: { type: 'script', params: { code: c.code } } }, output: 't' }
+  : { nodes: { g: { type: 'grid', params: { divisions: [20, 20] } }, t: { type: 'wrangle', in: ['g'], params: { code: c.code } } }, output: 't' };
+
+let laterFail = 0, laterRuns = 0;
+const tl = performance.now();
+for (const workers of [0, 2]) {
+  // pool on: every kernel (point wrangles included) goes to the workers, whatever its size
+  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  e.manifold = engine.manifold;
+  e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+  const mode = workers ? 'pool on' : 'pool off';
+  const problems: string[] = [];
+  const ballGraph: GraphSpec = { nodes: { s: { type: 'sdf_expr', params: { code: 'sdSphere(p, 0.5)' } }, m: { type: 'sdf_to_mesh', in: ['s'], params: { divisions: 24 } } }, output: 'm' };
+  const ballBefore = await e.cook(ballGraph);
+  const cases = [
+    ...SAMPLE_TYPES.flatMap((type) => SAMPLE_CASES.map((c) => ({ label: type, prefix: type.split(' ')[0], graph: sampleGraph(type, c.code), ...c }))),
+    ...THROW_CASES.map((c) => ({ label: c.node, prefix: c.node, graph: throwGraph(c), ...c })),
+  ];
+  for (const c of cases) {
+    laterRuns++;
+    const t = performance.now();
+    let r;
+    try { r = await e.cook(c.graph); } catch (err: any) { problems.push(`${c.label} ${JSON.stringify(c.code)}: engine.cook threw ${err?.stack ?? err}`); continue; }
+    const ms = performance.now() - t;
+    const err = r.errors.find((x) => x.node === 't');
+    if (r.ok || !err) problems.push(`${c.label} ${JSON.stringify(c.code)}: cooked${r.ok ? '' : ` (${r.errors.map((x) => `[${x.node}] ${x.message}`).join('; ')})`}`);
+    else if (!c.want.test(err.message) || !err.message.startsWith(c.prefix)) problems.push(`${c.label} ${JSON.stringify(c.code)}: unclear error: ${err.message}`);
+    if (c.loop && ms > EXPR_TIMEOUT_MS * 3 + 2000) problems.push(`${c.label} ${JSON.stringify(c.code)}: timeout fired late: ${ms.toFixed(0)} ms for a ${EXPR_TIMEOUT_MS} ms limit`);
+    if (!c.loop && ms > 2000) problems.push(`${c.label} ${JSON.stringify(c.code)}: took ${ms.toFixed(0)} ms`);
+    if (VERBOSE) console.log(`later ${mode} ${ms.toFixed(0).padStart(5)}ms ${c.label} ${JSON.stringify(c.code)}: ${err?.message.slice(0, 120)}`);
+  }
+  await new Promise((res) => setTimeout(res, 20)); // let any stray promise settle
+  // manifold's mesher and the scripting realms still work, with the same results as before the hostile code
+  e.cache.clear();
+  const ballAfter = await e.cook(ballGraph);
+  if (!ballBefore.ok || !ballAfter.ok || JSON.stringify(fingerprint(ballBefore.geo!)) !== JSON.stringify(fingerprint(ballAfter.geo!))) problems.push(`${mode}: sdf_expr → sdf_to_mesh differs after the hostile code: ${ballAfter.errors.map((x) => x.message).join('; ')}`);
+  const shape = await e.cook({ nodes: { s: { type: 'sdf_shape', params: { shape: 'torus' } }, m: { type: 'sdf_to_mesh', in: ['s'] } }, output: 'm' });
+  if (!shape.ok || !(shape.geo!.numPrims > 0)) problems.push(`${mode}: an analytic sdf_to_mesh fails after the hostile code: ${shape.errors.map((x) => x.message).join('; ')}`);
+  const wr = await e.cook(throwGraph({ node: 'wrangle', code: '@P.y += @ptnum;' }));
+  if (!wr.ok || wr.geo!.bbox().max[1] !== 440) problems.push(`${mode}: a wrangle no longer works after the hostile code: ${wr.errors.map((x) => x.message).join('; ')}`);
+  const sc = await e.cook(throwGraph({ node: 'script', code: "return await lib.run('box', { size: 2 });" }));
+  if (!sc.ok || sc.geo!.bbox().max[1] !== 1) problems.push(`${mode}: a script no longer works after the hostile code: ${sc.errors.map((x) => x.message).join('; ')}`);
+  // with the pool on, the wrangles (7 hostile or failing ones and the one above) ran in workers
+  const tasks = e.host.pool?.stats().tasks ?? 0;
+  if (workers && tasks < 8) problems.push(`${mode}: the wrangles did not run on the pool (${tasks} tasks)`);
+  await e.host.pool?.close();
+  for (const p of problems) { laterFail++; console.log(`FAIL later sampling / thrown values, ${mode}: ${p}`); }
+}
+console.log(`later sampling, thrown values: ${laterRuns} hostile sdf_to_mesh/sdf_grid/wrangle/script cooks over pool off/on, ${laterFail} failed (${((performance.now() - tl) / 1000).toFixed(1)}s)`);
+
+// ------------------------------------------------------------------ a realm whose stack formatting never returns
+
+/**
+ * The scripting realm is shared by every cook of a host, and code can change it: with Error.prepareStackTrace looping,
+ * reading the stack of any error created in that realm (a SyntaxError of a syntax check, the host's own timeout error)
+ * never returns. Later failing nodes must still fail within the timeout, never hang. The realm is poisoned by a script
+ * (main realm) and a point wrangle (the workers' realms when the pool is on), each engine is used for nothing else.
+ */
+const POISON_CASES: { graph: GraphSpec; prefix: string; want: RegExp }[] = [
+  { graph: throwGraph({ node: 'wrangle', code: '@P.y += 1;\nnull.foo;' }), prefix: 'wrangle', want: /^wrangle (exceeded \d+ ms|error: Cannot read)/ },
+  { graph: throwGraph({ node: 'wrangle', code: '@P.y += ;' }), prefix: 'wrangle', want: /^wrangle syntax error: .*\(line 1: @P\.y \+= ;\)$/ },
+  { graph: throwGraph({ node: 'wrangle', code: 'while (true) {}' }), prefix: 'wrangle', want: /^wrangle exceeded \d+ ms/ },
+  { graph: throwGraph({ node: 'script', code: 'null.foo;' }), prefix: 'script', want: /^script error: Cannot read properties of null \(reading 'foo'\)$/ },
+  { graph: throwGraph({ node: 'script', code: 'return geo +;' }), prefix: 'script', want: /^script syntax error: Unexpected token ';'$/ },
+  { graph: throwGraph({ node: 'script', code: 'while (true) {}' }), prefix: 'script', want: /^script exceeded \d+ ms/ },
+  { graph: codeGraph('parametric_curve', '(() => { throw new Error("boom") })()'), prefix: 'parametric_curve', want: /^parametric_curve: boom$/ },
+  { graph: codeGraph('parametric_curve', '[t +, 0, 0]'), prefix: 'parametric_curve', want: /^parametric_curve: expression syntax error: / },
+  { graph: codeGraph('heightfield_layer', 'x +'), prefix: 'heightfield_layer', want: /^heightfield_layer: expression syntax error: / },
+  { graph: sampleGraph('sdf_to_mesh', "p[0] > 0.5 ? (() => { throw new Error('boom') })() : sdSphere(p, 0.5)"), prefix: 'sdf_to_mesh', want: /^sdf_to_mesh: SDF code \(sdf_expr\) failed: boom$/ },
+];
+let poisonFail = 0;
+const tp = performance.now();
+for (const workers of [0, 2]) {
+  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  e.manifold = engine.manifold;
+  e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+  const mode = workers ? 'pool on' : 'pool off';
+  const problems: string[] = [];
+  const poison = 'Error.prepareStackTrace = () => { while (true) {} };';
+  for (const g of [throwGraph({ node: 'script', code: poison + '\nreturn geo;' }), throwGraph({ node: 'wrangle', code: poison })]) {
+    const r = await e.cook(g);
+    if (!r.ok) problems.push(`poisoning the realm failed: ${r.errors.map((x) => x.message).join('; ')}`);
+  }
+  for (const c of POISON_CASES) {
+    e.cache.clear();
+    const t = performance.now();
+    let r;
+    try { r = await e.cook(c.graph); } catch (err: any) { problems.push(`${c.prefix}: engine.cook threw ${err?.stack ?? err}`); continue; }
+    const ms = performance.now() - t;
+    const err = r.errors.find((x) => x.node === 't');
+    if (r.ok || !err) problems.push(`${c.prefix}: cooked${r.ok ? '' : ` (${r.errors.map((x) => `[${x.node}] ${x.message}`).join('; ')})`}`);
+    else if (!c.want.test(err.message) || !err.message.startsWith(c.prefix)) problems.push(`${c.prefix}: unclear error: ${err.message}`);
+    if (ms > EXPR_TIMEOUT_MS * 3 + 2000) problems.push(`${c.prefix}: took ${ms.toFixed(0)} ms for a ${EXPR_TIMEOUT_MS} ms limit`);
+    if (VERBOSE) console.log(`poisoned ${mode} ${ms.toFixed(0).padStart(5)}ms ${c.prefix}: ${err?.message.slice(0, 120)}`);
+  }
+  await e.host.pool?.close();
+  for (const p of problems) { poisonFail++; console.log(`FAIL poisoned realm, ${mode}: ${p}`); }
+}
+console.log(`poisoned realm: ${POISON_CASES.length} failing nodes × pool off/on after Error.prepareStackTrace loops, ${poisonFail} failed (${((performance.now() - tp) / 1000).toFixed(1)}s)`);
+process.exit(fail || exprFail || codeFail || laterFail || poisonFail ? 1 : 0);

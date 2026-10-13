@@ -67,7 +67,7 @@ export interface WorkerPool {
 export interface ExprSandbox {
   /** Evaluate a script in the sandbox realm and return its completion value (the engine compiles functions with it). */
   compile(source: string): any;
-  /** Parse `body` as a function body in the sandbox realm without running it (as Host.checkSyntax). */
+  /** Parse `body` as a function body without running it (as Host.checkSyntax). */
   checkSyntax(body: string): { message: string; line: number } | null;
   /**
    * Call `job` with a wall-clock limit. Microtasks the realm queues while it runs (continuations of async code) also

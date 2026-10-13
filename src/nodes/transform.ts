@@ -14,7 +14,7 @@ import { transformHeightfield } from '../core/heightfield.ts';
 import { transformSdfGrid } from '../core/sdfgrid.ts';
 import { AXES, P, getPointNormals, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
-import { then } from '../graph/parallel.ts';
+import { andThen } from '../graph/parallel.ts';
 import { composePackedXforms } from '../core/packed.ts';
 
 /**
@@ -497,7 +497,7 @@ defineNode({
     const N = p.mode === 'normal' ? getPointNormals(g) : null; // read only
     const dir = normalize(p.direction);
     const st = p.store ? (g.points.add(p.store, 'float', 1).data as Float64Array) : null;
-    return then(run, () => {
+    return andThen(run, () => {
       for (let i = 0; i < np; i++) {
         if (sel && !sel[i]) continue;
         const amp = p.amplitude * (ma ? (ma.get(i) as number) : 1);

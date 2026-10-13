@@ -2,6 +2,8 @@
 import { GeoBuilder, Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
+import type { CookContext } from '../graph/types.ts';
+import { runUserCode } from '../core/usercode.ts';
 import type { Vec3 } from '../core/math.ts';
 import { orientOutward, pointNormals, primNewell } from '../core/topology.ts';
 import { rng } from '../core/random.ts';
@@ -459,19 +461,37 @@ defineNode({
   },
 });
 
-function compileFn(engine: any, args: string[], code: string) {
-  const body = /\breturn\b/.test(code) ? code : `return (${code});`;
+/**
+ * Run user code of the parametric nodes under the script timeout, like a wrangle: what it throws (a message getter is
+ * user code too) is read inside the limit, and errors name the node.
+ */
+function runExpr<T>(ctx: CookContext, fn: () => T, what = ''): T {
+  const ms = ctx.engine.scriptTimeoutMs;
   try {
-    return engine.host.compile(`(function(${args.join(',')}){"use strict";\n${body}\n})`);
+    return runUserCode(ctx.engine.host, fn, ms);
   } catch (e: any) {
-    throw new NodeError(`expression syntax error: ${e.message}`);
+    if (e.timedOut) throw new NodeError(`${ctx.type}: code exceeded ${ms} ms (infinite loop?)`);
+    throw new NodeError(`${ctx.type}: ${what}${e.message}`);
   }
+}
+
+/**
+ * Compile the expression of a parametric node into a function of `args`. The body is parsed on its own first (a
+ * complete function body cannot close the wrapper it is pasted into, so nothing runs while compiling); compiling
+ * runs under the script timeout all the same (a host without checkSyntax relies on that).
+ */
+function compileFn(ctx: CookContext, args: string[], code: string) {
+  const body = /\breturn\b/.test(code) ? code : `return (${code});`;
+  const syntax = ctx.engine.host.checkSyntax?.(`"use strict";${body}`);
+  if (syntax) throw new NodeError(`${ctx.type}: expression syntax error: ${syntax.message}${code.includes('\n') ? ` (line ${syntax.line})` : ''}`);
+  return runExpr(ctx, () => ctx.engine.host.compile(`(function(${args.join(',')}){"use strict";\n${body}\n})`), 'expression syntax error: ');
 }
 
 defineNode({
   type: 'parametric_curve',
   category: 'curve',
   summary: 'Curve from a JS expression of t returning [x,y,z] (e.g. helices, knots, Lissajous).',
+  description: 'The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).',
   inputs: [],
   params: {
     expr: { type: 'code', default: '[cos(t*TAU), t, sin(t*TAU)]', desc: 'JS expression (or body with return) of t (and i) returning [x,y,z]. Snippet helpers available.' },
@@ -481,17 +501,18 @@ defineNode({
   },
   usesVars: true,
   example: { type: 'parametric_curve', params: { expr: '[(2+cos(3*t))*cos(2*t), sin(3*t), (2+cos(3*t))*sin(2*t)]', range: [0, 6.2832], count: 400, closed: true } },
-  cook: ({ p, engine }) => {
-    const f = compileFn(engine, ['t', 'i'], p.expr);
+  cook: (ctx) => {
+    const { p } = ctx;
+    const f = compileFn(ctx, ['t', 'i'], p.expr);
     const n = p.count, pos: number[] = [];
-    engine.host.runGuarded(() => {
+    runExpr(ctx, () => {
       const last = p.closed ? n : n - 1;
       for (let i = 0; i < n; i++) {
         const t = p.range[0] + ((p.range[1] - p.range[0]) * i) / Math.max(1, last);
         const v = f(t, i);
         pos.push(+v[0] || 0, +v[1] || 0, +v[2] || 0);
       }
-    }, engine.scriptTimeoutMs);
+    });
     return new Geometry({ positions: pos, prims: [Array.from({ length: n }, (_, i) => i)], closed: p.closed });
   },
 });
@@ -500,6 +521,7 @@ defineNode({
   type: 'parametric_surface',
   category: 'generate',
   summary: 'Surface from a JS expression of (u, v) returning [x,y,z]; optional wrapping for closed surfaces.',
+  description: 'The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).',
   inputs: [],
   params: {
     expr: { type: 'code', default: '[(1+0.5*cos(v*TAU))*cos(u*TAU), 0.5*sin(v*TAU), (1+0.5*cos(v*TAU))*sin(u*TAU)]', desc: 'JS expression of u, v returning [x,y,z]' },
@@ -513,13 +535,14 @@ defineNode({
   usesVars: true,
   outputs: 'vertex uv',
   example: { type: 'parametric_surface', params: { expr: '[(u - 0.5) * 4, 0.25 * sin(u * TAU * 2), (v - 0.5) * 2]', divisions: [64, 16] } },
-  cook: ({ p, engine }) => {
-    const f = compileFn(engine, ['u', 'v'], p.expr);
+  cook: (ctx) => {
+    const { p } = ctx;
+    const f = compileFn(ctx, ['u', 'v'], p.expr);
     const [nu, nv] = p.divisions;
     const cu = p.wrap_u ? nu : nu + 1, cv = p.wrap_v ? nv : nv + 1;
     const b = new GeoBuilder();
     const uv = b.attrib('vertex', 'uv', 3);
-    engine.host.runGuarded(() => {
+    runExpr(ctx, () => {
       for (let j = 0; j < cv; j++)
         for (let i = 0; i < cu; i++) {
           const u = p.u_range[0] + ((p.u_range[1] - p.u_range[0]) * i) / nu;
@@ -527,7 +550,7 @@ defineNode({
           const q = f(u, v);
           b.addPoint(+q[0] || 0, +q[1] || 0, +q[2] || 0);
         }
-    }, engine.scriptTimeoutMs);
+    });
     const id = (i: number, j: number) => (j % cv) * cu + (i % cu);
     for (let j = 0; j < nv; j++)
       for (let i = 0; i < nu; i++) {

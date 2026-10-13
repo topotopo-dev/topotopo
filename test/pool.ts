@@ -362,6 +362,26 @@ section('worker errors, crashes and timeouts fail only the node');
   check((await on.cook(graph)).ok, 'a failing kernel node outside the output branch does not affect the cook');
 }
 
+// ------------------------------------------------------------------ modules
+section('modules load with a dynamic import (no module exports `then`)');
+{
+  // A module namespace with a `then` export is a thenable: `await import()` calls that export instead of resolving to
+  // the module. parallel.ts exported its then() helper (now andThen), so a dynamic import of it rejected.
+  let mod: any, err = '';
+  try { mod = await import('../src/graph/parallel.ts'); } catch (e: any) { err = String(e?.message ?? e); }
+  check(typeof mod?.parallelMap === 'function' && typeof mod?.andThen === 'function', `await import('src/graph/parallel.ts') gives the module${err || !mod ? `: ${err || 'nothing'}` : ''}`);
+  const offenders: string[] = [];
+  const walk = (dir: string) => {
+    for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) walk(p);
+      else if (/\.ts$/.test(d.name) && /^export\s+(?:async\s+)?(?:function\*?|const|let|var|class)\s+then\b|^export\s*\{[^}]*\bthen\b/m.test(fs.readFileSync(p, 'utf8'))) offenders.push(path.relative(ROOT, p));
+    }
+  };
+  walk(path.join(ROOT, 'src'));
+  check(!offenders.length, `no module in src/ exports \`then\`${offenders.length ? ': ' + offenders.join(', ') : ''}`);
+}
+
 // ------------------------------------------------------------------ processes
 section('processes end with the pool in use');
 {
