@@ -47,6 +47,17 @@ Pipe thermal transport is a separate conservative eight-neighbour talus pass.
 Optional stream power is `K * A^m * S^n`; reference contributing area is calculated
 from the incoming terrain, so the drainage network does not jump during a solve.
 
+The session-5 pipe implementation reuses padded, separate flux arrays and row
+scratch buffers. Rain/flux and water/erosion/transport form two fluid sweeps;
+terrain slopes are refreshed only around actual height changes. A conservative
+talus margin can prove thermal transport inactive; once that proof expires the
+ordinary thermal stencil runs every iteration. Frozen receivers and conservative
+transport remainders retain their original semantics. The droplet implementation
+keeps f64 arithmetic and RNG order: f32 and reassociated interpolation experiments
+failed the full-reference flow-correlation threshold. Row bounds are validated
+before the small unchecked stencil/scatter loops; no work buffers allocate inside
+either iteration loop. See the session-5 measurements and limits in [BENCH.md](BENCH.md).
+
 `flow_accumulation` offers D8 and triangular-facet D-infinity routing. Accumulation
 includes each sample's own cell area. Stable height/index ordering fixes the sum
 order. The u8 direction codes are E, SE, S, SW, W, NW, N, NE = 0..7; 255 means sink.

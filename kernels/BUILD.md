@@ -17,6 +17,26 @@ cargo bench --manifest-path kernels/Cargo.toml --bench erosion
 node bench/erosion.ts --runs=3
 ```
 
+Opt-in erosion pass profiling uses the same fixtures and a monotonic clock:
+
+```powershell
+cargo bench --manifest-path kernels/Cargo.toml --bench erosion --features profile
+npm run kernels:build -- -- --features profile
+node bench/erosion.ts --runs=3
+# Restore the ordinary scalar package before tests, acceptance timings and commit.
+npm run kernels:build
+```
+
+The `profile` feature adds native/WASM JSON timings; ordinary builds erase the
+clocks and counters. Row-fused pipe passes call the clock once per row/stage, so
+profile totals include clock overhead. Droplet sub-step samples cover one in 256
+droplets, overlap the coarse hydraulic timer, and include substantial timing
+overhead. Use uninstrumented builds for acceptance. Both erosion benchmark commands
+accept `--pipe-only`, `--droplet-only`, and `--runs=N` (Cargo arguments follow `--`).
+Native `--runs` controls pipe repetitions; its droplet fixture remains one analytic
+valley call. Node also prints process CPU time, including any WASM compiler threads,
+as a contention diagnostic; the acceptance target always uses elapsed time.
+
 Toolchain used on 2026-10-13:
 
 ```text
@@ -32,7 +52,7 @@ unit, stripped symbols and panic=abort. Invalid geometry is handled by Rust `Res
 errors, not panics. `wasm-pack` runs `wasm-opt -O3 --enable-bulk-memory
 --enable-nontrapping-float-to-int`. The session's budget is strictly below 1,000,000 bytes
 for session 1; session 2's total WASM budget is 1,500,000 bytes and session 3's is
-2,000,000 bytes; session 4's budget is 2,500,000 bytes. The existing Node smoke test also retains its stricter 1,000,000-byte
+2,000,000 bytes; sessions 4 and 5 have a 2,500,000-byte budget. The existing Node smoke test also retains its stricter 1,000,000-byte
 check. See [BENCH.md](BENCH.md)
 for the measured size.
 

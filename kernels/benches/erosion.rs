@@ -3,6 +3,14 @@ use polyforge_kernels::erosion_droplet::{DropletParams, erode_droplet};
 use std::{hint::black_box, time::Instant};
 
 fn main() {
+    let args: Vec<_> = std::env::args().collect();
+    let runs: usize = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--runs="))
+        .map_or(3, |value| value.parse().expect("--runs must be an integer"));
+    assert!((1..=10).contains(&runs));
+    let pipe_only = args.iter().any(|a| a == "--pipe-only");
+    let droplet_only = args.iter().any(|a| a == "--droplet-only");
     let w = 1024usize;
     let height: Vec<f32> = (0..w * w)
         .map(|i| 32.0 + (w - 1 - i / w) as f32 / 64.0 + (i % w).abs_diff(w / 2) as f32 / 128.0)
@@ -14,7 +22,7 @@ fn main() {
         ..Default::default()
     };
     let mut times = Vec::new();
-    for run in 0..3 {
+    for run in 0..if droplet_only { 0 } else { runs } {
         let start = Instant::now();
         let r = erode_pipe(black_box(&height), None, None, None, w, w, 1.0, &p, 1).unwrap();
         let ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -26,10 +34,15 @@ fn main() {
         black_box(r);
     }
     times.sort_by(f64::total_cmp);
-    println!(
-        "pipe native release median: {:.3} ms; target 2000 ms",
-        times[1]
-    );
+    if !times.is_empty() {
+        println!(
+            "pipe native release median: {:.3} ms; target 2000 ms",
+            times[times.len() / 2]
+        );
+    }
+    if pipe_only {
+        return;
+    }
     let w = 512usize;
     let height: Vec<f32> = (0..w * w)
         .map(|i| 4.0 + (w - 1 - i / w) as f32 / 64.0 + (i % w).abs_diff(w / 2) as f32 / 128.0)
