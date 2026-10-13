@@ -9,6 +9,7 @@ export const grid_erode: (a: number, b: number, c: number) => void;
 export const grid_offset: (a: number, b: number, c: number) => void;
 export const grid_resample: (a: number, b: number, c: number) => void;
 export const offset_polygon: (a: number, b: number, c: number, d: number, e: number) => void;
+export const remesh_quad: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const roof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const sdf_from_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const straight_skeleton: (a: number, b: number, c: number, d: number, e: number, f: number) => void;

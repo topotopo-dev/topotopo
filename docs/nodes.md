@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-215 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+216 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -15,7 +15,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [measure](#measure-nodes): [assert](#assert) · [curvature](#curvature) · [distance](#distance) · [occlusion](#occlusion)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
-- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
+- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
@@ -3553,6 +3553,52 @@ Houdini: Remesh SOP (Target Size, Iterations, Hard Edges, adaptive sizing). Each
     "target_length": 0.05,
     "iterations": 8,
     "feature_angle": 40
+  }
+}
+```
+
+### remesh_quad
+
+category: `topology` · aliases: `quadremesh`, `quad_remesh`, `instant_meshes`
+
+Field-aligned quad-dominant remeshing in Rust/WASM, with feature alignment and source attribute transfer.
+
+Smooths a four-way orientation field and a position field through a multiresolution hierarchy, then extracts mostly quads on the original surface. Density is approximate: target_faces takes precedence over target_length; 0 for both uses the input scale. Quads-only conformingly subdivides all faces and can exceed the target density, especially around hard curves; locked group borders can retain triangles. Feature edges, explicit creases, UV seams and material/group borders constrain the field. Selected group borders stay fixed and unselected primitives pass through. Point attributes interpolate from final source-triangle barycentrics, vertex attributes interpolate per seam wedge, and prim attributes copy the source triangle. Existing normals are recomputed. Detail quality statistics describe the remeshed region. This is an independent implementation, not the Instant Meshes library.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | consistently oriented manifold polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `target_length` | float | `0` | 0.. |  | `edge_length`, `target_size` | target quad edge length in scene units (0 = automatic input scale) |
+| `target_faces` | int | `0` | 0.. |  |  | approximate target face count (> 0 overrides target_length) |
+| `mode` | enum | `"quad_dominant"` |  | `quad_dominant`, `quads_only` |  | quad_dominant permits triangles; quads_only subdivides every face when unlocked and can exceed target density |
+| `feature_angle` | float | `45` | 0..180 |  |  | dihedral threshold in degrees for automatic sharp-feature alignment (0 disables it) |
+| `align_boundaries` | bool | `true` |  |  |  | align the orientation field along open boundaries |
+| `smooth_iterations` | int | `8` | 0..100 |  |  | orientation and position field smoothing passes per hierarchy level |
+| `preserve_sharp` | bool | `true` |  |  |  | constrain extraction to detected sharp feature curves |
+| `crease_group` | group (edge) | `""` |  |  |  | edge group or pattern used as hard alignment constraints (empty = none) |
+| `group` | group (prim) | `""` |  |  |  | primitives to remesh (empty = all); edges shared with the remainder stay fixed |
+| `max_faces` | int | `1000000` | 1.. |  |  | refuse estimated or extracted output above this primitive count, including the retained group complement *(advanced)* |
+
+**Writes:** quad-dominant polygons; interpolated point/vertex attributes and copied prim attributes; detail quad_fraction, singularities and edge/planarity statistics
+
+**Example**
+
+```json
+{
+  "type": "remesh_quad",
+  "in": [
+    "mesh"
+  ],
+  "params": {
+    "target_faces": 1000,
+    "feature_angle": 45
   }
 }
 ```

@@ -125,7 +125,7 @@ export const INPUTS: Record<string, string[]> = {
   heightfield_mask_by_feature: ['HFN'], heightfield_mask_by_object: ['HFN', 'HF_CURVE'], heightfield_mask_expand: ['HFM'],
   heightfield_erode: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
   heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
-  remesh_isotropic: ['BOX'], mesh_repair: ['BROKEN'],
+  remesh_isotropic: ['BOX'], remesh_quad: ['BOX'], mesh_repair: ['BROKEN'],
   // PCG (P2-B): masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
@@ -184,6 +184,7 @@ export const PARAMS: Record<string, any> = {
   heightfield_transform: { translate: [1, 0.5, 0], rotate: 90, height_scale: 1.5 },
   // heightfield_from_image: { path } is filled in by createFixtureEngine() (a 16-bit PNG written to the temp dir)
   remesh_isotropic: { target_length: 0.2, iterations: 4 },
+  remesh_quad: { target_length: 0.2, smooth_iterations: 4 },
   mesh_repair: { self_intersections: 'report' },
   lod: { levels: 3 },
   mask: { by: 'slope', min: 0, max: 45, falloff: 15 },

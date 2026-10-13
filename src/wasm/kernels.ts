@@ -45,6 +45,7 @@ export interface RoofResult extends KernelProvenance {
 }
 
 export interface Kernels {
+  remesh_quad(positions: Float64Array, tris: Uint32Array, options?: QuadRemeshOptions): QuadRemeshResult;
   sdf_from_mesh(positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean): KernelGrid;
   grid_csg(a: GridInput, b: GridInput, op: GridOperation, k?: number): KernelGrid;
   grid_offset(grid: GridInput, distance: number): KernelGrid;
@@ -58,6 +59,43 @@ export interface Kernels {
   offset_polygon(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], distance: number): OffsetResult;
   /** Pitches are degrees: one value or one value for each outgoing contour edge. */
   roof(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], pitch: number | ArrayLike<number>, heightCap?: number): RoofResult;
+}
+
+/** Lengths are world units; feature_angle is radians in the kernel API. */
+export interface QuadRemeshOptions {
+  target_length?: number;
+  target_faces?: number;
+  quad_only?: boolean;
+  feature_angle?: number;
+  align_boundaries?: boolean;
+  smooth_iterations?: number;
+  preserve_sharp?: boolean;
+  /** Flat pairs of input point indices; hard field alignment constraints. */
+  crease_edges?: Uint32Array;
+  /** Flat pairs of input points whose edges and endpoints must remain exact. */
+  locked_edges?: Uint32Array;
+  max_faces?: number;
+}
+export interface QuadRemeshQuality {
+  quad_fraction: number;
+  singularities: number;
+  edge_length_min: number;
+  edge_length_mean: number;
+  edge_length_max: number;
+  planarity_mean: number;
+  planarity_max: number;
+  target_edge_length: number;
+}
+/** Inherited src_prim identifies the supplied source triangle under each output face. */
+export interface QuadRemeshResult extends KernelProvenance {
+  positions: Float64Array;
+  prim_start: Uint32Array;
+  vertex_point: Uint32Array;
+  /** Source triangle for each output point; indices address the supplied tris array. */
+  source_triangle: Uint32Array;
+  /** Three Float64 barycentric weights per output point, after final projection. */
+  barycentric: Float64Array;
+  quality: QuadRemeshQuality;
 }
 
 export type GridOperation = 'union' | 'intersect' | 'subtract' | 'smooth_union' | 'smooth_intersect' | 'smooth_subtract';
@@ -114,6 +152,12 @@ export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
       const wasm = await import('../../kernels/pkg/polyforge_kernels.js');
       await wasm.default({ module_or_path: bytes });
       return Object.freeze({
+        remesh_quad: (positions: Float64Array, tris: Uint32Array, options: QuadRemeshOptions = {}) =>
+          call('remesh_quad', () => {
+            if (!(positions instanceof Float64Array) || !(tris instanceof Uint32Array))
+              throw new Error('positions must be Float64Array and tris must be Uint32Array');
+            return wasm.remesh_quad(positions, tris, options) as QuadRemeshResult;
+          }),
         sdf_from_mesh: (positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean) =>
           call('sdf_from_mesh', () => wasm.sdf_from_mesh(positions, tris, voxel, band, padding, fill) as KernelGrid),
         grid_csg: (a: GridInput, b: GridInput, op: GridOperation, k = 0) =>

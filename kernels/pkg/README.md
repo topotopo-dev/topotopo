@@ -110,7 +110,7 @@ Current limits are explicit:
   the weights and then convert the returned times accordingly. Ordinary roof pitches
   and the explicit 90-degree gable are covered by tests; pitches extremely close to
   zero or 90 degrees can encounter the same limit.
-- Later quad/isotropic remeshing, erosion and point kernels are not included.
+- The Rust isotropic remesher, erosion and point kernels are not included; session 3 adds quad remeshing below.
 
 ## Tests
 
@@ -158,7 +158,92 @@ dependency is used. `earcutr` is only used for flat cap triangulation, not skele
 
 `unicode-ident` is a compiler-only transitive dependency; its Unicode-3.0 data-table
 licence is permitted by the repository's build-time licence rule. Its identifier
-tables are not linked into the shipped WASM. Session 2 adds no dependencies.
+tables are not linked into the shipped WASM. Sessions 2 and 3 add no dependencies.
+
+## Field-aligned quad remeshing (session 3)
+
+```js
+const mesh = remesh_quad(positions, tris, {
+  target_length: 0.1,       // 0: input mean edge length
+  target_faces: 0,         // >0: takes precedence over target_length
+  quad_only: false,
+  feature_angle: Math.PI / 4, // radians in the kernel; degrees in the node
+  align_boundaries: true,
+  smooth_iterations: 8,
+  preserve_sharp: true,
+  crease_edges: new Uint32Array(), // flat input point-index pairs
+  locked_edges: new Uint32Array(), // exact group-border edges/endpoints
+  max_faces: 1000000,
+});
+```
+
+The existing skeleton and grid entry points are unchanged. Native Rust uses
+`remesh_quad::remesh_quad(&positions, &tris, &RemeshOptions)`; its density fields
+are named `target_edge_length` and `target_face_count`. Inputs are f64 xyz triples
+and u32 triangle triples. The returned `QuadMesh`/JS object contains:
+
+- `positions: Float64Array`, `prim_start` and `vertex_point: Uint32Array`: polygon CSR.
+- `source_triangle: Uint32Array` and `barycentric: Float64Array`: one original triangle
+  index and three final-projection weights for every output point.
+- `src_prim: Int32Array`: original triangle under each output face centroid.
+- The WASM adapter additionally returns `src_point`, `blend_offset`, `blend_index`,
+  and f32 `blend_weight` in the established provenance contract. `src_vertex` is -1
+  because raw input triangles carry no wedge attributes. The node reconstructs
+  per-corner provenance from the original geometry on each side of UV seams.
+- `quality`: `quad_fraction`, `singularities`, `edge_length_min/mean/max`,
+  `planarity_mean/max`, and the effective `target_edge_length`. Singularities count
+  interior output vertices whose edge valence differs from four; boundaries are
+  excluded. Planarity is absolute maximum vertex distance to each face's Newell
+  plane, averaged and maximized over faces, in input units.
+
+The implementation independently follows the local field/hierarchy approach of
+[Jakob et al., Instant Field-Aligned Meshes (2015)](https://rgl.epfl.ch/publications/Jakob2015Instant).
+It contains no copied Instant Meshes or QuadriFlow source and adds no dependencies.
+Four equivalent tangent directions are compared after normal transport. Periodic
+position origins are relaxed in the local tangent lattices, coarse to fine through
+a deterministic adjacent-vertex clustering hierarchy. Input sampling is refined as
+needed. A bounded integer translation-cycle correction routes opposite unit defects
+through the triangle dual graph, stopping at cross-field singularities and respecting
+hard-edge barriers. Only a complete correction is fitted back to continuous tangent
+origins; an unresolved or search-budget-limited attempt leaves the original field
+unchanged. This improves local consistency but is not a globally optimized integer
+parametrization or a guarantee of exact integrability after fitting.
+Extraction contracts edges with near-zero lattice translation subject to
+manifold/normal checks, then joins compatible triangle pairs. Pure-quad mode also
+uses residual triangle transport and local polygon-diagonal rotations to condition
+the parent faces before subdivision.
+Vertices finally relax/project onto the original triangles or feature segments.
+Exact nearest-triangle barycentrics and deterministic source-index tie breaks supply
+the attribute contract. Triangle and feature-segment queries use balanced BVHs.
+
+The `remesh_quad` node adds the aliases `quadremesh`, `quad_remesh`, `instant_meshes`.
+It preserves selected-region borders, point attributes through `GeoBuilder`, vertex
+UVs per connected wedge, prim attributes from the source triangle and existing
+normals recomputed from the result. `crease_group` supplies hard curve constraints;
+UV seams and material/group borders are also constrained. Empty group selections
+pass through. `max_faces` counts both the retained complement and generated faces.
+Detail quality statistics describe the remeshed region, excluding retained primitives.
+
+This is a conservative implementation with narrower capabilities than the reference
+remeshers. Face counts are approximate. On unconstrained surfaces, pure-quad mode
+solves at twice the requested edge length, then conformingly splits every polygon
+once to approach the requested density. With hard curves it retains the finer solve
+to avoid folded coarse parent patches, so output density can exceed the target by
+about four times or more;
+it retains residual triangles when locked borders prohibit this refinement.
+Noncollinear feature-curve vertices are pinned, so densely sampled hard curves can
+dominate the output density. Input limits are 1M points and 2M triangles; refinement
+also has a 2M-triangle work limit. Degenerate source triangles are removed; ambiguous
+non-manifold edges, inconsistent winding and disconnected vertex fans are rejected
+with an actionable error. Self-intersecting manifold input is not repaired.
+Universal hardware/compiler bit identity and arbitrary-surface quality are not
+established by same-module replay tests. Exact acceptance measurements and remaining
+quality/performance gaps are recorded in [BENCH.md](BENCH.md).
+
+Run `node test/remeshquad.ts`, `node bench/remeshquad.ts` and
+`cargo bench --manifest-path kernels/Cargo.toml --bench remesh_quad`.
+Inspect `examples/renders/quad_remesh.png`: gray inputs and colored results for a
+noisy sphere, bevelled box, shelf rock and capped tube, with every polygon edge visible.
 
 ## Sampled SDF grids (session 2)
 

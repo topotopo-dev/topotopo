@@ -3,14 +3,14 @@
 <style>body{font:16px/1.5 system-ui;max-width:880px;margin:3rem auto;padding:1rem;background:#151921;color:#e5eaf1}h1{font-size:1.5rem}pre{white-space:pre-wrap;color:#a8e4c0}</style>
 <h1>Polyforge kernels: browser smoke</h1><p>The committed WebAssembly file is fetched and initialized once. Results below are computed in this browser.</p><pre id="result">Loading…</pre>
 <script type="module">
-import init,{straight_skeleton,offset_polygon,roof,dual_contour,grid_offset,grid_csg} from './pkg/polyforge_kernels.js';
+import init,{straight_skeleton,offset_polygon,roof,dual_contour,grid_offset,grid_csg,remesh_quad} from './pkg/polyforge_kernels.js';
 const result=document.querySelector('#result');
 try {
   const response=await fetch('./pkg/polyforge_kernels_bg.wasm');
   if(!response.ok) throw new Error(`WASM fetch failed: ${response.status}`);
   await init({module_or_path:await response.arrayBuffer()});
   const cases=[['rectangle',[0,0,6,0,6,4,0,4],[]],['L-shape',[0,0,6,0,6,2,2,2,2,6,0,6],[]],['courtyard',[0,0,8,0,8,8,0,8],[[2,2,2,6,6,6,6,2]]]];
-  const digest=o=>JSON.stringify(Object.fromEntries(Object.entries(o).map(([k,v])=>[k,Array.from(v)])));
+  const digest=o=>JSON.stringify(o,(_k,v)=>ArrayBuffer.isView(v)?Array.from(v):v);
   const lines=[];
   for(const [name,points,holePoints] of cases){
     const outer=new Float64Array(points),holes=holePoints.map(p=>new Float64Array(p));
@@ -33,7 +33,17 @@ try {
     if([...edges.values()].some(n=>n!==2))throw new Error(`grid ${name}: nonmanifold edge`);
     lines.push(`PASS grid ${name}: ${a.positions.length/3} vertices, ${a.prim_start.length-1} faces, closed and identical repeat`);
   }
-  result.textContent=lines.join('\n')+'\n\n12 browser kernel checks passed.';
+  const positions=new Float64Array([-1,0,-1,1,0,-1,1,0,1,-1,0,1]);
+  const tris=new Uint32Array([0,2,1,0,3,2]);
+  for(const quad_only of [false,true]){
+    const run=()=>remesh_quad(positions,tris,{target_length:1,smooth_iterations:4,quad_only});
+    const a=run(),b=run();
+    if(!a.positions.length||!Array.from(a.positions).every(Number.isFinite)||digest(a)!==digest(b))throw new Error('quad remesh: invalid or nondeterministic output');
+    if(a.source_triangle.length!==a.positions.length/3||a.barycentric.length!==a.positions.length)throw new Error('quad remesh: missing provenance');
+    if(quad_only&&a.quality.quad_fraction!==1)throw new Error('quad remesh: quads_only failed on plane');
+    lines.push(`PASS quad ${quad_only?'only':'dominant'}: ${a.prim_start.length-1} faces, provenance and identical repeat`);
+  }
+  result.textContent=lines.join('\n')+'\n\n14 browser kernel checks passed.';
   document.documentElement.dataset.status='passed';
 }catch(error){result.textContent=`FAILED: ${error?.message??error}`;document.documentElement.dataset.status='failed';throw error;}
 </script></html>
