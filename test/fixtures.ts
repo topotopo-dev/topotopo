@@ -69,12 +69,15 @@ export const SRC: Record<string, NodeSpec> = {
   SHELF_PIPE: { type: 'curve', params: { points: [[0, 0.6, 0], [2, 0.6, 0], [2, 1.5, 0], [2, 1.5, 2], [4.5, 1.5, 2]] } },
   SHELF_ROAD: { type: 'curve', params: { points: [[-10, 0, 0], [0, 0, 4], [10, 0, 0]], smooth: true, subdivisions: 8 } },
   SHELF_GROUND: { type: 'terrain', params: { size: [16, 16], divisions: [24, 24], height: 1.5, frequency: 0.12, octaves: 3, seed: 3 } },
+  // an L-shaped footprint on the ground (closed polygon), concave on purpose
+  SHELF_FOOTPRINT: { type: 'curve', params: { points: [[0, 0, 0], [10, 0, 0], [10, 0, 6], [5, 0, 6], [5, 0, 9], [0, 0, 9]], closed: true } },
 };
 
 /** Fixture inputs of the shelf assets that take one (curve input 0 or surface input 0); test/shelf.ts checks coverage. */
 export const SHELF_INPUTS: Record<string, string[]> = {
   railing: ['SHELF_PATH'], fence: ['SHELF_PATH'], pipe_run: ['SHELF_PIPE'], road_strip: ['SHELF_ROAD'],
   scatter_rocks: ['SHELF_GROUND'], forest_patch: ['SHELF_GROUND'], grass_clumps: ['SHELF_GROUND'],
+  house: ['SHELF_FOOTPRINT'],
 };
 
 /** A graph that cooks the shelf asset `name` at its defaults (on its fixture inputs, if it takes any) as node `target`. */

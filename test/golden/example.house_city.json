@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["copynum:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["Cd:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [37, 11.5421, 29],
+      "min": [-37, 0, -29]
+    },
+    "counts": {
+      "points": 17756,
+      "prims": 17013,
+      "vertices": 62476,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "1b7c8828f37ae392",
+      "attributes": {
+        "detail.materials": "c15e30b07627662e",
+        "prim.copynum": "4d98b7e5fb8bef9f",
+        "prim.material": "54b441e6e37a9c80",
+        "prim.name": "b1d25f96aa352410",
+        "vertex.Cd": "12c5d5b591fe791f",
+        "vertex.uv": "f7069d1ca1936112"
+      },
+      "topology": "7bc9f77802411fbe"
+    }
+  },
+  "name": "example.house_city",
+  "ok": true,
+  "source": "examples/house_city.json",
+  "warnings": []
+}

@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-167 node types and 35 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+167 node types and 36 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -25,7 +25,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
-- [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
+- [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
 
 ## generate nodes
 
@@ -7001,6 +7001,35 @@ None (generator).
 | `height` | float | `0.08` | 0.01..1 |  |  | tile height (m) |
 | `height_jitter` | float | `0.015` | 0..0.5 |  |  | random height variation (m) |
 | `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### house
+
+category: `shelf`
+
+House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_hip sized to the footprint's box.
+
+![house](../shelf/thumbs/house.png)
+
+Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are the shelf generators themselves, so editing wall_segment or roof_hip changes every house. Pivot: the footprint's origin on the ground. Pieces come from the child assets (wall, window_frame, door_frame, roof).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | footprint: a closed polygon on the XZ plane (optional) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `8` | 3..30 |  |  | default footprint along X (m), used when no footprint is connected |
+| `depth` | float | `6` | 3..30 |  |  | default footprint along Z (m) |
+| `floors` | int | `2` | 1..4 |  |  | number of floors (wall segments stacked) |
+| `floor_height` | float | `3` | 2.4..4.5 |  |  | height of one floor (m) |
+| `window_spacing` | float | `2.5` | 1.5..6 |  |  | one window per this length of wall (m) |
+| `pitch` | float | `32` | 5..65 |  |  | roof slope (degrees) |
+| `overhang` | float | `0.5` | 0..2 |  |  | eave overhang (m) |
+| `door` | bool | `true` |  |  |  | a door on the first footprint edge |
 
 ### lamp_post
 

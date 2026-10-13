@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "copynum:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [10.5, 9.1609, 9.5],
+      "min": [-0.5, 0, -0.5]
+    },
+    "counts": {
+      "points": 2218,
+      "prims": 2139,
+      "vertices": 7834,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "c10fdf20ed76ac7e",
+      "attributes": {
+        "detail.materials": "c15e30b07627662e",
+        "prim.Cd": "a0acbd591c80f907",
+        "prim.copynum": "3ab283a5b149269f",
+        "prim.material": "830abd22a768a05c",
+        "prim.name": "5431352ff4370aad",
+        "vertex.uv": "90d6d18bc4b26b99"
+      },
+      "topology": "e9a3ec3808f0d5d6"
+    }
+  },
+  "name": "shelf.house",
+  "ok": true,
+  "source": "shelf/house.json at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

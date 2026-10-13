@@ -108,6 +108,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-13: nested-generator demo: shelf asset `house` (wall_segment per footprint edge + roof_hip, optional footprint input) and `examples/house_city.json` (12 houses varied per lot); editing wall_segment/roof_hip re-cooks every house (cache dedups identical walls: 12 houses in ~250 ms).
 - 2026-10-12: P0-D merged. **Phases 0–2 complete except P2-G (Unreal round trip, needs the editor bridge).** 167 nodes + 35 shelf assets, 224 goldens, 24 showcase examples.
 - 2026-10-12: P0-F merged. Only P0-D (worker pool) still running; P2-G (Unreal round trip) waits for the editor bridge.
 - 2026-10-12: P2-F merged cleanly (branch included main). P0-F reported; sent back to reconcile scatter with P2-B. P0-D running.
