@@ -22,6 +22,7 @@ import { TriSurface } from './pcg.ts';
 import { colliderFromArrays, collideRange } from './xpbd.ts';
 import { particlesRange } from './particles.ts';
 import type { StepArgs } from './particles.ts';
+import { getLoadedKernels } from '../wasm/kernels.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -192,6 +193,17 @@ const scatterRelax: Kernel = {
   },
 };
 
+/** One serial elimination job. It must run as a full range on one initialized WASM worker. */
+const scatterWasmEliminate: Kernel = {
+  minElements: Infinity,
+  run(a: { target: number; rmax: number }, A, start, end) {
+    if (start !== 0 || end !== A.pos.length / 3) throw new Error('scatter_wasm_eliminate requires one full range');
+    const kernels = getLoadedKernels();
+    if (!kernels) throw new Error('scatter WASM kernels are not initialized');
+    return kernels.scatter_eliminate(A.pos, a.target, a.rmax, A.scale);
+  },
+};
+
 // ---------------------------------------------------------------- cloth (src/core/xpbd.ts)
 
 /** drape / inflate: each point's contact plane against a collider shared as arrays (colliderArrays), once per step. */
@@ -277,6 +289,7 @@ export const KERNELS: Record<string, Kernel> = {
   scatter_elim_lists: scatterElimLists,
   scatter_conflicts: scatterConflicts,
   scatter_relax: scatterRelax,
+  scatter_wasm_eliminate: scatterWasmEliminate,
   particles: particlesK,
   cloth_collide: clothCollide,
   'selftest.scale': selftestScale,

@@ -27,6 +27,16 @@ export function remesh_quad(positions: Float64Array, tris: Uint32Array, options:
 
 export function roof(outer: Float64Array, hole_arrays: Array<any>, pitch: Float64Array, height_cap?: number | null): object;
 
+export function scatter_eliminate(positions: Float32Array, scale: Float32Array, target_count: number, r_max: number): Int32Array;
+
+export function scatter_eliminate_f64(positions: Float64Array, scale: Float64Array, target_count: number, r_max: number): Int32Array;
+
+export function scatter_min_distance(positions: Float32Array, order: Int32Array, radius: number, limit: number, groups: Int32Array, group_cap: number): Int32Array;
+
+export function scatter_min_distance_f64(positions: Float64Array, order: Int32Array, radius: number, limit: number, groups: Int32Array, group_cap: number): Int32Array;
+
+export function scatter_relax(positions: Float64Array, spacing: Float64Array, triangles: Int32Array, barycentrics: Float64Array, t: Float64Array, nodes: Float64Array, child: Int32Array, order: Int32Array, tri_prim: Uint32Array, corners: Float64Array, cw: Float64Array, iterations: number, options: any): object;
+
 export function sdf_from_mesh(positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean): object;
 
 export function straight_skeleton(outer: Float64Array, hole_arrays: Array<any>, weights?: Float64Array | null): object;
@@ -50,6 +60,11 @@ export interface InitOutput {
     readonly offset_polygon: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly remesh_quad: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly roof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly scatter_eliminate: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly scatter_eliminate_f64: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly scatter_min_distance: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly scatter_min_distance_f64: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly scatter_relax: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number) => void;
     readonly sdf_from_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly straight_skeleton: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly thermal_erode: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
@@ -57,6 +72,7 @@ export interface InitOutput {
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
+    readonly __wbindgen_export4: (a: number, b: number, c: number) => void;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;
