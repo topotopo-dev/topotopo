@@ -4,9 +4,11 @@
 // Pool path: inputs, outputs and shared data are copied once into SharedArrayBuffers that every worker sees; the
 // range [0, count) is split into contiguous chunks, each written by one task into its own slots of the outputs; when
 // all chunks have finished the outputs are copied back into the caller's arrays. Outputs start as copies of the
-// caller's arrays, so elements a kernel skips (masked out) keep their values. Shared data (a BVH) also goes to the
-// workers under a content hash, so a worker that already holds it reuses it. Failures: the error of the first
-// failing chunk (in element order) rejects the run; a pool that cannot start workers falls back to this thread.
+// caller's arrays, so elements a kernel skips (masked out) keep their values. Inputs and results that already live in
+// a SharedArrayBuffer are handed to the workers as they are (no copy in; results are written in place). Shared data
+// (a BVH) also goes to the workers under a content hash, so a worker that already holds it reuses it. Failures: the
+// error of the first failing chunk (in element order) rejects the run; a pool that cannot start workers falls back to
+// this thread.
 // Host-agnostic: needs only SharedArrayBuffer and the Host's WorkerPool.
 import { KERNELS, hashArrays } from '../core/kernels.ts';
 import type { KernelContext, TypedArray } from '../core/kernels.ts';
@@ -17,13 +19,14 @@ export interface KernelJob {
   count: number;
   /** small structured-cloneable argument (params) */
   args?: any;
-  /** read-only arrays (null/undefined entries are left out, e.g. an absent group mask) */
+  /** read-only arrays (null/undefined entries are left out, e.g. an absent group mask; shared memory is not copied) */
   inputs?: Record<string, TypedArray | null | undefined>;
   /** arrays the kernel writes per element (indexed globally); written in place */
   outputs?: Record<string, TypedArray>;
   /**
    * Like outputs, for freshly allocated (all-zero) arrays: on the pool their shared copies start zeroed instead of
-   * being copied in. Elements the kernel skips come back as 0.
+   * being copied in. Elements the kernel skips come back as 0. A result that lives in a SharedArrayBuffer (all zero)
+   * is written in place.
    */
   results?: Record<string, TypedArray>;
   /** large read-only data reused across chunks and cooks (cached in each worker under a content hash) */
@@ -67,6 +70,11 @@ const localCtx: KernelContext = { sharedKey: '', memo: (_key, make) => make() };
 
 const DEFAULT_MIN = 50000;
 
+const isShared = (a: ArrayBufferView) => a.buffer instanceof SharedArrayBuffer;
+
+/** a read-only array as the workers see it: itself when it is shared memory already, else a shared copy */
+const sharedView = <T extends TypedArray>(a: T): T => (isShared(a) ? a : sharedCopy(a));
+
 function sharedCopy<T extends TypedArray>(a: T): T {
   const C = a.constructor as any;
   const v = new C(new SharedArrayBuffer(a.byteLength)) as T;
@@ -107,14 +115,16 @@ export function parallelMap(
 
   const chunks = Math.max(1, Math.min(job.count, Math.floor(opts.chunks ?? pool.size * (k?.chunksPerWorker ?? 1))));
   const arrays: Record<string, ArrayBufferView> = {};
-  for (const [n, v] of Object.entries(job.inputs ?? {})) if (v) arrays[n] = sharedCopy(v);
+  for (const [n, v] of Object.entries(job.inputs ?? {})) if (v) arrays[n] = sharedView(v);
   const outs: [string, TypedArray, TypedArray][] = [];
   for (const [n, v] of Object.entries(job.outputs ?? {})) {
     const c = sharedCopy(v);
     arrays[n] = c;
     outs.push([n, v, c]);
   }
+  const inPlace: TypedArray[] = [];
   for (const [n, v] of Object.entries(job.results ?? {})) {
+    if (isShared(v)) { arrays[n] = v; inPlace.push(v); continue; }
     const c = new (v.constructor as any)(new SharedArrayBuffer(v.byteLength)) as TypedArray;
     arrays[n] = c;
     outs.push([n, v, c]);
@@ -135,7 +145,10 @@ export function parallelMap(
     const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (failed) {
       // no worker could start (e.g. the worker module failed to load): do the work here instead
-      if (settled.some((r) => r.status === 'rejected' && r.reason?.code === 'POOL_UNAVAILABLE')) return serialRun(kernel, job, opts, stats);
+      if (settled.some((r) => r.status === 'rejected' && r.reason?.code === 'POOL_UNAVAILABLE')) {
+        for (const v of inPlace) v.fill(0); // chunks that did run wrote into them
+        return serialRun(kernel, job, opts, stats);
+      }
       throw failed.reason;
     }
     for (const [, dst, src] of outs) dst.set(src as any);
