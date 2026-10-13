@@ -20,7 +20,7 @@ import { triangulate } from './topology.ts';
 export const MAX_SAMPLES = 4097 * 4097;
 
 /** Layer names with a Houdini meaning; any other name is a user layer. */
-export const STANDARD_LAYERS = ['height', 'mask', 'flow', 'sediment', 'debris', 'water'];
+export const STANDARD_LAYERS = ['height', 'mask', 'flow', 'sediment', 'debris', 'water', 'fill', 'lake'];
 
 /** Bilinear lookup in a w × h grid at fractional sample coordinates (clamped to the grid). Needs w, h >= 2. */
 export function bilinear(a: ArrayLike<number>, w: number, h: number, fx: number, fz: number): number {

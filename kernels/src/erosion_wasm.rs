@@ -44,6 +44,16 @@ fn boundary(o: &JsValue) -> Result<bool, JsValue> {
         _ => Err(error("erosion boundary must be closed or open")),
     }
 }
+fn boolean(o: &JsValue, name: &str, default: bool) -> Result<bool, JsValue> {
+    let value = Reflect::get(o, &JsValue::from_str(name))?;
+    if value.is_undefined() {
+        Ok(default)
+    } else {
+        value
+            .as_bool()
+            .ok_or_else(|| error(format!("erosion {name} must be a boolean")))
+    }
+}
 fn optional(layer: &[f32]) -> Option<&[f32]> {
     if layer.is_empty() { None } else { Some(layer) }
 }
@@ -153,6 +163,14 @@ pub fn erode_pipe(
     value!(stream_power_k);
     value!(stream_power_m);
     value!(stream_power_n);
+    p.fill_sinks = boolean(&o, "fill_sinks", false)?;
+    let initial_water = Reflect::get(&o, &JsValue::from_str("initial_water"))?;
+    if !initial_water.is_undefined() {
+        if !initial_water.is_instance_of::<Float32Array>() {
+            return Err(error("erosion initial_water must be a Float32Array"));
+        }
+        p.initial_water = Float32Array::new(&initial_water).to_vec();
+    }
     p.open_boundary = boundary(&o)?;
     result(
         erode_pipe(
@@ -205,6 +223,7 @@ pub fn flow_accumulation(
     h: usize,
     cell: f32,
     method: &str,
+    fill_sinks: Option<bool>,
 ) -> Result<Object, JsValue> {
     use crate::erosion_flow::{FlowMethod, flow_accumulation};
     let method = match method {
@@ -212,7 +231,12 @@ pub fn flow_accumulation(
         "dinf" => FlowMethod::Dinf,
         _ => return Err(error("flow method must be d8 or dinf")),
     };
-    let r = flow_accumulation(height, w, h, cell, method).map_err(error)?;
+    let r = if fill_sinks.unwrap_or(false) {
+        crate::erosion_flow::flow_accumulation_filled(height, w, h, cell, method)
+    } else {
+        flow_accumulation(height, w, h, cell, method)
+    }
+    .map_err(error)?;
     let o = Object::new();
     Reflect::set(
         &o,
@@ -224,5 +248,45 @@ pub fn flow_accumulation(
         &JsValue::from_str("direction"),
         &Uint8Array::from(r.direction.as_slice()),
     )?;
+    Ok(o)
+}
+
+#[wasm_bindgen]
+pub fn fill_sinks(
+    height: &[f32],
+    w: usize,
+    h: usize,
+    params: JsValue,
+    mask: &[f32],
+) -> Result<Object, JsValue> {
+    let o = options(params)?;
+    let epsilon = number(&o, "epsilon", 0.0)?;
+    let max_depth = number(&o, "max_depth", 0.0)?;
+    if (epsilon != 0.0 && epsilon as f32 == 0.0) || (max_depth != 0.0 && max_depth as f32 == 0.0) {
+        return Err(error(
+            "fill_sinks: nonzero epsilon and max_depth must be representable as f32",
+        ));
+    }
+    let p = crate::fill_sinks::FillParams {
+        epsilon: epsilon as f32,
+        max_depth: max_depth as f32,
+        write_direction: boolean(&o, "write_direction", false)?,
+    };
+    let r = crate::fill_sinks::fill_sinks(height, w, h, &p, optional(mask)).map_err(error)?;
+    let o = Object::new();
+    for (name, values) in [("height", r.height), ("fill", r.fill), ("lake", r.lake)] {
+        Reflect::set(
+            &o,
+            &JsValue::from_str(name),
+            &Float32Array::from(values.as_slice()),
+        )?;
+    }
+    if p.write_direction {
+        Reflect::set(
+            &o,
+            &JsValue::from_str("direction"),
+            &Uint8Array::from(r.direction.as_slice()),
+        )?;
+    }
     Ok(o)
 }

@@ -100,18 +100,47 @@ export function erode_pipe(height, hardness, freeze, rain, w, h, cell, params, s
  * @param {Float32Array} height
  * @param {number} w
  * @param {number} h
- * @param {number} cell
- * @param {string} method
+ * @param {any} params
+ * @param {Float32Array} mask
  * @returns {object}
  */
-export function flow_accumulation(height, w, h, cell, method) {
+export function fill_sinks(height, w, h, params, mask) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF32ToWasm0(height, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(mask, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.fill_sinks(retptr, ptr0, len0, w, h, addHeapObject(params), ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float32Array} height
+ * @param {number} w
+ * @param {number} h
+ * @param {number} cell
+ * @param {string} method
+ * @param {boolean | null} [fill_sinks]
+ * @returns {object}
+ */
+export function flow_accumulation(height, w, h, cell, method, fill_sinks) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passArrayF32ToWasm0(height, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(method, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
-        wasm.flow_accumulation(retptr, ptr0, len0, w, h, cell, ptr1, len1);
+        wasm.flow_accumulation(retptr, ptr0, len0, w, h, cell, ptr1, len1, isLikeNone(fill_sinks) ? 0xFFFFFF : fill_sinks ? 1 : 0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -700,6 +729,10 @@ function __wbg_get_imports() {
         },
         __wbg_new_617a8cdb8bb1130e: function() {
             const ret = new Object();
+            return addHeapObject(ret);
+        },
+        __wbg_new_63c4c65d2534e5d3: function(arg0) {
+            const ret = new Float32Array(getObject(arg0));
             return addHeapObject(ret);
         },
         __wbg_new_c0cfdc72bf7dee4d: function(arg0) {

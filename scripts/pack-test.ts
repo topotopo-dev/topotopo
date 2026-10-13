@@ -80,6 +80,12 @@ try {
   fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ name: `${NAME}-pack-test`, private: true, type: 'module' }, null, 2));
   sh(`npm install --no-audit --no-fund --prefer-offline "${tarball}"`, app);
   const installed = path.join(app, 'node_modules', NAME);
+  for (const variant of ['pkg', 'pkg-simd']) {
+    const readme = fs.readFileSync(path.join(installed, 'kernels', variant, 'README.md'), 'utf8');
+    for (const document of ['BUILD.md', 'BENCH.md'])
+      check(readme.includes(`https://github.com/topotopo-dev/topotopo/blob/main/kernels/${document}`) &&
+        !readme.includes(`](${document}`), `${variant} README ${document} link works outside the source checkout`);
+  }
   const inPkg = (p: unknown) => typeof p === 'string' && path.resolve(p).toLowerCase().startsWith(installed.toLowerCase() + path.sep);
   check(fs.existsSync(path.join(installed, 'dist', 'cli.js')) && !fs.existsSync(path.join(installed, 'src')), `installed node_modules/${NAME} (dist/, no src/)`);
   const shim = path.join(app, 'node_modules', '.bin', process.platform === 'win32' ? `${BIN}.cmd` : BIN);
@@ -151,6 +157,14 @@ import { kernelsWasmVariant, kernelsWasmURL, loadHostKernels } from './node_modu
 const kernels = await loadHostKernels(createNodeHost({ workers: 0 }));
 const roof = kernels.roof([0, 0, 6, 0, 6, 4, 0, 4], [], 35);
 assert.ok(roof.vertices.length > 0);
+const bowl = Float32Array.of(3,3,3,3,0,3,3,3,3);
+const filled = kernels.fill_sinks(bowl, 3, 3, { writeDirection: true });
+assert.equal(filled.height[4], 3);
+assert.equal(filled.fill[4], 3);
+assert.notEqual(filled.direction[4], 255);
+const lake = kernels.fill_sinks(bowl, 3, 3, { maxDepth: 1 });
+assert.equal(lake.height[4], 0);
+assert.equal(lake.lake[4], 3);
 console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.href, vertices: Array.from(roof.vertices) }));
 `);
   const scalar = JSON.parse(sh('node kernels.mjs', app, { ...autoEnv, TOPOTOPO_WASM: 'scalar' }).trim().split('\n').pop()!);

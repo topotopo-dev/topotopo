@@ -4,7 +4,7 @@ Original Rust implementation of a kinetic, weighted straight skeleton, mitered p
 offsets, and hip/gable roof surfaces. The checked-in `pkg-simd/` and `pkg/` are the
 SIMD and scalar WebAssembly builds; normal TopoTopo users do not install Rust.
 The loader feature-detects simd128 and defaults to SIMD, with scalar fallback.
-See [BUILD.md](BUILD.md).
+See [BUILD.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BUILD.md).
 
 ## Scatter selection (sessions 12-13)
 
@@ -62,7 +62,7 @@ positive minimum distances whose squares underflow to zero, and
 excessive pair lists return errors. Minimum-distance grid coordinates are limited
 to the exact integer range `abs(position / radius) <= 2^52 - 4`, so hostile tiny
 radii cannot produce overflowing or nonadvancing cell loops. No dependencies were
-added. See [BENCH.md](BENCH.md) for measured parity, timing and remaining limits.
+added. See [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md) for measured parity, timing and remaining limits.
 
 `scatter_relax` accepts f64 positions, per-point spacing, triangle indices and
 barycentrics, plus the existing `TriSurface.arrays()` buffers (`T`, `nodes`, `child`,
@@ -155,8 +155,9 @@ deposits, `water` actual depth and `flow` normalised integrated speed. Closed ed
 keep water/material; open pipe edges lose water **only**, keeping rock in-grid.
 Droplet open edges retain their original behaviour of losing the carried load.
 Pipe thermal transport is a separate conservative eight-neighbour talus pass.
-Optional stream power is `K * A^m * S^n`; reference contributing area is calculated
-from the incoming terrain, so the drainage network does not jump during a solve.
+Optional stream power is `K * A^m * S^n`; by default reference contributing area
+is calculated from the incoming terrain, so the drainage network does not jump
+during a solve. Opt-in sink filling refreshes it each iteration, as described below.
 
 The pipe implementation reuses padded, separate flux arrays and row
 scratch buffers. Rain/flux and water/erosion/transport form two fluid sweeps;
@@ -172,20 +173,22 @@ failed the full-reference flow-correlation threshold. Row bounds are validated
 before the small unchecked stencil/scatter loops; no work buffers allocate inside
 either iteration loop. SIMD droplet smoothing retains the original addition order,
 and paired thermal inactivity checks preserve scalar transfers for active cells.
-See the session-6 measurements and limits in [BENCH.md](BENCH.md).
+See the session-6 measurements and limits in [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).
 
 `flow_accumulation` offers D8 and triangular-facet D-infinity routing. Accumulation
 includes each sample's own cell area. Stable height/index ordering fixes the sum
 order. The u8 direction codes are E, SE, S, SW, W, NW, N, NE = 0..7; 255 means sink.
 D-infinity accumulates through both receivers but reports the dominant direction.
-There is no depression filling/breaching: pits retain drainage. `heightfield_flow`
-writes float layers `drainage` and `direction`, optionally log-scaled/normalised.
+By default pits retain drainage. `heightfield_flow` writes float layers `drainage`
+and `direction`, optionally log-scaled/normalised; its opt-in `fill_sinks` routes
+over a filled surface while preserving the input terrain height and other layers.
 
 Compatibility: `heightfield_erode` defaults to `method:droplet, backend:js` and keeps
 the old layer schema and output. Explicit `kernel` loads WASM; `auto` uses an already
 loaded kernel and otherwise JS. Pipe/stream_power require the kernel. `wear` is added
 only on kernel paths to keep existing goldens unchanged. Each call starts a fresh
-water simulation; chaining pipe nodes does not resume flux/suspended-water state.
+water simulation, initialized from `lake` when present; chaining pipe nodes does
+not resume flux/suspended-water state or water outside the retained lake footprint.
 
 Limits: dense grids up to 16,777,216 samples, bounded iterations and cell-work counts;
 extreme/nonfinite inputs fail with a useful error. f32 rounding limits conservation
@@ -198,8 +201,89 @@ Scalar/SIMD corpus parity compares every returned byte, with no floating toleran
 golden and pool tests exercise the default SIMD path. `TOPOTOPO_WASM=scalar|simd`
 selects an explicit path before import. No dependencies were added; existing crate
 licences below still apply.
-See [BENCH.md](BENCH.md) for measured acceptance and performance, and
+See [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md) for measured acceptance and performance, and
 `examples/renders/erosion_models.png` for the four-model comparison.
+
+## Depression filling and lakes (session 14)
+
+The loader API is `fill_sinks(height, width, heightCount, options?, mask?)`, with
+`Float32Array` height/mask buffers and options `epsilon`, `maxDepth` and
+`writeDirection`. It returns `Float32Array` layers `height`, `fill`, `lake` and a
+`Uint8Array` direction layer (empty unless requested). The generated WASM export takes an options
+object with snake-case `max_depth` and `write_direction`, followed by the mask
+array (empty for no mask). Inputs are never modified.
+
+`heightfield_fill_sinks` prepares terrain for drainage using an original
+priority-flood implementation following
+[Barnes, Lehman and Mulla (2014)](https://doi.org/10.1016/j.cageo.2013.04.024).
+An eight-neighbour flood starts at border samples and protected outlets. A
+monotone radix queue orders finite Float32 elevations by their exact ordered bits;
+equal-priority buckets use deterministic last-in-first-out order, with row-major
+outlet insertion and E, SE, S, SW, W, NW, N, NE neighbour visits. Signed zeros have
+the same priority. At epsilon zero, a first-in-first-out depression queue skips
+priority-queue work for submerged samples. The optional directions record the
+discovery-parent forest: acyclic non-increasing routes through flats, with codes
+0..7 in that same compass order and 255 for an outlet or retained lake.
+
+`epsilon: 0` fills depressions to their spill elevation; a positive epsilon sets
+a minimum rise in metres per receiver step, at least one representable Float32
+step, giving the filled surface a strictly descending route. `max_depth: 0` fills
+all depressions.
+A positive `max_depth` preserves an entire connected depression when its deepest
+required fill exceeds that limit, instead of partially filling its deepest cells.
+`mask_layer` names an optional hardness/frozen layer with finite values in 0..1:
+one protects samples as unchanged drainage outlets; lower values may be filled. These protected
+outlets and deliberately retained lakes are exceptions to drainage to the border.
+`write_fill` and `write_lake` control the two diagnostic output layers.
+Lake classification always uses the epsilon-zero spill surface before any
+gradient is added, so the epsilon rise neither inflates reported lake depth nor
+joins separate basins over a dry saddle.
+
+The layers use world metres, not normalized masks:
+
+- `height` is the resulting terrain elevation.
+- `fill` is nonnegative material added to the terrain (`height - input height`).
+- `lake` is retained standing-water depth above unchanged ground, zero elsewhere.
+  Its visible water surface is `height + lake`; it is not a terrain displacement.
+
+For pipe and stream-power erosion, `water` is also a depth above the ground in
+metres. Those methods initialize standing water from an incoming `lake` layer;
+after erosion, `lake` equals the final `water` depth within the original lake
+footprint and stays zero outside it. `water` reports depth everywhere, including
+rainwater outside lakes. Before erosion, `lake` describes water up to the basin's
+spill level; afterwards both layers describe the solver's current water, and
+`height + lake` still gives the surface over the retained footprint. Legacy droplet
+erosion retains its normalized resting-water mask for compatibility and does not
+consume lake depth. Converting either depth layer to a mask is an explicit
+`depth > 0` or artist-chosen depth ramp.
+
+`heightfield_flow` with `fill_sinks: true` computes contributing area over a
+drainable surface without adding material to the saved ground. The same opt-in
+option on `heightfield_erode` with `method: stream_power` recomputes drainage each
+iteration so it does not stop in pits. On resolved flats, incision uses a minimum
+receiver drop of `max(1e-4 * cell_size, one Float32 height step)`, divided by the
+cardinal or diagonal receiver distance. This small artificial routing gradient
+lets stream incision advance over horizontal spill surfaces; it does not raise
+the stored terrain. Both defaults remain false, preserving existing graphs.
+Filling does not breach channels, simulate lake volume through time or change the
+boundary conditions of the shallow-water solver.
+
+Grids must be at least 2 by 2 with at most 16,777,216 samples, finite heights of
+magnitude at most `1e8`, epsilon in `0..1e6` and max depth in `0..2e8`. The kernel
+rejects mismatched masks, nonfinite values, nonzero JavaScript options that
+underflow Float32, and an epsilon gradient that exceeds the supported height
+range. Flooding uses the same arithmetic and queue logic in
+scalar and SIMD packages; it adds no runtime or Rust dependency.
+
+The [drainage example](https://github.com/topotopo-dev/topotopo/blob/main/examples/drainage.json)
+shows the demo massif twice: original drainage on the left, shallow depressions
+filled and deeper lakes retained on the right. Both use the same contributing-area
+colour scale; lake surfaces are blue. Its `filled` node is the terrain result;
+`water_surface` raises only the display mesh by `lake`, keeping water and terrain
+separate in the actual heightfield. Run `node test/showcase.ts drainage` and inspect
+`examples/renders/drainage.png`. See session 14 in
+[BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md)
+for the measured timings, backend parity and remaining limits.
 
 ## API and geometry
 
@@ -443,7 +527,7 @@ Face counts remain approximate, especially with locked borders or dense geometri
 constraints. Local cleanup and bounded integer correction do not establish global
 integrability or intersection freedom on arbitrary surfaces. Scalar/SIMD parity is
 tested on the regression corpus, not an exhaustive operating-system/compiler matrix. Session-7 measured
-acceptance, scalar/SIMD comparisons and remaining limits are in [BENCH.md](BENCH.md).
+acceptance, scalar/SIMD comparisons and remaining limits are in [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).
 
 Run `node test/remeshquad.ts`, `node bench/remeshquad.ts` and
 `cargo bench --manifest-path kernels/Cargo.toml --bench remesh_quad`.
@@ -568,4 +652,4 @@ Run `node test/sdfgrid.ts` for Node integration, `node bench/sdfgrid.ts` for the
 box benchmark, and inspect `examples/renders/voxel_remesh.png` (sharp left, smooth
 middle, dilate/erode/blur right). Existing goldens and render hashes are checked
 separately from the new example. Benchmarks and platform verification limits are in
-[BENCH.md](BENCH.md).
+[BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).

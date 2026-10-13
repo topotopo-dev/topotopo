@@ -228,6 +228,26 @@ for (const [width, heightCount] of [[2, 2], [3, 5], [4, 4], [7, 6], [8, 9], [17,
   }
 }
 
+// Priority flood: flat receivers, epsilon slopes, protected outlets and retained lake water.
+for (const [width, heightCount] of [[2, 2], [7, 9], [16, 16], [33, 25]]) {
+  const count = width * heightCount;
+  const basin = Float32Array.from({ length: count }, (_, i) => {
+    const x = i % width - (width - 1) / 2, z = Math.floor(i / width) - (heightCount - 1) / 2;
+    return Math.min(4, (x * x + z * z) / 16);
+  });
+  const protectedCells = Float32Array.from({ length: count }, (_, i) => i % 11 === 0 ? 1 : 0);
+  for (const epsilon of [0, 0.00001, 0.1]) for (const max_depth of [0, 0.5, 2]) for (const mask of [empty, protectedCells])
+    compare('fill_sinks', `${width}x${heightCount}, epsilon ${epsilon}, max_depth ${max_depth}, mask ${mask.length}`, k =>
+      k.fill_sinks(basin, width, heightCount, { epsilon, max_depth, write_direction: true }, mask));
+  compare('fill_sinks', `${width}x${heightCount}, optional directions omitted`, k => k.fill_sinks(basin, width, heightCount, {}, empty));
+  for (const method of ['d8', 'dinf']) compare('flow_accumulation', `${width}x${heightCount}, filled ${method}`, k =>
+    k.flow_accumulation(basin, width, heightCount, 0.5, method, true));
+  const initial_water = Float32Array.from(basin, v => Math.max(0, 1 - v));
+  compare('erode_pipe', `${width}x${heightCount}, filled stream power and lake water`, k =>
+    k.erode_pipe(basin, protectedCells, empty, empty, width, heightCount, 1,
+      { iterations: 5, fill_sinks: true, stream_power_k: 0.03, initial_water }, 1n));
+}
+
 // Signed zero and alternating active/inactive thermal lanes, at odd and even row lengths.
 for (const size of [7, 8]) for (const impulse of [0, 0.125, -0.125]) {
   const terrain = Float32Array.from({ length: size * size }, (_, i) => i % 2 ? -0 : 0);
