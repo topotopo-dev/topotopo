@@ -36,13 +36,29 @@ export function randN(...vals: number[]): number {
 
 /** Seeded PRNG (mulberry32) returning floats in [0,1). */
 export function rng(seed: number): () => number {
-  let a = hash32(hashNumber(seed) + 0x6d2b79f5);
+  let a = rngState(seed);
   return () => {
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/** The state rng(seed) starts from (for rngAt). */
+export function rngState(seed: number): number {
+  return hash32(hashNumber(seed) + 0x6d2b79f5);
+}
+
+/**
+ * The m-th value (m = 1, 2, ...) that rng(seed) returns, from its start state rngState(seed), in O(1): mulberry32's
+ * state only advances by a constant, so draws can be split across threads and give the same numbers.
+ */
+export function rngAt(state: number, m: number): number {
+  const a = (state + Math.imul(m, 0x6d2b79f5)) | 0;
+  let t = Math.imul(a ^ (a >>> 15), 1 | a);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
 /** Standard normal sample from a uniform rng (Box–Muller). */

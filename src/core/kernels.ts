@@ -16,6 +16,9 @@ import { cellsRange, noiseRange } from './texture.ts';
 import type { CellsJob, NoiseJob } from './texture.ts';
 import { curvatureRange, projectRange } from './bake.ts';
 import type { CurvatureArgs, ProjectArgs } from './bake.ts';
+import { candidatesRange, conflictsRange, elimNeighboursRange, elimPairsRange, relaxRange } from './scatter.ts';
+import type { CandidateArgs, ConflictArgs, RelaxArgs } from './scatter.ts';
+import { TriSurface } from './pcg.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -131,6 +134,45 @@ const bakeCurvature: Kernel = {
   run(a: CurvatureArgs, A, start, end) { curvatureRange(a, A, start, end); },
 };
 
+// ---------------------------------------------------------------- scatter (src/core/scatter.ts)
+
+/** scatter: area-weighted surface candidates (draws by index, rngAt). */
+const scatterCandidates: Kernel = {
+  minElements: 65536,
+  run(a: CandidateArgs, A, start, end) { candidatesRange(a, A, start, end); },
+};
+
+/** sample elimination with one radius: neighbour lists and weight contributions per KD slot (returned per chunk). */
+const scatterElimNeighbours: Kernel = {
+  minElements: 32768,
+  chunksPerWorker: 2,
+  run(a: { r2: number }, A, start, end) { return elimNeighboursRange(a, A, start, end); },
+};
+
+/** sample elimination with radii by density: the pairs found from each candidate (returned per chunk). */
+const scatterElimPairs: Kernel = {
+  minElements: 32768,
+  chunksPerWorker: 2,
+  run(a: { rmax: number }, A, start, end) { return elimPairsRange(a, A, start, end); },
+};
+
+/** exact minimum distance: each candidate's earlier candidates closer than r (returned per chunk). */
+const scatterConflicts: Kernel = {
+  minElements: 16384,
+  chunksPerWorker: 2,
+  run(a: ConflictArgs, A, start, end) { return conflictsRange(a, A, start, end); },
+};
+
+/** one relaxation pass on a surface shared as arrays (TriSurface.arrays), rebuilt once per thread. */
+const scatterRelax: Kernel = {
+  minElements: 2048,
+  chunksPerWorker: 4,
+  run(a: RelaxArgs, A, start, end, ctx) {
+    const surf = ctx.memo('trisurface:' + ctx.sharedKey, () => TriSurface.fromArrays(A as any));
+    relaxRange(a, A, start, end, surf);
+  },
+};
+
 // ---------------------------------------------------------------- self tests (test/pool.ts)
 
 /** x[i] *= factor over the range; returns the sum of the scaled values (round trips, transfer, parallelMap). */
@@ -185,6 +227,11 @@ export const KERNELS: Record<string, Kernel> = {
   tex_cells: texCellsK,
   bake_project: bakeProject,
   bake_curvature: bakeCurvature,
+  scatter_candidates: scatterCandidates,
+  scatter_elim_neighbours: scatterElimNeighbours,
+  scatter_elim_pairs: scatterElimPairs,
+  scatter_conflicts: scatterConflicts,
+  scatter_relax: scatterRelax,
   'selftest.scale': selftestScale,
   'selftest.square': selftestSquare,
   'selftest.throw': selftestThrow,

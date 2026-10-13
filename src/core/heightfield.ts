@@ -8,8 +8,9 @@
 //
 // Cooked geometry is immutable: Geometry.clone() gives each heightfield its own layer map but shares the arrays,
 // so a node writes through `writable(name)` (a private copy) and never into an array it did not allocate.
-// This module holds the volume class, bilinear sampling, grid filters (blur, distance transforms), rasterising
-// meshes and curves onto the grid, conversion to polygons, the render preview and the inspect summary.
+// This module holds the volume class, sampling (bilinear, or over Unreal Landscape triangles), grid filters (blur,
+// distance transforms), rasterising meshes and curves onto the grid, conversion to polygons, the render preview and
+// the inspect summary.
 import { AttribTable, Geometry } from './geometry.ts';
 import type { HeightfieldVolume, Volume } from './geometry.ts';
 import type { Vec3 } from './math.ts';
@@ -30,6 +31,34 @@ export function bilinear(a: ArrayLike<number>, w: number, h: number, fx: number,
   if (j > h - 2) j = h - 2;
   const u = fx - i, v = fz - j, k = j * w + i;
   return (a[k] * (1 - u) + a[k + 1] * u) * (1 - v) + (a[k + w] * (1 - u) + a[k + w + 1] * u) * v;
+}
+
+/**
+ * How a heightfield is read between its samples: 'bilinear' (the default everywhere), or 'unreal_triangles', the
+ * surface of an Unreal Landscape imported from the field's heightmap (unrealTriangles).
+ */
+export type HeightfieldSampling = 'bilinear' | 'unreal_triangles';
+export const HEIGHTFIELD_SAMPLING: HeightfieldSampling[] = ['bilinear', 'unreal_triangles'];
+
+/**
+ * Piecewise-linear lookup in a w × h grid at fractional sample coordinates (clamped to the grid like bilinear): every
+ * cell (i, j)–(i+1, j+1) is split along its (0,0)–(1,1) diagonal in index space, with column i = X and row j = Z. That
+ * is how Unreal's Landscape triangulates a heightmap (vertex (x, y) = (column, row), each quad cut from (x, y) to
+ * (x+1, y+1)); export png16/r16 writes column = X and row 0 = the field's min Z, and the Landscape maps X → X and
+ * Z → Y, so the two surfaces coincide. It equals bilinear() at the samples and along the cell edges and differs inside
+ * a cell by at most |h00 + h11 - h10 - h01| / 4 (at the cell centre). Needs w, h >= 2.
+ */
+export function unrealTriangles(a: ArrayLike<number>, w: number, h: number, fx: number, fz: number): number {
+  if (!(fx > 0)) fx = 0; else if (fx > w - 1) fx = w - 1;
+  if (!(fz > 0)) fz = 0; else if (fz > h - 1) fz = h - 1;
+  let i = Math.floor(fx), j = Math.floor(fz);
+  if (i > w - 2) i = w - 2;
+  if (j > h - 2) j = h - 2;
+  const u = fx - i, v = fz - j, k = j * w + i;
+  // triangle (0,0) (1,0) (1,1) below the diagonal (u >= v), (0,0) (0,1) (1,1) above it
+  return u >= v
+    ? a[k] + (a[k + 1] - a[k]) * u + (a[k + w + 1] - a[k + 1]) * v
+    : a[k] + (a[k + w] - a[k]) * v + (a[k + w + 1] - a[k + w]) * u;
 }
 
 export class Heightfield implements HeightfieldVolume {
@@ -96,14 +125,14 @@ export class Heightfield implements HeightfieldVolume {
     return c;
   }
 
-  /** Bilinear value of a layer array at world (x, z). */
-  sampleArray(a: ArrayLike<number>, x: number, z: number): number {
-    return bilinear(a, this.width, this.height, this.fx(x), this.fz(z));
+  /** Value of a layer array at world (x, z): bilinear, or over Unreal's Landscape triangles (unrealTriangles). */
+  sampleArray(a: ArrayLike<number>, x: number, z: number, mode: HeightfieldSampling = 'bilinear'): number {
+    return (mode === 'unreal_triangles' ? unrealTriangles : bilinear)(a, this.width, this.height, this.fx(x), this.fz(z));
   }
 
-  sample(x: number, z: number): number {
+  sample(x: number, z: number, mode: HeightfieldSampling = 'bilinear'): number {
     const a = this.layers.get('height');
-    return a ? this.sampleArray(a, x, z) : 0;
+    return a ? this.sampleArray(a, x, z, mode) : 0;
   }
 
   sampleLayer(name: string, x: number, z: number): number {

@@ -707,7 +707,7 @@ defineNode({
   type: 'project_curve',
   category: 'curve',
   summary: 'Project curves onto a surface or heightfield (along a direction or to the closest point): roads and paths on terrain.',
-  description: 'Houdini Ray SOP applied to curves. Optionally resamples each curve by spacing first (splines exactly), so the projected curve follows the surface between the original points. direction mode casts rays (both ways with bidirectional); closest snaps to the nearest surface point. Writes point hit (1/0) and N (surface normal at the hit); misses stay where they are or are deleted. lift raises the result along the normal. Targets: polygons (input 1), or a heightfield (sampled exactly for vertical rays, through its preview mesh otherwise).',
+  description: 'Houdini Ray SOP applied to curves. Optionally resamples each curve by spacing first (splines exactly), so the projected curve follows the surface between the original points. direction mode casts rays (both ways with bidirectional); closest snaps to the nearest surface point. Writes point hit (1/0) and N (surface normal at the hit); misses stay where they are or are deleted. lift raises the result along the normal. Targets: polygons (input 1), or a heightfield (sampled exactly for vertical rays, through its preview mesh otherwise). sample picks the heightfield surface for vertical rays: bilinear, or unreal_triangles (each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z: the surface of an Unreal Landscape imported from the field\'s png16/r16 export), so a road lies exactly on the Landscape.',
   aliases: ['curve_project', 'ray_curve', 'projectcurve'],
   inputs: [{ name: 'curves', desc: 'curves (or points) to project' }, { name: 'target', desc: 'surface mesh or heightfield' }],
   splines: 'keep',
@@ -722,6 +722,10 @@ defineNode({
     normals: { type: 'bool', default: true, desc: 'write point N from the surface' },
     smooth_normals: { type: 'bool', default: true, desc: 'N (and lift) from the interpolated vertex normals of the surface (60° cusp); false = the normal of the hit face' },
     group: P.group('point'),
+    sample: {
+      type: 'enum', options: ['bilinear', 'unreal_triangles'], default: 'bilinear', aliases: ['sampling', 'sample_mode'],
+      desc: 'heightfield target, vertical rays: bilinear, or unreal_triangles = Unreal Landscape\'s triangles (each cell cut along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z)',
+    },
   },
   outputs: 'point hit (int), N (surface normal)',
   example: { type: 'project_curve', params: { spacing: 0.25, lift: 0.05 } },
@@ -767,10 +771,10 @@ defineNode({
       if (exactHF) {
         const b = exactHF.bounds;
         if (x >= b.min[0] - 1e-9 && x <= b.max[0] + 1e-9 && z >= b.min[2] - 1e-9 && z <= b.max[2] + 1e-9) {
-          const h = exactHF.sample(x, z);
+          const s = p.sample === 'unreal_triangles' ? 'unreal_triangles' : 'bilinear', h = exactHF.sample(x, z, s);
           if (Math.abs(h - y) <= p.max_distance && (p.bidirectional || (dir[1] < 0 ? h <= y : h >= y))) {
             const e = exactHF.cellSize;
-            nrm = normalize([-(exactHF.sample(x + e, z) - exactHF.sample(x - e, z)) / (2 * e), 1, -(exactHF.sample(x, z + e) - exactHF.sample(x, z - e)) / (2 * e)]);
+            nrm = normalize([-(exactHF.sample(x + e, z, s) - exactHF.sample(x - e, z, s)) / (2 * e), 1, -(exactHF.sample(x, z + e, s) - exactHF.sample(x, z - e, s)) / (2 * e)]);
             pos = [x, h, z];
           }
         }
