@@ -12,15 +12,16 @@
 // particle integrates through it on its own. The integration is one kernel ("particles", src/core/kernels.ts) over the
 // particles: chunked on the worker pool it gives the same bits as on one thread (no shared state, per-particle
 // randomness is drawn at birth, the collision BVH and field data are shared read-only arrays). A run of steps can also be
-// cut anywhere (per frame) with the same result, which is what lets the node cache per-frame states.
+// cut anywhere (per frame) with the same result, which is what lets the node cache per-frame states, and what bounds
+// the memory of a run: it is emitted and integrated in batches of about `max_births` births.
 //
 // State. Between runs the simulation lives in a point Geometry (the node caches it per frame, like the solver): the
 // particles' carried emitter attributes and point groups, P, v, id, life, pscale, and internal attributes: __pb (birth
 // step), __pu (birth offset within the step: 0 = emitted at time 0 by emit_all, else in (0, 1]), __pkd (the step after
 // which the particle dies of age, NEVER = immortal), __pcn (its last contact normal, zero after a step without one),
 // __ptrail (ring of the last `trail` positions); detail __pstep (steps simulated), __pnextid, __pskipped (births refused
-// by max_particles), __pholders (death steps of particles a collision removed while their life still runs: they keep
-// their max_particles slot).
+// by max_particles), __pskipbirths (births refused by max_births; absent until one is), __pholders (death steps of
+// particles a collision removed while their life still runs: they keep their max_particles slot).
 import { Attribute, AttribTable, Geometry } from './geometry.ts';
 import { RayScene } from './analysis.ts';
 import { closestScratch } from './spatial.ts';
@@ -596,6 +597,12 @@ export interface EmitParams {
   velocityVar: number;
   pscale: number;
   maxParticles: number;
+  /**
+   * Most births in one step (the emit_all births at time 0 count separately, with the same limit); the rest of the
+   * step's births are refused (__pskipbirths). Also the batch size: emitSteps stops at the end of the first step at
+   * which its births reach it.
+   */
+  maxBirths: number;
   trail: number;
 }
 
@@ -605,12 +612,15 @@ function phaseOf(ep: EmitParams, key: number): number {
 }
 
 /**
- * Emit the births of steps [s0, s1) after `state` (null = the start of the simulation: the emit_all births come first)
+ * Emit the births of steps [s0, end) after `state` (null = the start of the simulation: the emit_all births come first)
  * and return a new state with them appended; never the input state itself, so the caller may write into its arrays.
  * `max_particles` counts every particle from its birth through its death step, including the ones a collision removed
- * (listed in __pholders).
+ * (listed in __pholders). `end` is s1, or the end of the first earlier step at which this call's births reach
+ * `maxBirths`: the caller integrates [s0, end) and continues from there, which gives the same result as one run (runs
+ * can be cut anywhere) while the births held at once stay bounded (R-17 N3: a high rate with a short life over many
+ * steps materialised every birth of the run and exhausted the heap).
  */
-export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s1: number, ep: EmitParams): Geometry {
+export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s1: number, ep: EmitParams): { geo: Geometry; end: number } {
   const n0 = state ? state.numPoints : 0;
   // particles holding a slot at s0, and when they release it (death step kd: counted through step kd)
   const span = Math.max(0, s1 - s0);
@@ -624,9 +634,11 @@ export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s
     if (holders) for (const kd of holders.getArray(0) as number[]) if (kd >= s0) hold(kd);
   }
   let skipped = state ? Number(state.detail.get('__pskipped')?.get(0) ?? 0) : 0;
+  let skippedBirths = stateSkippedBirths(state);
   let nextId = state ? Number(state.detail.get('__pnextid')?.get(0) ?? 0) : 0;
   const src: number[] = [], bs: number[] = [], us: number[] = [], lifes: number[] = [], kds: number[] = [], vel: number[] = [];
-  const cnt = em.count, max = ep.maxParticles, dt = ep.dt;
+  const cnt = em.count, max = ep.maxParticles, dt = ep.dt, maxBirths = Math.max(1, ep.maxBirths);
+  let end = s1;
   const keyOf = (e: number) => (em.key ? em.key[e] : e);
   const birth = (e: number, step: number, u: number, k: number) => {
     const key = keyOf(e);
@@ -646,36 +658,46 @@ export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s
     src.push(e); bs.push(step); us.push(u); lifes.push(life); kds.push(kd); vel.push(vx, vy, vz);
     hold(kd);
   };
-  if (!state && ep.emitAll)
+  if (!state && ep.emitAll) {
+    let n0 = 0;
     for (let e = 0; e < cnt; e++) {
       if (live >= max) { skipped++; continue; }
+      if (n0 >= maxBirths) { skippedBirths++; continue; }
       birth(e, 0, 0, 0);
+      n0++;
     }
+  }
   if (ep.rate > 0 && cnt > 0) {
     const phase = new Float64Array(cnt);
     for (let e = 0; e < cnt; e++) phase[e] = phaseOf(ep, keyOf(e));
     const k0 = ep.emitAll ? 1 : 0;
     for (let s = s0; s < s1; s++) {
       if (s > s0) live -= release[s - 1 - s0];
+      // births of this step: max_particles first (it counts every refused birth as before), then max_births
+      let room = maxBirths;
       for (let e = 0; e < cnt; e++) {
         const before = Math.floor(s * ep.rate + phase[e]), c = Math.floor((s + 1) * ep.rate + phase[e]) - before;
         for (let j = 0; j < c; j++) {
           // no slot frees up within a step: the rest of this point's births are refused at once (a huge emit_rate
           // would otherwise loop once per refused birth)
           if (live >= max) { skipped += c - j; break; }
+          if (room <= 0) { skippedBirths += c - j; break; }
           const k = k0 + before + j;
           // birth offset within the step in (0, 1]: 0 is reserved for particles that exist at time 0 (emit_all)
           birth(e, s, 1 - randN(ep.seed, keyOf(e), k, 1), k);
+          room--;
         }
       }
+      // a batch ends with the step at which its births reach max_births
+      if (src.length >= maxBirths && s + 1 < s1) { end = s + 1; break; }
     }
   }
   const nb = src.length;
   if (!nb) {
     const out = state ? state.clone() : emptyState(s0, ep.trail);
     setDetailInt(out, '__pnextid', nextId);
-    setSkipped(out, skipped);
-    return out;
+    setSkipped(out, skipped, skippedBirths);
+    return { geo: out, end };
   }
   // the births: the emitter points' attributes and groups, then the simulation attributes
   const g = new Geometry();
@@ -701,17 +723,21 @@ export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s
   }
   const out = state ? Geometry.merge([state, g]) : g;
   setDetailInt(out, '__pnextid', nextId);
-  setSkipped(out, skipped);
-  return out;
+  setSkipped(out, skipped, skippedBirths);
+  return { geo: out, end };
 }
 
 function setDetailInt(g: Geometry, name: string, v: number) {
   g.detail.add(name, 'int', 1).set(0, v);
 }
 
-/** The refused-births count: a float, since it can pass 2^31 (an int detail wrapped to a negative count). */
-function setSkipped(g: Geometry, v: number) {
+/**
+ * The refused-births counts (max_particles, max_births): floats, since they can pass 2^31 (an int detail wrapped to a
+ * negative count). The max_births count is only stored once a birth was refused, so states stay as they were before.
+ */
+function setSkipped(g: Geometry, v: number, births: number) {
   g.detail.add('__pskipped', 'float', 1).set(0, v);
+  if (births) g.detail.add('__pskipbirths', 'float', 1).set(0, births);
 }
 
 /** Steps simulated by a state. */
@@ -722,6 +748,11 @@ export function stateStep(g: Geometry | null): number {
 /** Births refused by max_particles so far. */
 export function stateSkipped(g: Geometry | null): number {
   return g ? Number(g.detail.get('__pskipped')?.get(0) ?? 0) : 0;
+}
+
+/** Births refused by max_births (most births per step) so far. */
+export function stateSkippedBirths(g: Geometry | null): number {
+  return g ? Number(g.detail.get('__pskipbirths')?.get(0) ?? 0) : 0;
 }
 
 /**

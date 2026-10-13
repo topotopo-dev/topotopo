@@ -47,7 +47,7 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `size` | vec3 | `[1,1,1]` |  |  | `scale`, `dims` | edge lengths X Y Z (a single number = uniform) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
-| `divisions` | ivec3 | `[1,1,1]` | 1.. |  | `divs`, `div` | quads along X Y Z |
+| `divisions` | ivec3 | `[1,1,1]` | 1..512 |  | `divs`, `div` | quads along X Y Z |
 
 **Writes:** vertex uv
 
@@ -86,7 +86,7 @@ None (generator).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `size` | vec2 | `[4,4]` |  |  |  | width and depth |
-| `divisions` | ivec2 | `[10,10]` | 1.. |  | `rows`, `cols`, `res`, `resolution` | quads along each side |
+| `divisions` | ivec2 | `[10,10]` | 1..2048 |  | `rows`, `cols`, `res`, `resolution` | quads along each side |
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
@@ -141,7 +141,7 @@ None (generator).
 | `tropism` | vec3 | `[0,-1,0]` |  |  |  | bending direction (e.g. gravity) |
 | `tropism_strength` | float | `0` |  |  |  | bending amount per step (0 = off; ~0.05-0.3) |
 | `seed` | float | `0` |  |  |  | random seed |
-| `max_length` | int | `400000` | 1.. |  |  | safety cap on the expanded string length |
+| `max_length` | int | `400000` | 1..50000000 |  |  | safety cap on the expanded string length |
 
 **Writes:** polylines with point width/depth, prim depth; leaf points in groups leaves, J, K, M with N, up, orient, pscale
 
@@ -178,7 +178,7 @@ None (generator).
 | `expr` | code | `"[(1+0.5*cos(v*TAU))*cos(u*TAU), 0.5*sin(v*TAU), (1+0.5*cos(v*TAU))*sin(u*TAU)]"` |  |  |  | JS expression of u, v returning [x,y,z] |
 | `u_range` | vec2 | `[0,1]` |  |  |  | u start/end |
 | `v_range` | vec2 | `[0,1]` |  |  |  | v start/end |
-| `divisions` | ivec2 | `[48,24]` | 1.. |  |  | quads along u and v |
+| `divisions` | ivec2 | `[48,24]` | 1..2048 |  |  | quads along u and v |
 | `wrap_u` | bool | `false` |  |  |  | u is periodic: join last column to first (no seam) |
 | `wrap_v` | bool | `false` |  |  |  | v is periodic |
 | `flip` | bool | `false` |  |  |  | reverse face winding |
@@ -244,7 +244,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `counts` | ivec3 | `[5,1,5]` | 1.. |  |  | points along X Y Z |
+| `counts` | ivec3 | `[5,1,5]` | 1..100000 |  |  | points along X Y Z |
 | `size` | vec3 | `[4,0,4]` |  |  |  | extent along X Y Z |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 | `jitter` | float | `0` | 0.. |  |  | random offset as a fraction of the spacing |
@@ -342,10 +342,10 @@ None (generator).
 | `radius` | float | `1` | 0.. |  | `rad`, `r` | radius |
 | `scale` | vec3 | `[1,1,1]` |  |  |  | non-uniform scale (ellipsoid) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
-| `rows` | int | `16` | 2.. |  |  | uv: latitude bands |
-| `cols` | int | `32` | 3.. |  | `columns`, `segments` | uv: longitude segments |
+| `rows` | int | `16` | 2..2048 |  |  | uv: latitude bands |
+| `cols` | int | `32` | 3..2048 |  | `columns`, `segments` | uv: longitude segments |
 | `level` | int | `3` | 0..7 |  | `frequency`, `subdivisions` | ico: subdivision level (20*4^level triangles) |
-| `divisions` | int | `8` | 1.. |  |  | quad: quads per cube-face edge |
+| `divisions` | int | `8` | 1..512 |  |  | quad: quads per cube-face edge |
 
 **Writes:** point N; uv (uv type)
 
@@ -377,7 +377,7 @@ None (generator).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `size` | vec2 | `[20,20]` |  |  |  | extent in X and Z |
-| `divisions` | ivec2 | `[128,128]` | 1.. |  | `resolution`, `res` | grid resolution (quads) |
+| `divisions` | ivec2 | `[128,128]` | 1..2048 |  | `resolution`, `res` | grid resolution (quads) |
 | `height` | float | `3` |  |  | `amplitude`, `amp` | vertical scale (amplitude) |
 | `frequency` | float | `0.12` |  |  | `freq` | base noise frequency (features per unit) |
 | `noise` | enum | `"simplex"` |  | `perlin`, `simplex`, `value`, `worley` |  | base noise |
@@ -470,8 +470,8 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `radius` | float | `1` |  |  | `major_radius`, `R` | major radius (center of tube) |
 | `radius2` | float | `0.25` |  |  | `minor_radius`, `tube_radius`, `r` | minor radius (tube thickness) |
-| `rows` | int | `16` | 3.. |  |  | segments around the tube |
-| `cols` | int | `48` | 3.. |  |  | segments around the ring |
+| `rows` | int | `16` | 3..2048 |  |  | segments around the tube |
+| `cols` | int | `48` | 3..2048 |  |  | segments around the ring |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
 **Writes:** vertex uv
@@ -507,8 +507,8 @@ None (generator).
 | `radius` | float | `0.5` | 0.. |  | `rad`, `r` | radius (both ends unless radius_top is set) |
 | `radius_top` | float | `-1` |  |  |  | top radius; -1 = same as radius; 0 = cone apex |
 | `height` | float | `1` |  |  | `h`, `length` | length along the axis |
-| `rows` | int | `1` | 1.. |  |  | segments along the axis |
-| `cols` | int | `24` | 3.. |  | `columns`, `segments`, `sides` | segments around |
+| `rows` | int | `1` | 1..2048 |  |  | segments along the axis |
+| `cols` | int | `24` | 3..2048 |  | `columns`, `segments`, `sides` | segments around |
 | `caps` | bool | `true` |  |  |  | close the ends with n-gons |
 | `axis` | enum | `"y"` |  | `y`, `x`, `z` |  | axis direction |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
@@ -709,7 +709,7 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `radius` | float | `1` |  |  | `rad`, `r` | radius |
 | `scale` | vec2 | `[1,1]` |  |  |  | ellipse scale along the plane axes |
-| `segments` | int | `32` | 3.. |  | `divisions`, `divs`, `points` | number of segments |
+| `segments` | int | `32` | 3..1000000 |  | `divisions`, `divs`, `points` | number of segments |
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 | `arc` | vec2 | `[0,360]` |  |  |  | begin/end angle in degrees (anything < 360 makes an open arc) |
@@ -753,7 +753,7 @@ Houdini Convert SOP for curves. Spline → polyline evaluates the curve (adaptiv
 | `order` | int | `4` | 2..11 |  |  | order of curves made from polylines (fit Bezier is always cubic) |
 | `fit` | bool | `false` |  |  | `interpolate` | polylines → spline: pass through the points instead of using them as CVs |
 | `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | knots of NURBS made from polylines (parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns)) |
-| `segments` | int | `0` | 0.. |  | `divisions`, `lod` | to polyline: segments per knot span / Bezier segment; 0 = adaptive (tolerance) |
+| `segments` | int | `0` | 0..10000 |  | `divisions`, `lod` | to polyline: segments per knot span / Bezier segment; 0 = adaptive (tolerance) |
 | `tolerance` | float | `0` | 0.. |  |  | to polyline: largest chord-to-curve distance; 0 = 1/2000 of each curve's CV box diagonal |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
@@ -786,7 +786,7 @@ None (generator).
 | `points` | json | `[[0,0,0],[1,0.5,0],[2,0,0]]` |  |  | `positions`, `pts` | list of [x,y,z] (2-number entries → [x, 0, z] on the ground) |
 | `closed` | bool | `false` |  |  |  | close the curve (makes a polygon) |
 | `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points |
-| `subdivisions` | int | `8` | 1.. |  |  | smooth: samples per segment |
+| `subdivisions` | int | `8` | 1..10000 |  |  | smooth: samples per segment |
 
 **Example**
 
@@ -938,7 +938,7 @@ Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon cap
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `height` | float | `1` |  |  | `depth`, `distance`, `h` | extrusion distance along the plane normal |
-| `divisions` | int | `1` | 1.. |  |  | segments along the extrusion |
+| `divisions` | int | `1` | 1..10000 |  |  | segments along the extrusion |
 | `twist` | float | `0` |  |  |  | twist in degrees (about each shape centroid) |
 | `scale_top` | vec2 | `[1,1]` |  |  |  | scale of the top cap (taper); [0,0] = pyramid |
 | `center` | bool | `false` |  |  |  | extrude symmetrically about the shape plane |
@@ -1041,7 +1041,7 @@ Like Houdini's PolyPath/fillet tools for curves (Fillet SOP is for surfaces). Ea
 |---|---|---|---|---|---|---|
 | `radius` | float | `0.2` | 0.. |  | `rad`, `r` | fillet radius (chamfer/bezier: the same tangent points) |
 | `type` | enum | `"round"` |  | `round`, `chamfer`, `bezier` | `shape`, `mode` | corner shape |
-| `segments` | int | `6` | 1.. |  | `divisions` | segments per round/bezier corner |
+| `segments` | int | `6` | 1..10000 |  | `divisions` | segments per round/bezier corner |
 | `angle_min` | float | `1` | 0..180 |  |  | leave corners that turn less than this (degrees) |
 | `group` | group (point) | `""` |  |  |  | corner points to fillet ("" = all), e.g. "@P.y>0", "0-4" |
 | `clamp` | bool | `true` |  |  |  | shrink radii that do not fit between neighbouring corners |
@@ -1078,7 +1078,7 @@ None (generator).
 | `origin` | vec3 | `[0,0,0]` |  |  | `start`, `center` | start point |
 | `direction` | vec3 | `[0,1,0]` |  |  | `dir` | direction (normalised) |
 | `length` | float | `1` |  |  | `dist` | length |
-| `points` | int | `2` | 2.. |  | `count`, `npts` | number of points |
+| `points` | int | `2` | 2..1000000 |  | `count`, `npts` | number of points |
 
 **Example**
 
@@ -1255,7 +1255,7 @@ category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
 |---|---|---|---|---|---|---|
 | `distance` | float | `0.1` |  |  | `offset`, `dist` | offset distance (negative shrinks) |
 | `join` | enum | `"round"` |  | `round`, `miter`, `square` |  | corner style |
-| `segments` | int | `16` | 3.. |  |  | segments per full circle for round joins |
+| `segments` | int | `16` | 3..10000 |  |  | segments per full circle for round joins |
 | `output` | enum | `"outlines"` |  | `outlines`, `faces` |  | outlines = closed polygons per contour; faces = filled with holes cut |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
 
@@ -1314,7 +1314,7 @@ Each edge moves by distance along its side vector direction × up (positive = to
 | `up` | vec3 | `[0,1,0]` |  |  | `normal`, `plane_normal` | initial up (rmf) or the plane normal (plane) |
 | `corner` | enum | `"mitre"` |  | `mitre`, `round`, `bevel` | `join`, `corners` | outer corner style |
 | `mitre_limit` | float | `4` | 1.. |  | `miter_limit` | mitres longer than this × distance are bevelled |
-| `round_segments` | int | `4` | 1.. |  |  | segments per 90° of round corners |
+| `round_segments` | int | `4` | 1..10000 |  |  | segments per 90° of round corners |
 | `both` | bool | `false` |  |  | `both_sides`, `double` | also output the -distance offset (two rails; prim int side = +1 / -1) |
 | `keep_input` | bool | `false` |  |  |  | keep the input curves as well |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
@@ -1352,7 +1352,7 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `expr` | code | `"[cos(t*TAU), t, sin(t*TAU)]"` |  |  |  | JS expression (or body with return) of t (and i) returning [x,y,z]. Snippet helpers available. |
 | `range` | vec2 | `[0,1]` |  |  |  | t start and end |
-| `count` | int | `100` | 2.. |  | `points`, `segments` | number of points |
+| `count` | int | `100` | 2..1000000 |  | `points`, `segments` | number of points |
 | `closed` | bool | `false` |  |  |  | closed curve (polygon) |
 
 **Example**
@@ -1389,7 +1389,7 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `radius` | float | `0.05` |  |  | `rad`, `wire_radius` | tube radius (used when no width attribute) |
-| `divisions` | int | `8` | 3.. |  | `sides`, `cols` | sides around the tube |
+| `divisions` | int | `8` | 3..1024 |  | `sides`, `cols` | sides around the tube |
 | `caps` | bool | `true` |  |  |  | cap the tube ends |
 | `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present |
 
@@ -1485,7 +1485,7 @@ Bezier/NURBS prims are sampled on the true curve, evenly by arc length (treat_sp
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"length"` |  | `length`, `count` |  | segment length or a fixed segment count per curve |
 | `length` | float | `0.1` | 0.000001.. |  | `seglen`, `segment_length` | target segment length |
-| `count` | int | `20` | 1.. |  | `segments` | segments per curve (mode=count) |
+| `count` | int | `20` | 1..1000000 |  | `segments` | segments per curve (mode=count) |
 | `smooth` | bool | `false` |  |  |  | Catmull-Rom smooth before resampling (polylines) |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 | `tangent` | bool | `false` |  |  |  | also write point tangentu (unit tangent) |
@@ -1552,7 +1552,7 @@ Lathe: revolve profile curves (drawn in XY, x = radius) around the Y axis. Profi
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `segments` | int | `32` | 3.. |  | `divisions`, `cols` | segments around |
+| `segments` | int | `32` | 3..4096 |  | `divisions`, `cols` | segments around |
 | `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees |
 | `caps` | bool | `false` |  |  |  | cap partial revolves (closed profiles) |
 | `flip` | bool | `false` |  |  |  | reverse face orientation |
@@ -1629,9 +1629,9 @@ None (generator).
 | `size` | vec2 | `[1,1]` |  |  |  | rect/rounded_rect/cross/L/U: width and depth |
 | `radius` | float | `0.5` |  |  |  | ngon/star/gear: outer radius |
 | `inner_radius` | float | `0.25` |  |  |  | star/gear: inner radius |
-| `sides` | int | `6` | 3.. |  | `points`, `teeth` | ngon sides / star points / gear teeth |
+| `sides` | int | `6` | 3..100000 |  | `points`, `teeth` | ngon sides / star points / gear teeth |
 | `corner_radius` | float | `0.1` | 0.. |  |  | rounded_rect corner radius |
-| `corner_segments` | int | `6` | 1.. |  |  | rounded_rect segments per corner |
+| `corner_segments` | int | `6` | 1..10000 |  |  | rounded_rect segments per corner |
 | `thickness` | float | `0.25` |  |  |  | cross/L/U arm thickness |
 | `rotate` | float | `0` |  |  |  | rotation in degrees within the plane |
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
@@ -1669,7 +1669,7 @@ None (generator).
 | `radius_end` | float | `-1` |  |  |  | end radius (-1 = same as radius) |
 | `height` | float | `2` |  |  |  | total rise |
 | `turns` | float | `3` |  |  |  | number of turns |
-| `points_per_turn` | int | `32` | 3.. |  |  | resolution |
+| `points_per_turn` | int | `32` | 3..100000 |  |  | resolution |
 | `clockwise` | bool | `false` |  |  |  | turn direction when seen from above |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
@@ -1706,13 +1706,13 @@ Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all p
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `order` | int | `4` | 2..11 |  |  | order of the fitted curve (4 = cubic) |
-| `cv_count` | int | `0` | 0.. |  | `cvs`, `count` | number of CVs; 0 = as few as the tolerance allows |
+| `cv_count` | int | `0` | 0..100000 |  | `cvs`, `count` | number of CVs; 0 = as few as the tolerance allows |
 | `tolerance` | float | `0.01` | 0.. |  | `tol`, `max_error` | largest allowed distance from a point to the curve (cv_count 0) |
 | `smoothing` | float | `0` | 0.. |  | `smooth` | second-difference penalty on the CVs (0 = none, ~1 smooths noise) |
 | `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns) |
 | `closed` | enum | `"auto"` |  | `auto`, `open`, `closed` |  | auto = as the input prim (open for point clouds) |
 | `output` | enum | `"nurbs"` |  | `nurbs`, `polyline` |  | NURBS prims or polylines sampled from the fit |
-| `segments` | int | `0` | 0.. |  |  | polyline output: segments per knot span; 0 = adaptive (tolerance / 4) |
+| `segments` | int | `0` | 0..10000 |  |  | polyline output: segments per knot span; 0 = adaptive (tolerance / 4) |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
 **Writes:** prim fit_error (largest distance from an input point to the fitted curve)
@@ -1857,7 +1857,7 @@ Sweep a cross-section along curves using rotation-minimising frames (tubes, ribb
 |---|---|---|---|---|---|---|
 | `shape` | enum | `"circle"` |  | `circle`, `square`, `ribbon`, `half_circle` |  | built-in profile when no profile input |
 | `radius` | float | `0.1` |  |  | `width`, `rad` | built-in profile radius / half width |
-| `divisions` | int | `12` | 2.. |  | `sides`, `cols` | built-in profile segments |
+| `divisions` | int | `12` | 2..1024 |  | `sides`, `cols` | built-in profile segments |
 | `caps` | bool | `true` |  |  |  | cap open ends (closed profiles only) |
 | `twist` | float | `0` |  |  |  | total twist in degrees along each curve |
 | `scale_ramp` | ramp | `[[0,1],[1,1]]` |  |  |  | profile scale along the curve (u 0..1); point pscale also multiplies |
@@ -2005,7 +2005,7 @@ category: `curve` · aliases: `voronoi_cells`, `voronoi_2d`
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `count` | int | `30` | 1.. |  |  | random sites when no input |
+| `count` | int | `30` | 1..100000 |  |  | random sites when no input |
 | `size` | vec2 | `[10,10]` |  |  |  | clip rectangle size (centered at center); [0,0] = sites bbox + 10% |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
@@ -2273,7 +2273,7 @@ Embeds the geometry in a lattice and moves it with the lattice. Three inputs: ge
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `divisions` | ivec3 | `[2,2,2]` | 1.. |  | `divs`, `div` | two-input form without a "rest" attribute: lattice divisions, matching the box/bound (or point_grid counts - 1) that was deformed; inferred with a warning when they do not match |
+| `divisions` | ivec3 | `[2,2,2]` | 1..128 |  | `divs`, `div` | two-input form without a "rest" attribute: lattice divisions, matching the box/bound (or point_grid counts - 1) that was deformed; inferred with a warning when they do not match |
 | `interp` | enum | `"trilinear"` |  | `trilinear`, `bernstein` | `interpolation`, `mode` | trilinear = piecewise per lattice cell (local); bernstein = smooth Bezier volume over the whole lattice (global; evenly spaced lattices) |
 | `group` | group (point) | `""` |  |  |  | points to deform ("" = all) |
 
@@ -2755,7 +2755,7 @@ Relax point positions (Laplacian or volume-preserving Taubin smoothing).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `iterations` | int | `10` | 0.. |  | `iter` | smoothing passes |
+| `iterations` | int | `10` | 0..10000 |  | `iter` | smoothing passes |
 | `strength` | float | `0.5` | 0..1 |  |  | move fraction per pass |
 | `method` | enum | `"taubin"` |  | `taubin`, `laplacian` |  | taubin avoids shrinking |
 | `preserve_boundary` | bool | `true` |  |  |  | pin open-boundary and curve end points |
@@ -2935,7 +2935,7 @@ Array attributes hold a variable-length list per element (Houdini i[]@/f[]@/s[]@
 | `class` | enum | `"auto"` |  | `auto`, `point`, `prim`, `vertex`, `detail` |  | class of the array (from_attributes/to_attributes/length; auto = where the attribute is found). from_neighbours is always point, from_group_points always prim |
 | `method` | enum | `"connectivity"` |  | `connectivity`, `radius` |  | from_neighbours: points sharing an edge, or points within radius (any geometry, also point clouds) |
 | `radius` | float | `0.5` | 0.. |  |  | from_neighbours radius mode: search radius |
-| `max_count` | int | `0` | 0.. |  |  | from_neighbours: keep at most this many (radius: the nearest); to_attributes: unpack at most this many entries (0 = no limit) |
+| `max_count` | int | `0` | 0..2147483647 |  |  | from_neighbours: keep at most this many (radius: the nearest); to_attributes: unpack at most this many entries (0 = no limit) |
 | `include_self` | bool | `false` |  |  |  | from_neighbours radius mode: include the point itself (Houdini nearpoints does) |
 | `attribs` | string | `""` |  |  |  | from_attributes: attributes to pack, in order, space-separated; wildcards expand in natural order ("w_*" = w_0 w_1 … w_10) |
 | `out_name` | string | `""` |  |  |  | to_attributes: prefix of the unpacked attributes ("" = name → name_0, name_1 …); length: the int attribute ("" = name_len) |
@@ -3538,16 +3538,16 @@ Every check is off by default; enable the ones that express what the graph must 
 | `watertight` | bool | `false` |  |  | `closed` | closed surface: only polygons, every edge shared by exactly two of them |
 | `manifold` | bool | `false` |  |  |  | no edge shared by 3+ polygons and no bowtie points (fans touching at a point) |
 | `no_flipped` | bool | `false` |  |  | `outward`, `consistent_winding` | neighbouring polygons wound consistently, and closed pieces face outward (positive volume; the walls of a cavity inside a hollow solid may face inward) |
-| `min_points` | int | `-1` | -1.. |  |  | at least this many points (-1 = off) |
-| `max_points` | int | `-1` | -1.. |  |  | at most this many points (-1 = off) |
-| `min_prims` | int | `-1` | -1.. |  |  | at least this many prims (-1 = off) |
-| `max_prims` | int | `-1` | -1.. |  |  | at most this many prims (-1 = off) |
+| `min_points` | int | `-1` | -1..2147483647 |  |  | at least this many points (-1 = off) |
+| `max_points` | int | `-1` | -1..2147483647 |  |  | at most this many points (-1 = off) |
+| `min_prims` | int | `-1` | -1..2147483647 |  |  | at least this many prims (-1 = off) |
+| `max_prims` | int | `-1` | -1..2147483647 |  |  | at most this many prims (-1 = off) |
 | `bbox_min` | json | `null` |  |  |  | [x, y, z] (or one number): no point may lie below it (null = off) |
 | `bbox_max` | json | `null` |  |  |  | [x, y, z] (or one number): no point may lie above it (null = off) |
 | `min_edge_length` | float | `0` | 0.. |  |  | no edge shorter than this (0 = off) |
 | `no_degenerate` | bool | `false` |  |  |  | no zero-area polygons (area <= tolerance²) and no two points within tolerance of each other |
 | `no_self_intersections` | bool | `false` |  |  | `no_intersections` | no two non-adjacent triangles cross each other (BVH search, capped at max_tests) |
-| `max_tests` | int | `2000000` | 1000.. |  |  | self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped) *(advanced)* |
+| `max_tests` | int | `2000000` | 1000..1000000000 |  |  | self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped) *(advanced)* |
 | `attrib` | string | `""` |  |  | `attribute` | attribute that must exist ("" = off) |
 | `attrib_class` | enum | `"auto"` |  | `auto`, `point`, `vertex`, `prim`, `detail` |  | where attrib must live (auto = any class: vertex, point, prim, detail) |
 | `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of its first component (null = off) |
@@ -4110,7 +4110,7 @@ Grow adds every neighbour of the group per step; shrink removes every member tha
 |---|---|---|---|---|---|---|
 | `group` | string | `""` |  |  | `name`, `base_group` | group to expand (name); a group pattern also works when new_name is set |
 | `class` | enum | `"prim"` |  | `prim`, `point`, `edge` |  | element class of the group |
-| `steps` | int | `1` |  |  | `iterations`, `amount`, `numsteps` | steps to grow (negative = shrink) |
+| `steps` | int | `1` | -100000..100000 |  | `iterations`, `amount`, `numsteps` | steps to grow (negative = shrink) |
 | `connectivity` | enum | `"edge"` |  | `edge`, `point` |  | prim class: neighbours share an edge or only a point |
 | `new_name` | string | `""` |  |  | `output`, `newname` | output group ("" = overwrite the input group) |
 
@@ -4301,7 +4301,7 @@ Bounding box of the input (whole or per connected piece) as a box mesh.
 |---|---|---|---|---|---|---|
 | `padding` | vec3 | `[0,0,0]` |  |  |  | extra size added on each side |
 | `per_piece` | bool | `false` |  |  |  | one box per connected piece |
-| `divisions` | ivec3 | `[1,1,1]` | 1.. |  |  | box divisions |
+| `divisions` | ivec3 | `[1,1,1]` | 1..512 |  |  | box divisions |
 
 **Example**
 
@@ -4373,7 +4373,7 @@ Houdini: PolyReduce SOP. Polygons are triangulated first and the result is trian
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `ratio` | float | `0.25` | 0..1 |  | `percentage`, `keep` | target fraction of triangles (or points) to keep |
-| `target_count` | int | `0` | 0.. |  | `count`, `target`, `final_count` | target number of triangles (points in points mode); > 0 overrides ratio |
+| `target_count` | int | `0` | 0..2147483647 |  | `count`, `target`, `final_count` | target number of triangles (points in points mode); > 0 overrides ratio |
 | `max_error` | float | `0.05` | 0.. |  | `error`, `target_error` | stop when the deviation reaches this (relative to the mesh extent, or scene units with error_absolute) |
 | `error_absolute` | bool | `false` |  |  |  | max_error (and detail "error") in scene units instead of relative to the mesh size |
 | `lock_border` | bool | `true` |  |  |  | keep open borders fixed (tiles and pieces still stitch) |
@@ -4574,7 +4574,7 @@ Cap open boundary loops with new polygons (makes meshes watertight).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `max_edges` | int | `0` | 0.. |  |  | only fill holes with at most this many edges (0 = all) |
+| `max_edges` | int | `0` | 0..2147483647 |  |  | only fill holes with at most this many edges (0 = all) |
 | `triangulate` | bool | `false` |  |  |  | fan-triangulate the caps |
 
 **Writes:** prim group filled
@@ -4651,7 +4651,7 @@ Split quads into a grid of cells by target size (facades → window cells) or fi
 | `group` | group (prim) | `""` |  |  |  | quads to split ("" = all) |
 | `mode` | enum | `"size"` |  | `size`, `count` |  | size = divide each edge by length / target size; count = fixed divisions |
 | `size` | vec2 | `[1,1]` |  |  |  | target cell size [horizontal, vertical]: edges mostly along Y use the 2nd value |
-| `divisions` | ivec2 | `[2,2]` | 1.. |  |  | count mode: cells along the quad's first and second edge |
+| `divisions` | ivec2 | `[2,2]` | 1..256 |  |  | count mode: cells along the quad's first and second edge |
 
 **Writes:** prim int cell_u, cell_v (cell indices within the original quad)
 
@@ -4816,7 +4816,7 @@ Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switc
 | `fix_winding` | bool | `true` |  |  |  | make face winding consistent across shared edges |
 | `outward` | bool | `true` |  |  |  | turn closed pieces so their normals face outward (needs fix_winding) |
 | `fill_holes` | bool | `true` |  |  |  | cap small holes |
-| `max_hole_edges` | int | `8` | 0.. |  |  | only fill holes with at most this many edges (0 = any size) |
+| `max_hole_edges` | int | `8` | 0..2147483647 |  |  | only fill holes with at most this many edges (0 = any size) |
 | `self_intersections` | enum | `"off"` |  | `off`, `report`, `remove_faces` |  | find faces that cross other faces: report (prim group self_intersecting) or remove them and fill the holes |
 | `remove_isolated` | bool | `true` |  |  |  | remove points no prim uses (only when the geometry has prims) |
 | `warn` | bool | `true` |  |  | `warnings`, `report_warning` | warn with a summary when something was found or changed (off: the counts are only in repair_report, e.g. for meshes known to need the fixes) |
@@ -4964,7 +4964,7 @@ Extrude/inset faces along normals (individually or as connected regions). Groups
 | `distance` | float | `0.2` |  |  | `dist`, `depth`, `height` | extrusion along the normal |
 | `inset` | float | `0` |  |  |  | move edges inward by this distance (0 = plain extrude; distance 0 + inset = inset faces) |
 | `mode` | enum | `"connected"` |  | `individual`, `connected` |  | connected keeps shared edges of selected faces together |
-| `divisions` | int | `1` | 1.. |  |  | segments along the sides |
+| `divisions` | int | `1` | 1..10000 |  |  | segments along the sides |
 | `keep_back` | bool | `false` |  |  |  | keep the original faces (reversed) underneath |
 
 **Writes:** prim groups front, side
@@ -5100,7 +5100,7 @@ quads: loops that are star-shaped around their centroid get a quad fan around a 
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"quads"` |  | `quads`, `grid`, `triangles`, `single` | `fill_mode`, `fillmode` | quads = quad fan / paired quads; grid = Coons quad grid (even loops); triangles = ear clipping; single = one n-gon |
 | `group` | group (point) | `""` |  |  |  | only loops touching these points ("" = every boundary loop) |
-| `max_edges` | int | `0` | 0.. |  | `max_size` | skip loops with more edges than this (0 = no limit) |
+| `max_edges` | int | `0` | 0..2147483647 |  | `max_size` | skip loops with more edges than this (0 = no limit) |
 | `smooth_iterations` | int | `10` | 0..1000 |  | `smooth`, `iterations`, `relax` | Laplacian relaxation steps for interior points |
 
 **Writes:** prim group fill
@@ -5216,7 +5216,7 @@ Houdini: Remesh SOP (Target Size, Iterations, Hard Edges, adaptive sizing). Each
 | `edge_groups` | group (edge) | `""` |  |  | `hard_edges`, `features` | edge group(s) or pattern to keep as feature edges ("" = none), e.g. "creases" or "seam*"; named groups follow the new feature edges |
 | `keep_prim_borders` | bool | `true` |  |  |  | keep borders between prims with different string attributes (name, material) or prim groups as feature edges |
 | `relax_passes` | int | `1` | 1..10 |  |  | relaxation + projection passes per iteration *(advanced)* |
-| `max_triangles` | int | `4000000` | 1000.. |  |  | refuse to run when the estimated output has more triangles than this *(advanced)* |
+| `max_triangles` | int | `4000000` | 1000..50000000 |  |  | refuse to run when the estimated output has more triangles than this *(advanced)* |
 
 **Writes:** triangles; point/vertex/prim attributes and groups by provenance; feature edge groups (edge_groups) follow the new edges
 
@@ -5252,7 +5252,7 @@ Smooths a four-way orientation field and a position field through a multiresolut
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `target_length` | float | `0` | 0.. |  | `edge_length`, `target_size` | target quad edge length in scene units (0 = automatic input scale) |
-| `target_faces` | int | `0` | 0.. |  |  | approximate target face count (> 0 overrides target_length) |
+| `target_faces` | int | `0` | 0..50000000 |  |  | approximate target face count (> 0 overrides target_length) |
 | `mode` | enum | `"quad_dominant"` |  | `quad_dominant`, `quads_only` |  | quad_dominant permits triangles; quads_only conformingly splits residual non-quads when unlocked |
 | `feature_angle` | float | `45` | 0..180 |  |  | dihedral threshold in degrees for automatic sharp-feature alignment (0 disables it) |
 | `align_boundaries` | bool | `true` |  |  |  | align the orientation field along open boundaries |
@@ -5261,7 +5261,7 @@ Smooths a four-way orientation field and a position field through a multiresolut
 | `cleanup` | bool | `true` |  |  |  | remove avoidable irregular vertices and short edges after extraction |
 | `crease_group` | group (edge) | `""` |  |  |  | edge group or pattern used as hard alignment constraints (empty = none) |
 | `group` | group (prim) | `""` |  |  |  | primitives to remesh (empty = all); edges shared with the remainder stay fixed |
-| `max_faces` | int | `1000000` | 1.. |  |  | refuse estimated or extracted output above this primitive count, including the retained group complement *(advanced)* |
+| `max_faces` | int | `1000000` | 1..50000000 |  |  | refuse estimated or extracted output above this primitive count, including the retained group complement *(advanced)* |
 
 **Writes:** quad-dominant polygons; interpolated point/vertex attributes and copied prim attributes; detail quad_fraction, singularities, irregular_fraction and edge/planarity statistics
 
@@ -5555,7 +5555,7 @@ Make N copies, each transformed cumulatively (Houdini Copy and Transform): stair
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `count` | int | `4` | 0.. |  | `ncy`, `copies`, `n` | total copies (including the original) |
+| `count` | int | `4` | 0..100000 |  | `ncy`, `copies`, `n` | total copies (including the original) |
 | `translate` | vec3 | `[1,0,0]` |  |  | `t`, `offset` | offset applied per copy |
 | `rotate` | vec3 | `[0,0,0]` |  |  | `r` | rotation per copy (degrees) |
 | `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale per copy (compounding) |
@@ -5644,7 +5644,7 @@ Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sample
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `count` | int | `500` | 0.. |  | `npts`, `points`, `num` | number of points |
+| `count` | int | `500` | 0..10000000 |  | `npts`, `points`, `num` | number of points |
 | `density` | float | `0` | 0.. |  |  | points per unit area/length/volume (overrides count when > 0) |
 | `mode` | enum | `"auto"` |  | `auto`, `surface`, `curve`, `volume` |  | auto = surface if polygons, curve if only polylines |
 | `relax` | bool | `true` |  |  |  | even (blue-noise) spacing via sample elimination |
@@ -5659,7 +5659,7 @@ Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sample
 | `relax_iterations` | int | `0` | 0..100 |  | `relaxiterations`, `relax_iter`, `relax_passes` | surface: Lloyd-style relaxation passes (points push apart and are projected back onto the surface) |
 | `relax_radius` | float | `0` | 0.. |  |  | relaxation spacing in metres (0 = from the local density) |
 | `min_distance` | float | `0` | 0.. |  | `mindist`, `min_dist`, `poisson_radius` | exact minimum distance between points (0 = off); the count can come out lower |
-| `max_per_prim` | int | `0` | 0.. |  | `maxperprim` | at most this many points per source prim (0 = no limit) |
+| `max_per_prim` | int | `0` | 0..2147483647 |  | `maxperprim` | at most this many points per source prim (0 = no limit) |
 | `emit_attributes` | string | `"*"` |  |  | `attributes`, `interpolate`, `emit` | source attributes carried onto the points (pattern: point/vertex interpolated, prim copied; "^Cd" excludes) |
 | `write_sourceprim` | bool | `true` |  |  | `source_prim`, `sourceprim` | write int sourceprim (the source prim of each point) |
 | `write_primuv` | bool | `false` |  |  | `prim_uv`, `sourceprimuv` | write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention) |
@@ -5734,7 +5734,7 @@ Instances are expanded in prim order after the other prims; source attributes an
 |---|---|---|---|---|---|---|
 | `group` | group (prim) | `""` |  |  |  | packed prims to unpack ("" = all); the others stay packed |
 | `transfer_attributes` | string | `"name Cd material piece"` |  |  | `transfer`, `attributes` | anchor point / packed prim attributes copied onto the unpacked points / prims (names or patterns, "*" = all, "" = none) |
-| `limit` | int | `0` | 0.. |  | `max_instances` | unpack at most this many instances (in prim order) and drop the rest of the selection; 0 = all |
+| `limit` | int | `0` | 0..2147483647 |  | `max_instances` | unpack at most this many instances (in prim order) and drop the rest of the selection; 0 = all |
 | `piece_attrib` | string | `""` |  |  |  | prim int attribute receiving the packed prim number of every unpacked prim (-1 on prims that were not packed; "" = none) |
 | `recursive` | bool | `false` |  |  |  | also unpack instances inside the sources (false = one level, as in Houdini: nested instances become packed prims) |
 
@@ -5966,7 +5966,7 @@ Contour a closed solid with parallel planes (closed polygons per level) — e.g.
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `count` | int | `10` | 1.. |  |  | number of slices across the bounding box |
+| `count` | int | `10` | 1..100000 |  |  | number of slices across the bounding box |
 | `axis` | enum | `"y"` |  | `y`, `x`, `z` |  | slicing axis |
 | `margin` | float | `0.001` | 0.. |  |  | keep slices this far inside the bbox ends |
 
@@ -6033,10 +6033,10 @@ Shatter a closed solid into convex Voronoi pieces (sites from input 2 or scatter
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `count` | int | `12` | 1.. |  |  | number of pieces when no site points are given |
+| `count` | int | `12` | 1..10000 |  |  | number of pieces when no site points are given |
 | `seed` | float | `0` |  |  |  | random seed |
 | `gap` | float | `0` | 0.. |  |  | shrink each piece toward its centre by this distance (visual separation) |
-| `neighbors` | int | `24` | 4.. |  |  | nearest sites considered per cell (raise if cells look wrong) |
+| `neighbors` | int | `24` | 4..1024 |  |  | nearest sites considered per cell (raise if cells look wrong) |
 
 **Writes:** prim name ("piece0"...), class (int), group inside; point/prim attributes from the source
 
@@ -6546,7 +6546,7 @@ Modify SDF volumes: offset (grow/shrink), shell, noise displacement, twist, bend
 | `frequency` | float | `3` |  |  |  | noise frequency |
 | `octaves` | int | `3` | 1..8 |  |  | noise octaves |
 | `period` | vec3 | `[1,0,1]` |  |  |  | repeat: spacing per axis (0 = no repetition on that axis) |
-| `count` | ivec3 | `[3,1,3]` | 1.. |  |  | repeat: number of copies per axis (limits the domain) |
+| `count` | ivec3 | `[3,1,3]` | 1..1000000 |  |  | repeat: number of copies per axis (limits the domain) |
 | `seed` | float | `0` |  |  |  | random seed |
 
 **Example**
@@ -6735,7 +6735,7 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `size` | vec2 | `[20,20]` |  |  |  | extent in X and Z (metres), rounded up to whole cells |
 | `resolution` | float | `0.1` | 0.001.. |  | `grid_spacing`, `cell_size`, `spacing`, `voxel_size`, `divsize` | cell size: distance between samples (metres) |
-| `samples` | ivec2 | `[0,0]` | 0.. |  |  | sample counts [nx, nz]; when nx > 1 they override resolution (cell = size.x / (nx - 1), depth = (nz - 1) × cell), e.g. [505, 505] for Unreal |
+| `samples` | ivec2 | `[0,0]` | 0..16785409 |  |  | sample counts [nx, nz]; when nx > 1 they override resolution (cell = size.x / (nx - 1), depth = (nz - 1) × cell), e.g. [505, 505] for Unreal |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos` | field centre: X and Z place the grid, Y is added to the initial height |
 | `height` | float | `0` |  |  | `initial_height`, `elevation` | initial height (world Y) |
 | `name` | string | `"heightfield"` |  |  |  | heightfield name (shown by inspect) |
@@ -7915,7 +7915,7 @@ Houdini: HeightField Resample. Give the new cell size (resolution), exact sample
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `resolution` | float | `0` | 0.. |  | `cell_size`, `grid_spacing` | new cell size (metres); 0 = use samples or factor |
-| `samples` | ivec2 | `[0,0]` | 0.. |  |  | new sample counts [nx, nz]; nx > 1 overrides resolution (nz 0 = keep the extent) |
+| `samples` | ivec2 | `[0,0]` | 0..16785409 |  |  | new sample counts [nx, nz]; nx > 1 overrides resolution (nz 0 = keep the extent) |
 | `factor` | float | `1` | 0.01..16 |  | `scale` | multiply the samples per side (when resolution and samples are 0) |
 
 **Writes:** all layers at the new resolution
@@ -7971,7 +7971,7 @@ Houdini: HeightField Scatter. Count = density × area weighted by the mask (or c
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `density` | float | `0.5` | 0.. |  | `density_per_m2` | points per square metre at mask 1 |
-| `count` | int | `0` | 0.. |  | `npts`, `points` | exact number of points; > 0 overrides density |
+| `count` | int | `0` | 0..2000000 |  | `npts`, `points` | exact number of points; > 0 overrides density |
 | `mask_layer` | string | `"mask"` |  |  | `mask`, `density_layer` | density layer (0..1); "" = uniform everywhere |
 | `relax` | bool | `true` |  |  |  | even (blue-noise) spacing |
 | `seed` | float | `0` |  |  |  | random seed |
@@ -8654,10 +8654,10 @@ The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} 
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"pieces"` |  | `pieces`, `count`, `points`, `prims` |  | pieces = by piece_attrib (or connectivity); count = N iterations; points/prims = one element each |
 | `piece_attrib` | string | `""` |  |  |  | pieces: prim attribute to group by ("" = connectivity) |
-| `count` | int | `4` | 0.. |  |  | count mode: iterations |
+| `count` | int | `4` | 0..1000000 |  |  | count mode: iterations |
 | `feedback` | bool | `false` |  |  |  | count mode: feed each result into the next iteration (output = last) |
 | `body` | graph | {nodes, output} |  |  |  | subgraph {nodes, output} run per iteration |
-| `max_iterations` | int | `10000` | 1.. |  |  | safety limit |
+| `max_iterations` | int | `10000` | 1..1000000 |  |  | safety limit |
 
 **Example**
 
@@ -8900,7 +8900,7 @@ Cooking at frame N runs the body for every frame from start_frame to N (once per
 | `body` | graph | {nodes, output} |  |  |  | subgraph {nodes, output} run per frame (and substep): input 0 = previous frame, 1 = initial, 2/3 = extra inputs (default: pass through) |
 | `start_frame` | int | `1` |  |  |  | first frame the body runs on; earlier frames output the initial geometry |
 | `substeps` | int | `1` | 1..1000 |  |  | body runs per frame; timeInc = 1 / (fps * substeps) |
-| `max_frames` | int | `1000` | 1.. |  |  | safety limit: most frames simulated from start_frame |
+| `max_frames` | int | `1000` | 1..1000000 |  |  | safety limit: most frames simulated from start_frame |
 
 **Example**
 
@@ -9347,7 +9347,7 @@ Houdini: Resample (+ Orient Along Curve) to points; Unreal PCG: Spline Sampler (
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"distance"` |  | `distance`, `subdivision`, `at_points` |  | distance = by spacing (or count); subdivision = per segment; at_points = the curve vertices |
 | `spacing` | float | `1` | 0.0001.. |  | `step`, `length`, `seglen`, `distance` | distance: metres of arc length between points |
-| `count` | int | `0` | 0.. |  | `npts`, `points` | distance: exactly this many points per curve, evenly spread (0 = use spacing) |
+| `count` | int | `0` | 0..5000000 |  | `npts`, `points` | distance: exactly this many points per curve, evenly spread (0 = use spacing) |
 | `per_segment` | int | `1` | 1..10000 |  | `segments`, `subdivisions` | subdivision: points per segment |
 | `start_offset` | float | `0` | 0.. |  | `start` | skip this many metres at the start |
 | `end_offset` | float | `0` | 0.. |  | `end` | skip this many metres at the end |
@@ -10494,7 +10494,7 @@ Simulates the `cloth` input for `steps` steps and outputs the final state (same 
 | `pin_snap` | bool | `false` |  |  |  | move the cloth points pinned by the `pins` input onto those pin points first (hang a cloth from hooks) |
 | `tethers` | bool | `true` |  |  |  | long-range attachments: no point gets farther from its nearest pin than along the cloth at rest, so pinned cloth does not stretch under its weight or the wind *(advanced)* |
 | `keep_rest` | bool | `true` |  |  |  | write the input positions to the point attribute rest_P |
-| `max_points` | int | `100000` | 1.. |  |  | refuse inputs with more points than this (cost grows with points × steps × substeps × iterations) *(advanced)* |
+| `max_points` | int | `100000` | 1..10000000 |  |  | refuse inputs with more points than this (cost grows with points × steps × substeps × iterations) *(advanced)* |
 
 **Writes:** point v, rest_P (keep_rest), N, pinned (int, when anything is pinned)
 
@@ -10597,7 +10597,7 @@ Simulates the `geo` input as a closed cloth bag whose volume is driven towards `
 | `pin_snap` | bool | `false` |  |  |  | move the cloth points pinned by the `pins` input onto those pin points first (hang a cloth from hooks) |
 | `tethers` | bool | `false` |  |  |  | long-range attachments: no point gets farther from its nearest pin than along the cloth at rest, so pinned cloth does not stretch under its weight or the wind *(advanced)* |
 | `keep_rest` | bool | `true` |  |  |  | write the input positions to the point attribute rest_P |
-| `max_points` | int | `100000` | 1.. |  |  | refuse inputs with more points than this (cost grows with points × steps × substeps × iterations) *(advanced)* |
+| `max_points` | int | `100000` | 1..10000000 |  |  | refuse inputs with more points than this (cost grows with points × steps × substeps × iterations) *(advanced)* |
 
 **Writes:** point v, rest_P (keep_rest), N, pinned (int, when anything is pinned)
 
@@ -10691,7 +10691,8 @@ Steps of dt = 1 / (fps × substeps). Each step, every emitter point (input 0: po
 | `field_max_distance` | float | `0` | 0.. |  |  | points field: ignore points farther than this (0 = unlimited) |
 | `field_resolution` | int | `64` | 4..256 |  |  | SDF field: samples along the longest side of the grid the distance is sampled on *(advanced)* |
 | `seed` | float | `0` |  |  |  | random seed (emission phases, birth offsets, lifetimes, velocities, noise) |
-| `max_particles` | int | `1000000` | 0.. |  |  | births are refused while this many particles hold a slot (from birth to the end of their life) |
+| `max_particles` | int | `1000000` | 0..50000000 |  |  | births are refused while this many particles hold a slot (from birth to the end of their life) |
+| `max_births` | int | `1000000` | 1..10000000 |  |  | guard: most particles born in one step (the rest of the step's births are refused, with a warning). Steps are also simulated in batches of about this many births, so memory stays bounded however many particles are born and die over a run (the result does not depend on it otherwise) |
 | `trails` | int | `0` | 0..10000 |  | `trail_length` | positions kept per particle and output as a polyline (0 = no trails; 2 or more) |
 | `output` | enum | `"both"` |  | `both`, `points`, `trails` |  | points (the particles), trails (one polyline per particle) or both (points first; no trails when trails < 2) |
 
@@ -10804,7 +10805,7 @@ For procedural assembly: scatter pieces above a surface, settle them, and they r
 | `angular_damping` | float | `0.5` | 0..10 |  |  | angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling |
 | `rest_damping` | float | `5` | 0..100 |  |  | extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics |
 | `sleep_threshold` | float | `0.05` | 0.0001..10 |  | `settle_threshold` | a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces |
-| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected |
+| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected (a connected input without polygons or heightfields gives nothing to land on, with a warning); on = also with input 1 |
 | `ground` | float | `0` |  |  | `ground_height` | height of the ground plane |
 | `ccd` | bool | `true` |  |  |  | continuous collision detection, so fast pieces do not pass through thin collision geometry *(advanced)* |
 | `solver_iterations` | int | `4` | 1..32 |  |  | Rapier solver iterations per step (more = stiffer stacks, slower) *(advanced)* |
@@ -10935,7 +10936,7 @@ rbd_settle for pieces that overlap where they are: give every crate the same pos
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `interval` | int | `15` | 1..10000 |  |  | solver steps between two drops (15 at 60 steps/s = four pieces per second) |
-| `order` | enum | `"input"` |  | `input`, `height`, `random` |  | drop order: input = prim order, height = lowest first, random = seeded shuffle |
+| `order` | enum | `"input"` |  | `input`, `height`, `random` |  | drop order: input = prim order, height = lowest first (equal heights in the input-independent spatial order), random = seeded shuffle |
 | `lift` | bool | `true` |  |  |  | raise each piece above whatever already lies under its drop position (a shape cast from above), so pieces given the same position stack |
 | `clearance` | float | `0.02` | 0..10 |  |  | lift: gap left between a dropped piece and the pile under it (m) |
 | `pieces` | enum | `"auto"` |  | `auto`, `connectivity`, `name`, `attrib` |  | how polygons form pieces (packed prims are always one piece each): auto = prim attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; connectivity; name; attrib (piece_attrib) |
@@ -10952,7 +10953,7 @@ rbd_settle for pieces that overlap where they are: give every crate the same pos
 | `angular_damping` | float | `0.5` | 0..10 |  |  | angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling |
 | `rest_damping` | float | `5` | 0..100 |  |  | extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics |
 | `sleep_threshold` | float | `0.05` | 0.0001..10 |  | `settle_threshold` | a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces |
-| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected |
+| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected (a connected input without polygons or heightfields gives nothing to land on, with a warning); on = also with input 1 |
 | `ground` | float | `0` |  |  | `ground_height` | height of the ground plane |
 | `ccd` | bool | `true` |  |  |  | continuous collision detection, so fast pieces do not pass through thin collision geometry *(advanced)* |
 | `solver_iterations` | int | `4` | 1..32 |  |  | Rapier solver iterations per step (more = stiffer stacks, slower) *(advanced)* |

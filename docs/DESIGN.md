@@ -289,6 +289,14 @@ host (`Host.compile`), which has the snippet library installed. In the Node host
 `DONT_CONTEXTIFY` (an ordinary global object, so global lookups in hot loops stay fast) and
 `microtaskMode: 'afterEvaluate'`: the realm has its own microtask queue, drained at the end of every `runInContext`
 call and inside that call's timeout.
+- The realm is set up once, before any user code, by `SCRIPT_REALM_SETUP` (`src/core/snippet-lib.ts`): it installs the
+  snippet library and declares the realm's control object `__topotopo` as a global `const`, a frozen object of realm
+  functions (`run`, `setJob`, `setCur`). The job of a timed call and the wrangle's geometry API (what `point()`,
+  `addpoint()` … dispatch to) are closure variables behind it. After setup the host never reads or writes a property
+  of the realm's global object, which user code can redefine: until R-18 the job and the API were the globals `__job`
+  and `__cur`, written outside the time limit, and a script that gave them a looping setter hung the process (in a
+  pool worker, the worker). A global `const` can be neither reassigned nor shadowed at the top level, where user code
+  never runs.
 - `runGuarded(fn, ms)` runs synchronous code (wrangles, parametric expressions, `heightfield_layer` expressions over a
   whole layer, the `sdf_expr` probe at the origin) in a timed call. Code pasted into a wrapper function is parsed on
   its own first (`Host.checkSyntax`; the `script` body through the realm's `AsyncFunction` constructor, which rejects
@@ -316,6 +324,14 @@ call and inside that call's timeout.
   awaits also fails the node. After the run, `lib.run` refuses to cook, so a continuation left over from a timed-out
   script dies at its next call. Subscribing to the run's promise also happens in the first timed call: `then` is
   looked up on the realm's `Promise.prototype`, which a script can replace with a loop (R-17).
+- What a script hands back is read after the timed call: its result, and the inputs and params of a `lib.run` of an
+  async node (which cooks on in the main queue). `instanceof Geometry` on a Proxy runs its `getPrototypeOf` trap, so a
+  returned Proxy hung the process (R-17 N2). Geometries now carry a brand (a WeakSet filled by the constructor and
+  `Geometry.blank()`, which replaces `Object.create(Geometry.prototype)` in the fast paths): `isGeometry` runs no
+  code of the value, the script node and the engine accept only branded results (with their original prototype), and
+  `lib.run` refuses unbranded inputs and copies its params with `structuredClone` inside the call (getters run there;
+  a Proxy or a function is refused without running it). A script still holds engine objects (`lib.Geometry`, its
+  inputs) and can change them; that stays in the "not a security boundary" gap.
 - `lib.run` is wrapped in a realm-side async function: a synchronous node's result resolves a realm promise, so
   `await lib.run('box')` continues inside the same timed call with no drain. Only async nodes cost a drain, about
   0.2 ms each (a `vm` timeout starts a watchdog thread per call).
@@ -388,6 +404,29 @@ costs ~300 ms per worker start (engine modules plus manifold WASM), would need g
 input, output and `lib.run` call, and could not share the engine cache; it was not used. The browser host can use a
 Worker realm, where `terminate()` is the timeout. (Point wrangles do run in workers now, see the worker pool below:
 there only the attribute arrays travel, the workers are already running, and the snippet cannot reach the engine.)
+
+### Resource limits
+
+R-17 found that valid but huge params took the process down or kept it busy for hours (N4): a fatal heap OOM is not
+an exception a node can catch, and nothing limited a simulation's time. Since R-18 (`test/limits.ts`):
+- **Counts.** Every int param that counts something has a `max` (values above are clamped, like values below `min`);
+  the registry scan in the test lists the int params that are not counts (seeds, frames, indices, an offset, a pixel
+  height). The maxes keep one node at its max within the default heap, measured: a 2048 × 2048 grid builds 4.2 M quads
+  in ~1 GB of builder arrays while 4096 × 4096 ran out of heap, so 2D divisions stop at 2048, box/bound/quad sphere
+  divisions at 512 (six faces), 1D curve counts at 10^6, per-element counts (segments per corner or span, sides) at 10^4,
+  guards (max_particles, max_faces, max_length …) at a few times their default, limits whose off value is 0 or -1 at
+  2^31 − 1. Products of counts are guarded where a per-axis max cannot bound them (`point_grid` ≤ 20 M points, besides
+  the existing heightfield, texture and scatter limits). Inputs still multiply (resample count × curves): the guarantee
+  is per param, not a per-cook memory budget. `group_expand` also stops once a step changes nothing.
+- **Time.** `engine.simTimeoutMs` (default 600 s; `TOPOTOPO_SIM_TIMEOUT_MS` in the MCP server) bounds one cook of the
+  long-running nodes, checked from `simBudget` (`src/nodes/util.ts`): rbd every 5 solver steps, drape/inflate every
+  step, particles between batches (a batch also ends after about 10 M particle-steps, which does not change the result),
+  heightfield_erode's JS path every iteration. remesh_quad and the erosion kernels make one WASM call that nothing on
+  its own thread can stop: when the host has a pool and the call is big (≥ 50 k triangles, ≥ 2·10^7 samples ×
+  iterations, or any size under `TOPOTOPO_POOL_MIN`), it runs on a pool worker as the task `wasm`
+  (`src/nodes/wasmcall.ts`) whose limit is the rest of the budget; past it the worker is terminated and replaced and the
+  node fails. The worker runs the same WASM build on copies of the arrays, so the bits are the same (the golden layer
+  passes with every such call on the pool). Without a pool those calls still cannot be stopped.
 
 ### Worker pool
 
@@ -548,6 +587,11 @@ worker pool bit for bit and can be cut into frames anywhere:
   accumulate), `emit_all` at time 0, and `max_particles`, which counts a particle from its birth through its death step by
   age, also when a `die` collision removed it earlier (those keep their slot in `__pholders`). So a run of steps is emitted
   first (serially, cheap), then every particle integrates through it on its own: one `parallelMap` per run, not per step.
+  Since `max_particles` counts live particles only, a high rate with a short life over many steps once materialised
+  hundreds of millions of births in one run and exhausted the heap (R-17 N3). A run is now emitted and integrated in
+  batches: emission stops at the end of the step at which its births reach `max_births` (default 1,000,000), the batch is
+  integrated and compacted, and the next one starts from there (the result is the one of a single run, as for frames);
+  and one step gives at most `max_births` births (the rest are refused and reported, like `max_particles`).
 - **Per-particle randomness is drawn at birth** from (seed, emitter key, birth index): the emitter point's `id` when it has
   one, so reordering or adding emitter points leaves the other points' streams alone. A birth offset u ∈ (0, 1] inside the
   step (0 is reserved for `emit_all` particles, which exist at time 0) avoids banding; a particle's age after S steps is
@@ -682,9 +726,13 @@ so the dependency costs nothing until a graph uses it, and a browser bundle spli
   fallen pieces are in point group `fallen` (or deleted). `active` defaults to 1, so geometry merged without it moves.
 - **Determinism.** Same inputs, params and seed give the same bits: Rapier's WASM arithmetic is IEEE-754 without
   platform-dependent rounding (no SIMD build, no threads), bodies are inserted in a spatial order (y, x, z of their
-  input pose) so permuting the input changes nothing, and the jitter is seeded by that rank. Tested: two engines with
-  another simulation in between, pool off and on, reversed prim and point order. A different Rapier version may
-  settle differently (goldens would change).
+  input pose to 1e-6 m, then a 64-bit hash of the piece's shape in its body frame, exact pose, velocities and
+  `active`) so permuting the input changes nothing, and the jitter is seeded by that rank. Until R-18 pieces at the same
+  position were ordered by input index, so permuting coincident pieces of different shapes changed the result;
+  identical pieces still tie, and being interchangeable they give the same set of results. `rbd_stack`'s order
+  `height` breaks equal heights by the same rank (order `input` follows the input by definition). Tested: two engines
+  with another simulation in between, pool off and on, reversed prim and point order, four coincident pieces of
+  different shapes in three orders. A different Rapier version may settle differently (goldens would change).
 - **Time.** By default the nodes ignore the frame (a plain cook is the settled result, cached across frames). With
   `animate` the cook reads the frame and fps and simulates `(frame - start_frame) / fps` seconds; the node keeps the
   world of its last two signatures, so cooking frame 11 after frame 10 runs only the steps in between, and the last

@@ -22,7 +22,7 @@
 // (Engine.inflight). The report is then put in the order a one-at-a-time cook produces, without the nodes such a
 // cook would not have reached (it stops at the first failed input), so results, errors and warnings do not depend
 // on the pool. Without a pool everything is pulled one input at a time, as before.
-import { Geometry } from '../core/geometry.ts';
+import { Geometry, isGeometry } from '../core/geometry.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
@@ -339,6 +339,12 @@ export class Engine {
   manifold: any = null;
   maxDepth = 24;
   scriptTimeoutMs = 30000;
+  /**
+   * Wall-clock limit of one cook of a long-running node (rbd_settle, rbd_stack, drape, inflate, particles,
+   * heightfield_erode, remesh_quad): past it the node fails with an error that names it (src/nodes/util.ts
+   * simBudget). Generous by default; the MCP server reads TOPOTOPO_SIM_TIMEOUT_MS.
+   */
+  simTimeoutMs = 600000;
   /** pull the inputs of a node concurrently (default: when the host has a worker pool) */
   concurrent: boolean;
   /** CookContext.parallelMap usage: jobs run on the pool / on the cooking thread, chunks dispatched */
@@ -989,7 +995,7 @@ export class Engine {
     try {
       this.unpackInputs(def, rp.values, inputs, inputSigs, name, result);
       const out = await def.cook(ctx);
-      if (!(out instanceof Geometry)) throw new Error(`node returned ${out === null ? 'null' : typeof out} instead of geometry`);
+      if (!isGeometry(out)) throw new Error(`node returned ${out === null ? 'null' : typeof out} instead of geometry`);
       checkFinite(out, result);
       if (readTime && !timeDep) {
         // discovered while cooking: remember it so later cooks look up the time-mixed key directly

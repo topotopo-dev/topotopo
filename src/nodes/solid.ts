@@ -209,10 +209,10 @@ defineNode({
   aliases: ['fracture', 'shatter', 'voronoi'],
   inputs: [{ name: 'solid', desc: 'closed mesh to fracture' }, { name: 'sites', desc: 'optional fracture points', optional: true }],
   params: {
-    count: { type: 'int', default: 12, min: 1, desc: 'number of pieces when no site points are given' },
+    count: { type: 'int', default: 12, min: 1, max: 10000, desc: 'number of pieces when no site points are given' },
     seed: P.seed(),
     gap: { type: 'float', default: 0, min: 0, desc: 'shrink each piece toward its centre by this distance (visual separation)' },
-    neighbors: { type: 'int', default: 24, min: 4, desc: 'nearest sites considered per cell (raise if cells look wrong)' },
+    neighbors: { type: 'int', default: 24, min: 4, max: 1024, desc: 'nearest sites considered per cell (raise if cells look wrong)' },
   },
   outputs: 'prim name ("piece0"...), class (int), group inside; point/prim attributes from the source',
   example: { type: 'voronoi_fracture', params: { count: 20, gap: 0.02, seed: 4 } },
@@ -273,7 +273,7 @@ defineNode({
   aliases: ['contour', 'section', 'cross_section'],
   inputs: [{ name: 'solid', desc: 'closed mesh' }],
   params: {
-    count: { type: 'int', default: 10, min: 1, desc: 'number of slices across the bounding box' },
+    count: { type: 'int', default: 10, min: 1, max: 100000, desc: 'number of slices across the bounding box' },
     axis: { type: 'enum', options: ['y', 'x', 'z'], default: 'y', desc: 'slicing axis' },
     margin: { type: 'float', default: 0.001, min: 0, desc: 'keep slices this far inside the bbox ends' },
   },

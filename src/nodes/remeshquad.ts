@@ -9,7 +9,11 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { loadHostKernels } from '../wasm/kernels.ts';
 import type { QuadRemeshResult } from '../wasm/kernels.ts';
-import { edgeMask, mask, P } from './util.ts';
+import { edgeMask, mask, P, simBudget } from './util.ts';
+import { wasmCallUnderBudget } from './wasmcall.ts';
+
+/** Input triangles from which a remesh runs on a pool worker, under the time limit (smaller ones take well under a second). */
+const WORKER_TRIANGLES = 50_000;
 
 interface SourceMesh {
   positions: Float64Array;
@@ -228,7 +232,7 @@ defineNode({
   inputs: [{ name: 'geo', desc: 'consistently oriented manifold polygon mesh' }],
   params: {
     target_length: { type: 'float', default: 0, min: 0, desc: 'target quad edge length in scene units (0 = automatic input scale)', aliases: ['edge_length', 'target_size'] },
-    target_faces: { type: 'int', default: 0, min: 0, desc: 'approximate target face count (> 0 overrides target_length)' },
+    target_faces: { type: 'int', default: 0, min: 0, max: 50000000, desc: 'approximate target face count (> 0 overrides target_length)' },
     mode: { type: 'enum', options: ['quad_dominant', 'quads_only'], default: 'quad_dominant', desc: 'quad_dominant permits triangles; quads_only conformingly splits residual non-quads when unlocked' },
     feature_angle: { type: 'float', default: 45, min: 0, max: 180, desc: 'dihedral threshold in degrees for automatic sharp-feature alignment (0 disables it)' },
     align_boundaries: { type: 'bool', default: true, desc: 'align the orientation field along open boundaries' },
@@ -237,11 +241,14 @@ defineNode({
     cleanup: { type: 'bool', default: true, desc: 'remove avoidable irregular vertices and short edges after extraction' },
     crease_group: { type: 'group', default: '', groupClass: 'edge', desc: 'edge group or pattern used as hard alignment constraints (empty = none)' },
     group: P.group('prim', 'primitives to remesh (empty = all); edges shared with the remainder stay fixed'),
-    max_faces: { type: 'int', default: 1000000, min: 1, desc: 'refuse estimated or extracted output above this primitive count, including the retained group complement', advanced: true },
+    max_faces: { type: 'int', default: 1000000, min: 1, max: 50000000, desc: 'refuse estimated or extracted output above this primitive count, including the retained group complement', advanced: true },
   },
   outputs: 'quad-dominant polygons; interpolated point/vertex attributes and copied prim attributes; detail quad_fraction, singularities, irregular_fraction and edge/planarity statistics',
   example: { type: 'remesh_quad', in: ['mesh'], params: { target_faces: 1000, feature_angle: 45 } },
-  cook: async ({ input, p, engine, stat }) => {
+  cook: async (ctx) => {
+    const { input, p, engine, stat } = ctx;
+    // the time limit of long-running nodes: a big remesh runs on a pool worker that the limit can stop
+    const budget = simBudget(ctx, 'a larger target_length or a lower target_faces, fewer smooth_iterations, or a decimated input; or raise the limit');
     const g = input(0), selection = mask(g, 'prim', p.group);
     if (selection && !selection.some((selected, prim) => selected && g.primClosed[prim] && g.primSize(prim) >= 3)) return g.clone();
     const source = sourceMesh(g, selection, p.crease_group ? edgeMask(g, p.crease_group) : null);
@@ -251,15 +258,21 @@ defineNode({
     const kernels = await loadHostKernels(engine.host);
     let result: QuadRemeshResult;
     try {
-      result = kernels.remesh_quad(source.positions, source.tris, {
-        target_length: p.target_length, target_faces: p.target_faces, quad_only: p.mode === 'quads_only',
-        feature_angle: p.feature_angle * Math.PI / 180, align_boundaries: p.align_boundaries,
-        smooth_iterations: p.smooth_iterations, preserve_sharp: p.preserve_sharp, cleanup: p.cleanup,
+      result = await wasmCallUnderBudget(ctx, kernels, {
+        fn: 'remesh_quad',
+        options: {
+          target_length: p.target_length, target_faces: p.target_faces, quad_only: p.mode === 'quads_only',
+          feature_angle: p.feature_angle * Math.PI / 180, align_boundaries: p.align_boundaries,
+          smooth_iterations: p.smooth_iterations, preserve_sharp: p.preserve_sharp, cleanup: p.cleanup,
+          max_faces: availableFaces,
+        },
+      }, {
+        positions: source.positions, tris: source.tris,
         crease_edges: Uint32Array.from(source.creases.toPairs()), locked_edges: Uint32Array.from(source.locked.toPairs()),
         direction_edges: Uint32Array.from(source.seams.toPairs()),
-        max_faces: availableFaces,
-      });
+      }, source.tris.length / 3, WORKER_TRIANGLES, budget);
     } catch (error) {
+      if (error instanceof NodeError) throw error;
       throw new NodeError(error instanceof Error ? error.message : String(error), 'check the target density and max_faces; use mesh_repair for invalid topology');
     }
     if (result.prim_start.length - 1 > availableFaces) throw new NodeError(`remesh_quad: output plus retained primitives exceeds max_faces ${p.max_faces}; raise target_length or max_faces`);

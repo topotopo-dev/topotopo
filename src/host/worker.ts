@@ -1,6 +1,7 @@
-// Worker thread entry of the Node pool (src/host/pool.ts). Runs registered kernels (src/core/kernels.ts) and the
+// Worker thread entry of the Node pool (src/host/pool.ts). Runs registered kernels (src/core/kernels.ts), the
 // wrangle kernel, which compiles the generated per-point kernel source in this worker's own scripting realm (a
-// Node host with the snippet library, created on the first wrangle task).
+// Node host with the snippet library, created on the first wrangle task), and the wasm kernel: one long call into the
+// WASM kernels (src/nodes/wasmcall.ts) that the task's time limit can stop.
 //
 // Protocol: {type:'run', id, kernel, args, range, arrays, shared?} → {type:'result', id, ok, value, arrays} |
 // {type:'result', id, ok:false, error, stack, user} | {type:'result', id, missingShared: key}. Shared data arrives
@@ -52,13 +53,30 @@ async function wrangleChunk(a: any, arrays: Record<string, any>, start: number, 
     numpt: a.numpt, numprim: a.numprim, numvtx: a.numvtx, frame: a.frame, time: a.time, timeInc: a.timeInc, vars: a.vars,
     centroid: () => { throw new Error('centroid is not available in a point wrangle'); },
   };
-  const g = realm.compile('globalThis');
-  g.__cur = null;
+  // the geometry API stays null in workers (point wrangles that call geometry functions run on the cooking thread)
   try {
     // what the snippet throws is read inside the time limit too (a thrown object's message getter is user code)
     runUserCode(realm, () => kernel(env), a.timeoutMs, true);
   } catch (e: any) {
     throw Object.assign(wrangleRunError(e, a.bodyLine, a.code, a.timeoutMs), { topotopoUser: true });
+  }
+}
+
+/**
+ * A call into the WASM kernels (src/nodes/wasmcall.ts), run here so that the pool's task limit can stop it. Errors of
+ * the call keep their message (as when it runs on the cooking thread); a worker that selected another WASM build than
+ * the cooking thread refuses, and the caller runs the call itself.
+ */
+async function wasmTask(a: any, arrays: Record<string, any>) {
+  if (!realm) realm = (await import('./node.ts')).createNodeHost({ workers: 0 });
+  const { kernelsWasmVariant, loadHostKernels } = await import('../wasm/kernels.ts');
+  if (a.variant !== kernelsWasmVariant) throw new Error(`WASM variant ${kernelsWasmVariant} in the worker, ${a.variant} on the cooking thread`);
+  const kernels = await loadHostKernels(realm);
+  const { runWasmCall } = await import('../nodes/wasmcall.ts');
+  try {
+    return runWasmCall(kernels, a, arrays);
+  } catch (e: any) {
+    throw Object.assign(new Error(String(e?.message ?? e)), { topotopoUser: true });
   }
 }
 
@@ -77,6 +95,7 @@ port.on('message', async (m: any) => {
   try {
     let value: any;
     if (m.kernel === 'wrangle') value = await wrangleChunk(m.args, m.arrays, start, end);
+    else if (m.kernel === 'wasm') value = await wasmTask(m.args, m.arrays);
     else if (m.kernel === 'selftest.crash') process.exit(7);
     else {
       const k = KERNELS[m.kernel];

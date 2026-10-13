@@ -9,6 +9,7 @@ import { RBD_PIECE_MODES, RBD_SHAPES, RbdSim, applyRbd, collectRbdScene, staticM
 import type { RbdScene, RbdSimOptions, RbdStackOptions } from '../core/rbd.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { loadRapier } from '../wasm/rapier.ts';
+import { simBudget } from './util.ts';
 
 const COMMON: Record<string, ParamDef> = {
   pieces: { type: 'enum', options: [...RBD_PIECE_MODES], default: 'auto', desc: 'how polygons form pieces (packed prims are always one piece each): auto = prim attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; connectivity; name; attrib (piece_attrib)' },
@@ -25,7 +26,7 @@ const COMMON: Record<string, ParamDef> = {
   angular_damping: { type: 'float', default: 0.5, min: 0, max: 10, desc: 'angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling' },
   rest_damping: { type: 'float', default: 5, min: 0, max: 100, desc: 'extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics' },
   sleep_threshold: { type: 'float', default: 0.05, min: 0.0001, max: 10, aliases: ['settle_threshold'], desc: 'a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces' },
-  ground_plane: { type: 'enum', options: ['auto', 'on', 'off'], default: 'auto', desc: 'infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected' },
+  ground_plane: { type: 'enum', options: ['auto', 'on', 'off'], default: 'auto', desc: 'infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected (a connected input without polygons or heightfields gives nothing to land on, with a warning); on = also with input 1' },
   ground: { type: 'float', default: 0, aliases: ['ground_height'], desc: 'height of the ground plane' },
   ccd: { type: 'bool', default: true, advanced: true, desc: 'continuous collision detection, so fast pieces do not pass through thin collision geometry' },
   solver_iterations: { type: 'int', default: 4, min: 1, max: 32, advanced: true, desc: 'Rapier solver iterations per step (more = stiffer stacks, slower)' },
@@ -40,7 +41,7 @@ const COMMON: Record<string, ParamDef> = {
 
 const STACK: Record<string, ParamDef> = {
   interval: { type: 'int', default: 15, min: 1, max: 10000, desc: 'solver steps between two drops (15 at 60 steps/s = four pieces per second)' },
-  order: { type: 'enum', options: ['input', 'height', 'random'], default: 'input', desc: 'drop order: input = prim order, height = lowest first, random = seeded shuffle' },
+  order: { type: 'enum', options: ['input', 'height', 'random'], default: 'input', desc: 'drop order: input = prim order, height = lowest first (equal heights in the input-independent spatial order), random = seeded shuffle' },
   lift: { type: 'bool', default: true, desc: 'raise each piece above whatever already lies under its drop position (a shape cast from above), so pieces given the same position stack' },
   clearance: { type: 'float', default: 0.02, min: 0, max: 10, desc: 'lift: gap left between a dropped piece and the pile under it (m)' },
 };
@@ -82,7 +83,11 @@ async function cookRbd(ctx: CookContext, stack: boolean): Promise<Geometry> {
   const notes: string[] = [];
   const statics = ctx.hasInput(1) ? staticMesh(ctx.input(1), notes) : null;
   for (const m of notes) ctx.warn(m);
-  const ground = p.ground_plane === 'on' || (p.ground_plane === 'auto' && !statics) ? Number(p.ground) : null;
+  // auto: the ground plane stands in for a collision input that is not connected (R-17 N6: it was also added when the
+  // input was connected but had no triangles, unlike the param says)
+  const ground = p.ground_plane === 'on' || (p.ground_plane === 'auto' && !ctx.hasInput(1)) ? Number(p.ground) : null;
+  if (ctx.hasInput(1) && !statics && ground === null)
+    ctx.warn('the collision input (input 1) has no polygons or heightfields: there is nothing to land on (ground_plane auto adds the ground only when input 1 is not connected; set ground_plane on, or disconnect it)');
   const rate = Math.max(1, Math.round(p.steps_per_second));
   const dt = 1 / rate;
   const dynamic = scene.pieces.filter((x) => !x.fixed).length;
@@ -101,6 +106,10 @@ async function cookRbd(ctx: CookContext, stack: boolean): Promise<Geometry> {
   } catch (e: any) {
     throw new NodeError(`could not load the Rapier physics engine: ${e?.message ?? e}`, 'reinstall the package (@dimforge/rapier3d-compat is a dependency)');
   }
+  // the wall-clock limit of long-running nodes, checked every few solver steps
+  const budget = simBudget(ctx, stack
+    ? 'fewer pieces, a shorter interval or duration, fewer steps_per_second; or raise the limit'
+    : 'a shorter duration, fewer steps_per_second or pieces; or raise the limit');
   let res;
   if (p.animate) {
     const elapsed = Math.max(0, (ctx.frame - p.start_frame) / ctx.fps);
@@ -111,12 +120,12 @@ async function cookRbd(ctx: CookContext, stack: boolean): Promise<Geometry> {
     if (cached && cached.sim.step <= target) ({ sim, scene } = cached);
     else sim = new RbdSim(R, scene, statics, opts);
     keepWorld(key, sim, scene);
-    sim.advance(target);
+    sim.advance(target, budget.check);
     res = sim.read();
   } else {
     const sim = new RbdSim(R, scene, statics, opts);
     try {
-      sim.advance(maxSteps);
+      sim.advance(maxSteps, budget.check);
       res = sim.read();
     } finally {
       sim.free();

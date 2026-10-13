@@ -126,6 +126,29 @@ export function polyGeo(curves: number[][][], closed: boolean | boolean[]): Geom
   return new Geometry({ positions: pos, prims, closed });
 }
 
+/**
+ * The wall-clock budget of one cook of a long-running node (engine.simTimeoutMs from now; R-17 N4: a simulation had
+ * no time limit, so large but valid params could keep an MCP server busy for hours). `check()` throws a NodeError that
+ * names the node once the budget is spent (call it between steps, batches or iterations); `left()` is what remains, for
+ * the limit of a pool task that runs work which cannot be stopped from here (a WASM call).
+ */
+export interface SimBudget {
+  check(): void;
+  left(): number;
+  error(): NodeError;
+}
+
+export function simBudget(ctx: CookContext, hint: string): SimBudget {
+  const ms = Math.max(1, Number(ctx.engine.simTimeoutMs) || 600000), deadline = Date.now() + ms;
+  const limit = ms >= 1000 ? `${+(ms / 1000).toFixed(1)} s` : `${ms} ms`;
+  const error = () => new NodeError(`${ctx.type}: stopped after ${limit}, the time limit of long-running nodes (engine.simTimeoutMs, env TOPOTOPO_SIM_TIMEOUT_MS)`, hint);
+  return {
+    check() { if (Date.now() > deadline) throw error(); },
+    left: () => deadline - Date.now(),
+    error,
+  };
+}
+
 export function requirePrims(g: Geometry, node: string) {
   if (g.numPrims === 0) throw new NodeError(`${node}: input has no primitives (${g.numPoints} points)`);
 }

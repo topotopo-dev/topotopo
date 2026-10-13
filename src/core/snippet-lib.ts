@@ -5,11 +5,12 @@
 // (.x .y .z .w / .r .g .b .a / .u .v).
 //
 // `host` supplies number-returning primitives implemented in the engine realm
-// (noise, hashing). Geometry query/edit functions dispatch through globalThis.__cur,
-// which the engine sets for each wrangle run.
+// (noise, hashing). Geometry query/edit functions dispatch through the current wrangle's
+// geometry API, a closure variable of the library that the engine sets for each wrangle run
+// through the realm's control object (see SCRIPT_REALM_SETUP).
 
 /**
- * Library functions that go through globalThis.__cur (the wrangle's geometry API): they read other elements or
+ * Library functions that go through the wrangle's geometry API (`C()` below): they read other elements or
  * inputs, edit the geometry or log. A point wrangle that calls none of them can run in chunks on worker threads
  * (wrangle.ts runWrangleParallel); test/pool.ts checks this list against the functions installed below.
  */
@@ -21,7 +22,13 @@ export const GEOMETRY_FUNCTIONS = [
   'setpointgroup', 'setprimgroup', 'setvertexgroup', 'setedgegroup', 'print', 'printf', 'warning',
 ];
 
-export function installSnippetLib(g: any, host: any) {
+/**
+ * Install the library as globals of the realm `g` and return the setter of the current wrangle's geometry API. The
+ * API is a variable of this closure, not a property of the global object: user code in the realm can redefine any
+ * global property (a setter that never returns), and the engine sets the API outside the time limit.
+ */
+export function installSnippetLib(g: any, host: any): (api: any) => void {
+  let cur: any = null;
   const AP = g.Array.prototype;
   const acc = (name: string, i: number) =>
     Object.defineProperty(AP, name, {
@@ -238,7 +245,7 @@ export function installSnippetLib(g: any, host: any) {
   };
 
   // geometry access — inputs: 0 = geometry being processed (pre-edit), 1..3 = other inputs
-  const C = () => g.__cur;
+  const C = () => cur;
   L.npoints = (i = 0) => C().npoints(i);
   L.nprims = (i = 0) => C().nprims(i);
   L.nvertices = (i = 0) => C().nvertices(i);
@@ -376,4 +383,28 @@ export function installSnippetLib(g: any, host: any) {
 
   for (const k of Object.keys(L)) g[k] = L[k];
   g.__snippetLibNames = Object.keys(L).filter((k) => !k.startsWith('__'));
+  return (api: any) => { cur = api; };
 }
+
+/** Name of the scripting realm's control object (a global `const` declared by SCRIPT_REALM_SETUP). */
+export const REALM_CONTROL = '__topotopo';
+
+/**
+ * The script a host runs once in a new scripting realm, before any user code, with its primitives (rand, noise, curl)
+ * on the realm's global `__hostApi` (deleted again). It installs the snippet library and declares the realm's control
+ * object as a global `const` (REALM_CONTROL), a frozen object of realm functions:
+ *   run()        calls the current job: the host's timed script is `__topotopo.run()` (Host.runGuarded)
+ *   setJob(f)    sets the current job
+ *   setCur(api)  sets the current wrangle's geometry API (wrangle.ts; null after the run)
+ * The host keeps the object and calls setJob/setCur directly, outside the time limit, so they must not run user code:
+ * the job and the API are closure variables, the object is frozen (own data properties only) and a global `const`
+ * can be neither reassigned nor redefined by later code (user code never runs at the realm's top level, and a
+ * property of the global object of the same name is shadowed by the binding). Before R-18 the host assigned
+ * global properties `__job` and `__cur`, and a script that gave them a looping setter hung the process.
+ */
+export const SCRIPT_REALM_SETUP = `const ${REALM_CONTROL} = (() => {
+  let job;
+  const setCur = (${installSnippetLib.toString()})(globalThis, __hostApi);
+  return Object.freeze({ run: () => job(), setJob: (f) => { job = f; }, setCur });
+})();
+delete globalThis.__hostApi;`;
