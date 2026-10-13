@@ -1,0 +1,44 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [1.19, 1.19, 1.19],
+          "min": [-1.11, -1.11, -1.11]
+        },
+        "kind": "sdf",
+        "name": "grid",
+        "samples": "eef4fe71a23647f7"
+      }
+    ]
+  },
+  "name": "node.grid_to_sdf",
+  "ok": true,
+  "source": "fixture for node type \"grid_to_sdf\" (test/fixtures.ts)",
+  "warnings": []
+}

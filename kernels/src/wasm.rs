@@ -23,6 +23,128 @@ fn put(o: &Object, key: &str, value: impl Into<JsValue>) -> Result<(), JsValue> 
 fn error(e: String) -> JsValue {
     JsValue::from_str(&e)
 }
+
+// Grid objects only contain scalar metadata and flat typed arrays. Copies detach
+// Rust ownership from JS so input arrays are never mutated by an operation.
+fn grid(value: &JsValue) -> Result<crate::sdf::Grid, JsValue> {
+    let get = |key: &str| Reflect::get(value, &JsValue::from_str(key));
+    let dims = get("dims")?;
+    let origin = get("origin")?;
+    let values = get("values")?;
+    if !dims.is_instance_of::<Uint32Array>()
+        || !origin.is_instance_of::<Float64Array>()
+        || !values.is_instance_of::<Float32Array>()
+    {
+        return Err(JsValue::from_str(
+            "grid requires Uint32Array dims, Float64Array origin and Float32Array values",
+        ));
+    }
+    // The type checks above permit borrowing the JS views without constructing
+    // duplicate typed arrays; validate metadata before the one Rust-owned copy.
+    let dims: Uint32Array = dims.unchecked_into();
+    let origin: Float64Array = origin.unchecked_into();
+    let values: Float32Array = values.unchecked_into();
+    if dims.length() != 3 || origin.length() != 3 || values.length() > 64 * 1024 * 1024 {
+        return Err(JsValue::from_str(
+            "grid requires three dimensions/origin coordinates and at most 64M samples",
+        ));
+    }
+    let dims = [dims.get_index(0), dims.get_index(1), dims.get_index(2)];
+    let origin = [
+        origin.get_index(0),
+        origin.get_index(1),
+        origin.get_index(2),
+    ];
+    let voxel = get("voxel")?
+        .as_f64()
+        .ok_or_else(|| JsValue::from_str("grid voxel must be a number"))?;
+    let count = crate::sdf::layout_len(dims, origin, voxel).map_err(error)?;
+    if values.length() as usize != count {
+        return Err(JsValue::from_str(
+            "grid values length must equal dims[0] * dims[1] * dims[2]",
+        ));
+    }
+    let g = crate::sdf::Grid {
+        dims,
+        origin,
+        voxel,
+        values: values.to_vec(),
+    };
+    g.validate().map_err(error)?;
+    Ok(g)
+}
+fn grid_object(g: crate::sdf::Grid) -> Result<Object, JsValue> {
+    let o = Object::new();
+    put(&o, "dims", Uint32Array::from(g.dims.as_slice()))?;
+    put(&o, "origin", Float64Array::from(g.origin.as_slice()))?;
+    put(&o, "voxel", g.voxel)?;
+    put(&o, "values", Float32Array::from(g.values.as_slice()))?;
+    Ok(o)
+}
+
+#[wasm_bindgen]
+pub fn sdf_from_mesh(
+    positions: &[f64],
+    tris: &[u32],
+    voxel: f64,
+    band: f64,
+    padding: f64,
+    fill: bool,
+) -> Result<Object, JsValue> {
+    grid_object(
+        crate::sdf::sdf_from_mesh(positions, tris, voxel, band, padding, fill).map_err(error)?,
+    )
+}
+#[wasm_bindgen]
+pub fn grid_csg(a: JsValue, b: JsValue, op: &str, k: f64) -> Result<Object, JsValue> {
+    grid_object(crate::sdf::grid_csg(&grid(&a)?, &grid(&b)?, op, k).map_err(error)?)
+}
+#[wasm_bindgen]
+pub fn grid_offset(g: JsValue, d: f64) -> Result<Object, JsValue> {
+    grid_object(crate::sdf::grid_offset(&grid(&g)?, d).map_err(error)?)
+}
+#[wasm_bindgen]
+pub fn grid_blur(g: JsValue, radius: f64) -> Result<Object, JsValue> {
+    if !radius.is_finite() || radius < 0.0 || radius > 1024.0 || radius.fract() != 0.0 {
+        return Err(JsValue::from_str(
+            "grid_blur radius must be an integer in 0..1024",
+        ));
+    }
+    grid_object(crate::sdf::grid_blur(&grid(&g)?, radius as u32).map_err(error)?)
+}
+#[wasm_bindgen]
+pub fn grid_dilate(g: JsValue, d: f64) -> Result<Object, JsValue> {
+    grid_object(crate::sdf::grid_dilate(&grid(&g)?, d).map_err(error)?)
+}
+#[wasm_bindgen]
+pub fn grid_erode(g: JsValue, d: f64) -> Result<Object, JsValue> {
+    grid_object(crate::sdf::grid_erode(&grid(&g)?, d).map_err(error)?)
+}
+#[wasm_bindgen]
+pub fn grid_resample(g: JsValue, voxel: f64) -> Result<Object, JsValue> {
+    grid_object(crate::sdf::grid_resample(&grid(&g)?, voxel).map_err(error)?)
+}
+#[wasm_bindgen]
+pub fn dual_contour(
+    g: JsValue,
+    iso: f64,
+    qef_tolerance: f64,
+    sharp: bool,
+    clamp_to_cell: bool,
+) -> Result<Object, JsValue> {
+    let m = crate::dual_contour::dual_contour(&grid(&g)?, iso, qef_tolerance, sharp, clamp_to_cell)
+        .map_err(error)?;
+    let o = Object::new();
+    put(&o, "positions", Float64Array::from(m.positions.as_slice()))?;
+    put(&o, "prim_start", Uint32Array::from(m.prim_start.as_slice()))?;
+    put(
+        &o,
+        "vertex_point",
+        Uint32Array::from(m.vertex_point.as_slice()),
+    )?;
+    put(&o, "cell_index", Uint32Array::from(m.cell_index.as_slice()))?;
+    Ok(o)
+}
 fn provenance(o: &Object, p: &crate::Provenance) -> Result<(), JsValue> {
     put(o, "src_point", Int32Array::from(p.src_point.as_slice()))?;
     put(

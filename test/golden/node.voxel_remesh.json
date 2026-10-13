@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "grid_cell:int:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 4802,
+      "prims": 9600,
+      "vertices": 28800,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "cf1bd90cff4a6ee6",
+      "attributes": {
+        "point.grid_cell": "dcd69c17daaf5195"
+      },
+      "topology": "9014071103275a37"
+    }
+  },
+  "name": "node.voxel_remesh",
+  "ok": true,
+  "source": "fixture for node type \"voxel_remesh\" (test/fixtures.ts)",
+  "warnings": []
+}

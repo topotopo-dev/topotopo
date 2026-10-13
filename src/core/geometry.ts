@@ -397,6 +397,22 @@ export interface SdfVolume {
   sample: (x: number, y: number, z: number) => number;
 }
 
+/** A sampled 3D signed distance field; X varies fastest. Implemented by SdfGrid in core/sdfgrid.ts. */
+export interface GridVolume {
+  name: string;
+  kind: 'grid';
+  dims: [number, number, number];
+  origin: Vec3;
+  voxel: number;
+  /** Negative inside, positive outside; signed infinities mark samples outside a narrow band. */
+  values: Float32Array;
+  readonly bounds: { min: Vec3; max: Vec3 };
+  /** Trilinear sampling in world space; +Infinity outside the sampled domain. */
+  sample(x: number, y: number, z: number): number;
+  /** Copies the layout; the immutable values array is shared (copy before writing). */
+  clone(): GridVolume;
+}
+
 /**
  * A heightfield (Houdini's model): a regular grid of samples in the XZ plane, Y up, with named float layers
  * (height, mask, flow, sediment, debris, water and any user layer). Sample (i, j) sits at world
@@ -449,11 +465,11 @@ export interface ImageVolume {
   clone(): ImageVolume;
 }
 
-export type Volume = SdfVolume | HeightfieldVolume | ImageVolume;
+export type Volume = SdfVolume | GridVolume | HeightfieldVolume | ImageVolume;
 
 /** Volumes for a new geometry: heightfields and images get their own layer map (the arrays stay shared), SDFs are immutable. */
 export function cloneVolumes(vs: Volume[]): Volume[] {
-  return vs.map((v) => (v.kind === 'heightfield' || v.kind === 'image' ? v.clone() : v));
+  return vs.map((v) => (v.kind === 'heightfield' || v.kind === 'image' || v.kind === 'grid' ? v.clone() : v));
 }
 
 export interface GeoInit {

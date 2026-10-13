@@ -16,6 +16,8 @@ export { readMaterials, writeMaterials, mergeMaterialTables } from './core/mater
 export type { Material, MaterialTable } from './core/materials.ts';
 export { geoToJSON, geoFromJSON } from './io/json.ts';
 export { Heightfield, heightfieldsOf, heightfieldToMesh, withHeightfieldPreview } from './core/heightfield.ts';
+export { SdfGrid, gridsOf, gridFromImplicit, gridToMeshMarchingCubes, withSdfGridPreview } from './core/sdfgrid.ts';
+export type { GridVolume } from './core/geometry.ts';
 export { erodeStep, makeErosionField, DEFAULT_EROSION } from './core/erosion.ts';
 export type { ErosionField, ErosionParams } from './core/erosion.ts';
 export { heightmapExport, heightmapPaths } from './io/heightmap.ts';

@@ -468,7 +468,7 @@ defineNode({
   description:
     'Always watertight and merges overlapping parts, but sharp edges round off and attributes are dropped. To keep the ' +
     'surface, sharp edges, boundaries, uv and other attributes use remesh_isotropic (Houdini Remesh SOP).',
-  aliases: ['voxel_remesh', 'remesh_voxel'],
+  aliases: ['remesh_voxel'],
   inputs: [{ name: 'mesh', desc: 'closed mesh (may self-intersect; overlapping parts get merged)' }],
   params: {
     edge_length: { type: 'float', default: 0, min: 0, desc: 'target edge length (0 = auto from divisions)' },
