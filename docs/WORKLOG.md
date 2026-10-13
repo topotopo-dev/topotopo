@@ -57,9 +57,10 @@ before touching the repo during the run.
 ## Merge procedure (orchestrator)
 1. Read the agent report, skim the diff (`git diff main...<branch> --stat`, then the core files).
 2. `git merge --no-ff <branch>` into `main` (resolve conflicts, typically `package.json` scripts, `test/`, `docs.ts`).
-3. `npm run typecheck && npm test && npm run showcase`; look at changed renders.
-4. Update this worklog (status table + log), README node table if needed; commit; `git push`.
-5. Remove the worktree and branch.
+3. If the branch changed `package.json` dependencies or `package-lock.json`, run `npm install` in the main checkout first (agent worktrees install into their own node_modules; main's copy does not get the new package, and typecheck, goldens, build and pack test then fail on main although the branch was green).
+4. `npm run typecheck && npm test && npm run build && npm run pack:test && npm run showcase`, checking every exit code; look at changed renders. Never push a merge before this is green.
+5. Update this worklog (status table + log), README node table if needed; commit; `git push`.
+6. Remove the worktree and branch.
 
 ## Work items
 
