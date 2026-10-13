@@ -9,7 +9,11 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./node": {
+      "types": "./dist/host/node.d.ts",
+      "default": "./dist/host/node.js"
+    }
   },
   "bin": {
     "polyforge": "dist/cli.js"
