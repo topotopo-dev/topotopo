@@ -10804,7 +10804,7 @@ For procedural assembly: scatter pieces above a surface, settle them, and they r
 | `angular_damping` | float | `0.5` | 0..10 |  |  | angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling |
 | `rest_damping` | float | `5` | 0..100 |  |  | extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics |
 | `sleep_threshold` | float | `0.05` | 0.0001..10 |  | `settle_threshold` | a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces |
-| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected |
+| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected (a connected input without polygons or heightfields gives nothing to land on, with a warning); on = also with input 1 |
 | `ground` | float | `0` |  |  | `ground_height` | height of the ground plane |
 | `ccd` | bool | `true` |  |  |  | continuous collision detection, so fast pieces do not pass through thin collision geometry *(advanced)* |
 | `solver_iterations` | int | `4` | 1..32 |  |  | Rapier solver iterations per step (more = stiffer stacks, slower) *(advanced)* |
@@ -10952,7 +10952,7 @@ rbd_settle for pieces that overlap where they are: give every crate the same pos
 | `angular_damping` | float | `0.5` | 0..10 |  |  | angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling |
 | `rest_damping` | float | `5` | 0..100 |  |  | extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics |
 | `sleep_threshold` | float | `0.05` | 0.0001..10 |  | `settle_threshold` | a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces |
-| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected |
+| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected (a connected input without polygons or heightfields gives nothing to land on, with a warning); on = also with input 1 |
 | `ground` | float | `0` |  |  | `ground_height` | height of the ground plane |
 | `ccd` | bool | `true` |  |  |  | continuous collision detection, so fast pieces do not pass through thin collision geometry *(advanced)* |
 | `solver_iterations` | int | `4` | 1..32 |  |  | Rapier solver iterations per step (more = stiffer stacks, slower) *(advanced)* |

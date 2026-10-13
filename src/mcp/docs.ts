@@ -397,7 +397,8 @@ PIECES (input 0): every packed prim is one piece (copy_to_points {pack:true} or 
   (they are pushed apart violently; a warning counts them): lift the template points (transform translate [0, 1, 0]),
   space them (scatter min_distance), or use rbd_stack.
 COLLISION (input 1): terrain mesh, heightfield, container, settled pieces from an earlier rbd node (merge them): exact
-  triangles, static. Not connected: a ground plane at y = ground (ground_plane on adds it to input 1 too).
+  triangles, static. Not connected: a ground plane at y = ground (ground_plane on adds it to input 1 too; connected but
+  without polygons or heightfields: nothing to land on, with a warning).
 ATTRIBUTES IN: active (prim or point int, default 1) = 0 → the piece stays put but others collide with it; v (m/s) and
   w (rad/s) on the points (anchors) = initial velocity. OUT (points; packed: anchors): v, w, settled (0/1), contacts
   (how many colliders touch it), group "fallen" (fell off the collision geometry; delete_fallen removes them).

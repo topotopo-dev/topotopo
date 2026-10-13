@@ -3,7 +3,7 @@
 // Pieces end up resting: above the ground or terrain, not inside each other (checked here on exact convex hulls,
 // independently of Rapier's contacts), settled, touching something. Deterministic across cooks, engines and the
 // worker pool; independent of the input order; packed and unpacked input; static pieces, initial velocities,
-// heightfield collision, fallen pieces, animate (frames resume), the max_pieces guard, stacking, and the 1,000-piece
+// heightfield collision, fallen pieces, ground_plane auto, animate (frames resume), the max_pieces guard, stacking, and the 1,000-piece
 // timing (target 3 s, reported; fails only beyond a generous limit because the machine may be loaded).
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
@@ -327,6 +327,17 @@ if (!perfOnly) {
     check(o.warnings.some((w) => /started inside/.test(w)), `pieces that start inside each other are reported (${o.warnings.join(' | ')})`);
     const many = await engine.cook({ nodes: { ...ROCKS(12, { max_pieces: 5 }) }, output: 'settle' });
     check(!many.ok && /12 pieces is more than max_pieces \(5\)/.test(many.errors[0]?.message ?? ''), `max_pieces guards the cook (${many.errors[0]?.message})`);
+    // R-17 N6: ground_plane auto adds the ground only when input 1 is not connected (as the param says); a connected
+    // input without triangles (points only here) leaves nothing to land on, with a warning; on adds the ground anyway
+    const pts = { type: 'points', params: { positions: [[0, 0, 0], [1, 0, 0]] } };
+    const none = await cook({ a: nodes.a, pts, s: { type: 'rbd_settle', in: ['a', 'pts'], params: { duration: 3 } } }, 's');
+    check(none.stats.fallen === 1 && none.warnings.some((w) => /input 1\) has no polygons or heightfields: there is nothing to land on/.test(w)),
+      `auto with a connected input without triangles: no ground, the piece falls (${none.stats.fallen} fallen) and a warning says why`);
+    const on = await cook({ a: nodes.a, pts, s: { type: 'rbd_settle', in: ['a', 'pts'], params: { duration: 3, ground_plane: 'on' } } }, 's');
+    check(on.stats.fallen === 0 && on.stats.settled === 1 && Math.abs(on.geo.bbox().min[1]) < 0.01 && !on.warnings.some((w) => /nothing to land on/.test(w)),
+      `ground_plane on: the piece rests on the ground (lowest point ${on.geo.bbox().min[1].toFixed(4)} m)`);
+    const off = await cook({ a: nodes.a, s: { type: 'rbd_settle', in: ['a'], params: { duration: 3 } } }, 's');
+    check(off.stats.settled === 1 && Math.abs(off.geo.bbox().min[1]) < 0.01, 'auto without input 1: the ground plane');
   }
 
   // ---------------------------------------------------------------- rbd_stack: a pile keeps every crate
