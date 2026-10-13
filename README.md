@@ -10,7 +10,7 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   modelling (bevel, knife, bridge, quad fill), UVs (xatlas unwrap, LSCM), remeshing (isotropic, quad, voxel) and LOD,
   scattering and instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit and sampled SDF grids,
   heightfield terrain (masks, hydraulic and thermal erosion, roads, scattering), procedural textures and bakes,
-  L-systems, text, loops, a frame solver, in-graph checks, and code nodes. A shelf of ready-made graph assets (walls,
+  cloth draping and inflation (XPBD), L-systems, text, loops, a frame solver, in-graph checks, and code nodes. A shelf of ready-made graph assets (walls,
   roofs, stairs, props, trees, rocks, PCG helpers) is used like nodes. Every node documents its params and carries an
   example that is cooked in the tests.
 - **Rust/WASM kernels**: a straight skeleton (pitched roofs and polygon offsets from any footprint, holes included),
@@ -199,6 +199,7 @@ in a privileged process.
 | curve | `parametric_curve` `line` `circle` `curve` `spiral` `shape2d` `resample` `carve` `ends` `sweep` `polywire` `revolve` `extrude` `offset_curve` `boolean2d` `fill` `loft` `voronoi2d` `triangulate2d` `bezier` `nurbs` (Bezier/NURBS curve prims, evaluated exactly wherever they are used) `convert_curve` `spline_fit` `fillet_curve` `offset_curve_3d` `project_curve` `curve_attribs` `straight_skeleton` (skeleton, polygon offset, pitched roof) |
 | transform | `transform` `match_size` `mirror` |
 | deform | `noise_displace` `twist` `bend` `taper` `smooth` `peak` `jitter` `ray` `soft_transform` `lattice` `path_deform` `point_deform` `rest` |
+| sim | `drape` (XPBD cloth: colliders, floor, pins, wind, self collision) `inflate` (pressure: cushions, balloons) |
 | attribute | `attrib_create` `attrib_randomize` `attrib_promote` `attrib_delete` `attrib_rename` `attrib_copy` `attrib_transfer` `attrib_array` `attrib_noise` `color` `material` `measure` `connectivity` (float/int tuples, strings, and float[]/int[]/string[] array attributes) |
 | measure | `curvature` `occlusion` (ambient occlusion, cavity, thickness) `distance` `assert` (in-graph checks: watertight, counts, bbox, edge length, degenerate, self-intersections, attributes, groups, expression) |
 | group | `group` `delete` `group_promote` `group_expand` `group_combine` `group_delete` `group_rename` (point, vertex, prim and edge groups) |
@@ -240,7 +241,8 @@ path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert
 repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
 sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube, and
 `erosion_models` erodes one ridged terrain four ways (TypeScript and WASM droplets, virtual pipes, pipes plus stream
-power).
+power). `drape` is the cloth family: a tarp draped over a stack of shelf crates, a banner pinned between two poles in
+the wind, and a box inflated into a cushion.
 
 To cook a graph from the command line:
 

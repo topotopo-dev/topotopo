@@ -17,6 +17,7 @@ import { pointNormals, refreshNormals } from '../core/topology.ts';
 import { rand } from '../core/random.ts';
 import { XpbdCloth, buildCloth, buildCollider, colliderArrays, collideRange } from '../core/xpbd.ts';
 import type { Collider, SimOptions } from '../core/xpbd.ts';
+import { hashArrays } from '../core/kernels.ts';
 import { P, mask } from './util.ts';
 
 interface Defaults {
@@ -143,11 +144,13 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
   }
   const R = new Float64Array(n);
   const shared = collider ? colliderArrays(collider) : null;
+  // the collider is the same every step: hash it once, so the pool reuses its shared copy
+  const sharedKey = shared ? hashArrays(shared) : '';
   const detect = () => {
     sim.queryRadius(R);
     const c = collider!;
     return ctx.parallelMap('cloth_collide', {
-      count: n, inputs: { X: sim.x, R }, results: { CP: sim.cp, CN: sim.cn, CF: sim.cf }, shared: shared!,
+      count: n, inputs: { X: sim.x, R }, results: { CP: sim.cp, CN: sim.cn, CF: sim.cf }, shared: shared!, sharedKey,
     }, { serial: () => collideRange(c, sim.x, R, sim.cp, sim.cn, sim.cf, 0, n) });
   };
 
@@ -156,7 +159,9 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
     if (collider) {
       const r = detect();
       if (r instanceof Promise) await r;
+      sim.afterQuery(R);
       if (s === 0) sim.settleContacts();
+      sim.findCornerContacts(collider);
     }
     if (opts.selfCollision) sim.findSelfPairs();
     sim.step();

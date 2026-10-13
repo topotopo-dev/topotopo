@@ -81,6 +81,8 @@ export const SRC: Record<string, NodeSpec> = {
   UVBOX: { type: 'uv_unwrap', in: ['BOX'] },
   UVCOLOR: { type: 'color', in: ['UVBOX'], params: { mode: 'random' } },
   HIGHBOX: { type: 'subdivide', in: ['BOX'], params: { levels: 2 } },
+  // cloth (P3-C): a sheet above BOX for drape; inflate takes MESH (closed)
+  CLOTH: { type: 'grid', params: { size: [2, 2], divisions: [12, 12], center: [0, 1.2, 0] } },
 };
 
 /** Fixture inputs of the shelf assets that take one (curve input 0 or surface input 0); test/shelf.ts checks coverage. */
@@ -139,6 +141,7 @@ export const INPUTS: Record<string, string[]> = {
   bake_ao: ['UVBOX'], bake_thickness: ['UVBOX'], bake_curvature: ['UVBOX'], bake_position: ['UVBOX'], bake_world_normal: ['UVBOX'],
   bake_normal: ['UVBOX', 'HIGHBOX'], bake_height: ['UVBOX', 'HIGHBOX'], bake_island_id: ['UVBOX'], bake_mask: ['UVBOX'],
   bake_vertex_color: ['UVCOLOR'],
+  drape: ['CLOTH', 'BOX'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -236,6 +239,8 @@ export const PARAMS: Record<string, any> = {
   bake_island_id: { resolution: 64 },
   bake_mask: { resolution: 64, mask_group: '@P.y>0' },
   bake_vertex_color: { resolution: 64, supersample: 2 },
+  drape: { steps: 60 },
+  inflate: { steps: 12, pressure: 1.3 },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */
