@@ -8,6 +8,7 @@ Rules that apply to every session:
 - Commit with explicit `git add <paths>`; never add files you did not create or change for the task.
 - Node >= 22.18 runs the TypeScript directly: only erasable TS syntax, `import type`, `.ts` import extensions, no build step.
   `src/core`, `src/graph`, `src/nodes` stay host-agnostic (no Node APIs).
+- New node types: one `defineNode()`; params with type, default and desc; an `example` graph that cooks (`test/examples.ts` checks every node); a fixture in `test/fixtures.ts` and a golden via `npm run test:update`.
 - Licences: MIT, Apache-2.0, BSD, ISC, MPL-2.0 for anything that ships; other OSI-approved permissive licences (e.g. Unicode-3.0, Zlib, CC0) are fine for build-time-only tooling such as proc-macro crates. No GPL/AGPL anywhere in a dependency tree. Run `npm run notice`
   after adding an npm dependency; record Rust crate licences in the crate's README.
 - Determinism: same inputs and seed give bit-identical outputs on every platform.
