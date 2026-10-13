@@ -29,9 +29,9 @@ defineNode({
     alpha: { type: 'float', default: 1, min: 0, max: 1, desc: 'opacity; below 1 exports with alphaMode BLEND', aliases: ['opacity', 'opac'] },
     double_sided: { type: 'bool', default: false, desc: 'render both faces', aliases: ['doublesided', 'two_sided'] },
     unlit: { type: 'bool', default: false, desc: 'unlit shading (KHR_materials_unlit)', aliases: ['emissive_only', 'flat'] },
-    base_color_map: { type: 'path', default: '', desc: 'base colour texture (sRGB PNG/JPEG path; "" = none); uses the uv attribute', aliases: ['basecolor_map', 'albedo_map', 'diffuse_map', 'color_map', 'basecolor_texture', 'base_color_texture'] },
-    normal_map: { type: 'path', default: '', desc: 'tangent-space normal map (PNG/JPEG path, OpenGL convention: +Y up; "" = none)', aliases: ['normal_texture', 'bump_map'] },
-    roughness_map: { type: 'path', default: '', desc: 'roughness texture (grey PNG/JPEG path; "" = none); glTF reads its green channel', aliases: ['roughness_texture', 'rough_map'] },
+    base_color_map: { type: 'path', default: '', desc: 'base colour texture (sRGB PNG/JPEG path, or "image:<name>" for an image the geometry carries; "" = none); uses the uv attribute', aliases: ['basecolor_map', 'albedo_map', 'diffuse_map', 'color_map', 'basecolor_texture', 'base_color_texture'] },
+    normal_map: { type: 'path', default: '', desc: 'tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none)', aliases: ['normal_texture', 'bump_map'] },
+    roughness_map: { type: 'path', default: '', desc: 'roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel', aliases: ['roughness_texture', 'rough_map'] },
   },
   example: { type: 'material', params: { name: 'brick', base_color: '#a5462e', roughness: 0.9, group: '@P.y<0.5' } },
   cook: ({ input, p }) => {

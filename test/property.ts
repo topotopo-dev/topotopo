@@ -35,7 +35,7 @@ const VERBOSE = args.includes('--verbose');
 const STRICT = args.includes('--strict');
 
 /** Fixtures a chain may start from. */
-const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'PACKED', 'HFN', 'NURBS', 'BEZIER'];
+const SOURCES = ['MESH', 'BOX', 'GRID', 'CURVE', 'CIRCLE', 'SHAPE', 'PTS', 'SDF', 'COLORED', 'PROFILE', 'LOFT', 'SMALLSPHERE', 'PACKED', 'HFN', 'NURBS', 'BEZIER', 'TEX', 'TEX2', 'UVBOX'];
 
 /** Per-node param ranges that keep cooks fast ('keep' = leave the default). Vector ranges apply per component. */
 const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
@@ -74,6 +74,19 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   points_along_curve: { spacing: [0.01, 1], count: [0, 50], per_segment: [1, 8] },
   mask: { samples: [1, 8] },
   prune: { radius: [0, 0.5] },
+  // textures (P3-T): small images and few rays (resolution is an ivec2: [8, 48] per side)
+  tex_tile_sampler: { resolution: [8, 48], count: [1, 8] },
+  bake_ao: { resolution: [8, 48], samples: [1, 8] },
+  bake_thickness: { resolution: [8, 48], samples: [1, 8] },
+  bake_curvature: { resolution: [8, 48] },
+  bake_position: { resolution: [8, 48] },
+  bake_world_normal: { resolution: [8, 48] },
+  bake_normal: { resolution: [8, 48] },
+  bake_height: { resolution: [8, 48] },
+  bake_island_id: { resolution: [8, 48] },
+  bake_mask: { resolution: [8, 48] },
+  bake_vertex_color: { resolution: [8, 48] },
+  tex_height_to_ao: { directions: [1, 8], steps: [1, 8] },
 };
 
 /** Node types that get slow on big inputs: only chained when the incoming geometry has at most this many prims. */

@@ -1,0 +1,43 @@
+{
+  "description": "Procedural textures and bakes: a brick wall material made only from texture nodes (tex_pattern bricks with a per-brick id colour, tex_noise grain, tex_normal_from_height, a roughness from tex_levels) and the shelf crate unwrapped with xatlas, its ambient occlusion and edge curvature baked into uv space and combined into an edge-wear mask (worn paint on convex edges, dirt in the AO), packed with roughness into an ORM map. Both materials carry their images (image:<name>), so glb/usda exports embed them. Rendered with textures on the meshes next to the texture view of every map.",
+  "meta": { "render": { "views": ["persp", "texture"], "textures": true, "azimuth": 30, "elevation": 18 } },
+  "nodes": {
+    "wall": { "type": "box", "params": { "size": [3.2, 2, 0.3], "center": [0, 1, -0.9] } },
+    "wall_uv": { "type": "uv_project", "in": ["wall"], "params": { "method": "box", "scale": [1.6, 1.6] } },
+    "bricks": { "type": "tex_pattern", "params": { "resolution": 512, "pattern": "bricks", "count": [4, 12], "gap": 0.07, "bevel": 0.15, "variation": 0.25, "seed": 3, "name": "bricks" } },
+    "grain": { "type": "tex_noise", "params": { "resolution": 512, "scale": 24, "octaves": 4, "seed": 7, "name": "grain" } },
+    "height": { "type": "tex_blend", "in": ["bricks", "grain"], "params": { "mode": "multiply", "opacity": 0.35, "name": "brick_height" } },
+    "brick_ids": { "type": "tex_output", "in": ["bricks"], "params": { "name": "brick_ids", "layer": "id", "keep_only": true } },
+    "brick_tint": { "type": "tex_colorize", "in": ["brick_ids"], "params": { "ramp": [[0, "#6e2a1c"], [0.5, "#9a4029"], [1, "#b8603f"]], "name": "brick_tint" } },
+    "mortar": { "type": "tex_colorize", "in": ["grain"], "params": { "ramp": [[0, "#5d5a54"], [1, "#a7a39a"]], "name": "mortar" } },
+    "brick_mask": { "type": "tex_output", "in": ["bricks"], "params": { "name": "brick_mask", "keep_only": true } },
+    "masonry": { "type": "tex_blend", "in": ["mortar", "brick_tint", "brick_mask"], "params": { "mode": "normal" } },
+    "brick_color": { "type": "tex_blend", "in": ["masonry", "grain"], "params": { "mode": "overlay", "opacity": 0.35, "name": "brick_color" } },
+    "brick_normal": { "type": "tex_normal_from_height", "in": ["height"], "params": { "strength": 1.5, "name": "brick_normal" } },
+    "brick_rough": { "type": "tex_levels", "in": ["height"], "params": { "out_low": 0.95, "out_high": 0.7, "name": "brick_rough" } },
+    "brick_maps": { "type": "merge", "in": ["brick_color", "brick_normal", "brick_rough"] },
+    "brick_wall": { "type": "texture_to_material", "in": ["wall_uv", "brick_maps"], "params": { "material": "brick", "base_color": "brick_color", "normal": "brick_normal", "roughness": "brick_rough" } },
+
+    "crate": { "type": "crate", "params": { "seed": 4 } },
+    "crate_plain": { "type": "attrib_delete", "in": ["crate"], "params": { "names": "Cd" } },
+    "crate_uv": { "type": "uv_unwrap", "in": ["crate_plain"], "params": { "resolution": 512, "padding": 4 } },
+    "crate_ao": { "type": "bake_ao", "in": ["crate_uv"], "params": { "resolution": 512, "samples": 24, "max_distance": 0.25, "name": "crate_ao" } },
+    "crate_curv": { "type": "bake_curvature", "in": ["crate_uv"], "params": { "resolution": 512, "radius": 0.012, "name": "crate_curv" } },
+    "edges": { "type": "tex_output", "in": ["crate_curv"], "params": { "name": "crate_edges", "layer": "convex", "keep_only": true } },
+    "chips": { "type": "tex_noise", "params": { "resolution": 512, "scale": 12, "fractal": "turbulence", "seed": 11, "name": "chips" } },
+    "wear_raw": { "type": "tex_blend", "in": ["edges", "chips"], "params": { "mode": "subtract", "opacity": 0.9 } },
+    "wear": { "type": "tex_histogram_scan", "in": ["wear_raw"], "params": { "position": 0.4, "contrast": 0.8, "name": "crate_wear" } },
+    "wood_grain": { "type": "tex_noise", "params": { "resolution": 512, "scale": 6, "seed": 2, "name": "wood_grain" } },
+    "wood": { "type": "tex_colorize", "in": ["wood_grain"], "params": { "ramp": [[0, "#4a2f1a"], [0.5, "#7d5634"], [1, "#a47a4e"]], "name": "wood" } },
+    "paint_worn": { "type": "tex_colorize", "in": ["chips"], "params": { "ramp": [[0, "#c9b48c"], [1, "#e6d6b0"]], "name": "paint_worn" } },
+    "worn": { "type": "tex_blend", "in": ["wood", "paint_worn", "wear"], "params": { "mode": "normal" } },
+    "crate_color": { "type": "tex_blend", "in": ["worn", "crate_ao"], "params": { "mode": "multiply", "opacity": 0.8, "name": "crate_color" } },
+    "crate_rough": { "type": "tex_levels", "in": ["wear"], "params": { "out_low": 0.85, "out_high": 0.55, "name": "crate_rough" } },
+    "crate_orm": { "type": "tex_channel", "in": ["crate_ao", "crate_rough"], "params": { "name": "crate_orm", "fill": [1, 0.8, 0, 1] } },
+    "crate_maps": { "type": "merge", "in": ["crate_color", "crate_orm"] },
+    "crate_textured": { "type": "texture_to_material", "in": ["crate_uv", "crate_maps"], "params": { "material": "crate", "base_color": "crate_color", "orm": "crate_orm" } },
+
+    "out": { "type": "merge", "in": ["brick_wall", "crate_textured"] }
+  },
+  "output": "out"
+}

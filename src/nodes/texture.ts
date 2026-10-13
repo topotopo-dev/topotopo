@@ -34,7 +34,7 @@ export const nameParam = (def: string, desc = 'image name (materials reference i
 const imageParam = (): ParamDef => ({ type: 'string', default: '', desc: 'which image of the input to process ("" = the first)', aliases: ['input_image', 'source_image'] });
 const layerParam = (): ParamDef => ({ type: 'string', default: '', desc: 'layer to process ("" = the main layer "C"; others: "id", "mask", …)', aliases: ['plane', 'channel_layer'] });
 const renameParam = (): ParamDef => ({ type: 'string', default: '', desc: 'rename the result ("" = keep the input image name)', aliases: ['image_name', 'output_name'] });
-const tileParam = (desc = 'the image tiles: filters read across the opposite border (keep a tileable texture tileable)'): ParamDef => ({ type: 'bool', default: true, desc, aliases: ['wrap', 'tiling', 'seamless'] });
+const tileParam = (desc = 'the image tiles: filters read across the opposite border (keep a tileable texture tileable)'): ParamDef => ({ type: 'bool', default: true, desc, aliases: ['wrap', 'seamless'] });
 
 export function checkSize(w: number, h: number, node: string): void {
   if (!(w >= 1 && h >= 1)) throw new NodeError(`${node}: image size must be at least 1 × 1 (got ${w} × ${h})`);
@@ -467,7 +467,7 @@ defineNode({
     ramp: { type: 'ramp', default: [[0, 0], [0.5, 0.5], [1, 1]], desc: 'tone curve [[in, out], …]', aliases: ['curve', 'lut'] },
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
-  example: { type: 'tex_curves', params: { ramp: [[0, 0], [0.4, 0.1], [0.6, 0.9], [1, 1]] } },
+  example: { nodes: { n: { type: 'tex_noise', params: { resolution: 256 } }, out: { type: 'tex_curves', in: ['n'], params: { ramp: [[0, 0], [0.4, 0.1], [0.6, 0.9], [1, 1]] } } }, output: 'out' },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -733,7 +733,7 @@ defineNode({
     ramp: { type: 'ramp', default: [[0, '#000000'], [1, '#ffffff']], desc: 'colour ramp [[pos, colour], …]', aliases: ['gradient', 'colors', 'colours'] },
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
-  example: { type: 'tex_colorize', params: { ramp: [[0, '#3b2316'], [0.5, '#8a4b2a'], [1, '#c9845a']] } },
+  example: { nodes: { n: { type: 'tex_cells', params: { resolution: 256, output: 'distance' } }, out: { type: 'tex_colorize', in: ['n'], params: { ramp: [[0, '#3b2316'], [0.5, '#8a4b2a'], [1, '#c9845a']] } } }, output: 'out' },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
