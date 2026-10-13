@@ -64,6 +64,8 @@ src/core/      geometry model + algorithms (no I/O)
                  conflicts), surface relaxation, KD build; the same code runs single-threaded (bit-identical)
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
+  particles.ts   particle simulation (the particles node): emission, the per-particle integration kernel (forces, analytic-
+                 gradient curl noise, fields, floor and mesh collisions, trail rings), the state as a point Geometry, output
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
   wrangle.ts     @-syntax compiler → per-element kernels; deferred addpoint/addprim/remove; chunked point wrangles
@@ -414,6 +416,7 @@ What runs in chunks:
 | `bake_normal`, `bake_height` (and the ray / curvature bakes with a high-res input) | `bake_project`: one cage ray per sample into the high-res BVH, plus its point normals | |
 | `bake_curvature` | `bake_curvature`: the edges near each sample | edges and their uniform grid shared |
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
+| `particles` | `particles`: each particle through a whole run of steps (forces, drag, collisions, its trail ring) | births are decided first on the main thread, so the particles never interact; the collision BVH and the field (KD tree + v, heightfield gradients, a sampled SDF) are shared as arrays; threshold by particle-steps (200k); 4 chunks per thread (later births run fewer steps) |
 | `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_elim_lists`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists (with a density mask: the pairs, then each candidate's list and weight from them), conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
 
 Not in chunks, and why:
@@ -442,6 +445,55 @@ warm-up, two rounds; other jobs shared the machine, so ±10%):
 The point normals that bound noise_displace are a scatter-add over the vertices, memory-bound and not split: computing
 the per-polygon Newell vectors on the pool and summing them here (bit-identical) was tried and saved nothing, because
 the sums and the normalisation are most of pointNormals' cost.
+
+### Particles
+
+`particles` (src/nodes/particles.ts, src/core/particles.ts) is Houdini's POP network reduced to one node: points emit,
+forces and fields push, the floor and a mesh collide, trails become polylines. The model is chosen so that it runs on the
+worker pool bit for bit and can be cut into frames anywhere:
+- **Particles never interact, and nothing that couples them depends on the integration.** Births depend only on the
+  emitters, the step and the lifetimes: a rate per step and emitter point with a per-point random phase (fractions
+  accumulate), `emit_all` at time 0, and `max_particles`, which counts a particle from its birth through its death step by
+  age, also when a `die` collision removed it earlier (those keep their slot in `__pholders`). So a run of steps is emitted
+  first (serially, cheap), then every particle integrates through it on its own: one `parallelMap` per run, not per step.
+- **Per-particle randomness is drawn at birth** from (seed, emitter key, birth index): the emitter point's `id` when it has
+  one, so reordering or adding emitter points leaves the other points' streams alone. A birth offset u ∈ (0, 1] inside the
+  step (0 is reserved for `emit_all` particles, which exist at time 0) avoids banding; a particle's age after S steps is
+  `(S − b − u)·dt` and its death step is computed from the same expression, so ages, lifetimes and the cap always agree.
+- **One step**: acceleration = gravity + noise + field force + attraction, semi-implicit Euler, then exact exponential drag
+  toward the air velocity (wind + air fields), then up to four contacts: the earliest of the floor plane and a ray along
+  the move against the collision BVH. The ray starts a stand-off behind the particle (its radius, or a skin of 1e-5 of the
+  collider size for points), so a resting particle keeps finding its surface; triangles are two-sided, the side being the
+  one the particle's centre is on, and, within the stand-off, the side of its last contact normal (kept per particle in
+  `__pcn`); a hit it moves away from is skipped. `die` removes it, `slide` removes the normal velocity, `bounce` reflects it
+  (slower than 1.5·|g|·dt it rests instead); friction is Coulomb (tangential loss = μ × normal velocity change), so a
+  particle rests on slopes below atan μ. Spheres (`use_pscale`) are also pushed out of any surface closer than their
+  radius (closest-point query), because a centre ray only sees the planes it moves toward.
+- **Curl noise** is the curl of three fBm Perlin potentials evaluated with analytic gradients (one evaluation per
+  potential and octave gives value and gradient), divergence-free to rounding; 100k particles × 200 steps with curl noise
+  and floor collisions take ≈ 2.5 s on 15 threads (≈ 13 s on one), without noise ≈ 0.3 s (≈ 1.3 s on one).
+- **Fields** (input 2) are made shareable once per input geometry: points with `v` as a KD tree + values (nearest or
+  inverse-distance weighted over k neighbours, an allocation-free k-nearest walk), a heightfield as per-sample gradient
+  arrays (bilinear, zero outside the field), an SDF (lazy or sampled) resampled on a grid of `field_resolution` along its
+  longest side over its bounds grown by a quarter on each side (outside it, the gradient at the grid boundary).
+
+**State and time.** Between runs the simulation is a point Geometry: carried emitter attributes and groups, P, v, id,
+life, pscale and the internal `__pb` (birth step), `__pu`, `__pkd` (death step), `__pcn`, `__ptrail` (a ring of the last
+`trails` positions, as a float tuple of 3 × trails per particle), plus detail step / next id / refused births / slot holders.
+A cook at `start_frame` (and any cook with `animate: false`, which never reads the frame) runs `steps` steps; with `animate`,
+frame f runs `steps + (f − start_frame) × substeps`. States are cached in the engine cache like the solver's, chained
+`S(start) = hash(params, inputs at start_frame)`, `S(f) = hash(S(f−1), f, inputs at f)`. A cook resumes from the latest
+cached frame at or before its own: with static inputs it runs the remaining steps in one kernel run and caches only the
+final state; with time-dependent inputs (an animated emitter, collider or field) it runs frame by frame with each frame's
+inputs and caches every frame. The cost is therefore one frame's steps when stepping forward (`cookFrames`), the steps
+from the start (or the latest cached earlier frame) when jumping, and a cache entry per state (≈ 100 bytes per particle
+plus 24 × trails); because a run can be cut anywhere with the same bits (test/particles.ts compares frame-by-frame, direct
+and pooled cooks), resuming never changes the result.
+
+Limits: no particle–particle interaction (no flocking, no SPH, no inter-particle collisions); sub-step emitter motion is
+not interpolated; the field is sampled at the particle and collisions are against the static collider of the frame (a
+moving collider does not push particles); spheres touching a mesh between contacts are resolved by the closest-point push,
+not by a swept test; trails record one position per step.
 
 ### Sampled SDF grids
 

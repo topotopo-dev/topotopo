@@ -135,7 +135,7 @@ Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, pcg, curves, assets, uv, render, export, verify, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, pcg, curves, particles, assets, uv, render, export, verify, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export) |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings, images (size and per-layer ranges) |
@@ -210,6 +210,7 @@ in a privileged process.
 | heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_flow` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
 | uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
 | texture | generators `tex_noise` `tex_pattern` `tex_cells` `tex_gradient` `tex_shape` `tex_splatter` `tex_scratches` `tex_text`; filters `tex_blend` `tex_levels` `tex_curves` `tex_blur` `tex_warp` `tex_transform` `tex_edge_detect` `tex_invert` `tex_threshold` `tex_histogram_scan` `tex_normal_from_height` `tex_height_to_ao` `tex_channel` (ORM packing) `tex_colorize` `tex_tile_sampler` `tex_output`; bakes in uv space `bake_ao` `bake_curvature` `bake_thickness` `bake_position` `bake_normal` `bake_world_normal` `bake_height` `bake_island_id` `bake_mask` `bake_vertex_color`; `texture_to_material` `tex_to_heightfield` `heightfield_to_tex` (images are 2D float layers carried on the geometry; glb/usda embed them, export format `textures` writes PNGs) |
+| sim | `particles` (Houdini POPs in one node: emission from points, gravity, drag, wind, curl noise, point/heightfield/SDF fields, attraction, floor and mesh collisions with die/slide/bounce, trails as polylines; steps with the frame, each frame's state cached; bit-identical on the worker pool) |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json) |
@@ -240,7 +241,8 @@ path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert
 repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
 sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube, and
 `erosion_models` erodes one ridged terrain four ways (TypeScript and WASM droplets, virtual pipes, pipes plus stream
-power).
+power). `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
+collision surface, curl noise, sliding contacts; trails coloured by age) next to a fountain bouncing on a plane.
 
 To cook a graph from the command line:
 
@@ -335,6 +337,7 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
 | shelf | `npm run test:shelf [-- filter]` | every shelf asset: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; index, thumbnails and README table current; workspace override precedence; `assets` list / delete / fork |
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
+| particles | `npm run test:particles` | the particles node: emission counts and lifetimes, attribute and group carry, determinism, pool on/off bit-identical (noise, fields, mesh and floor collisions, trails), particles never below the floor or a mesh and never inside a closed one, spheres kept pscale off a mesh, trail lengths/curveu/ages, max_particles, frames = one long run (resume, jump back, substeps, moving emitter), point/heightfield/SDF fields, wind, attraction, analytic Perlin gradients and divergence-free curl noise, 100k particles × 200 steps |
 | pool | `npm run test:pool` | worker pool: lazy start, close, transfer round trips, every ported node bit-identical with the pool on and off, concurrent branches and shared in-flight cooks, the lazy switch, kernel errors, crashes and timeouts, the size threshold, the CLI and MCP server exiting; `test:pool` also runs the golden layer with every kernel forced onto the pool. `npm test` passes with `TOPOTOPO_WORKERS=0` and with the default |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
