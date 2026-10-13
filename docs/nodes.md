@@ -5235,7 +5235,7 @@ category: `topology` · aliases: `quadremesh`, `quad_remesh`, `instant_meshes`
 
 Field-aligned quad-dominant remeshing in Rust/WASM, with feature alignment and source attribute transfer.
 
-Smooths a four-way orientation field and a position field through a multiresolution hierarchy, then extracts mostly quads on the original surface. Density is approximate: target_faces takes precedence over target_length; 0 for both uses the input scale. Quads-only conformingly subdivides all faces and can exceed the target density, especially around hard curves; locked group borders can retain triangles. Feature edges, explicit creases, UV seams and material/group borders constrain the field. Selected group borders stay fixed and unselected primitives pass through. Point attributes interpolate from final source-triangle barycentrics, vertex attributes interpolate per seam wedge, and prim attributes copy the source triangle. Existing normals are recomputed. Detail quality statistics describe the remeshed region. This is an independent implementation, not the Instant Meshes library.
+Smooths a four-way orientation field and a position field through a multiresolution hierarchy, then extracts mostly quads on the original surface. Density is approximate: target_faces takes precedence over target_length; 0 for both uses the input scale. Quads-only splits residual non-quads and their affected neighbors conformingly; locked group borders can retain triangles. Cleanup removes avoidable topology defects. Feature edges, explicit creases and material/group borders constrain the fields; UV seams constrain the orientation field without fixing the position field. Original seam geometry is retained for attribute transfer. Selected group borders stay fixed and unselected primitives pass through. Point attributes interpolate from final source-triangle barycentrics, vertex attributes interpolate per seam wedge, and prim attributes copy the source triangle. Existing normals are recomputed. Detail quality statistics describe the remeshed region. irregular_fraction is the number of interior vertices with valence other than four divided by all remeshed vertices. This is an independent implementation, not the Instant Meshes library.
 
 **Inputs**
 
@@ -5249,16 +5249,17 @@ Smooths a four-way orientation field and a position field through a multiresolut
 |---|---|---|---|---|---|---|
 | `target_length` | float | `0` | 0.. |  | `edge_length`, `target_size` | target quad edge length in scene units (0 = automatic input scale) |
 | `target_faces` | int | `0` | 0.. |  |  | approximate target face count (> 0 overrides target_length) |
-| `mode` | enum | `"quad_dominant"` |  | `quad_dominant`, `quads_only` |  | quad_dominant permits triangles; quads_only subdivides every face when unlocked and can exceed target density |
+| `mode` | enum | `"quad_dominant"` |  | `quad_dominant`, `quads_only` |  | quad_dominant permits triangles; quads_only conformingly splits residual non-quads when unlocked |
 | `feature_angle` | float | `45` | 0..180 |  |  | dihedral threshold in degrees for automatic sharp-feature alignment (0 disables it) |
 | `align_boundaries` | bool | `true` |  |  |  | align the orientation field along open boundaries |
 | `smooth_iterations` | int | `8` | 0..100 |  |  | orientation and position field smoothing passes per hierarchy level |
 | `preserve_sharp` | bool | `true` |  |  |  | constrain extraction to detected sharp feature curves |
+| `cleanup` | bool | `true` |  |  |  | remove avoidable irregular vertices and short edges after extraction |
 | `crease_group` | group (edge) | `""` |  |  |  | edge group or pattern used as hard alignment constraints (empty = none) |
 | `group` | group (prim) | `""` |  |  |  | primitives to remesh (empty = all); edges shared with the remainder stay fixed |
 | `max_faces` | int | `1000000` | 1.. |  |  | refuse estimated or extracted output above this primitive count, including the retained group complement *(advanced)* |
 
-**Writes:** quad-dominant polygons; interpolated point/vertex attributes and copied prim attributes; detail quad_fraction, singularities and edge/planarity statistics
+**Writes:** quad-dominant polygons; interpolated point/vertex attributes and copied prim attributes; detail quad_fraction, singularities, irregular_fraction and edge/planarity statistics
 
 **Example**
 

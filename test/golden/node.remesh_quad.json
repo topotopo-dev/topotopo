@@ -6,6 +6,7 @@
         "edge_length_max:float:1",
         "edge_length_mean:float:1",
         "edge_length_min:float:1",
+        "irregular_fraction:float:1",
         "planarity_max:float:1",
         "planarity_mean:float:1",
         "quad_fraction:float:1",
@@ -21,9 +22,9 @@
       "min": [-0.5, -0.5, -0.5]
     },
     "counts": {
-      "points": 94,
-      "prims": 95,
-      "vertices": 374,
+      "points": 97,
+      "prims": 108,
+      "vertices": 406,
       "volumes": 0
     },
     "groups": {
@@ -33,19 +34,20 @@
       "vertex": []
     },
     "hashes": {
-      "P": "618e43f8c3a3fb4a",
+      "P": "3a8a0e326b7ccec4",
       "attributes": {
-        "detail.edge_length_max": "16521be824487cba",
-        "detail.edge_length_mean": "605c22c34fcc9889",
-        "detail.edge_length_min": "a3852ba447654ed2",
+        "detail.edge_length_max": "418dfe3a01c5bc04",
+        "detail.edge_length_mean": "cd815b7d152ab153",
+        "detail.edge_length_min": "49c96d1919685e53",
+        "detail.irregular_fraction": "a2271049434c9153",
         "detail.planarity_max": "9be171658ea4219f",
         "detail.planarity_mean": "9be171658ea4219f",
-        "detail.quad_fraction": "5051b8b105a8acfb",
-        "detail.singularities": "71f763759cb3658f",
+        "detail.quad_fraction": "7007ff833108f1cd",
+        "detail.singularities": "33184e8dd29ce7b7",
         "detail.target_edge_length": "fa9a7fd81852d586",
-        "vertex.uv": "3a9c405507d92917"
+        "vertex.uv": "6c69d6dd6445753f"
       },
-      "topology": "88471abfe8c81009"
+      "topology": "09b3591f2eb52849"
     }
   },
   "name": "node.remesh_quad",
