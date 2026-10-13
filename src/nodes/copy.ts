@@ -3,151 +3,20 @@ import { Attribute, AttribTable, GeoBuilder, Geometry, defaultValueFor } from '.
 import { EdgeSet } from '../core/edges.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
-import { rng } from '../core/random.ts';
+import { rng, rngState } from '../core/random.ts';
 import { connectivity, primNormals, triangulate } from '../core/topology.ts';
 import { composePackedXforms } from '../core/packed.ts';
-import { KDTree, TriBVH, neighbourBuffer } from '../core/spatial.ts';
-import { TriSurface, elementSeed, minDistanceSelect, relaxPoints } from '../core/pcg.ts';
-import type { TriPoint } from '../core/pcg.ts';
+import { TriBVH } from '../core/spatial.ts';
+import { TriSurface, elementSeed } from '../core/pcg.ts';
+import { minDistanceSelectWith, relaxOnSurface, relaxSpacing, relaxWeight, sampleEliminate, surfaceCandidates } from '../core/scatter.ts';
 import { lookAtBasis, m4apply, m4applyDir, m4basis, m4euler, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize, qAxisAngle, qFromMat, qMul, qNormalize } from '../core/math.ts';
 import type { Mat4, Quat, Vec3 } from '../core/math.ts';
 import { P, mask } from './util.ts';
 
 // ---------------------------------------------------------------- scatter
-/**
- * Weighted sample elimination (Yuksel 2015) – picks a well-spaced subset of candidates. With `scale`, candidate i has
- * the radius rmax × scale[i] (pairs use the mean of their radii), so the spacing follows a varying density (smaller
- * radii where points should be denser); without it every candidate has rmax.
- *
- * Typed arrays throughout: each point's neighbour list (as KDTree.within orders it) and each pair's weight contribution
- * (1 - d / r)^8 are computed once into CSR arrays and reused when a removal lowers the neighbours' weights; the max-heap
- * keeps the weights of its slots next to the slots. Without scale, everything runs on the KD-tree's slot numbering
- * (points in tree order, for locality) and a pair's contribution is computed once for both lists (|a - b| is symmetric
- * bit for bit); with scale, pairs are found in point order as before (their weights accumulate in that order). The
- * heap does the same operations on the same weights (entries relabelled), so the kept subset is the same as the
- * straightforward version's.
- */
-export function sampleEliminate(pos: Float64Array, target: number, rmax: number, scale?: ArrayLike<number>): Int32Array {
-  const n = pos.length / 3;
-  if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
-  const kd = new KDTree(pos);
-  const r2 = 2 * rmax;
-  const buf = neighbourBuffer();
-  // neighbour lists in CSR form over labels (KD slots without scale, point indices with scale); w by label
-  const start = new Int32Array(n + 1), w = new Float64Array(n);
-  let nbr: Int32Array, con: Float64Array;
-  let labelOf: Int32Array | null = null;
-  if (!scale) {
-    const order = kd.idx, TP = kd.TP;
-    labelOf = new Int32Array(n);
-    for (let a = 0; a < n; a++) labelOf[order[a]] = a;
-    let list = new Int32Array(Math.max(16, n * 20)), len = 0;
-    for (let a = 0; a < n; a++) {
-      const i = order[a];
-      const m = kd.neighbours(TP[a * 3], TP[a * 3 + 1], TP[a * 3 + 2], r2, buf);
-      if (len + m > list.length) { const g = new Int32Array(Math.max(len + m, list.length * 2)); g.set(list); list = g; }
-      const idx = buf.idx;
-      for (let k = 0; k < m; k++) { const j = idx[k]; if (j !== i) list[len++] = labelOf[j]; }
-      start[a + 1] = len;
-    }
-    nbr = list;
-    // w[a] = sum over a's list (in list order) of (1 - min(d, r2) / r2)^8, d = |pos_a - pos_b|
-    con = new Float64Array(len);
-    for (let a = 0; a < n; a++) {
-      const ax = TP[a * 3], ay = TP[a * 3 + 1], az = TP[a * 3 + 2];
-      for (let e = start[a]; e < start[a + 1]; e++) {
-        const b = nbr[e];
-        let c = -1;
-        if (b < a) for (let f = start[b]; f < start[b + 1]; f++) if (nbr[f] === a) { c = con[f]; break; }
-        if (c < 0) {
-          const d = Math.hypot(ax - TP[b * 3], ay - TP[b * 3 + 1], az - TP[b * 3 + 2]);
-          c = Math.pow(1 - Math.min(d, r2) / r2, 8);
-        }
-        con[e] = c;
-        w[a] += c;
-      }
-    }
-  } else {
-    // a pair interacts below rmax × (s_i + s_j) ≤ 2 rmax × max(s_i, s_j): it is found from the side with the larger radius
-    let pi = new Int32Array(1024), pj = new Int32Array(1024), pf = new Float64Array(1024), np = 0;
-    const deg = new Int32Array(n);
-    for (let i = 0; i < n; i++) {
-      const si = scale[i];
-      const m = kd.neighbours(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 2 * rmax * si, buf);
-      const idx = buf.idx;
-      for (let k = 0; k < m; k++) {
-        const j = idx[k];
-        if (j === i || scale[j] > si || (scale[j] === si && j < i)) continue;
-        const rr = rmax * (si + scale[j]);
-        const d = Math.hypot(pos[i * 3] - pos[j * 3], pos[i * 3 + 1] - pos[j * 3 + 1], pos[i * 3 + 2] - pos[j * 3 + 2]);
-        if (d >= rr) continue;
-        const f = Math.pow(1 - d / rr, 8);
-        w[i] += f; w[j] += f;
-        if (np === pi.length) {
-          const gi = new Int32Array(np * 2), gj = new Int32Array(np * 2), gf = new Float64Array(np * 2);
-          gi.set(pi); gj.set(pj); gf.set(pf); pi = gi; pj = gj; pf = gf;
-        }
-        pi[np] = i; pj[np] = j; pf[np] = f; np++;
-        deg[i]++; deg[j]++;
-      }
-    }
-    // each pair is listed at both ends in discovery order; the removal weight of a pair equals its creation weight
-    // (same distance, same summed radius), so it is stored with it
-    for (let i = 0; i < n; i++) start[i + 1] = start[i] + deg[i];
-    nbr = new Int32Array(start[n]); con = new Float64Array(start[n]);
-    const fill = start.slice(0, n);
-    for (let k = 0; k < np; k++) {
-      const i = pi[k], j = pj[k], f = pf[k];
-      nbr[fill[i]] = j; con[fill[i]++] = f;
-      nbr[fill[j]] = i; con[fill[j]++] = f;
-    }
-  }
-  // max-heap on w: heap[k] = label in heap position k, hw[k] = its weight, where[label] = heap position
-  const heap = new Int32Array(n), where = new Int32Array(n), hw = new Float64Array(n);
-  for (let i = 0; i < n; i++) { const a = labelOf ? labelOf[i] : i; heap[i] = a; where[a] = i; hw[i] = w[a]; }
-  let size = n;
-  for (let k = (size >> 1) - 1; k >= 0; k--) heapDown(heap, hw, where, size, k);
-  const removed = new Uint8Array(n);
-  while (size > target) {
-    const a = heap[0];
-    removed[a] = 1;
-    heapSwap(heap, hw, where, 0, size - 1); size--; heapDown(heap, hw, where, size, 0);
-    for (let e = start[a]; e < start[a + 1]; e++) {
-      const b = nbr[e];
-      if (removed[b]) continue;
-      w[b] -= con[e];
-      const k = where[b];
-      hw[k] = w[b];
-      if (k < size) { heapDown(heap, hw, where, size, k); heapUp(heap, hw, where, where[b]); }
-    }
-  }
-  let kept = 0;
-  for (let i = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) kept++;
-  const out = new Int32Array(kept);
-  for (let i = 0, o = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) out[o++] = i;
-  return out;
-}
-
-// max-heap of sampleEliminate on weights hw (by heap position): module functions, so the optimised code keeps its call
-// targets from one call to the next (per-call closures made every later call deoptimise)
-function heapSwap(heap: Int32Array, hw: Float64Array, where: Int32Array, x: number, y: number) {
-  const t = heap[x]; heap[x] = heap[y]; heap[y] = t;
-  const tw = hw[x]; hw[x] = hw[y]; hw[y] = tw;
-  where[heap[x]] = x; where[heap[y]] = y;
-}
-function heapUp(heap: Int32Array, hw: Float64Array, where: Int32Array, k: number) {
-  while (k > 0) { const p = (k - 1) >> 1; if (hw[p] >= hw[k]) break; heapSwap(heap, hw, where, p, k); k = p; }
-}
-function heapDown(heap: Int32Array, hw: Float64Array, where: Int32Array, size: number, k: number) {
-  for (;;) {
-    const l = 2 * k + 1, r = l + 1;
-    let m = k;
-    if (l < size && hw[l] > hw[m]) m = l;
-    if (r < size && hw[r] > hw[m]) m = r;
-    if (m === k) break;
-    heapSwap(heap, hw, where, k, m); k = m;
-  }
-}
+// The sampling stages (candidates, sample elimination, exact minimum distance, relaxation) live in core/scatter.ts and
+// run in chunks on the worker pool through ctx.parallelMap; sampleEliminate is re-exported for heightfield_scatter.
+export { sampleEliminate };
 
 /**
  * The surface-scatter result for the points keep[k] (triangle candT[c], barycentric weights candW[3c..3c+2], position
@@ -354,7 +223,7 @@ defineNode({
     },
     output: 'pts',
   },
-  cook: ({ input, p, warn }) => {
+  cook: async ({ input, p, warn, parallelMap }) => {
     const g = input(0);
     const r = rng(p.seed + 0.5);
     const sel = mask(g, 'prim', p.group);
@@ -435,20 +304,11 @@ defineNode({
       const count = scatterCount(p, total, mA ? maskedArea : area, warn);
       const ncand = p.relax || extra ? count * 5 : count;
       const fn = primNormals(g);
-      // candidates: triangle, barycentric weights and position, in typed arrays
-      const candT = new Int32Array(ncand), candW = new Float64Array(ncand * 3);
-      const pos = new Float64Array(ncand * 3);
-      for (let k = 0; k < ncand; k++) {
-        const x = r() * total;
-        let lo = 0, hi = nt - 1;
-        while (lo < hi) { const mid = (lo + hi) >> 1; if (cdf[mid] < x) lo = mid + 1; else hi = mid; }
-        const t = lo;
-        const s1 = Math.sqrt(r()), s2 = r();
-        const w0 = 1 - s1, w1 = s1 * (1 - s2), w2 = s1 * s2;
-        const i0 = vp[tris[t * 3]] * 3, i1 = vp[tris[t * 3 + 1]] * 3, i2 = vp[tris[t * 3 + 2]] * 3;
-        for (let c = 0; c < 3; c++) pos[k * 3 + c] = w0 * Pd[i0 + c] + w1 * Pd[i1 + c] + w2 * Pd[i2 + c];
-        candT[k] = t; candW[k * 3] = w0; candW[k * 3 + 1] = w1; candW[k * 3 + 2] = w2;
-      }
+      // candidates: triangle, barycentric weights and position, in typed arrays (in chunks on the pool; candidate k
+      // takes draws 3k+1..3k+3 of the node's generator, as the serial loop did)
+      const tp = new Int32Array(nt * 3);
+      for (let k = 0; k < nt * 3; k++) tp[k] = vp[tris[k]];
+      const { candT, candW, pos } = await surfaceCandidates(Pd, tp, cdf, ncand, rngState(p.seed + 0.5), parallelMap);
       // weight at a point of triangle t (barycentrics w)
       const wAt = (t: number, w: ArrayLike<number>, o = 0) => {
         let s = 0;
@@ -464,7 +324,9 @@ defineNode({
         rscale = new Float64Array(ncand);
         for (let k = 0; k < ncand; k++) { const wl = wAt(candT[k], candW, k * 3); rscale[k] = wl > 0 ? Math.min(4, Math.max(0.25, Math.sqrt(wMean / wl))) : 4; }
       }
-      let keep = p.relax && count > 0 ? sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count)), rscale) : Int32Array.from({ length: ncand }, (_, i) => i);
+      let keep = p.relax && count > 0
+        ? await sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count)), rscale, parallelMap)
+        : Int32Array.from({ length: ncand }, (_, i) => i);
       const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
       if (extra) {
         // the well-spaced selection first, the other candidates as refill; exact distance test and per-prim cap
@@ -472,56 +334,42 @@ defineNode({
         let o = 0;
         for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
         for (let k = 0; k < ncand; k++) if (!inKeep[k]) order[o++] = k;
-        keep = minDistanceSelect(pos, order, md, count,
+        keep = (await minDistanceSelectWith(pos, order, md, count,
           perPrim ? (k) => perPrim[triPrim[candT[k]]] < cap : undefined,
-          perPrim ? (k) => { perPrim[triPrim[candT[k]]]++; } : undefined).sort();
+          perPrim ? (k) => { perPrim[triPrim[candT[k]]]++; } : undefined, parallelMap)).sort();
       }
       // the chosen candidates, as indices into the candidate arrays
       let outKeep: ArrayLike<number> = keep, outT = candT, outW = candW, outPos = pos;
       if (p.relax_iterations > 0 && keep.length > 1) {
-        const surf = new TriSurface(g, tris);
-        let pts = Array.from(keep, (k) => ({ t: candT[k], w: [candW[k * 3], candW[k * 3 + 1], candW[k * 3 + 2]], pos: [pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]] }));
-        const n = pts.length;
-        const RP = new Float64Array(n * 3);
-        pts = pts.map((c, i) => { RP.set(c.pos, i * 3); return { t: c.t, w: c.w.slice(), pos: c.pos.slice() }; });
-        const dBar = Math.sqrt((2 * area) / (Math.sqrt(3) * n));
-        const spacingAt = (t: number, w: number[]) => {
-          if (p.relax_radius > 0) return p.relax_radius;
-          if (!weighted) return dBar;
-          const wl = wAt(t, w);
-          const s = wl > 0 ? dBar * Math.sqrt(wMean / wl) : 4 * dBar;
-          return Math.min(4 * dBar, Math.max(0.25 * dBar, s));
-        };
-        const spacing = Float64Array.from(pts, (c) => spacingAt(c.t, c.w));
-        const tp: TriPoint = { x: 0, y: 0, z: 0, b0: 1, b1: 0, b2: 0 };
-        relaxPoints(RP, spacing, p.relax_iterations, (i, x, y, z) => {
-          const t = surf.closest(x, y, z, tp);
-          if (t < 0) return;
-          RP[i * 3] = tp.x; RP[i * 3 + 1] = tp.y; RP[i * 3 + 2] = tp.z;
-          const c = pts[i];
-          c.t = t; c.w = [tp.b0, tp.b1, tp.b2]; c.pos = [tp.x, tp.y, tp.z];
-          spacing[i] = spacingAt(t, c.w);
-        });
+        // the kept points become arrays of their own (triangle, barycentrics, position), relaxed in place
+        const n = keep.length;
+        const RT = new Int32Array(n), RW = new Float64Array(n * 3), RP = new Float64Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const k = keep[i];
+          RT[i] = candT[k];
+          RW[i * 3] = candW[k * 3]; RW[i * 3 + 1] = candW[k * 3 + 1]; RW[i * 3 + 2] = candW[k * 3 + 2];
+          RP[i * 3] = pos[k * 3]; RP[i * 3 + 1] = pos[k * 3 + 1]; RP[i * 3 + 2] = pos[k * 3 + 2];
+        }
+        // the weight at each triangle corner, for the spacing that follows the density
+        let cw: Float64Array | null = null;
+        if (weighted) {
+          cw = new Float64Array(nt * 3);
+          for (let t = 0; t < nt; t++) for (let j = 0; j < 3; j++) { const v = tris[t * 3 + j]; cw[t * 3 + j] = dw(v, vp[v], triPrim[t]); }
+        }
+        const base = { radius: p.relax_radius, weighted, dBar: Math.sqrt((2 * area) / (Math.sqrt(3) * n)), wMean };
+        const spacing = new Float64Array(n);
+        for (let i = 0; i < n; i++) spacing[i] = relaxSpacing({ ...base, smax: 0 }, cw, RT[i], RW[i * 3], RW[i * 3 + 1], RW[i * 3 + 2]);
+        await relaxOnSurface(new TriSurface(g, tris), RP, spacing, RT, RW, p.relax_iterations, base, cw, parallelMap);
         // points relaxed into zero-density areas go; the distance and per-prim limits are enforced again
         let order: Int32Array = Int32Array.from({ length: n }, (_, i) => i);
-        if (weighted) order = order.filter((i) => wAt(pts[i].t, pts[i].w) > 0);
+        if (cw) order = order.filter((i) => relaxWeight(cw, RT[i], RW[i * 3], RW[i * 3 + 1], RW[i * 3 + 2]) > 0);
         if (extra) {
           if (perPrim) perPrim.fill(0);
-          order = minDistanceSelect(RP, order, md, Infinity,
-            perPrim ? (i) => perPrim[triPrim[pts[i].t]] < cap : undefined,
-            perPrim ? (i) => { perPrim[triPrim[pts[i].t]]++; } : undefined).sort();
+          order = (await minDistanceSelectWith(RP, order, md, Infinity,
+            perPrim ? (i) => perPrim[triPrim[RT[i]]] < cap : undefined,
+            perPrim ? (i) => { perPrim[triPrim[RT[i]]]++; } : undefined, parallelMap)).sort();
         }
-        if (order.length < n) pts = Array.from(order, (i) => pts[i]);
-        // the relaxed points become the candidate arrays of the output
-        const m = pts.length;
-        outT = new Int32Array(m); outW = new Float64Array(m * 3); outPos = new Float64Array(m * 3);
-        for (let i = 0; i < m; i++) {
-          const c = pts[i];
-          outT[i] = c.t;
-          outW[i * 3] = c.w[0]; outW[i * 3 + 1] = c.w[1]; outW[i * 3 + 2] = c.w[2];
-          outPos[i * 3] = c.pos[0]; outPos[i * 3 + 1] = c.pos[1]; outPos[i * 3 + 2] = c.pos[2];
-        }
-        outKeep = Int32Array.from({ length: m }, (_, i) => i);
+        outKeep = order; outT = RT; outW = RW; outPos = RP;
       }
       // no emitted vertex/prim attributes: assemble the result directly (what the builder path below gives)
       if (!emits.length) return finish(scatterSurfaceGeo(g, b.skip.point, outKeep, outT, outW, outPos, tris, triPrim, fn, !!sp, !!puv));
@@ -585,9 +433,9 @@ defineNode({
       let order: ArrayLike<number> = Int32Array.from({ length: count }, (_, i) => i);
       if (extra) {
         const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
-        order = minDistanceSelect(pos, order, md, Infinity,
+        order = await minDistanceSelectWith(pos, order, md, Infinity,
           perPrim ? (k) => perPrim[segs[picks[k].sg].pr] < cap : undefined,
-          perPrim ? (k) => { perPrim[segs[picks[k].sg].pr]++; } : undefined);
+          perPrim ? (k) => { perPrim[segs[picks[k].sg].pr]++; } : undefined, parallelMap);
       }
       for (let o = 0; o < order.length; o++) {
         const { sg: si, f } = picks[order[o]], sg = segs[si];
@@ -616,13 +464,15 @@ defineNode({
     }
     const P0 = Float64Array.from(pos);
     const nc = P0.length / 3;
-    let keep = p.relax && count > 0 && nc > count ? sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6) : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
+    let keep = p.relax && count > 0 && nc > count
+      ? await sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6, undefined, parallelMap)
+      : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
     if (md > 0) {
       const inKeep = new Uint8Array(nc), order = new Int32Array(nc);
       let o = 0;
       for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
       for (let k = 0; k < nc; k++) if (!inKeep[k]) order[o++] = k;
-      keep = minDistanceSelect(P0, order, md, count).sort();
+      keep = (await minDistanceSelectWith(P0, order, md, count, undefined, undefined, parallelMap)).sort();
     }
     const out = new Geometry({ positions: Array.from(keep).flatMap((k) => [P0[k * 3], P0[k * 3 + 1], P0[k * 3 + 2]]) });
     if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }

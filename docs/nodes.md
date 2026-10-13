@@ -1421,7 +1421,7 @@ category: `curve` · aliases: `curve_project`, `ray_curve`, `projectcurve`
 
 Project curves onto a surface or heightfield (along a direction or to the closest point): roads and paths on terrain.
 
-Houdini Ray SOP applied to curves. Optionally resamples each curve by spacing first (splines exactly), so the projected curve follows the surface between the original points. direction mode casts rays (both ways with bidirectional); closest snaps to the nearest surface point. Writes point hit (1/0) and N (surface normal at the hit); misses stay where they are or are deleted. lift raises the result along the normal. Targets: polygons (input 1), or a heightfield (sampled exactly for vertical rays, through its preview mesh otherwise).
+Houdini Ray SOP applied to curves. Optionally resamples each curve by spacing first (splines exactly), so the projected curve follows the surface between the original points. direction mode casts rays (both ways with bidirectional); closest snaps to the nearest surface point. Writes point hit (1/0) and N (surface normal at the hit); misses stay where they are or are deleted. lift raises the result along the normal. Targets: polygons (input 1), or a heightfield (sampled exactly for vertical rays, through its preview mesh otherwise). sample picks the heightfield surface for vertical rays: bilinear, or unreal_triangles (each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z: the surface of an Unreal Landscape imported from the field's png16/r16 export), so a road lies exactly on the Landscape.
 
 **Inputs**
 
@@ -1444,6 +1444,7 @@ Houdini Ray SOP applied to curves. Optionally resamples each curve by spacing fi
 | `normals` | bool | `true` |  |  |  | write point N from the surface |
 | `smooth_normals` | bool | `true` |  |  |  | N (and lift) from the interpolated vertex normals of the surface (60° cusp); false = the normal of the hit face |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+| `sample` | enum | `"bilinear"` |  | `bilinear`, `unreal_triangles` | `sampling`, `sample_mode` | heightfield target, vertical rays: bilinear, or unreal_triangles = Unreal Landscape's triangles (each cell cut along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z) |
 
 **Writes:** point hit (int), N (surface normal)
 
@@ -7861,7 +7862,7 @@ category: `heightfield` · aliases: `hf_scatter`, `heightfield_scatter_points`
 
 Scatter points on a heightfield by a mask layer's density: P on the surface, N from the slope, height/slope/mask attributes. Feed copy_to_points.
 
-Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter). Points sit exactly on the bilinear surface; N follows the terrain normal; attributes: height (Y), slope (degrees), mask (the density layer value at the point).
+Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field's surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field's heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point).
 
 **Inputs**
 
@@ -7879,6 +7880,7 @@ Houdini: HeightField Scatter. Count = density × area weighted by the mask (or c
 | `relax` | bool | `true` |  |  |  | even (blue-noise) spacing |
 | `seed` | float | `0` |  |  |  | random seed |
 | `keep_heightfield` | bool | `false` |  |  |  | also keep the heightfield (default: points only) |
+| `sample` | enum | `"bilinear"` |  | `bilinear`, `unreal_triangles` | `sampling`, `sample_mode` | surface between samples: bilinear, or unreal_triangles = Unreal Landscape's triangles (each cell cut along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z), so points land exactly on a Landscape imported from this field's png16/r16 export |
 
 **Writes:** points: N, height, slope, mask
 

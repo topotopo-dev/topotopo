@@ -194,6 +194,22 @@ section('ported nodes: pool on = pool off, bit for bit');
     nodes: { ...rock, ground: { type: 'grid', params: { size: [6, 6], center: [0, -1.1, 0] } }, o: { type: 'occlusion', in: ['n', 'ground'], params: { samples: 16, group: '@P.y<0', invert: true } } },
     output: 'o',
   }, { expectParallel: true });
+  // scatter (R-8): candidates, sample elimination (one radius, radii by density), exact minimum distance (conflict
+  // lists), relaxation passes, curve and volume modes, heightfield_scatter
+  const hills = { g: { type: 'grid', params: { size: [20, 20], divisions: [24, 24] } }, b: { type: 'noise_displace', in: ['g'], params: { amplitude: 1.2, frequency: 0.15 } } };
+  const sc = (params: any, extra: any = {}) => ({ nodes: { ...hills, ...extra, s: { type: 'scatter', in: [extra.m ? 'm' : 'b'], params } }, output: 's' });
+  await same('scatter relax (sample elimination, one radius)', sc({ count: 3000, seed: 1 }), { expectParallel: true });
+  await same('scatter density mask: radii by density, min distance, per-prim cap, relax passes', sc(
+    { generate_by: 'count', count: 2500, seed: 2, density_mask: 'mask', min_distance: 0.15, max_per_prim: 5, relax_iterations: 3, emit_attributes: '*' },
+    { m: { type: 'mask', in: ['b'], params: { by: 'noise', min: 0.3, max: 1, falloff: 0.1 } } }), { expectParallel: true });
+  await same('scatter relax passes with relax_radius, primuv, seed', sc({ count: 1500, seed: 3, relax_iterations: 2, relax_radius: 0.35, write_primuv: true, write_seed: true }), { expectParallel: true });
+  await same('scatter min distance without relax (blocks reach the count early)', sc({ count: 2000, seed: 4, relax: false, min_distance: 0.2 }), { expectParallel: true });
+  await same('scatter curve mode with min distance', { nodes: { c: { type: 'circle', params: { radius: 8, segments: 200, open: true } }, s: { type: 'scatter', in: ['c'], params: { count: 4000, mode: 'curve', min_distance: 0.01, seed: 5 } } }, output: 's' }, { expectParallel: true });
+  await same('scatter volume mode, relax and min distance', { nodes: { s0: { type: 'sphere', params: { radius: 3 } }, s: { type: 'scatter', in: ['s0'], params: { count: 1500, mode: 'volume', min_distance: 0.2, seed: 6 } } }, output: 's' }, { expectParallel: true });
+  await same('heightfield_scatter relax, unreal_triangles', {
+    nodes: { h: { type: 'heightfield', params: { size: [30, 30], resolution: 0.5 } }, n: { type: 'heightfield_noise', in: ['h'], params: { amplitude: 3 } }, s: { type: 'heightfield_scatter', in: ['n'], params: { count: 2000, mask_layer: '', sample: 'unreal_triangles' } } },
+    output: 's',
+  }, { expectParallel: true });
   const w = (code: string, extra: any = {}) => ({ nodes: { g: grid, w: { type: 'wrangle', in: ['g'], params: { code, ...extra } } }, output: 'w' });
   await same('wrangle (bench snippet)', w('@P.y += sin(@P.x * 3) * 0.1;\n@Cd = [@P.x, @P.y, 0.5];'), { expectParallel: true });
   await same('wrangle with noise, rand, groups, typed new attributes', w('f@h = noise(mul(@P, 2));\n@group_top = @P.y + @h > 0.1;\n@pscale = rand(@ptnum) * 0.5;\ni@k = @ptnum % 7;\nif (@P.x > 1) return;\n@P.z += fit(@h, -1, 1, 0, 0.2);'), { expectParallel: true });

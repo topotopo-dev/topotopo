@@ -1265,7 +1265,7 @@ defineNode({
   type: 'heightfield_scatter',
   category: 'heightfield',
   summary: 'Scatter points on a heightfield by a mask layer\'s density: P on the surface, N from the slope, height/slope/mask attributes. Feed copy_to_points.',
-  description: 'Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter). Points sit exactly on the bilinear surface; N follows the terrain normal; attributes: height (Y), slope (degrees), mask (the density layer value at the point).',
+  description: 'Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field\'s surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field\'s heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point).',
   aliases: ['hf_scatter', 'heightfield_scatter_points'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1275,10 +1275,14 @@ defineNode({
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing' },
     seed: P.seed(),
     keep_heightfield: { type: 'bool', default: false, desc: 'also keep the heightfield (default: points only)' },
+    sample: {
+      type: 'enum', options: ['bilinear', 'unreal_triangles'], default: 'bilinear', aliases: ['sampling', 'sample_mode'],
+      desc: 'surface between samples: bilinear, or unreal_triangles = Unreal Landscape\'s triangles (each cell cut along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z), so points land exactly on a Landscape imported from this field\'s png16/r16 export',
+    },
   },
   outputs: 'points: N, height, slope, mask',
   example: { nodes: { hf: { type: 'heightfield' }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3 } }, m: { type: 'heightfield_mask_by_feature', in: ['n'], params: { feature: 'slope', min_angle: 20 } }, s: { type: 'heightfield_scatter', in: ['m'], params: { density: 0.3 } } }, output: 's' },
-  cook: (ctx) => {
+  cook: async (ctx) => {
     const { p, input } = ctx;
     const g = input(0);
     const hfs = heightfieldsOf(g);
@@ -1311,7 +1315,9 @@ defineNode({
         pos[q * 3] = Math.min(x1, Math.max(x0, hf.x(i) + (r() - 0.5) * c));
         pos[q * 3 + 2] = Math.min(z1, Math.max(z0, hf.z(j) + (r() - 0.5) * c));
       }
-      const keep = p.relax && ncand > count ? sampleEliminate(pos, count, Math.sqrt(total / (2 * Math.sqrt(3) * count))) : Int32Array.from({ length: Math.min(ncand, count) }, (_, i) => i);
+      const keep = p.relax && ncand > count
+        ? await sampleEliminate(pos, count, Math.sqrt(total / (2 * Math.sqrt(3) * count)), undefined, ctx.parallelMap)
+        : Int32Array.from({ length: Math.min(ncand, count) }, (_, i) => i);
       const np = keep.length;
       const out = new Geometry({ positions: new Float64Array(np * 3) });
       const Pd = out.P;
@@ -1319,12 +1325,13 @@ defineNode({
       const ha = out.points.add('height', 'float', 1).data as Float64Array;
       const sa = out.points.add('slope', 'float', 1).data as Float64Array;
       const ma = out.points.add('mask', 'float', 1).data as Float64Array;
-      const H = hf.read('height'), e = c * 0.5;
+      // height, N and slope from the chosen surface (bilinear or Unreal's triangles); the mask always bilinear
+      const H = hf.read('height'), e = c * 0.5, s = p.sample === 'unreal_triangles' ? 'unreal_triangles' : 'bilinear';
       keep.forEach((q, o) => {
-        const x = pos[q * 3], z = pos[q * 3 + 2], y = hf.sampleArray(H, x, z);
+        const x = pos[q * 3], z = pos[q * 3 + 2], y = hf.sampleArray(H, x, z, s);
         Pd[o * 3] = x; Pd[o * 3 + 1] = y; Pd[o * 3 + 2] = z;
-        const gx = (hf.sampleArray(H, x + e, z) - hf.sampleArray(H, x - e, z)) / (2 * e);
-        const gz = (hf.sampleArray(H, x, z + e) - hf.sampleArray(H, x, z - e)) / (2 * e);
+        const gx = (hf.sampleArray(H, x + e, z, s) - hf.sampleArray(H, x - e, z, s)) / (2 * e);
+        const gz = (hf.sampleArray(H, x, z + e, s) - hf.sampleArray(H, x, z - e, s)) / (2 * e);
         const l = Math.hypot(gx, 1, gz);
         N[o * 3] = -gx / l; N[o * 3 + 1] = 1 / l; N[o * 3 + 2] = -gz / l;
         ha[o] = y;

@@ -4,13 +4,14 @@
 //  PointGrid             hashed uniform grid for incremental radius queries (points are inserted as they are kept)
 //  minDistanceSelect     greedy dart throwing over a candidate order: no two kept points closer than r (exact)
 //  sphereOverlapPrune    greedy keep in priority order: no two kept spheres (centre, radius) overlap (exact)
-//  relaxPoints           repulsion relaxation (Lloyd-style point relax) with a projection callback (onto a surface)
 //  kmeans, radiusClusters
 //  band, combineMask     0..1 masks from a feature value and their combination with an existing mask
 //  sampleImage           bilinear / nearest lookups in a decoded image with repeat / clamp / mirror wrapping
 //  frameQuat             instance frame (Houdini copy convention: +Z = N, +Y = up) as a quaternion
+// Sample elimination, surface relaxation and the pooled minimum-distance pass are in scatter.ts.
 import { AttribTable, Geometry } from './geometry.ts';
-import { KDTree, TriBVH } from './spatial.ts';
+import { KDTree, TriBVH, closestScratch } from './spatial.ts';
+import type { ClosestScratch, TriBVHArrays } from './spatial.ts';
 import { hash32, hashNumber, rng } from './random.ts';
 import type { Quat, Vec3 } from './math.ts';
 
@@ -45,12 +46,26 @@ export class TriSurface {
     }
   }
 
+  /** The arrays of the surface (fromArrays rebuilds it from them, e.g. in a worker thread). */
+  arrays(): Required<TriBVHArrays> & { C: Float64Array } {
+    return { ...this.bvh.arrays(), C: this.C };
+  }
+
+  /** A surface over arrays from arrays() (no BVH build): closest() gives the same results. */
+  static fromArrays(a: TriBVHArrays & { C: Float64Array }): TriSurface {
+    const s = Object.create(TriSurface.prototype) as TriSurface;
+    Object.assign(s as any, { bvh: TriBVH.fromArrays(a), C: a.C, numTris: a.order.length, hit: closestScratch() });
+    return s;
+  }
+
+  private hit: ClosestScratch = closestScratch();
+
   /** Closest point on the triangles; fills out and returns the triangle index (-1 when there are no triangles). */
   closest(x: number, y: number, z: number, out: TriPoint): number {
-    const h = this.bvh.closest(x, y, z);
-    if (!h) return -1;
-    const t = h.prim, C = this.C, o = t * 9;
-    out.x = h.pos[0]; out.y = h.pos[1]; out.z = h.pos[2];
+    const h = this.hit, tri = this.bvh.closestInto(x, y, z, Infinity, h);
+    if (tri < 0) return -1;
+    const t = this.bvh.triPrim[tri], C = this.C, o = t * 9;
+    out.x = h.x; out.y = h.y; out.z = h.z;
     // barycentrics of the hit in the list's corner order
     const v0x = C[o + 3] - C[o], v0y = C[o + 4] - C[o + 1], v0z = C[o + 5] - C[o + 2];
     const v1x = C[o + 6] - C[o], v1y = C[o + 7] - C[o + 1], v1z = C[o + 8] - C[o + 2];
@@ -64,12 +79,17 @@ export class TriSurface {
       let b0 = 1 - b1 - b2;
       if (b0 < 0) { const s = b1 + b2; b1 /= s; b2 /= s; b0 = 0; }
       out.b0 = b0; out.b1 = b1; out.b2 = b2;
-    } else { out.b0 = h.bary[0]; out.b1 = h.bary[1]; out.b2 = h.bary[2]; }
+    } else { out.b0 = h.b0; out.b1 = h.b1; out.b2 = h.b2; }
     return t;
   }
 }
 
 // ---------------------------------------------------------------- incremental spatial grid
+
+/** Hash key of an integer grid cell (PointGrid; the min-distance kernel in scatter.ts keys its cells the same way). */
+export function cellKey(ix: number, iy: number, iz: number): number {
+  return (Math.imul(ix | 0, 73856093) ^ Math.imul(iy | 0, 19349663) ^ Math.imul(iz | 0, 83492791)) | 0;
+}
 
 /**
  * A uniform grid over points that are inserted one at a time (the KD-tree in spatial.ts is static). Cells are
@@ -88,9 +108,7 @@ export class PointGrid {
     this.inv = 1 / this.cell;
   }
 
-  private static key(ix: number, iy: number, iz: number): number {
-    return (Math.imul(ix | 0, 73856093) ^ Math.imul(iy | 0, 19349663) ^ Math.imul(iz | 0, 83492791)) | 0;
-  }
+  private static key(ix: number, iy: number, iz: number): number { return cellKey(ix, iy, iz); }
 
   insert(i: number) {
     const P = this.P, inv = this.inv;
@@ -179,59 +197,6 @@ export function sphereOverlapPrune(P: ArrayLike<number>, radius: ArrayLike<numbe
     keep[i] = 1;
   }
   return keep;
-}
-
-// ---------------------------------------------------------------- relaxation
-
-/**
- * Lloyd-style point relaxation by repulsion: every iteration each point moves away from neighbours closer than the
- * pair spacing (spacing[i] + spacing[j]) / 2, by half the overlap per neighbour (the move is capped at half the point's
- * spacing), then `project` moves it back onto the domain (e.g. the closest point on a surface) and may update its
- * spacing (local density). P is modified in place. Each iteration rebuilds a KD-tree over the current positions.
- */
-export function relaxPoints(
-  P: Float64Array, spacing: Float64Array, iterations: number,
-  project: (i: number, x: number, y: number, z: number) => void,
-): void {
-  const n = Math.floor(P.length / 3);
-  if (n < 2 || !(iterations > 0)) return;
-  const disp = new Float64Array(n * 3);
-  for (let it = 0; it < iterations; it++) {
-    let smax = 0;
-    for (let i = 0; i < n; i++) if (spacing[i] > smax) smax = spacing[i];
-    if (!(smax > 0)) return;
-    const kd = new KDTree(P);
-    disp.fill(0);
-    for (let i = 0; i < n; i++) {
-      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2], si = spacing[i];
-      if (!(si > 0)) continue;
-      const near = kd.within(x, y, z, (si + smax) / 2);
-      let dx = 0, dy = 0, dz = 0;
-      for (const j of near) {
-        if (j === i) continue;
-        const rest = (si + spacing[j]) / 2;
-        let ex = x - P[j * 3], ey = y - P[j * 3 + 1], ez = z - P[j * 3 + 2];
-        let d = Math.hypot(ex, ey, ez);
-        if (d >= rest) continue;
-        if (d < 1e-12) {
-          // coincident: push in a direction that depends on the pair only
-          const h = hash32(Math.min(i, j) * 7919 + Math.max(i, j));
-          const a = (h / 4294967296) * Math.PI * 2;
-          ex = Math.cos(a); ey = 0; ez = Math.sin(a); d = 1;
-          if (i > j) { ex = -ex; ez = -ez; }
-          const push = rest * 0.5;
-          dx += ex * push; dy += ey * push; dz += ez * push;
-          continue;
-        }
-        const push = (rest - d) * 0.5 / d;
-        dx += ex * push; dy += ey * push; dz += ez * push;
-      }
-      const len = Math.hypot(dx, dy, dz), cap = 0.5 * si;
-      if (len > cap) { const s = cap / len; dx *= s; dy *= s; dz *= s; }
-      disp[i * 3] = dx; disp[i * 3 + 1] = dy; disp[i * 3 + 2] = dz;
-    }
-    for (let i = 0; i < n; i++) project(i, P[i * 3] + disp[i * 3], P[i * 3 + 1] + disp[i * 3 + 1], P[i * 3 + 2] + disp[i * 3 + 2]);
-  }
 }
 
 // ---------------------------------------------------------------- clustering
