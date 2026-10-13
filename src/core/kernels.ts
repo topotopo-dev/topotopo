@@ -19,6 +19,8 @@ import type { CurvatureArgs, ProjectArgs } from './bake.ts';
 import { candidatesRange, conflictsRange, elimNeighboursRange, elimPairsRange, kdBuildRange, relaxRange } from './scatter.ts';
 import type { CandidateArgs, ConflictArgs, RelaxArgs } from './scatter.ts';
 import { TriSurface } from './pcg.ts';
+import { particlesRange } from './particles.ts';
+import type { StepArgs } from './particles.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -180,6 +182,19 @@ const scatterRelax: Kernel = {
   },
 };
 
+// ---------------------------------------------------------------- particles (src/core/particles.ts)
+
+/**
+ * particles: each particle integrates through a run of steps on its own (forces, drag, floor and mesh collisions,
+ * trail ring); the collision BVH and the field are shared arrays. Returns the contacts resolved in the chunk.
+ */
+const particlesK: Kernel = {
+  // the node scales this by the steps of the run (it passes minElements = particle-steps threshold / steps)
+  minElements: 4096,
+  chunksPerWorker: 4,
+  run(a: StepArgs, A, start, end, ctx) { return particlesRange(a, A, start, end, ctx); },
+};
+
 // ---------------------------------------------------------------- self tests (test/pool.ts)
 
 /** x[i] *= factor over the range; returns the sum of the scaled values (round trips, transfer, parallelMap). */
@@ -240,6 +255,7 @@ export const KERNELS: Record<string, Kernel> = {
   scatter_elim_pairs: scatterElimPairs,
   scatter_conflicts: scatterConflicts,
   scatter_relax: scatterRelax,
+  particles: particlesK,
   'selftest.scale': selftestScale,
   'selftest.square': selftestSquare,
   'selftest.throw': selftestThrow,

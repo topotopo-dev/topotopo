@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "description": "Particles: on the left, emitters scattered along the ridges of an eroded massif shed particles that run downhill (the heightfield as a gradient field), swirl with curl noise and slide over the terrain (the heightfield as the collision surface); their trails are polylines coloured by age (white at birth, through amber, to deep red after 4 s). On the right, a fountain sprays into a basin and the drops bounce on the plane (trails short, the drops as points). Both are one particles node each; cook at a later frame (CLI --frame 48) and they continue from the cached state.",
+  "vars": { "seed": 3 },
+  "nodes": {
+    "field": { "type": "heightfield", "params": { "size": [20, 20], "resolution": 0.2 } },
+    "massif": { "type": "heightfield_layer", "in": ["field"], "params": { "expression": "2.2 * (1 - smoothstep(1, 11, sqrt(x * x + (z + 1) * (z + 1))))" } },
+    "ridges": { "type": "heightfield_noise", "in": ["massif"], "params": { "fractal": "ridged", "amplitude": 2.4, "element_size": 8, "range": "positive", "seed": 11 } },
+    "detail": { "type": "heightfield_noise", "in": ["ridges"], "params": { "amplitude": 0.35, "element_size": 2.5, "seed": 5 } },
+    "falloff": { "type": "heightfield_layer", "in": ["detail"], "params": { "expression": "height * (0.35 + 0.65 * (1 - smoothstep(3, 10.5, sqrt(x * x + (z + 1) * (z + 1)))))" } },
+    "terrain": { "type": "heightfield_erode", "in": ["falloff"], "params": { "iterations": 30, "seed": 1 } },
+    "crest": { "type": "heightfield_mask_by_feature", "in": ["terrain"], "params": { "feature": "curvature", "curvature_type": "convex", "curvature_radius": 0.8 } },
+    "high": { "type": "heightfield_mask_by_feature", "in": ["crest"], "params": { "feature": "height", "min_height": 2.4, "max_height": 10, "height_falloff": 0.4, "mode": "multiply" } },
+    "ridge_pts": { "type": "heightfield_scatter", "in": ["high"], "params": { "count": 70, "seed": "=seed" } },
+    "emitters": { "type": "transform", "in": ["ridge_pts"], "params": { "translate": [0, 0.08, 0] } },
+    "runoff": {
+      "type": "particles",
+      "in": ["emitters", "terrain", "terrain"],
+      "params": {
+        "steps": 96, "emit_rate": 0.25, "life": 3, "life_var": 0.4, "speed": 0.3, "velocity_var": 0.2,
+        "field_scale": 3, "noise": 4, "noise_size": 3, "curl": true, "drag": 1.4,
+        "collide": "slide", "friction": 0.1, "trails": 40, "output": "trails", "seed": "=seed"
+      }
+    },
+    "runoff_col": {
+      "type": "color", "in": ["runoff"],
+      "params": { "mode": "ramp", "attrib": "age", "range": [0, 3], "ramp": [[0, "#fff6e0"], [0.35, "#ffb52e"], [0.7, "#e2531b"], [1, "#7a0f12"]] }
+    },
+    "ground": { "type": "heightfield_to_mesh", "in": ["terrain"], "params": { "color": "terrain" } },
+    "basin": { "type": "grid", "params": { "size": [7, 7], "divisions": [14, 14], "center": [15.5, 0, 0] } },
+    "basin_col": { "type": "color", "in": ["basin"], "params": { "color": "#8d99a6" } },
+    "nozzle": { "type": "points", "params": { "positions": [[15.5, 0.3, 0]] } },
+    "fountain": {
+      "type": "particles",
+      "in": ["nozzle"],
+      "params": {
+        "steps": 72, "emit_rate": 6, "speed": 6.5, "velocity_var": 1.3, "life": 3, "life_var": 0.4,
+        "floor": true, "collide": "bounce", "bounce": 0.45, "friction": 0.3, "trails": 7, "output": "both", "pscale": 0.04, "seed": "=seed"
+      }
+    },
+    "fountain_col": {
+      "type": "color", "in": ["fountain"],
+      "params": { "mode": "ramp", "attrib": "age", "range": [0, 3], "ramp": [[0, "#e6f7ff"], [0.5, "#3fa7e0"], [1, "#1b3f8f"]] }
+    },
+    "out": { "type": "merge", "in": ["ground", "runoff_col", "basin_col", "fountain_col"] }
+  },
+  "output": "out",
+  "meta": { "render": { "views": ["persp", "top"], "azimuth": 30, "elevation": 32 } }
+}
