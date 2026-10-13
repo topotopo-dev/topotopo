@@ -91,8 +91,10 @@ export function drawTextureView(g: Geometry, col: Float32Array, W: number, H: nu
     const fr = [0.55, 0.57, 0.62];
     for (let i = ox - 1; i <= ox + tw; i++) for (const y of [oy - 1, oy + th]) if (i >= 0 && i < W && y >= 0 && y < H) { const o = (y * W + i) * 3; col[o] = fr[0]; col[o + 1] = fr[1]; col[o + 2] = fr[2]; }
     for (let j = oy - 1; j <= oy + th; j++) for (const x of [ox - 1, ox + tw]) if (x >= 0 && x < W && j >= 0 && j < H) { const o = (j * W + x) * 3; col[o] = fr[0]; col[o + 1] = fr[1]; col[o + 2] = fr[2]; }
+    // name, size and channels; the size goes first when the cell is narrow, then the name is shortened
     let label = `${e.label.toUpperCase()}  ${e.img.width}×${e.img.height} ${ch === 4 ? 'RGBA' : 'GREY'}`;
-    while (label.length > 4 && textWidth(label, scale) > cw) label = label.slice(0, -2);
+    if (textWidth(label, scale) > cw) label = e.label.toUpperCase();
+    if (textWidth(label, scale) > cw) { while (label.length > 3 && textWidth(label + '..', scale) > cw) label = label.slice(0, -1); label += '..'; }
     drawText(col, W, H, Math.round(cx), Math.round(cy), label, [0.9, 0.9, 0.95], scale, true);
   });
   if (ranges.length) notes.push(`texture view: values outside 0..1 are shown clamped (${ranges.slice(0, 4).join(', ')})`);
