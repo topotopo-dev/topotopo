@@ -1,7 +1,7 @@
 // Worker pool tests: lazy start and close, kernel round trips (transfer), CookContext.parallelMap against the serial
 // loop for every ported node (bit-identical arrays, same fingerprints and reports with the pool on and off),
 // concurrent branches and in-flight sharing, the lazy switch, worker errors, crashes and timeouts, the size
-// threshold, POLYFORGE_WORKERS=0, the CLI exiting with the pool in use, and the MCP server ending on stdin close.
+// threshold, TOPOTOPO_WORKERS=0, the CLI exiting with the pool in use, and the MCP server ending on stdin close.
 //   node test/pool.ts            these tests
 //   node test/pool.ts --golden   also the golden layer with every kernel forced onto the pool (npm run test:pool)
 import fs from 'node:fs';
@@ -29,7 +29,7 @@ const check = (cond: any, msg: string) => {
   console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`);
 };
 const section = (s: string) => console.log(`\n== ${s}`);
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-pool-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-pool-'));
 
 // test-only nodes (registered in this process only)
 let sleeps = 0;
@@ -120,9 +120,9 @@ async function same(label: string, graph: GraphSpec, opts: { frame?: number; exp
 // ------------------------------------------------------------------ pool basics
 section('pool basics');
 {
-  check(workersFromEnv({ POLYFORGE_WORKERS: '0' }) === 0 && workersFromEnv({ POLYFORGE_WORKERS: '3' }) === 3, 'POLYFORGE_WORKERS: 0 disables, a number sets the size');
+  check(workersFromEnv({ TOPOTOPO_WORKERS: '0' }) === 0 && workersFromEnv({ TOPOTOPO_WORKERS: '3' }) === 3, 'TOPOTOPO_WORKERS: 0 disables, a number sets the size');
   check(workersFromEnv({}) === Math.max(0, os.availableParallelism() - 1), `default size: availableParallelism() - 1 (${workersFromEnv({})})`);
-  check(poolOptionsFromEnv({ POLYFORGE_POOL_MIN: '1', POLYFORGE_WORKERS_IDLE_MS: '500' }).minElements === 1, 'POLYFORGE_POOL_MIN read');
+  check(poolOptionsFromEnv({ TOPOTOPO_POOL_MIN: '1', TOPOTOPO_WORKERS_IDLE_MS: '500' }).minElements === 1, 'TOPOTOPO_POOL_MIN read');
   check(createNodeHost({ workers: 0 }).pool === undefined && !off.concurrent, 'workers 0: no pool, sequential cooking');
   check(!!on.host.pool && on.concurrent, 'workers 4: pool, concurrent cooking');
 
@@ -342,12 +342,12 @@ section('processes end with the pool in use');
 {
   const gfile = path.join(tmp, 'noise.json');
   fs.writeFileSync(gfile, JSON.stringify({ nodes: { g: { type: 'grid', params: { divisions: [100, 100] } }, n: { type: 'noise_displace', in: ['g'] }, w: { type: 'wrangle', in: ['n'], params: { code: '@Cd = [@P.y, 0, 0];' } } }, output: 'w' }));
-  const env = { ...process.env, POLYFORGE_WORKERS: '3', POLYFORGE_POOL_MIN: '1' };
+  const env = { ...process.env, TOPOTOPO_WORKERS: '3', TOPOTOPO_POOL_MIN: '1' };
   const t0 = performance.now();
   const r = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), gfile], { encoding: 'utf8', env, timeout: 60000 });
   check(r.status === 0 && /cooked/.test(r.stdout), `CLI with the pool forced exits (status ${r.status}, ${(performance.now() - t0).toFixed(0)} ms)${r.status ? ': ' + r.stderr.slice(0, 300) : ''}`);
-  const z = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), gfile], { encoding: 'utf8', env: { ...process.env, POLYFORGE_WORKERS: '0' }, timeout: 60000 });
-  check(z.status === 0 && z.stdout.split('\n').slice(1).join('\n') === r.stdout.split('\n').slice(1).join('\n'), 'POLYFORGE_WORKERS=0: the CLI prints the same summary');
+  const z = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), gfile], { encoding: 'utf8', env: { ...process.env, TOPOTOPO_WORKERS: '0' }, timeout: 60000 });
+  check(z.status === 0 && z.stdout.split('\n').slice(1).join('\n') === r.stdout.split('\n').slice(1).join('\n'), 'TOPOTOPO_WORKERS=0: the CLI prints the same summary');
   // MCP server: closing stdin ends the process
   const ws = path.join(tmp, 'ws');
   const child = spawn(process.execPath, [path.join(ROOT, 'src', 'mcp', 'server.ts'), '--workspace', ws], { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -363,8 +363,8 @@ section('processes end with the pool in use');
 
 // ------------------------------------------------------------------ golden layer with the pool forced
 if (process.argv.includes('--golden')) {
-  section('golden layer with every kernel on the pool (POLYFORGE_WORKERS=4, POLYFORGE_POOL_MIN=1)');
-  const g = spawnSync(process.execPath, [path.join(ROOT, 'test', 'golden.ts')], { encoding: 'utf8', env: { ...process.env, POLYFORGE_WORKERS: '4', POLYFORGE_POOL_MIN: '1' }, timeout: 900000 });
+  section('golden layer with every kernel on the pool (TOPOTOPO_WORKERS=4, TOPOTOPO_POOL_MIN=1)');
+  const g = spawnSync(process.execPath, [path.join(ROOT, 'test', 'golden.ts')], { encoding: 'utf8', env: { ...process.env, TOPOTOPO_WORKERS: '4', TOPOTOPO_POOL_MIN: '1' }, timeout: 900000 });
   const tail = g.stdout.trim().split('\n').slice(-3).join(' | ');
   check(g.status === 0, `golden: exit ${g.status} — ${tail}${g.status ? '\n' + g.stdout.split('\n').filter((l) => /FAIL|differs|mismatch/i.test(l)).slice(0, 20).join('\n') + g.stderr.slice(0, 500) : ''}`);
 }

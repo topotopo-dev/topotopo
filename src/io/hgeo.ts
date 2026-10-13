@@ -19,7 +19,7 @@
 //   [["type", "PackedGeometry"], ["vertex", v, "transform", [9 numbers], "pivot", [0, 0, 0],
 //     "parameters", {"embedded": "<key>", "pivot": [0, 0, 0], "viewportlod": "full"}]]
 // and each packed source once in sharedprimitivedata as "PackedGeometry", ["geo:embedded", "<key>", <its .geo array>]
-// (nested instances expanded). The 3×3 is Houdini's row-vector matrix in row order, which is polyforge's column-major
+// (nested instances expanded). The 3×3 is Houdini's row-vector matrix in row order, which is topotopo's column-major
 // packedXform as it is; the anchor point P is the instance position. This mirrors how Houdini stores shared volume
 // voxels; the exact key names Houdini uses for embedded packed geometry are not confirmed (verify in Houdini), so the
 // reader accepts any parameter that names a shared geometry, a flat or nested 3×3 / 4×4 transform and a pivot.
@@ -32,7 +32,7 @@
 // with a warning).
 // Uncompressed binary .bgeo (Houdini's binary JSON encoding of the same tree) is read too; .bgeo.sc (Blosc) is not.
 //
-// Winding: Houdini polygons wind clockwise seen from the front (left-hand rule), polyforge counter-clockwise (like
+// Winding: Houdini polygons wind clockwise seen from the front (left-hand rule), topotopo counter-clockwise (like
 // OBJ and glTF). Closed polygons are therefore written and read with their vertex order reversed, keeping the first
 // vertex ([v0, v1, v2, v3] ⇄ [v0, v3, v2, v1]); vertex attributes and vertex groups follow their vertices. Open
 // polylines keep their direction.
@@ -176,7 +176,7 @@ function houdiniGeoJSON(g: Geometry, o: ExportOptions): any[] {
   const out: any[] = [
     'fileversion', '20.0.0', 'hasindex', false,
     'pointcount', g.numPoints, 'vertexcount', g.numVertices, 'primitivecount', g.numPrims,
-    'info', { software: 'polyforge', bounds: [bb.min[0], bb.max[0], bb.min[1], bb.max[1], bb.min[2], bb.max[2]], primcount_summary: summary + '\n' },
+    'info', { software: 'topotopo', bounds: [bb.min[0], bb.max[0], bb.min[1], bb.max[1], bb.min[2], bb.max[2]], primcount_summary: summary + '\n' },
     'topology', ['pointref', ['indices', Array.from(fileVtx, (v) => g.vertexPoint[v])]],
     'attributes', attributes,
     'primitives', prims,
@@ -366,7 +366,7 @@ function sharedData(x: any): Map<string, any> {
 /** True for a value that looks like a .geo tree (key/value array or object with pointcount). */
 const isGeoTree = (x: any) => { const o = kv(x); return o.pointcount !== undefined || o.topology !== undefined; };
 
-/** A 3×3 (polyforge column-major = Houdini row-major) from a flat 9 / 16 list or nested rows; null if unreadable. */
+/** A 3×3 (topotopo column-major = Houdini row-major) from a flat 9 / 16 list or nested rows; null if unreadable. */
 function matrix3(x: any): number[] | null {
   if (!Array.isArray(x)) return null;
   const f: number[] = (Array.isArray(x[0]) ? x.flat() : x).map(Number);

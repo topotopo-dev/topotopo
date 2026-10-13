@@ -17,7 +17,7 @@
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter
 //   node src/cli.ts mcp [--workspace dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
-// Installed from npm the same commands are `polyforge …` (package.json bin → dist/cli.js, built by npm run build).
+// Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -41,7 +41,7 @@ const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
 const fail = (msg: string): never => { console.error(msg); process.exit(1); };
 // the command as the user typed it: the sources from a clone, or the package's bin (dist/cli.js)
-const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'polyforge';
+const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo';
 
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
@@ -72,7 +72,7 @@ if (opt('--help-node')) {
 }
 
 if (argv[0] === 'mcp') {
-  // `polyforge mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
+  // `topotopo mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin
   process.argv.splice(2, 1);
   await import('./mcp/server.ts');

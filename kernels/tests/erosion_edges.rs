@@ -1,7 +1,7 @@
 //! Boundary regressions for halo stencils and brushes larger than the terrain.
 
-use polyforge_kernels::erosion::{ErosionResult, PipeParams, erode_pipe};
-use polyforge_kernels::erosion_droplet::{DropletParams, erode_droplet};
+use topotopo_kernels::erosion::{ErosionResult, PipeParams, erode_pipe};
+use topotopo_kernels::erosion_droplet::{DropletParams, erode_droplet};
 
 fn sum(values: &[f32]) -> f64 {
     values.iter().map(|&value| f64::from(value)).sum()

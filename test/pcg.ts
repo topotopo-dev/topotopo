@@ -25,7 +25,7 @@ import { checkGeo } from './fixtures.ts';
 import type { CookReport } from '../src/graph/engine.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-pcg-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-pcg-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
 

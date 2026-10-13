@@ -124,7 +124,7 @@ export interface Host {
   fontCandidates?(name?: string): string[];
   /**
    * Worker pool for chunked kernels (CookContext.parallelMap) and the signal to cook independent graph branches
-   * concurrently. Absent (POLYFORGE_WORKERS=0, or a host without threads): everything runs on the calling thread.
+   * concurrently. Absent (TOPOTOPO_WORKERS=0, or a host without threads): everything runs on the calling thread.
    */
   pool?: WorkerPool;
 }

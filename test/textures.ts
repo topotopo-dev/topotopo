@@ -32,7 +32,7 @@ import type { NodeSpec } from '../src/graph/types.ts';
 const require = createRequire(import.meta.url);
 const validator = require('gltf-validator');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-tex-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-tex-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
 

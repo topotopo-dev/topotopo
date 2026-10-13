@@ -1,4 +1,4 @@
-# Polyforge roadmap: towards Houdini-class geometry
+# TopoTopo roadmap: towards Houdini-class geometry
 
 Status as of 2026-10-12: 96 node types, ~12k lines of TypeScript, immutable geometry with provenance-preserving
 `GeoBuilder`, content-hashed lazy cooking, MCP server, software renderer, 10 example graphs, 322 lines of tests.
@@ -18,7 +18,7 @@ The target is parity with Houdini SOPs, Blender Geometry Nodes and Unreal PCG fo
 procedural assembly, scattering and instancing, terrain, curves, volumes, and the export that feeds engines. Rendering,
 character tools and film-scale simulation are out of scope.
 
-Houdini ships ~450 SOPs. The subset a production modelling and PCG pipeline actually uses is about 180. Polyforge has
+Houdini ships ~450 SOPs. The subset a production modelling and PCG pipeline actually uses is about 180. TopoTopo has
 96 of them, so the node gap is 80–100 nodes. The harder part is not the node count. It is five structural features that
 most of the missing nodes depend on: edge topology, packed instancing, sampled volumes and heightfields, time, and a
 test suite that lets the engine change safely.
@@ -30,7 +30,7 @@ test suite that lets the engine change safely.
 These come first. Every later phase depends on at least one of them.
 
 ### 1.1 Edge topology, edge groups, vertex groups
-Houdini has four element classes with groups: point, vertex, prim, **edge**. Polyforge has point and prim groups only,
+Houdini has four element classes with groups: point, vertex, prim, **edge**. TopoTopo has point and prim groups only,
 and `buildEdges()` is a one-off helper rather than a structure nodes can share.
 
 - Add **edge groups** (stored as sorted point pairs, Houdini-compatible), edge patterns in `evalGroup`
@@ -85,7 +85,7 @@ The current SDF is a lazy sample function. That is elegant and composable, keep 
 ### 1.7 Performance architecture
 - Worker pool (`worker_threads` in Node, Web Workers in the browser) behind the `Host` interface: cook independent
   branches in parallel, chunk wrangles over `SharedArrayBuffer` views.
-- Hot kernels in WASM. Preferred route: a small Rust crate (`polyforge-kernels`) compiled with `wasm-bindgen`, because
+- Hot kernels in WASM. Preferred route: a small Rust crate (`topotopo-kernels`) compiled with `wasm-bindgen`, because
   the Rust geometry ecosystem (see §4) is MIT/Apache and already WASM-ready. Candidates: half-edge ops, subdivision,
   SDF/grid sampling, erosion, isotropic remeshing.
 - GPU compute via WebGPU for erosion, SDF sampling and scatter. Native in browsers; in Node through Dawn bindings
@@ -102,7 +102,7 @@ This is the largest production-readiness gap today.
   ops, attribute preservation through every node that uses `GeoBuilder`.
 - **Fuzzing** the wrangle compiler and the group-pattern parser.
 - **Parity tests against Houdini**: the same operation (subdivide, polyextrude, resample, scatter density) cooked in
-  Polyforge and in Houdini through the existing Houdini MCP, compared by Hausdorff distance. Houdini becomes the oracle.
+  TopoTopo and in Houdini through the existing Houdini MCP, compared by Hausdorff distance. Houdini becomes the oracle.
 - Graph format `version` field with migrations, and node deprecation aliases so old graphs keep cooking.
 - Generated node reference (Markdown/HTML) from `NodeDef`s, published with the repo.
 
@@ -110,7 +110,7 @@ This is the largest production-readiness gap today.
 
 ## 2. Node suite gaps, by Houdini category
 
-Names are Houdini's; Polyforge aliases should accept them.
+Names are Houdini's; TopoTopo aliases should accept them.
 
 ### Polygon modelling
 | node | notes |
@@ -204,7 +204,7 @@ Names are Houdini's; Polyforge aliases should accept them.
 
 ## 3. Shipped asset library (the "shelf")
 
-Houdini's value is partly the shelf and the HDA library. Polyforge's equivalent is JSON graph assets, and LLMs can
+Houdini's value is partly the shelf and the HDA library. TopoTopo's equivalent is JSON graph assets, and LLMs can
 write them. Ship and regression-render 30–50 curated assets: fence, railing, stairs, road, roof (straight skeleton),
 window grid, tree, rock, cliff, pipe run, cable, crate, barrel, brick wall, tiles, hex grid, scaffold, pillar, arch.
 Each asset has typed `params`, a description, a thumbnail, and a golden test.
@@ -251,18 +251,18 @@ Versions and licences checked against npm on 2026-10-12.
 
 ### Avoid
 CGAL (GPL for most packages, including its straight skeleton and the npm `straight-skeleton` wrapper), TetGen (AGPL),
-MeshFix (GPL). They would change Polyforge's licence. LGPL code such as OpenCascade is acceptable only as a separately
+MeshFix (GPL). They would change TopoTopo's licence. LGPL code such as OpenCascade is acceptable only as a separately
 loaded, replaceable WASM module, never bundled into the core.
 
 ### Commercial use
-Polyforge is Apache-2.0 (switched from MIT on 2026-10-12 while the author was the sole contributor). Every dependency
+TopoTopo is Apache-2.0 (switched from MIT on 2026-10-12 while the author was the sole contributor). Every dependency
 in use is MIT, Apache-2.0 or ISC, so commercial use, hosting and selling derived products are all permitted; the
-obligations are keeping the licence notices, which the generated NOTICE file carries. The geometry a user produces is theirs. Relicensing Polyforge itself stays simple while there are
+obligations are keeping the licence notices, which the generated NOTICE file carries. The geometry a user produces is theirs. Relicensing TopoTopo itself stays simple while there are
 no outside contributors; adopt a CLA or DCO before accepting external pull requests if relicensing should remain possible.
 
 ---
 
-## 5. Ideas that make Polyforge more than a Houdini clone
+## 5. Ideas that make TopoTopo more than a Houdini clone
 
 1. **Packed-first PCG.** Instance streams plus variant libraries as the native output, with Unreal PCG and USD
    PointInstancer export. Cheap, deterministic, textual: the one place an LLM-driven tool can beat Houdini on workflow.
@@ -276,7 +276,7 @@ no outside contributors; adopt a CLA or DCO before accepting external pull reque
 5. **Self-extending engine.** Promote a `script` node plus a param schema to a named node type stored in the workspace,
    with a golden test. Agents write nodes, not just graphs. Assets already do this for graphs.
 6. **Cook server.** Batch cooking of many graphs and frame ranges from the CLI, so CI builds asset libraries from JSON.
-7. **Unreal round trip today.** The Unreal MCP already imports GLB and spawns actors. A `polyforge → unreal` push
+7. **Unreal round trip today.** The Unreal MCP already imports GLB and spawns actors. A `topotopo → unreal` push
    (export GLB, import as static mesh, place instances from a point list) can be built before the PCG plugin exists.
 
 ---

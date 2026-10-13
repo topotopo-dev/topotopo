@@ -5,13 +5,13 @@
 // Checks
 // - npm pack (prepack builds dist/): required files are in the tarball, nothing from src/, test/, examples/, out/,
 //   shelf/thumbs or the Rust sources is.
-// - The bin from the installed package: `npm exec --no -- polyforge --help`, and cooking an example graph copied into the
+// - The bin from the installed package: `npm exec --no -- topotopo --help`, and cooking an example graph copied into the
 //   temp project with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
 //   kernels loaded from the installed kernels/pkg, and the house walls come from the installed shelf).
-// - The library: `import 'polyforge'` (exports map) and its types (tsc on a consumer file), the shelf, the bundled
+// - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the shelf, the bundled
 //   font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location.
-// - The MCP server over stdio as a client starts it (`npm exec --no -- polyforge mcp --workspace …`, which is what
-//   `npx -y polyforge mcp` runs once the package is installed): catalog, a build that uses sdf_grid, and the preview
+// - The MCP server over stdio as a client starts it (`npm exec --no -- topotopo mcp --workspace …`, which is what
+//   `npx -y topotopo mcp` runs once the package is installed): catalog, a build that uses sdf_grid, and the preview
 //   page with three.js served from the installed dependencies.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
 import fs from 'node:fs';
@@ -61,7 +61,7 @@ try {
     'dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/mcp/server.js', 'dist/host/node.js', 'dist/host/pool.js',
     'dist/host/worker.js', 'dist/wasm/kernels.js', 'dist/viewer/server.js', 'dist/viewer/index.html',
     'shelf/index.json', 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
-    'kernels/pkg/polyforge_kernels.js', 'kernels/pkg/polyforge_kernels_bg.wasm', 'kernels/pkg/LICENSE',
+    'kernels/pkg/topotopo_kernels.js', 'kernels/pkg/topotopo_kernels_bg.wasm', 'kernels/pkg/LICENSE',
   ];
   const missing = required.filter((f) => !files.includes(f));
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
@@ -155,7 +155,7 @@ console.log(JSON.stringify(out));
   const transport = new StdioClientTransport({
     // npm exec --no: the local bin or nothing (npx in a non-TTY would fall back to downloading a same-named package)
     command: 'npm', args: ['exec', '--no', '--', BIN, 'mcp', '--workspace', ws], cwd: app,
-    env: { ...process.env, POLYFORGE_PORT: '0' } as Record<string, string>, stderr: 'pipe',
+    env: { ...process.env, TOPOTOPO_PORT: '0' } as Record<string, string>, stderr: 'pipe',
   });
   let serverLog = '';
   transport.stderr?.on('data', (d) => { serverLog += String(d); });

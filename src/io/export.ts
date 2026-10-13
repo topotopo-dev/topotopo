@@ -40,7 +40,7 @@ function isolatedPoints(g: Geometry, o: ExportOptions) {
 
 export function exportOBJ(g: Geometry, o: ExportOptions = {}): string {
   g = expandForExport(g, o, 'obj');
-  const lines: string[] = ['# polyforge OBJ'];
+  const lines: string[] = ['# topotopo OBJ'];
   const Pd = g.P;
   const cd = g.points.get('Cd');
   for (let i = 0; i < g.numPoints; i++) {
@@ -80,7 +80,7 @@ export function exportSTL(g: Geometry, o: ExportOptions = {}): Uint8Array {
   const nt = tris.length / 3;
   const out = new Uint8Array(84 + nt * 50);
   const dv = new DataView(out.buffer);
-  new TextEncoder().encodeInto('polyforge STL', out);
+  new TextEncoder().encodeInto('topotopo STL', out);
   dv.setUint32(80, nt, true);
   const Pd = g.P;
   for (let t = 0; t < nt; t++) {
@@ -109,7 +109,7 @@ export function exportPLY(g: Geometry, o: ExportOptions = {}): Uint8Array {
   for (const [n, a] of custom) for (let c = 0; c < a.size; c++) props.push(`property float ${a.size === 1 ? n : n + '_' + comp[c]}`);
   const faces: number[][] = [];
   for (let p = 0; p < g.numPrims; p++) if (g.primClosed[p]) faces.push(g.primPoints(p));
-  const header = ['ply', 'format binary_little_endian 1.0', 'comment polyforge', `element vertex ${np}`, ...props, `element face ${faces.length}`, 'property list uchar int vertex_indices', 'end_header', ''].join('\n');
+  const header = ['ply', 'format binary_little_endian 1.0', 'comment topotopo', `element vertex ${np}`, ...props, `element face ${faces.length}`, 'property list uchar int vertex_indices', 'end_header', ''].join('\n');
   const hb = new TextEncoder().encode(header);
   const vsize = 12 + (N && N.size === 3 ? 12 : 0) + (Cd && Cd.size >= 3 ? 3 : 0) + custom.reduce((s, [, a]) => s + a.size * 4, 0);
   const fsize = faces.reduce((s, f) => s + 1 + f.length * 4, 0);

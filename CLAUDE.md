@@ -1,4 +1,4 @@
-# Polyforge
+# TopoTopo
 
 LLM-native procedural geometry engine (Houdini-SOP style node graphs), headless core + MCP server.
 

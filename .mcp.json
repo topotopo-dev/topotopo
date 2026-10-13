@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "polyforge": {
+    "topotopo": {
       "command": "node",
       "args": ["src/mcp/server.ts", "--workspace", "workspace"]
     }

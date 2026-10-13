@@ -373,7 +373,7 @@ presented as controlled hardware microbenchmarks. The uninstrumented native
 baseline recheck is recorded below.
 
 Sampling-profiler availability: samply and cargo-flamegraph absent; Windows WPR
-and xperf installed. `wpr -start CPU.light -instancename PolyforgeK4b` failed with
+and xperf installed. `wpr -start CPU.light -instancename TopoTopoK4b` failed with
 0xc5585011, "Failed to enable the policy to profile system performance." Both
 unique/default WPR status checks confirmed no recording remains. No profiler
 package/dependency was installed. Release already had opt-level=3, LTO, one

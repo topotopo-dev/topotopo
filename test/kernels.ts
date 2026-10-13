@@ -288,7 +288,7 @@ await test('deterministic simple random polygon property corpus tiles and preser
 function countingHost() {
   const original = createNodeHost({ shelf: false, workers: 0 });
   let reads = 0;
-  const host: Host = { ...original, async readFile(path) { if (/polyforge_kernels.*\.wasm/.test(path)) reads++; return original.readFile(path); } };
+  const host: Host = { ...original, async readFile(path) { if (/topotopo_kernels.*\.wasm/.test(path)) reads++; return original.readFile(path); } };
   return { host, reads: () => reads };
 }
 const firstHost = countingHost(), engine = new Engine(firstHost.host);

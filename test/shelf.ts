@@ -29,7 +29,7 @@ let fails = 0, checks = 0;
 const fail = (msg: string) => { fails++; console.log('FAIL ' + msg); };
 const check = (ok: boolean, msg: string) => { checks++; if (!ok) fail(msg); };
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-shelf-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-shelf-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
 check(!engine.shelfErrors.length, `shelf loads without errors: ${engine.shelfErrors.join('; ')}`);

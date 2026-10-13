@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Polyforge MCP server (stdio). Exposes the geometry engine as tools for LLM agents.
+// TopoTopo MCP server (stdio). Exposes the geometry engine as tools for LLM agents.
 //   node src/mcp/server.ts [--workspace <dir>] [--viewer]
-//   polyforge mcp [--workspace <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
-// Env: POLYFORGE_WORKSPACE, POLYFORGE_VIEWER=1, POLYFORGE_PORT, POLYFORGE_SCRIPT_TIMEOUT_MS, POLYFORGE_WORKERS
+//   topotopo mcp [--workspace <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
+// Env: TOPOTOPO_WORKSPACE, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_WORKERS
 // stdout carries the MCP protocol — log only to stderr.
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -18,12 +18,12 @@ import { startViewer } from '../viewer/server.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
-const wsDir = path.resolve(argOf('--workspace') ?? process.env.POLYFORGE_WORKSPACE ?? path.join(process.cwd(), 'workspace'));
+const wsDir = path.resolve(argOf('--workspace') ?? process.env.TOPOTOPO_WORKSPACE ?? path.join(process.cwd(), 'workspace'));
 
-const log = (...a: any[]) => process.stderr.write('[polyforge] ' + a.join(' ') + '\n');
+const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + '\n');
 
 const engine = new Engine(createNodeHost({ baseDir: wsDir }));
-if (process.env.POLYFORGE_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.POLYFORGE_SCRIPT_TIMEOUT_MS);
+if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
 await engine.init();
 const ws = new Workspace(wsDir, engine);
 const loaded = ws.load();
@@ -35,12 +35,12 @@ const ensureViewer = async () => {
   if (!viewer) { viewer = await startViewer(ws); log('preview at', viewer.url); }
   return viewer.url;
 };
-if (argv.includes('--viewer') || process.env.POLYFORGE_VIEWER === '1') await ensureViewer();
+if (argv.includes('--viewer') || process.env.TOPOTOPO_VIEWER === '1') await ensureViewer();
 
 const tools = makeTools(ws, { onPreview: ensureViewer });
 
 const server = new Server(
-  { name: 'polyforge', version: '0.1.0' },
+  { name: 'topotopo', version: '0.1.0' },
   { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
 );
 

@@ -1,8 +1,8 @@
-# polyforge-kernels
+# topotopo-kernels
 
 Original Rust implementation of a kinetic, weighted straight skeleton, mitered polygon
 offsets, and hip/gable roof surfaces. The checked-in `pkg/` is the browser-compatible
-WebAssembly build; normal Polyforge users do not install Rust. See [BUILD.md](BUILD.md).
+WebAssembly build; normal TopoTopo users do not install Rust. See [BUILD.md](BUILD.md).
 
 ## Heightfield erosion (session 4)
 
@@ -84,7 +84,7 @@ See [BENCH.md](BENCH.md) for measured acceptance and performance, and
 
 ## API and geometry
 
-The generated `pkg/polyforge_kernels.js` exports:
+The generated `pkg/topotopo_kernels.js` exports:
 
 ```js
 await init({ module_or_path: wasmBytes });
@@ -137,7 +137,7 @@ The result is `vertices` (x,y,height), face CSR, `face_edge`, and `src_point`. S
 faces use contour source edge indices; horizontal cap triangles use `0xffffffff`.
 `height_cap` is a positive height: it stops the wavefront and triangulates the remaining
 footprint, preserving courtyard holes. The roof includes gable faces but no bottom.
-The TypeScript node maps this to Polyforge's XZ footprint and Y-up convention.
+The TypeScript node maps this to TopoTopo's XZ footprint and Y-up convention.
 
 ## Algorithm and numeric contract
 

@@ -170,7 +170,7 @@ Numbers in captions and narration come from `docs/nodes.md`, `test/golden/` and 
 
 The day before:
 - [ ] The R-4 rename is merged, so the CLI, the MCP server name and the viewer title read `topotopo`. If it is not,
-      record anyway and keep "Polyforge" out of frame (terminal prompt, window titles, the UE content path).
+      record anyway and keep "TopoTopo" out of frame (terminal prompt, window titles, the UE content path).
 - [ ] Clone the repository fresh into a folder named `topotopo`, run `npm ci`, `npm test` (exit code 0) and
       `npm run showcase`, and look at the renders used here:
       `examples/renders/house_city.png`, `erosion_models.png`, `quad_remesh.png`, `textures.png`, `unreal_demo.png`
@@ -181,7 +181,7 @@ The day before:
       `out/video/house_city_seed8.json` and change `vars.seed` there instead of editing the example; the shelf is
       found from any folder), erosion_models, unreal_demo. Encode each to MP4.
 - [ ] Unreal: open project `topotopotest` in Unreal 5.8 [verify: project path on disk]. Open
-      `/Game/Polyforge/Demo/L_Demo`; rename the folder to `/Game/TopoTopo/Demo` or keep the Content Browser out of
+      `/Game/TopoTopo/Demo/L_Demo`; rename the folder to `/Game/TopoTopo/Demo` or keep the Content Browser out of
       frame. Check:
   - [ ] `Content/Python/init_unreal.py` (which calls `pf_verify.py` at startup to import the GLBs and spawn the CSV
         rows) is disabled for the session, so the editor does not re-import or spawn duplicates [verify: what the

@@ -6,7 +6,7 @@
 	"primitivecount",9,
 	"info",{
 		"software":"Houdini 20.0.547",
-		"artist":"polyforge test (hand-written, mirrors Houdini 20 ASCII output)",
+		"artist":"topotopo test (hand-written, mirrors Houdini 20 ASCII output)",
 		"date":"2026-10-12 12:00:00",
 		"timetocook":0.0,
 		"bounds":[-0.5,1.5,-0.5,0.75,-0.5,0.5],

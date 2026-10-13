@@ -357,7 +357,7 @@ defineNode({
   inputs: [],
   params: {
     resolution: resolutionParam(),
-    text: { type: 'string', default: 'POLYFORGE', desc: 'text (use \\n for new lines)' },
+    text: { type: 'string', default: 'TOPOTOPO', desc: 'text (use \\n for new lines)' },
     font: { type: 'string', default: '', desc: 'font file or family ("" = the bundled DejaVu Sans)' },
     size: { type: 'float', default: 0.2, min: 0.001, desc: 'height of the text block as a fraction of the image height (shrunk to fit the width)', aliases: ['height', 'font_size'] },
     position: { type: 'vec2', default: [0.5, 0.5], desc: 'centre of the text in uv', aliases: ['center'] },

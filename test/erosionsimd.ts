@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import * as scalar from '../kernels/pkg/polyforge_kernels.js';
+import * as scalar from '../kernels/pkg/topotopo_kernels.js';
 const simdPath = path.resolve(process.argv[2] ?? 'out/session4/pkg-simd');
-const simd = await import(pathToFileURL(path.join(simdPath, 'polyforge_kernels.js')).href);
-await scalar.default({ module_or_path: fs.readFileSync(new URL('../kernels/pkg/polyforge_kernels_bg.wasm', import.meta.url)) });
-await simd.default({ module_or_path: fs.readFileSync(path.join(simdPath, 'polyforge_kernels_bg.wasm')) });
+const simd = await import(pathToFileURL(path.join(simdPath, 'topotopo_kernels.js')).href);
+await scalar.default({ module_or_path: fs.readFileSync(new URL('../kernels/pkg/topotopo_kernels_bg.wasm', import.meta.url)) });
+await simd.default({ module_or_path: fs.readFileSync(path.join(simdPath, 'topotopo_kernels_bg.wasm')) });
 const empty = new Float32Array(0), w = 33, h = 25;
 let checks = 0;
 for (let seed = 0; seed < 6; seed++) {

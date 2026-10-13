@@ -1,13 +1,13 @@
 # Briefs for an external agent
 
-Three self-contained work packages for an agent working outside the Polyforge orchestration. They are ordered by
+Three self-contained work packages for an agent working outside the TopoTopo orchestration. They are ordered by
 expected impact. Package 1 is the one to start with; packages 2 and 3 are independent of it.
 
 ## Context (read once)
 
-Polyforge is an LLM-native procedural geometry engine: Houdini-SOP-style node graphs in JSON, cooked by a
+TopoTopo is an LLM-native procedural geometry engine: Houdini-SOP-style node graphs in JSON, cooked by a
 TypeScript core that runs unchanged in Node 22+ and in browsers (WebAssembly for heavy libraries: manifold-3d,
-meshoptimizer). It exposes an MCP server so LLM agents can build geometry. Repository: `github.com/topotopo-dev/polyforge`
+meshoptimizer). It exposes an MCP server so LLM agents can build geometry. Repository: `github.com/topotopo-dev/topotopo`
 (Apache-2.0). Read `README.md`, `docs/DESIGN.md`, `docs/ROADMAP.md` (the gap analysis and the library survey) and
 `docs/WORKLOG.md` (what is in flight; do not duplicate it).
 
@@ -24,7 +24,7 @@ Hard constraints for anything that lands in the repo:
 
 ---
 
-## Package 1 (primary): `polyforge-kernels`, a Rust → WASM compute crate
+## Package 1 (primary): `topotopo-kernels`, a Rust → WASM compute crate
 
 ### Why
 The TypeScript core is fine up to about 100k elements. Above that, and for algorithms that are hard to make robust,
@@ -108,7 +108,7 @@ A written report (`docs/research/landscape-2026.md`) answering, with sources and
    conventions PCG expects (`$Position`, `$Rotation`, `$Scale`, `$Density`, `$Seed`, bounds, steepness), and whether
    a C++ PCG element can load a JSON file at graph execution time. What changed between 5.5 and 5.8.
 3. Houdini 21 and Blender 5.0 Geometry Nodes: new or renamed nodes in the modelling, scatter, heightfield and curve
-   families that Polyforge should mirror (names and parameter conventions), and any new interchange features (USD,
+   families that TopoTopo should mirror (names and parameter conventions), and any new interchange features (USD,
    `.bgeo` changes).
 4. glTF and USD in 2026: extensions worth supporting for instancing, LODs, materials and metadata; USD versions
    Houdini/Blender/Unreal read today; whether `usda` text remains sufficient or `usdc` is now expected.
@@ -122,14 +122,14 @@ Keep it factual and short: a table per topic, then recommendations with a one-li
 
 ## Package 3 (optional): Unreal Engine 5.8 bridge plugin
 
-A C++ editor plugin `PolyforgePCG` for UE 5.8, in its own repository:
-- A PCG element (`UPCGPolyforgeLoadSettings` + element) that reads a Polyforge point stream (CSV or the
+A C++ editor plugin `TopoTopoPCG` for UE 5.8, in its own repository:
+- A PCG element (`UPCGTopoTopoLoadSettings` + element) that reads a TopoTopo point stream (CSV or the
   `points.json` schema from `src/io/points.ts`) into PCG point data with every attribute preserved, converting
   Y-up metres to Z-up centimetres and `orient`/`N`+`up` to rotations.
-- An editor utility (or Interchange pipeline) that imports Polyforge GLB files as Static Meshes with their `name`
+- An editor utility (or Interchange pipeline) that imports TopoTopo GLB files as Static Meshes with their `name`
   split and materials, and an "instance from point stream" action that creates ISM/HISM components.
-- Optionally, a "Cook with Polyforge" node that runs the Polyforge CLI (`node src/cli.ts graph.json --export …`)
-  as a subprocess with a timeout, so a PCG graph can call a Polyforge graph.
+- Optionally, a "Cook with TopoTopo" node that runs the TopoTopo CLI (`node src/cli.ts graph.json --export …`)
+  as a subprocess with a timeout, so a PCG graph can call a TopoTopo graph.
 Tests: a sample level that loads a 100k-point stream and a GLB. Document the install.
 
 Verification on our side: the orchestrator can drive the Unreal editor through its MCP once UE 5.8 is installed, so

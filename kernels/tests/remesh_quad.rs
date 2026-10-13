@@ -1,4 +1,4 @@
-use polyforge_kernels::remesh_quad::{QuadMesh, RemeshOptions, remesh_quad};
+use topotopo_kernels::remesh_quad::{QuadMesh, RemeshOptions, remesh_quad};
 use std::collections::{BTreeMap, BTreeSet};
 
 type Point = [f64; 3];

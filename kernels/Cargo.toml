@@ -1,11 +1,11 @@
 [package]
-name = "polyforge-kernels"
+name = "topotopo-kernels"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
-description = "Deterministic geometry kernels for Polyforge"
-repository = "https://github.com/topotopo-dev/polyforge"
+description = "Deterministic geometry kernels for TopoTopo"
+repository = "https://github.com/topotopo-dev/topotopo"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

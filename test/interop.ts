@@ -218,7 +218,7 @@ function sameGeo(a: Geometry, b: Geometry, label: string, tol = 0) {
       g1: { type: 'group', in: ['wv'], params: { name: 'top', class: 'prim', expr: '@P.y > 0.4' } },
       g2: { type: 'group', in: ['g1'], params: { name: 'right', class: 'point', expr: '@P.x > 0.4' } },
       m: { type: 'material', in: ['g2'], params: { name: 'stone', group: 'top' } },
-      d: { type: 'attrib_create', in: ['m'], params: { name: 'author', class: 'detail', value: 'polyforge' } },
+      d: { type: 'attrib_create', in: ['m'], params: { name: 'author', class: 'detail', value: 'topotopo' } },
       crv: { type: 'curve', params: { points: [[0, 0, 0], [1, 1, 0], [2, 0, 0]] } },
       out: { type: 'merge', in: ['d', 'crv'] },
     },
@@ -493,7 +493,7 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
     const side = JSON.parse(new TextDecoder().decode(res.files[1].bytes));
     const counts: Record<string, number> = {};
     for (const p of packedPrims(iscene)) { const n = srcNames[iscene.packedSource![p]]; counts[n] = (counts[n] ?? 0) + 1; }
-    check(side.format === 'polyforge-instance-meshes' && side.meshes.every((m: any, i: number) => m.name === srcNames[i] && m.file === `props_meshes/${m.name}.glb` && m.instances === counts[m.name]) && side.meshes.find((m: any) => m.name === 'crate').materials.join() === 'crate',
+    check(side.format === 'topotopo-instance-meshes' && side.meshes.every((m: any, i: number) => m.name === srcNames[i] && m.file === `props_meshes/${m.name}.glb` && m.instances === counts[m.name]) && side.meshes.find((m: any) => m.name === 'crate').materials.join() === 'crate',
       'meshes sidecar: names, files, instance counts and materials per source');
     for (const f of res.files.filter((x) => x.path.endsWith('.glb'))) await validate(f.bytes, `source mesh ${path.basename(f.path)}`);
     const crate = await importGeometryAsync(res.files.find((f) => f.path.endsWith('crate.glb'))!.bytes, 'glb');

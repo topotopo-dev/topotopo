@@ -436,7 +436,7 @@ let failed = 0;
 const selected = CASES.filter((c) => !FILTER || c.name.includes(FILTER));
 if (!selected.length) { console.log(`no benchmark matches "${FILTER}". Cases: ${CASES.map((c) => c.name).join(', ')}`); process.exit(1); }
 
-console.log(`polyforge bench${QUICK ? ' (quick)' : ''}: ${selected.length} case(s), warm-up + best of ${RUNS} · node ${process.version} · ${os.cpus()[0]?.model ?? os.arch()}\n`);
+console.log(`topotopo bench${QUICK ? ' (quick)' : ''}: ${selected.length} case(s), warm-up + best of ${RUNS} · node ${process.version} · ${os.cpus()[0]?.model ?? os.arch()}\n`);
 for (const c of selected) {
   const graph = c.graph(QUICK);
   const times: number[] = [], totals: number[] = [];

@@ -381,7 +381,7 @@ defineNode({
   type: 'file',
   category: 'io',
   packed: 'keep',
-  summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo/.bgeo, CSV, points JSON or polyforge JSON. Z-up files can be converted.',
+  summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON. Z-up files can be converted.',
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {

@@ -228,7 +228,7 @@ defineNode({
   aliases: ['font', 'type', 'lettering'],
   inputs: [],
   params: {
-    text: { type: 'string', default: 'Polyforge', desc: 'text (use \\n for new lines)' },
+    text: { type: 'string', default: 'TopoTopo', desc: 'text (use \\n for new lines)' },
     font: { type: 'string', default: '', desc: 'font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine)' },
     size: { type: 'float', default: 1, desc: 'font size (em height in units)' },
     align: { type: 'enum', options: ['left', 'center', 'right'], default: 'center', desc: 'horizontal alignment' },

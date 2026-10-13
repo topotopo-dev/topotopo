@@ -1,4 +1,4 @@
-// Unreal Landscape bundle: everything Unreal needs to rebuild a polyforge terrain scene, in one directory.
+// Unreal Landscape bundle: everything Unreal needs to rebuild a topotopo terrain scene, in one directory.
 //
 //   landscape.json           manifest: the exact Landscape import settings (section size, sections per component,
 //                            component count, scale, location for the New Landscape panel and for the actor), the
@@ -82,7 +82,7 @@ export const LANDSCAPE_IMPORT_STEPS = [
   'Layers: give the landscape material one layer per layers[] entry (Landscape Layer Blend), then in the import panel (or later: Paint > Target Layers > right-click > Import) assign layers/<name>.png to each.',
   'Click Import. Height check: world Z (cm) = location.z + (value - 32768) * scale.z / 128, i.e. height_min..height_max metres x 100.',
   'Objects: import objects.glb (meshes + EXT_mesh_gpu_instancing instances) with the Interchange glTF importer at location 0; Unreal maps glTF Y-up metres to Z-up centimetres (X = x, Y = z, Z = y), matching the landscape. If the importer rejects EXT_mesh_gpu_instancing, import objects_expanded.glb (the instances as real meshes, one per source name).',
-  'Instances for PCG: import meshes/*.glb as static meshes, read instances.csv (Position/Rotation/Scale in cm and degrees, Mesh = the static mesh name) with the Polyforge PCG loader or a DataTable (pcg_struct export), and spawn by Mesh.',
+  'Instances for PCG: import meshes/*.glb as static meshes, read instances.csv (Position/Rotation/Scale in cm and degrees, Mesh = the static mesh name) with the TopoTopo PCG loader or a DataTable (pcg_struct export), and spawn by Mesh.',
 ];
 
 const r = (x: number, d = 4) => +x.toFixed(d);
@@ -147,7 +147,7 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
     instances = { count: g.numPacked, csv: 'instances.csv', meshes: 'instances.meshes.json', mesh_dir: 'meshes', sources: names };
   }
   const manifest: Record<string, any> = {
-    format: 'polyforge-unreal-landscape', version: 1,
+    format: 'topotopo-unreal-landscape', version: 1,
     heightfield: hf.name,
     heightmap: {
       file: 'heightmap.png', sidecar: 'heightmap.json', layer: info.layer, resolution: info.resolution, cell_size_m: info.cell_size,

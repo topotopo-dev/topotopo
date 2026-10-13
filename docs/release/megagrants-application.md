@@ -49,7 +49,7 @@ Short version (about 600 characters):
 
 ### What it is
 
-TopoTopo (renamed from Polyforge before its first public release) is a procedural geometry engine. A graph is a JSON
+TopoTopo (renamed from TopoTopo before its first public release) is a procedural geometry engine. A graph is a JSON
 file of named nodes with sparse parameters; the engine cooks it lazily from the output node, caches every result by a
 content signature, and re-cooks only what is downstream of an edit. The node library covers modelling (bevel, knife,
 bridge, quad fill, booleans, deformers), curves and splines (Bezier, NURBS, sweeps, fillets), UVs (xatlas unwrap, LSCM),

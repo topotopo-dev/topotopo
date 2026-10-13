@@ -24,7 +24,7 @@ import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-engine-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-engine-'));
 
 let failures = 0, passes = 0;
 const check = (cond: any, msg: string) => {

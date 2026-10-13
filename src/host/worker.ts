@@ -54,7 +54,7 @@ async function wrangleChunk(a: any, arrays: Record<string, any>, start: number, 
   try {
     realm.runGuarded(() => kernel(env), a.timeoutMs);
   } catch (e: any) {
-    throw Object.assign(wrangleRunError(e, a.bodyLine, a.code, a.timeoutMs), { polyforgeUser: true });
+    throw Object.assign(wrangleRunError(e, a.bodyLine, a.code, a.timeoutMs), { topotopoUser: true });
   }
 }
 
@@ -90,7 +90,7 @@ port.on('message', async (m: any) => {
     }
     port.postMessage({ type: 'result', id: m.id, ok: true, value, arrays: back }, transfer);
   } catch (e: any) {
-    port.postMessage({ type: 'result', id: m.id, ok: false, error: String(e?.message ?? e), stack: String(e?.stack ?? ''), user: !!e?.polyforgeUser });
+    port.postMessage({ type: 'result', id: m.id, ok: false, error: String(e?.message ?? e), stack: String(e?.stack ?? ''), user: !!e?.topotopoUser });
   }
 });
 

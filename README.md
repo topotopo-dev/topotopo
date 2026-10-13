@@ -1,4 +1,6 @@
-# Polyforge
+# TopoTopo
+
+*Formerly Polyforge; renamed before the first tagged release. Files written as `polyforge-*` still load.*
 
 A procedural geometry engine: Houdini-style node graphs, headless, deterministic, exports to Unreal, Blender and
 Houdini. You build JSON node graphs; the engine cooks them into geometry. It runs on Node and WebAssembly with no
@@ -17,7 +19,7 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   compiled from a Rust crate in [kernels/](kernels) to WebAssembly: deterministic, no native build.
 - **Time**: every cook happens at a frame. Only time-dependent nodes re-cook when the frame changes, and the `solver`
   node advances a simulation frame by frame from its cached previous state.
-- **Agent and MCP support**: Polyforge ships an MCP server, so LLM agents can build graphs in one call, read text
+- **Agent and MCP support**: TopoTopo ships an MCP server, so LLM agents can build graphs in one call, read text
   summaries, look at a multi-view **render**, edit incrementally with content-hash caching, and verify their work with
   `assert`, `explain` and `diff`. JS escape hatches (`wrangle` with `@P` syntax, `script`, `sdf_expr`) cover what the
   node library does not.
@@ -51,18 +53,18 @@ The design notes, including whether the browser is a limitation, are in [docs/DE
 
 Requires Node ≥ 22.18.
 
-**As a package.** The npm package ships compiled JavaScript (`dist/`) with a `polyforge` command:
+**As a package.** The npm package ships compiled JavaScript (`dist/`) with a `topotopo` command:
 
 ```bash
-npx polyforge --catalog                                      # node types by category
-npx polyforge --help-node scatter                            # one node's params, defaults and example
-npx polyforge graph.json --render out.png --export out.glb   # cook, render, export
-npx polyforge mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
+npx topotopo --catalog                                      # node types by category
+npx topotopo --help-node scatter                            # one node's params, defaults and example
+npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
+npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
 
 The package is not on npm yet. Until it is, build the tarball from a clone and install that:
-`npm pack`, then `npm install -g ./polyforge-0.1.0.tgz` (or into a project), and run `polyforge …`.
-`import { Engine } from 'polyforge'` gives the engine API (`src/index.ts`) with its type declarations.
+`npm pack`, then `npm install -g ./topotopo-0.1.0.tgz` (or into a project), and run `topotopo …`.
+`import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations.
 
 **From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for
 working on the code or running the tests. `npm run build` (run by `npm pack`) compiles `src/` to `dist/` for the package.
@@ -92,22 +94,22 @@ npm run preview
 
 **Threads.** Heavy per-element work (noise displacement, attribute noise, occlusion rays, point wrangles) runs in
 chunks on a pool of worker threads, and independent graph branches cook concurrently. The output is the same bit for
-bit with or without it. `POLYFORGE_WORKERS` sets the number of threads (default: CPU threads − 1; `0` turns the pool
-off). Threads start on first use and stop after 30 s idle (`POLYFORGE_WORKERS_IDLE_MS`); small inputs stay on the main
+bit with or without it. `TOPOTOPO_WORKERS` sets the number of threads (default: CPU threads − 1; `0` turns the pool
+off). Threads start on first use and stop after 30 s idle (`TOPOTOPO_WORKERS_IDLE_MS`); small inputs stay on the main
 thread. Details in [docs/DESIGN.md](docs/DESIGN.md#worker-pool).
 
 ### Connect to Claude Code
-With the package, the server is the `mcp` subcommand of the `polyforge` command:
+With the package, the server is the `mcp` subcommand of the `topotopo` command:
 
 ```bash
-claude mcp add polyforge -- npx -y polyforge mcp --workspace /absolute/path/to/workspace
+claude mcp add topotopo -- npx -y topotopo mcp --workspace /absolute/path/to/workspace
 ```
 
 From a clone, the repository includes [.mcp.json](.mcp.json) (it runs `node src/mcp/server.ts`), so opening a Claude
-Code session in this folder offers the `polyforge` server. To register a clone from anywhere, use an absolute path:
+Code session in this folder offers the `topotopo` server. To register a clone from anywhere, use an absolute path:
 
 ```bash
-claude mcp add polyforge -- node /absolute/path/to/polyforge/src/mcp/server.ts --workspace /absolute/path/to/polyforge/workspace
+claude mcp add topotopo -- node /absolute/path/to/topotopo/src/mcp/server.ts --workspace /absolute/path/to/topotopo/workspace
 ```
 
 ### Other MCP clients (Claude Desktop, …)
@@ -115,18 +117,18 @@ With the package:
 ```json
 {
   "mcpServers": {
-    "polyforge": {
+    "topotopo": {
       "command": "npx",
-      "args": ["-y", "polyforge", "mcp", "--workspace", "C:/path/to/workspace"]
+      "args": ["-y", "topotopo", "mcp", "--workspace", "C:/path/to/workspace"]
     }
   }
 }
 ```
-From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/to/polyforge/src/mcp/server.ts",
-"--workspace", "C:/path/to/polyforge/workspace"]` (`node src/cli.ts mcp …` is the same server).
+From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/to/topotopo/src/mcp/server.ts",
+"--workspace", "C:/path/to/topotopo/workspace"]` (`node src/cli.ts mcp …` is the same server).
 
-Options: `--viewer` (start the live preview immediately), or set `POLYFORGE_PORT`, `POLYFORGE_WORKSPACE`,
-`POLYFORGE_SCRIPT_TIMEOUT_MS` and `POLYFORGE_WORKERS`. The server exits when the client closes its stdin.
+Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_WORKSPACE`,
+`TOPOTOPO_SCRIPT_TIMEOUT_MS` and `TOPOTOPO_WORKERS`. The server exits when the client closes its stdin.
 
 ## MCP tools
 
@@ -183,7 +185,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 
 A graph is code: `"=expr"` params and the code of `wrangle`, `script`, `sdf_expr` and similar nodes are JavaScript
 taken from the graph JSON. On Node, expressions and wrangles run sandboxed in separate `vm` realms with a timeout
-(`POLYFORGE_SCRIPT_TIMEOUT_MS`, default 30 s): an expression sees only graph vars, the cook time, `Math` and the
+(`TOPOTOPO_SCRIPT_TIMEOUT_MS`, default 30 s): an expression sees only graph vars, the cook time, `Math` and the
 documented helpers (no `process`, `require`, `import`, `fetch` or `globalThis`), and a runaway loop fails its node
 instead of hanging the process. That contains mistakes, not attackers: sandboxed code can still allocate memory and
 burn CPU until the timeout, and a `vm` realm is not a hard security boundary. Do not cook graphs from untrusted sources
@@ -259,7 +261,7 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 
 ## Shelf
 
-[shelf/](shelf) holds ready-made graph assets (Polyforge's answer to a shelf of HDAs): walls with windows and doors,
+[shelf/](shelf) holds ready-made graph assets (TopoTopo's answer to a shelf of HDAs): walls with windows and doors,
 whole houses, roofs (gable, hip, and straight-skeleton roofs for any footprint), stairs, railings and fences, bricks and
 tiles, props, trees and rocks, and PCG helpers that dress a road or a terrain. The engine registers them on startup as
 node types of category `shelf`, so a graph uses one like any node:
@@ -333,7 +335,7 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
 | shelf | `npm run test:shelf [-- filter]` | every shelf asset: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; index, thumbnails and README table current; workspace override precedence; `assets` list / delete / fork |
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
-| pool | `npm run test:pool` | worker pool: lazy start, close, transfer round trips, every ported node bit-identical with the pool on and off, concurrent branches and shared in-flight cooks, the lazy switch, kernel errors, crashes and timeouts, the size threshold, the CLI and MCP server exiting; `test:pool` also runs the golden layer with every kernel forced onto the pool. `npm test` passes with `POLYFORGE_WORKERS=0` and with the default |
+| pool | `npm run test:pool` | worker pool: lazy start, close, transfer round trips, every ported node bit-identical with the pool on and off, concurrent branches and shared in-flight cooks, the lazy switch, kernel errors, crashes and timeouts, the size threshold, the CLI and MCP server exiting; `test:pool` also runs the golden layer with every kernel forced onto the pool. `npm test` passes with `TOPOTOPO_WORKERS=0` and with the default |
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.
@@ -362,13 +364,13 @@ node or param change; `npm test` fails while it is stale.
 **Benchmarks.** `npm run bench` times named cooks (scatter, copy, packed copy, unpack, subdivide, boolean, noise,
 wrangle, SDF meshing, triangulate, merge, fuse) against targets from the roadmap and prints a Markdown table. `--quick` uses smaller sizes,
 `--filter name` selects cases. Results go to `bench/last.json`; `bench/baseline.json` is a reference run (informational,
-never failing). Compare with the thread pool off: `POLYFORGE_WORKERS=0 npm run bench -- --filter noise`.
+never failing). Compare with the thread pool off: `TOPOTOPO_WORKERS=0 npm run bench -- --filter noise`.
 `node bench/expr.ts` cooks graphs with 1000 `"=expr"` params (cold and cached) to time the expression sandbox.
 
 CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test` on Node 22 and 24 for every push and pull request.
 
 **Package.** `npm run pack:test` builds and packs the npm tarball, installs it into an empty project in a temp
-directory and uses it from there: the `polyforge` bin (help, cooking an example with a render), the library import and
+directory and uses it from there: the `topotopo` bin (help, cooking an example with a render), the library import and
 its types, the shelf, the bundled font, the worker pool, the WASM kernels and the MCP server over stdio. It takes about
 a minute and is not part of `npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
