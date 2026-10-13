@@ -107,7 +107,8 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P3-B | `particles`: seeded emitters, drag/wind/curl noise/attract, mesh and floor collisions, trails as polylines, time-model aware, pool parity | running (agent) | launched 2026-10-14; src/core/particles.ts, src/nodes/particles.ts |
 | P3-C | `drape` (XPBD cloth: stretch/shear/bend compliance, pins, collisions, wind) and `inflate` (pressure) | running (agent) | launched 2026-10-14; src/core/xpbd.ts, src/nodes/cloth.ts |
 | P3-D | Optional OCCT module (CAD fillets, STEP) | queued | separately loaded module; licence LGPL-2.1 with exception: decide before starting |
-| R-12 | Follow-ups: guard `heightfield_layer`/`sdf_expr` expressions, scatter mask path on the pool, weak examples, roof_skeleton wording | running (agent) | launched 2026-10-14 |
+| R-12 | Follow-ups: guard `heightfield_layer`/`sdf_expr` expressions, scatter mask path on the pool, weak examples, roof_skeleton wording | merged | 9436b46, 2026-10-14. Both nodes now syntax-check and run under the script timeout (9 hostile cases each, pool off/on); `scatter_elim_lists` kernel (mask rebuild 450–550 → 170–260 ms, SharedArrayBuffer inputs passed to workers without copying); mesh_repair gained `warn`; 217 examples cook with 0 warnings |
+| R-13 | Remaining hang paths found by R-12: `wrangle`/`script` read a thrown value's `message` outside the timeout (`throw { get message() { while(true){} } }` hangs); `parametric_curve`/`parametric_surface` can be escaped at compile time and report the raw "Script execution timed out"; an `sdf_expr` volume sampled later by `sdf_to_mesh`/grid nodes runs unguarded inside manifold's levelSet; `src/graph/parallel.ts` exports a function named `then` (breaks dynamic import). Also: make `test/examples.ts` fail on warnings once the P3 nodes are in | queued | small, one agent |
 
 ### Release and outreach (after Phase 2)
 | id | item | status | notes |
@@ -133,6 +134,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-14: R-12 merged (9436b46). R-13 queued for the hang paths R-12 found outside its scope.
 - 2026-10-14: Phase 3 simulation-lite started: P3-A (Rapier RBD), P3-B (particles), P3-C (XPBD cloth) and R-12 (follow-ups) launched as Opus agents in parallel with Codex session 7 (quad remesher). Release steps (repo rename, public, placeholder publish) wait for the user.
 - 2026-10-14: Codex session 6 merged (71c0cd7): SIMD WASM by default with scalar fallback, erosion pipe model 3.2 s native. Session 7 (K-3b quad remesher) launched.
 - 2026-10-14: **R-4 rename done** (8391fc5): the code says TopoTopo everywhere. Awaiting the user: GitHub repo rename to topotopo-dev/topotopo, public flip, npm placeholder publish (user present for 2FA). Codex session 6 (SIMD default) launched from the renamed main.
