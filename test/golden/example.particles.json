@@ -1,0 +1,72 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "age:float:1",
+        "curveu:float:1",
+        "debris:float:1",
+        "flow:float:1",
+        "height:float:1",
+        "id:int:1",
+        "life:float:1",
+        "mask:float:1",
+        "pscale:float:1",
+        "sediment:float:1",
+        "slope:float:1",
+        "uv:float:3",
+        "v:float:3",
+        "water:float:1"
+      ],
+      "prim": ["id:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [19, 3.767, 10],
+      "min": [-10.7679, -0.2271, -11.3186]
+    },
+    "counts": {
+      "points": 51222,
+      "prims": 11875,
+      "vertices": 81162,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "26989d5d5ebc1b3f",
+      "attributes": {
+        "point.Cd": "de7f0ecda2341c0f",
+        "point.N": "8bc2c40e827e9bec",
+        "point.age": "d8cd48f8964dfe2e",
+        "point.curveu": "b0fb9db798c1d259",
+        "point.debris": "43359b8f3eed29fd",
+        "point.flow": "c0fe78b25a01b4a0",
+        "point.height": "a66e35ee29eeb838",
+        "point.id": "51d29b100d5fb416",
+        "point.life": "891b0e6a833ca554",
+        "point.mask": "f99ffad7880da66d",
+        "point.pscale": "e1117ae5f340bc07",
+        "point.sediment": "77a1420da45748e3",
+        "point.slope": "d55db727f945a1d1",
+        "point.uv": "8e6222d59dad4f7f",
+        "point.v": "4abf796628d6c994",
+        "point.water": "923e788e84a8071c",
+        "prim.id": "b641a903c78b8039"
+      },
+      "topology": "1ff1584e8d4b676c"
+    }
+  },
+  "name": "example.particles",
+  "ok": true,
+  "source": "examples/particles.json",
+  "warnings": []
+}
