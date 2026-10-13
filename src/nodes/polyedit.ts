@@ -315,7 +315,13 @@ defineNode({
     remove_degenerate: { type: 'bool', default: true, desc: 'drop polygons with fewer than 3 distinct points or no area' },
   },
   outputs: 'prim group dissolved (merged polygons)',
-  example: { type: 'dissolve', params: { group: 'loop:p4-5' } },
+  example: {
+    nodes: {
+      grid: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
+      d: { type: 'dissolve', in: ['grid'], params: { group: 'loop:p10-17' } },
+    },
+    output: 'd',
+  },
   cook: ({ input, p, warn }) => {
     const g = input(0);
     let es: EdgeSet, forced: Uint8Array | null = null;

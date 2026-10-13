@@ -111,6 +111,8 @@ mod tests {
                 u: [0.; 3],
                 q: [0.; 3],
                 curve: [0.; 3],
+                direction: [0.; 3],
+                position_constraint: false,
                 alive: true,
                 fixed: false,
                 locked: false,

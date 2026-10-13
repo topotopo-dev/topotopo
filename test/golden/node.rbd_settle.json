@@ -1,0 +1,47 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "contacts:int:1", "settled:int:1", "v:float:3", "w:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.6528, 0.235, 0.6667],
+      "min": [-0.6091, -0.0463, -0.6678]
+    },
+    "counts": {
+      "points": 25,
+      "prims": 25,
+      "vertices": 25,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "8929176bc57e05fd",
+      "attributes": {
+        "point.contacts": "c1c773c429d9f7de",
+        "point.settled": "c1c773c429d9f7de",
+        "point.v": "2a4f29a53a665e9f",
+        "point.w": "eb70c5fdc33873d7",
+        "prim.copynum": "762e2c7dc24b6407"
+      },
+      "topology": "60979e868344657c"
+    },
+    "packed": {
+      "hash": "05354180e604f6e2",
+      "instances": 25,
+      "sources": ["6e4060660388115c"]
+    }
+  },
+  "name": "node.rbd_settle",
+  "ok": true,
+  "source": "fixture for node type \"rbd_settle\" (test/fixtures.ts)",
+  "warnings": []
+}

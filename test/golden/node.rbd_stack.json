@@ -1,0 +1,47 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "contacts:int:1", "settled:int:1", "v:float:3", "w:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.3693, 1.1936, 0.2978],
+      "min": [-0.1515, -0.0013, -0.1262]
+    },
+    "counts": {
+      "points": 6,
+      "prims": 6,
+      "vertices": 6,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "4627c3543b1f987e",
+      "attributes": {
+        "point.contacts": "9aa8d786f3a98dfc",
+        "point.settled": "f5587e257270bedf",
+        "point.v": "7e2129e98a82f8b3",
+        "point.w": "3dda9ccf29482de5",
+        "prim.copynum": "67c5cfe4637878be"
+      },
+      "topology": "f19c4ec446d56e9e"
+    },
+    "packed": {
+      "hash": "457b6fdb5ca12159",
+      "instances": 6,
+      "sources": ["55967a4b015515b1"]
+    }
+  },
+  "name": "node.rbd_stack",
+  "ok": true,
+  "source": "fixture for node type \"rbd_stack\" (test/fixtures.ts)",
+  "warnings": []
+}

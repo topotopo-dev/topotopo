@@ -403,6 +403,18 @@ const CASES: Case[] = [
     }),
   },
   {
+    name: 'particles_100k',
+    what: (q) => `particles: ${k(q ? 1e4 : 1e5)} particles × 200 steps falling and bouncing on a floor (emit_all, velocity_var 2)`,
+    elements: (q) => (q ? 1e4 : 1e5) * 200, unit: 'particle-steps',
+    target: 3000, targetSource: 'P3-B (100k × 200 steps with floor collisions under 3 s with the pool)',
+    graph: (q) => ({
+      nodes: {
+        p: { type: 'point_grid', params: { counts: [50, 1, q ? 200 : 2000], size: [10, 0, q ? 40 : 400], center: [0, 5, 0] } },
+        target: { type: 'particles', in: ['p'], params: { steps: 200, emit_all: true, emit_rate: 0, velocity_var: 2, floor: true, collide: 'bounce', seed: 1 } },
+      },
+    }),
+  },
+  {
     name: 'drape_100x100',
     what: (q) => `drape: a ${q ? 50 : 100}×${q ? 50 : 100} cloth, 200 steps over a 5k-triangle sphere and the floor`,
     elements: (q) => (q ? 51 : 101) ** 2 * 200, unit: 'point-steps',

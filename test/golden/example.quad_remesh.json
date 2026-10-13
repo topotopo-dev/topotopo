@@ -6,6 +6,7 @@
         "edge_length_max:float:1",
         "edge_length_mean:float:1",
         "edge_length_min:float:1",
+        "irregular_fraction:float:1",
         "materials:string:1",
         "planarity_max:float:1",
         "planarity_mean:float:1",
@@ -22,9 +23,9 @@
       "min": [-4.1272, -2.1327, -0.8878]
     },
     "counts": {
-      "points": 4667,
-      "prims": 5918,
-      "vertices": 21138,
+      "points": 3329,
+      "prims": 4582,
+      "vertices": 15790,
       "volumes": 0
     },
     "groups": {
@@ -34,27 +35,28 @@
       "vertex": []
     },
     "hashes": {
-      "P": "2ff88a7e897ae5a8",
+      "P": "5c9aad894872d21b",
       "attributes": {
-        "detail.edge_length_max": "6a6f50858d8aa2ff",
-        "detail.edge_length_mean": "7e1eca14fa2c88a2",
-        "detail.edge_length_min": "1b5bb2c9f95b26e3",
+        "detail.edge_length_max": "98dd0ad5c7bc4daf",
+        "detail.edge_length_mean": "92e921319493704f",
+        "detail.edge_length_min": "4545c0b9049704f3",
+        "detail.irregular_fraction": "c7a5ffcbafd0ad31",
         "detail.materials": "84592c4b99e26c29",
-        "detail.planarity_max": "05ff2a32341d5d88",
+        "detail.planarity_max": "fe4c67677d15975d",
         "detail.planarity_mean": "6ec84d0aa9487970",
-        "detail.quad_fraction": "4d10805d51b04c67",
-        "detail.singularities": "b734a5335fca2a89",
+        "detail.quad_fraction": "e025e8edae4b2517",
+        "detail.singularities": "86ec6a6d0784a397",
         "detail.target_edge_length": "30a8db0ab2cc57c4",
         "group.edge.bevel_edges": "c324422843d384ae",
-        "group.prim.bevel": "bd91df113d6b8823",
-        "group.prim.bevel_corner": "5bc0a8a9c3c2a97b",
-        "prim.material": "93d554a1684c635b",
-        "prim.name": "93d554a1684c635b",
-        "vertex.Cd": "38b06529aadf485b",
-        "vertex.N": "5e400556f393fbf8",
-        "vertex.uv": "a122f9d1cb86f073"
+        "group.prim.bevel": "e4ec7660b4e40722",
+        "group.prim.bevel_corner": "12ee0008eabd3466",
+        "prim.material": "3ad5bcb9e49be74b",
+        "prim.name": "3ad5bcb9e49be74b",
+        "vertex.Cd": "f7bd7ffd9178e9cf",
+        "vertex.N": "95399bcc4738103a",
+        "vertex.uv": "114cee901a71e346"
       },
-      "topology": "9780a7bde4b1ae53"
+      "topology": "f8c301ac9fbde292"
     }
   },
   "name": "example.quad_remesh",

@@ -27,4 +27,6 @@ import './measure.ts';
 import './pcg.ts';
 import './texture.ts';
 import './bake.ts';
+import './particles.ts';
+import './rbd.ts';
 import './cloth.ts';
