@@ -517,7 +517,7 @@ so the dependency costs nothing until a graph uses it, and a browser bundle spli
   static pieces (`active` = 0). Smooth pieces with more than `hull_points` (64) hull vertices are reduced: a greedy on
   the support function (start from the extremes along 26 directions, then add the vertex that gives the full hull's
   support in the direction where the chosen set falls shortest, over the hull's face normals and 256 sphere directions;
-  one quickhull at the end). Collision cost grows with hull size (1,000 shelf rocks: 3.9 s exact, 2.2 s reduced); a
+  one quickhull at the end). Collision cost grows with hull size (1,000 shelf rocks: 3.5 s exact, 2.1 s reduced); a
   reduced piece can sink in by the remaining shortfall, about 3 % of its radius for the shelf rock and at most 4.7 % in
   `test/rbd.ts`. Input 1 (terrain, heightfields as the triangles `heightfield_to_mesh` draws, containers, earlier settled
   pieces; packed input expanded) is one static trimesh with Rapier's internal-edge fix (two-sided); without it a ground
@@ -545,19 +545,21 @@ so the dependency costs nothing until a graph uses it, and a browser bundle spli
   world of its last two signatures, so cooking frame 11 after frame 10 runs only the steps in between, and the last
   frame equals the settled cook bit for bit.
 
-Measured (i7-10700K, while other jobs kept the machine at 95–100 % CPU, so idle numbers are lower):
+Measured (i7-10700K; other jobs kept the machine at 50–100 % CPU, so idle numbers are lower; the whole cook of the
+node, Rapier loaded):
 
 | case | time | steps |
 |---|---|---|
-| 1,000 packed shelf rocks (151 hull vertices → 64) dropped 1–2 m onto the ground | 2.2–2.4 s (4.3 s at 100 % load) | 355–430 |
-| the same with exact hulls (`hull_points` 0) | 3.9 s | 475 |
-| 1,000 packed boxes / ico spheres | 1.3 s / 1.5 s | 180 / 255 |
-| 1,000 unpacked rocks (a hull per piece) | 5.2 s (build 0.7–2.5 s) | 360 |
-| 1,000 rocks in a 10-layer column, 223 starting in contact | 6.1 s | 405 |
-| `examples/rbd_settle.json`: 116 rocks on a 51k-triangle terrain, then 16 crates | 2.0–2.5 s + 0.3–0.7 s | 590 / 535 |
+| 1,000 packed shelf rocks (151 hull vertices → 64) dropped 1–2 m onto the ground | 2.1 s (3.5 s at 100 % load) | 325–415 |
+| the same with exact hulls (`hull_points` 0) | 3.5 s | 475 |
+| 1,000 packed boxes / ico spheres (42 vertices) | 0.9 s / 1.4 s | 190 / 255 |
+| 1,000 unpacked rocks (a hull per piece, 162k points written back) | 3.7 s | 335 |
+| 1,000 rocks in a 10-layer column, 219 starting in contact | 5.5 s | 440 |
+| `examples/rbd_settle.json`: 116 rocks on a 51k-triangle terrain, then 16 crates | 2.6 s + 0.35 s | 720 / 545 |
 
-Per step, a convex piece resting on the ground plane costs a few µs; on a triangle mesh it touches tens of triangles,
-which makes terrain contacts the main cost (the showcase rocks: about 7 ms per step for 116 pieces).
+Most of the time goes to the first second or two, while every piece is awake; sleeping pieces cost nothing. A piece
+on a triangle mesh touches tens of triangles, so terrain contacts are the main cost (the showcase rocks: 3.6 ms
+per step on average over 720 steps for 116 pieces).
 
 ## What makes it LLM-friendly
 
