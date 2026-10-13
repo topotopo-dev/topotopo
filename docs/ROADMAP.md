@@ -3,6 +3,11 @@
 Status as of 2026-10-12: 96 node types, ~12k lines of TypeScript, immutable geometry with provenance-preserving
 `GeoBuilder`, content-hashed lazy cooking, MCP server, software renderer, 10 example graphs, 322 lines of tests.
 
+> **Status 2026-10-13.** Phases 0–2 below are implemented (167 node types, 36 shelf assets, 226 golden tests, 25 rendered
+> examples, worker pool, exporters for Unreal/Blender/Houdini). Remaining before the first release: the Unreal round trip
+> (P2-G), the rename to TopoTopo, a tagged v0.2, and the docs pass. Phase 3 starts with procedural textures (new, see
+> §6a), then volumes, simulation and CAD. Live item status: [WORKLOG.md](WORKLOG.md).
+
 The target is parity with Houdini SOPs, Blender Geometry Nodes and Unreal PCG for **creating geometry**: modelling,
 procedural assembly, scattering and instancing, terrain, curves, volumes, and the export that feeds engines. Rendering,
 character tools and film-scale simulation are out of scope.
@@ -270,6 +275,15 @@ no outside contributors; adopt a CLA or DCO before accepting external pull reque
 
 ---
 
+### 6a. Procedural textures and bakes (Phase 3, first)
+Assets must ship with textures and never depend on files whose licence is unknown. A Substance-Designer-style image
+node family (category `texture`): generators (noise, patterns, cells, shapes, gradients, splatter), filters (blend,
+levels, blur, warp, transform, edge detect, normal from height, height to AO, channel packing, colorize, tile
+sampler), and bakes from geometry in UV space (AO, curvature, thickness, position/normal, island ids, masks from
+groups, vertex colour, high-to-low height). Images are 2D float layers carried on the geometry like heightfields and
+referenced by materials as `image:<name>`; glTF embeds them, USD writes them next to the file, `textures` export writes
+PNGs. A `texture` render view and persp texture sampling let agents look at the result. (In progress as P3-T.)
+
 ## 6. Sequencing
 
 Each phase ends with golden tests and example renders. Performance work runs alongside every phase.
@@ -284,3 +298,27 @@ Each phase ends with golden tests and example renders. Performance work runs alo
 
 Suggested first sprint: phase 0 tests and benchmarks, then edge groups + half-edge + `polybevel`. Bevel is the node
 that proves the topology layer and that artists check first.
+
+## 7. Release and grants (after Phase 2)
+
+Facts checked on 2026-10-13:
+- **Epic MegaGrants** runs two submission cycles a year. 2026: cycle 1 January 12 – March 20 (notices June 15–19),
+  cycle 2 June 29 – September 4 (notices December 7–11). Both are closed; the next window is expected to be cycle 1 of
+  2027, opening around January 2027 with notices around June 2027. Typical awards are $5,000–$75,000, exceptional
+  projects up to $150,000. Open-source tools "building or enhancing open-source tools with Unreal Engine" are an
+  eligibility category; the stated criteria are the creative and innovative nature of the project, use of (or a
+  project built around) Unreal Engine, and contribution to the open-source 3D graphics ecosystem. Confirm on the
+  official MegaGrants page and FAQ before submitting.
+- **NLnet**: the NGI Zero Commons Fund ended with its 13th call (June 1, 2026). Open now: the Restack and CodeSupply
+  funds plus an open call, deadline November 3, 2026, 12:00 CET, grants €5,000–€50,000, strictly open source,
+  mostly for Horizon-Europe-eligible applicants. NLnet states that AI-generated projects or proposals are not of
+  interest and the form requires a disclosure of generative-AI use. This project is largely AI-implemented; any
+  application must say so plainly, which makes NLnet a weak fit.
+
+Plan toward a MegaGrants cycle-1-2027 submission:
+1. Unreal 5.8 round trip verified in the editor (landscape bundle, instanced GLB, PCG stream), with screenshots.
+2. Rename to TopoTopo in one commit, tag v0.2, publish to npm, public repository, CI back on.
+3. A 2–3 minute demo video: graph → terrain + instances → Unreal, plus an agent building and verifying a prop.
+4. Application text drafted from ROADMAP and WORKLOG: problem, what exists (numbers), what the grant funds
+   (milestones with costs), why it helps the Unreal and open-source 3D community, team and track record.
+5. Optional: textures (P3-T) in the demo so assets arrive in Unreal with materials.
