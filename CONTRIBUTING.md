@@ -12,7 +12,7 @@ Thanks for your interest. A few things to know before you start.
   `npm run test:update` for its golden, add behavioural checks to the matching `test/*.ts`, and run `npm run docs`.
 - **Keep the core host-agnostic.** `src/core`, `src/graph` and `src/nodes` must not import Node APIs. Cooked geometry
   is immutable: `clone()` before writing. Y-up, metres, degrees, Houdini attribute names.
-- **Licences.** Dependencies must be MIT, Apache-2.0, BSD, ISC or MPL-2.0. No GPL or AGPL anywhere in the tree.
+- **Licences.** Dependencies that ship must be MIT, Apache-2.0, BSD, ISC or MPL-2.0; build-time-only tooling may use other OSI-approved permissive licences (Unicode-3.0, Zlib, CC0). No GPL or AGPL anywhere in the tree.
   Run `npm run notice` after adding one so `NOTICE` carries its licence text.
 
 ## Before you open a pull request
