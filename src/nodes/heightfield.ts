@@ -673,6 +673,11 @@ defineNode({
         if (ident.test(id) && used(id)) { const o = other; B[name] = (x, z) => o.sampleArray(a, x, z); decl.push(`const ${id} = __B[${JSON.stringify(name)}](x, z);`); }
       }
       const body = /\breturn\b/.test(code) ? code : `return (${code});`;
+      // run like a wrangle: the body is parsed on its own first (a complete function body cannot close the wrapper
+      // it is pasted into, so nothing runs while compiling), and the whole layer is computed under the host's time
+      // limit, which also covers async continuations and reading the message of whatever the code throws
+      const syntax = engine.host.checkSyntax?.(`"use strict";${body}`);
+      if (syntax) throw new NodeError(`${ctx.type}: expression syntax error: ${syntax.message}${code.includes('\n') ? ` (line ${syntax.line})` : ''}`);
       let make;
       try {
         make = engine.host.compile(`(function(__L, __B, vars){ "use strict"; return function(k, i, j, x, z, u, v, cell, value){ ${decl.join(' ')}\n${body}\n}; })`);
@@ -682,19 +687,27 @@ defineNode({
       const f = make(L, B, vars);
       const old = hf.read(p.layer);
       const res = new Float32Array(hf.count);
-      let bad = 0;
+      let bad = 0, failed: string | undefined;
       try {
-        for (let j = 0; j < hf.height; j++)
-          for (let i = 0; i < hf.width; i++) {
-            const k = j * hf.width + i;
-            const r = f(k, i, j, hf.x(i), hf.z(j), i / (hf.width - 1), j / (hf.height - 1), hf.cellSize, old[k]);
-            const n = typeof r === 'number' ? r : typeof r === 'boolean' ? +r : NaN;
-            if (!Number.isFinite(n)) { if (!bad && typeof r !== 'number') throw new Error(`expression returned ${Array.isArray(r) ? 'an array' : typeof r}, expected a number`); bad++; res[k] = 0; }
-            else res[k] = n;
+        engine.host.runGuarded(() => {
+          try {
+            for (let j = 0; j < hf.height; j++)
+              for (let i = 0; i < hf.width; i++) {
+                const k = j * hf.width + i;
+                const r = f(k, i, j, hf.x(i), hf.z(j), i / (hf.width - 1), j / (hf.height - 1), hf.cellSize, old[k]);
+                const n = typeof r === 'number' ? r : typeof r === 'boolean' ? +r : NaN;
+                if (!Number.isFinite(n)) { if (!bad && typeof r !== 'number') throw new Error(`expression returned ${Array.isArray(r) ? 'an array' : typeof r}, expected a number`); bad++; res[k] = 0; }
+                else res[k] = n;
+              }
+          } catch (e: any) {
+            try { const m = e?.message; failed = typeof m === 'string' ? m : String(e); } catch { failed = 'an exception that cannot be described'; }
           }
+        }, engine.scriptTimeoutMs);
       } catch (e: any) {
-        throw new NodeError(`${ctx.type}: ${e.message}`);
+        if (/timed out/i.test(String(e?.message))) throw new NodeError(`${ctx.type}: expression exceeded ${engine.scriptTimeoutMs} ms (infinite loop?)`);
+        throw new NodeError(`${ctx.type}: ${e?.message ?? e}`);
       }
+      if (failed !== undefined) throw new NodeError(`${ctx.type}: ${failed}`);
       if (bad) ctx.warn(`${bad} sample(s) gave NaN or infinity; written as 0`);
       writeLayer(hf, p.layer, mask, (k) => res[k]);
     });
