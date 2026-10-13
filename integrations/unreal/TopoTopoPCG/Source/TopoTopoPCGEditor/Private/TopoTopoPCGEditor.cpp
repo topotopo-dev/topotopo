@@ -19,8 +19,6 @@
 #include "InterchangeManager.h"
 #include "InterchangeSourceData.h"
 #include "Landscape.h"
-#include "LandscapeImportHelper.h"
-#include "LandscapeInfo.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -30,6 +28,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "ToolMenus.h"
 #include "TopoTopoStream.h"
+#include "TopoTopoLandscapeImport.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -54,19 +53,9 @@ struct FOptions
     FString Directory;
     FString Destination = TEXT("/Game/TopoTopo/PluginDemo");
     bool bLandscape = false;
+    bool bLayers = true;
+    bool bMaterial = true;
     bool bExpandedObjects = true;
-};
-
-struct FLandscapeData
-{
-    FString Filename;
-    int32 Width = 0;
-    int32 Height = 0;
-    int32 Sections = 0;
-    int32 Quads = 0;
-    FVector Location = FVector::ZeroVector;
-    FVector Scale = FVector::OneVector;
-    TArray<uint16> Heights;
 };
 
 static bool ReadJSON(const FString& File, TSharedPtr<FJsonObject>& Out, FString& Error)
@@ -80,19 +69,6 @@ static bool ReadJSON(const FString& File, TSharedPtr<FJsonObject>& Out, FString&
     return true;
 }
 
-static bool ReadVector(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field, FVector& Out)
-{
-    const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-    if (!Object->TryGetArrayField(Field, Values) || Values->Num() != 3) { return false; }
-    for (int32 I = 0; I < 3; ++I)
-    {
-        double Value;
-        if (!(*Values)[I]->TryGetNumber(Value) || !FMath::IsFinite(Value)) { return false; }
-        Out[I] = Value;
-    }
-    return true;
-}
-
 static bool BundleFile(const FString& Directory, const FString& Relative, FString& Out, FString& Error)
 {
     Out = FPaths::ConvertRelativePathToFull(Directory, Relative);
@@ -101,78 +77,6 @@ static bool BundleFile(const FString& Directory, const FString& Relative, FStrin
     if (!FPaths::IsRelative(Relative) || !FPaths::IsUnderDirectory(Out, Directory) || !FPaths::FileExists(Out))
     {
         Error = FString::Printf(TEXT("Missing file or path outside bundle: %s"), *Relative);
-        return false;
-    }
-    return true;
-}
-
-static bool ReadLandscape(const FString& Directory, FLandscapeData& Out, FString& Error)
-{
-    TSharedPtr<FJsonObject> Manifest;
-    if (!ReadJSON(Directory / TEXT("landscape.json"), Manifest, Error)) { return false; }
-    FString Format;
-    double Version = 0;
-    const TSharedPtr<FJsonObject>* Settings = nullptr;
-    const TSharedPtr<FJsonObject>* Heightmap = nullptr;
-    bool bExact = false;
-    if (!Manifest->TryGetStringField(TEXT("format"), Format) ||
-        (Format != TEXT("topotopo-unreal-landscape") && Format != TEXT("polyforge-unreal-landscape")) ||
-        !Manifest->TryGetNumberField(TEXT("version"), Version) || Version != 1 ||
-        !Manifest->TryGetObjectField(TEXT("landscape"), Settings) ||
-        !Manifest->TryGetObjectField(TEXT("heightmap"), Heightmap) ||
-        !(*Settings)->TryGetBoolField(TEXT("exact_fit"), bExact) || !bExact)
-    {
-        Error = TEXT("Landscape requires a version 1 topotopo-unreal-landscape (or legacy polyforge-unreal-landscape) manifest with exact_fit=true. Resample non-exact bundles before importing.");
-        return false;
-    }
-    const TArray<TSharedPtr<FJsonValue>>* Resolution = nullptr;
-    double Width, Height, Sections, Quads;
-    FString Relative;
-    if (!(*Heightmap)->TryGetStringField(TEXT("file"), Relative) ||
-        !(*Settings)->TryGetArrayField(TEXT("overall_resolution"), Resolution) || Resolution->Num() != 2 ||
-        !(*Resolution)[0]->TryGetNumber(Width) || !(*Resolution)[1]->TryGetNumber(Height) ||
-        !(*Settings)->TryGetNumberField(TEXT("sections_per_component"), Sections) ||
-        !(*Settings)->TryGetNumberField(TEXT("section_size_quads"), Quads) ||
-        !ReadVector(*Settings, TEXT("actor_location_cm"), Out.Location) || !ReadVector(*Settings, TEXT("scale"), Out.Scale))
-    {
-        Error = TEXT("Landscape manifest is missing valid resolution, component layout, location or scale.");
-        return false;
-    }
-    if (Width < 2 || Height < 2 || Width > 8193 || Height > 8193 ||
-        Width != FMath::FloorToDouble(Width) || Height != FMath::FloorToDouble(Height) ||
-        (Sections != 1 && Sections != 2) || (Quads != 7 && Quads != 15 && Quads != 31 && Quads != 63 && Quads != 127 && Quads != 255) ||
-        Out.Scale.X <= 0 || Out.Scale.Y <= 0 || Out.Scale.Z <= 0)
-    {
-        Error = TEXT("Unsupported Landscape dimensions/layout/scale (maximum 8193 samples per side).");
-        return false;
-    }
-    Out.Width = static_cast<int32>(Width);
-    Out.Height = static_cast<int32>(Height);
-    Out.Sections = static_cast<int32>(Sections);
-    Out.Quads = static_cast<int32>(Quads);
-    if ((Out.Width - 1) % (Out.Sections * Out.Quads) != 0 || (Out.Height - 1) % (Out.Sections * Out.Quads) != 0)
-    {
-        Error = TEXT("Landscape resolution does not fit its component grid.");
-        return false;
-    }
-    if (!BundleFile(Directory, Relative, Out.Filename, Error)) { return false; }
-    FLandscapeImportDescriptor Descriptor;
-    FText Message;
-    if (FLandscapeImportHelper::GetHeightmapImportDescriptor(Out.Filename, true, false, Descriptor, Message) == ELandscapeImportResult::Error)
-    {
-        Error = Message.ToString();
-        return false;
-    }
-    const int32 Index = Descriptor.FindDescriptorIndex(Out.Width, Out.Height);
-    if (Index == INDEX_NONE)
-    {
-        Error = TEXT("Heightmap dimensions do not match landscape.overall_resolution.");
-        return false;
-    }
-    if (FLandscapeImportHelper::GetHeightmapImportData(Descriptor, Index, Out.Heights, Message) == ELandscapeImportResult::Error ||
-        Out.Heights.Num() != Out.Width * Out.Height)
-    {
-        Error = TEXT("Could not decode the complete Landscape heightmap: ") + Message.ToString();
         return false;
     }
     return true;
@@ -309,7 +213,7 @@ static bool Run(FOptions Options, FString& Message)
         if (!PrototypeFiles.Contains(Pair.Key)) { Message = TEXT("No prototype GLB for Mesh '") + Pair.Key + TEXT("'."); return false; }
     }
     FLandscapeData LandscapeData;
-    if (Options.bLandscape && !ReadLandscape(Options.Directory, LandscapeData, Message)) { return false; }
+    if (Options.bLandscape && !ReadLandscape(Options.Directory, LandscapeData, Message, Options.bLayers)) { return false; }
     TArray<FString> Names;
     PrototypeFiles.GetKeys(Names);
     Names.Sort();
@@ -385,28 +289,21 @@ static bool Run(FOptions Options, FString& Message)
     }
     if (Options.bLandscape)
     {
-        ALandscape* Landscape = World->SpawnActor<ALandscape>(LandscapeData.Location, FRotator::ZeroRotator, Spawn);
-        if (!Landscape) { Message = TEXT("Instances imported, but Landscape actor creation failed. Changes remain unsaved."); return false; }
+        ALandscape* Landscape = ImportLandscape(World, LandscapeData, Options.Destination, Options.bMaterial, false, Message);
+        if (!Landscape) { return false; }
         Landscape->SetActorLabel(Actor->GetActorLabel() + TEXT("_Landscape"));
-        Landscape->SetActorScale3D(LandscapeData.Scale);
-        Landscape->StaticLightingLOD = FMath::DivideAndRoundUp(FMath::CeilLogTwo(
-            (LandscapeData.Width * LandscapeData.Height) / (2048 * 2048) + 1), static_cast<uint32>(2));
-        TMap<FGuid, TArray<uint16>> Heights;
-        Heights.Add(FGuid(), MoveTemp(LandscapeData.Heights));
-        TMap<FGuid, TArray<FLandscapeImportLayerInfo>> Layers;
-        Layers.Add(FGuid(), {});
-        Landscape->Import(FGuid::NewGuid(), 0, 0, LandscapeData.Width - 1, LandscapeData.Height - 1,
-            LandscapeData.Sections, LandscapeData.Quads, Heights, *LandscapeData.Filename, Layers,
-            ELandscapeImportAlphamapType::Additive, TArrayView<const FLandscapeLayer>());
-        if (ULandscapeInfo* Info = Landscape->GetLandscapeInfo()) { Info->UpdateLayerInfoMap(Landscape); }
-        Landscape->MarkPackageDirty();
     }
     Actor->MarkPackageDirty();
     GEditor->SelectNone(false, true);
     GEditor->SelectActor(Actor, true, true);
     GEditor->RedrawLevelEditingViewports();
-    Message = FString::Printf(TEXT("Imported %d instances in %d mesh groups, %d ordinary objects%s into %s. Assets and level are unsaved. Landscape materials/weight layers are assigned manually."),
+    Message = FString::Printf(TEXT("Imported %d instances in %d mesh groups, %d ordinary objects%s into %s. Assets and level are unsaved."),
         InstanceCount, Transforms.Num(), ObjectCount, Options.bLandscape ? TEXT(" and one Landscape") : TEXT(""), *Options.Destination);
+    if (Options.bLandscape)
+    {
+        Message += FString::Printf(TEXT(" Landscape: %d weight layers; generated material %s."),
+            LandscapeData.WeightLayers.Num(), Options.bMaterial ? TEXT("assigned") : TEXT("disabled"));
+    }
     UE_LOG(LogTopoTopoImport, Display, TEXT("%s"), *Message);
     return true;
 }
@@ -416,7 +313,7 @@ static void OpenDialog()
     TSharedRef<FOptions> Options = MakeShared<FOptions>();
     Options->Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("TopoTopo/landscape"));
     TSharedRef<SWindow> Window = SNew(SWindow).Title(LOCTEXT("Title", "Import TopoTopo scene"))
-        .ClientSize(FVector2D(650, 320)).SupportsMaximize(false).SupportsMinimize(false);
+        .ClientSize(FVector2D(650, 400)).SupportsMaximize(false).SupportsMinimize(false);
     TSharedPtr<STextBlock> Status;
     Window->SetContent(SNew(SBox).Padding(16)
         [SNew(SVerticalBox)
@@ -431,7 +328,15 @@ static void OpenDialog()
             [SNew(STextBlock).Text(LOCTEXT("Objects", "Import expanded reference assets and place ordinary objects (e.g. road)"))]]
         + SVerticalBox::Slot().AutoHeight().Padding(0, 5, 0, 10)[SNew(SCheckBox)
             .OnCheckStateChanged_Lambda([Options](ECheckBoxState State) { Options->bLandscape = State == ECheckBoxState::Checked; })
-            [SNew(STextBlock).Text(LOCTEXT("Landscape", "Import Landscape heightmap (exact-fit bundle; materials/layers manual)"))]]
+            [SNew(STextBlock).Text(LOCTEXT("Landscape", "Import Landscape heightmap (exact-fit bundle)"))]]
+        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 5)[SNew(SCheckBox).IsChecked(ECheckBoxState::Checked)
+            .IsEnabled_Lambda([Options]() { return Options->bLandscape; })
+            .OnCheckStateChanged_Lambda([Options](ECheckBoxState State) { Options->bLayers = State == ECheckBoxState::Checked; })
+            [SNew(STextBlock).Text(LOCTEXT("Layers", "Import Landscape weight layers and create layer info assets"))]]
+        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SCheckBox).IsChecked(ECheckBoxState::Checked)
+            .IsEnabled_Lambda([Options]() { return Options->bLandscape; })
+            .OnCheckStateChanged_Lambda([Options](ECheckBoxState State) { Options->bMaterial = State == ECheckBoxState::Checked; })
+            [SNew(STextBlock).Text(LOCTEXT("Material", "Generate and assign a Landscape material"))]]
         + SVerticalBox::Slot().AutoHeight()[SAssignNew(Status, STextBlock).AutoWrapText(true).Text(LOCTEXT("Unsaved", "Imports assets and creates HISM components in the current level. Nothing is saved automatically."))]
         + SVerticalBox::Slot().AutoHeight().Padding(0, 12, 0, 0)[SNew(SButton).Text(LOCTEXT("Import", "Import"))
             .OnClicked_Lambda([Options, Status]()
@@ -452,10 +357,10 @@ public:
     {
         UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FTopoTopoPCGEditorModule::RegisterMenus));
         Command = MakeUnique<FAutoConsoleCommand>(TEXT("TopoTopo.ImportScene"),
-            TEXT("TopoTopo.ImportScene \"absolute bundle directory\" /Game/TopoTopo/NewSet [landscape=0|1] [objects=0|1]. Imports into the current editor level, without saving."),
+            TEXT("TopoTopo.ImportScene \"absolute bundle directory\" /Game/TopoTopo/NewSet [landscape=0|1] [objects=0|1] [layers=0|1] [material=0|1]. Imports into the current editor level, without saving."),
             FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
             {
-                if (Args.Num() < 2) { UE_LOG(LogTopoTopoImport, Error, TEXT("Usage: TopoTopo.ImportScene \"bundle directory\" /Game/TopoTopo/NewSet [landscape=1] [objects=1]")); return; }
+                if (Args.Num() < 2) { UE_LOG(LogTopoTopoImport, Error, TEXT("Usage: TopoTopo.ImportScene \"bundle directory\" /Game/TopoTopo/NewSet [landscape=1] [objects=1] [layers=1] [material=1]")); return; }
                 TopoTopoImport::FOptions Options;
                 Options.Directory = Args[0];
                 Options.Destination = Args[1];
@@ -463,6 +368,10 @@ public:
                 {
                     if (Args[I] == TEXT("landscape=1")) { Options.bLandscape = true; }
                     else if (Args[I] == TEXT("landscape=0")) { Options.bLandscape = false; }
+                    else if (Args[I] == TEXT("layers=0")) { Options.bLayers = false; }
+                    else if (Args[I] == TEXT("layers=1")) { Options.bLayers = true; }
+                    else if (Args[I] == TEXT("material=0")) { Options.bMaterial = false; }
+                    else if (Args[I] == TEXT("material=1")) { Options.bMaterial = true; }
                     else if (Args[I] == TEXT("objects=0")) { Options.bExpandedObjects = false; }
                     else if (Args[I] == TEXT("objects=1")) { Options.bExpandedObjects = true; }
                     else { UE_LOG(LogTopoTopoImport, Error, TEXT("Unknown argument: %s"), *Args[I]); return; }
