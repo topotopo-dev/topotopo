@@ -93,7 +93,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "a615c3e5a6daaf83"
+          "C": "2c6cc8c499d64c2a"
         },
         "name": "crate_color"
       },
@@ -108,7 +108,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "438a3dce155e0ae8"
+          "C": "9b4c9f69a01c3e43"
         },
         "name": "crate_orm"
       }

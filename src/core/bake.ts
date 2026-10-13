@@ -171,6 +171,16 @@ export function interpolate(s: BakeSamples, tris: ArrayLike<number>, vals: Array
  */
 export function resolve(s: BakeSamples, vals: ArrayLike<number>, ch: number): { data: Float32Array; coverage: Float32Array } {
   const nt = s.W * s.H;
+  if (s.S === 1) {
+    // one sample per texel at most: a scatter
+    const data = new Float32Array(nt * ch), coverage = new Float32Array(nt);
+    for (let k = 0; k < s.n; k++) {
+      const t = s.texel[k];
+      coverage[t] = 1;
+      for (let c = 0; c < ch; c++) data[t * ch + c] = vals[k * ch + c];
+    }
+    return { data, coverage };
+  }
   const acc = new Float64Array(nt * ch), cnt = new Int32Array(nt);
   for (let k = 0; k < s.n; k++) {
     const t = s.texel[k];
@@ -187,21 +197,58 @@ export function resolve(s: BakeSamples, vals: ArrayLike<number>, ch: number): { 
 }
 
 /**
- * Padding (edge dilation): every texel with coverage 0 within `padding` texels of a covered texel copies that texel;
- * the rest get `background`. Writes vals in place; returns the number of texels filled by padding.
+ * Padding (edge dilation): every texel with coverage 0 within `padding` texels of a covered texel copies the nearest
+ * covered texel; the rest get `background`. A front grows ring by ring from the island borders (8-neighbours, each
+ * texel keeping the Euclidean-nearest source among the neighbours that reach it), so the cost follows the padded band,
+ * not the image (the exact distance transform is used for very wide padding). Writes vals in place; returns the number
+ * of texels filled by padding.
  */
 export function dilate(vals: Float32Array, ch: number, w: number, h: number, coverage: Float32Array, padding: number, background: number[]): number {
   const n = w * h;
+  const src = new Int32Array(n).fill(-1);
+  let front: number[] = [];
+  for (let k = 0; k < n; k++) if (coverage[k] > 0) src[k] = k;
+  const pad = Math.max(0, Math.floor(padding));
+  if (pad > 64) {
+    const dt = distanceTransform(src.map((s) => (s >= 0 ? 1 : 0)), w, h);
+    for (let k = 0; k < n; k++) if (src[k] < 0 && dt.d2[k] <= pad * pad && dt.nearest[k] >= 0) src[k] = -2 - dt.nearest[k];
+  } else if (pad > 0) {
+    // the border of the covered region
+    for (let k = 0; k < n; k++) {
+      if (src[k] < 0) continue;
+      const i = k % w, j = (k - i) / w;
+      if ((i > 0 && src[k - 1] < 0) || (i < w - 1 && src[k + 1] < 0) || (j > 0 && src[k - w] < 0) || (j < h - 1 && src[k + w] < 0)) front.push(k);
+    }
+    const lim = pad * pad;
+    const d2 = (k: number, s: number) => { const dx = (k % w) - (s % w), dy = Math.floor(k / w) - Math.floor(s / w); return dx * dx + dy * dy; };
+    for (let ring = 0; ring < pad && front.length; ring++) {
+      const next: number[] = [];
+      for (const k of front) {
+        const s = src[k] >= 0 ? src[k] : -2 - src[k];
+        const i = k % w, j = (k - i) / w;
+        for (let dj = -1; dj <= 1; dj++) {
+          const jj = j + dj;
+          if (jj < 0 || jj >= h) continue;
+          for (let di = -1; di <= 1; di++) {
+            const ii = i + di;
+            if ((!di && !dj) || ii < 0 || ii >= w) continue;
+            const q = jj * w + ii;
+            if (src[q] >= 0) continue; // covered
+            const dq = d2(q, s);
+            if (dq > lim) continue;
+            if (src[q] === -1) { src[q] = -2 - s; next.push(q); }
+            else if (dq < d2(q, -2 - src[q])) src[q] = -2 - s; // reached this ring by a nearer source
+          }
+        }
+      }
+      front = next;
+    }
+  }
   let filled = 0;
-  const sites = new Uint8Array(n);
-  let any = false;
-  for (let k = 0; k < n; k++) if (coverage[k] > 0) { sites[k] = 1; any = true; }
-  const lim = padding * padding;
-  const dt = any && padding > 0 ? distanceTransform(sites, w, h) : null;
   for (let k = 0; k < n; k++) {
-    if (sites[k]) continue;
-    if (dt && dt.d2[k] <= lim && dt.nearest[k] >= 0) {
-      const s = dt.nearest[k];
+    if (src[k] >= 0) continue;
+    if (src[k] <= -2) {
+      const s = -2 - src[k];
       for (let c = 0; c < ch; c++) vals[k * ch + c] = vals[s * ch + c];
       filled++;
     } else for (let c = 0; c < ch; c++) vals[k * ch + c] = background[c] ?? 0;
@@ -212,7 +259,7 @@ export function dilate(vals: Float32Array, ch: number, w: number, h: number, cov
 /** Normalise 3-vectors in place (zero vectors stay zero). */
 export function normalize3(a: Float32Array | Float64Array): void {
   for (let i = 0; i < a.length; i += 3) {
-    const l = Math.hypot(a[i], a[i + 1], a[i + 2]);
+    const l = Math.sqrt(a[i] * a[i] + a[i + 1] * a[i + 1] + a[i + 2] * a[i + 2]);
     if (l > 0) { a[i] /= l; a[i + 1] /= l; a[i + 2] /= l; }
   }
 }
@@ -394,6 +441,8 @@ export function projectRange(a: ProjectArgs, A: Record<string, any>, scene: RayS
 export interface CurvatureEdges {
   /** segment endpoints, 6 per edge */
   E: Float64Array;
+  /** unit direction and length, 4 per edge */
+  D: Float64Array;
   /** signed bend per edge: angle / 90°, + convex, − concave */
   K: Float64Array;
   /** the two face normals, 6 per edge */
@@ -451,7 +500,13 @@ export function curvatureEdges(g: Geometry, tol: number, minAngle = 0.5): Curvat
     K.push((s <= 0 ? 1 : -1) * (Math.acos(c) / (Math.PI / 2)));
     FN.push(n1x, n1y, n1z, n2x, n2y, n2z);
   }
-  return { E: Float64Array.from(E), K: Float64Array.from(K), FN: Float64Array.from(FN), count: K.length };
+  const D = new Float64Array(K.length * 4);
+  for (let e = 0; e < K.length; e++) {
+    const ux = E[e * 6 + 3] - E[e * 6], uy = E[e * 6 + 4] - E[e * 6 + 1], uz = E[e * 6 + 5] - E[e * 6 + 2];
+    const L = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1e-300;
+    D[e * 4] = ux / L; D[e * 4 + 1] = uy / L; D[e * 4 + 2] = uz / L; D[e * 4 + 3] = L;
+  }
+  return { E: Float64Array.from(E), D, K: Float64Array.from(K), FN: Float64Array.from(FN), count: K.length };
 }
 
 export interface EdgeGrid {
@@ -497,9 +552,9 @@ export interface CurvatureArgs {
   dims: [number, number, number];
 }
 
-/** Edge curvature (see above) for samples [start, end): P, N per sample, edges E/K/FN, grid start/items → V. */
+/** Edge curvature (see above) for samples [start, end): P, N per sample, edges E/D/K/FN, grid start/items → V. */
 export function curvatureRange(a: CurvatureArgs, A: Record<string, any>, start: number, end: number): void {
-  const P: Float64Array = A.P, N: Float64Array = A.N, E: Float64Array = A.E, K: Float64Array = A.K, FN: Float64Array = A.FN;
+  const P: Float64Array = A.P, N: Float64Array = A.N, E: Float64Array = A.E, DL: Float64Array = A.D, K: Float64Array = A.K, FN: Float64Array = A.FN;
   const CS: Int32Array = A.start, CI: Int32Array = A.items, V: Float64Array = A.V;
   const r = a.radius, r2 = r * r, br = 1 / r2, norm = 15 / (16 * r);
   const [ox, oy, oz] = a.origin, cell = a.cell, [dx, dy, dz] = a.dims;
@@ -521,11 +576,8 @@ export function curvatureRange(a: CurvatureArgs, A: Record<string, any>, start: 
             stamp[e] = i + 1;
             const f = e * 6;
             if (Math.max(nx * FN[f] + ny * FN[f + 1] + nz * FN[f + 2], nx * FN[f + 3] + ny * FN[f + 4] + nz * FN[f + 5]) < a.facing) continue;
-            const ax = E[f], ay = E[f + 1], az = E[f + 2];
-            let ux = E[f + 3] - ax, uy = E[f + 4] - ay, uz = E[f + 5] - az;
-            const L = Math.hypot(ux, uy, uz);
-            if (!(L > 0)) continue;
-            ux /= L; uy /= L; uz /= L;
+            const ax = E[f], ay = E[f + 1], az = E[f + 2], d = e * 4;
+            const ux = DL[d], uy = DL[d + 1], uz = DL[d + 2], L = DL[d + 3];
             const wx = px - ax, wy = py - ay, wz = pz - az;
             const t0 = wx * ux + wy * uy + wz * uz;
             const d2 = wx * wx + wy * wy + wz * wz - t0 * t0;
