@@ -22,6 +22,7 @@ import { Geometry } from '../src/core/geometry.ts';
 import { rng } from '../src/core/random.ts';
 import { fingerprint } from './fingerprint.ts';
 import { ROOT } from './fixtures.ts';
+import { kernelsWasmURL, loadKernels } from '../src/wasm/kernels.ts';
 
 let failures = 0, passes = 0;
 const check = (cond: any, msg: string) => {
@@ -423,6 +424,49 @@ section('processes end with the pool in use');
   const code = await Promise.race([exited, new Promise<string>((res) => setTimeout(() => res('still running'), 10000))]);
   if (code === 'still running') child.kill();
   check(code === 0 && /shutting down \(stdin closed\)/.test(err), `MCP server exits when the client closes stdin (${code})`);
+}
+
+// ------------------------------------------------------------------ Rust scatter with the pool forced
+section('scatter JS and loaded WASM backends preserve pool parity');
+{
+  await loadKernels(fs.readFileSync(kernelsWasmURL));
+  const graphs: [string, GraphSpec][] = [
+    ['surface density, caps and projected relaxation', { nodes: {
+      g: { type: 'grid', params: { size: [20, 20], divisions: [20, 20] } },
+      m: { type: 'mask', in: ['g'], params: { by: 'noise', min: 0.3, max: 1, falloff: 0.1 } },
+      s: { type: 'scatter', in: ['m'], params: { count: 1200, seed: 72, generate_by: 'count', density_mask: 'mask',
+        min_distance: 0.2, max_per_prim: 4, relax_iterations: 2, write_primuv: true, write_seed: true } },
+    }, output: 's' }],
+    ['curve ordered rejection', { nodes: {
+      g: { type: 'circle', params: { radius: 8, segments: 80, open: true } },
+      s: { type: 'scatter', in: ['g'], params: { count: 1500, mode: 'curve', min_distance: 0.02, seed: 3 } },
+    }, output: 's' }],
+    ['volume elimination and rejection', { nodes: {
+      g: { type: 'sphere', params: { radius: 3 } },
+      s: { type: 'scatter', in: ['g'], params: { count: 500, mode: 'volume', min_distance: 0.2, seed: 4 } },
+    }, output: 's' }],
+  ];
+  for (const [label, base] of graphs) {
+    let reference: Geometry | undefined;
+    for (const backend of ['js', 'kernel', 'auto']) {
+      const graph = structuredClone(base);
+      graph.nodes.s.params = { ...graph.nodes.s.params, backend };
+      const { a } = await same(`scatter ${backend}: ${label}`, graph);
+      check(a.ok && !!a.geo, `${backend}: ${label} cooked`);
+      if (!reference) reference = a.geo ?? undefined;
+      else check(!!a.geo && !sameBits(reference!, a.geo), `${backend}: ${label} matches JS bytes`);
+    }
+  }
+  const largeScatter: GraphSpec = { nodes: {
+    g: { type: 'grid', params: { size: [20, 20], divisions: [12, 12] } },
+    s: { type: 'scatter', in: ['g'], params: { count: 14000, seed: 17, backend: 'kernel' } },
+  }, output: 's' };
+  const beforeWorker = on.host.pool!.stats().tasks;
+  const { a: largeKernel } = await same('large scatter: full WASM elimination on a warmed worker', largeScatter, { expectParallel: true });
+  check(on.host.pool!.stats().tasks - beforeWorker === 5, 'large scatter uses four candidate chunks and one serial WASM worker job');
+  largeScatter.nodes.s.params!.backend = 'js';
+  const largeJs = await off.cook(largeScatter);
+  check(!!largeKernel.geo && !!largeJs.geo && !sameBits(largeKernel.geo, largeJs.geo), 'large worker elimination matches JS bytes');
 }
 
 // ------------------------------------------------------------------ golden layer with the pool forced

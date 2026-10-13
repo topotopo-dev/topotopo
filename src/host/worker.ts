@@ -9,6 +9,7 @@ import { parentPort } from 'node:worker_threads';
 import { KERNELS } from '../core/kernels.ts';
 import type { KernelContext } from '../core/kernels.ts';
 import type { Host } from './types.ts';
+import { loadHostKernels } from '../wasm/kernels.ts';
 
 const port = parentPort!;
 
@@ -37,6 +38,7 @@ const memoize = <T>(key: string, make: () => T): T => {
 };
 
 let realm: Host | null = null;
+let kernelsHost: Host | null = null;
 
 /** One chunk of a point wrangle (eligibility and the kernel source come from src/core/wrangle.ts). */
 async function wrangleChunk(a: any, arrays: Record<string, any>, start: number, end: number) {
@@ -79,6 +81,10 @@ port.on('message', async (m: any) => {
     else {
       const k = KERNELS[m.kernel];
       if (!k) throw new Error(`unknown kernel "${m.kernel}"`);
+      if (m.kernel === 'scatter_wasm_eliminate') {
+        if (!kernelsHost) kernelsHost = (await import('./node.ts')).createNodeHost({ workers: 0 });
+        await loadHostKernels(kernelsHost);
+      }
       const ctx: KernelContext = { sharedKey: m.shared?.key ?? '', memo: m.shared ? memoize : (_k, make) => make() };
       value = k.run(m.args, { ...shared, ...m.arrays }, start, end, ctx);
     }

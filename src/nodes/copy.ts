@@ -12,6 +12,9 @@ import { minDistanceSelectWith, relaxOnSurface, relaxSpacing, relaxWeight, sampl
 import { lookAtBasis, m4apply, m4applyDir, m4basis, m4euler, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize, qAxisAngle, qFromMat, qMul, qNormalize } from '../core/math.ts';
 import type { Mat4, Quat, Vec3 } from '../core/math.ts';
 import { P, mask } from './util.ts';
+import { getLoadedKernels, loadHostKernels, SCATTER_KERNEL_MAX_POINTS, SCATTER_RELAX_MAX_POINTS } from '../wasm/kernels.ts';
+import type { Kernels } from '../wasm/kernels.ts';
+import type { PoolResult } from '../host/types.ts';
 
 // ---------------------------------------------------------------- scatter
 // The sampling stages (candidates, sample elimination, exact minimum distance, relaxation) live in core/scatter.ts and
@@ -198,6 +201,7 @@ defineNode({
     density: { type: 'float', default: 0, min: 0, desc: 'points per unit area/length/volume (overrides count when > 0)' },
     mode: { type: 'enum', options: ['auto', 'surface', 'curve', 'volume'], default: 'auto', desc: 'auto = surface if polygons, curve if only polylines' },
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing via sample elimination' },
+    backend: { type: 'enum', options: ['auto', 'kernel', 'js'], default: 'auto', desc: 'auto uses WASM only when already loaded, otherwise js; kernel loads WASM for elimination, distance rejection and surface relaxation' },
     density_attrib: { type: 'string', default: '', desc: 'point, vertex or prim float attribute (≥ 0) scaling the local density (e.g. a noise mask; 2 = twice as many points as 1)', aliases: ['densityattrib', 'density_attribute'] },
     seed: P.seed(),
     group: P.group('prim'),
@@ -223,7 +227,13 @@ defineNode({
     },
     output: 'pts',
   },
-  cook: async ({ input, p, warn, parallelMap }) => {
+  signatureExtra: p => p.backend === 'auto' ? (getLoadedKernels() ? 'kernel' : 'js') : '',
+  cook: async ({ input, p, warn, parallelMap, engine }) => {
+    let kernels: Kernels | undefined;
+    if (p.backend === 'kernel') {
+      try { kernels = await loadHostKernels(engine.host); }
+      catch (error) { throw new NodeError(`scatter: kernel backend could not be loaded: ${error instanceof Error ? error.message : String(error)}`, 'Build or install the kernels with npm run kernels:build, or use backend js.'); }
+    } else if (p.backend === 'auto') kernels = getLoadedKernels();
     const g = input(0);
     const r = rng(p.seed + 0.5);
     const sel = mask(g, 'prim', p.group);
@@ -237,6 +247,35 @@ defineNode({
     const mw = (v: number, pt: number, pr: number) => (mA ? clamp01(mA(v, pt, pr)) : 1);
     const md = Math.max(0, p.min_distance || 0), cap = Math.max(0, Math.floor(p.max_per_prim || 0));
     const extra = md > 0 || cap > 0;
+    const canSelectKernel = (pos: Float64Array) => !!kernels && (p.backend !== 'auto' || pos.length / 3 <= SCATTER_KERNEL_MAX_POINTS);
+    const eliminate = (pos: Float64Array, target: number, radius: number, scale?: Float64Array) => {
+      if (!canSelectKernel(pos)) return sampleEliminate(pos, target, radius, scale, parallelMap);
+      const pool = engine.host.pool;
+      // Whole-stage elimination stays serial. A warmed worker was faster for large
+      // jobs with cloned inputs; preserve the candidate arrays for interpolation.
+      if (pool && pool.size > 0 && pool.threads > 0 && pos.length / 3 >= Math.max(1, pool.minElements ?? 1_000_000)) {
+        return pool.run<PoolResult<Int32Array>>({ kernel: 'scatter_wasm_eliminate', args: { target, rmax: radius },
+          range: [0, pos.length / 3], arrays: scale ? { pos, scale } : { pos } }).then(result => {
+          engine.poolStats.parallel++; engine.poolStats.chunks++;
+          return result.value;
+        }, error => {
+          if (error?.code === 'POOL_UNAVAILABLE') return kernels!.scatter_eliminate(pos, target, radius, scale);
+          throw error;
+        });
+      }
+      return kernels!.scatter_eliminate(pos, target, radius, scale);
+    };
+    // The ordered greedy pass and its optional per-prim cap are one operation in either backend.
+    const select = (pos: Float64Array, order: Int32Array, limit: number, sourcePrim?: (i: number) => number) => {
+      if (canSelectKernel(pos)) {
+        const groups = cap && sourcePrim ? Int32Array.from({ length: pos.length / 3 }, (_, i) => sourcePrim(i)) : undefined;
+        return kernels!.scatter_min_distance(pos, order, md, limit, groups, groups ? cap : 0);
+      }
+      const perPrim = cap && sourcePrim ? new Int32Array(g.numPrims) : undefined;
+      return minDistanceSelectWith(pos, order, md, limit,
+        perPrim ? i => perPrim[sourcePrim!(i)] < cap : undefined,
+        perPrim ? i => { perPrim[sourcePrim!(i)]++; } : undefined, parallelMap);
+    };
     const emitOk = namePattern(p.emit_attributes);
     const b = new GeoBuilder(g);
     if (!p.keep_attribs) for (const n of g.points.names()) b.skip.point.add(n);
@@ -325,18 +364,15 @@ defineNode({
         for (let k = 0; k < ncand; k++) { const wl = wAt(candT[k], candW, k * 3); rscale[k] = wl > 0 ? Math.min(4, Math.max(0.25, Math.sqrt(wMean / wl))) : 4; }
       }
       let keep = p.relax && count > 0
-        ? await sampleEliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count)), rscale, parallelMap)
+        ? await eliminate(pos, count, Math.sqrt(area / (2 * Math.sqrt(3) * count)), rscale)
         : Int32Array.from({ length: ncand }, (_, i) => i);
-      const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
       if (extra) {
         // the well-spaced selection first, the other candidates as refill; exact distance test and per-prim cap
         const inKeep = new Uint8Array(ncand), order = new Int32Array(ncand);
         let o = 0;
         for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
         for (let k = 0; k < ncand; k++) if (!inKeep[k]) order[o++] = k;
-        keep = (await minDistanceSelectWith(pos, order, md, count,
-          perPrim ? (k) => perPrim[triPrim[candT[k]]] < cap : undefined,
-          perPrim ? (k) => { perPrim[triPrim[candT[k]]]++; } : undefined, parallelMap)).sort();
+        keep = (await select(pos, order, count, k => triPrim[candT[k]])).sort();
       }
       // the chosen candidates, as indices into the candidate arrays
       let outKeep: ArrayLike<number> = keep, outT = candT, outW = candW, outPos = pos;
@@ -359,15 +395,16 @@ defineNode({
         const base = { radius: p.relax_radius, weighted, dBar: Math.sqrt((2 * area) / (Math.sqrt(3) * n)), wMean };
         const spacing = new Float64Array(n);
         for (let i = 0; i < n; i++) spacing[i] = relaxSpacing({ ...base, smax: 0 }, cw, RT[i], RW[i * 3], RW[i * 3 + 1], RW[i * 3 + 2]);
-        await relaxOnSurface(new TriSurface(g, tris), RP, spacing, RT, RW, p.relax_iterations, base, cw, parallelMap);
+        const surface = new TriSurface(g, tris);
+        if (kernels && (p.backend !== 'auto' || (n <= SCATTER_RELAX_MAX_POINTS && surface.numTris <= SCATTER_RELAX_MAX_POINTS))) {
+          const result = kernels.scatter_relax(RP, spacing, RT, RW, surface.arrays(), p.relax_iterations, base, cw ?? undefined);
+          RP.set(result.positions); spacing.set(result.spacing); RT.set(result.triangles); RW.set(result.barycentrics);
+        } else await relaxOnSurface(surface, RP, spacing, RT, RW, p.relax_iterations, base, cw, parallelMap);
         // points relaxed into zero-density areas go; the distance and per-prim limits are enforced again
         let order: Int32Array = Int32Array.from({ length: n }, (_, i) => i);
         if (cw) order = order.filter((i) => relaxWeight(cw, RT[i], RW[i * 3], RW[i * 3 + 1], RW[i * 3 + 2]) > 0);
         if (extra) {
-          if (perPrim) perPrim.fill(0);
-          order = (await minDistanceSelectWith(RP, order, md, Infinity,
-            perPrim ? (i) => perPrim[triPrim[RT[i]]] < cap : undefined,
-            perPrim ? (i) => { perPrim[triPrim[RT[i]]]++; } : undefined, parallelMap)).sort();
+          order = (await select(RP, order, Infinity, i => triPrim[RT[i]])).sort();
         }
         outKeep = order; outT = RT; outW = RW; outPos = RP;
       }
@@ -432,10 +469,7 @@ defineNode({
       }
       let order: ArrayLike<number> = Int32Array.from({ length: count }, (_, i) => i);
       if (extra) {
-        const perPrim = cap > 0 ? new Int32Array(g.numPrims) : null;
-        order = await minDistanceSelectWith(pos, order, md, Infinity,
-          perPrim ? (k) => perPrim[segs[picks[k].sg].pr] < cap : undefined,
-          perPrim ? (k) => { perPrim[segs[picks[k].sg].pr]++; } : undefined, parallelMap);
+        order = await select(pos, order as Int32Array, Infinity, k => segs[picks[k].sg].pr);
       }
       for (let o = 0; o < order.length; o++) {
         const { sg: si, f } = picks[order[o]], sg = segs[si];
@@ -465,14 +499,14 @@ defineNode({
     const P0 = Float64Array.from(pos);
     const nc = P0.length / 3;
     let keep = p.relax && count > 0 && nc > count
-      ? await sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6, undefined, parallelMap)
+      ? await eliminate(P0, count, Math.cbrt(vol / count) * 0.6)
       : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
     if (md > 0) {
       const inKeep = new Uint8Array(nc), order = new Int32Array(nc);
       let o = 0;
       for (const k of keep) { inKeep[k] = 1; order[o++] = k; }
       for (let k = 0; k < nc; k++) if (!inKeep[k]) order[o++] = k;
-      keep = (await minDistanceSelectWith(P0, order, md, count, undefined, undefined, parallelMap)).sort();
+      keep = (await select(P0, order, count)).sort();
     }
     const out = new Geometry({ positions: Array.from(keep).flatMap((k) => [P0[k * 3], P0[k * 3 + 1], P0[k * 3 + 2]]) });
     if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }

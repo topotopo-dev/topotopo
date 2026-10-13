@@ -24,6 +24,7 @@ import { fingerprint } from './fingerprint.ts';
 import { checkGeo } from './fixtures.ts';
 import type { CookReport } from '../src/graph/engine.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
+import { getLoadedKernels, kernelsWasmURL, loadKernels } from '../src/wasm/kernels.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-pcg-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
@@ -675,6 +676,26 @@ section('packed instances, examples');
     const r = await engine.cook(ex.nodes ? ex : { nodes: { a: ex }, output: 'a' });
     check(r.ok && r.geo!.numPoints > 0, `${t}: its docs example cooks (${r.geo?.numPoints ?? 0} points)`);
   }
+}
+
+section('scatter backend selection');
+{
+  const nodes = (backend: string): Record<string, NodeSpec> => ({
+    g: GRID,
+    m: { type: 'mask', in: ['g'], params: { by: 'noise', min: 0.3, max: 1, falloff: 0.1 } },
+    s: { type: 'scatter', in: ['m'], params: { count: 160, seed: 47, generate_by: 'count', density_mask: 'mask',
+      min_distance: 0.1, max_per_prim: 3, relax_iterations: 2, write_primuv: true, write_seed: true, backend } },
+  });
+  check(!getLoadedKernels(), 'scatter auto leaves kernels unloaded until explicitly requested');
+  const js = await geo(nodes('js'), 's'), fallback = await run(nodes('auto'), 's');
+  check(fallback.ok && fpEq(fallback.geo!, js), 'scatter auto before kernel load matches explicit js');
+  await loadKernels(fs.readFileSync(kernelsWasmURL));
+  const auto = await run(nodes('auto'), 's'), kernel = await geo(nodes('kernel'), 's');
+  check(auto.ok && !auto.results.get('s')?.cached, 'loading kernels invalidates cached scatter auto fallback');
+  check(fpEq(auto.geo!, kernel) && fpEq(kernel, js), 'loaded auto, kernel and js scatter have identical fingerprints');
+  engine.cache.clear();
+  check(fpEq(await geo(nodes('js'), 's'), js), 'explicit js stays unchanged after kernels load');
+  check(/backend/.test(await cookErr(nodes('invalid'), 's')), 'invalid scatter backend is rejected by parameter validation');
 }
 
 console.log(`\npcg: ${pass} passed, ${fail} failed`);

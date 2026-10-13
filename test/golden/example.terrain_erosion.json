@@ -21,8 +21,8 @@
       "vertex": []
     },
     "bbox": {
-      "max": [10.0011, 3.7592, 10.1307],
-      "min": [-10, -0.0138, -10.1615]
+      "max": [10.0011, 3.7592, 10.2204],
+      "min": [-10, -0.0138, -10.1919]
     },
     "counts": {
       "points": 50445,
@@ -37,17 +37,17 @@
       "vertex": []
     },
     "hashes": {
-      "P": "edd9d997581ff19d",
+      "P": "0268ee33635129dd",
       "attributes": {
         "point.Cd": "c039a56929a5b577",
-        "point.N": "8d7e2fb7d24656dd",
+        "point.N": "ad2f620ac454a850",
         "point.debris": "d3cb85d5c644d247",
         "point.flow": "f2c99a9d34f417f7",
-        "point.height": "7a9c7c5a65f9f044",
-        "point.mask": "e59ae4fdd7de8bbf",
+        "point.height": "2809c68a25d1ba1c",
+        "point.mask": "bc458a2108f88a2b",
         "point.path": "4769582d609f5e9b",
         "point.sediment": "f7726c79d6e8140f",
-        "point.slope": "5e9745f544e3f997",
+        "point.slope": "dba8bdd9637a187b",
         "point.uv": "7174ca0d5d7d5477",
         "point.water": "f69036abf2b17345",
         "prim.copynum": "5d7651c5c1ad011f"

@@ -332,6 +332,188 @@ export function roof(outer, hole_arrays, pitch, height_cap) {
 }
 
 /**
+ * @param {Float32Array} positions
+ * @param {Float32Array} scale
+ * @param {number} target_count
+ * @param {number} r_max
+ * @returns {Int32Array}
+ */
+export function scatter_eliminate(positions, scale, target_count, r_max) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF32ToWasm0(positions, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(scale, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.scatter_eliminate(retptr, ptr0, len0, ptr1, len1, target_count, r_max);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v3 = getArrayI32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export4(r0, r1 * 4, 4);
+        return v3;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float64Array} positions
+ * @param {Float64Array} scale
+ * @param {number} target_count
+ * @param {number} r_max
+ * @returns {Int32Array}
+ */
+export function scatter_eliminate_f64(positions, scale, target_count, r_max) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(positions, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(scale, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.scatter_eliminate_f64(retptr, ptr0, len0, ptr1, len1, target_count, r_max);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v3 = getArrayI32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export4(r0, r1 * 4, 4);
+        return v3;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float32Array} positions
+ * @param {Int32Array} order
+ * @param {number} radius
+ * @param {number} limit
+ * @param {Int32Array} groups
+ * @param {number} group_cap
+ * @returns {Int32Array}
+ */
+export function scatter_min_distance(positions, order, radius, limit, groups, group_cap) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF32ToWasm0(positions, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray32ToWasm0(order, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray32ToWasm0(groups, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.scatter_min_distance(retptr, ptr0, len0, ptr1, len1, radius, limit, ptr2, len2, group_cap);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v4 = getArrayI32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export4(r0, r1 * 4, 4);
+        return v4;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float64Array} positions
+ * @param {Int32Array} order
+ * @param {number} radius
+ * @param {number} limit
+ * @param {Int32Array} groups
+ * @param {number} group_cap
+ * @returns {Int32Array}
+ */
+export function scatter_min_distance_f64(positions, order, radius, limit, groups, group_cap) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(positions, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray32ToWasm0(order, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray32ToWasm0(groups, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.scatter_min_distance_f64(retptr, ptr0, len0, ptr1, len1, radius, limit, ptr2, len2, group_cap);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v4 = getArrayI32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export4(r0, r1 * 4, 4);
+        return v4;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @param {Float64Array} positions
+ * @param {Float64Array} spacing
+ * @param {Int32Array} triangles
+ * @param {Float64Array} barycentrics
+ * @param {Float64Array} t
+ * @param {Float64Array} nodes
+ * @param {Int32Array} child
+ * @param {Int32Array} order
+ * @param {Uint32Array} tri_prim
+ * @param {Float64Array} corners
+ * @param {Float64Array} cw
+ * @param {number} iterations
+ * @param {any} options
+ * @returns {object}
+ */
+export function scatter_relax(positions, spacing, triangles, barycentrics, t, nodes, child, order, tri_prim, corners, cw, iterations, options) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(positions, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(spacing, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray32ToWasm0(triangles, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF64ToWasm0(barycentrics, wasm.__wbindgen_export);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArrayF64ToWasm0(t, wasm.__wbindgen_export);
+        const len4 = WASM_VECTOR_LEN;
+        const ptr5 = passArrayF64ToWasm0(nodes, wasm.__wbindgen_export);
+        const len5 = WASM_VECTOR_LEN;
+        const ptr6 = passArray32ToWasm0(child, wasm.__wbindgen_export);
+        const len6 = WASM_VECTOR_LEN;
+        const ptr7 = passArray32ToWasm0(order, wasm.__wbindgen_export);
+        const len7 = WASM_VECTOR_LEN;
+        const ptr8 = passArray32ToWasm0(tri_prim, wasm.__wbindgen_export);
+        const len8 = WASM_VECTOR_LEN;
+        const ptr9 = passArrayF64ToWasm0(corners, wasm.__wbindgen_export);
+        const len9 = WASM_VECTOR_LEN;
+        const ptr10 = passArrayF64ToWasm0(cw, wasm.__wbindgen_export);
+        const len10 = WASM_VECTOR_LEN;
+        wasm.scatter_relax(retptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, ptr9, len9, ptr10, len10, iterations, addHeapObject(options));
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * @param {Float64Array} positions
  * @param {Uint32Array} tris
  * @param {number} voxel

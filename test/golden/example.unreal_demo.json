@@ -21,7 +21,7 @@
     },
     "bbox": {
       "max": [65.2796, 25.004, 66.1186],
-      "min": [-65.6742, -1.3138, -64.8453]
+      "min": [-65.6742, -0.2003, -64.7899]
     },
     "counts": {
       "points": 64829,
@@ -36,7 +36,7 @@
       "vertex": []
     },
     "hashes": {
-      "P": "cbfcbedda298eebb",
+      "P": "44e99b898970e1d3",
       "attributes": {
         "detail.materials": "0395a3589848bda6",
         "group.prim.caps": "008f8baef984ca54",
@@ -44,12 +44,12 @@
         "point.Cd": "bb9972ba328d56ac",
         "point.N": "93ea95b8aefec412",
         "point.curveu": "ae2ac5413dc08e4b",
-        "point.height": "f698a913923832fd",
+        "point.height": "7b8fe9fa8f518d38",
         "point.hitdist": "0da4a17d1e8f0657",
         "point.hitprim": "8f9f4bfdffdb1be7",
         "point.id": "a23527fdd4bbddef",
-        "point.mask": "72ba541f756c06cd",
-        "point.slope": "710a0c4a71f0f554",
+        "point.mask": "652c254947d34817",
+        "point.slope": "000379f26cfd8fc0",
         "point.tint": "b06298e6e3ba2310",
         "prim.copynum": "f151fa095d914bc3",
         "prim.material": "02486648ab64db6a",
