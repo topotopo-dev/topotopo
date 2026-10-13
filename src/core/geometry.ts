@@ -1,5 +1,5 @@
 // Houdini-style geometry: points / vertices / primitives / detail, each with attribute
-// tables, plus named point, vertex, primitive and edge groups and optional volumes (SDFs, heightfields).
+// tables, plus named point, vertex, primitive and edge groups and optional volumes (SDFs, heightfields, images).
 //
 //  points    – positions (P) and per-point attributes
 //  prims     – polygons (closed) or polylines (open), stored CSR-style:
@@ -428,11 +428,32 @@ export interface HeightfieldVolume {
   clone(): HeightfieldVolume;
 }
 
-export type Volume = SdfVolume | HeightfieldVolume;
+/**
+ * An image (Substance Designer / Houdini COP style texture): a 2D grid of linear float pixels with named layers of 1
+ * (grey) or 4 (RGBA, interleaved) channels, so a layer holds width × height or 4 × width × height floats. Pixel (i, j)
+ * is column i, row j from the top; layers are row-major (index j * width + i). Images have no position in space (bounds
+ * is an empty box and bbox() skips them); materials reference them by name ("image:<name>" texture paths). Layer
+ * arrays are shared like heightfield layers: copy before writing. Implemented by Image in core/image.ts.
+ */
+export interface ImageVolume {
+  name: string;
+  kind: 'image';
+  /** pixels along u (columns) */
+  width: number;
+  /** pixels along v (rows, row 0 at the top: v = 1) */
+  height: number;
+  layers: Map<string, Float32Array>;
+  /** always an empty box (min +Infinity, max -Infinity): an image is not placed in space */
+  readonly bounds: { min: Vec3; max: Vec3 };
+  /** a copy with its own layer map that shares the layer arrays */
+  clone(): ImageVolume;
+}
 
-/** Volumes for a new geometry: heightfields get their own layer map (the arrays stay shared), SDFs are immutable. */
+export type Volume = SdfVolume | HeightfieldVolume | ImageVolume;
+
+/** Volumes for a new geometry: heightfields and images get their own layer map (the arrays stay shared), SDFs are immutable. */
 export function cloneVolumes(vs: Volume[]): Volume[] {
-  return vs.map((v) => (v.kind === 'heightfield' ? v.clone() : v));
+  return vs.map((v) => (v.kind === 'heightfield' || v.kind === 'image' ? v.clone() : v));
 }
 
 export interface GeoInit {
