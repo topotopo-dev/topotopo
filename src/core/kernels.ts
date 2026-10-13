@@ -19,6 +19,7 @@ import type { CurvatureArgs, ProjectArgs } from './bake.ts';
 import { candidatesRange, conflictsRange, elimNeighboursRange, elimPairsRange, kdBuildRange, relaxRange } from './scatter.ts';
 import type { CandidateArgs, ConflictArgs, RelaxArgs } from './scatter.ts';
 import { TriSurface } from './pcg.ts';
+import { colliderFromArrays, collideRange } from './xpbd.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -180,6 +181,17 @@ const scatterRelax: Kernel = {
   },
 };
 
+// ---------------------------------------------------------------- cloth (src/core/xpbd.ts)
+
+/** drape / inflate: each point's contact plane against a collider shared as arrays (colliderArrays), once per step. */
+const clothCollide: Kernel = {
+  minElements: 4096,
+  run(_a, A, start, end, ctx) {
+    const c = ctx.memo('collider:' + ctx.sharedKey, () => colliderFromArrays(A));
+    collideRange(c, A.X, A.R, A.CP, A.CN, A.CF, start, end);
+  },
+};
+
 // ---------------------------------------------------------------- self tests (test/pool.ts)
 
 /** x[i] *= factor over the range; returns the sum of the scaled values (round trips, transfer, parallelMap). */
@@ -240,6 +252,7 @@ export const KERNELS: Record<string, Kernel> = {
   scatter_elim_pairs: scatterElimPairs,
   scatter_conflicts: scatterConflicts,
   scatter_relax: scatterRelax,
+  cloth_collide: clothCollide,
   'selftest.scale': selftestScale,
   'selftest.square': selftestSquare,
   'selftest.throw': selftestThrow,
