@@ -13,7 +13,7 @@ Thanks for your interest. A few things to know before you start.
   `npm run test:update` for its golden, add behavioural checks to the matching `test/*.ts`, and run `npm run docs`.
 - **Keep the core host-agnostic.** `src/core`, `src/graph` and `src/nodes` must not import Node APIs. Cooked geometry
   is immutable: `clone()` before writing. Y-up, metres, degrees, Houdini attribute names.
-- **Licences.** Dependencies that ship must be MIT, Apache-2.0, BSD, ISC or MPL-2.0; build-time-only tooling may use other OSI-approved permissive licences (Unicode-3.0, Zlib, CC0). No GPL or AGPL anywhere in the tree.
+- **Licences.** Dependencies that ship must be permissive: MIT, Apache-2.0, BSD, ISC, MPL-2.0, Unicode-3.0, Zlib, 0BSD, Unlicense or CC0. No GPL or AGPL anywhere in the tree. LGPL is tolerated only for optional native modules that our code never calls and that load dynamically if present (today: sharp/libvips, an optional dependency of gltf-transform); `npm run notice` lists them and flags anything outside this list.
   Run `npm run notice` after adding one so `NOTICE` carries its licence text; after a change to the Rust crates of
   `kernels/` (Cargo.lock) it needs `cargo`. `npm test` checks NOTICE without Rust.
 
