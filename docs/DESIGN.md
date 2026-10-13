@@ -302,6 +302,61 @@ call and inside that call's timeout.
   points at the line that opened it), and only a complete function body is pasted into the kernel, so a stray `}`
   can no longer close the kernel's wrapper.
 
+**Expressions** (`"=expr"` params and the `assert` expr, `src/graph/expr.ts`) used to be compiled with `new Function`
+in the engine's own realm, with no timeout and every global in reach, so any graph JSON could run arbitrary code. They
+now go through `Host.exprSandbox`, which in the Node host is a second vm realm used by nothing else, created on first
+use (`DONT_CONTEXTIFY`, `microtaskMode: 'afterEvaluate'`).
+- The engine builds the expression library inside that realm (`exprRealmSetup`, compiled from its source text like
+  the snippet library) after locking the realm down: the Function constructors (`fn.constructor` of plain, async and
+  generator functions) throw, and every built-in reachable from the global object and from the hidden iterator and
+  generator prototypes is frozen (about 800 objects, ~3 ms once per host). An expression therefore only ever holds
+  objects of that realm: vars are copied in (frozen, once per node), the reference functions (`npoints`, `bbox`, `ch`
+  …) get primitives and their results are copied in, results and error messages are copied out. A single object of
+  the engine realm would do, since its `.constructor.constructor` is the engine's `Function`.
+- Every free identifier resolves through a scope proxy (`with`) whose `has` claims every name, so nothing reaches the
+  realm's global scope: vars, then the helpers (`sin` … `pick`, `Math`, the reference functions), then
+  `frame`/`time`/`fps`/`timeInc`; any other name throws (`process is not available in expressions …`). The expression
+  is the body of a strict function called with a `this` that throws when read; `import` is rejected before compiling;
+  assigning to a name throws. Unless it is straight-line (below), the body is syntax-checked on its own first, as
+  wrangle snippets are, so it cannot close its wrapper. Compiled functions are cached per host by source text.
+- Timer: a vm timeout starts a watchdog thread per call (~0.15 ms idle, ~0.5 ms on a loaded machine), which alone
+  would make a graph with 1000 expressions several times slower. `isSimpleExpr` admits straight-line code (numbers,
+  strings, names, operators, member reads, array literals and at most 32 calls of a bare name or `Math.<name>`, under
+  1000 characters): it cannot loop, since vars hold data and every callable name is a helper or reference function,
+  and runs without the timer. Everything else (function literals, loops, regular expressions, method calls,
+  templates, object literals, assignments) runs in `exprSandbox.run` under `scriptTimeoutMs`, which also covers async
+  continuations (the realm's microtask queue drains inside the timed call) and getters of the result or of a thrown
+  object (both are read inside the call). All 475 expressions in `examples/` and `shelf/` are straight-line.
+- Memo: a timed evaluation records what it reads through the scope (vars and time values, helper names, reference
+  calls with their results, as fingerprints). With the realm frozen and vars copied, an expression is a function of
+  those reads, except through `Math.random`: one that reads `Math` is never remembered. A later evaluation whose
+  reads all give the same values (re-read in order, reference functions called again) returns the remembered result
+  without the timed call, so only the first cook of a timed expression, or one whose inputs changed, pays for the
+  watchdog thread. Failed evaluations are not remembered; up to 8 results per source text, 256 reads each.
+- Compiling: the straight-line expressions of a node are compiled in one script (they cannot contain braces, so none
+  can leave its wrapper), about half the cost of a script each; the realm and its lockdown cost ~10 ms per host.
+- Error messages name the param and the expression: `param "translate"[1]: expression "=bbox('x').max.y" failed: …`.
+- A host without `exprSandbox` (a future browser host that provides none) gets the same wrapper and scope compiled
+  with `new Function` in the engine realm: the same names are hidden, but there is no realm isolation and no timeout.
+- Wrangles are not sealed the same way: their realm also holds engine objects (the geometry API, attribute arrays),
+  so the vm realm limits mistakes there, not attackers (README, Security).
+
+Measured with the shapes of `bench/expr.ts`, the previous evaluation (`new Function`) and the sandbox loaded in one
+process and run interleaved (i7-10700K shared with other jobs, so ±25 % noise, see the first row; median of 15, ms).
+Cold = geometry cache cleared (expressions already compiled), warm = every node a cache hit, which is dominated by
+resolving params; first cook = a fresh process, so every expression is compiled and the realm is set up:
+
+| graph | expressions | cold before → after | warm before → after | first cook before → after |
+|---|---|---|---|---|
+| no expressions: 1000 transforms (noise reference) | 0 | 78.9 → 99.7 | 37.7 → 42.9 | |
+| chain: 1000 transforms, one expression each | 1000 | 78.1 → 87.6 (1.12×) | 44.9 → 42.5 (0.95×) | 127 → 142 (1.12×) |
+| wide: 100 transforms, ten distinct expressions each | 1000 | 12.9 → 12.7 (0.99×) | 8.7 → 9.1 (1.04×) | 39 → 51 (1.30×) |
+| refs: 100 boxes reading bbox/npoints/ch/centroid | 1000 | 34.7 → 32.5 (0.94×) | 22.0 → 26.7 (1.21×) | 55 → 70 (1.27×) |
+| loops: 100 transforms, an arrow function with a loop each (timed) | 100 | 7.5 → 7.2 (0.96×) | 3.7 → 3.5 (0.96×) | 15 → 65 (4.4×) |
+
+The loops row is the price of the timer: ~0.5 ms per timed expression the first time it is evaluated with given
+inputs (a watchdog thread per call); re-cooks reuse the remembered results.
+
 Measured (i7-10700K): the wrangle benchmark (`wrangle_1m`) and the `script` fixture cook in the same time as before
 (within noise; 1M points 90–116 ms, fixture script ~0.7 ms), 500 `await lib.run('box')` in one script ~9 ms both
 before and after. The alternative, running scripts in a `worker_threads` Worker and terminating it on timeout,
@@ -481,7 +536,8 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
   tolerant to float noise, so any change in output, intended or not, is visible as a git diff and reviewed.
 - **Property**: random chains from the registry check the engine's contracts: errors are per node and never thrown,
   cooks are deterministic, and the content-addressed cache gives the same result after a param is changed and
-  restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line.
+  restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line; hostile
+  `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on.
 - **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
 - **Examples**: every `NodeDef` carries an `example` (a node spec or a small graph, shown by `help` and in the node
   reference) and `test/examples.ts` cooks each one: node specs on the node's fixture inputs, graphs as written.

@@ -63,7 +63,15 @@ Referenced nodes are dependencies: they cook first (even if not wired), changing
 names get did-you-mean errors, and reading a node downstream of yourself is a cycle error.
 Not supported: dynamic names (npoints(name) with a variable), and these functions inside graph "vars".
 Assets: their vars become node parameters.
-Expressions are per-node constants. For per-element logic use wrangle.`,
+Expressions are per-node constants. For per-element logic use wrangle.
+SANDBOX: an expression sees only graph vars (read-only copies), frame/time/fps/timeInc, Math, the helpers above and the
+  reference functions; any other name (process, require, globalThis, fetch, Number, JSON …) is an error, and so are
+  import, \`this\` and assigning to a name. Errors name the param and the expression: param "size": expression "=…" failed: ….
+  Straight-line expressions (operators, helper and Math calls) run directly; ones with functions, loops, regular
+  expressions or method calls run under the script timeout (POLYFORGE_SCRIPT_TIMEOUT_MS, default 30 s), ~0.5 ms more
+  each the first time (the result is reused while the vars, time and nodes it read stay the same).
+SECURITY: a graph is code. Expressions and wrangles run sandboxed with a timeout on Node, but can still allocate
+  memory and burn CPU until the timeout; do not cook graphs from untrusted sources in a privileged process.`,
 
   time: `TIME
 Every cook happens at a frame: build/edit/render/inspect/export accept "frame" (default 1). frame 1 = time 0; time = (frame-1)/fps, fps 24.

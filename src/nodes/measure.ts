@@ -327,7 +327,7 @@ defineNode({
     },
     output: 'check',
   },
-  cook: ({ input, p, warn, stat }) => {
+  cook: ({ input, p, warn, stat, engine }) => {
     const src = input(0);
     const g = src;
     const fails: string[] = [];
@@ -481,7 +481,7 @@ defineNode({
       const src = String(p.expr).trim();
       const scope = assertScope(g, pieces());
       let res: any;
-      try { res = evalExpr(src, scope); }
+      try { res = evalExpr(src, scope, { host: engine.host, timeoutMs: engine.scriptTimeoutMs }); }
       catch (e: any) {
         // evalExpr's message names the "=expr" and lists the scope; keep the cause, the hint lists the names
         const why = /failed: ([\s\S]*?)\. Vars in scope/.exec(e.message)?.[1] ?? /: ([^:]*)$/.exec(e.message)?.[1] ?? e.message;

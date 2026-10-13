@@ -1,4 +1,5 @@
-// Wrangle fuzz: random snippets from a small grammar, plus malformed and never-ending ones.
+// Wrangle fuzz: random snippets from a small grammar, plus malformed and never-ending ones; and the "=expr" sandbox:
+// parameter expressions that try to escape it or never finish, with the worker pool off and on.
 //
 //   node test/fuzz.ts [--count N] [--seed S] [--verbose]      (FUZZ_COUNT env also sets the count)
 //
@@ -7,11 +8,15 @@
 //     timeout (the run happens in a child process with a hard wall-clock limit, so a timeout that fails to fire
 //     fails the test instead of hanging CI),
 //   - malformed code fails the wrangle node (a per-node error, never a throw) with a "(line N: …)" hint,
-//   - valid code cooks, passes checkGeo, and is deterministic.
+//   - valid code cooks, passes checkGeo, and is deterministic,
+//   - "=expr" params that reach for process, globalThis, this.constructor.constructor, import(), fetch, require or
+//     the engine realm through any object fail their node with a clear error, and loops (also after an await, in a
+//     getter of the result, in a thrown object, in a regular expression) are stopped by the expression timeout.
 import { spawnSync } from 'node:child_process';
 import { rng } from '../src/core/random.ts';
-import type { Engine } from '../src/graph/engine.ts';
-import type { NodeSpec } from '../src/graph/types.ts';
+import { Engine } from '../src/graph/engine.ts';
+import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
+import { createNodeHost } from '../src/host/node.ts';
 import { addFixture, checkGeo, createFixtureEngine } from './fixtures.ts';
 import { fingerprint } from './fingerprint.ts';
 
@@ -231,4 +236,74 @@ for (const [i, c] of cases.entries()) {
 
 const secs = ((performance.now() - t0) / 1000).toFixed(1);
 console.log(`wrangle fuzz: ${cases.length} snippets (${counts.valid} valid, ${counts.malformed} malformed, ${counts.hang} infinite loops; seed ${SEED}), ${fail} failed, ${gaps} known line-hint gaps (${secs}s)`);
-process.exit(fail ? 1 : 0);
+
+// ------------------------------------------------------------------ "=expr" sandbox
+
+/**
+ * Hostile parameter expressions. Each one gives a number when it gets out (so an escape cooks instead of failing),
+ * and must fail the node with an error matching `want` that names the param and the expression. `loop` cases
+ * never finish: the expression timeout has to stop them.
+ */
+const EXPR_CASES: { expr: string; want: RegExp; loop?: boolean }[] = [
+  { expr: '=process.pid', want: /process is not available in expressions/ },
+  { expr: '=globalThis.process.pid', want: /globalThis is not available in expressions/ },
+  { expr: "=this.constructor.constructor('return process')().pid", want: /this is not available in expressions/ },
+  { expr: "=import('node:fs') ? 1 : 1", want: /import is not available in expressions/ },
+  { expr: "=import('data:text/javascript,globalThis.__pwned=1') ? 1 : 1", want: /import is not available in expressions/ },
+  { expr: "=fetch('http://127.0.0.1:9') ? 1 : 1", want: /fetch is not available in expressions/ },
+  { expr: "=require('node:fs') ? 1 : 1", want: /require is not available in expressions/ },
+  { expr: "=Function('return process')().pid", want: /Function is not available in expressions/ },
+  { expr: "=sin.constructor.constructor('return process')().pid", want: /the Function constructor is not available/ },
+  { expr: "=(() => 0).constructor('return this')().process.pid", want: /the Function constructor is not available/ },
+  { expr: "=(async () => 0).constructor('return 1') ? 1 : 1", want: /the Function constructor is not available/ },
+  { expr: "=Math.max.constructor('return process')().pid", want: /the Function constructor is not available/ },
+  { expr: "=bbox('src').max.constructor.constructor('return process')().pid", want: /the Function constructor is not available/ },
+  { expr: "=list.constructor.constructor('return process')().pid", want: /the Function constructor is not available/ },
+  { expr: "=(() => { try { return nope } catch (e) { return e.constructor.constructor('return process')().pid } })()", want: /the Function constructor is not available/ },
+  { expr: "=(() => { try { point('src', 1e9, 'P') } catch (e) { return e.constructor.constructor('return process')().pid } })()", want: /the Function constructor is not available/ },
+  { expr: '=[].constructor.prototype.polluted = 1', want: /not extensible/ },
+  { expr: '=list.push(4)', want: /not extensible/ },
+  { expr: '=list = 1', want: /cannot assign to "list"/ },
+  { expr: '=(() => { while (true) {} })()', want: /exceeded \d+ ms/, loop: true },
+  { expr: '=(() => { for (;;) {} })()', want: /exceeded \d+ ms/, loop: true },
+  { expr: '=(async () => { await 0; while (true) {} })() ? 1 : 1', want: /exceeded \d+ ms/, loop: true },
+  { expr: '=({ get x() { while (true) {} } })', want: /exceeded \d+ ms/, loop: true },
+  { expr: '=(() => { throw { get message() { while (true) {} } } })()', want: /exceeded \d+ ms/, loop: true },
+  { expr: "='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!'.match('(a+)+$') ? 1 : 0", want: /exceeded \d+ ms/, loop: true },
+];
+const exprGraph = (expr: string): GraphSpec => ({
+  vars: { list: [1, 2, 3] },
+  nodes: { src: { type: 'box' }, t: { type: 'box', params: { size: 0.5, center: [0, expr, 0] } } },
+  output: 't',
+});
+const EXPR_TIMEOUT_MS = 400;
+let exprFail = 0;
+const te = performance.now();
+for (const workers of [0, 2]) {
+  const e = new Engine(createNodeHost({ workers, shelf: false }));
+  e.manifold = engine.manifold;
+  e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+  const mode = workers ? 'pool on' : 'pool off';
+  const problems: string[] = [];
+  if (e.concurrent !== !!workers) problems.push(`${mode}: engine.concurrent is ${e.concurrent}`);
+  for (const c of EXPR_CASES) {
+    const t = performance.now();
+    let r;
+    try { r = await e.cook(exprGraph(c.expr)); } catch (err: any) { problems.push(`${c.expr}: engine.cook threw ${err?.stack ?? err}`); continue; }
+    const ms = performance.now() - t;
+    const err = r.errors.find((x) => x.node === 't');
+    if (r.ok || !err) problems.push(`${c.expr}: cooked (${r.ok ? 'escaped the sandbox, center y = ' + r.geo?.bbox().max[1] : r.errors.map((x) => x.message).join('; ')})`);
+    else if (!c.want.test(err.message) || !err.message.includes('param "center"[1]') || !err.message.includes(c.expr)) problems.push(`${c.expr}: unclear error: ${err.message}`);
+    if (c.loop && ms > EXPR_TIMEOUT_MS * 3 + 2000) problems.push(`${c.expr}: timeout fired late: ${ms.toFixed(0)} ms for a ${EXPR_TIMEOUT_MS} ms limit`);
+    if (!c.loop && ms > 2000) problems.push(`${c.expr}: took ${ms.toFixed(0)} ms`);
+    if (VERBOSE) console.log(`expr ${mode} ${ms.toFixed(0).padStart(5)}ms ${c.expr}: ${err?.message.slice(0, 120)}`);
+  }
+  await new Promise((res) => setTimeout(res, 20)); // let any stray promise settle
+  const after = await e.cook(exprGraph('=list[2] + sin(0) + rand(1) * 0'));
+  if (!after.ok || Math.abs(after.geo!.bbox().max[1] - 3.25) > 1e-9) problems.push(`${mode}: a plain expression no longer works after the hostile ones: ${after.errors.map((x) => x.message).join('; ')}`);
+  if ((globalThis as any).__pwned !== undefined || ([] as any).polluted !== undefined || Object.isFrozen(Array.prototype)) problems.push(`${mode}: the engine realm was changed`);
+  await e.host.pool?.close();
+  for (const p of problems) { exprFail++; console.log(`FAIL expression sandbox, ${p}`); }
+}
+console.log(`expression sandbox: ${EXPR_CASES.length} hostile expressions × pool off/on, ${exprFail} failed (${((performance.now() - te) / 1000).toFixed(1)}s)`);
+process.exit(fail || exprFail ? 1 : 0);
