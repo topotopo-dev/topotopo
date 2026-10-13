@@ -14,6 +14,10 @@ import { GRAPH_VERSION } from '../src/graph/types.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { migrateGraph, migrateGraphDetailed } from '../src/graph/migrate.ts';
 import { scanExpr } from '../src/graph/params.ts';
+import { EXPR_HELPERS, REF_FUNCS, evalExpr, isSimpleExpr } from '../src/graph/expr.ts';
+import type { Host } from '../src/host/types.ts';
+import { rand } from '../src/core/random.ts';
+import { clamp, fit, lerp, smoothstep } from '../src/core/math.ts';
 import { catalogText, nodeDoc, TOPICS } from '../src/mcp/docs.ts';
 import { Workspace } from '../src/workspace.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -44,6 +48,7 @@ const cook = async (g: GraphSpec, o: CookOptions = {}, e = engine): Promise<Cook
 };
 const res = (r: CookReport, n: string) => r.results.get(n)!;
 const bboxOf = (g: Geometry | null) => g!.bbox();
+const size3 = (g: Geometry | null) => { const b = g!.bbox(); return [0, 1, 2].map((k) => +(b.max[k] - b.min[k]).toFixed(6)); };
 
 // test-only nodes (registered in this process only)
 let counter = 0;
@@ -366,6 +371,116 @@ section('expression references to other nodes');
   // static scan
   const sc = scanExpr(`npoints("a") + bbox('b').size.y + ch("c/size")[0] + ch('d', 'radius') + x.point(1) + detail(\`e\`, 'h')`);
   check(sc.geo.join() === 'a,b,e' && sc.ch.map((c) => `${c.node}.${c.param}`).join() === 'c.size,d.radius' && !sc.errors.length, 'scanExpr finds literal references only');
+}
+
+// ------------------------------------------------------------------ expression sandbox
+// (hostile and never-ending expressions, with the worker pool off and on, are in test/fuzz.ts)
+section('expression sandbox');
+{
+  const host = engine.host;
+  const ev = (src: string, vars: Record<string, any> = {}) => evalExpr(src, vars, { host });
+  const errOf = (f: () => any) => { try { f(); return ''; } catch (e: any) { return String(e?.message ?? e); } };
+  check(!!host.exprSandbox, 'the Node host provides an expression sandbox');
+
+  // the helpers are built inside the sandbox realm: they must compute what the engine's own functions compute
+  const xs = [0, 1, -1, 2.5, -7.25, 0.1, 1e9, 2 ** 31, -(2 ** 31) - 1, 2 ** 40 + 0.5, 123456789, Math.PI];
+  let same = ev('rand(3)') === rand(3);
+  for (const x of xs) {
+    for (const s of [0, 1, 2.5, -3, 17]) if (ev(`rand(${x}, ${s})`) !== rand(x, s)) same = false;
+    if (ev(`clamp(${x}, -2, 3)`) !== clamp(x, -2, 3) || ev(`lerp(-1, 4, ${x})`) !== lerp(-1, 4, x)) same = false;
+    if (ev(`fit(${x}, -1, 3, 10, 20)`) !== fit(x, -1, 3, 10, 20) || ev(`smoothstep(-1, 2, ${x})`) !== smoothstep(-1, 2, x)) same = false;
+  }
+  check(same, 'rand, clamp, fit, lerp, smoothstep in the sandbox equal src/core/random.ts and src/core/math.ts');
+  check(ev('frac(-1.25) + mod(-1, 3) + degrees(radians(90)) + TAU / PI + pick([4, 5, 6], -1) + E * 0') === 0.75 + 2 + 90 + 2 + 6, 'frac, mod, radians, degrees, TAU, pick');
+  const missing = [...EXPR_HELPERS, ...REF_FUNCS].filter((n) => /not/.test(errOf(() => ev(`typeof ${n}`))));
+  const undocumented = EXPR_HELPERS.filter((n) => !['Math', 'NaN', 'Infinity', 'undefined'].includes(n) && !new RegExp(`\\b${n}\\b`).test(TOPICS.expressions));
+  check(!missing.length && !undocumented.length, `every helper is in scope and documented in topic "expressions"${missing.length + undocumented.length ? `; missing: ${missing.join(', ')}; undocumented: ${undocumented.join(', ')}` : ''}`);
+
+  // the static check: every expression shipped in examples/ and shelf/ runs without the per-call timer
+  const shipped: string[] = [];
+  const walk = (v: any) => {
+    if (typeof v === 'string') { if (v.length > 1 && v[0] === '=') shipped.push(v.slice(1)); }
+    else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x);
+  };
+  for (const dir of ['examples', 'shelf']) for (const f of fs.readdirSync(path.join(root, dir))) if (f.endsWith('.json')) walk(JSON.parse(fs.readFileSync(path.join(root, dir, f), 'utf8')));
+  const timedShipped = shipped.filter((s) => !isSimpleExpr(s));
+  check(shipped.length > 100 && !timedShipped.length, `all ${shipped.length} shipped expressions run without the timer${timedShipped.length ? '; not: ' + timedShipped.join(' | ') : ''}`);
+  const timedForms = [
+    '(() => 1)()', 'list.map(sin)', "'a'.match('a')", '/a/.test(s)', '`t`', 'h = 1', '({ a: 1 }).a', 'new Array(3)', 'f?.(1)',
+    'h // c', 'h /* c */ + 1', '[...list]', 'Math.max.apply(null, list)', '(sin)(1)', "list['map'](sin)", 'h++', "'a' in b", 'this',
+    'h; 1', 'h <!-- c', 'x.Math.max(1)', 'sin(1)' + ' + sin(1)'.repeat(40), 'h'.repeat(1001), '\\u0068',
+  ];
+  const plainForms = [
+    'h * 2', "bbox('a').max.y + 1", 'Math.min(a, b) / 2', 'c ? 1 : 0', '[1, 2, h][i % 3]', 'typeof h', 'h / 2 / 3', "s == 'x' && !t",
+    'a?.b ?? 0', "ch('n/size')[0]", 'pick([1, 2, 3], iteration)', '0x1f + 1e-3 + .5 + 1_000', 'attr.import_x', 'x.while',
+  ];
+  check(timedForms.every((s) => !isSimpleExpr(s)), `forms that need the timer are detected${timedForms.some(isSimpleExpr) ? '; missed: ' + timedForms.filter(isSimpleExpr).join(' | ') : ''}`);
+  check(plainForms.every(isSimpleExpr), `straight-line forms skip the timer${plainForms.some((s) => !isSimpleExpr(s)) ? '; not: ' + plainForms.filter((s) => !isSimpleExpr(s)).join(' | ') : ''}`);
+  check(ev('[1, 2, 3].map((x) => x * h).reduce((a, b) => a + b)', { h: 2 }) === 12 && ev('(() => { let s = 0; for (let i = 0; i < 4; i++) s += i; return s; })()') === 6, 'timed expressions (function literals, loops) still evaluate');
+
+  // timed expressions remember their result together with everything they read: a re-cook with the same inputs skips
+  // the timed host call, any changed input (var, time, referenced geometry, a var shadowing a helper) re-evaluates
+  {
+    const e = await newEngine();
+    const sb = e.host.exprSandbox!;
+    const run0 = sb.run;
+    let timedRuns = 0;
+    sb.run = (job, ms) => { timedRuns++; return run0.call(sb, job, ms); };
+    const g = (h: number, size: number, extra: Record<string, any> = {}): GraphSpec => ({
+      vars: { h, ...extra },
+      nodes: {
+        base: { type: 'box', params: { size } },
+        t: { type: 'box', params: { size: 0.5, center: ['=(() => h * 2)()', "=(() => bbox('base').max.y)()", '=(() => frame + sin(0))()'] } },
+      },
+      output: 't',
+    });
+    const center = (r: CookReport) => { const b = bboxOf(r.geo); return [0, 1, 2].map((k) => +((b.max[k] + b.min[k]) / 2).toFixed(6)).join(); };
+    const a = await cook(g(2, 1), {}, e);
+    const runsA = timedRuns;
+    e.cache.clear();
+    const b = await cook(g(2, 1), {}, e);
+    const runsB = timedRuns - runsA;
+    const c = await cook(g(3, 4), { frame: 5 }, e);
+    const d = await cook(g(3, 4, { sin: () => 0 }), { frame: 5 }, e);
+    check(runsA === 3 && runsB === 0 && center(a) === '4,0.5,1' && center(b) === '4,0.5,1' && res(b, 't').timeDependent, `same inputs: remembered results, no timed call (${runsA} then ${runsB}), still time-dependent`);
+    check(center(c) === '6,2,5' && !d.ok, `changed var, geometry and frame re-evaluate (${center(c)}); a var shadowing a helper is not served from memory`);
+    const rnd = async () => (await cook({ nodes: { t: { type: 'box', params: { size: '=(() => 1 + Math.random())()' } } } }, {}, e)).geo!.bbox().max[0];
+    e.cache.clear();
+    const r1 = await rnd();
+    e.cache.clear();
+    check(r1 !== await rnd(), 'an expression that reads Math (Math.random) is not remembered');
+  }
+
+  // errors name the param and the expression
+  const r1 = await engine.cook({ nodes: { b: { type: 'box', params: { size: '=nope_var * 2' } } } });
+  check(!r1.ok && /^param "size": expression "=nope_var \* 2" failed: nope_var is not defined/.test(r1.errors[0]?.message ?? ''), `error names the param and the expression: ${r1.errors[0]?.message}`);
+  const r2 = await engine.cook({ nodes: { b: { type: 'box' }, t: { type: 'transform', in: ['b'], params: { translate: [0, '=1 +', 0] } } } });
+  check(!r2.ok && /^param "translate"\[1\]: syntax error in expression "=1 \+"/.test(r2.errors[0]?.message ?? ''), `syntax error names the param component: ${r2.errors[0]?.message}`);
+  const r3 = await engine.cook({ nodes: { b: { type: 'box', params: { size: '=(() => {\n  return 1 +;\n})()' } } } });
+  check(!r3.ok && /syntax error in expression .*\(line 2\)$/s.test(r3.errors[0]?.message ?? ''), `multi-line syntax error names the line: ${r3.errors[0]?.message.split('\n').pop()}`);
+
+  // values cross the realm boundary as copies: vars are read-only, results are engine-realm data
+  const vv = { list: [3, 1, 2] };
+  const r4 = await engine.cook({ vars: vv, nodes: { b: { type: 'box', params: { size: '=list.sort()[0]' } } } });
+  check(!r4.ok && /read only/.test(r4.errors[0]?.message ?? '') && vv.list.join() === '3,1,2', 'vars are read-only in expressions and the graph vars stay untouched');
+  const arr = ev("[1, [2, h], 'x']", { h: 5 });
+  check(Object.getPrototypeOf(arr) === Array.prototype && Object.getPrototypeOf(arr[1]) === Array.prototype && arr.flat().join() === '1,2,5,x', 'array results are engine-realm arrays');
+  check(/gives a function/.test(errOf(() => ev('sin'))) && /circular/.test(errOf(() => ev('(() => { const a = []; a.push(a); return a; })()'))), 'functions and circular results are errors');
+  check(ev('v.x + v.z', { v: Object.defineProperty([1, 2, 3], 'x', { get() { return 1; } }) }) === 4, 'vectors keep .x .y .z in vars');
+
+  // a host without exprSandbox (e.g. a browser host) falls back to new Function: the same names are hidden, but
+  // there is no realm isolation and no timeout (so no loop cases here)
+  const fbHost: Host = Object.assign(createNodeHost({ baseDir: tmp, workers: 0 }), { exprSandbox: undefined });
+  const fb = new Engine(fbHost);
+  fb.manifold = engine.manifold;
+  const fbMsgs: string[] = [];
+  for (const x of ['=process.pid', '=globalThis.process.pid', "=fetch('x') ? 1 : 1", "=import('node:fs') ? 1 : 1", "=this.constructor.constructor('return process')().pid", "=require('fs') ? 1 : 1"]) {
+    const r = await fb.cook({ nodes: { b: { type: 'box', params: { center: [0, x, 0] } } } });
+    fbMsgs.push(r.ok ? `${x} cooked` : r.errors[0].message);
+  }
+  check(fbMsgs.every((m) => /is not available in expressions/.test(m)), `fallback hides host names${fbMsgs.some((m) => !/is not available/.test(m)) ? ': ' + fbMsgs.join(' | ') : ''}`);
+  const fbOk = await fb.cook({ vars: { h: 2 }, nodes: { b: { type: 'box', params: { size: ['=h * sin(PI / 2)', "=[1, 2].map((x) => x * h)[1]", '=rand(3) * 0 + 1'] } } } });
+  check(fbOk.ok && size3(fbOk.geo).join() === '2,4,1', 'fallback evaluates plain and timed forms');
 }
 
 // ------------------------------------------------------------------ versioning and deprecation

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import type { Host, WorkerPool } from './types.ts';
+import type { ExprSandbox, Host, WorkerPool } from './types.ts';
 import { createNodePool, poolOptionsFromEnv } from './pool.ts';
 import type { NodePoolOptions } from './pool.ts';
 import { installSnippetLib } from '../core/snippet-lib.ts';
@@ -104,6 +104,47 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   };
   // running any script drains the realm's microtask queue afterwards (inside the timeout)
   const drain = new vm.Script('undefined', { filename: 'drain.js' });
+  const checkBody = (body: string, parsingContext: any) => {
+    try {
+      vm.compileFunction(body, [], { filename: 'check.js', parsingContext });
+      return null;
+    } catch (e: any) {
+      if (!(e instanceof SyntaxError) && e?.name !== 'SyntaxError') throw e;
+      const m = /check\.js:(\d+)/.exec(String(e.stack ?? ''));
+      return { message: String(e.message), line: m ? Number(m[1]) : 1 };
+    }
+  };
+
+  // "=expr" expressions get a realm of their own, created on first use (src/graph/expr.ts installs the expression
+  // library there and locks the realm down). Its own microtask queue is drained inside every timed run, so an
+  // expression's async continuation cannot outlive the timeout. The job slot is a lexical binding of the realm's
+  // global scope, not a property of its global object; expressions cannot name it (their scope proxy claims every
+  // identifier) and their Function constructors are disabled.
+  let exprRealm: { ctx: any; setJob: (job: (() => void) | undefined) => void } | null = null;
+  const exprCtx = () => {
+    if (!exprRealm) {
+      const opts = { name: 'polyforge-expressions', microtaskMode: 'afterEvaluate' as const };
+      const ectx: any = fast ? vm.createContext(fast, opts) : vm.createContext({}, opts);
+      const setJob = vm.runInContext('const __exprJob = { f: undefined };\n(f) => { __exprJob.f = f; }', ectx);
+      realmPromiseProtos.add(vm.runInContext('Promise.prototype', ectx));
+      exprRealm = { ctx: ectx, setJob };
+    }
+    return exprRealm;
+  };
+  const exprJob = new vm.Script('__exprJob.f()', { filename: 'expression-job.js' });
+  const exprSandbox: ExprSandbox = {
+    compile: (source) => new vm.Script(source, { filename: 'expression.js' }).runInContext(exprCtx().ctx),
+    checkSyntax: (body) => checkBody(body, exprCtx().ctx),
+    run(job, timeoutMs) {
+      const r = exprCtx();
+      r.setJob(job);
+      try {
+        exprJob.runInContext(r.ctx, { timeout: Math.max(1, timeoutMs) });
+      } finally {
+        r.setJob(undefined);
+      }
+    },
+  };
 
   const fontDirs =
     process.platform === 'win32'
@@ -153,15 +194,9 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
       return v;
     },
     checkSyntax(body) {
-      try {
-        vm.compileFunction(body, [], { filename: 'check.js', parsingContext: ctx });
-        return null;
-      } catch (e: any) {
-        if (!(e instanceof SyntaxError) && e?.name !== 'SyntaxError') throw e;
-        const m = /check\.js:(\d+)/.exec(String(e.stack ?? ''));
-        return { message: String(e.message), line: m ? Number(m[1]) : 1 };
-      }
+      return checkBody(body, ctx);
     },
+    exprSandbox,
     runGuarded(fn, timeoutMs = 30000) {
       return guarded(fn, timeoutMs);
     },

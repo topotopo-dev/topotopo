@@ -59,6 +59,24 @@ export interface WorkerPool {
   stats(): { workers: number; busy: number; queued: number; started: number; tasks: number; crashes: number; timeouts: number };
 }
 
+/**
+ * The realm "=expr" parameter expressions run in (src/graph/expr.ts), separate from the script realm and used by
+ * nothing else: the engine installs the expression library there, freezes the realm's built-ins and disables its
+ * Function constructors.
+ */
+export interface ExprSandbox {
+  /** Evaluate a script in the sandbox realm and return its completion value (the engine compiles functions with it). */
+  compile(source: string): any;
+  /** Parse `body` as a function body in the sandbox realm without running it (as Host.checkSyntax). */
+  checkSyntax(body: string): { message: string; line: number } | null;
+  /**
+   * Call `job` with a wall-clock limit. Microtasks the realm queues while it runs (continuations of async code) also
+   * run before `run` returns, inside the limit. On timeout `job` is stopped wherever it is and a "timed out" error is
+   * thrown.
+   */
+  run(job: () => void, timeoutMs: number): void;
+}
+
 export interface Host {
   name: string;
   /** Read a file (or URL) as bytes. */
@@ -83,6 +101,12 @@ export interface Host {
   checkSyntax?(body: string): { message: string; line: number } | null;
   /** Run fn with a wall-clock limit; throws on timeout. */
   runGuarded<T>(fn: () => T, timeoutMs?: number): T;
+  /**
+   * Where "=expr" expressions are compiled and run. Absent: the engine compiles them with `new Function` in its own
+   * realm, with the same restricted names but no realm isolation and no timeout, so such a host must not cook
+   * graphs from untrusted sources.
+   */
+  exprSandbox?: ExprSandbox;
   /**
    * Run an async fn from the scripting realm with a wall-clock limit that also covers its continuations: code the
    * realm runs after an `await` is time-limited like synchronous code, and the whole run (including time spent in

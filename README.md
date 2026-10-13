@@ -169,6 +169,7 @@ graph: `npoints('pts')`, `nprims`, `nvertices`, `bbox('base').size.y` (also `min
 `detail('n', 'attr')`, `point('n', i, 'P')`, `prim('n', i, 'attr')` and `ch('box1/size')` for another node's param.
 Referenced nodes become dependencies: they are cooked first, editing them re-cooks the reader, and unknown names or
 cycles are reported before cooking. Node names must be string literals; these functions are not available in `vars`.
+Expressions run in a sandbox that sees only these names, `Math` and the helpers listed by `help {topic: "expressions"}`.
 
 Group patterns look like `top`, `!top`, `0-10` or `@P.y>0.5`. A wrangle snippet looks like this:
 
@@ -177,6 +178,16 @@ Group patterns look like `top`, `!top`, `0-10` or `@P.y>0.5`. A wrangle snippet 
 @Cd = hsv2rgb(rand(@ptnum), 0.6, 1);
 if (@P.y < 0) removepoint(0, @ptnum);
 ```
+
+## Security
+
+A graph is code: `"=expr"` params and the code of `wrangle`, `script`, `sdf_expr` and similar nodes are JavaScript
+taken from the graph JSON. On Node, expressions and wrangles run sandboxed in separate `vm` realms with a timeout
+(`POLYFORGE_SCRIPT_TIMEOUT_MS`, default 30 s): an expression sees only graph vars, the cook time, `Math` and the
+documented helpers (no `process`, `require`, `import`, `fetch` or `globalThis`), and a runaway loop fails its node
+instead of hanging the process. That contains mistakes, not attackers: sandboxed code can still allocate memory and
+burn CPU until the timeout, and a `vm` realm is not a hard security boundary. Do not cook graphs from untrusted sources
+in a privileged process.
 
 ## Node types
 
@@ -305,7 +316,7 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 |---|---|---|
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
 | golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every shelf asset matches its fingerprint in `test/golden/` |
-| property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) |
+| property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets) and hostile `=expr` expressions (escapes and endless loops, pool off and on) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions; this README's node table lists every node type |
 | examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors: a node spec on the node's fixture inputs, a graph as written |
 | io | `node test/io.ts` | export → import round trips for every format |
@@ -352,6 +363,7 @@ node or param change; `npm test` fails while it is stale.
 wrangle, SDF meshing, triangulate, merge, fuse) against targets from the roadmap and prints a Markdown table. `--quick` uses smaller sizes,
 `--filter name` selects cases. Results go to `bench/last.json`; `bench/baseline.json` is a reference run (informational,
 never failing). Compare with the thread pool off: `POLYFORGE_WORKERS=0 npm run bench -- --filter noise`.
+`node bench/expr.ts` cooks graphs with 1000 `"=expr"` params (cold and cached) to time the expression sandbox.
 
 CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test` on Node 22 and 24 for every push and pull request.
 
