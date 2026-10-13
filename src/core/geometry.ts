@@ -483,6 +483,23 @@ export interface GeoInit {
   closed?: boolean | boolean[];
 }
 
+/**
+ * Every Geometry object the engine made (the constructor and Geometry.blank add them). A brand check that runs no user
+ * code: `instanceof` and Object.getPrototypeOf call a Proxy's getPrototypeOf trap, and a script node may hand back a
+ * Proxy of a geometry (R-18). WeakSet.prototype.has is bound now, so a later change to WeakSet.prototype in this realm
+ * does not reach the check either.
+ */
+const GEOMETRIES = new WeakSet<object>();
+const brandHas = Function.prototype.call.bind(WeakSet.prototype.has) as (s: WeakSet<object>, x: object) => boolean;
+
+/**
+ * Is x a Geometry the engine created (not a Proxy of one, nor an object made with Geometry.prototype by other means)?
+ * Never runs code of x: safe on values user code returned.
+ */
+export function isGeometry(x: unknown): x is Geometry {
+  return typeof x === 'object' && x !== null && brandHas(GEOMETRIES, x);
+}
+
 export class Geometry {
   points: AttribTable;
   vertices: AttribTable;
@@ -495,7 +512,7 @@ export class Geometry {
   primGroups = new Map<string, Uint8Array>();
   volumes: Volume[] = [];
   // Vertex and edge groups are created lazily, so geometry assembled with
-  // Object.create(Geometry.prototype) (fast paths in nodes) never sees them undefined.
+  // Geometry.blank() (fast paths in nodes) never sees them undefined.
   private _vertexGroups?: Map<string, Uint8Array>;
   private _edgeGroups?: Map<string, EdgeSet>;
   /**
@@ -519,7 +536,19 @@ export class Geometry {
   get packedSources(): Geometry[] { return this._packedSources ?? (this._packedSources = []); }
   set packedSources(s: Geometry[]) { this._packedSources = s; }
 
+  /**
+   * A Geometry object without any field set (not even the class fields), for fast paths that assign every field
+   * themselves. Use it instead of Object.create(Geometry.prototype): only objects from here and from the constructor
+   * pass isGeometry, which the engine checks on every node's result.
+   */
+  static blank(): Geometry {
+    const g = Object.create(Geometry.prototype) as Geometry;
+    GEOMETRIES.add(g);
+    return g;
+  }
+
   constructor(init: GeoInit = {}) {
+    GEOMETRIES.add(this);
     const pos = init.positions ?? [];
     const np = Math.floor(pos.length / 3);
     this.points = new AttribTable(np);
@@ -595,7 +624,7 @@ export class Geometry {
   }
 
   clone(): Geometry {
-    const g = Object.create(Geometry.prototype) as Geometry;
+    const g = Geometry.blank();
     g.points = this.points.clone();
     g.vertices = this.vertices.clone();
     g.prims = this.prims.clone();
@@ -898,7 +927,7 @@ export class Geometry {
       for (let v = s; v < e; v++) if (remap[this.vertexPoint[v]] >= 0) vtxIdx.push(v);
       starts.push(vtxIdx.length);
     }
-    const g = Object.create(Geometry.prototype) as Geometry;
+    const g = Geometry.blank();
     g.points = this.points.gather(ptIdx);
     g.vertices = this.vertices.gather(vtxIdx);
     g.prims = this.prims.gather(primIdx);
@@ -926,7 +955,7 @@ export class Geometry {
     if (geos.length === 0) return new Geometry();
     if (geos.length === 1) return geos[0].clone();
     geos = unifyDisplayAttribs(geos);
-    const out = Object.create(Geometry.prototype) as Geometry;
+    const out = Geometry.blank();
     const total = (f: (g: Geometry) => number) => geos.reduce((s, g) => s + f(g), 0);
     const np = total((g) => g.numPoints), nv = total((g) => g.numVertices), nprim = total((g) => g.numPrims);
     out.points = mergeTables(geos.map((g) => g.points), np);
@@ -1325,7 +1354,7 @@ export class GeoBuilder {
   }
 
   build(): Geometry {
-    const g = Object.create(Geometry.prototype) as Geometry;
+    const g = Geometry.blank();
     const np = this.numPoints, nv = this.numVertices, npr = this.numPrims;
     const src = this.src;
     g.points = src ? interpTable(src.points, this.ptSrc, this.skip.point, ['P']) : new AttribTable(np);

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { ExprSandbox, Host, WorkerPool } from './types.ts';
 import { createNodePool, poolOptionsFromEnv } from './pool.ts';
 import type { NodePoolOptions } from './pool.ts';
-import { installSnippetLib } from '../core/snippet-lib.ts';
+import { REALM_CONTROL, SCRIPT_REALM_SETUP } from '../core/snippet-lib.ts';
 import { makeCurl, makeNoise } from '../core/noise.ts';
 import type { Noise3 } from '../core/noise.ts';
 import { randN } from '../core/random.ts';
@@ -87,19 +87,25 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   const fast = (vm as any).constants?.DONT_CONTEXTIFY;
   const ctxOpts = { name: 'topotopo-scripts', microtaskMode: 'afterEvaluate' as const };
   const ctx: any = fast ? vm.createContext(fast, ctxOpts) : vm.createContext({}, ctxOpts);
+  // Set up before any user code runs; afterwards the host never reads or writes a property of the realm's global
+  // object, which user code can redefine (a getter or setter that never returns would run here, outside any limit).
   const realmGlobal = vm.runInContext('globalThis', ctx);
   realmGlobal.__hostApi = hostApi;
   realmGlobal.console = { log: () => {} };
-  vm.runInContext(`(${installSnippetLib.toString()})(globalThis, __hostApi); delete globalThis.__hostApi;`, ctx);
+  vm.runInContext(SCRIPT_REALM_SETUP, ctx);
+  const realmCtl: { setJob: (f: (() => any) | undefined) => void } = vm.runInContext(REALM_CONTROL, ctx);
   const scriptCache = new Map<string, any>();
   realmPromiseProtos.add(realmGlobal.Promise.prototype);
   filterRealmRejections();
+  // The job is a closure variable of the realm (set through the frozen control object), and the timed script reaches
+  // it through a global const: nothing on the way can be replaced by user code.
+  const runJob = new vm.Script(`${REALM_CONTROL}.run()`, { filename: 'job.js' });
   const guarded = (fn: () => any, timeoutMs: number) => {
-    realmGlobal.__job = fn;
+    realmCtl.setJob(fn);
     try {
-      return vm.runInContext('__job()', ctx, { timeout: Math.max(1, timeoutMs) });
+      return runJob.runInContext(ctx, { timeout: Math.max(1, timeoutMs) });
     } finally {
-      realmGlobal.__job = undefined;
+      realmCtl.setJob(undefined);
     }
   };
   // running any script drains the realm's microtask queue afterwards (inside the timeout)

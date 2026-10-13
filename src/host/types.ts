@@ -91,7 +91,9 @@ export interface Host {
   resolvePath(path: string): string;
   /**
    * Compile JS source inside the scripting realm (which has the snippet library
-   * installed) and return the resulting value (usually a function).
+   * installed) and return the resulting value (usually a function). The realm is set up with
+   * SCRIPT_REALM_SETUP (src/core/snippet-lib.ts) before any user code runs, so `compile(REALM_CONTROL)` returns its
+   * control object; runGuarded runs its jobs through that object too.
    */
   compile(source: string): any;
   /**

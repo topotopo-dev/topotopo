@@ -41,7 +41,7 @@ function scatterSurfaceGeo(
     }
     dom[k] = best;
   }
-  const out = Object.create(Geometry.prototype) as Geometry;
+  const out = Geometry.blank();
   const pts = new AttribTable(n);
   for (const [name, a] of g.points.map) {
     if (skip.has(name) || name === 'P') continue;
@@ -775,7 +775,7 @@ defineNode({
     if (!pieceOf) {
       // fast path: one source repeated
       const np = src.numPoints, nv = src.numVertices, npr = src.numPrims, nc = tpts.length;
-      const out = Object.create(Geometry.prototype) as Geometry;
+      const out = Geometry.blank();
       const rep = (n: number) => {
         const ident = new Int32Array(n); // one identity index list shared by every copy
         for (let i = 0; i < n; i++) ident[i] = i;
@@ -984,7 +984,7 @@ function packedCopies(
   });
   const n = chosen.length;
   const { pos, X } = instanceXforms(t, chosen);
-  const out = Object.create(Geometry.prototype) as Geometry;
+  const out = Geometry.blank();
   out.points = new AttribTable(n);
   (out.points.add('P', 'float', 3).data as Float64Array).set(pos);
   for (const name of copyNames) out.points.set(name, t.points.get(name)!.gather(chosen));

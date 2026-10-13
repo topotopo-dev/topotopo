@@ -127,7 +127,7 @@ defineNode({
     }
     // output: anchors + packed prims (+ isolated points, kept as they are)
     const count = srcIdx.length;
-    const out = Object.create(Geometry.prototype) as Geometry;
+    const out = Geometry.blank();
     out.points = new AttribTable(count);
     (out.points.add('P', 'float', 3).data as Float64Array).set(pivots);
     out.vertices = new AttribTable(count);

@@ -50,8 +50,7 @@ async function wrangleChunk(a: any, arrays: Record<string, any>, start: number, 
     numpt: a.numpt, numprim: a.numprim, numvtx: a.numvtx, frame: a.frame, time: a.time, timeInc: a.timeInc, vars: a.vars,
     centroid: () => { throw new Error('centroid is not available in a point wrangle'); },
   };
-  const g = realm.compile('globalThis');
-  g.__cur = null;
+  // the geometry API stays null in workers (point wrangles that call geometry functions run on the cooking thread)
   try {
     // what the snippet throws is read inside the time limit too (a thrown object's message getter is user code)
     runUserCode(realm, () => kernel(env), a.timeoutMs, true);
