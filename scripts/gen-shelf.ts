@@ -127,7 +127,8 @@ export function thumbnailPNG(geo: any, g: GraphSpec): Uint8Array {
   return encodePNG(rgba, size, size, (d) => zlib.deflateSync(d, { level: 9 }));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// realpath on both sides: started through a symlinked path, argv[1] keeps the link while the module URL does not
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   const filter = args.find((a) => !a.startsWith('--'));
   const files = readShelfFiles();

@@ -80,6 +80,6 @@ written.push({ path: 'demo.json', bytes: fs.statSync(path.join(out, 'demo.json')
 const kb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(2)} MB` : `${(n / 1024).toFixed(1)} KB`);
 console.log(`\n${out}  (cook ${cookMs.toFixed(0)} ms; ${scene.numPacked} instances of ${scene.packedSources.length} sources)`);
 const w = Math.max(...written.map((f) => f.path.length));
-for (const f of [...written].sort((a, b) => a.path.localeCompare(b.path))) console.log(`  ${f.path.padEnd(w)}  ${kb(f.bytes).padStart(10)}`);
+for (const f of [...written].sort((a, b) => a.path.localeCompare(b.path, 'en'))) console.log(`  ${f.path.padEnd(w)}  ${kb(f.bytes).padStart(10)}`);
 console.log(`  ${written.length} files, ${kb(written.reduce((s, f) => s + f.bytes, 0))}`);
 for (const m of warnings) console.log(`warning: ${m}`);
