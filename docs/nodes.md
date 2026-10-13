@@ -164,6 +164,8 @@ category: `generate`
 
 Surface from a JS expression of (u, v) returning [x,y,z]; optional wrapping for closed surfaces.
 
+The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
+
 **Inputs**
 
 None (generator).
@@ -1336,6 +1338,8 @@ Each edge moves by distance along its side vector direction × up (positive = to
 category: `curve`
 
 Curve from a JS expression of t returning [x,y,z] (e.g. helices, knots, Lissajous).
+
+The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
 
 **Inputs**
 
@@ -6396,6 +6400,8 @@ category: `sdf` · aliases: `sdf_code`, `sdf_wrangle`, `implicit`
 
 SDF from JS code: return a signed distance for point p ([x,y,z]). IQ helpers built in (sdSphere, sdBox, smin, opTwist…). sdf(i, p) samples input i.
 
+The code runs sandboxed like a wrangle, under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s). This node only probes the field at the origin; the nodes that sample it later (sdf_to_mesh, sdf_grid, also after transform, sdf_modify or sdf_combine) run all of their sampling under that limit, so the whole mesh or grid must be computed within it: a field that loops anywhere, or is too slow for the resolution, fails the sampling node with "SDF code (sdf_expr) exceeded N ms".
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -6481,7 +6487,7 @@ category: `sdf`
 
 Sample implicit SDF volumes or a polygon mesh into a regular 3D distance grid.
 
-SDF volumes are unioned before sampling; if none exist, polygons are sampled using a triangle BVH and generalized winding-number sign. Values outside the narrow band are signed infinity unless fill is enabled. Grid bounds include padding in voxels. Mesh attributes are dropped.
+SDF volumes are unioned before sampling; if none exist, polygons are sampled using a triangle BVH and generalized winding-number sign. Values outside the narrow band are signed infinity unless fill is enabled. Grid bounds include padding in voxels. Mesh attributes are dropped. A field that runs user code (an sdf_expr upstream, also through transform, sdf_modify or sdf_combine) is sampled under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s): the whole grid must be sampled within it, else this node fails with "SDF code (sdf_expr) exceeded N ms" (raise voxel_size or the timeout). Implicit analytic volumes and meshes have no limit.
 
 **Inputs**
 
@@ -6618,6 +6624,8 @@ None (generator).
 category: `sdf` · aliases: `convert_sdf`, `convert_vdb`, `mesh_sdf`, `polygonize`, `isosurface`
 
 Polygonise SDF volumes into a watertight triangle mesh (all volumes are unioned). Smooth normals from the field gradient.
+
+Meshes with the level-set mesher of manifold-3d. A field that runs user code (an sdf_expr upstream, also through transform, sdf_modify or sdf_combine) is meshed under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s): the whole meshing, normals included, must finish within it, else this node fails with "SDF code (sdf_expr) exceeded N ms" (raise edge_length or the timeout for a slow field). Analytic volumes (sdf_shape, sdf_from_mesh, grid_to_sdf, heightfield_to_sdf) have no limit.
 
 **Inputs**
 

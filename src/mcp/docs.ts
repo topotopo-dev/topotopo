@@ -230,7 +230,11 @@ sdf_expr: write the distance in JS: p = [x,y,z]; return a number. Inputs via sdf
   opRepeat(p,[cx,cy,cz]) opTwist(p,k) opBend(p,k) opTranslate(p,t) opRotateX/Y/Z(p,radians) opMirrorX(p)
   plus all wrangle math (add, sub, mul, noise, fbm …).
 Example: {"type":"sdf_expr","params":{"code":"const b = sdBox(p,[0.6,0.3,0.4]); const s = sdSphere(sub(p,[0,0.35,0]),0.35); return smin(b, s, 0.15) + 0.03*noise(mul(p,6));"}}
-Then: {"type":"sdf_to_mesh","in":["that"],"params":{"divisions":120}}. Set bounds_min/bounds_max to enclose the shape.`,
+Then: {"type":"sdf_to_mesh","in":["that"],"params":{"divisions":120}}. Set bounds_min/bounds_max to enclose the shape.
+Time limit: sdf_expr code is sandboxed like a wrangle. sdf_to_mesh and sdf_grid sample a field that comes from sdf_expr
+  (also through transform/sdf_modify/sdf_combine) under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s)
+  for the whole mesh or grid: a loop or a field too slow for the resolution fails them with "SDF code (sdf_expr)
+  exceeded N ms". Analytic volumes (sdf_shape, sdf_from_mesh …) have no limit.`,
 
   heightfield: `HEIGHTFIELDS (terrain; Houdini's HeightField model, exports to Unreal Landscape)
 A heightfield is a volume carried in the geometry (like an SDF), not polygons: a regular grid of samples in the XZ

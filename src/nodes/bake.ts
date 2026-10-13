@@ -17,7 +17,7 @@ import { pointNormals, resolveVertexNormals, triangulate } from '../core/topolog
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
-import { then } from '../graph/parallel.ts';
+import { andThen } from '../graph/parallel.ts';
 import { P, mask } from './util.ts';
 import { imageGeo, nameParam, resolutionParam, size2 } from './texture.ts';
 
@@ -144,7 +144,7 @@ function project(b: Bake, high: Geometry, cage: number, normals: boolean) {
   const run = b.ctx.parallelMap('bake_project', {
     count: b.s.n, args: { cage }, inputs: { P: b.P, N: R }, results: normals ? { D, NO } : { D }, shared: { ...scene.toArrays(), HN },
   });
-  return then(run, () => ({ D, NO, scene, R }));
+  return andThen(run, () => ({ D, NO, scene, R }));
 }
 
 /** Cage ray directions per sample: averaged normals (default; no gaps at hard edges) or the mesh's own normals. */
@@ -162,14 +162,14 @@ function pointNormalsOf(g: Geometry): Float64Array {
   return pointNormals(g);
 }
 
-/** then() for a callback that may itself return a promise (a cook result); keeps synchronous runs synchronous. */
+/** andThen() for a callback that may itself return a promise (a cook result); keeps synchronous runs synchronous. */
 const chain = <T>(x: T | Promise<T>, f: (v: T) => Geometry | Promise<Geometry>): Geometry | Promise<Geometry> => (x instanceof Promise ? x.then(f) : f(x));
 
 const cageOf = (b: Bake) => (b.ctx.p.cage > 0 ? b.ctx.p.cage : 0.02 * b.diag);
 
 /** Samples moved onto the high mesh (P, N) where the projection hit; the low surface elsewhere. */
 function onHigh(b: Bake, high: Geometry) {
-  return then(project(b, high, cageOf(b), true), ({ D, NO, scene, R }) => {
+  return andThen(project(b, high, cageOf(b), true), ({ D, NO, scene, R }) => {
     const P = b.P.slice(), N = b.N.slice();
     let miss = 0;
     for (let i = 0; i < b.s.n; i++) {
@@ -199,7 +199,7 @@ function rayBake(ctx: CookContext, mode: 'occlusion' | 'thickness') {
     const opts: RaySampleOptions = { mode, samples: p.samples, maxDistance: maxD, bias: p.bias > 0 ? p.bias : 1e-4 * diag, coneAngle: p.cone_angle > 0 ? p.cone_angle : mode === 'thickness' ? 30 : 90, seed: p.seed };
     const out = new Float64Array(b.s.n);
     const run = ctx.parallelMap('occlusion', { count: b.s.n, args: opts, inputs: { P, N }, results: { out }, shared: scene.toArrays() }, { minElements: Math.ceil(32768 / Math.max(1, p.samples)) });
-    return then(run, () => {
+    return andThen(run, () => {
       const v = new Float32Array(b.s.n);
       for (let i = 0; i < b.s.n; i++) {
         let x = mode === 'occlusion' ? 1 - out[i] : Math.min(1, out[i] / maxD);
@@ -317,7 +317,7 @@ defineBake({
       const run = ctx.parallelMap('bake_curvature', {
         count: b.s.n, args, inputs: { P, N }, results: { V }, shared: { E: edges.E, D: edges.D, K: edges.K, FN: edges.FN, start: grid.start, items: grid.items },
       });
-      return then(run, () => {
+      return andThen(run, () => {
         const k = p.strength, n = b.s.n;
         const C = new Float32Array(n), cx = new Float32Array(n), cc = new Float32Array(n);
         for (let i = 0; i < n; i++) {
@@ -438,7 +438,7 @@ defineBake({
     }
     const tan = triangleTangents(b.g, b.uv, b.tris);
     const dx = p.format === 'directx' ? -1 : 1;
-    return then(onHigh(b, high), (h) => {
+    return andThen(onHigh(b, high), (h) => {
       for (let i = 0; i < n; i++) {
         if (!(h.D[i] === h.D[i])) continue;
         const t = b.s.tri[i];
@@ -491,7 +491,7 @@ defineBake({
     const high = highOf(ctx);
     if (!high) throw new NodeError(`${ctx.type}: connect a high-res mesh to input 1`, 'e.g. the subdivided or displaced version of the mesh, near it (within cage)');
     const cage = cageOf(b);
-    return then(project(b, high, cage, false), ({ D }) => {
+    return andThen(project(b, high, cage, false), ({ D }) => {
       const n = b.s.n, dist = new Float32Array(n), C = new Float32Array(n);
       let lo = Infinity, hi = -Infinity, miss = 0;
       for (let i = 0; i < n; i++) { const d = D[i]; if (d === d) { if (d < lo) lo = d; if (d > hi) hi = d; } else miss++; }
