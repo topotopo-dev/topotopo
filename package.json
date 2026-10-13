@@ -19,6 +19,8 @@
     "shelf/*.json",
     "assets/fonts",
     "kernels/pkg",
+    "!kernels/README.md",
+    "!kernels/LICENSE",
     "README.md",
     "LICENSE",
     "NOTICE"
