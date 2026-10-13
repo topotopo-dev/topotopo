@@ -4,7 +4,8 @@
 // - A node spec documents params: it cooks as the node under test on its fixture inputs (test/fixtures.ts), with the
 //   example's params on top of the node's defaults. Its `in` names are illustrative and are not wired.
 // - A graph cooks as it is and must contain the node type (directly or in a nested body graph).
-// Either way the cook must succeed without errors and the result must pass the geometry invariants. Files the examples
+// Either way the cook must succeed without errors or warnings and the result must pass the geometry invariants (an
+// example is what `help` shows: it must not teach a graph that warns). Files the examples
 // name (images, meshes) are written to the engine's temp dir from the test fixtures, and graph_ref resolves every
 // workspace graph name to a small terrain graph. Shelf assets are covered by test/shelf.ts.
 import fs from 'node:fs';
@@ -73,7 +74,7 @@ function exampleGraph(def: NodeDef): GraphSpec | string {
   return g;
 }
 
-let pass = 0, fail = 0, warned = 0;
+let pass = 0, fail = 0;
 for (const def of allNodeDefs()) {
   if (filter && !def.type.includes(filter)) continue;
   const g = exampleGraph(def);
@@ -84,13 +85,19 @@ for (const def of allNodeDefs()) {
     if (!r.ok || !r.geo) { fail++; console.log(`FAIL ${def.type}: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`); continue; }
     const inv = checkGeo(r.geo);
     if (inv.length) { fail++; console.log(`FAIL ${def.type}: invariants: ${inv.join(', ')}`); continue; }
-    if (r.warnings.length) warned++;
+    if (r.warnings.length) {
+      fail++;
+      // every shipped example cooks without warnings since R-12; node types added later (the phase 3 simulation
+      // nodes and any other) must keep it that way
+      console.log(`FAIL ${def.type}: the example cooks with warnings; every node's example must cook without warnings, new node types included (change the example's params or inputs, or the node): ${r.warnings.map((w) => `[${w.node}] ${w.message}`).join('; ')}`);
+      continue;
+    }
     pass++;
-    console.log(`ok   ${def.type.padEnd(26)} ${String(r.geo.numPoints).padStart(7)} pts ${String(r.geo.numPrims).padStart(7)} prims${r.geo.volumes.length ? ` ${r.geo.volumes.length} vol` : ''}${r.warnings.length ? `  (warn: ${r.warnings[0].message.slice(0, 70)})` : ''}`);
+    console.log(`ok   ${def.type.padEnd(26)} ${String(r.geo.numPoints).padStart(7)} pts ${String(r.geo.numPrims).padStart(7)} prims${r.geo.volumes.length ? ` ${r.geo.volumes.length} vol` : ''}`);
   } catch (e: any) {
     fail++;
     console.log(`FAIL ${def.type}: threw ${e?.stack ?? e}`);
   }
 }
-console.log(`\nexamples: ${pass} passed, ${fail} failed (${warned} with warnings)`);
+console.log(`\nexamples: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

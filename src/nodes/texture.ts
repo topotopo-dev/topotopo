@@ -18,7 +18,7 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, ParamDef } from '../graph/types.ts';
 import { evalRamp } from '../graph/params.ts';
-import { then } from '../graph/parallel.ts';
+import { andThen } from '../graph/parallel.ts';
 import { P, mask } from './util.ts';
 
 // ---------------------------------------------------------------- shared params and helpers
@@ -143,7 +143,7 @@ defineNode({
       seed: p.seed, tileable: !!p.tileable, offset: [p.offset[0], p.offset[1]], aspect: h / w, jitter: p.jitter, width: w, height: h,
     };
     const C = new Float32Array(w * h);
-    return then(parallelMap('tex_noise', { count: w * h, args: job, results: { C } }), () => imageGeo(new Image(w, h, imgName(p, 'noise')).set(MAIN_LAYER, C)));
+    return andThen(parallelMap('tex_noise', { count: w * h, args: job, results: { C } }), () => imageGeo(new Image(w, h, imgName(p, 'noise')).set(MAIN_LAYER, C)));
   },
 });
 
@@ -256,7 +256,7 @@ defineNode({
       metric: ['euclidean', 'manhattan', 'chebyshev'].indexOf(p.metric),
     };
     const C = new Float32Array(w * h), id = new Float32Array(w * h);
-    return then(parallelMap('tex_cells', { count: w * h, args: job, results: { C, id } }), () => imageGeo(new Image(w, h, imgName(p, 'cells')).set(MAIN_LAYER, C).set('id', id)));
+    return andThen(parallelMap('tex_cells', { count: w * h, args: job, results: { C, id } }), () => imageGeo(new Image(w, h, imgName(p, 'cells')).set(MAIN_LAYER, C).set('id', id)));
   },
 });
 
