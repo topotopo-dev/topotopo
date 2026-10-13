@@ -160,24 +160,37 @@ bool ParseStruct(const FString& Text, TMap<FString, double>& Values)
     return !Values.IsEmpty();
 }
 
-bool CSVColumns(const FString& Text, TArray<FColumn>& Columns, int32& Count, bool& bPCG, FString& Error)
+bool CSVColumns(const FString& Text, TArray<FColumn>& Columns, int32& Count, bool& bPCG, TArray<FString>& Warnings, FString& Error)
 {
     TArray<TArray<FCell>> Rows;
     if (!ParseCSV(Text, Rows, Error)) return false;
     Count = Rows.Num() - 1;
     const TArray<FCell>& Header = Rows[0];
-    bPCG = Header.ContainsByPredicate([](const FCell& C) { return C.Text.Equals(TEXT("Position.X"), ESearchCase::IgnoreCase) || C.Text.Equals(TEXT("Position"), ESearchCase::IgnoreCase); });
-    struct FGroup { FString Name; int32 Scalar = INDEX_NONE; TMap<int32, int32> Components; };
+    bPCG = Header.ContainsByPredicate([](const FCell& C)
+    {
+        const FString Name = C.Text.TrimStartAndEnd();
+        return Name.Equals(TEXT("Position.X"), ESearchCase::IgnoreCase) || Name.Equals(TEXT("Position"), ESearchCase::IgnoreCase);
+    });
+    const bool bCanonicalRowKey = bPCG && Header.ContainsByPredicate([](const FCell& C)
+    {
+        return C.Text.TrimStartAndEnd().Equals(TEXT("Name"), ESearchCase::CaseSensitive);
+    });
+    struct FGroup { FString Name; FString OutputName; int32 Scalar = INDEX_NONE; TMap<int32, int32> Components; };
     TArray<FGroup> Groups;
-    TSet<FString> HeaderNames;
+    TArray<FString> HeaderNames;
     for (int32 H = 0; H < Header.Num(); ++H)
     {
         const FString Name = Header[H].Text.TrimStartAndEnd();
         if (Name.IsEmpty()) return Fail(Error, TEXT("CSV has an empty column name."));
-        if (HeaderNames.Contains(Name)) return Fail(Error, FString::Printf(TEXT("Duplicate CSV column '%s'."), *Name));
+        // FString equality and hashing ignore case. Preserve distinct source columns until we can
+        // choose the exact canonical spelling, independent of their order in the header.
+        if (HeaderNames.ContainsByPredicate([&](const FString& Existing) { return Existing.Equals(Name, ESearchCase::CaseSensitive); }))
+            return Fail(Error, FString::Printf(TEXT("Duplicate CSV column '%s'."), *Name));
         HeaderNames.Add(Name);
-        // Name is a DataTable row key, whereas lower-case name is real TopoTopo metadata.
-        if (bPCG && H == 0 && (Name.Equals(TEXT("Name"), ESearchCase::IgnoreCase) || Name == TEXT("---") || Name.Equals(TEXT("RowName"), ESearchCase::IgnoreCase))) continue;
+        // Exact Name is the row key even after column reordering. A lone first-column name alias
+        // remains accepted, but name next to Name is real metadata and must not be discarded.
+        if (bPCG && (Name.Equals(TEXT("Name"), ESearchCase::CaseSensitive) || (H == 0 &&
+            ((!bCanonicalRowKey && Name.Equals(TEXT("Name"), ESearchCase::IgnoreCase)) || Name == TEXT("---") || Name.Equals(TEXT("RowName"), ESearchCase::IgnoreCase))))) continue;
         FString Base = Name, Suffix;
         int32 Component = INDEX_NONE;
         if (Name.Split(TEXT("."), &Base, &Suffix, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
@@ -196,8 +209,8 @@ bool CSVColumns(const FString& Text, TArray<FColumn>& Columns, int32& Count, boo
             Base = TEXT("P"); Component = ComponentIndex(Name);
         }
         if (Component > 15) return Fail(Error, FString::Printf(TEXT("Column '%s': only tuple components 0..15 are supported."), *Name));
-        FGroup* Group = Groups.FindByPredicate([&](const FGroup& G) { return G.Name == Base; });
-        if (!Group) { FGroup NewGroup; NewGroup.Name = Base; Groups.Add(MoveTemp(NewGroup)); Group = &Groups.Last(); }
+        FGroup* Group = Groups.FindByPredicate([&](const FGroup& G) { return G.Name.Equals(Base, ESearchCase::CaseSensitive); });
+        if (!Group) { FGroup NewGroup; NewGroup.Name = Base; NewGroup.OutputName = Base; Groups.Add(MoveTemp(NewGroup)); Group = &Groups.Last(); }
         if (Component < 0) Group->Scalar = H;
         else
         {
@@ -205,11 +218,40 @@ bool CSVColumns(const FString& Text, TArray<FColumn>& Columns, int32& Count, boo
             Group->Components.Add(Component, H);
         }
     }
+    TSet<FName> ReservedNames;
+    for (const FGroup& Group : Groups) ReservedNames.Add(FName(*Group.Name));
+    for (const TCHAR* Canonical : {TEXT("Name"), TEXT("Position"), TEXT("Rotation"), TEXT("Scale"), TEXT("Density"), TEXT("Color"), TEXT("Seed"), TEXT("Mesh")})
+    {
+        // Native CSV still has a canonical Mesh attribute, but its transform names (scale, seed,
+        // etc.) have their own meaning and must not be treated as PCG properties.
+        if (!bPCG && FCString::Strcmp(Canonical, TEXT("Mesh")) != 0) continue;
+        const bool bHasCanonical = (bCanonicalRowKey && FCString::Strcmp(Canonical, TEXT("Name")) == 0) ||
+            Groups.ContainsByPredicate([&](const FGroup& G) { return G.Name.Equals(Canonical, ESearchCase::CaseSensitive); });
+        if (!bHasCanonical) continue;
+        for (FGroup& Group : Groups)
+        {
+            if (!Group.Name.Equals(Canonical, ESearchCase::IgnoreCase) || Group.Name.Equals(Canonical, ESearchCase::CaseSensitive)) continue;
+            const FString Renamed = Group.Name + TEXT("_attr");
+            if (ReservedNames.Contains(FName(*Renamed)))
+                return Fail(Error, FString::Printf(TEXT("CSV attribute '%s' collides with canonical '%s', but '%s' already exists (case-insensitive). Rename the input attribute to preserve both values."), *Group.Name, Canonical, *Renamed));
+            ReservedNames.Add(FName(*Renamed));
+            Group.OutputName = Renamed;
+            Warnings.Add(FString::Printf(TEXT("CSV attribute '%s' collides case-insensitively with canonical '%s'; imported as '%s'."), *Group.Name, Canonical, *Renamed));
+        }
+    }
+    TSet<FName> OutputNames;
+    for (const FGroup& Group : Groups)
+    {
+        const FName Name(*Group.OutputName);
+        if (OutputNames.Contains(Name))
+            return Fail(Error, FString::Printf(TEXT("CSV attributes collide case-insensitively at '%s'. Use the exact canonical spelling for PCG properties or rename the input attribute."), *Group.OutputName));
+        OutputNames.Add(Name);
+    }
     for (const FGroup& Group : Groups)
     {
         FColumn Column;
-        Column.Name = Group.Name;
-        const bool bStruct = bPCG && Group.Scalar >= 0 && (Group.Name.Equals(TEXT("Position"), ESearchCase::IgnoreCase) || Group.Name.Equals(TEXT("Rotation"), ESearchCase::IgnoreCase) || Group.Name.Equals(TEXT("Scale"), ESearchCase::IgnoreCase) || Group.Name.Equals(TEXT("Color"), ESearchCase::IgnoreCase));
+        Column.Name = Group.OutputName;
+        const bool bStruct = bPCG && Group.Scalar >= 0 && (Column.Name.Equals(TEXT("Position"), ESearchCase::IgnoreCase) || Column.Name.Equals(TEXT("Rotation"), ESearchCase::IgnoreCase) || Column.Name.Equals(TEXT("Scale"), ESearchCase::IgnoreCase) || Column.Name.Equals(TEXT("Color"), ESearchCase::IgnoreCase));
         if (Group.Scalar >= 0 && !Group.Components.IsEmpty()) return Fail(Error, FString::Printf(TEXT("'%s' mixes scalar/struct and component columns."), *Group.Name));
         if (bStruct)
         {
@@ -421,15 +463,20 @@ int32 DefaultSeed(uint32 Index)
     return static_cast<int32>(Index >> 1);
 }
 
+bool ContainsExact(const TArray<FString>& Names, const FString& Name)
+{
+    return Names.ContainsByPredicate([&](const FString& Existing) { return Existing.Equals(Name, ESearchCase::CaseSensitive); });
+}
+
 bool Selected(const FString& Name, const FTopoTopoStreamOptions& Options)
 {
-    return (Options.AttributeInclude.IsEmpty() || Options.AttributeInclude.Contains(Name)) && !Options.AttributeExclude.Contains(Name);
+    return (Options.AttributeInclude.IsEmpty() || ContainsExact(Options.AttributeInclude, Name)) && !ContainsExact(Options.AttributeExclude, Name);
 }
 
 bool SelectedPart(const FString& Base, const FString& Name, const FTopoTopoStreamOptions& Options)
 {
-    return (Options.AttributeInclude.IsEmpty() || Options.AttributeInclude.Contains(Base) || Options.AttributeInclude.Contains(Name)) &&
-        !Options.AttributeExclude.Contains(Base) && !Options.AttributeExclude.Contains(Name);
+    return (Options.AttributeInclude.IsEmpty() || ContainsExact(Options.AttributeInclude, Base) || ContainsExact(Options.AttributeInclude, Name)) &&
+        !ContainsExact(Options.AttributeExclude, Base) && !ContainsExact(Options.AttributeExclude, Name);
 }
 
 bool ValidMetadataName(const FString& Name)
@@ -590,8 +637,8 @@ bool ReadSidecar(const FString& Path, FTopoTopoStreamOptions& Options, FString& 
     FString Format;
     double Version = 0;
     const TArray<TSharedPtr<FJsonValue>>* Meshes = nullptr;
-    if (!Root->TryGetStringField(TEXT("format"), Format) || Format != TEXT("topotopo-instance-meshes") || !Root->TryGetNumberField(TEXT("version"), Version) || Version != 1 || !Root->TryGetArrayField(TEXT("meshes"), Meshes))
-        return Fail(Error, TEXT("Mesh sidecar must use format topotopo-instance-meshes, version 1, meshes array: ") + Path);
+    if (!Root->TryGetStringField(TEXT("format"), Format) || (Format != TEXT("topotopo-instance-meshes") && Format != TEXT("polyforge-instance-meshes")) || !Root->TryGetNumberField(TEXT("version"), Version) || Version != 1 || !Root->TryGetArrayField(TEXT("meshes"), Meshes))
+        return Fail(Error, TEXT("Mesh sidecar must use format topotopo-instance-meshes (legacy polyforge-instance-meshes is accepted), version 1, meshes array: ") + Path);
     FString Folder = Options.MeshFolder;
     Folder.RemoveFromEnd(TEXT("/"));
     if (!Folder.StartsWith(TEXT("/Game/")) && Folder != TEXT("/Game")) return Fail(Error, TEXT("Mesh Folder must be a /Game/... Unreal content folder."));
@@ -625,8 +672,8 @@ bool TopoTopoStream::ParseText(const FString& Text, bool bJson, const FTopoTopoS
     TArray<FColumn> Columns;
     int32 Count = 0;
     bool bPCG = false;
-    if (!(bJson ? JSONColumns(Text, Columns, Count, OutError) : CSVColumns(Text, Columns, Count, bPCG, OutError))) return false;
     FTopoTopoStream Parsed;
+    if (!(bJson ? JSONColumns(Text, Columns, Count, OutError) : CSVColumns(Text, Columns, Count, bPCG, Parsed.Warnings, OutError))) return false;
     if (!MakeStream(Columns, Count, bPCG, Options, Parsed, OutError)) return false;
     OutStream = MoveTemp(Parsed);
     return true;
