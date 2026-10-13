@@ -21,6 +21,7 @@ import { encodePNG } from '../src/render/png.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { summarize } from '../src/inspect.ts';
 import { topologyReport } from '../src/core/topology.ts';
+import { TriBVH } from '../src/core/spatial.ts';
 import { Workspace } from '../src/workspace.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { fingerprint } from './fingerprint.ts';
@@ -355,6 +356,66 @@ section('project, path, scatter, resample, transform, to_sdf');
   check(above > 0.05 && below < -0.05 && Math.abs(onSurf) < 1e-6, `to_sdf: positive above the surface, negative below, 0 on it (${above.toFixed(3)}, ${below.toFixed(3)})`);
   const solid = await geo({ ...nodes, s: { type: 'heightfield_to_sdf', in: ['n'] }, m: { type: 'sdf_to_mesh', in: ['s'], params: { divisions: 48 } } }, 'm');
   check(topologyReport(solid).closed && solid.bbox().max[1] > 0.2, 'to_sdf → sdf_to_mesh gives a watertight terrain block');
+}
+
+// ---------------------------------------------------------------- sampling: bilinear vs Unreal Landscape triangles
+section('sampling: bilinear and unreal_triangles');
+{
+  // 4 × 3 samples (rows j = 0..2, columns i = 0..3), cell 2 m: cell (0,0) twisted, cell (1,0) planar, the rest random
+  // cell (0,0): 0 + 0 − 1 − 4 = −5; cell (1,0): 1 + 2 − 3 − 0 = 0
+  const hf = new Heightfield(4, 3, 2, [10, -5]);
+  hf.writable('height').set([0, 1, 3, 2, 4, 0, 2, 5, 2, 2, 0, 1]);
+  const H = hf.layer('height')!;
+  const at = (i: number, j: number) => H[j * 4 + i];
+  const tw = (i: number, j: number) => at(i, j) + at(i + 1, j + 1) - at(i + 1, j) - at(i, j + 1);
+  const X = (fx: number) => 10 + fx * 2, Z = (fz: number) => -5 + fz * 2;
+  let samples = 0, edges = 0, centres = 0, diag = 0;
+  for (let j = 0; j < 3; j++) for (let i = 0; i < 4; i++) if (hf.sample(X(i), Z(j)) === at(i, j) && hf.sample(X(i), Z(j), 'unreal_triangles') === at(i, j)) samples++;
+  for (let j = 0; j < 2; j++) for (let i = 0; i < 3; i++) {
+    for (const t of [0.1, 0.37, 0.5, 0.9]) for (const [u, v] of [[t, 0], [t, 1], [0, t], [1, t]]) {
+      if (Math.abs(hf.sample(X(i + u), Z(j + v)) - hf.sample(X(i + u), Z(j + v), 'unreal_triangles')) < 1e-12) edges++;
+    }
+    const c = hf.sample(X(i + 0.5), Z(j + 0.5), 'unreal_triangles') - hf.sample(X(i + 0.5), Z(j + 0.5));
+    if (Math.abs(c - tw(i, j) / 4) < 1e-12) centres++;
+    // Unreal's diagonal runs (i, j) → (i+1, j+1): linear along it
+    const d = hf.sample(X(i + 0.3), Z(j + 0.3), 'unreal_triangles');
+    if (Math.abs(d - (at(i, j) + (at(i + 1, j + 1) - at(i, j)) * 0.3)) < 1e-12) diag++;
+  }
+  check(samples === 12, `bilinear and unreal_triangles agree exactly at all 12 samples (${samples})`);
+  check(edges === 6 * 16, `… and along every cell edge (${edges}/96 points)`);
+  check(centres === 6 && Math.abs(tw(0, 0)) > 1 && tw(1, 0) === 0, 'cell centres differ by exactly a quarter of the cell twist h00 + h11 − h10 − h01 (0 in the planar cell (1,0), not in the twisted cell (0,0))');
+  check(diag === 6, 'unreal_triangles is linear along the (i, j) → (i+1, j+1) diagonal of every cell');
+  // the triangle below the diagonal (u ≥ v) is (0,0) (1,0) (1,1), above it (0,0) (0,1) (1,1)
+  const lo = hf.sample(X(0.75), Z(0.25), 'unreal_triangles'), up = hf.sample(X(0.25), Z(0.75), 'unreal_triangles');
+  check(Math.abs(lo - (at(0, 0) + (at(1, 0) - at(0, 0)) * 0.75 + (at(1, 1) - at(1, 0)) * 0.25)) < 1e-12 && Math.abs(up - (at(0, 0) + (at(0, 1) - at(0, 0)) * 0.75 + (at(1, 1) - at(0, 1)) * 0.25)) < 1e-12,
+    'below the diagonal the triangle (0,0)(1,0)(1,1), above it (0,0)(0,1)(1,1)');
+
+  // heightfield_scatter: same XZ in both modes; Y differs only in twisted cells; unreal_triangles Y = vertical rays on
+  // heightfield_to_mesh (its quads are triangulated along the same diagonal)
+  const base = { h: { type: 'heightfield', params: { size: [20, 20], resolution: 1 } }, n: { type: 'heightfield_noise', in: ['h'], params: { amplitude: 3, element_size: 6 } } };
+  const sb = await geo({ ...base, s: { type: 'heightfield_scatter', in: ['n'], params: { count: 3000, mask_layer: '' } } }, 's');
+  const su = await geo({ ...base, s: { type: 'heightfield_scatter', in: ['n'], params: { count: 3000, mask_layer: '', sample: 'unreal_triangles' } } }, 's');
+  const nf = await field(base, 'n');
+  const mesh = await geo({ ...base, m: { type: 'heightfield_to_mesh', in: ['n'] } }, 'm');
+  const bvh = new TriBVH(mesh), NH = nf.layer('height')!;
+  let sameXZ = sb.numPoints === su.numPoints, onMesh = 0, offMesh = 0, outside = 0, diffInPlanar = 0;
+  for (let k = 0; k < su.numPoints; k++) {
+    const x = su.P[k * 3], y = su.P[k * 3 + 1], z = su.P[k * 3 + 2];
+    if (x !== sb.P[k * 3] || z !== sb.P[k * 3 + 2]) sameXZ = false;
+    const hit = bvh.raycast(x, 100, z, 0, -1, 0, Infinity, 0);
+    if (hit) { onMesh = Math.max(onMesh, Math.abs(100 - hit.t - y)); offMesh = Math.max(offMesh, Math.abs(100 - hit.t - sb.P[k * 3 + 1])); } else outside++;
+    const fx = nf.fx(x), fz = nf.fz(z), i = Math.min(nf.width - 2, Math.floor(fx)), j = Math.min(nf.height - 2, Math.floor(fz)), q = j * nf.width + i;
+    if (Math.abs(NH[q] + NH[q + nf.width + 1] - NH[q + 1] - NH[q + nf.width]) < 1e-9 && Math.abs(y - sb.P[k * 3 + 1]) > 1e-9) diffInPlanar++;
+  }
+  check(sameXZ, 'heightfield_scatter: unreal_triangles moves no point sideways (same XZ as bilinear)');
+  check(outside === 0 && onMesh < 1e-9 && offMesh > 1e-3, `unreal_triangles Y = the triangulated heightfield_to_mesh surface (max ${onMesh.toExponential(1)} m); bilinear is off it by up to ${offMesh.toFixed(4)} m`);
+  check(diffInPlanar === 0, 'the modes differ only in twisted cells');
+  // project_curve onto the heightfield (vertical rays) follows the chosen surface too
+  const crv = { c: { type: 'curve', params: { points: [[-7.3, 10, -6.1], [6.7, 10, 5.2]] } } };
+  const pu = await geo({ ...base, ...crv, p: { type: 'project_curve', in: ['c', 'n'], params: { spacing: 0.37, sample: 'unreal_triangles' } } }, 'p');
+  let curveErr = 0;
+  for (let k = 0; k < pu.numPoints; k++) curveErr = Math.max(curveErr, Math.abs(pu.P[k * 3 + 1] - nf.sample(pu.P[k * 3], pu.P[k * 3 + 2], 'unreal_triangles')));
+  check(pu.numPoints > 30 && curveErr < 1e-12, `project_curve sample unreal_triangles puts the curve on the Unreal surface (${pu.numPoints} points)`);
 }
 
 // ---------------------------------------------------------------- PNG decoder, export, import

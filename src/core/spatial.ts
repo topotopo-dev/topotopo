@@ -28,6 +28,31 @@ export class KDTree {
     this.build(0, this.n);
   }
 
+  /** The arrays that define the tree (fromArrays rebuilds it from them, e.g. in a worker thread). */
+  arrays(): { TP: Float64Array; idx: Int32Array; axis: Int8Array } {
+    return { TP: this.TP, idx: this.idx, axis: this.axis };
+  }
+
+  /**
+   * A tree over arrays from arrays() (no build): the same queries with the same results. neighbours() reads only these
+   * arrays; P (point order, for nearest/within/knn) is rebuilt from them on first use (points not in the tree read 0).
+   */
+  static fromArrays(a: { TP: Float64Array; idx: Int32Array; axis: Int8Array }): KDTree {
+    const kd = Object.create(KDTree.prototype) as KDTree;
+    const n = a.idx.length;
+    Object.assign(kd as any, { idx: a.idx, axis: a.axis, n, TP: a.TP, stack: new Int32Array(128) });
+    let P: Float64Array | null = null;
+    const rebuild = () => {
+      let np = 0;
+      for (let k = 0; k < n; k++) if (a.idx[k] >= np) np = a.idx[k] + 1;
+      const Q = new Float64Array(np * 3);
+      for (let k = 0; k < n; k++) { const i = a.idx[k] * 3; Q[i] = a.TP[k * 3]; Q[i + 1] = a.TP[k * 3 + 1]; Q[i + 2] = a.TP[k * 3 + 2]; }
+      return Q;
+    };
+    Object.defineProperty(kd, 'P', { get: () => (P ??= rebuild()), configurable: true });
+    return kd;
+  }
+
   private build(lo: number, hi: number) {
     if (hi - lo <= 1) return;
     const W = this.TP;

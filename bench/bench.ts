@@ -300,6 +300,83 @@ const CASES: Case[] = [
     }),
   },
   {
+    name: 'scatter_relax_mask_100k',
+    what: (q) => `scatter ${k(q ? 1e4 : 1e5)} points by a noise density mask, relax (radii follow the density)`,
+    elements: (q) => (q ? 1e4 : 1e5), unit: 'points',
+    target: 2000, targetSource: 'R-8 (blue-noise scatter of 100k under 2 s with the pool)',
+    graph: (q) => ({
+      nodes: {
+        g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
+        m: { type: 'mask', in: ['g'], params: { by: 'noise', min: 0.3, max: 1, falloff: 0.1 } },
+        target: { type: 'scatter', in: ['m'], params: { count: q ? 1e4 : 1e5, seed: 1, generate_by: 'count', density_mask: 'mask' } },
+      },
+    }),
+  },
+  {
+    name: 'scatter_relax_iter_50k',
+    what: (q) => `scatter ${k(q ? 5e3 : 5e4)} points with relax and 5 relaxation passes (projected back onto the surface)`,
+    elements: (q) => (q ? 5e3 : 5e4) * 5, unit: 'point-passes',
+    target: 2000, targetSource: 'R-8 (goal)',
+    graph: (q) => ({
+      nodes: {
+        g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
+        n: { type: 'noise_displace', in: ['g'], params: { amplitude: 2, frequency: 0.05 } },
+        target: { type: 'scatter', in: ['n'], params: { count: q ? 5e3 : 5e4, seed: 1, relax_iterations: 5 } },
+      },
+    }),
+  },
+  {
+    name: 'scatter_min_distance_100k',
+    what: (q) => `scatter ${k(q ? 1e4 : 1e5)} points with relax and an exact min distance larger than the spacing (refills from 5× candidates)`,
+    elements: (q) => (q ? 1e4 : 1e5), unit: 'points',
+    target: 2000, targetSource: 'R-8 (goal)',
+    graph: (q) => ({
+      nodes: {
+        g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
+        target: { type: 'scatter', in: ['g'], params: { count: q ? 1e4 : 1e5, seed: 1, min_distance: q ? 0.8 : 0.25 } },
+      },
+    }),
+  },
+  {
+    name: 'heightfield_scatter_100k',
+    what: (q) => `heightfield_scatter ${k(q ? 1e4 : 1e5)} points with relax on a ${q ? 101 : 401}² field`,
+    elements: (q) => (q ? 1e4 : 1e5), unit: 'points',
+    target: 2000, targetSource: 'R-8 (goal)',
+    graph: (q) => ({
+      nodes: {
+        h: { type: 'heightfield', params: { size: [200, 200], samples: q ? [101, 101] : [401, 401] } },
+        n: { type: 'heightfield_noise', in: ['h'], params: { amplitude: 5, element_size: 20 } },
+        target: { type: 'heightfield_scatter', in: ['n'], params: { count: q ? 1e4 : 1e5, mask_layer: '', seed: 1 } },
+      },
+    }),
+  },
+  {
+    name: 'point_normals_1m',
+    what: (q) => `normal (point normals, area-weighted) on a noisy ${k((gridDiv(q ? 1e5 : 1e6) + 1) ** 2)}-point grid`,
+    elements: (q) => (gridDiv(q ? 1e5 : 1e6) + 1) ** 2, unit: 'points',
+    target: 200, targetSource: 'R-8 (goal)',
+    graph: (q) => ({
+      nodes: {
+        g: { type: 'grid', params: { size: [10, 10], divisions: [gridDiv(q ? 1e5 : 1e6), gridDiv(q ? 1e5 : 1e6)] } },
+        n: { type: 'noise_displace', in: ['g'], params: { amplitude: 0.2, frequency: 2 } },
+        target: { type: 'normal', in: ['n'], params: { class: 'point' } },
+      },
+    }),
+  },
+  {
+    name: 'distance_100k',
+    what: (q) => `distance: closest points on a ${k(uvSphereTris(sphereRows(q ? 1e4 : 1e5)))}-triangle sphere from ${k((q ? 100 : 316) ** 2)} points (BVH build included)`,
+    elements: (q) => (q ? 100 : 316) ** 2, unit: 'queries',
+    target: 1000, targetSource: 'R-8 (goal)',
+    graph: (q) => ({
+      nodes: {
+        s: { type: 'sphere', params: { type: 'uv', rows: sphereRows(q ? 1e4 : 1e5), cols: 2 * sphereRows(q ? 1e4 : 1e5) } },
+        p: { type: 'point_grid', params: { counts: [q ? 100 : 316, 1, q ? 100 : 316], size: [3, 0, 3], center: [0, 0.3, 0] } },
+        target: { type: 'distance', in: ['p', 's'], params: { extra: true } },
+      },
+    }),
+  },
+  {
     name: 'subdivide_sphere_100k',
     what: (q) => `Catmull-Clark, 1 level, UV sphere with ${k(uvSphereFaces(q ? 71 : 224))} faces (vertex N, vertex uv)`,
     elements: (q) => uvSphereFaces(q ? 71 : 224), unit: 'input faces',

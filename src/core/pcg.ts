@@ -10,7 +10,8 @@
 //  sampleImage           bilinear / nearest lookups in a decoded image with repeat / clamp / mirror wrapping
 //  frameQuat             instance frame (Houdini copy convention: +Z = N, +Y = up) as a quaternion
 import { AttribTable, Geometry } from './geometry.ts';
-import { KDTree, TriBVH } from './spatial.ts';
+import { KDTree, TriBVH, closestScratch } from './spatial.ts';
+import type { ClosestScratch, TriBVHArrays } from './spatial.ts';
 import { hash32, hashNumber, rng } from './random.ts';
 import type { Quat, Vec3 } from './math.ts';
 
@@ -45,12 +46,26 @@ export class TriSurface {
     }
   }
 
+  /** The arrays of the surface (fromArrays rebuilds it from them, e.g. in a worker thread). */
+  arrays(): Required<TriBVHArrays> & { C: Float64Array } {
+    return { ...this.bvh.arrays(), C: this.C };
+  }
+
+  /** A surface over arrays from arrays() (no BVH build): closest() gives the same results. */
+  static fromArrays(a: TriBVHArrays & { C: Float64Array }): TriSurface {
+    const s = Object.create(TriSurface.prototype) as TriSurface;
+    Object.assign(s as any, { bvh: TriBVH.fromArrays(a), C: a.C, numTris: a.order.length, hit: closestScratch() });
+    return s;
+  }
+
+  private hit: ClosestScratch = closestScratch();
+
   /** Closest point on the triangles; fills out and returns the triangle index (-1 when there are no triangles). */
   closest(x: number, y: number, z: number, out: TriPoint): number {
-    const h = this.bvh.closest(x, y, z);
-    if (!h) return -1;
-    const t = h.prim, C = this.C, o = t * 9;
-    out.x = h.pos[0]; out.y = h.pos[1]; out.z = h.pos[2];
+    const h = this.hit, tri = this.bvh.closestInto(x, y, z, Infinity, h);
+    if (tri < 0) return -1;
+    const t = this.bvh.triPrim[tri], C = this.C, o = t * 9;
+    out.x = h.x; out.y = h.y; out.z = h.z;
     // barycentrics of the hit in the list's corner order
     const v0x = C[o + 3] - C[o], v0y = C[o + 4] - C[o + 1], v0z = C[o + 5] - C[o + 2];
     const v1x = C[o + 6] - C[o], v1y = C[o + 7] - C[o + 1], v1z = C[o + 8] - C[o + 2];
@@ -64,12 +79,17 @@ export class TriSurface {
       let b0 = 1 - b1 - b2;
       if (b0 < 0) { const s = b1 + b2; b1 /= s; b2 /= s; b0 = 0; }
       out.b0 = b0; out.b1 = b1; out.b2 = b2;
-    } else { out.b0 = h.bary[0]; out.b1 = h.bary[1]; out.b2 = h.bary[2]; }
+    } else { out.b0 = h.b0; out.b1 = h.b1; out.b2 = h.b2; }
     return t;
   }
 }
 
 // ---------------------------------------------------------------- incremental spatial grid
+
+/** Hash key of an integer grid cell (PointGrid; the min-distance kernel in scatter.ts keys its cells the same way). */
+export function cellKey(ix: number, iy: number, iz: number): number {
+  return (Math.imul(ix | 0, 73856093) ^ Math.imul(iy | 0, 19349663) ^ Math.imul(iz | 0, 83492791)) | 0;
+}
 
 /**
  * A uniform grid over points that are inserted one at a time (the KD-tree in spatial.ts is static). Cells are
@@ -88,9 +108,7 @@ export class PointGrid {
     this.inv = 1 / this.cell;
   }
 
-  private static key(ix: number, iy: number, iz: number): number {
-    return (Math.imul(ix | 0, 73856093) ^ Math.imul(iy | 0, 19349663) ^ Math.imul(iz | 0, 83492791)) | 0;
-  }
+  private static key(ix: number, iy: number, iz: number): number { return cellKey(ix, iy, iz); }
 
   insert(i: number) {
     const P = this.P, inv = this.inv;

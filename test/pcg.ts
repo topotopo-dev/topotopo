@@ -14,6 +14,8 @@ import { Geometry } from '../src/core/geometry.ts';
 import { KDTree } from '../src/core/spatial.ts';
 import { expandPacked } from '../src/core/packed.ts';
 import { band, combineMask, kmeans, minDistanceSelect, sphereOverlapPrune } from '../src/core/pcg.ts';
+import { candidatesRange, minDistanceSelectWith, surfaceCandidates } from '../src/core/scatter.ts';
+import { rng, rngAt, rngState } from '../src/core/random.ts';
 import { qRotate } from '../src/core/math.ts';
 import type { Quat, Vec3 } from '../src/core/math.ts';
 import { encodeGreyPNG } from '../src/io/heightmap.ts';
@@ -92,6 +94,46 @@ section('kernels');
   check(overl === 0 && kept > 100, `sphereOverlapPrune: ${kept} kept, ${overl} overlapping pairs`);
   const km = kmeans(P, Int32Array.from({ length: 1000 }, (_, i) => i), 5, 20, 1);
   check(km.k === 5 && km.label.every((l) => l >= 0 && l < 5) && km.label[0] === 0, 'kmeans: 5 clusters, labels in order of first appearance');
+}
+
+// ---------------------------------------------------------------- scatter kernels (core/scatter.ts, R-8)
+section('scatter kernels: the chunked stages give what the serial ones give');
+{
+  // rngAt(state, m) is the m-th draw of rng(seed)
+  const seq = rng(7.5), st = rngState(7.5);
+  let same = true;
+  for (let m = 1; m <= 5000; m++) if (seq() !== rngAt(st, m)) same = false;
+  check(same, 'rngAt(rngState(seed), m) = the m-th value of rng(seed), for m = 1..5000');
+
+  // minDistanceSelectWith (conflict lists, in blocks) keeps exactly the candidates the greedy grid keeps
+  const r = rng(11), N = 6000, Q = new Float64Array(N * 3);
+  for (let i = 0; i < N; i++) { Q[i * 3] = r() * 10; Q[i * 3 + 1] = r() < 0.5 ? 0 : r() * 0.3; Q[i * 3 + 2] = r() * 10; }
+  for (let i = 0; i < 40; i++) Q.copyWithin(i * 30 + 3, i * 30, i * 30 + 3); // exact duplicates
+  const ord = Int32Array.from({ length: N }, (_, i) => i);
+  for (let i = N - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = ord[i]; ord[i] = ord[j]; ord[j] = t; }
+  let mismatches = 0, cases = 0;
+  for (const radius of [0, 0.03, 0.1, 0.17, 0.4, 2.5])
+    for (const limit of [Infinity, 700, 50])
+      for (const capped of [false, true]) {
+        cases++;
+        const used = new Int32Array(N);
+        const acc = capped ? (i: number) => used[i % 97] < 3 : undefined, kept = capped ? (i: number) => { used[i % 97]++; } : undefined;
+        const a = minDistanceSelect(Q, ord, radius, limit, acc, kept);
+        used.fill(0);
+        const b = minDistanceSelectWith(Q, ord, radius, limit, acc, kept) as Int32Array;
+        if (a.length !== b.length || a.some((v, i) => v !== b[i])) mismatches++;
+      }
+  check(mismatches === 0, `minDistanceSelectWith = minDistanceSelect (greedy grid) over ${cases} radius/limit/accept cases, duplicates included (${mismatches} differ)`);
+
+  // the candidate kernel in chunks = in one piece
+  const tp = Int32Array.from({ length: 300 }, (_, i) => (i * 7) % 100), Pk = Float64Array.from({ length: 300 }, (_, i) => Math.sin(i));
+  const cdf = Float64Array.from({ length: 100 }, (_, i) => (i + 1) * (1 + (i % 3)));
+  const one = surfaceCandidates(Pk, tp, cdf, 999, rngState(3), undefined) as { candT: Int32Array; candW: Float64Array; pos: Float64Array };
+  const parts = { candT: new Int32Array(999), candW: new Float64Array(2997), pos: new Float64Array(2997) };
+  const A = { cdf, tp, P: Pk, ...parts }, args = { state: rngState(3), total: cdf[99], nt: 100 };
+  for (const [s, e] of [[0, 1], [1, 400], [400, 401], [401, 999]]) candidatesRange(args, A, s, e);
+  check(one.candT.every((v, i) => v === parts.candT[i]) && one.candW.every((v, i) => Object.is(v, parts.candW[i])) && one.pos.every((v, i) => Object.is(v, parts.pos[i])),
+    'scatter_candidates: four uneven chunks = one piece, bit for bit');
 }
 
 // ---------------------------------------------------------------- scatter v2
