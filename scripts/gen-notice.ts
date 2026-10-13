@@ -106,7 +106,7 @@ function collect(): Dep[] {
 function render(deps: Dep[]): string {
   const out: string[] = [];
   out.push('Polyforge');
-  out.push('Copyright (c) 2026 faxlab');
+  out.push('Copyright (c) 2026 faxcorp');
   out.push('');
   out.push('This product is licensed under the Apache License, Version 2.0 (see LICENSE).');
   out.push('It includes, bundles or depends on the third-party components below. Each component keeps its own licence;');
