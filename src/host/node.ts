@@ -31,7 +31,10 @@ function filterRealmRejections() {
   });
 }
 
-/** The repository's asset shelf (shelf/index.json + one graph per asset). */
+/**
+ * The repository's asset shelf (shelf/index.json + one graph per asset). Paths relative to this module hold for the
+ * sources (src/host) and for the built package (dist/host): both sit two levels below the package root.
+ */
 export const SHELF_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../shelf');
 
 /** opts.shelf: shelf directory (default SHELF_DIR), or false for an engine without the shelf. */

@@ -11,9 +11,13 @@ import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { wiringOf } from '../graph/engine.ts';
 
+// index.html sits next to this module (the build copies it to dist/viewer/)
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '..', '..');
-const threeDir = path.join(root, 'node_modules', 'three');
+// three.js where Node resolves it: this checkout's node_modules, or the hoisted copy next to an installed package
+const threeDir = (() => {
+  try { return path.resolve(path.dirname(fileURLToPath(import.meta.resolve('three'))), '..'); }
+  catch { return path.resolve(here, '..', '..', 'node_modules', 'three'); }
+})();
 
 const MIME: Record<string, string> = { '.js': 'text/javascript', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.glb': 'model/gltf-binary' };
 
@@ -35,7 +39,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.POLYF
       if (u.pathname.startsWith('/vendor/three/')) {
         const rel = decodeURIComponent(u.pathname.slice('/vendor/three/'.length));
         const p = path.resolve(threeDir, rel);
-        if (!p.startsWith(threeDir) || !fs.existsSync(p)) return send(404, 'not found');
+        if (!p.startsWith(threeDir + path.sep) || !fs.existsSync(p)) return send(404, 'not found');
         return send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream');
       }
       if (u.pathname === '/api/events') {
