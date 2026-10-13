@@ -2,8 +2,8 @@
 // did-you-mean), "=expression" evaluation against graph vars, time and upstream
 // geometry, static scanning of expression references, and type coercion.
 import type { NodeDef, ParamDef } from './types.ts';
-import { rand } from '../core/random.ts';
-import { clamp, fit, lerp, smoothstep } from '../core/math.ts';
+import { DeferredExpr, ExprError, REF_FUNCS, evalIn, exprScope, precompileExprs } from './expr.ts';
+import type { ExprEnv, ExprScope } from './expr.ts';
 
 export const norm = (s: string) => s.toLowerCase().replace(/[\s_\-]/g, '');
 
@@ -47,87 +47,30 @@ export function resolveParamName(def: NodeDef, key: string): string | null {
 
 // ---------------------------------------------------------------- expressions
 
-const EXPR_LIB: Record<string, any> = {
-  sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan,
-  atan2: Math.atan2, sqrt: Math.sqrt, pow: Math.pow, exp: Math.exp, log: Math.log, abs: Math.abs,
-  floor: Math.floor, ceil: Math.ceil, round: Math.round, min: Math.min, max: Math.max, sign: Math.sign,
-  hypot: Math.hypot, PI: Math.PI, E: Math.E, TAU: Math.PI * 2,
-  clamp, fit, lerp, smoothstep,
-  frac: (x: number) => x - Math.floor(x),
-  mod: (a: number, b: number) => ((a % b) + b) % b,
-  radians: (d: number) => (d * Math.PI) / 180,
-  degrees: (r: number) => (r * 180) / Math.PI,
-  rand: (x: number, seed = 0) => rand(x, seed),
-  pick: (arr: any[], i: number) => arr[((Math.floor(i) % arr.length) + arr.length) % arr.length],
-};
+// Compilation and evaluation live in expr.ts (the sandbox); these re-exports keep the old import paths working.
+export { DEFAULT_TIME, DeferredExpr, EXPR_HELPERS, ExprError, REF_FUNCS, TIME_KEYS, evalExpr } from './expr.ts';
+export type { ExprEnv, TimeState } from './expr.ts';
 
-const exprCache = new Map<string, Function>();
-
-export class ExprError extends Error {}
-/** Thrown by reference functions while validating without cooking (dry run): the value is only known at cook time. */
-export class DeferredExpr extends Error {}
-
-/** The time a graph is cooked at. frame 1 = time 0 (Houdini convention). */
-export interface TimeState { frame: number; time: number; fps: number; timeInc: number }
-export const TIME_KEYS = new Set(['frame', 'time', 'fps', 'timeInc']);
-export const DEFAULT_TIME: TimeState = { frame: 1, time: 0, fps: 24, timeInc: 1 / 24 };
-
-/** Functions of "=expr" params that read other nodes: upstream geometry, or another node's parameter. */
-export const REF_FUNCS = ['npoints', 'nprims', 'nvertices', 'bbox', 'centroid', 'detail', 'point', 'prim', 'ch'];
-
-/** Per-evaluation context for expressions: the cook time and node-reference functions. */
-export interface ExprEnv {
-  time?: TimeState;
-  /** implementations of REF_FUNCS bound to the current cook */
-  fns?: Record<string, (...a: any[]) => any>;
-  /** called when an expression reads frame, time, fps or timeInc (and no var of that name shadows it) */
-  onTime?: () => void;
-}
-
-const NO_COOK_FNS: Record<string, (...a: any[]) => any> = Object.fromEntries(
-  REF_FUNCS.map((f) => [f, () => { throw new ExprError(`${f}() only works in node params of a cooked graph`); }]),
-);
-
-/** Evaluate "=..." expressions. Identifiers resolve to graph vars, then time (frame, time, fps, timeInc), then helpers. */
-export function evalExpr(src: string, vars: Record<string, any>, env: ExprEnv = {}): any {
-  let fn = exprCache.get(src);
-  if (!fn) {
-    try {
-      // sloppy-mode Function so `with` can expose vars and helpers by bare name
-      fn = new Function('__s', `with (__s) { return (${src}); }`);
-    } catch (e: any) {
-      throw new ExprError(`syntax error in expression "=${src}": ${e.message}`);
-    }
-    exprCache.set(src, fn);
-  }
-  const base: Record<string, any> = { ...EXPR_LIB, ...(env.fns ?? NO_COOK_FNS), ...vars };
-  const time = env.time ?? DEFAULT_TIME;
-  // time identifiers are read lazily so that a read can be recorded (it makes the node time-dependent)
-  const scope = new Proxy(base, {
-    has: (t, k) => typeof k === 'string' && (k in t || TIME_KEYS.has(k)),
-    get: (t, k) => {
-      if (typeof k === 'string' && !(k in t) && TIME_KEYS.has(k)) {
-        env.onTime?.();
-        return (time as any)[k];
-      }
-      return (t as any)[k];
-    },
-  });
-  try {
-    return fn(scope);
-  } catch (e: any) {
-    if (e instanceof DeferredExpr) throw e;
-    const names = Object.keys(vars);
-    throw new ExprError(
-      `expression "=${src}" failed: ${e.message}. Vars in scope: ${names.length ? names.join(', ') : '(none)'}`,
-    );
-  }
-}
-
-/** Recursively evaluate "=expr" strings inside a param value (arrays/objects too). */
+/** Recursively evaluate "=expr" strings inside a param value (arrays too). */
 export function evalDeep(v: any, vars: Record<string, any>, env?: ExprEnv): any {
-  if (typeof v === 'string' && v.length > 1 && v[0] === '=') return evalExpr(v.slice(1), vars, env);
-  if (Array.isArray(v)) return v.map((x) => evalDeep(x, vars, env));
+  let scope: ExprScope | undefined;
+  return evalValue(v, () => (scope ??= exprScope(vars, env)), '');
+}
+
+/**
+ * evalDeep with a lazily created scope (one per node: vars are copied into the sandbox once) and a label for errors:
+ * `param "translate"[1]: expression "=…" failed: …`.
+ */
+function evalValue(v: any, scope: () => ExprScope, label: string): any {
+  if (typeof v === 'string' && v.length > 1 && v[0] === '=') {
+    try {
+      return evalIn(scope(), v.slice(1));
+    } catch (e) {
+      if (label && e instanceof ExprError) throw new ExprError(`param ${label}: ${e.message}`);
+      throw e;
+    }
+  }
+  if (Array.isArray(v)) return v.map((x, i) => evalValue(x, scope, label && `${label}[${i}]`));
   return v;
 }
 
@@ -363,6 +306,8 @@ export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined
   const errors: string[] = [], notes: string[] = [], deferred: string[] = [];
   let usesTime = false;
   const ev: ExprEnv = { ...env, onTime: () => { usesTime = true; env.onTime?.(); } };
+  let scope: ExprScope | undefined;
+  const getScope = () => (scope ??= exprScope(vars, ev));
   const given: Record<string, any> = {};
   for (const [k, v] of Object.entries(raw ?? {})) {
     const name = resolveParamName(def, k);
@@ -377,10 +322,18 @@ export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined
     if (name !== k) notes.push(`"${k}" → "${name}"`);
     given[name] = v;
   }
+  // compile this node's new expressions in one go
+  const srcs: string[] = [];
+  const collect = (v: any) => {
+    if (typeof v === 'string') { if (v.length > 1 && v[0] === '=') srcs.push(v.slice(1)); }
+    else if (Array.isArray(v)) for (const x of v) collect(x);
+  };
+  for (const [name, pd] of Object.entries(def.params)) if (pd.type !== 'code' && pd.type !== 'graph') collect(name in given ? given[name] : pd.default);
+  if (srcs.length > 1) precompileExprs(env.host, srcs);
   for (const [name, pd] of Object.entries(def.params)) {
     let v = name in given ? given[name] : pd.default;
     try {
-      if (pd.type !== 'code' && pd.type !== 'graph') v = evalDeep(v, vars, ev);
+      if (pd.type !== 'code' && pd.type !== 'graph') v = evalValue(v, getScope, `"${name}"`);
       values[name] = v === undefined ? undefined : coerce(name, pd, v);
     } catch (e: any) {
       if (e instanceof DeferredExpr) deferred.push(name);

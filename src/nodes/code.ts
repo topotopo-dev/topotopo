@@ -108,7 +108,7 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
       const def = engine.resolveDef(type);
       if (!def) throw new Error(`lib.run: unknown node type "${type}"`);
       // "=frame" etc. read the script's own time (and mark it time-dependent)
-      const rp = resolveParams(def, params, ctx.vars, { time: ctx });
+      const rp = resolveParams(def, params, ctx.vars, { time: ctx, host: engine.host, timeoutMs: engine.scriptTimeoutMs });
       if (rp.errors.length) throw new Error(`lib.run(${type}): ${rp.errors.join('; ')}`);
       // inherit from ctx through the prototype so its time getters stay lazy
       const sub: CookContext = Object.assign(Object.create(ctx), {
