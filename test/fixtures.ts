@@ -123,7 +123,7 @@ export const INPUTS: Record<string, string[]> = {
   heightfield_remap: ['HFN'], heightfield_blur: ['HFN'], heightfield_mask_blur: ['HFM'], heightfield_terrace: ['HFN'],
   heightfield_clip: ['HFN'], heightfield_cutout: ['HFN', 'CIRCLE'], heightfield_layer: ['HFN'],
   heightfield_mask_by_feature: ['HFN'], heightfield_mask_by_object: ['HFN', 'HF_CURVE'], heightfield_mask_expand: ['HFM'],
-  heightfield_erode: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
+  heightfield_erode: ['HFN'], heightfield_flow: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
   heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
   remesh_isotropic: ['BOX'], remesh_quad: ['BOX'], mesh_repair: ['BROKEN'],
   // PCG (P2-B): masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve

@@ -246,6 +246,15 @@ EROSION: droplets (rain_density per sample per iteration, rain_amount, erosion_r
   evaporation, inertia, gravity, max_lifetime) + thermal (thermal_talus_angle, thermal_rate); hardness_layer (1 = rock),
   freeze_layer (1 = untouched); boundary closed conserves material. Deterministic per seed. Cost ≈ samples ×
   rain_density × iterations × 30 steps (512² × 100 iterations ≈ 2–3 s). Stronger: more iterations or sediment_capacity.
+  method droplet / backend js is the unchanged default. backend kernel loads WASM; auto uses an already loaded
+  kernel or falls back to js. method pipe and stream_power require the kernel. Pipe uses virtual pipes, CFL-limited
+  time_step (0 = automatic), rain_amount in metres/second, optional rain_layer multiplier, evaporation and thermal
+  talus relaxation. stream_power adds stream_power_k * drainage^stream_power_m * slope^stream_power_n incision.
+  Kernel erosion also writes wear (cumulative eroded depth); pipe water is remaining water depth in metres.
+  heightfield_flow {method:"dinf", normalise:true, log_scale:true} writes drainage and direction without erosion.
+  Raw drainage is contributing area (m²); direction E/SE/S/SW/W/NW/N/NE = 0..7, sink = 255. D8 routes one receiver,
+  D-infinity splits across two downhill receivers; local pits retain flow (no depression filling).
+  See examples/erosion_models.json for all four erosion methods on the same ridged terrain.
 RENDER / INSPECT: render draws heightfields as a shaded grid (the mask in red); color_by any layer name. inspect and
   every cook summary list the grid and each layer's min/max/mean.
 UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with

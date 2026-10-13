@@ -6,13 +6,13 @@ Status as of 2026-10-12: 96 node types, ~12k lines of TypeScript, immutable geom
 > **Status 2026-10-13 (end of day).** Phases 0–2 below are done, including the Unreal round trip: verified in Unreal 5.8
 > on 2026-10-13 (instance rows, glTF through Interchange, the Landscape import with the manifest values), with the same
 > scene loading in Blender 5.2 and Houdini 22. Phase 3 has started: procedural textures and bakes shipped (§6a), and
-> three Rust/WASM kernel sessions are merged (straight-skeleton roofs and offsets, sampled SDF grids with dual
-> contouring, field-aligned quad remeshing). Totals: 216 node types (each with a documented example that is cooked in
-> the tests), 37 shelf assets, 280 golden fingerprints, 29 rendered examples, worker pool, exporters for
-> Unreal/Blender/Houdini. Remaining before the first release: the rename to TopoTopo, a tagged v0.2 on npm, and the
-> grant applications (§7). Then Phase 3 continues with volumes beyond the sampled grids, simulation-lite and CAD; on
-> the kernel track the erosion kernel, a quad-remesher speed pass and a dual-contouring quality pass are next. Live
-> item status: [WORKLOG.md](WORKLOG.md).
+> four Rust/WASM kernel sessions are merged (straight-skeleton roofs and offsets, sampled SDF grids with dual
+> contouring, field-aligned quad remeshing, heightfield erosion and drainage). Totals: 217 node types (each with a
+> documented example that is cooked in the tests), 37 shelf assets, 282 golden fingerprints, 30 rendered examples,
+> worker pool, exporters for Unreal/Blender/Houdini. Remaining before the first release: the rename to TopoTopo, a
+> tagged v0.2 on npm, and the grant applications (§7). Then Phase 3 continues with volumes beyond the sampled grids,
+> simulation-lite and CAD; on the kernel track an erosion speed pass (running), a quad-remesher speed pass and a
+> dual-contouring quality pass are next. Live item status: [WORKLOG.md](WORKLOG.md).
 
 The target is parity with Houdini SOPs, Blender Geometry Nodes and Unreal PCG for **creating geometry**: modelling,
 procedural assembly, scattering and instancing, terrain, curves, volumes, and the export that feeds engines. Rendering,

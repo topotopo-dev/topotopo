@@ -531,8 +531,9 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   import with the manifest values), with the same scene loading in Blender 5.2 and Houdini 22.
 - Procedural textures and bakes (37 texture nodes, image volumes, materials referencing `image:<name>`, embedded export,
   the texture view).
-- Rust/WASM kernels, sessions 1–3: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual
-  contouring, field-aligned quad remeshing.
+- Rust/WASM kernels, sessions 1–4: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual
+  contouring, field-aligned quad remeshing, heightfield erosion (droplet, virtual-pipe and stream-power models behind
+  `heightfield_erode`; the TypeScript droplet erosion stays the default) and D8/D-infinity drainage (`heightfield_flow`).
 
 **Before the first release**
 - The rename to TopoTopo in one commit, a tagged v0.2 on npm under the new name, the public repository with CI back on.
@@ -540,15 +541,16 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   there is revenue or a grant.
 
 **Next for the engine**
-- Kernels: the Rust erosion kernel behind `heightfield_erode` (in progress); quad remesher speed (100k triangles take
-  8.4 s against a 3 s target), singularity cleanup and quads-only density; a dual-contouring quality pass (edge
-  serration, adaptive extraction, speed).
-- Performance follow-ups: scatter sampling on the pool, faster point normals, a SAH BVH, relaxed scatter, the AO bake
-  (2048² × 16 rays ≈ 6 s); a WebGPU spike.
+- Kernels: erosion speed (in progress; the pipe model takes 21.8 s for 1024² × 200 steps in Node against a 4 s
+  target, and the droplet kernel runs at TypeScript speed); quad remesher speed (100k triangles take 8.4 s against a
+  3 s target), singularity cleanup and quads-only density; a dual-contouring quality pass (edge serration, adaptive
+  extraction, speed).
+- Performance follow-ups (in progress): scatter sampling on the pool, faster point normals, a SAH BVH, relaxed
+  scatter; then the AO bake (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
 - Packed primitives: packed disk references (Houdini packed disk prims), USD variants and per-frame layers, and
   instanced rendering in the rasteriser (it draws expanded copies within a triangle budget).
-- Heightfields: a grid (pipe-model) erosion variant, heightfield tiles, Unreal weight-layer import presets, and an
-  Unreal-triangulation sampling mode so scattered bases match a Landscape to the millimetre.
+- Heightfields: an Unreal-triangulation sampling mode so scattered bases match a Landscape to the millimetre (in
+  progress), heightfield tiles, Unreal weight-layer import presets, depression filling for drainage.
 - Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.

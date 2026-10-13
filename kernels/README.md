@@ -4,6 +4,73 @@ Original Rust implementation of a kinetic, weighted straight skeleton, mitered p
 offsets, and hip/gable roof surfaces. The checked-in `pkg/` is the browser-compatible
 WebAssembly build; normal Polyforge users do not install Rust. See [BUILD.md](BUILD.md).
 
+## Heightfield erosion (session 4)
+
+`src/wasm/kernels.ts` exposes `erode_droplet`, `erode_pipe`, `thermal_erode`, and
+`flow_accumulation`. Heights and optional hardness/freeze/rain maps are flat row-major
+`Float32Array` buffers. Width is X, rows are Z, height is Y, and cell size is metres.
+Kernel angles are radians; node angles remain degrees. Inputs are never modified.
+All six erosion result layers are f32: `height`, `sediment`, `debris`, `flow`, `water`,
+`wear`. Seeds are explicit u64 in Rust/bigint at the WASM boundary. The TypeScript
+adapter accepts numbers too and passes their exact JS-compatible initial RNG state,
+including negative/fractional seeds. Native/bigint calls use the u64 seed directly.
+
+The droplet solver ports the existing seeded, tiled droplet model with f64 working
+arrays, inertia, weighted erosion brushes, deposit smoothing, evaporation and a
+separate eight-neighbour thermal pass. It retains signed net sediment/debris and raw
+flow/water accumulations internally. The node adds/clips deposits and normalises the
+two water masks exactly as before. Fully frozen samples cannot receive deposits;
+weights are renormalised onto unfrozen receivers. This corrects the JS model's
+partial-mask deposition leak on the opt-in kernel path. Droplet `wear` sums positive
+net eroded depth per pass, so erosion followed by redeposition in that same pass is
+not counted as gross wear.
+
+The pipe solver implements four nonnegative virtual outflows per sample, following
+the shallow-water approach of [Mei, Decaudin and Hu (2007)](https://evasion.imag.fr/Publications/2007/MDH07/)
+and the terrain-modelling context of [Št'ava et al. (2008)](https://www.cs.purdue.edu/cgvlab/www/publications/Stava08SCA/).
+It is an original implementation, with no copied reference source. Rain is a uniform
+depth rate optionally multiplied by a rain map; this model does not consume the seed.
+The timestep is at most `0.4 * cell / (max_velocity + sqrt(gravity * max_depth))`,
+using at least one cell of depth and an upper bound on incoming rain. `time_step` is an optional upper
+bound. Each cell's total outflow is limited by available water. Velocities are capped
+to a 0.45-cell travel distance per step. Carry capacity depends on slope, velocity
+and water depth; hardness scales excavation. Hydraulic/stream incision cannot remove
+more than a quarter of the local downward relief per step.
+
+Sediment follows forward semi-Lagrangian characteristics with a conservative
+bilinear scatter and a subtraction remainder on the last receiver. Remaining load
+settles at the end of a call; `sediment` records deposited thickness, `debris` thermal
+deposits, `water` actual depth and `flow` normalised integrated speed. Closed edges
+keep water/material; open pipe edges lose water **only**, keeping rock in-grid.
+Droplet open edges retain their original behaviour of losing the carried load.
+Pipe thermal transport is a separate conservative eight-neighbour talus pass.
+Optional stream power is `K * A^m * S^n`; reference contributing area is calculated
+from the incoming terrain, so the drainage network does not jump during a solve.
+
+`flow_accumulation` offers D8 and triangular-facet D-infinity routing. Accumulation
+includes each sample's own cell area. Stable height/index ordering fixes the sum
+order. The u8 direction codes are E, SE, S, SW, W, NW, N, NE = 0..7; 255 means sink.
+D-infinity accumulates through both receivers but reports the dominant direction.
+There is no depression filling/breaching: pits retain drainage. `heightfield_flow`
+writes float layers `drainage` and `direction`, optionally log-scaled/normalised.
+
+Compatibility: `heightfield_erode` defaults to `method:droplet, backend:js` and keeps
+the old layer schema and output. Explicit `kernel` loads WASM; `auto` uses an already
+loaded kernel and otherwise JS. Pipe/stream_power require the kernel. `wear` is added
+only on kernel paths to keep existing goldens unchanged. Each call starts a fresh
+water simulation; chaining pipe nodes does not resume flux/suspended-water state.
+
+Limits: dense grids up to 16,777,216 samples, bounded iterations and cell-work counts;
+extreme/nonfinite inputs fail with a useful error. f32 rounding limits conservation
+precision. The pipe model is single-layer terrain, without undercuts, stratigraphy,
+bank collapse or turbulence; its four directions can show grid bias. Fixed operation
+order and libm avoid platform-dependent transcendental paths, but exhaustive platform
+bit-identity is not established by one native/WASM comparison. `simd` opts into a
+wasm32 simd128 evaporation loop with identical per-lane arithmetic; default builds
+remain scalar. No dependencies were added; existing crate licences below still apply.
+See [BENCH.md](BENCH.md) for measured acceptance and performance, and
+`examples/renders/erosion_models.png` for the four-model comparison.
+
 ## API and geometry
 
 The generated `pkg/polyforge_kernels.js` exports:
@@ -110,7 +177,7 @@ Current limits are explicit:
   the weights and then convert the returned times accordingly. Ordinary roof pitches
   and the explicit 90-degree gable are covered by tests; pitches extremely close to
   zero or 90 degrees can encounter the same limit.
-- The Rust isotropic remesher, erosion and point kernels are not included; session 3 adds quad remeshing below.
+- The Rust isotropic remesher and point kernels are not included; sessions 3/4 add quad remeshing and erosion.
 
 ## Tests
 
@@ -158,7 +225,7 @@ dependency is used. `earcutr` is only used for flat cap triangulation, not skele
 
 `unicode-ident` is a compiler-only transitive dependency; its Unicode-3.0 data-table
 licence is permitted by the repository's build-time licence rule. Its identifier
-tables are not linked into the shipped WASM. Sessions 2 and 3 add no dependencies.
+tables are not linked into the shipped WASM. Sessions 2, 3 and 4 add no dependencies.
 
 ## Field-aligned quad remeshing (session 3)
 

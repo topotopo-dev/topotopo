@@ -8,8 +8,13 @@ mod skeleton;
 pub use skeleton::{Offset, Provenance, Roof, Skeleton, offset, roof_mesh, skeleton};
 
 pub mod dual_contour;
+pub mod erosion;
+pub mod erosion_droplet;
+pub mod erosion_flow;
 pub mod remesh_quad;
 pub mod sdf;
 
+#[cfg(target_arch = "wasm32")]
+mod erosion_wasm;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
