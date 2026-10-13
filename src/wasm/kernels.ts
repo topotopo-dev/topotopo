@@ -60,7 +60,7 @@ export interface Kernels {
   grid_dilate(grid: GridInput, distance: number): KernelGrid;
   grid_erode(grid: GridInput, distance: number): KernelGrid;
   grid_resample(grid: GridInput, voxel: number): KernelGrid;
-  dual_contour(grid: GridInput, iso?: number, qefTolerance?: number, sharp?: boolean, clampToCell?: boolean): DualContourResult;
+  dual_contour(grid: GridInput, iso?: number, qefTolerance?: number, sharp?: boolean, clampToCell?: boolean, conservative?: boolean, adaptive?: number, sharpThreshold?: number): DualContourResult;
   straight_skeleton(outer: ArrayLike<number>, holes?: readonly ArrayLike<number>[], weights?: ArrayLike<number>): SkeletonResult;
   /** Positive distances move inward; negative distances move outward. */
   offset_polygon(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], distance: number): OffsetResult;
@@ -170,6 +170,10 @@ export interface DualContourResult {
   vertex_point: Uint32Array;
   /** Flattened grid sample index at the lower corner of each output vertex's cell. */
   cell_index: Uint32Array;
+  /** Cells that required conservative extraction to avoid invalid dual faces. */
+  fallback_cells: number;
+  /** Accepted adaptive simplifications; zero when uniform extraction is retained. */
+  adaptive_collapses: number;
 }
 function gridArg(g: GridInput): KernelGrid {
   if (!g || !g.dims || !g.origin || !(g.values instanceof Float32Array))
@@ -332,8 +336,8 @@ export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
         grid_dilate: (grid: GridInput, d: number) => call('grid_dilate', () => wasm.grid_dilate(gridArg(grid), d) as KernelGrid),
         grid_erode: (grid: GridInput, d: number) => call('grid_erode', () => wasm.grid_erode(gridArg(grid), d) as KernelGrid),
         grid_resample: (grid: GridInput, voxel: number) => call('grid_resample', () => wasm.grid_resample(gridArg(grid), voxel) as KernelGrid),
-        dual_contour: (grid: GridInput, iso = 0, qefTolerance = 1e-6, sharp = true, clampToCell = true) =>
-          call('dual_contour', () => wasm.dual_contour(gridArg(grid), iso, qefTolerance, sharp, clampToCell) as DualContourResult),
+        dual_contour: (grid: GridInput, iso = 0, qefTolerance = 1e-6, sharp = true, clampToCell = true, conservative = false, adaptive = 0, sharpThreshold = 0.5) =>
+          call('dual_contour', () => wasm.dual_contour(gridArg(grid), iso, qefTolerance, sharp, clampToCell, conservative, adaptive, sharpThreshold) as DualContourResult),
         straight_skeleton: (outer: ArrayLike<number>, holes: readonly ArrayLike<number>[] = [], weights?: ArrayLike<number>) =>
           call('straight_skeleton', () => wasm.straight_skeleton(array(outer), rings(holes), weights ? array(weights) : undefined) as SkeletonResult),
         offset_polygon: (outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], distance: number) =>

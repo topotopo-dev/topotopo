@@ -348,7 +348,7 @@ Run `node test/remeshquad.ts`, `node bench/remeshquad.ts` and
 Inspect `examples/renders/quad_remesh.png`: gray inputs and colored results for a
 noisy sphere, bevelled box, shelf rock and capped tube, with every polygon edge visible.
 
-## Sampled SDF grids (session 2)
+## Sampled SDF grids (sessions 2 and 8)
 
 The original skeleton API is unchanged. Additional generated WASM exports are:
 
@@ -360,7 +360,7 @@ grid_dilate(grid, distance);
 grid_erode(grid, distance);
 grid_blur(grid, radius);
 grid_resample(grid, newVoxel);
-dual_contour(grid, iso, qefTolerance, sharp, clampToCell);
+dual_contour(grid, iso, qefTolerance, sharp, clampToCell, conservative, adaptive, sharpThreshold);
 ```
 
 `positions` are xyz `Float64Array`; `tris` are point indices in `Uint32Array`.
@@ -385,6 +385,13 @@ cancel. Degenerate triangles contribute distance but no winding.
 
 With `fill=true`, up to four cycles of eight-direction Eikonal fast sweeping propagate unsigned distances
 outside the exact band while retaining the winding signs and all exact band samples.
+Dependency marks skip a repeated solve when none of its neighbours changed, without
+changing the sweep order, stopping rule or output bits. Closed-mesh winding fills
+scanline spans, and distance queries visit only active narrow-band block spans.
+Each 4-cubed block keeps up to eight candidate triangles for direct distance tests;
+dense blocks fall back to the BVH. Converged rows skip whole sweep spans. Added
+scratch space is one byte per sample, one native integer per grid row, and 36 bytes
+per band block (previously one byte), plus cached triangle normals.
 These farther distances are approximations. CSG resamples B trilinearly onto A's
 layout and clips to A's bounds. Smooth operations use polynomial smooth min/max.
 Offset and morphology subtract/add distance; blur is a separable box filter. Those
@@ -395,18 +402,34 @@ band are intentionally not exact.
 
 Dual contouring returns `positions: Float64Array`, polygon CSR `prim_start` and
 `vertex_point: Uint32Array`, plus `cell_index: Uint32Array` identifying the flattened
-lower grid corner for every output vertex. The native equivalent is `DualMesh`.
-Hermite samples interpolate sign-changing grid edges and use minmod finite-difference
-gradients. A centered symmetric-Jacobi pseudoinverse minimizes the QEF; an active-set
-solver minimizes it within the cell when clamping is enabled. Shared bilinear face
-asymptotic decisions split separate crossing loops. Each loop is triangulated through
-its QEF vertex and shared grid-edge crossings, keeping triangles within one cell
-instead of emitting potentially folded dual quads. Multi-loop cells use separate
-crossing centroids; `sharp=false` uses centroids throughout. A 1e-6-voxel inset avoids
-exact-zero endpoint collapses. Signed negative zero at iso zero retains inside sign.
-This is a conservative uniform primal/dual hybrid, not the full Schaefer/Ju adaptive
-octree algorithm. Unclamped QEF fits are accepted only when they stay in their cells;
-otherwise the caller gets a clear enable-clamping error.
+lower grid corner for every output vertex. `fallback_cells` reports cells that
+required conservative patches and `adaptive_collapses` reports accepted simplifications.
+The native equivalent is `DualMesh`; the original five-argument `dual_contour`
+function selects the new default, while `dual_contour_with_options` exposes all controls.
+The default emits a dual polygon around each sign-changing grid edge, using a QEF
+vertex in each incident cell. Planar faces stay quads (plane tolerance 1e-4 voxel);
+warped faces use the diagonal with better aligned triangle normals, with stable ties.
+Hermite normals interpolate finite grid derivatives; affine axial exterior evidence avoids
+blending across a sharp box's interior medial axis. A centered symmetric-Jacobi
+pseudoinverse minimizes the QEF, and an active-set solve constrains it to the cell.
+Smooth unstable fits use the Hermite mass point. `sharp=false` uses mass points
+throughout. Shared bilinear face decisions split separate crossing loops: ambiguous
+multi-sheet cells require one vertex per component to preserve manifold vertex links.
+
+Ambiguous topology and unsafe sharp fits trigger local conservative patches. Shared
+face connectors make the transition conforming, without unmatched edges or T-junctions.
+These guards detect risky local configurations, not every possible geometric
+self-intersection. Runtime validation checks oriented edge incidence; the test corpus
+also checks vertex links and proper nonadjacent triangle crossings. See session 8 in
+`BENCH.md` for the remaining union-junction accuracy limit.
+The explicit `conservative=true` path retains the session-2 minmod gradients and
+cell-local fans byte-for-byte. Signed negative zero at iso zero retains inside sign.
+Unclamped QEF fits are accepted only when they stay in their cells; otherwise the
+caller gets a clear enable-clamping error. The construction follows the uniform
+edge-dual/QEF approach described by
+[Schaefer, Ju and Warren](https://people.engr.tamu.edu/schaefer/research/dualsimp_tvcg.pdf);
+the adaptive octree simplifier is **not implemented**. Positive `adaptive` requests
+currently retain the uniform mesh exactly and report zero `adaptive_collapses`.
 
 The surface budget is 1M active cells, 2M output vertices and 4M triangles, with checked
 growth and fallible reservations. Boundary-crossing level sets and infinite samples
@@ -428,6 +451,11 @@ mesher, capped at 64 cells along the largest dimension.
 
 The ten `sdf` nodes expose sampling, CSG, filters and conversions. `grid_to_mesh`
 drops source attributes and supplies point `grid_cell` provenance for dual contouring.
+Both `grid_to_mesh` and `voxel_remesh` accept `method: dual_contouring |
+dual_contouring_conservative | marching_cubes`, `adaptive` (error tolerance in voxels,
+zero for uniform extraction), and `sharp_threshold` (normal variation from zero to
+one, default 0.5). Dual extraction adds the two statistics as detail attributes;
+`grid_to_mesh` sums them when extracting several volumes.
 `voxel_remesh` optionally transfers `Cd` by barycentric interpolation on the nearest
 source triangle and `material` by the nearest triangle to each new face centre,
 including the material table and referenced image volumes. UVs and other source

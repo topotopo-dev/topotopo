@@ -269,15 +269,28 @@ pub fn grid_resample(g: JsValue, voxel: f64) -> Result<Object, JsValue> {
     grid_object(crate::sdf::grid_resample(&grid(&g)?, voxel).map_err(error)?)
 }
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn dual_contour(
     g: JsValue,
     iso: f64,
     qef_tolerance: f64,
     sharp: bool,
     clamp_to_cell: bool,
+    conservative: Option<bool>,
+    adaptive: Option<f64>,
+    sharp_threshold: Option<f64>,
 ) -> Result<Object, JsValue> {
-    let m = crate::dual_contour::dual_contour(&grid(&g)?, iso, qef_tolerance, sharp, clamp_to_cell)
-        .map_err(error)?;
+    let m = crate::dual_contour::dual_contour_with_options(
+        &grid(&g)?,
+        iso,
+        qef_tolerance,
+        sharp,
+        clamp_to_cell,
+        conservative.unwrap_or(false),
+        adaptive.unwrap_or(0.),
+        sharp_threshold.unwrap_or(0.5),
+    )
+    .map_err(error)?;
     let o = Object::new();
     put(&o, "positions", Float64Array::from(m.positions.as_slice()))?;
     put(&o, "prim_start", Uint32Array::from(m.prim_start.as_slice()))?;
@@ -287,6 +300,12 @@ pub fn dual_contour(
         Uint32Array::from(m.vertex_point.as_slice()),
     )?;
     put(&o, "cell_index", Uint32Array::from(m.cell_index.as_slice()))?;
+    put(&o, "fallback_cells", JsValue::from(m.fallback_cells))?;
+    put(
+        &o,
+        "adaptive_collapses",
+        JsValue::from(m.adaptive_collapses),
+    )?;
     Ok(o)
 }
 fn provenance(o: &Object, p: &crate::Provenance) -> Result<(), JsValue> {

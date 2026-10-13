@@ -1,10 +1,14 @@
-//! Uniform-grid dual contouring with one QEF vertex per cell surface component.
+//! Uniform Hermite dual contouring: a QEF vertex per cell surface component,
+//! and an outward-oriented polygon for each sign-changing primal grid edge.
 //!
-//! Shared bilinear face decisions connect the edge crossings into disjoint loops,
-//! instead of collapsing unrelated sheets onto one vertex. Conservative shared
-//! face/edge subdivision triangulates each dual polygon into cell-local fans:
-//! clamping alone does not prevent ordinary QEF quads from self-intersecting.
-//! This is a uniform contourer, not Schaefer/Ju adaptive octree clustering.
+//! The uniform component construction follows Schaefer, Ju and Warren's
+//! manifold dual contouring formulation (TVCG 2007, section III). Shared
+//! asymptotic face decisions keep unrelated sheets distinct. Ambiguous cells
+//! and sharply varying fits clamped against a cell boundary use conforming
+//! cell-local conservative fans; shared face connectors prevent T junctions.
+//! The legacy all-fan method remains available, byte-for-byte. Adaptive octree
+//! clustering is not implemented: the adaptive tolerance currently retains the
+//! uniform mesh. Local safeguards are not a proof against all geometric contacts.
 
 use crate::sdf::Grid;
 use std::collections::HashMap;
@@ -102,6 +106,10 @@ pub struct DualMesh {
     pub vertex_point: Vec<u32>,
     /// Flattened x-fast lower grid-sample index of each vertex's source cell.
     pub cell_index: Vec<u32>,
+    /// Cells replaced by conforming conservative patches after safety checks.
+    pub fallback_cells: u32,
+    /// Successful topology-preserving adaptive vertex collapses.
+    pub adaptive_collapses: u32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -136,7 +144,7 @@ fn finite_delta(a: f64, b: f64, fallback: f64) -> f64 {
     }
 }
 
-fn gradient(grid: &Grid, p: [usize; 3]) -> [f64; 3] {
+fn gradient(grid: &Grid, p: [usize; 3], limited: bool) -> [f64; 3] {
     let strides = [
         1,
         grid.dims[0] as usize,
@@ -161,7 +169,11 @@ fn gradient(grid: &Grid, p: [usize; 3]) -> [f64; 3] {
         // At a narrow-band boundary use a finite one-sided derivative. Infinity
         // means a signed sentinel, never a numeric distance to differentiate.
         result[axis] = if lo.is_finite() && hi.is_finite() {
-            if center.is_finite() && p[axis] > 0 && p[axis] + 1 < grid.dims[axis] as usize {
+            if limited
+                && center.is_finite()
+                && p[axis] > 0
+                && p[axis] + 1 < grid.dims[axis] as usize
+            {
                 let backward = center - lo;
                 let forward = hi - center;
                 if backward * forward <= 0. {
@@ -170,7 +182,12 @@ fn gradient(grid: &Grid, p: [usize; 3]) -> [f64; 3] {
                     backward.signum() * backward.abs().min(forward.abs())
                 }
             } else {
-                hi - lo
+                (hi - lo)
+                    / if p[axis] > 0 && p[axis] + 1 < grid.dims[axis] as usize {
+                        2.
+                    } else {
+                        1.
+                    }
             }
         } else if center.is_finite() && hi.is_finite() {
             hi - center
@@ -181,6 +198,43 @@ fn gradient(grid: &Grid, p: [usize; 3]) -> [f64; 3] {
         };
     }
     result
+}
+
+// Project only when two finite exterior differences establish an affine
+// distance stencil. Using its actual slope also respects uniformly rescaled
+// implicit fields; a unit-gradient assumption would silently move their zero.
+fn affine_edge_root(
+    grid: &Grid,
+    outside: [usize; 3],
+    axis: usize,
+    high: bool,
+    value: f64,
+) -> Option<f64> {
+    let stride = [
+        1,
+        grid.dims[0] as usize,
+        grid.dims[0] as usize * grid.dims[1] as usize,
+    ][axis];
+    if high && outside[axis] + 2 >= grid.dims[axis] as usize || !high && outside[axis] < 2 {
+        return None;
+    }
+    let i = outside[0] + grid.dims[0] as usize * (outside[1] + grid.dims[1] as usize * outside[2]);
+    let samples = if high {
+        [i, i + stride, i + stride * 2]
+    } else {
+        [i, i - stride, i - stride * 2]
+    }
+    .map(|index| f64::from(grid.values[index]));
+    if samples.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let d0 = samples[1] - samples[0];
+    let d1 = samples[2] - samples[1];
+    if d0 <= 0. || (d0 - d1).abs() > 1e-4 * d0.abs().max(d1.abs()) {
+        return None;
+    }
+    let result = if high { 1. - value / d0 } else { value / d0 };
+    (0. ..=1.).contains(&result).then_some(result)
 }
 
 fn root(parent: &[usize; 12], mut i: usize) -> usize {
@@ -377,7 +431,40 @@ pub fn dual_contour(
     sharp: bool,
     clamp_to_cell: bool,
 ) -> Result<DualMesh, String> {
+    dual_contour_with_options(
+        grid,
+        iso,
+        qef_tolerance,
+        sharp,
+        clamp_to_cell,
+        false,
+        0.,
+        0.5,
+    )
+}
+
+/// Extract ordinary edge-dual polygons, or the original conservative fan mesh.
+/// `adaptive` is a geometric tolerance in voxels; unsafe clusters stay uniform.
+/// `sharp_threshold` is a feature-normal variation (1 - absolute normal dot product).
+#[allow(clippy::too_many_arguments)]
+pub fn dual_contour_with_options(
+    grid: &Grid,
+    iso: f64,
+    qef_tolerance: f64,
+    sharp: bool,
+    clamp_to_cell: bool,
+    conservative: bool,
+    adaptive: f64,
+    sharp_threshold: f64,
+) -> Result<DualMesh, String> {
+    let mut profile = crate::erosion_profile::Profile::new("dual_contour");
     grid.validate()?;
+    if !adaptive.is_finite() || adaptive < 0. {
+        return Err("dual_contour: adaptive must be finite and non-negative".into());
+    }
+    if !sharp_threshold.is_finite() || !(0. ..=1.).contains(&sharp_threshold) {
+        return Err("dual_contour: sharp_threshold must be in [0, 1]".into());
+    }
     if !iso.is_finite() {
         return Err("dual_contour: iso must be finite".into());
     }
@@ -417,11 +504,13 @@ pub fn dual_contour(
             }
         }
     }
+    profile.mark("validation");
     let mut mesh = DualMesh {
         prim_start: vec![0],
         ..DualMesh::default()
     };
     let mut cells = Vec::<(usize, [u32; 12])>::new();
+    let mut unsafe_cells = Vec::new();
     let corner_offset = [
         0,
         1,
@@ -434,10 +523,20 @@ pub fn dual_contour(
     ];
     for z in 0..nz - 1 {
         for y in 0..ny - 1 {
+            let row = index(0, y, z);
+            let column_signs = |i: usize| {
+                u8::from(negative(i))
+                    | (u8::from(negative(i + nx)) << 1)
+                    | (u8::from(negative(i + layer)) << 2)
+                    | (u8::from(negative(i + nx + layer)) << 3)
+            };
+            let mut left = column_signs(row);
             for x in 0..nx - 1 {
-                let base = index(x, y, z);
-                let sign = negative(base);
-                if corner_offset.iter().all(|off| negative(base + off) == sign) {
+                let base = row + x;
+                let right = column_signs(base + 1);
+                let uniform = left == right && (left == 0 || left == 15);
+                left = right;
+                if uniform {
                     continue;
                 }
                 check_budget(cells.len(), 1, MAX_ACTIVE_CELLS)?;
@@ -460,6 +559,7 @@ pub fn dual_contour(
                             gradients[c] = gradient(
                                 grid,
                                 [x + (c & 1), y + ((c >> 1) & 1), z + ((c >> 2) & 1)],
+                                conservative,
                             );
                             computed[c] = true;
                         }
@@ -473,6 +573,45 @@ pub fn dual_contour(
                             gradients[a][i] * (1. - t) + gradients[b][i] * t
                         }),
                     };
+                    if sharp && !conservative {
+                        // An exact affine exterior stencil is stronger Hermite
+                        // evidence than interpolating through the medial-axis
+                        // kink on the inside of a sharp box edge. Recover its
+                        // plane root instead of averaging unrelated face normals.
+                        let outside = if inside(values[a]) { b } else { a };
+                        let axis = e / 4;
+                        let mut n = gradients[outside];
+                        if (0..3).any(|a| a != axis && n[a].abs() > 1e-15) {
+                            n = gradient(
+                                grid,
+                                [
+                                    x + (outside & 1),
+                                    y + ((outside >> 1) & 1),
+                                    z + ((outside >> 2) & 1),
+                                ],
+                                true,
+                            );
+                        }
+                        let length = libm::sqrt(dot(n, n));
+                        if length > 1e-15 && n[axis].abs() / length > 1. - 1e-12 {
+                            let position = [
+                                x + (outside & 1),
+                                y + ((outside >> 1) & 1),
+                                z + ((outside >> 2) & 1),
+                            ];
+                            if let Some(root) = affine_edge_root(
+                                grid,
+                                position,
+                                axis,
+                                outside == b,
+                                values[outside],
+                            ) {
+                                h.p[axis] = root;
+                                h.n = [0.; 3];
+                                h.n[axis] = n[axis].signum();
+                            }
+                        }
+                    }
                     let mut len = libm::sqrt(dot(h.n, h.n));
                     if len < 1e-15 {
                         // A pathological cancellation must still yield a valid
@@ -488,6 +627,15 @@ pub fn dual_contour(
                 let component = components(&values, &crossed);
                 let component_count = (0..12).filter(|&i| crossed[i] && component[i] == i).count();
                 let mut edge_vertex = [NONE; 12];
+                let mut unsafe_cell = component_count > 1
+                    || FACES
+                        .iter()
+                        .any(|(_, edges)| edges.iter().all(|&e| crossed[e]));
+                let affine_axial = hermite
+                    .iter()
+                    .enumerate()
+                    .filter(|(e, _)| crossed[*e])
+                    .all(|(_, h)| h.n.iter().filter(|n| n.abs() > 1e-10).count() == 1);
                 for e in 0..12 {
                     if !crossed[e] || component[e] != e {
                         continue;
@@ -502,7 +650,7 @@ pub fn dual_contour(
                     }
                     // Several sheets share this voxel: each must remain near
                     // its own crossing loop instead of fitting a remote crease.
-                    let p = qef(
+                    let mut p = qef(
                         &h[..n],
                         qef_tolerance,
                         sharp && component_count == 1,
@@ -510,6 +658,25 @@ pub fn dual_contour(
                     );
                     if p.iter().any(|v| !v.is_finite() || *v < 0. || *v > 1.) {
                         return Err("dual_contour: an unconstrained QEF leaves its source cell; enable clamp_to_cell for safe extraction".into());
+                    }
+                    if !conservative
+                        && !affine_axial
+                        && p.iter().any(|v| *v <= 1e-9 || *v >= 1. - 1e-9)
+                    {
+                        let mut variation: f64 = 0.;
+                        for a in &h[..n] {
+                            for b in &h[..n] {
+                                variation = variation.max(1. - dot(a.n, b.n).abs());
+                            }
+                        }
+                        if variation > sharp_threshold {
+                            unsafe_cell = true;
+                        } else {
+                            // A smooth patch can have an ill-conditioned fit
+                            // outside its cell. The Hermite mass point is the
+                            // stable in-cell fallback without sharpening a fold.
+                            p = qef(&h[..n], qef_tolerance, false, true);
+                        }
                     }
                     reserve_vertex(&mut mesh)?;
                     let vertex = mesh.cell_index.len() as u32;
@@ -525,12 +692,346 @@ pub fn dual_contour(
                     }
                 }
                 cells.push((base, edge_vertex));
+                reserve(&mut unsafe_cells, 1)?;
+                unsafe_cells.push(unsafe_cell);
             }
         }
     }
-    surface_fans(grid, iso, &cells, &mut mesh)?;
+    profile.mark("hermite_qef");
+    if conservative {
+        surface_fans(grid, iso, &cells, &mut mesh)?;
+    } else {
+        surface_dual(
+            grid,
+            iso,
+            &cells,
+            &unsafe_cells,
+            &mut mesh,
+            sharp,
+            qef_tolerance,
+        )?;
+    }
+    profile.mark("connectivity");
     validate_edges(&mesh)?;
+    profile.mark("edge_validation");
+    profile.finish();
     Ok(mesh)
+}
+
+fn point(mesh: &DualMesh, vertex: u32) -> [f64; 3] {
+    std::array::from_fn(|axis| mesh.positions[3 * vertex as usize + axis])
+}
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|i| a[i] - b[i])
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn polygon(mesh: &mut DualMesh, vertices: &[u32]) -> Result<(), String> {
+    let triangles = mesh.vertex_point.len() - 2 * (mesh.prim_start.len() - 1);
+    check_budget(triangles, vertices.len() - 2, MAX_OUTPUT_TRIANGLES)?;
+    reserve(&mut mesh.vertex_point, vertices.len())?;
+    reserve(&mut mesh.prim_start, 1)?;
+    mesh.vertex_point.extend_from_slice(vertices);
+    mesh.prim_start.push(mesh.vertex_point.len() as u32);
+    Ok(())
+}
+
+// A quad remains a quad if its fourth corner is within 1e-4 voxel of the
+// first triangle's plane. Otherwise select the diagonal with the most aligned
+// triangle normals, breaking exact ties by the stable global vertex numbers.
+fn dual_quad(mesh: &mut DualMesh, vertices: [u32; 4], voxel: f64) -> Result<(), String> {
+    let p = vertices.map(|v| point(mesh, v));
+    let normal = cross(sub(p[1], p[0]), sub(p[2], p[0]));
+    let squared = dot(normal, normal);
+    let height = dot(normal, sub(p[3], p[0]));
+    if squared > 0. && height * height <= squared * (voxel * 1e-4).powi(2) {
+        return polygon(mesh, &vertices);
+    }
+    let score = |a: usize, b: usize, c: usize, d: usize| {
+        let n0 = cross(sub(p[b], p[a]), sub(p[c], p[a]));
+        let n1 = cross(sub(p[c], p[a]), sub(p[d], p[a]));
+        dot(n0, n1) / libm::sqrt((dot(n0, n0) * dot(n1, n1)).max(1e-60))
+    };
+    if score(0, 1, 2, 3) >= score(1, 2, 3, 0) {
+        polygon(mesh, &[vertices[0], vertices[1], vertices[2]])?;
+        polygon(mesh, &[vertices[0], vertices[2], vertices[3]])
+    } else {
+        polygon(mesh, &[vertices[1], vertices[2], vertices[3]])?;
+        polygon(mesh, &[vertices[1], vertices[3], vertices[0]])
+    }
+}
+
+fn surface_dual(
+    grid: &Grid,
+    iso: f64,
+    cells: &[(usize, [u32; 12])],
+    unsafe_cells: &[bool],
+    mesh: &mut DualMesh,
+    sharp: bool,
+    qef_tolerance: f64,
+) -> Result<(), String> {
+    let nx = grid.dims[0] as usize;
+    let layer = nx * grid.dims[1] as usize;
+    let mut lookup = Vec::new();
+    reserve(&mut lookup, grid.values.len())?;
+    lookup.resize(grid.values.len(), NONE);
+    for (i, &(base, _)) in cells.iter().enumerate() {
+        lookup[base] = i as u32;
+    }
+    let offsets = [
+        0,
+        1,
+        nx,
+        nx + 1,
+        layer,
+        layer + 1,
+        layer + nx,
+        layer + nx + 1,
+    ];
+    let edge_key = |base: usize, e: usize| 3 * (base + offsets[EDGES[e][0]]) + e / 4;
+    let mut split_edges = HashMap::<usize, (), BuildHasherDefault<EdgeHasher>>::default();
+    for (i, &(base, vertices)) in cells.iter().enumerate() {
+        if unsafe_cells[i] {
+            for (e, &v) in vertices.iter().enumerate() {
+                if v != NONE {
+                    let key = edge_key(base, e);
+                    if !split_edges.contains_key(&key) {
+                        split_edges
+                            .try_reserve(1)
+                            .map_err(|_| ALLOCATION_ERROR.to_string())?;
+                        split_edges.insert(key, ());
+                    }
+                }
+            }
+        }
+    }
+    // Every patch incident on a dangerous edge uses cell-interior fan centres.
+    // The shared face connectors are also inserted into neighbouring quads, so
+    // the transition never creates an unmatched edge or a T junction.
+    for &(base, vertices) in cells {
+        if vertices
+            .iter()
+            .enumerate()
+            .any(|(e, &v)| v != NONE && split_edges.contains_key(&edge_key(base, e)))
+        {
+            mesh.fallback_cells += 1;
+            let xyz = [base % nx, (base / nx) % grid.dims[1] as usize, base / layer];
+            for &v in &vertices {
+                if v == NONE {
+                    continue;
+                }
+                for (axis, &coordinate) in xyz.iter().enumerate() {
+                    let lo = grid.origin[axis] + (coordinate as f64 + INSET) * grid.voxel;
+                    let hi = lo + (1. - 2. * INSET) * grid.voxel;
+                    mesh.positions[v as usize * 3 + axis] =
+                        mesh.positions[v as usize * 3 + axis].clamp(lo, hi);
+                }
+            }
+        }
+    }
+    let crossing = |key: usize| {
+        let sample = key / 3;
+        let axis = key % 3;
+        let stride = [1, nx, layer][axis];
+        let a = f64::from(grid.values[sample]) - iso;
+        let b = f64::from(grid.values[sample + stride]) - iso;
+        let mut t = crossing_fraction(a, b);
+        let xyz = [
+            sample % nx,
+            (sample / nx) % grid.dims[1] as usize,
+            sample / layer,
+        ];
+        let mut high_xyz = xyz;
+        high_xyz[axis] += 1;
+        let ga = gradient(grid, xyz, false);
+        let gb = gradient(grid, high_xyz, false);
+        let mut normal = std::array::from_fn(|i| ga[i] * (1. - t) + gb[i] * t);
+        if sharp {
+            let outside = if inside(a) { high_xyz } else { xyz };
+            let n = gradient(grid, outside, true);
+            let length = libm::sqrt(dot(n, n));
+            if length > 1e-15
+                && n[axis].abs() / length > 1. - 1e-12
+                && let Some(root) = affine_edge_root(
+                    grid,
+                    outside,
+                    axis,
+                    inside(a),
+                    if inside(a) { b } else { a },
+                )
+            {
+                t = root;
+                normal = [0.; 3];
+                normal[axis] = n[axis].signum();
+            }
+        }
+        let t = t.clamp(INSET, 1. - INSET);
+        let length = libm::sqrt(dot(normal, normal));
+        if length > 1e-15 {
+            for value in &mut normal {
+                *value /= length;
+            }
+        } else {
+            normal[axis] = (b - a).signum();
+        }
+        Hermite {
+            p: std::array::from_fn::<_, 3, _>(|i| {
+                grid.origin[i] + (xyz[i] as f64 + if i == axis { t } else { 0. }) * grid.voxel
+            }),
+            n: normal,
+        }
+    };
+    let mut connectors = HashMap::<(usize, usize), u32, BuildHasherDefault<EdgeHasher>>::default();
+    for &(base, edge_vertex) in cells {
+        let rings = [
+            [(0, 0), (nx, 1), (nx + layer, 3), (layer, 2)],
+            [(0, 4), (layer, 6), (layer + 1, 7), (1, 5)],
+            [(0, 8), (1, 9), (1 + nx, 11), (nx, 10)],
+        ];
+        for (axis, ring) in rings.into_iter().enumerate() {
+            if edge_vertex[axis * 4] == NONE {
+                continue;
+            }
+            let key = edge_key(base, axis * 4);
+            let split = split_edges.contains_key(&key);
+            let mut perimeter = [NONE; 8];
+            let mut count = 0;
+            for (j, (delta, edge)) in ring.into_iter().enumerate() {
+                let cell_base = base - delta;
+                let id = lookup[cell_base];
+                if id == NONE {
+                    return Err("dual_contour: incomplete sign-changing edge ring".into());
+                }
+                perimeter[count] = cells[id as usize].1[edge];
+                count += 1;
+                if split_edges.is_empty() {
+                    continue;
+                }
+                let other_delta = ring[(j + 1) % 4].0;
+                let face_axis = if delta.abs_diff(other_delta) == 1 {
+                    0
+                } else if delta.abs_diff(other_delta) == nx {
+                    1
+                } else {
+                    2
+                };
+                let face = face_axis * 2 + usize::from(other_delta < delta);
+                let (corners, edges) = FACES[face];
+                let values = offsets.map(|o| f64::from(grid.values[cell_base + o]) - iso);
+                let selected: Vec<_> = edges
+                    .iter()
+                    .copied()
+                    .filter(|&e| cells[id as usize].1[e] != NONE)
+                    .collect();
+                let other = if selected.len() == 2 {
+                    if selected[0] == edge {
+                        selected[1]
+                    } else {
+                        selected[0]
+                    }
+                } else {
+                    let [a, b, c, d] = corners.map(|c| values[c]);
+                    let scale = a.abs().max(b.abs()).max(c.abs()).max(d.abs()).max(1.);
+                    let k = edges
+                        .iter()
+                        .position(|&e| e == edge)
+                        .expect("incident edge belongs to face");
+                    edges[if (a / scale) * (c / scale) - (b / scale) * (d / scale) >= 0. {
+                        k ^ 1
+                    } else {
+                        3 - k
+                    }]
+                };
+                let other_key = edge_key(cell_base, other);
+                if !split && !split_edges.contains_key(&other_key) {
+                    continue;
+                }
+                let pair = (key.min(other_key), key.max(other_key));
+                let connector = if let Some(&v) = connectors.get(&pair) {
+                    v
+                } else {
+                    let p = crossing(key);
+                    let q = crossing(other_key);
+                    let mut center = std::array::from_fn(|a| (p.p[a] + q.p[a]) * 0.5);
+                    let axial_plane =
+                        |n: [f64; 3]| n.iter().filter(|v| v.abs() > 1e-10).count() == 1;
+                    if sharp
+                        && selected.len() == 2
+                        && axial_plane(p.n)
+                        && axial_plane(q.n)
+                        && dot(p.n, q.n).abs() < 1e-10
+                    {
+                        // Two independently detected axial affine stencils
+                        // identify a sharp planar junction. Solve their QEF on
+                        // the shared face instead of beveling that junction.
+                        // Blended normals at arbitrary CSG seams do not justify
+                        // extrapolating a feature: retain the safe mass point.
+                        let u = (face_axis + 1) % 3;
+                        let v = (face_axis + 2) % 3;
+                        let aa = p.n[u] * p.n[u] + q.n[u] * q.n[u];
+                        let ab = p.n[u] * p.n[v] + q.n[u] * q.n[v];
+                        let bb = p.n[v] * p.n[v] + q.n[v] * q.n[v];
+                        let pa = dot(p.n, sub(p.p, center));
+                        let qa = dot(q.n, sub(q.p, center));
+                        let ru = p.n[u] * pa + q.n[u] * qa;
+                        let rv = p.n[v] * pa + q.n[v] * qa;
+                        let determinant = aa * bb - ab * ab;
+                        if determinant > (aa + bb).powi(2) * qef_tolerance.powi(2).max(1e-12) {
+                            let mut candidate = center;
+                            candidate[u] += (bb * ru - ab * rv) / determinant;
+                            candidate[v] += (aa * rv - ab * ru) / determinant;
+                            let xyz = [
+                                cell_base % nx,
+                                (cell_base / nx) % grid.dims[1] as usize,
+                                cell_base / layer,
+                            ];
+                            if [u, v].iter().all(|&a| {
+                                let local =
+                                    (candidate[a] - grid.origin[a]) / grid.voxel - xyz[a] as f64;
+                                (INSET..=1. - INSET).contains(&local)
+                            }) {
+                                center = candidate;
+                            }
+                        }
+                    }
+                    reserve_vertex(mesh)?;
+                    let v = mesh.cell_index.len() as u32;
+                    mesh.positions.extend_from_slice(&center);
+                    mesh.cell_index.push(cell_base as u32);
+                    connectors
+                        .try_reserve(1)
+                        .map_err(|_| ALLOCATION_ERROR.to_string())?;
+                    connectors.insert(pair, v);
+                    v
+                };
+                perimeter[count] = connector;
+                count += 1;
+            }
+            if !inside(f64::from(grid.values[base]) - iso) {
+                perimeter[..count].reverse();
+            }
+            if count == 4 && !split {
+                dual_quad(mesh, perimeter[..4].try_into().unwrap(), grid.voxel)?;
+            } else {
+                reserve_vertex(mesh)?;
+                let center = mesh.cell_index.len() as u32;
+                mesh.positions.extend_from_slice(&crossing(key).p);
+                mesh.cell_index.push(base as u32);
+                for j in 0..count {
+                    polygon(mesh, &[center, perimeter[j], perimeter[(j + 1) % count]])?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 // A simple loop on the boundary of a convex cell has an injective radial

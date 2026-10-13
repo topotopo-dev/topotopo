@@ -23,6 +23,8 @@ struct Triangle {
     centroid: V3,
     area_vector: V3,
     area: f64,
+    normal: V3,
+    normal_squared: f64,
 }
 
 struct Node {
@@ -114,6 +116,9 @@ impl Bvh {
     }
 
     fn distance(&self, p: V3, maximum_squared: f64) -> f64 {
+        if box_distance(p, &self.nodes[0]) > maximum_squared {
+            return f64::INFINITY;
+        }
         let d = self.distance_node(0, p, maximum_squared);
         if d <= maximum_squared {
             libm::sqrt(d)
@@ -122,22 +127,52 @@ impl Bvh {
         }
     }
 
+    fn band_distance(&self, p: V3, maximum_squared: f64, block: &BandBlock) -> f64 {
+        if block.count as usize > BLOCK_TRIANGLES {
+            return self.distance(p, maximum_squared);
+        }
+        let mut best = maximum_squared;
+        let mut found = false;
+        for &index in &block.triangles[..block.count as usize] {
+            let triangle = &self.triangles[index as usize];
+            if bounds_distance(p, triangle.min, triangle.max) > best {
+                continue;
+            }
+            let candidate = triangle_distance_precomputed(p, triangle);
+            if candidate <= best {
+                best = candidate;
+                found = true;
+            }
+        }
+        if found {
+            libm::sqrt(best)
+        } else {
+            f64::INFINITY
+        }
+    }
+
     fn distance_node(&self, index: usize, p: V3, mut best: f64) -> f64 {
         let node = &self.nodes[index];
-        if box_distance(p, node) > best {
-            return f64::INFINITY;
-        }
         if let Some([left, right]) = node.children {
             let dl = box_distance(p, &self.nodes[left]);
             let dr = box_distance(p, &self.nodes[right]);
-            let (first, second) = if dl <= dr {
-                (left, right)
+            let (first, first_bound, second, second_bound) = if dl <= dr {
+                (left, dl, right, dr)
             } else {
-                (right, left)
+                (right, dr, left, dl)
             };
-            let first_distance = self.distance_node(first, p, best);
+            let first_distance = if first_bound <= best {
+                self.distance_node(first, p, best)
+            } else {
+                f64::INFINITY
+            };
             best = best.min(first_distance);
-            return first_distance.min(self.distance_node(second, p, best));
+            let second_distance = if second_bound <= best {
+                self.distance_node(second, p, best)
+            } else {
+                f64::INFINITY
+            };
+            return first_distance.min(second_distance);
         } else {
             let mut found = false;
             for &triangle in &self.order[node.start..node.end] {
@@ -145,7 +180,7 @@ impl Bvh {
                 if bounds_distance(p, triangle.min, triangle.max) > best {
                     continue;
                 }
-                let distance = triangle_distance(p, &triangle.p);
+                let distance = triangle_distance_precomputed(p, triangle);
                 if distance <= best {
                     best = distance;
                     found = true;
@@ -239,12 +274,25 @@ fn segment_distance(p: V3, a: V3, b: V3) -> f64 {
 }
 
 /// Squared exact closest distance, including degenerate triangles.
+fn triangle_distance_precomputed(p: V3, triangle: &Triangle) -> f64 {
+    triangle_distance_with_normal(p, &triangle.p, triangle.normal, triangle.normal_squared)
+}
+
+#[cfg(test)]
 fn triangle_distance(p: V3, triangle: &[V3; 3]) -> f64 {
+    let normal = cross(sub(triangle[1], triangle[0]), sub(triangle[2], triangle[0]));
+    triangle_distance_with_normal(p, triangle, normal, dot(normal, normal))
+}
+
+fn triangle_distance_with_normal(
+    p: V3,
+    triangle: &[V3; 3],
+    normal: V3,
+    normal_squared: f64,
+) -> f64 {
     let [a, b, c] = *triangle;
     let ab = sub(b, a);
     let ac = sub(c, a);
-    let normal = cross(ab, ac);
-    let normal_squared = dot(normal, normal);
     let ap = sub(p, a);
     if normal_squared > 0.0 {
         // Barycentrics of the orthogonal projection. Cross products avoid the
@@ -376,18 +424,35 @@ fn scanline_crossings(
     rows
 }
 
-/// Coarse conservative band mask. Empty 4^3 blocks skip BVH queries entirely;
-/// marked blocks still use exact per-point triangle distances.
+const BLOCK_TRIANGLES: usize = 8;
+
+#[derive(Clone)]
+struct BandBlock {
+    triangles: [u32; BLOCK_TRIANGLES],
+    // The overflow value BLOCK_TRIANGLES + 1 selects the full BVH. The bounded
+    // list avoids per-block allocation and prevents dense meshes growing memory.
+    count: u8,
+}
+
+/// Conservative band blocks. Empty 4^3 blocks skip distance queries, sparse
+/// blocks directly test their bounded triangle list, and dense blocks use the
+/// BVH. Every candidate still uses exactly the same closest-distance arithmetic.
 fn band_blocks(
     triangles: &[Triangle],
     dims: [u32; 3],
     origin: V3,
     voxel: f64,
     width: f64,
-) -> ([usize; 3], Vec<bool>) {
+) -> ([usize; 3], Vec<BandBlock>) {
     let blocks = dims.map(|d| (d as usize).div_ceil(4));
-    let mut active = vec![false; blocks[0] * blocks[1] * blocks[2]];
-    for triangle in triangles {
+    let mut active = vec![
+        BandBlock {
+            triangles: [0; BLOCK_TRIANGLES],
+            count: 0
+        };
+        blocks[0] * blocks[1] * blocks[2]
+    ];
+    for (triangle_index, triangle) in triangles.iter().enumerate() {
         let lower: [usize; 3] = std::array::from_fn(|i| {
             ((libm::floor((triangle.min[i] - width - origin[i]) / voxel).max(0.) as usize) / 4)
                 .min(blocks[i] - 1)
@@ -400,7 +465,14 @@ fn band_blocks(
             for y in lower[1]..=upper[1] {
                 let start = lower[0] + blocks[0] * (y + blocks[1] * z);
                 let end = upper[0] + blocks[0] * (y + blocks[1] * z) + 1;
-                active[start..end].fill(true);
+                for block in &mut active[start..end] {
+                    if (block.count as usize) < BLOCK_TRIANGLES {
+                        block.triangles[block.count as usize] = triangle_index as u32;
+                        block.count += 1;
+                    } else if block.count as usize == BLOCK_TRIANGLES {
+                        block.count += 1;
+                    }
+                }
             }
         }
     }
@@ -420,6 +492,7 @@ pub fn sdf_from_mesh(
     padding: f64,
     fill: bool,
 ) -> Result<Grid, String> {
+    let mut profile = crate::erosion_profile::Profile::new("sdf_from_mesh");
     if positions.is_empty() || !positions.len().is_multiple_of(3) || positions.len() / 3 > 4_000_000
     {
         return Err("mesh positions must contain xyz triples for 1..4000000 points".into());
@@ -464,7 +537,9 @@ pub fn sdf_from_mesh(
         let triangle_min = std::array::from_fn(|i| p[0][i].min(p[1][i]).min(p[2][i]));
         let triangle_max = std::array::from_fn(|i| p[0][i].max(p[1][i]).max(p[2][i]));
         let centroid = std::array::from_fn(|i| (p[0][i] + p[1][i] + p[2][i]) / 3.0);
-        let area_vector = cross(sub(p[1], p[0]), sub(p[2], p[0])).map(|v| v * 0.5);
+        let normal = cross(sub(p[1], p[0]), sub(p[2], p[0]));
+        let normal_squared = dot(normal, normal);
+        let area_vector = normal.map(|v| v * 0.5);
         let area = libm::sqrt(dot(area_vector, area_vector));
         for axis in 0..3 {
             min[axis] = min[axis].min(triangle_min[axis]);
@@ -477,6 +552,8 @@ pub fn sdf_from_mesh(
             centroid,
             area_vector,
             area,
+            normal,
+            normal_squared,
         });
     }
     let origin = min.map(|v| v - margin);
@@ -489,6 +566,7 @@ pub fn sdf_from_mesh(
         dims[axis] = (cells as u32).max(1) + 1;
     }
     let count = layout_len(dims, origin, voxel)?;
+    profile.mark("validation_setup");
     let crossings =
         if dims[1] as usize * dims[2] as usize <= 1_048_576 && is_closed(positions, tris) {
             Some(scanline_crossings(&triangles, dims, origin, voxel))
@@ -501,48 +579,86 @@ pub fn sdf_from_mesh(
         dims,
         origin,
         voxel,
-        values: Vec::with_capacity(count),
+        values: vec![f32::INFINITY; count],
     };
-    for z in 0..dims[2] {
-        for y in 0..dims[1] {
-            let row = crossings
-                .as_ref()
-                .map(|rows| &rows[(y + dims[1] * z) as usize]);
-            let mut next_crossing = 0;
+    // Separate sign classification from distance sampling so profile builds report
+    // the two costs independently. Closed meshes fill whole winding spans; the
+    // binary search uses the original lattice comparison, including rounding ties.
+    let nx = dims[0] as usize;
+    let ny = dims[1] as usize;
+    if let Some(rows) = crossings {
+        for (row, values) in rows.iter().zip(result.values.chunks_exact_mut(nx)) {
+            let mut previous = 0;
             let mut winding = 0_i32;
-            for x in 0..dims[0] {
-                let point = [
-                    origin[0] + x as f64 * voxel,
-                    origin[1] + y as f64 * voxel,
-                    origin[2] + z as f64 * voxel,
-                ];
-                let block =
-                    x as usize / 4 + blocks[0] * (y as usize / 4 + blocks[1] * (z as usize / 4));
-                let distance = if active[block] {
-                    bvh.distance(point, width * width)
-                } else {
-                    f64::INFINITY
-                };
-                let inside = if let Some(row) = row {
-                    while next_crossing < row.len() && row[next_crossing].0 <= point[0] {
-                        winding += row[next_crossing].1;
-                        next_crossing += 1;
+            for &(crossing, delta) in row {
+                let mut lower = previous;
+                let mut upper = nx;
+                while lower < upper {
+                    let middle = lower + (upper - lower) / 2;
+                    if origin[0] + middle as f64 * voxel < crossing {
+                        lower = middle + 1;
+                    } else {
+                        upper = middle;
                     }
-                    winding != 0
-                } else {
-                    bvh.inside(point)
-                };
-                result.values.push(if inside {
-                    -(distance as f32)
-                } else {
-                    distance as f32
-                });
+                }
+                if winding != 0 {
+                    values[previous..lower].fill(f32::NEG_INFINITY);
+                }
+                previous = lower;
+                winding += delta;
+            }
+            if winding != 0 {
+                values[previous..].fill(f32::NEG_INFINITY);
+            }
+        }
+    } else {
+        for z in 0..dims[2] as usize {
+            let pz = origin[2] + z as f64 * voxel;
+            for y in 0..ny {
+                let py = origin[1] + y as f64 * voxel;
+                let start = nx * (y + ny * z);
+                for (x, value) in result.values[start..start + nx].iter_mut().enumerate() {
+                    if bvh.inside([origin[0] + x as f64 * voxel, py, pz]) {
+                        *value = f32::NEG_INFINITY;
+                    }
+                }
             }
         }
     }
+    profile.mark("winding_sign");
+    // Empty band blocks already contain the correct signed infinity. Skipping
+    // them a row-span at a time avoids a full-volume per-sample branch and query.
+    for z in 0..dims[2] as usize {
+        let pz = origin[2] + z as f64 * voxel;
+        for y in 0..ny {
+            let py = origin[1] + y as f64 * voxel;
+            let start = nx * (y + ny * z);
+            let block_start = blocks[0] * (y / 4 + blocks[1] * (z / 4));
+            for bx in 0..blocks[0] {
+                let block = &active[block_start + bx];
+                if block.count == 0 {
+                    continue;
+                }
+                let x0 = bx * 4;
+                let x1 = (x0 + 4).min(nx);
+                for x in x0..x1 {
+                    let distance = bvh.band_distance(
+                        [origin[0] + x as f64 * voxel, py, pz],
+                        width * width,
+                        block,
+                    );
+                    let value = &mut result.values[start + x];
+                    *value = (distance as f32).copysign(*value);
+                }
+            }
+        }
+    }
+    profile.mark("distance_band");
     if fill {
         fill_distances(&mut result)?;
     }
+    profile.mark("sweeping");
+    profile.finish();
     Ok(result)
 }
 
@@ -559,5 +675,65 @@ mod tests {
             triangle_distance([0., 2., 0.], &[[0.; 3], [1., 0., 0.], [0.; 3]]),
             4.
         );
+    }
+
+    #[test]
+    fn sparse_band_blocks_match_complete_bvh_byte_for_byte() {
+        let mut state = 0x9375_291a_u32;
+        let mut triangles = Vec::new();
+        for index in 0..19 {
+            let p: [V3; 3] = std::array::from_fn(|_| {
+                std::array::from_fn(|axis| {
+                    state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                    if index == 0 {
+                        0.
+                    } else {
+                        (state as f64 / u32::MAX as f64 - 0.5) * 1.8 + axis as f64 * 0.17
+                    }
+                })
+            });
+            let normal = cross(sub(p[1], p[0]), sub(p[2], p[0]));
+            let area_vector = normal.map(|v| v * 0.5);
+            triangles.push(Triangle {
+                p,
+                min: std::array::from_fn(|i| p[0][i].min(p[1][i]).min(p[2][i])),
+                max: std::array::from_fn(|i| p[0][i].max(p[1][i]).max(p[2][i])),
+                centroid: std::array::from_fn(|i| (p[0][i] + p[1][i] + p[2][i]) / 3.),
+                area_vector,
+                area: libm::sqrt(dot(area_vector, area_vector)),
+                normal,
+                normal_squared: dot(normal, normal),
+            });
+        }
+        let bvh = Bvh::build(triangles);
+        let dims = [19, 17, 18];
+        let origin = [-2.1, -2.3, -2.2];
+        let voxel = 0.25;
+        let mut saw_sparse = false;
+        let mut saw_dense = false;
+        let mut saw_empty = false;
+        for width in [0.125, 0.5, 1.2] {
+            let (blocks, active) = band_blocks(&bvh.triangles, dims, origin, voxel, width);
+            for z in 0..dims[2] as usize {
+                for y in 0..dims[1] as usize {
+                    for x in 0..dims[0] as usize {
+                        let point = [
+                            origin[0] + x as f64 * voxel,
+                            origin[1] + y as f64 * voxel,
+                            origin[2] + z as f64 * voxel,
+                        ];
+                        let block = &active[x / 4 + blocks[0] * (y / 4 + blocks[1] * (z / 4))];
+                        saw_sparse |= block.count > 0 && block.count as usize <= BLOCK_TRIANGLES;
+                        saw_dense |= block.count as usize > BLOCK_TRIANGLES;
+                        saw_empty |= block.count == 0;
+                        assert_eq!(
+                            bvh.band_distance(point, width * width, block).to_bits(),
+                            bvh.distance(point, width * width).to_bits()
+                        );
+                    }
+                }
+            }
+        }
+        assert!(saw_sparse && saw_dense && saw_empty);
     }
 }

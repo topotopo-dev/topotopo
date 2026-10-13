@@ -1024,3 +1024,165 @@ Inspect `examples/renders/quad_remesh.png` for a regular tube-cap grid with one 
 - No runtime dependencies were added. Erosion, dual contouring, new nodes, threads and GPU work remain outside this session.
 
 Work stays on `codex/kernels`; no push or merge.
+
+# Session 8 measurements: K-2b dual contouring
+
+2026-10-13, Windows 10.0.26200 x64, Intel Core i7-10700K @ 3.80 GHz
+(16 logical CPUs), Node v24.14.0, Rust 1.94.0. Starting HEAD was `cfb802b` on
+`codex/kernels`. No runtime dependencies were added.
+
+## Implementation and scope
+
+The default is now edge-dual extraction: one QEF vertex per active cell component,
+with a polygon around each sign-changing grid edge. Shared asymptotic face decisions
+keep separate sheets separate. Ordinary cells have one vertex; collapsing multiple
+components to one would produce non-manifold vertex links. Faces within 1e-4 voxel
+of a plane stay quads; warped faces use a deterministic diagonal. Central Hermite
+gradients, guarded affine axial one-sided reconstruction, constrained QEF fitting and
+mass-point fallback preserve the tested box features. The affine reconstruction uses
+the actual finite-difference slope, so scaling an implicit field does not move its zero set.
+
+Ambiguous topology and unsafe sharp fits trigger local conservative patches with
+shared face connectors. `fallback_cells` counts affected cells. These are local risk
+checks, **not an exhaustive geometric self-intersection detector**; runtime validation
+checks oriented edge incidence, while the corpus additionally checks vertex links and
+proper nonadjacent triangle crossings. Explicit `dual_contouring_conservative` keeps
+the session-2 geometry byte-identical. `sharp_threshold` is normal variation
+`1 - abs(dot(n0,n1))`, from 0 to 1, default 0.5.
+
+Both nodes expose all three methods, `adaptive`, and `sharp_threshold`. The optional
+adaptive octree is **not implemented**: positive tolerances retain the uniform mesh
+exactly, with `adaptive_collapses = 0`. Its tests verify this explicit retention and
+manifoldness; they are not evidence of adaptive simplification or face reduction.
+
+SDF construction now fills winding spans, queries bounded triangle lists in sparse
+4-cubed band blocks (dense blocks use the full BVH), caches triangle normals, and
+skips unchanged Eikonal dependencies and converged rows. Sweep order, stopping rule,
+exact band samples and signs remain unchanged. Extra scratch: one byte/sample,
+one native integer/grid row, and 36 bytes/band block (formerly one byte), plus
+32 bytes/triangle for cached normal data.
+
+## Per-stage Node/SIMD profiles
+
+Same twelve-triangle box, spacing, band 3 and padding 4 as session 2, with a 64-cubed
+warmup and three measured 256-cubed calls per fill mode. JS/WASM copies are included
+in the external contour/total times. Internal stage timers exclude those copies.
+Each entry is an independent median in milliseconds; medians need not sum exactly.
+
+| Mode | Version | Winding/setup | Distance band | Sweeping | Contour incl. copies | Total |
+|---|---|---:|---:|---:|---:|---:|
+| Band | Before | 63.376 | 1178.738 | 0.003 | 1381.564 | 2639.214 |
+| Band | After | 21.192 | 200.758 | 0.002 | 641.077 | 912.010 |
+| Filled | Before | 63.712 | 1153.211 | 9956.675 | 1666.327 | 13512.840 |
+| Filled | After | 23.162 | 226.306 | 941.593 | 723.108 | 1960.200 |
+
+After contour internal stages (band / filled): Hermite/QEF **478.091 / 545.251 ms**,
+connectivity **40.111 / 44.642 ms**, edge validation **75.569 / 79.109 ms**.
+The final box has **366,056 vertices, 366,054 quads, zero fallback cells**, versus
+732,110 vertices and 1,464,216 triangles in the original conservative extraction.
+
+Commands: `node scripts/kernels-build.ts --features profile`, then
+`node bench/sdfgrid.ts --runs=3`; the before run uses the instrumented starting
+package via `--package=out/session8/before-profile/pkg-simd`. Profiling only split
+the original sign/distance traversal into separately timed stages before optimization.
+`winding_sign` includes scanline/BVH/block setup and output allocation. Source hashes
+were verified unchanged across the final scalar and SIMD profile builds.
+
+Measurements are **not idle-machine results**. Other repository processes were
+present: the initial snapshot included a separate cloth `cpubench.ts` and
+`test/arrays.ts`; profile snapshots included outside-session `test/showcase.ts`
+and `test/remesh.ts`, and background ffmpeg work was observed. Our own builds and
+tests were stopped during timed calls. Before profile CPU busy samples were
+66.97-98.80%; final profile samples were 53.83-62.50%. The table establishes measured
+times under differing contention, not a controlled speedup or platform-wide guarantee.
+Raw logs/process snapshots are in ignored `out/session8/`.
+
+## Ordinary release-build timings
+
+After rebuilding without `profile`, the preserved starting SIMD package and final
+SIMD package were run consecutively, three calls per mode, with all our other work
+stopped. The process query before these runs found no other matching repository
+test/benchmark commands; the end query found no matching test/benchmark/Cargo/ffmpeg
+processes. This still was not idle: sampled machine CPU busy was 46.20-59.74% before
+and 49.90-57.49% after. The raw results include every sample, not just the fastest.
+
+| Mode | Version | Grid median | Contour median | Total median | Individual totals |
+|---|---|---:|---:|---:|---|
+| Band | Before | 944.141 ms | 1092.731 ms | 2108.487 ms | 1870.592, 2108.487, 2139.723 ms |
+| Band | After | 246.888 ms | 629.091 ms | **866.090 ms** | 951.931, 842.193, 866.090 ms |
+| Filled | Before | 8108.190 ms | 1143.973 ms | 9252.164 ms | 12509.829, 9252.164, 8913.286 ms |
+| Filled | After | 1214.014 ms | 689.775 ms | **1937.339 ms** | 2556.006, 1818.333, 1937.339 ms |
+
+Both requested speed targets are met in all three measured final calls: band below
+1500 ms and filled below 4000 ms. These are Node/SIMD observations on this machine,
+not an idle-machine or cross-platform performance claim. Commands:
+`node bench/sdfgrid.ts --package=out/session8/before/pkg-simd --runs=3` and
+`node bench/sdfgrid.ts --runs=3`. Final ordinary WASM sizes: scalar **696,943 bytes**,
+SIMD **691,591 bytes**, combined **1,388,534 bytes** (limit 2,500,000).
+
+## Quality, compatibility and remaining misses
+
+- Final Node sphere area error **0.212807%**, below 1%; native finer sphere **0.087079%**.
+- Shifted Node box maximum edge error **0.000000021 voxel**, line straightness
+  **less than 1e-9 voxel**, maximum corner error **0.000000026 voxel**. All twelve
+  edge strips and eight corners are checked. The ordinary box has one vertex per
+  active cell and no conservative fallback. Scaled implicit-box values (0.2x and
+  2x) have an additional native zero-set regression test.
+- Torus Euler characteristic **0**, genus **1**, maximum sampled vertex analytic SDF
+  residual **0.081733914 voxel** in Node (native fixture **0.052764840 voxel**).
+- Sixteen five-sphere unions in Rust and sixteen sphere/box unions in Node have
+  closed, consistently wound manifold edges and vertex links, deterministic replay,
+  and no detected proper nonadjacent triangle crossings. **The 0.1-voxel union
+  accuracy target is not met:** worst Node vertex residual **0.396347155 voxel**;
+  native five-sphere corpus **0.425128611 voxel**. The worst Node point is an added
+  conservative face connector in seed 13, near a sharp concave junction. These
+  residuals are analytic SDF evaluations at vertices, not a certified Hausdorff bound.
+- The optional adaptive octree is deferred, and automatic local guards are not an
+  exhaustive intersection audit. Coplanar/shared-vertex contacts and arbitrary
+  pathological grids remain outside the proven corpus. Scalar/SIMD byte parity
+  on this machine does not establish the full native/WASM/OS platform matrix.
+- Original-WASM compatibility audit: **28 grids**, **24 explicit conservative
+  contours**, **180 arrays** byte-identical; four matching expected rejections.
+  This includes shifted/rotated/open/reversed/seam-duplicated meshes and filled
+  grids. The original conservative Rust sphere digest is retained. Sweeping tests
+  compare 87 varied/scale-extreme cases to the original traversal byte-for-byte;
+  17,442 sparse/empty/dense block queries match complete BVH distance f64 bits.
+
+Only these geometry goldens changed via `npm run test:update`:
+`node.grid_to_mesh.json`, `node.voxel_remesh.json`, and `example.voxel_remesh.json`;
+the other **284** are unchanged. Inspect `examples/renders/voxel_remesh.png`: the
+gold box's long edges and top perimeter are now clean lines; remaining torus/junction
+faceting is visible. The blue marching-cubes comparison retains its original serration.
+
+## Final release gates
+
+All commands below exited **0**, on the final source and ordinary WASM packages:
+
+- `cargo test --manifest-path kernels/Cargo.toml`: **100 tests passed**.
+- `cargo test --manifest-path kernels/Cargo.toml --features simd`: **100 tests passed**.
+- `cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings`.
+- `cargo clippy --manifest-path kernels/Cargo.toml --features simd --all-targets -- -D warnings`.
+- `cargo fmt --manifest-path kernels/Cargo.toml --check`.
+- `npm run kernels:build`: both ordinary release packages, **1,388,534 bytes** combined.
+- `npm run typecheck`.
+- `npm run docs`; `npm run test:update`: **3 written, 284 unchanged, 0 failed**.
+- `npm test`: complete chained command, **287 goldens**, **220 node examples with no
+  warnings**, **288 SDF integration checks**, and **509 scalar/SIMD byte-exact result
+  comparisons across 16 kernels**, including 115 contour results and 34 matching
+  contour validation rejections. Existing skeleton/quad/erosion and other suites passed.
+- `npm run build`: **111 modules**, one asset, compiled CLI/library output.
+- `npm run pack:test`: installed tarball CLI/library/MCP/preview smoke test passed
+  (**21 s**), including an installed `sdf_grid` WASM graph cook.
+- `npm run showcase`: **32 renders**, **31 original PNG SHA-256 hashes unchanged**;
+  only `voxel_remesh.png` changed and was visually inspected.
+- `git diff --check`.
+
+Final ordinary WASM SHA-256:
+
+- Scalar: `3e1a27433fdb12a586cb5cde5775cc9672b11e15102b4cc37ede23ecf8450fb8`.
+- SIMD: `58201a09021c1f7c02d1ec793fe9c028d86ebf144d030ceeff7d55b0759a8624`.
+- Render: `20c2b34f64a90a1bb6841f8f1f254ca747693eff38a30aef6d48b85c6d015d5b`.
+
+An intermediate scalar/SIMD mismatch was caused by changing contour source between
+the two builds; rebuilding both from a frozen, hash-checked source resolved it. The
+final parity gate has no tolerated numeric differences. No push or merge was performed.
