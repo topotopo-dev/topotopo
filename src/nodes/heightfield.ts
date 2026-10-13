@@ -19,13 +19,16 @@ import { NodeError } from '../graph/types.ts';
 import type { CookContext, ParamDef } from '../graph/types.ts';
 import { evalRamp } from '../graph/params.ts';
 import { sampleEliminate } from './copy.ts';
-import { P } from './util.ts';
+import { P, simBudget } from './util.ts';
+import { wasmCallUnderBudget } from './wasmcall.ts';
 import { getLoadedKernels, loadHostKernels } from '../wasm/kernels.ts';
-import type { Kernels } from '../wasm/kernels.ts';
+import type { ErosionResult, Kernels } from '../wasm/kernels.ts';
 
 // ---------------------------------------------------------------- shared
 
 const NO_FIELD = 'create one with heightfield, heightfield_from_mesh or heightfield_from_image';
+/** Samples × iterations from which a kernel erosion runs on a pool worker, under the time limit (about a second of work). */
+const WORKER_SAMPLE_ITERATIONS = 20_000_000;
 const clamp01 = (x: number) => (x > 0 ? (x < 1 ? x : 1) : 0);
 
 /** Clone the input and run fn on each heightfield (each has its own layer map); fn may return a replacement. */
@@ -37,6 +40,21 @@ function eachField(ctx: CookContext, fn: (hf: Heightfield) => Heightfield | void
     if (!isHeightfield(v)) continue;
     const hf = asHeightfield(v);
     g.volumes[k] = fn(hf) ?? hf;
+    n++;
+  }
+  if (!n) throw new NodeError(`${ctx.type}: input has no heightfield`, NO_FIELD);
+  return g;
+}
+
+/** eachField for an async fn (one field at a time). */
+async function eachFieldAsync(ctx: CookContext, fn: (hf: Heightfield) => Promise<Heightfield | void>): Promise<Geometry> {
+  const g = ctx.input(0).clone();
+  let n = 0;
+  for (let k = 0; k < g.volumes.length; k++) {
+    const v = g.volumes[k];
+    if (!isHeightfield(v)) continue;
+    const hf = asHeightfield(v);
+    g.volumes[k] = (await fn(hf)) ?? hf;
     n++;
   }
   if (!n) throw new NodeError(`${ctx.type}: input has no heightfield`, NO_FIELD);
@@ -107,7 +125,7 @@ defineNode({
   params: {
     size: { type: 'vec2', default: [20, 20], desc: 'extent in X and Z (metres), rounded up to whole cells' },
     resolution: { type: 'float', default: 0.1, min: 0.001, desc: 'cell size: distance between samples (metres)', aliases: ['grid_spacing', 'cell_size', 'spacing', 'voxel_size', 'divsize'] },
-    samples: { type: 'ivec2', default: [0, 0], min: 0, desc: 'sample counts [nx, nz]; when nx > 1 they override resolution (cell = size.x / (nx - 1), depth = (nz - 1) × cell), e.g. [505, 505] for Unreal' },
+    samples: { type: 'ivec2', default: [0, 0], min: 0, max: MAX_SAMPLES, desc: 'sample counts [nx, nz]; when nx > 1 they override resolution (cell = size.x / (nx - 1), depth = (nz - 1) × cell), e.g. [505, 505] for Unreal' },
     center: centerParam(),
     height: { type: 'float', default: 0, desc: 'initial height (world Y)', aliases: ['initial_height', 'elevation'] },
     name: { type: 'string', default: 'heightfield', desc: 'heightfield name (shown by inspect)' },
@@ -1000,7 +1018,10 @@ defineNode({
     if (p.method !== 'droplet' && !kernels)
       throw new NodeError(`${ctx.type}: method ${p.method} requires the kernel backend`, 'Set backend to kernel to load WASM; backend js supports only droplet, and auto requires kernels to be loaded already.');
     let droplets = 0;
-    const out = eachField(ctx, (hf) => {
+    // the time limit of long-running nodes: checked every iteration of the JS path; a big kernel run goes to a pool
+    // worker that the limit can stop
+    const budget = simBudget(ctx, 'fewer iterations, a lower rain_density or max_lifetime, or a coarser field (heightfield_resample); or raise the limit');
+    const out = await eachFieldAsync(ctx, async (hf) => {
       const H = layerOf(hf, 'height', ctx.type);
       const hard = maskOf(hf, p.hardness_layer, ctx.type), frz = maskOf(hf, p.freeze_layer, ctx.type);
       if (p.method === 'droplet') {
@@ -1014,15 +1035,20 @@ defineNode({
         talusAngle: p.thermal_talus_angle, thermalRate: p.thermal_rate, boundary: p.boundary,
       };
       if (kernels) {
-        const result = p.method === 'droplet'
-          ? kernels.erode_droplet(H, hard, hf.width, hf.height, hf.cellSize, { ...params, talusAngle: p.thermal_talus_angle * Math.PI / 180, iterations: p.iterations }, p.seed, frz)
-          : kernels.erode_pipe(H, hard, hf.width, hf.height, hf.cellSize, {
-            iterations: p.iterations, rainAmount: p.rain_amount, evaporation: p.evaporation,
-            sedimentCapacity: p.sediment_capacity, erosionRate: p.erosion_rate, depositionRate: p.deposition_rate,
-            gravity: p.gravity, talusAngle: p.thermal_talus_angle * Math.PI / 180, thermalRate: p.thermal_rate,
-            timeStep: p.time_step, boundary: p.boundary, streamPowerK: p.method === 'stream_power' ? p.stream_power_k : 0,
-            streamPowerM: p.stream_power_m, streamPowerN: p.stream_power_n,
-          }, p.seed, frz, maskOf(hf, p.rain_layer, ctx.type));
+        const grid = { w: hf.width, h: hf.height, cell: hf.cellSize, seed: p.seed };
+        const result: ErosionResult = await wasmCallUnderBudget(ctx, kernels, p.method === 'droplet'
+          ? { fn: 'erode_droplet', ...grid, params: { ...params, talusAngle: p.thermal_talus_angle * Math.PI / 180, iterations: p.iterations } }
+          : {
+            fn: 'erode_pipe', ...grid, params: {
+              iterations: p.iterations, rainAmount: p.rain_amount, evaporation: p.evaporation,
+              sedimentCapacity: p.sediment_capacity, erosionRate: p.erosion_rate, depositionRate: p.deposition_rate,
+              gravity: p.gravity, talusAngle: p.thermal_talus_angle * Math.PI / 180, thermalRate: p.thermal_rate,
+              timeStep: p.time_step, boundary: p.boundary, streamPowerK: p.method === 'stream_power' ? p.stream_power_k : 0,
+              streamPowerM: p.stream_power_m, streamPowerN: p.stream_power_n,
+            },
+          },
+        { height: H, hardness: hard, freeze: frz, rain: p.method === 'droplet' ? null : maskOf(hf, p.rain_layer, ctx.type) },
+        hf.count * Math.max(1, p.iterations), WORKER_SAMPLE_ITERATIONS, budget);
         hf.layers.set('height', result.height);
         for (const name of ['sediment', 'debris', 'wear'] as const) {
           const prev = hf.layer(name), delta = result[name], out = new Float32Array(hf.count);
@@ -1036,7 +1062,7 @@ defineNode({
       }
       const field = makeErosionField(hf.width, hf.height, hf.cellSize, H, hard, frz);
       const r = rng(p.seed);
-      for (let it = 0; it < p.iterations; it++) erodeStep(field, params, r);
+      for (let it = 0; it < p.iterations; it++) { budget.check(); erodeStep(field, params, r); }
       droplets += Math.round(p.rain_density * hf.count) * p.iterations;
       hf.layers.set('height', Float32Array.from(field.h));
       for (const [name, delta] of [['sediment', field.sediment], ['debris', field.debris]] as const) {
@@ -1283,7 +1309,7 @@ defineNode({
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
     density: { type: 'float', default: 0.5, min: 0, desc: 'points per square metre at mask 1', aliases: ['density_per_m2'] },
-    count: { type: 'int', default: 0, min: 0, desc: 'exact number of points; > 0 overrides density', aliases: ['npts', 'points'] },
+    count: { type: 'int', default: 0, min: 0, max: 2000000, desc: 'exact number of points; > 0 overrides density', aliases: ['npts', 'points'] },
     mask_layer: { type: 'string', default: 'mask', desc: 'density layer (0..1); "" = uniform everywhere', aliases: ['mask', 'density_layer'] },
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing' },
     seed: P.seed(),
@@ -1369,7 +1395,7 @@ defineNode({
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
     resolution: { type: 'float', default: 0, min: 0, desc: 'new cell size (metres); 0 = use samples or factor', aliases: ['cell_size', 'grid_spacing'] },
-    samples: { type: 'ivec2', default: [0, 0], min: 0, desc: 'new sample counts [nx, nz]; nx > 1 overrides resolution (nz 0 = keep the extent)' },
+    samples: { type: 'ivec2', default: [0, 0], min: 0, max: MAX_SAMPLES, desc: 'new sample counts [nx, nz]; nx > 1 overrides resolution (nz 0 = keep the extent)' },
     factor: { type: 'float', default: 1, min: 0.01, max: 16, desc: 'multiply the samples per side (when resolution and samples are 0)', aliases: ['scale'] },
   },
   outputs: 'all layers at the new resolution',

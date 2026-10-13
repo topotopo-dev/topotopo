@@ -137,7 +137,7 @@ defineNode({
     origin: { type: 'vec3', default: [0, 0, 0], desc: 'start point', aliases: ['start', 'center'] },
     direction: { type: 'vec3', default: [0, 1, 0], desc: 'direction (normalised)', aliases: ['dir'] },
     length: { type: 'float', default: 1, desc: 'length', aliases: ['dist'] },
-    points: { type: 'int', default: 2, min: 2, desc: 'number of points', aliases: ['count', 'npts'] },
+    points: { type: 'int', default: 2, min: 2, max: 1000000, desc: 'number of points', aliases: ['count', 'npts'] },
   },
   example: { type: 'line', params: { direction: [1, 0, 0], length: 5, points: 11 } },
   cook: ({ p }) => {
@@ -156,7 +156,7 @@ defineNode({
   params: {
     radius: { type: 'float', default: 1, desc: 'radius', aliases: ['rad', 'r'] },
     scale: { type: 'vec2', default: [1, 1], desc: 'ellipse scale along the plane axes' },
-    segments: { type: 'int', default: 32, min: 3, desc: 'number of segments', aliases: ['divisions', 'divs', 'points'] },
+    segments: { type: 'int', default: 32, min: 3, max: 1000000, desc: 'number of segments', aliases: ['divisions', 'divs', 'points'] },
     plane: P.plane('xz'),
     center: P.center(),
     arc: { type: 'vec2', default: [0, 360], desc: 'begin/end angle in degrees (anything < 360 makes an open arc)' },
@@ -189,7 +189,7 @@ defineNode({
     points: { type: 'json', default: [[0, 0, 0], [1, 0.5, 0], [2, 0, 0]], desc: 'list of [x,y,z] (2-number entries → [x, 0, z] on the ground)', aliases: ['positions', 'pts'] },
     closed: { type: 'bool', default: false, desc: 'close the curve (makes a polygon)' },
     smooth: { type: 'bool', default: false, desc: 'Catmull-Rom interpolate through the points' },
-    subdivisions: { type: 'int', default: 8, min: 1, desc: 'smooth: samples per segment' },
+    subdivisions: { type: 'int', default: 8, min: 1, max: 10000, desc: 'smooth: samples per segment' },
   },
   example: { type: 'curve', params: { points: [[0, 0, 0], [2, 0, 1], [4, 0, -1], [6, 0, 0]], smooth: true, subdivisions: 12 } },
   cook: ({ p }) => {
@@ -211,7 +211,7 @@ defineNode({
     radius_end: { type: 'float', default: -1, desc: 'end radius (-1 = same as radius)' },
     height: { type: 'float', default: 2, desc: 'total rise' },
     turns: { type: 'float', default: 3, desc: 'number of turns' },
-    points_per_turn: { type: 'int', default: 32, min: 3, desc: 'resolution' },
+    points_per_turn: { type: 'int', default: 32, min: 3, max: 100000, desc: 'resolution' },
     clockwise: { type: 'bool', default: false, desc: 'turn direction when seen from above' },
     center: P.center(),
   },
@@ -239,9 +239,9 @@ defineNode({
     size: { type: 'vec2', default: [1, 1], desc: 'rect/rounded_rect/cross/L/U: width and depth' },
     radius: { type: 'float', default: 0.5, desc: 'ngon/star/gear: outer radius' },
     inner_radius: { type: 'float', default: 0.25, desc: 'star/gear: inner radius' },
-    sides: { type: 'int', default: 6, min: 3, desc: 'ngon sides / star points / gear teeth', aliases: ['points', 'teeth'] },
+    sides: { type: 'int', default: 6, min: 3, max: 100000, desc: 'ngon sides / star points / gear teeth', aliases: ['points', 'teeth'] },
     corner_radius: { type: 'float', default: 0.1, min: 0, desc: 'rounded_rect corner radius' },
-    corner_segments: { type: 'int', default: 6, min: 1, desc: 'rounded_rect segments per corner' },
+    corner_segments: { type: 'int', default: 6, min: 1, max: 10000, desc: 'rounded_rect segments per corner' },
     thickness: { type: 'float', default: 0.25, desc: 'cross/L/U arm thickness' },
     rotate: { type: 'float', default: 0, desc: 'rotation in degrees within the plane' },
     plane: P.plane('xz'),
@@ -300,7 +300,7 @@ defineNode({
   params: {
     mode: { type: 'enum', options: ['length', 'count'], default: 'length', desc: 'segment length or a fixed segment count per curve' },
     length: { type: 'float', default: 0.1, min: 1e-6, desc: 'target segment length', aliases: ['seglen', 'segment_length'] },
-    count: { type: 'int', default: 20, min: 1, desc: 'segments per curve (mode=count)', aliases: ['segments'] },
+    count: { type: 'int', default: 20, min: 1, max: 1000000, desc: 'segments per curve (mode=count)', aliases: ['segments'] },
     smooth: { type: 'bool', default: false, desc: 'Catmull-Rom smooth before resampling (polylines)' },
     group: P.group('prim'),
     tangent: { type: 'bool', default: false, desc: 'also write point tangentu (unit tangent)' },
@@ -546,7 +546,7 @@ defineNode({
   params: {
     shape: { type: 'enum', options: ['circle', 'square', 'ribbon', 'half_circle'], default: 'circle', desc: 'built-in profile when no profile input' },
     radius: { type: 'float', default: 0.1, desc: 'built-in profile radius / half width', aliases: ['width', 'rad'] },
-    divisions: { type: 'int', default: 12, min: 2, desc: 'built-in profile segments', aliases: ['sides', 'cols'] },
+    divisions: { type: 'int', default: 12, min: 2, max: 1024, desc: 'built-in profile segments', aliases: ['sides', 'cols'] },
     caps: { type: 'bool', default: true, desc: 'cap open ends (closed profiles only)' },
     twist: { type: 'float', default: 0, desc: 'total twist in degrees along each curve' },
     scale_ramp: { type: 'ramp', default: [[0, 1], [1, 1]], desc: 'profile scale along the curve (u 0..1); point pscale also multiplies' },
@@ -587,7 +587,7 @@ defineNode({
   splines: 'keep',
   params: {
     radius: { type: 'float', default: 0.05, desc: 'tube radius (used when no width attribute)', aliases: ['rad', 'wire_radius'] },
-    divisions: { type: 'int', default: 8, min: 3, desc: 'sides around the tube', aliases: ['sides', 'cols'] },
+    divisions: { type: 'int', default: 8, min: 3, max: 1024, desc: 'sides around the tube', aliases: ['sides', 'cols'] },
     caps: { type: 'bool', default: true, desc: 'cap the tube ends' },
     use_width: { type: 'bool', default: true, desc: 'use point "width" attribute (diameter) when present' },
   },
@@ -618,7 +618,7 @@ defineNode({
   aliases: ['lathe'],
   inputs: [{ name: 'profile', desc: 'curves in the XY plane (x = distance from the axis)' }],
   params: {
-    segments: { type: 'int', default: 32, min: 3, desc: 'segments around', aliases: ['divisions', 'cols'] },
+    segments: { type: 'int', default: 32, min: 3, max: 4096, desc: 'segments around', aliases: ['divisions', 'cols'] },
     angle: { type: 'vec2', default: [0, 360], desc: 'start/end angle in degrees' },
     caps: { type: 'bool', default: false, desc: 'cap partial revolves (closed profiles)' },
     flip: { type: 'bool', default: false, desc: 'reverse face orientation' },
@@ -702,7 +702,7 @@ defineNode({
   inputs: [{ name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' }],
   params: {
     height: { type: 'float', default: 1, desc: 'extrusion distance along the plane normal', aliases: ['depth', 'distance', 'h'] },
-    divisions: { type: 'int', default: 1, min: 1, desc: 'segments along the extrusion' },
+    divisions: { type: 'int', default: 1, min: 1, max: 10000, desc: 'segments along the extrusion' },
     twist: { type: 'float', default: 0, desc: 'twist in degrees (about each shape centroid)' },
     scale_top: { type: 'vec2', default: [1, 1], desc: 'scale of the top cap (taper); [0,0] = pyramid' },
     center: { type: 'bool', default: false, desc: 'extrude symmetrically about the shape plane' },
@@ -781,7 +781,7 @@ defineNode({
   params: {
     distance: { type: 'float', default: 0.1, desc: 'offset distance (negative shrinks)', aliases: ['offset', 'dist'] },
     join: { type: 'enum', options: ['round', 'miter', 'square'], default: 'round', desc: 'corner style' },
-    segments: { type: 'int', default: 16, min: 3, desc: 'segments per full circle for round joins' },
+    segments: { type: 'int', default: 16, min: 3, max: 10000, desc: 'segments per full circle for round joins' },
     output: { type: 'enum', options: ['outlines', 'faces'], default: 'outlines', desc: 'outlines = closed polygons per contour; faces = filled with holes cut' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'shape plane' },
   },

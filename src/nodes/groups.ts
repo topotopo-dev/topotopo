@@ -139,7 +139,7 @@ defineNode({
   params: {
     group: { type: 'string', default: '', desc: 'group to expand (name); a group pattern also works when new_name is set', aliases: ['name', 'base_group'] },
     class: { type: 'enum', options: ['prim', 'point', 'edge'], default: 'prim', desc: 'element class of the group' },
-    steps: { type: 'int', default: 1, desc: 'steps to grow (negative = shrink)', aliases: ['iterations', 'amount', 'numsteps'] },
+    steps: { type: 'int', default: 1, min: -100000, max: 100000, desc: 'steps to grow (negative = shrink)', aliases: ['iterations', 'amount', 'numsteps'] },
     connectivity: { type: 'enum', options: ['edge', 'point'], default: 'edge', desc: 'prim class: neighbours share an edge or only a point' },
     new_name: { type: 'string', default: '', desc: 'output group ("" = overwrite the input group)', aliases: ['output', 'newname'] },
   },
@@ -168,15 +168,18 @@ defineNode({
     }
     const { start, items } = connectors(g, cls, p.connectivity, list);
     const nc = start.length - 1;
-    const grow = p.steps > 0;
+    const grow = p.steps > 0, to = grow ? 1 : 0;
+    // a step that changes nothing ends the expansion (the rest would change nothing either)
     for (let s = 0; s < Math.abs(p.steps); s++) {
       const next = sel.slice();
+      let changed = false;
       for (let c = 0; c < nc; c++) {
         let touch = false;
         for (let k = start[c]; k < start[c + 1]; k++) if (grow ? sel[items[k]] : !sel[items[k]]) { touch = true; break; }
-        if (touch) for (let k = start[c]; k < start[c + 1]; k++) next[items[k]] = grow ? 1 : 0;
+        if (touch) for (let k = start[c]; k < start[c + 1]; k++) if (next[items[k]] !== to) { next[items[k]] = to; changed = true; }
       }
       sel = next;
+      if (!changed) break;
     }
     if (cls === 'edge') g.addEdgeGroup(out, maskToEdgeSet(list, sel));
     else g.addGroup(cls, out, sel);

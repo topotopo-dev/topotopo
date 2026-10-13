@@ -95,7 +95,10 @@ SOLVER (Houdini SOP Solver): feedback over frames.
 SOLVER vs FOREACH: foreach feedback:true is count-based (N iterations in one cook, no time, cached as a whole);
   the solver's result depends on the frame you cook at and is advanced frame by frame.
 PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_frame) × substeps steps, every frame's state is
-  cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).`,
+  cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).
+LIMITS: one cook of rbd_settle, rbd_stack, drape, inflate, particles, heightfield_erode or remesh_quad stops with an error
+  naming the node after TOPOTOPO_SIM_TIMEOUT_MS (default 10 min; lower steps/duration/iterations, not the limit). Params that
+  count something have a max (help shows it); larger values are clamped.`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}

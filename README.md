@@ -131,7 +131,7 @@ From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/t
 "--workspace", "C:/path/to/topotopo/workspace"]` (`node src/cli.ts mcp …` is the same server).
 
 Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_WORKSPACE`,
-`TOPOTOPO_SCRIPT_TIMEOUT_MS` and `TOPOTOPO_WORKERS`. The server exits when the client closes its stdin.
+`TOPOTOPO_SCRIPT_TIMEOUT_MS`, `TOPOTOPO_SIM_TIMEOUT_MS` and `TOPOTOPO_WORKERS`. The server exits when the client closes its stdin.
 
 ## MCP tools
 
@@ -192,9 +192,12 @@ taken from the graph JSON. On Node, expressions and wrangles run sandboxed in se
 documented helpers (no `process`, `require`, `import`, `fetch` or `globalThis`), and a runaway loop fails its node
 instead of hanging the process. The same timeout covers `script`, `heightfield_layer` and the parametric nodes, an
 `sdf_expr` field wherever it is sampled (`sdf_to_mesh` and `sdf_grid` run their whole sampling under it), and reading
-whatever such code throws. That contains mistakes, not attackers: sandboxed code can still allocate memory and
-burn CPU until the timeout, and a `vm` realm is not a hard security boundary. Do not cook graphs from untrusted sources
-in a privileged process.
+whatever such code throws. Params that count something have upper bounds (larger values are clamped), and the
+long-running nodes (`rbd_settle`, `rbd_stack`, `drape`, `inflate`, `particles`, `heightfield_erode`, `remesh_quad`) stop
+with an error after `TOPOTOPO_SIM_TIMEOUT_MS` (default 10 minutes; the WASM calls of the last two only when the worker
+pool is on). That contains mistakes, not attackers: sandboxed code can still allocate memory and burn CPU until the
+timeout, combinations of large params and inputs can still exhaust memory, and a `vm` realm is not a hard security
+boundary. Do not cook graphs from untrusted sources in a privileged process.
 
 ## Node types
 
@@ -357,6 +360,7 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
 | particles | `npm run test:particles` | the particles node: emission counts and lifetimes, attribute and group carry, determinism, pool on/off bit-identical (noise, fields, mesh and floor collisions, trails), particles never below the floor or a mesh and never inside a closed one, spheres kept pscale off a mesh, trail lengths/curveu/ages, max_particles, max_births (step cap, batched runs = one run), frames = one long run (resume, jump back, substeps, moving emitter), point/heightfield/SDF fields, wind, attraction, analytic Perlin gradients and divergence-free curl noise, 100k particles × 200 steps |
 | rbd | `npm run test:rbd` | rbd_settle / rbd_stack: rocks rest on the ground plane, a terrain mesh and a heightfield (exact hulls checked independently: no vertex below the surface or inside another piece beyond 5 mm / 1 cm; reduced hulls within 5 % of a radius), every piece settled and touching something, bit-identical across cooks, engines and pool on/off, input order independent (also coincident pieces of different shapes), packed = unpacked, static `active` = 0 pieces, initial `v`, fallen pieces and `delete_fallen`, the overlap warning, `ground_plane` auto, `max_pieces`, a 12-crate pile that keeps every crate, animate (frame 1, resumed frames, last frame = settled), every collision shape, and the 1,000-piece timing |
+| limits | `npm run test:limits` | resource limits: every int param that counts something has a max (absurd counts such as `resample {count: 1e15}` are clamped instead of running the process out of heap; `point_grid` refuses huge products), and the long-running nodes (rbd_settle, rbd_stack, drape, inflate, particles, heightfield_erode, remesh_quad) stop with an error naming them at `engine.simTimeoutMs`, pool off and on (the WASM calls of remesh_quad and the erosion kernels on a pool worker, same bits as on the cooking thread) |
 | cloth | `npm run test:cloth` | drape and inflate: pinned cloth hangs without NaN or stretch (with and without tethers), draped cloth rests outside a box and above the floor within the thickness with its rest lengths kept, sharp box corners stay under the cloth, open colliders from both sides, determinism and pool on/off bit-identical, max_points, pins input and pin_snap, the pin attribute, wind, self collision stacking two layers, inflate volume monotonic in pressure, stencil/colouring/chain helpers |
 | pool | `npm run test:pool` | worker pool: lazy start, close, transfer round trips, every ported node bit-identical with the pool on and off, concurrent branches and shared in-flight cooks, the lazy switch, kernel errors, crashes and timeouts, the size threshold, the CLI and MCP server exiting; `test:pool` also runs the golden layer with every kernel forced onto the pool. `npm test` passes with `TOPOTOPO_WORKERS=0` and with the default |
 

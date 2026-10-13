@@ -9,6 +9,7 @@ import { RBD_PIECE_MODES, RBD_SHAPES, RbdSim, applyRbd, collectRbdScene, staticM
 import type { RbdScene, RbdSimOptions, RbdStackOptions } from '../core/rbd.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { loadRapier } from '../wasm/rapier.ts';
+import { simBudget } from './util.ts';
 
 const COMMON: Record<string, ParamDef> = {
   pieces: { type: 'enum', options: [...RBD_PIECE_MODES], default: 'auto', desc: 'how polygons form pieces (packed prims are always one piece each): auto = prim attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; connectivity; name; attrib (piece_attrib)' },
@@ -105,6 +106,10 @@ async function cookRbd(ctx: CookContext, stack: boolean): Promise<Geometry> {
   } catch (e: any) {
     throw new NodeError(`could not load the Rapier physics engine: ${e?.message ?? e}`, 'reinstall the package (@dimforge/rapier3d-compat is a dependency)');
   }
+  // the wall-clock limit of long-running nodes, checked every few solver steps
+  const budget = simBudget(ctx, stack
+    ? 'fewer pieces, a shorter interval or duration, fewer steps_per_second; or raise the limit'
+    : 'a shorter duration, fewer steps_per_second or pieces; or raise the limit');
   let res;
   if (p.animate) {
     const elapsed = Math.max(0, (ctx.frame - p.start_frame) / ctx.fps);
@@ -115,12 +120,12 @@ async function cookRbd(ctx: CookContext, stack: boolean): Promise<Geometry> {
     if (cached && cached.sim.step <= target) ({ sim, scene } = cached);
     else sim = new RbdSim(R, scene, statics, opts);
     keepWorld(key, sim, scene);
-    sim.advance(target);
+    sim.advance(target, budget.check);
     res = sim.read();
   } else {
     const sim = new RbdSim(R, scene, statics, opts);
     try {
-      sim.advance(maxSteps);
+      sim.advance(maxSteps, budget.check);
       res = sim.read();
     } finally {
       sim.free();

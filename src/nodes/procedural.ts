@@ -55,7 +55,7 @@ defineNode({
     tropism: { type: 'vec3', default: [0, -1, 0], desc: 'bending direction (e.g. gravity)' },
     tropism_strength: { type: 'float', default: 0, desc: 'bending amount per step (0 = off; ~0.05-0.3)' },
     seed: P.seed(),
-    max_length: { type: 'int', default: 400000, min: 1, desc: 'safety cap on the expanded string length' },
+    max_length: { type: 'int', default: 400000, min: 1, max: 50000000, desc: 'safety cap on the expanded string length' },
   },
   outputs: 'polylines with point width/depth, prim depth; leaf points in groups leaves, J, K, M with N, up, orient, pscale',
   example: { type: 'lsystem', params: { generations: 4, angle: 25, tropism_strength: 0.1, seed: 2 } },
@@ -315,7 +315,7 @@ defineNode({
   aliases: ['voronoi_cells', 'voronoi_2d'],
   inputs: [{ name: 'sites', desc: 'points (optional: random sites are generated)', optional: true }],
   params: {
-    count: { type: 'int', default: 30, min: 1, desc: 'random sites when no input' },
+    count: { type: 'int', default: 30, min: 1, max: 100000, desc: 'random sites when no input' },
     size: { type: 'vec2', default: [10, 10], desc: 'clip rectangle size (centered at center); [0,0] = sites bbox + 10%' },
     center: P.center(),
     plane: P.plane('xz'),

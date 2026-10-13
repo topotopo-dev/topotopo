@@ -339,6 +339,12 @@ export class Engine {
   manifold: any = null;
   maxDepth = 24;
   scriptTimeoutMs = 30000;
+  /**
+   * Wall-clock limit of one cook of a long-running node (rbd_settle, rbd_stack, drape, inflate, particles,
+   * heightfield_erode, remesh_quad): past it the node fails with an error that names it (src/nodes/util.ts
+   * simBudget). Generous by default; the MCP server reads TOPOTOPO_SIM_TIMEOUT_MS.
+   */
+  simTimeoutMs = 600000;
   /** pull the inputs of a node concurrently (default: when the host has a worker pool) */
   concurrent: boolean;
   /** CookContext.parallelMap usage: jobs run on the pool / on the cooking thread, chunks dispatched */
