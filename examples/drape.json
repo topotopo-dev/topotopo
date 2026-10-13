@@ -1,0 +1,31 @@
+{
+  "description": "Cloth simulation (XPBD, Vellum-lite): a tarp draped over a stack of shelf crates, a banner pinned between two poles and blown by the wind, and a flat box inflated into a cushion that settles on the ground.",
+  "meta": { "render": { "views": ["persp", "front", "right", "top"], "azimuth": 32, "elevation": 22, "wireframe": "none" } },
+  "nodes": {
+    "crate_a": { "type": "crate", "params": { "width": 1.0, "height": 0.8, "depth": 0.8, "seed": 1 } },
+    "crate_a_at": { "type": "transform", "in": ["crate_a"], "params": { "translate": [-0.5, 0, 0.05], "rotate": [0, 4, 0] } },
+    "crate_b": { "type": "crate", "params": { "width": 0.9, "height": 0.7, "depth": 0.8, "seed": 2 } },
+    "crate_b_at": { "type": "transform", "in": ["crate_b"], "params": { "translate": [0.55, 0, -0.1], "rotate": [0, -8, 0] } },
+    "crate_c": { "type": "crate", "params": { "width": 0.8, "height": 0.6, "depth": 0.7, "seed": 3 } },
+    "crate_c_at": { "type": "transform", "in": ["crate_c"], "params": { "translate": [-0.3, 0.8, 0.05], "rotate": [0, 15, 0] } },
+    "crates": { "type": "merge", "in": ["crate_a_at", "crate_b_at", "crate_c_at"] },
+    "tarp": { "type": "grid", "params": { "size": [3, 3], "divisions": [60, 60], "center": [-0.1, 1.9, 0] } },
+    "tarp_draped": { "type": "drape", "in": ["tarp", "crates"], "params": { "steps": 120, "thickness": 0.03, "bend_stiffness": 0.003, "seed": 1 } },
+    "tarp_col": { "type": "color", "in": ["tarp_draped"], "params": { "color": "#3f6e8c" } },
+
+    "pole_l": { "type": "box", "params": { "size": [0.06, 2.2, 0.06], "center": [1.7, 1.1, -1.0] } },
+    "pole_r": { "type": "box", "params": { "size": [0.06, 2.2, 0.06], "center": [3.1, 1.1, -1.0] } },
+    "poles": { "type": "merge", "in": ["pole_l", "pole_r"] },
+    "poles_col": { "type": "color", "in": ["poles"], "params": { "color": "#6b5a48" } },
+    "banner": { "type": "grid", "params": { "size": [1.34, 0.8], "divisions": [34, 20], "plane": "xy", "center": [2.4, 1.7, -1.0] } },
+    "banner_blown": { "type": "drape", "in": ["banner", "poles"], "params": { "steps": 96, "pin_group": "@P.y>2.09", "wind": [0.2, 0, 2.2], "bend_stiffness": 0.0005, "thickness": 0.02 } },
+    "banner_col": { "type": "color", "in": ["banner_blown"], "params": { "color": "#b5402f" } },
+
+    "bag": { "type": "box", "params": { "size": [0.8, 0.2, 0.8], "divisions": [16, 4, 16], "center": [-2.1, 0.15, 0.9] } },
+    "cushion": { "type": "inflate", "in": ["bag"], "params": { "pressure": 1.6, "gravity": [0, -9.81, 0], "floor": true, "steps": 72 } },
+    "cushion_col": { "type": "color", "in": ["cushion"], "params": { "color": "#d9a441" } },
+
+    "out": { "type": "merge", "in": ["crates", "tarp_col", "poles_col", "banner_col", "cushion_col"] }
+  },
+  "output": "out"
+}

@@ -19,6 +19,7 @@ import type { CurvatureArgs, ProjectArgs } from './bake.ts';
 import { candidatesRange, conflictsRange, elimListsRange, elimNeighboursRange, elimPairsRange, kdBuildRange, relaxRange } from './scatter.ts';
 import type { CandidateArgs, ConflictArgs, RelaxArgs } from './scatter.ts';
 import { TriSurface } from './pcg.ts';
+import { colliderFromArrays, collideRange } from './xpbd.ts';
 import { particlesRange } from './particles.ts';
 import type { StepArgs } from './particles.ts';
 
@@ -191,6 +192,17 @@ const scatterRelax: Kernel = {
   },
 };
 
+// ---------------------------------------------------------------- cloth (src/core/xpbd.ts)
+
+/** drape / inflate: each point's contact plane against a collider shared as arrays (colliderArrays), once per step. */
+const clothCollide: Kernel = {
+  minElements: 4096,
+  run(_a, A, start, end, ctx) {
+    const c = ctx.memo('collider:' + ctx.sharedKey, () => colliderFromArrays(A));
+    collideRange(c, A.X, A.R, A.CP, A.CN, A.CF, A.CT, A.QD, start, end);
+  },
+};
+
 // ---------------------------------------------------------------- particles (src/core/particles.ts)
 
 /**
@@ -266,6 +278,7 @@ export const KERNELS: Record<string, Kernel> = {
   scatter_conflicts: scatterConflicts,
   scatter_relax: scatterRelax,
   particles: particlesK,
+  cloth_collide: clothCollide,
   'selftest.scale': selftestScale,
   'selftest.square': selftestSquare,
   'selftest.throw': selftestThrow,
