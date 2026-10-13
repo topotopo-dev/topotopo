@@ -208,6 +208,39 @@ const CASES: Case[] = [
     }),
   },
   {
+    name: 'tex_noise_2048',
+    what: (q) => `tex_noise ${q ? 512 : 2048}² (perlin fbm, 5 octaves, tileable)`,
+    elements: (q) => (q ? 512 : 2048) ** 2, unit: 'pixels',
+    target: 1000, targetSource: 'P3-T (2048² noise under 1 s with the pool)',
+    graph: (q) => ({ nodes: { target: { type: 'tex_noise', params: { resolution: q ? 512 : 2048 } } } }),
+  },
+  {
+    name: 'bake_curvature_50k_2048',
+    what: (q) => `bake_curvature ${q ? 512 : 2048}² of a noisy ${k(q ? 2 * 80 * 80 : 2 * 160 * 160)}-triangle grid (uv covers 0..1)`,
+    elements: (q) => (q ? 512 : 2048) ** 2, unit: 'texels',
+    target: 5000, targetSource: 'P3-T (bakes of a 50k-triangle mesh at 2048² under 5 s)',
+    graph: (q) => ({
+      nodes: {
+        g: { type: 'grid', params: { size: [4, 4], divisions: q ? [80, 80] : [160, 160] } },
+        n: { type: 'noise_displace', in: ['g'], params: { amplitude: 0.3, frequency: 1.2 } },
+        target: { type: 'bake_curvature', in: ['n'], params: { resolution: q ? 512 : 2048 } },
+      },
+    }),
+  },
+  {
+    name: 'bake_ao_50k_2048',
+    what: (q) => `bake_ao ${q ? 512 : 2048}² (8 rays per texel) of a noisy ${k(q ? 2 * 80 * 80 : 2 * 160 * 160)}-triangle grid (uv covers 0..1)`,
+    elements: (q) => (q ? 512 : 2048) ** 2 * 8, unit: 'rays',
+    target: 5000, targetSource: 'P3-T (bakes of a 50k-triangle mesh at 2048² under 5 s)',
+    graph: (q) => ({
+      nodes: {
+        g: { type: 'grid', params: { size: [4, 4], divisions: q ? [80, 80] : [160, 160] } },
+        n: { type: 'noise_displace', in: ['g'], params: { amplitude: 0.3, frequency: 1.2 } },
+        target: { type: 'bake_ao', in: ['n'], params: { resolution: q ? 512 : 2048, samples: 8 } },
+      },
+    }),
+  },
+  {
     name: 'copy_to_points_1m_packed',
     what: (q) => `packed copies of a 100-triangle mesh on ${k(q ? 1e5 : 1e6)} points (orient + pscale)`,
     elements: (q) => (q ? 1e5 : 1e6), unit: 'instances',
