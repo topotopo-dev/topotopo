@@ -15,6 +15,7 @@ WORKFLOW
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
+CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the floor, from pins (pin_group / input 2) and in wind; inflate {pressure} puffs a closed mesh into a cushion or balloon. See help topic "cloth".
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
@@ -702,6 +703,28 @@ MEASURE NODES (category measure) turn shape into attributes for masks and colour
               optional occluder input — dirt in crevices, scatter masks under overhangs, thin-wall checks
   distance    to a mesh surface, curves or points (second input); signed (inside < 0), max_distance, extra → nearest_prim/uv/P
   e.g. {"type":"occlusion","in":["rock"]} → {"type":"color","params":{"mode":"ramp","attrib":"ao","range":[0,1]}}`,
+
+  cloth: `CLOTH AND PRESSURE (category "sim": drape, inflate; XPBD, Vellum-lite)
+drape simulates input 0 as cloth for "steps" steps of 1/fps s and outputs the last state: the same points, prims and
+attributes with P moved plus v, rest_P (the input positions), N and pinned. Not time-dependent: every cook simulates from
+the input ("steps": "=frame" re-simulates per frame; use solver for frame-to-frame feedback).
+INPUTS: 0 cloth (any polygon mesh; quads stay quads; polylines become strings), 1 collider (static mesh, optional),
+ 2 pins (points: the nearest cloth point to each is pinned; pin_snap:true moves it onto the pin first).
+PINS: pin_group "@P.y>1.99" (a top edge), a point attribute pin != 0, or input 2. Tethers keep pinned cloth from sagging.
+RECIPES
+ tablecloth: grid {size:[2,2], divisions:[40,40], center:[0,1.2,0]} + box table → drape(grid, table) {steps:100}
+ tarp over props: merge the props (crates, rocks) into input 1; thickness 0.02-0.03; bend_stiffness 0.003 for a stiff tarp
+ banner: grid {plane:"xy"} → drape {pin_group:"@P.y>1.99", wind:[0,0,2]} (wind 5+ m/s flies light cloth flat)
+ hang from hooks: drape(cloth, null, hooks) {pin_snap:true}
+ cushion: box {size:[0.8,0.2,0.8], divisions:[16,4,16]} → inflate {pressure:1.6} (gravity [0,-9.81,0] + floor:true rests it)
+ balloon: sphere → inflate {pressure:2.5, stretch_stiffness:300} (a soft skin stretches)
+PARAMS are physical and independent of the step size: stretch_stiffness N/m (1e4+ ≈ inextensible), shear_stiffness N/m,
+ bend_stiffness N·m (1e-5 silk … 1e-2 leather), density kg/m², damping 1/s, drag ½ρCd. steps = settle time (steps/fps s);
+ raise substeps (not iterations) for stiffer cloth and cleaner contacts. thickness keeps points off colliders and the
+ floor; self_collision (off by default) works with thickness ≈ half the edge length; max_points guards the cost.
+CHECK: inspect stats (substeps, contacts; inflate: volume_ratio); render views "persp" for the folds.
+LIMITS: collision is per point plus sharp corners (a sharp collider edge can pass between the points of a coarse cloth: refine it),
+ colliders are static, contacts are found once per step, no tearing, plasticity or cloth-on-cloth friction.`,
 
   recipes: `RECIPES (copy, then adapt)
 1) Rocks on terrain:
