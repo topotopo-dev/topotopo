@@ -657,7 +657,9 @@ export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s
       for (let e = 0; e < cnt; e++) {
         const before = Math.floor(s * ep.rate + phase[e]), c = Math.floor((s + 1) * ep.rate + phase[e]) - before;
         for (let j = 0; j < c; j++) {
-          if (live >= max) { skipped++; continue; }
+          // no slot frees up within a step: the rest of this point's births are refused at once (a huge emit_rate
+          // would otherwise loop once per refused birth)
+          if (live >= max) { skipped += c - j; break; }
           const k = k0 + before + j;
           // birth offset within the step in (0, 1]: 0 is reserved for particles that exist at time 0 (emit_all)
           birth(e, s, 1 - randN(ep.seed, keyOf(e), k, 1), k);
@@ -669,7 +671,7 @@ export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s
   if (!nb) {
     const out = state ? state.clone() : emptyState(s0, ep.trail);
     setDetailInt(out, '__pnextid', nextId);
-    setDetailInt(out, '__pskipped', skipped);
+    setSkipped(out, skipped);
     return out;
   }
   // the births: the emitter points' attributes and groups, then the simulation attributes
@@ -696,12 +698,17 @@ export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s
   }
   const out = state ? Geometry.merge([state, g]) : g;
   setDetailInt(out, '__pnextid', nextId);
-  setDetailInt(out, '__pskipped', skipped);
+  setSkipped(out, skipped);
   return out;
 }
 
 function setDetailInt(g: Geometry, name: string, v: number) {
   g.detail.add(name, 'int', 1).set(0, v);
+}
+
+/** The refused-births count: a float, since it can pass 2^31 (an int detail wrapped to a negative count). */
+function setSkipped(g: Geometry, v: number) {
+  g.detail.add('__pskipped', 'float', 1).set(0, v);
 }
 
 /** Steps simulated by a state. */
