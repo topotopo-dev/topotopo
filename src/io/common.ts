@@ -54,6 +54,8 @@ export interface ExportOptions {
   texturePath?: (path: string) => string;
   /** internal: texture bytes preloaded by exportGLB/exportGLTF for the synchronous document builder (null = unreadable) */
   textureData?: Map<string, Uint8Array | null>;
+  /** zlib compressor for PNGs encoded from image volumes ("image:<name>" textures; default: stored, uncompressed blocks) */
+  deflate?: (data: Uint8Array) => Uint8Array;
   /** receives non-fatal notes (instances expanded for a format without instancing, shear dropped, …) */
   warn?: (msg: string) => void;
 }

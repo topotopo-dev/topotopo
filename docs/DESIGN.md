@@ -34,7 +34,7 @@ the human side can be pure browser with no install. Every Node-specific capabili
 
 ```
 src/core/      geometry model + algorithms (no I/O)
-  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF and heightfield volumes,
+  geometry.ts    Geometry (points/vertices/prims/detail attribute tables, point/vertex/prim/edge groups, SDF, heightfield and image volumes,
                  packed prims), GeoBuilder
   packed.ts      packed primitives: expansion (unpack, auto-unpack, render budget), transform composition, statistics
   splines.ts     Bezier/NURBS curve prims: de Casteljau/de Boor evaluation, derivatives, arc length, closest point,
@@ -42,6 +42,11 @@ src/core/      geometry model + algorithms (no I/O)
   geohash.ts     content hash of a geometry (deduplicates packed sources)
   heightfield.ts heightfield volumes: grid + named layers, bilinear sampling, blur, distance transforms, rasterising meshes/curves, to-mesh, render preview
   erosion.ts     erodeStep: droplet hydraulic + thermal erosion over typed arrays (the WASM-replaceable kernel)
+  image.ts       image volumes: 2D float grids with named grey/RGBA layers, sampling, resizing, stats, bytes for PNG, JSON
+  texture.ts     texture generators and filters over Float32Array layers (patterns, cells, blends, blur, normals, AO …);
+                 texnoise.ts periodic 2D noise (perlin/value/worley on a wrapped lattice, simplex on a 4D torus)
+  bake.ts        uv-space baking: conservative uv rasterisation with supersampling, resolve + padding, islands, tangents,
+                 high-res projection and edge-curvature kernels
   edges.ts       EdgeSet (unordered point pairs, integer keys), unique-edge list
   halfedge.ts    half-edge mesh derived on demand and cached per Geometry: loops, rings, one-rings, boundaries, dihedral angles
   topology.ts    normals (hard edges), triangulation (earcut), edges, connectivity, boundary loops, health report
@@ -69,11 +74,13 @@ src/graph/     node system
   parallel.ts    CookContext.parallelMap: a kernel in chunks on the host's worker pool, or in one piece without it
   migrate.ts     graph format versions and migrations
 src/nodes/     ~95 node types, one defineNode() each
-src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision)
+src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision); texview.ts: the texture view and
+               base colour sampling of image textures
 src/inspect.ts, src/explain.ts  text views of geometry: summaries, statistics, a "reads as" description, diffs
 src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON and the
                instance stream (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts ·
-               heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts)
+               heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts) ·
+               image volumes as PNG files (textures.ts: glTF/USD texture data, the "textures" format)
 src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts)
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
@@ -166,6 +173,38 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   relaxation, deterministic, mass-conserving with closed borders), so a WASM kernel can replace it. Export writes
   16-bit PNG / RAW heightmaps with a JSON sidecar holding the range and the Unreal import scale (`io/heightmap.ts`),
   and `io/png-decode.ts` is a dependency-free PNG decoder (inflate included) for heightmap and mask import.
+- **Image volumes** are the third volume kind (`Volume = SdfVolume | HeightfieldVolume | ImageVolume`,
+  `core/image.ts`): Substance Designer / Houdini COP textures. A width × height grid of float pixels with named layers
+  of 1 (grey) or 4 (RGBA, interleaved) channels; "C" is the image itself, nodes add others ("id" random per cell, "mask"
+  bake coverage, "convex"/"concave", "distance"). Pixel (i, j) is column i, row j from the top, row-major, so rows go to
+  PNG in order and glTF's flipped t needs no flip; texel centres sit at u = (i + 0.5) / W, v = 1 − (j + 0.5) / H.
+  Images are not placed in space (empty bounds, skipped by bbox and transform) but otherwise behave like heightfields:
+  `clone()`/`merge()` give each its own layer map sharing the arrays (nodes replace a layer, never write into it), the
+  JSON format stores layers as base64 float32, fingerprints hash every layer, inspect lists size and per-layer ranges.
+  **Values are written as they are** (round(v × 255) in 8-bit files; no transfer curve). Data maps are linear by
+  nature; colour layers hold display values exactly as colour params and Cd do (`"#a5462e"` → 0.65, 0.27, 0.18, and the
+  renderer shows those numbers), so a base colour PNG has the bytes of the colours that made it and glTF/USD read it
+  as sRGB as they require. The alternative, linear colour in memory with sRGB encoding on export, would need a
+  colour-space tag per image (is this RGBA a colour or a normal map?) and would make texture colours disagree with the
+  same hex in a material or a Cd attribute everywhere the engine shows them; blending in display space is also what
+  Substance Designer and image editors do by default.
+  Materials reference images as `image:<name>` texture paths (`texture_to_material`, or any material map path); the
+  exporters encode them from memory: glTF embeds PNGs (an `orm` slot is both `occlusionTexture` and
+  `metallicRoughnessTexture`), USD writes `<name>_textures/<image>.png` next to the `.usda` (`io/files.ts`), and the
+  `textures` format writes every image as a PNG; `.geo` and the mesh formats skip images with a note.
+  **Generators** compute every pixel from its centre independently (seeded hashing, periodic noise lattices for
+  tileable output), so `tex_noise` and `tex_cells` run in chunks on the worker pool with identical bits. **Filters** read
+  one layer of one image of input 0 (`image`/`layer` params), write the result into that layer, and pass everything else
+  through; inputs of other sizes are resized to the first (bilinear up, area average down); `tileable` makes
+  neighbourhood filters wrap. **Bakes** (`core/bake.ts`) rasterise the mesh's triangles in uv space at `supersample`²
+  samples per texel (centre test, then conservative coverage: a texel whose square touches a triangle takes its closest
+  point), evaluate only covered samples (positions and normals interpolated; rays through the existing `occlusion`
+  kernel; the high-res projection along averaged-normal cage rays in `bake_project`; edge curvature in
+  `bake_curvature`), average them per texel (coverage → layer "mask") and dilate the islands by `padding` texels with
+  the exact distance transform. Curvature is measured from the mesh's dihedral angles in 3D, not from a normal map, so
+  uv seams do not show: every edge carries its signed bend (angle / 90°) and a texel sums the bends of the edge length
+  within a radius under a (1 − d²/r²)² kernel, normalised so a 90° edge through the texel reads 1 (a smooth surface of
+  radius R reads about 1.25 r / R).
 - **GeoBuilder** records the *provenance* of each new element: a source index or a weighted blend. On `build()`,
   every attribute and group of the source is interpolated automatically. That is why subdivide, extrude, resample,
   clip, sweep and the rest preserve `uv`, `Cd` and custom attributes without per-node code. Point and prim groups
@@ -309,6 +348,10 @@ What runs in chunks:
 | `noise_displace` | `noise_displace`: the noise values per point (1, or 3 for 3d/curl) | the displacement arithmetic stays on the main thread; when the normals have to be computed from the polygons, that happens on the main thread while four chunks sample the noise |
 | `attrib_noise` | `attrib_noise`: the attribute values | |
 | `occlusion` (occlusion, cavity, thickness) | `occlusion`: the rays of each point | the BVH is built once on the main thread and shared as arrays (`RayScene.toArrays`), keyed by a content hash; threshold by ray count (32k rays); 4 chunks per thread |
+| `tex_noise`, `tex_cells` | `tex_noise`, `tex_cells`: one value per pixel | 64k+ pixels; every pixel from its own centre |
+| `bake_ao`, `bake_thickness` | `occlusion`: the rays of each covered texel sample | the low (or high-res) mesh's BVH shared as arrays, as for the occlusion node |
+| `bake_normal`, `bake_height` (and the ray / curvature bakes with a high-res input) | `bake_project`: one cage ray per sample into the high-res BVH, plus its point normals | |
+| `bake_curvature` | `bake_curvature`: the edges near each sample | edges and their uniform grid shared |
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
 
 Not in chunks, and why:
@@ -415,9 +458,9 @@ Khronos `gltf-validator` (Apache-2.0, dev dependency only).
 
 **Material data.** A prim string attribute `material` names a material; the detail string attribute `materials` holds
 a JSON table `{name: {baseColor, metallic, roughness, emissive, alpha, doubleSided, unlit, textures?}}`
-(`src/core/materials.ts`). It carries names, PBR scalars and texture file paths (base colour, normal, roughness) to
-engines, not shading: glTF embeds the images (read through `Host.readFile`), USD references them from `UsdUVTexture`
-shaders, `.geo` and JSON keep the paths. The renderer shows a material's base colour where a prim has no colour. `Geometry.merge` keeps the first detail value, so the `merge`
+(`src/core/materials.ts`). It carries names, PBR scalars and texture paths (base colour, normal, roughness, ORM) to
+engines, not shading: glTF embeds the images (files read through `Host.readFile`, `image:<name>` image volumes encoded
+in memory), USD references them from `UsdUVTexture` shaders, `.geo` and JSON keep the paths. The renderer shows a material's base colour where a prim has no colour. `Geometry.merge` keeps the first detail value, so the `merge`
 node and the exporters union tables (`mergeMaterialTables`); other internal merges keep their first input's table.
 
 ## Roadmap

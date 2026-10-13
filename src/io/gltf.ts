@@ -26,6 +26,8 @@
 //   Textures: the material table's texture paths (base colour, normal, roughness) are read with options.readFile and
 //   embedded (PNG / JPEG) as baseColorTexture, normalTexture and metallicRoughnessTexture (roughness = green channel);
 //   a map replaces its factor (baseColorFactor white, roughnessFactor 1). Without readFile the maps are skipped.
+//   "image:<name>" paths are image volumes of the geometry (texture nodes), encoded to PNG in memory; an "orm" map is
+//   both the metallicRoughness and the occlusion texture (metallicFactor 1).
 //
 // Import
 //   node hierarchy flattened with world transforms, EXT_mesh_gpu_instancing as packed prims (one source per mesh;
@@ -34,7 +36,8 @@
 //   relative to the file. Mesh/node names → prim "name", materials → prim "material" + table, COLOR_0 → Cd/Alpha,
 //   TEXCOORD_0/1 → uv/uv2, custom `_X` → attributes, instance `_X` accessors → anchor attributes. Texture images are
 //   not decoded: their paths (URI resolved against the file, or "embedded:<name>" for images inside a GLB) go into the
-//   material table's textures entries; files written by polyforge restore the original paths from material extras.
+//   material table's textures entries; files written by polyforge restore the original paths from material extras,
+//   and their "image:<name>" textures are decoded back into image volumes (8-bit precision).
 import { Document, GLB_BUFFER, MathUtils, PlatformIO, Primitive } from '@gltf-transform/core';
 import type { Accessor, JSONDocument, Material as GMaterial, Node as GNode, Texture } from '@gltf-transform/core';
 import {
@@ -53,6 +56,10 @@ import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, baseOf, decomposeXfor
 import type { AnchorAttrib, ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked } from '../core/packed.ts';
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
+import { imageFromPNG, imageTextureData } from './textures.ts';
+import { decodePNG } from './png-decode.ts';
+import { imageRef } from '../core/image.ts';
+import type { Image } from '../core/image.ts';
 
 /** Above this many polylines per material and mesh, curves go into one LINES primitive instead of LINE_STRIPs. */
 const MAX_LINE_STRIPS = 256;
@@ -265,7 +272,7 @@ function textureFor(st: MatState, path: string): Texture | null {
   const mime = bytes ? imageMime(bytes) : null;
   if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image; material exported without it`);
   if (bytes && mime) {
-    const base = baseOf(path).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
+    const base = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
     const ext = mime === 'image/png' ? '.png' : '.jpg';
     let uri = base + ext, k = 1;
     while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
@@ -283,17 +290,23 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   const isDefault = !name;
   const mat = isDefault ? st.defaultMat : st.table[name] ?? normalizeMaterial({});
   const tex = (slot: keyof MaterialTextures) => (mat.textures?.[slot] ? textureFor(st, mat.textures[slot]!) : null);
-  const baseTex = tex('baseColor'), normalTex = tex('normal'), roughTex = tex('roughness');
-  // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map
+  const baseTex = tex('baseColor'), normalTex = tex('normal'), ormTex = tex('orm');
+  // an ORM map (occlusion R, roughness G, metallic B) is glTF's own layout: it is both the metallicRoughness and the
+  // occlusion texture, and replaces a separate roughness map
+  const roughTex = ormTex ?? tex('roughness');
+  if (ormTex && mat.textures?.roughness) st.warn?.(`glTF: material "${name}" has an orm and a roughness map; the orm map's green channel is used`);
+  // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map,
+  // metallic 1 under an ORM map
   const rgb = vertexColors || baseTex ? [1, 1, 1] : mat.baseColor;
   m = st.doc.createMaterial(isDefault ? 'default' : name)
     .setBaseColorFactor([rgb[0], rgb[1], rgb[2], mat.alpha])
-    .setMetallicFactor(mat.metallic)
+    .setMetallicFactor(ormTex ? 1 : mat.metallic)
     .setRoughnessFactor(roughTex ? 1 : mat.roughness)
     .setDoubleSided(mat.doubleSided);
   if (baseTex) m.setBaseColorTexture(baseTex);
   if (normalTex) m.setNormalTexture(normalTex);
   if (roughTex) m.setMetallicRoughnessTexture(roughTex);
+  if (ormTex) m.setOcclusionTexture(ormTex);
   const emax = Math.max(...mat.emissive);
   if (emax > 1) {
     m.setEmissiveFactor([mat.emissive[0] / emax, mat.emissive[1] / emax, mat.emissive[2] / emax]);
@@ -673,17 +686,21 @@ async function exportIO(doc: Document, o: ExportOptions): Promise<HostIO> {
   return io;
 }
 
-/** Read the material table's texture files (o.readFile) for gltfDocument; warns about each one it cannot read. */
+/**
+ * Read the material table's texture files (o.readFile) for gltfDocument; warns about each one it cannot read.
+ * "image:<name>" textures are image volumes of the geometry, encoded to PNG in memory (io/textures.ts).
+ */
 async function withTextures(g: Geometry, o: ExportOptions): Promise<ExportOptions> {
   if (o.materials === false || o.textureData) return o;
   const paths = texturePaths(mergeMaterialTables([g, ...g.packedSources]));
   if (!paths.length) return o;
-  const data = new Map<string, Uint8Array | null>();
-  for (const p of paths) {
+  const data = imageTextureData(g, o.deflate, o.warn, 'glTF');
+  const files = paths.filter((p) => !data.has(p));
+  for (const p of files) {
     if (!o.readFile) { data.set(p, null); continue; }
     try { data.set(p, await o.readFile(p)); } catch (e: any) { data.set(p, null); o.warn?.(`glTF: texture "${p}" could not be read (${e?.message ?? e}); material exported without it`); }
   }
-  if (!o.readFile) o.warn?.(`glTF: ${paths.length} texture map(s) skipped: no file access in this export (pass readFile)`);
+  if (!o.readFile && files.length) o.warn?.(`glTF: ${files.length} texture map(s) skipped: no file access in this export (pass readFile)`);
   return { ...o, textureData: data };
 }
 
@@ -958,6 +975,21 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
   if (instanced) warn('EXT_mesh_gpu_instancing instances were expanded into geometry');
   const out = Geometry.merge(parts);
   if (Object.keys(table).length) writeMaterials(out, table);
+  // "image:<name>" textures (polyforge files keep the paths in material extras): decode the embedded PNGs back into
+  // image volumes, so a re-export writes them again
+  const images = new Map<string, Image>();
+  for (const [gm, n] of matNames) {
+    const tex = n ? table[n]?.textures : undefined;
+    if (!tex) continue;
+    const slots: [string | undefined, Texture | null][] = [[tex.baseColor, gm.getBaseColorTexture()], [tex.normal, gm.getNormalTexture()], [tex.orm ?? tex.roughness, gm.getMetallicRoughnessTexture()]];
+    for (const [path, t] of slots) {
+      const name = imageRef(path);
+      const bytes = t?.getImage();
+      if (name === null || images.has(name) || !bytes?.length || imageMime(bytes) !== 'image/png') continue;
+      try { images.set(name, imageFromPNG(decodePNG(bytes), name)); } catch (e: any) { warn(`texture "${path}": ${e?.message ?? e}`); }
+    }
+  }
+  out.volumes.push(...images.values());
   return out;
 }
 

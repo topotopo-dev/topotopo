@@ -21,4 +21,6 @@ export type { ErosionField, ErosionParams } from './core/erosion.ts';
 export { heightmapExport, heightmapPaths } from './io/heightmap.ts';
 export type { HeightmapFormat, HeightmapOptions } from './io/heightmap.ts';
 export { decodePNG, inflateZlib, pngChannel } from './io/png-decode.ts';
+export { Image, imagesOf, findImage, imageToBytes } from './core/image.ts';
+export { imagePNG, texturesExport } from './io/textures.ts';
 export { summarize, inspect } from './inspect.ts';

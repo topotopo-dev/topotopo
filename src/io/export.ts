@@ -191,13 +191,16 @@ function usdaMaterials(table: MaterialTable, o: ExportOptions, out: string[]): M
     if (tex.baseColor) out.push(`${I}    color3f inputs:diffuseColor.connect = <${mp}/base_color_map.outputs:rgb>`);
     out.push(`${I}    color3f inputs:emissiveColor = ${tup(m.emissive, 0, 3)}`);
     out.push(`${I}    float inputs:metallic = ${fmt(m.metallic)}`);
+    if (tex.orm) out.push(`${I}    float inputs:metallic.connect = <${mp}/orm_map.outputs:b>`);
     out.push(`${I}    float inputs:roughness = ${fmt(m.roughness)}`);
-    if (tex.roughness) out.push(`${I}    float inputs:roughness.connect = <${mp}/roughness_map.outputs:r>`);
+    // an orm map (occlusion R, roughness G, metallic B) drives occlusion, roughness and metallic and wins over a roughness map
+    if (tex.orm) out.push(`${I}    float inputs:roughness.connect = <${mp}/orm_map.outputs:g>`, `${I}    float inputs:occlusion.connect = <${mp}/orm_map.outputs:r>`);
+    else if (tex.roughness) out.push(`${I}    float inputs:roughness.connect = <${mp}/roughness_map.outputs:r>`);
     if (tex.normal) out.push(`${I}    normal3f inputs:normal.connect = <${mp}/normal_map.outputs:rgb>`);
     out.push(`${I}    float inputs:opacity = ${fmt(m.alpha)}`);
     out.push(`${I}    int inputs:useSpecularWorkflow = 0`);
     out.push(`${I}    token outputs:surface`, `${I}}`);
-    if (tex.baseColor || tex.normal || tex.roughness) {
+    if (tex.baseColor || tex.normal || tex.roughness || tex.orm) {
       out.push('', `${I}def Shader "st_reader"`, `${I}{`, `${I}    uniform token info:id = "UsdPrimvarReader_float2"`, `${I}    string inputs:varname = "st"`, `${I}    float2 outputs:result`, `${I}}`);
       const texShader = (id2: string, path: string, colorSpace: string, output: string, extra: string[] = []) => {
         out.push('', `${I}def Shader "${id2}"`, `${I}{`, `${I}    uniform token info:id = "UsdUVTexture"`, `${I}    asset inputs:file = ${file(path)}`,
@@ -205,7 +208,8 @@ function usdaMaterials(table: MaterialTable, o: ExportOptions, out: string[]): M
           `${I}    token inputs:wrapS = "repeat"`, `${I}    token inputs:wrapT = "repeat"`, ...extra.map((l) => I + '    ' + l), `${I}    ${output}`, `${I}}`);
       };
       if (tex.baseColor) texShader('base_color_map', tex.baseColor, 'sRGB', 'float3 outputs:rgb');
-      if (tex.roughness) texShader('roughness_map', tex.roughness, 'raw', 'float outputs:r');
+      if (tex.roughness && !tex.orm) texShader('roughness_map', tex.roughness, 'raw', 'float outputs:r');
+      if (tex.orm) texShader('orm_map', tex.orm, 'raw', 'float outputs:r', ['float outputs:g', 'float outputs:b']);
       if (tex.normal) texShader('normal_map', tex.normal, 'raw', 'float3 outputs:rgb', ['float4 inputs:scale = (2, 2, 2, 1)', 'float4 inputs:bias = (-1, -1, -1, 0)']);
     }
     out.push('        }');
@@ -372,10 +376,10 @@ function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, o
   }
 }
 
-export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson' | HeightmapFormat | 'unreal_landscape';
+export type ExportFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'ply' | 'usda' | 'json' | 'geo' | 'csv' | 'pointsjson' | HeightmapFormat | 'unreal_landscape' | 'textures';
 
-/** Every export format; unreal_landscape writes a directory (exportFilesAsync in io/files.ts). */
-export const EXPORT_FORMATS: ExportFormat[] = ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'pointsjson', 'png16', 'r16', 'mask_png', 'unreal_landscape'];
+/** Every export format; unreal_landscape and textures write a directory (exportFilesAsync in io/files.ts). */
+export const EXPORT_FORMATS: ExportFormat[] = ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'pointsjson', 'png16', 'r16', 'mask_png', 'unreal_landscape', 'textures'];
 
 /** Format from a file name: the extension, with ".points.json" → pointsjson. */
 export function exportFormatFromPath(path: string): string {
@@ -413,6 +417,7 @@ export function exportGeometry(g: Geometry, format: ExportFormat, o: ExportOptio
     case 'pointsjson': return enc.encode(exportPointsJSON(g, o));
     case 'glb': case 'gltf': throw new Error(`${format} export is asynchronous (gltf-transform): use exportGeometryAsync`);
     case 'unreal_landscape': throw new Error('unreal_landscape writes a directory of files: use exportFilesAsync (src/io/files.ts)');
+    case 'textures': throw new Error('textures writes a directory of PNG files: use exportFilesAsync (src/io/files.ts)');
     default: throw new Error(`unknown export format "${format}" (${EXPORT_FORMATS.join(', ')})`);
   }
 }

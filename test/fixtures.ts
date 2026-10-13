@@ -71,6 +71,14 @@ export const SRC: Record<string, NodeSpec> = {
   SHELF_GROUND: { type: 'terrain', params: { size: [16, 16], divisions: [24, 24], height: 1.5, frequency: 0.12, octaves: 3, seed: 3 } },
   // an L-shaped footprint on the ground (closed polygon), concave on purpose
   SHELF_FOOTPRINT: { type: 'curve', params: { points: [[0, 0, 0], [10, 0, 0], [10, 0, 6], [5, 0, 6], [5, 0, 9], [0, 0, 9]], closed: true } },
+  // textures (P3-T): small images (noise "noise", bricks "pattern" + id, a soft disc stamp "shape"), a box unwrapped
+  // for bakes (xatlas), the same box coloured, and its subdivided high-res version
+  TEX: { type: 'tex_noise', params: { resolution: 64, seed: 1 } },
+  TEX2: { type: 'tex_pattern', params: { resolution: [64, 32], count: [4, 4] } },
+  TEXSHAPE: { type: 'tex_shape', params: { resolution: 32, falloff: 0.5 } },
+  UVBOX: { type: 'uv_unwrap', in: ['BOX'] },
+  UVCOLOR: { type: 'color', in: ['UVBOX'], params: { mode: 'random' } },
+  HIGHBOX: { type: 'subdivide', in: ['BOX'], params: { levels: 2 } },
 };
 
 /** Fixture inputs of the shelf assets that take one (curve input 0 or surface input 0); test/shelf.ts checks coverage. */
@@ -117,6 +125,15 @@ export const INPUTS: Record<string, string[]> = {
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
   curve_attribs: ['NURBS'],
+  // textures (P3-T): filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
+  tex_blend: ['TEX', 'TEX2', 'TEXSHAPE'], tex_levels: ['TEX'], tex_curves: ['TEX'], tex_blur: ['TEX'], tex_warp: ['TEX2', 'TEX'],
+  tex_transform: ['TEX2'], tex_edge_detect: ['TEX2'], tex_invert: ['TEX'], tex_threshold: ['TEX'], tex_histogram_scan: ['TEX'],
+  tex_normal_from_height: ['TEX2'], tex_height_to_ao: ['TEX2'], tex_channel: ['TEX', 'TEX2'], tex_colorize: ['TEX'],
+  tex_tile_sampler: ['TEXSHAPE'], tex_output: ['TEX2'], texture_to_material: ['UVBOX', 'TEX'], tex_to_heightfield: ['TEX'],
+  heightfield_to_tex: ['HFN'],
+  bake_ao: ['UVBOX'], bake_thickness: ['UVBOX'], bake_curvature: ['UVBOX'], bake_position: ['UVBOX'], bake_world_normal: ['UVBOX'],
+  bake_normal: ['UVBOX', 'HIGHBOX'], bake_height: ['UVBOX', 'HIGHBOX'], bake_island_id: ['UVBOX'], bake_mask: ['UVBOX'],
+  bake_vertex_color: ['UVCOLOR'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -177,6 +194,42 @@ export const PARAMS: Record<string, any> = {
   offset_curve_3d: { distance: 0.3, both: true, lift: 0.2 },
   project_curve: { spacing: 0.1, lift: 0.02 },
   curve_attribs: { frame: true, curvature: true, segment: true, ramp_attrib: 'width', ramp: [[0, 0.2], [1, 0.05]] },
+  // textures (P3-T): generators at 64² (the tests hash every pixel), bakes at 64² with few rays
+  tex_noise: { resolution: 64, fractal: 'ridged', scale: 3 },
+  tex_pattern: { resolution: 64, pattern: 'hex', count: [4, 6], variation: 0.4 },
+  tex_gradient: { resolution: 64, mode: 'radial' },
+  tex_shape: { resolution: 64, shape: 'star', sides: 5, falloff: 0.3, tile: [2, 2] },
+  tex_cells: { resolution: 64, output: 'edges', scale: 5 },
+  tex_scratches: { resolution: 64, count: 20, width: 0.02 },
+  tex_splatter: { resolution: 64, count: 10, size: [0.05, 0.15] },
+  tex_text: { resolution: [64, 32], text: 'P3' },
+  tex_blend: { mode: 'overlay', opacity: 0.8 },
+  tex_levels: { in_low: 0.2, in_high: 0.8, gamma: 1.5 },
+  tex_curves: { ramp: [[0, 0], [0.5, 0.8], [1, 1]] },
+  tex_blur: { radius: 3 },
+  tex_warp: { mode: 'directional', intensity: 0.05, angle: 30 },
+  tex_transform: { offset: [0.25, 0], rotate: 30, scale: [1.5, 1.5] },
+  tex_edge_detect: { width: 1 },
+  tex_threshold: { threshold: 0.5, softness: 0.1 },
+  tex_histogram_scan: { position: 0.3, contrast: 0.8 },
+  tex_normal_from_height: { strength: 2, format: 'directx' },
+  tex_height_to_ao: { radius: 0.1, depth: 0.1, directions: 4, steps: 4 },
+  tex_channel: { name: 'orm' },
+  tex_colorize: { ramp: [[0, '#3b2316'], [0.5, '#8a4b2a'], [1, '#c9845a']] },
+  tex_tile_sampler: { resolution: 64, count: [4, 4], scale: [0.5, 1] },
+  tex_output: { name: 'bricks_id', layer: 'id' },
+  texture_to_material: { material: 'noisy', base_color: 'noise', roughness: 'noise' },
+  tex_to_heightfield: { size: 4, height_scale: 0.5 },
+  bake_ao: { resolution: 64, samples: 8 },
+  bake_thickness: { resolution: 64, samples: 8 },
+  bake_curvature: { resolution: 64, radius: 0.05 },
+  bake_position: { resolution: 64 },
+  bake_world_normal: { resolution: 64 },
+  bake_normal: { resolution: 64, cage: 0.3 },
+  bake_height: { resolution: 64, cage: 0.3 },
+  bake_island_id: { resolution: 64 },
+  bake_mask: { resolution: 64, mask_group: '@P.y>0' },
+  bake_vertex_color: { resolution: 64, supersample: 2 },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */

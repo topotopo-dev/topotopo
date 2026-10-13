@@ -216,7 +216,8 @@ function flatSource(src: Geometry, notes: Set<string>, oneLevel = false): Geomet
   }
   f = src.hasPacked() && !oneLevel ? expandPacked(src, { transfer: DEFAULT_TRANSFER }).geo : src;
   if (f.volumes.length) {
-    notes.add('SDF volumes inside packed sources are not expanded');
+    // images are carried once by expandPacked (not per copy); other volumes are dropped
+    if (f.volumes.some((v) => v.kind !== 'image')) notes.add('SDF volumes inside packed sources are not expanded');
     f = f === src ? src.clone() : f;
     f.volumes = [];
   }
@@ -288,6 +289,10 @@ export function expandPacked(g: Geometry, o: ExpandOptions = {}): ExpandResult {
   for (const p of drawn) list.push(flat[S[p]]);
   const out = list.length === 1 ? base : Geometry.merge(list); // base is a fresh geometry (subsets copy)
   if (out.primKind) out.compactPackedSources();
+  // the image volumes of the expanded sources (texture maps their materials reference), once per name
+  const imageNames = new Set(out.volumes.filter((v) => v.kind === 'image').map((v) => v.name));
+  for (const s of usedSrc)
+    for (const v of sources[s].volumes) if (v.kind === 'image' && !imageNames.has(v.name)) { imageNames.add(v.name); out.volumes.push(v.clone()); }
 
   // transform each instance block
   const nb = base.numPoints, nvb = base.numVertices, nprb = base.numPrims;

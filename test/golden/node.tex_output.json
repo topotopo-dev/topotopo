@@ -1,0 +1,66 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 2
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 32,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "e53f898d897176b7",
+          "id": "dfe46a8d68df27b7"
+        },
+        "name": "pattern"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 32,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "dfe46a8d68df27b7"
+        },
+        "name": "bricks_id"
+      }
+    ]
+  },
+  "name": "node.tex_output",
+  "ok": true,
+  "source": "fixture for node type \"tex_output\" (test/fixtures.ts)",
+  "warnings": []
+}

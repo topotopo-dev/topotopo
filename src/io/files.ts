@@ -4,6 +4,8 @@
 //   csv / pointsjson of packed instances (instance rows): the stream + <base>.meshes.json + <base>_meshes/<Mesh>.glb
 //                    (one GLB per packed source; meshes: false leaves the GLBs out)
 //   unreal_landscape a directory (the path, or the directory of a .json path naming the manifest): io/unreal.ts
+//   usda             + <name>_textures/<image>.png for "image:<name>" material textures (io/textures.ts)
+//   textures         a directory with one PNG per image volume (io/textures.ts)
 import type { Geometry } from '../core/geometry.ts';
 import { exportGeometryAsync } from './export.ts';
 import type { ExportFormat } from './export.ts';
@@ -15,6 +17,7 @@ import { flattenSource } from '../core/packed.ts';
 import { baseOf, dirOf, joinPath, packedSourceNames } from './common.ts';
 import type { ExportOptions } from './common.ts';
 import { unrealLandscapeBundle } from './unreal.ts';
+import { texturesExport, usdTextureFiles } from './textures.ts';
 
 export interface ExportFile { path: string; bytes: Uint8Array }
 export type FileExportOptions = ExportOptions & HeightmapOptions & {
@@ -32,6 +35,20 @@ export function stripExtension(p: string): string {
 
 /** Every file an export of `format` to `path` writes, plus a one-line summary. */
 export async function exportFilesAsync(g: Geometry, format: ExportFormat | 'unreal_landscape', path: string, o: FileExportOptions = {}): Promise<{ files: ExportFile[]; summary: string }> {
+  if (format === 'textures') {
+    // a directory (or the directory of a .png path) with one PNG per image
+    const dir = /\.png$/i.test(path) ? dirOf(path) : path.replace(/[\\/]+$/, '');
+    return texturesExport(g, dir, { deflate: o.deflate, layers: o.layers });
+  }
+  const nImages = g.volumes.filter((v) => v.kind === 'image').length;
+  if (nImages && !['glb', 'gltf', 'usda', 'json'].includes(format)) o.warn?.(`${format}: ${nImages} image(s) not written (${format} has no images; glb/gltf embed the textures materials use, usda writes them next to the file, format "textures" writes every image as PNG)`);
+  if (format === 'usda') {
+    // image textures as PNGs in <name>_textures/ next to the .usda, referenced relative to it
+    const tex = usdTextureFiles(g, path, o.deflate, o.warn);
+    const map = o.texturePath;
+    const bytes = await exportGeometryAsync(g, format, { ...o, texturePath: (t) => tex.assetPath.get(t) ?? (t.startsWith('image:') ? t : map ? map(t) : t) });
+    return { files: [{ path, bytes }, ...tex.files], summary: `usda, ${(bytes.byteLength / 1024).toFixed(1)} KB${tex.files.length ? ` + ${tex.files.length} texture PNG(s)` : ''}` };
+  }
   if (HEIGHTMAP_FORMATS.includes(format as HeightmapFormat)) {
     const res = heightmapExport(g, format as HeightmapFormat, o);
     const paths = heightmapPaths(path, res.files);
