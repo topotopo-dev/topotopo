@@ -16,7 +16,7 @@ import { cellsRange, noiseRange } from './texture.ts';
 import type { CellsJob, NoiseJob } from './texture.ts';
 import { curvatureRange, projectRange } from './bake.ts';
 import type { CurvatureArgs, ProjectArgs } from './bake.ts';
-import { candidatesRange, conflictsRange, elimNeighboursRange, elimPairsRange, relaxRange } from './scatter.ts';
+import { candidatesRange, conflictsRange, elimNeighboursRange, elimPairsRange, kdBuildRange, relaxRange } from './scatter.ts';
 import type { CandidateArgs, ConflictArgs, RelaxArgs } from './scatter.ts';
 import { TriSurface } from './pcg.ts';
 
@@ -136,6 +136,13 @@ const bakeCurvature: Kernel = {
 
 // ---------------------------------------------------------------- scatter (src/core/scatter.ts)
 
+/** KD tree: the ranges the top levels deferred, one subtree per element (buildKDTree). */
+const kdBuild: Kernel = {
+  minElements: 2,
+  chunksPerWorker: 2,
+  run(a, A, start, end) { kdBuildRange(a, A, start, end); },
+};
+
 /** scatter: area-weighted surface candidates (draws by index, rngAt). */
 const scatterCandidates: Kernel = {
   minElements: 65536,
@@ -227,6 +234,7 @@ export const KERNELS: Record<string, Kernel> = {
   tex_cells: texCellsK,
   bake_project: bakeProject,
   bake_curvature: bakeCurvature,
+  kd_build: kdBuild,
   scatter_candidates: scatterCandidates,
   scatter_elim_neighbours: scatterElimNeighbours,
   scatter_elim_pairs: scatterElimPairs,

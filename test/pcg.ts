@@ -125,6 +125,12 @@ section('scatter kernels: the chunked stages give what the serial ones give');
       }
   check(mismatches === 0, `minDistanceSelectWith = minDistanceSelect (greedy grid) over ${cases} radius/limit/accept cases, duplicates included (${mismatches} differ)`);
 
+  // a KD tree whose lower levels are deferred and built range by range (in any order) = the full build
+  const full = new KDTree(Q), part = new KDTree(Q, undefined, 97), rs = part.deferred.slice();
+  for (let i = rs.length - 2; i >= 0; i -= 2) part.buildRange(rs[i], rs[i + 1]);
+  check(rs.length > 20 && full.idx.every((v, i) => v === part.idx[i]) && full.axis.every((v, i) => v === part.axis[i]) && full.TP.every((v, i) => Object.is(v, part.TP[i])),
+    `KDTree deferBelow + buildRange of the ${rs.length / 2} deferred ranges (reverse order) = the full build`);
+
   // the candidate kernel in chunks = in one piece
   const tp = Int32Array.from({ length: 300 }, (_, i) => (i * 7) % 100), Pk = Float64Array.from({ length: 300 }, (_, i) => Math.sin(i));
   const cdf = Float64Array.from({ length: 100 }, (_, i) => (i + 1) * (1 + (i % 3)));

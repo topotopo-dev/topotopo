@@ -12,7 +12,12 @@ export class KDTree {
   /** positions in tree order (TP[3k..3k+2] = P[3·idx[k]..]) as of construction; neighbours() reads them */
   readonly TP: Float64Array;
 
-  constructor(P: ArrayLike<number>, subset?: ArrayLike<number>) {
+  /**
+   * deferBelow: build only the levels whose ranges are larger than this and list the smaller ranges (lo, hi pairs) in
+   * `deferred` instead; buildRange(lo, hi) of each one then gives the tree the full build gives (the ranges are
+   * disjoint and each one's build reads and writes only its own slots, so they can be built in any order or thread).
+   */
+  constructor(P: ArrayLike<number>, subset?: ArrayLike<number>, deferBelow = 0) {
     this.P = P;
     if (subset) this.idx = Int32Array.from(subset);
     else {
@@ -25,8 +30,17 @@ export class KDTree {
     // the build permutes a copy of the coordinates alongside idx, so it reads them sequentially
     const TP = (this.TP = new Float64Array(this.n * 3)), idx = this.idx;
     for (let k = 0; k < this.n; k++) { const i = idx[k] * 3; TP[k * 3] = P[i]; TP[k * 3 + 1] = P[i + 1]; TP[k * 3 + 2] = P[i + 2]; }
+    this.deferBelow = deferBelow;
     this.build(0, this.n);
+    this.deferBelow = 0;
   }
+
+  /** Ranges left unbuilt by the constructor's deferBelow (lo, hi pairs, left to right). */
+  deferred: number[] = [];
+  private deferBelow = 0;
+
+  /** Build a range the constructor deferred (see deferBelow). */
+  buildRange(lo: number, hi: number) { this.build(lo, hi); }
 
   /** The arrays that define the tree (fromArrays rebuilds it from them, e.g. in a worker thread). */
   arrays(): { TP: Float64Array; idx: Int32Array; axis: Int8Array } {
@@ -55,6 +69,7 @@ export class KDTree {
 
   private build(lo: number, hi: number) {
     if (hi - lo <= 1) return;
+    if (hi - lo <= this.deferBelow) { this.deferred.push(lo, hi); return; }
     const W = this.TP;
     let mn0 = Infinity, mn1 = Infinity, mn2 = Infinity, mx0 = -Infinity, mx1 = -Infinity, mx2 = -Infinity;
     for (let i = lo; i < hi; i++) {
