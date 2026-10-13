@@ -140,10 +140,20 @@ function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: strin
     : ['Name', 'Position.X', 'Position.Y', 'Position.Z', 'Rotation.Roll', 'Rotation.Pitch', 'Rotation.Yaw', 'Scale.X', 'Scale.Y', 'Scale.Z', 'Density', 'Color.R', 'Color.G', 'Color.B', 'Color.A', 'Seed'];
   const ue = (keys: string[], vals: number[]) => quote('(' + keys.map((k, j) => `${k}=${fmtFixed(vals[j])}`).join(',') + ')');
   const XYZ = ['X', 'Y', 'Z'];
-  // PCG attribute names are case-insensitive (FName): an attribute whose name collides with a standard column
-  // (a prim `name` next to the row key `Name`, a `mesh` next to `Mesh`) is written with an `_attr` suffix.
-  const pcgColumn = (n: string) => { const c = PCG_CANONICAL[n.toLowerCase()]; return c && c !== n ? n + '_attr' : n; };
-  for (const [n, a] of extras) header.push(...columnsFor(pcgColumn(n), a));
+  // PCG attribute names are case-insensitive (FName): an attribute named like a standard column (a prim `name` next to
+  // the row key `Name`, a `mesh` next to `Mesh`, an exact `Seed` next to `Seed`) is written with an `_attr` suffix,
+  // except the instance stream's own `Mesh` column; a column that would still repeat one (`name` and `NAME`) gets
+  // another suffix. Only the table's own keys count (not Object.prototype's `constructor`).
+  const used = new Set(header.map((h) => h.toLowerCase()));
+  const pcgColumns = (n: string, a: Attribute) => {
+    const low = n.toLowerCase();
+    let base = Object.hasOwn(PCG_CANONICAL, low) && n !== 'Mesh' ? n + '_attr' : n;
+    while (columnsFor(base, a).some((h) => used.has(h.toLowerCase()))) base += '_attr';
+    const cols = columnsFor(base, a);
+    for (const h of cols) used.add(h.toLowerCase());
+    return cols;
+  };
+  for (const [n, a] of extras) header.push(...pcgColumns(n, a));
   const P = g.P, tr = get('trans'), ps = get('pscale'), sc = get('scale'), cd = get('Cd'), al = get('Alpha'), de = get('density'), sd = get('seed');
   const rows: string[][] = [];
   for (let i = 0; i < g.numPoints; i++) {

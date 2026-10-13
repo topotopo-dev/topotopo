@@ -365,6 +365,25 @@ function encodeBinaryJSON(v: any): Uint8Array {
   }
   check(serr < 1e-5 && close((sb.points.get('Cd')!.get(2) as number[])[0], (pts.points.get('Cd')!.get(2) as number[])[0], 1e-6), `pcg struct csv re-import: position, rotation, colour (max error ${serr.toExponential(1)})`);
 
+  // R-17: attribute columns never repeat a column (Unreal FNames are case-insensitive and the TopoTopoPCG loader
+  // rejects duplicate columns): attributes named exactly Seed, Name, Density or Position were written next to the
+  // standard columns of the same name, and `constructor` (an Object.prototype key) got a suffix it does not need
+  const clashGeo = (attrs: [string, 'int' | 'float' | 'string', number][]) => {
+    const c = new Geometry({ positions: new Float64Array([0, 0, 0, 1, 2, 3]) });
+    for (const [n, t, s] of attrs) c.points.add(n, t, s);
+    return c;
+  };
+  const clashes: [Geometry, string][] = [
+    [clashGeo([['Seed', 'int', 1], ['Name', 'string', 1], ['Density', 'float', 1], ['Position', 'float', 3], ['constructor', 'float', 1]]), 'Seed_attr,Name_attr,Density_attr,Position_attr.x,Position_attr.y,Position_attr.z,constructor'],
+    [clashGeo([['name', 'string', 1], ['NAME', 'string', 1]]), 'name_attr,NAME_attr_attr'],
+  ];
+  for (const [clash, want] of clashes)
+    for (const struct of [false, true]) {
+      const h = new TextDecoder().decode(exportGeometry(clash, 'csv', { pcg: true, pcgStruct: struct })).split('\n')[0].split(',');
+      const low = h.map((x) => x.toLowerCase()), dup = low.filter((x, i) => low.indexOf(x) !== i), extra = h.slice(struct ? 7 : 16).join(',');
+      check(!dup.length && extra === want, `pcg${struct ? ' struct' : ''} csv: no repeated column (${dup.join(',') || 'none'}): ${extra}`);
+    }
+
   // points JSON
   const pj = exportGeometry(pts, 'pointsjson');
   const pjb = importGeometry(pj, 'pointsjson');
