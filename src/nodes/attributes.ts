@@ -386,7 +386,7 @@ defineNode({
     class: { type: 'enum', options: ['auto', 'point', 'prim', 'vertex', 'detail'], default: 'auto', desc: 'class of the array (from_attributes/to_attributes/length; auto = where the attribute is found). from_neighbours is always point, from_group_points always prim' },
     method: { type: 'enum', options: ['connectivity', 'radius'], default: 'connectivity', desc: 'from_neighbours: points sharing an edge, or points within radius (any geometry, also point clouds)' },
     radius: { type: 'float', default: 0.5, min: 0, desc: 'from_neighbours radius mode: search radius' },
-    max_count: { type: 'int', default: 0, min: 0, desc: 'from_neighbours: keep at most this many (radius: the nearest); to_attributes: unpack at most this many entries (0 = no limit)' },
+    max_count: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'from_neighbours: keep at most this many (radius: the nearest); to_attributes: unpack at most this many entries (0 = no limit)' },
     include_self: { type: 'bool', default: false, desc: 'from_neighbours radius mode: include the point itself (Houdini nearpoints does)' },
     attribs: { type: 'string', default: '', desc: 'from_attributes: attributes to pack, in order, space-separated; wildcards expand in natural order ("w_*" = w_0 w_1 … w_10)' },
     out_name: { type: 'string', default: '', desc: 'to_attributes: prefix of the unpacked attributes ("" = name → name_0, name_1 …); length: the int attribute ("" = name_len)' },

@@ -793,7 +793,7 @@ defineNode({
     distance: { type: 'float', default: 0.2, desc: 'extrusion along the normal', aliases: ['dist', 'depth', 'height'] },
     inset: { type: 'float', default: 0, desc: 'move edges inward by this distance (0 = plain extrude; distance 0 + inset = inset faces)' },
     mode: { type: 'enum', options: ['individual', 'connected'], default: 'connected', desc: 'connected keeps shared edges of selected faces together' },
-    divisions: { type: 'int', default: 1, min: 1, desc: 'segments along the sides' },
+    divisions: { type: 'int', default: 1, min: 1, max: 10000, desc: 'segments along the sides' },
     keep_back: { type: 'bool', default: false, desc: 'keep the original faces (reversed) underneath' },
   },
   outputs: 'prim groups front, side',
@@ -925,7 +925,7 @@ defineNode({
     group: P.group('prim', 'quads to split ("" = all)'),
     mode: { type: 'enum', options: ['size', 'count'], default: 'size', desc: 'size = divide each edge by length / target size; count = fixed divisions' },
     size: { type: 'vec2', default: [1, 1], desc: 'target cell size [horizontal, vertical]: edges mostly along Y use the 2nd value' },
-    divisions: { type: 'ivec2', default: [2, 2], min: 1, desc: 'count mode: cells along the quad\'s first and second edge' },
+    divisions: { type: 'ivec2', default: [2, 2], min: 1, max: 256, desc: 'count mode: cells along the quad\'s first and second edge' },
   },
   outputs: 'prim int cell_u, cell_v (cell indices within the original quad)',
   example: {
@@ -1008,7 +1008,7 @@ defineNode({
   aliases: ['polycap', 'cap_holes', 'close_holes'],
   inputs: [{ name: 'geo', desc: 'mesh with holes' }],
   params: {
-    max_edges: { type: 'int', default: 0, min: 0, desc: 'only fill holes with at most this many edges (0 = all)' },
+    max_edges: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'only fill holes with at most this many edges (0 = all)' },
     triangulate: { type: 'bool', default: false, desc: 'fan-triangulate the caps' },
   },
   outputs: 'prim group filled',
@@ -1044,7 +1044,7 @@ defineNode({
   params: {
     padding: { type: 'vec3', default: [0, 0, 0], desc: 'extra size added on each side' },
     per_piece: { type: 'bool', default: false, desc: 'one box per connected piece' },
-    divisions: { type: 'ivec3', default: [1, 1, 1], min: 1, desc: 'box divisions' },
+    divisions: { type: 'ivec3', default: [1, 1, 1], min: 1, max: 512, desc: 'box divisions' },
   },
   example: { type: 'bound', params: { padding: [0.1, 0.1, 0.1] } },
   cook: ({ input, p }) => {

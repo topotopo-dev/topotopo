@@ -194,7 +194,7 @@ defineNode({
   aliases: ['scatter_points', 'distribute'],
   inputs: [{ name: 'geo', desc: 'surface, curves, or closed mesh (volume mode)' }],
   params: {
-    count: { type: 'int', default: 500, min: 0, desc: 'number of points', aliases: ['npts', 'points', 'num'] },
+    count: { type: 'int', default: 500, min: 0, max: 10000000, desc: 'number of points', aliases: ['npts', 'points', 'num'] },
     density: { type: 'float', default: 0, min: 0, desc: 'points per unit area/length/volume (overrides count when > 0)' },
     mode: { type: 'enum', options: ['auto', 'surface', 'curve', 'volume'], default: 'auto', desc: 'auto = surface if polygons, curve if only polylines' },
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing via sample elimination' },
@@ -208,7 +208,7 @@ defineNode({
     relax_iterations: { type: 'int', default: 0, min: 0, max: 100, desc: 'surface: Lloyd-style relaxation passes (points push apart and are projected back onto the surface)', aliases: ['relaxiterations', 'relax_iter', 'relax_passes'] },
     relax_radius: { type: 'float', default: 0, min: 0, desc: 'relaxation spacing in metres (0 = from the local density)' },
     min_distance: { type: 'float', default: 0, min: 0, desc: 'exact minimum distance between points (0 = off); the count can come out lower', aliases: ['mindist', 'min_dist', 'poisson_radius'] },
-    max_per_prim: { type: 'int', default: 0, min: 0, desc: 'at most this many points per source prim (0 = no limit)', aliases: ['maxperprim'] },
+    max_per_prim: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'at most this many points per source prim (0 = no limit)', aliases: ['maxperprim'] },
     emit_attributes: { type: 'string', default: '*', desc: 'source attributes carried onto the points (pattern: point/vertex interpolated, prim copied; "^Cd" excludes)', aliases: ['attributes', 'interpolate', 'emit'] },
     write_sourceprim: { type: 'bool', default: true, desc: 'write int sourceprim (the source prim of each point)', aliases: ['source_prim', 'sourceprim'] },
     write_primuv: { type: 'bool', default: false, desc: 'write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention)', aliases: ['prim_uv', 'sourceprimuv'] },

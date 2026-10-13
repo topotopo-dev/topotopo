@@ -18,7 +18,7 @@ import { rand } from '../core/random.ts';
 import { XpbdCloth, buildCloth, buildCollider, colliderArrays, collideRange } from '../core/xpbd.ts';
 import type { Collider, SimOptions } from '../core/xpbd.ts';
 import { hashArrays } from '../core/kernels.ts';
-import { P, mask } from './util.ts';
+import { P, mask, simBudget } from './util.ts';
 
 interface Defaults {
   steps: number; gravity: number[]; floor: boolean; stretch: number; shear: number; bend: number; damping: number; drag: number; tethers: boolean;
@@ -50,7 +50,7 @@ function simParams(d: Defaults): Record<string, ParamDef> {
     pin_snap: { type: 'bool', default: false, desc: 'move the cloth points pinned by the `pins` input onto those pin points first (hang a cloth from hooks)' },
     tethers: { type: 'bool', default: d.tethers, desc: 'long-range attachments: no point gets farther from its nearest pin than along the cloth at rest, so pinned cloth does not stretch under its weight or the wind', advanced: true },
     keep_rest: { type: 'bool', default: true, desc: 'write the input positions to the point attribute rest_P' },
-    max_points: { type: 'int', default: 100000, min: 1, desc: 'refuse inputs with more points than this (cost grows with points × steps × substeps × iterations)', advanced: true },
+    max_points: { type: 'int', default: 100000, min: 1, max: 10000000, desc: 'refuse inputs with more points than this (cost grows with points × steps × substeps × iterations)', advanced: true },
   };
 }
 
@@ -157,8 +157,11 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
     }, { serial: () => collideRange(c, sim.x, R, sim.cp, sim.cn, sim.cf, sim.ct, sim.qd, 0, n) });
   };
 
+  // the wall-clock limit of long-running nodes, checked every step (steps × substeps × iterations can reach 10^9 sweeps)
+  const budget = simBudget(ctx, 'fewer steps, substeps or iterations, or a coarser cloth (decimate / remesh); or raise the limit');
   sim.settleFloor();
   for (let s = 0; s < p.steps; s++) {
+    budget.check();
     if (collider) {
       const r = detect();
       if (r instanceof Promise) await r;

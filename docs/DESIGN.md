@@ -405,6 +405,29 @@ input, output and `lib.run` call, and could not share the engine cache; it was n
 Worker realm, where `terminate()` is the timeout. (Point wrangles do run in workers now, see the worker pool below:
 there only the attribute arrays travel, the workers are already running, and the snippet cannot reach the engine.)
 
+### Resource limits
+
+R-17 found that valid but huge params took the process down or kept it busy for hours (N4): a fatal heap OOM is not
+an exception a node can catch, and nothing limited a simulation's time. Since R-18 (`test/limits.ts`):
+- **Counts.** Every int param that counts something has a `max` (values above are clamped, like values below `min`);
+  the registry scan in the test lists the int params that are not counts (seeds, frames, indices, an offset, a pixel
+  height). The maxes keep one node at its max within the default heap, measured: a 2048 × 2048 grid builds 4.2 M quads
+  in ~1 GB of builder arrays while 4096 × 4096 ran out of heap, so 2D divisions stop at 2048, box/bound/quad sphere
+  divisions at 512 (six faces), 1D curve counts at 10^6, per-element counts (segments per corner or span, sides) at 10^4,
+  guards (max_particles, max_faces, max_length …) at a few times their default, limits whose off value is 0 or -1 at
+  2^31 − 1. Products of counts are guarded where a per-axis max cannot bound them (`point_grid` ≤ 20 M points, besides
+  the existing heightfield, texture and scatter limits). Inputs still multiply (resample count × curves): the guarantee
+  is per param, not a per-cook memory budget. `group_expand` also stops once a step changes nothing.
+- **Time.** `engine.simTimeoutMs` (default 600 s; `TOPOTOPO_SIM_TIMEOUT_MS` in the MCP server) bounds one cook of the
+  long-running nodes, checked from `simBudget` (`src/nodes/util.ts`): rbd every 5 solver steps, drape/inflate every
+  step, particles between batches (a batch also ends after about 10 M particle-steps, which does not change the result),
+  heightfield_erode's JS path every iteration. remesh_quad and the erosion kernels make one WASM call that nothing on
+  its own thread can stop: when the host has a pool and the call is big (≥ 50 k triangles, ≥ 2·10^7 samples ×
+  iterations, or any size under `TOPOTOPO_POOL_MIN`), it runs on a pool worker as the task `wasm`
+  (`src/nodes/wasmcall.ts`) whose limit is the rest of the budget; past it the worker is terminated and replaced and the
+  node fails. The worker runs the same WASM build on copies of the arrays, so the bits are the same (the golden layer
+  passes with every such call on the pool). Without a pool those calls still cannot be stopped.
+
 ### Worker pool
 
 `Host.pool` (a `WorkerPool`: `size`, `threads`, `run(task)`, `warm()`, `close()`, `stats()`) runs registered kernels on

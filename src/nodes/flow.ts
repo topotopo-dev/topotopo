@@ -128,10 +128,10 @@ defineNode({
   params: {
     mode: { type: 'enum', options: ['pieces', 'count', 'points', 'prims'], default: 'pieces', desc: 'pieces = by piece_attrib (or connectivity); count = N iterations; points/prims = one element each' },
     piece_attrib: { type: 'string', default: '', desc: 'pieces: prim attribute to group by ("" = connectivity)' },
-    count: { type: 'int', default: 4, min: 0, desc: 'count mode: iterations' },
+    count: { type: 'int', default: 4, min: 0, max: 1000000, desc: 'count mode: iterations' },
     feedback: { type: 'bool', default: false, desc: 'count mode: feed each result into the next iteration (output = last)' },
     body: { type: 'graph', desc: 'subgraph {nodes, output} run per iteration' },
-    max_iterations: { type: 'int', default: 10000, min: 1, desc: 'safety limit' },
+    max_iterations: { type: 'int', default: 10000, min: 1, max: 1000000, desc: 'safety limit' },
   },
   // the body's "=expr" params read the parent vars, so they are part of the cache key
   usesVars: true,
@@ -262,7 +262,7 @@ defineNode({
     },
     start_frame: { type: 'int', default: 1, desc: 'first frame the body runs on; earlier frames output the initial geometry' },
     substeps: { type: 'int', default: 1, min: 1, max: 1000, desc: 'body runs per frame; timeInc = 1 / (fps * substeps)' },
-    max_frames: { type: 'int', default: 1000, min: 1, desc: 'safety limit: most frames simulated from start_frame' },
+    max_frames: { type: 'int', default: 1000, min: 1, max: 1000000, desc: 'safety limit: most frames simulated from start_frame' },
   },
   usesTime: true,
   // the body's "=expr" params read the parent vars

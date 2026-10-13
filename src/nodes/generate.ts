@@ -11,6 +11,9 @@ import { fractal, makeNoise } from '../core/noise.ts';
 import { FRAMES, P } from './util.ts';
 import type { PlaneName } from './util.ts';
 
+/** Most points of a point_grid (its counts multiply). */
+const MAX_GRID_POINTS = 20_000_000;
+
 // ---------------------------------------------------------------- shared builders
 
 export function makeBox(size: Vec3, center: Vec3, div: number[]): Geometry {
@@ -297,7 +300,7 @@ defineNode({
   params: {
     size: { type: 'vec3', default: [1, 1, 1], desc: 'edge lengths X Y Z (a single number = uniform)', aliases: ['scale', 'dims'] },
     center: P.center(),
-    divisions: { type: 'ivec3', default: [1, 1, 1], min: 1, desc: 'quads along X Y Z', aliases: ['divs', 'div'] },
+    divisions: { type: 'ivec3', default: [1, 1, 1], min: 1, max: 512, desc: 'quads along X Y Z', aliases: ['divs', 'div'] },
   },
   outputs: 'vertex uv',
   example: { type: 'box', params: { size: [2, 1, 1], center: [0, 0.5, 0] } },
@@ -311,7 +314,7 @@ defineNode({
   inputs: [],
   params: {
     size: { type: 'vec2', default: [4, 4], desc: 'width and depth' },
-    divisions: { type: 'ivec2', default: [10, 10], min: 1, desc: 'quads along each side', aliases: ['rows', 'cols', 'res', 'resolution'] },
+    divisions: { type: 'ivec2', default: [10, 10], min: 1, max: 2048, desc: 'quads along each side', aliases: ['rows', 'cols', 'res', 'resolution'] },
     plane: P.plane('xz'),
     center: P.center(),
   },
@@ -330,10 +333,10 @@ defineNode({
     radius: { type: 'float', default: 1, min: 0, desc: 'radius', aliases: ['rad', 'r'] },
     scale: { type: 'vec3', default: [1, 1, 1], desc: 'non-uniform scale (ellipsoid)' },
     center: P.center(),
-    rows: { type: 'int', default: 16, min: 2, desc: 'uv: latitude bands' },
-    cols: { type: 'int', default: 32, min: 3, desc: 'uv: longitude segments', aliases: ['columns', 'segments'] },
+    rows: { type: 'int', default: 16, min: 2, max: 2048, desc: 'uv: latitude bands' },
+    cols: { type: 'int', default: 32, min: 3, max: 2048, desc: 'uv: longitude segments', aliases: ['columns', 'segments'] },
     level: { type: 'int', default: 3, min: 0, max: 7, desc: 'ico: subdivision level (20*4^level triangles)', aliases: ['frequency', 'subdivisions'] },
-    divisions: { type: 'int', default: 8, min: 1, desc: 'quad: quads per cube-face edge' },
+    divisions: { type: 'int', default: 8, min: 1, max: 512, desc: 'quad: quads per cube-face edge' },
   },
   outputs: 'point N; uv (uv type)',
   example: { type: 'sphere', params: { type: 'quad', radius: 0.5, divisions: 6 } },
@@ -356,8 +359,8 @@ defineNode({
     radius: { type: 'float', default: 0.5, min: 0, desc: 'radius (both ends unless radius_top is set)', aliases: ['rad', 'r'] },
     radius_top: { type: 'float', default: -1, desc: 'top radius; -1 = same as radius; 0 = cone apex' },
     height: { type: 'float', default: 1, desc: 'length along the axis', aliases: ['h', 'length'] },
-    rows: { type: 'int', default: 1, min: 1, desc: 'segments along the axis' },
-    cols: { type: 'int', default: 24, min: 3, desc: 'segments around', aliases: ['columns', 'segments', 'sides'] },
+    rows: { type: 'int', default: 1, min: 1, max: 2048, desc: 'segments along the axis' },
+    cols: { type: 'int', default: 24, min: 3, max: 2048, desc: 'segments around', aliases: ['columns', 'segments', 'sides'] },
     caps: { type: 'bool', default: true, desc: 'close the ends with n-gons' },
     axis: { type: 'enum', options: ['y', 'x', 'z'], default: 'y', desc: 'axis direction' },
     center: P.center(),
@@ -375,8 +378,8 @@ defineNode({
   params: {
     radius: { type: 'float', default: 1, desc: 'major radius (center of tube)', aliases: ['major_radius', 'R'] },
     radius2: { type: 'float', default: 0.25, desc: 'minor radius (tube thickness)', aliases: ['minor_radius', 'tube_radius', 'r'] },
-    rows: { type: 'int', default: 16, min: 3, desc: 'segments around the tube' },
-    cols: { type: 'int', default: 48, min: 3, desc: 'segments around the ring' },
+    rows: { type: 'int', default: 16, min: 3, max: 2048, desc: 'segments around the tube' },
+    cols: { type: 'int', default: 48, min: 3, max: 2048, desc: 'segments around the ring' },
     center: P.center(),
   },
   outputs: 'vertex uv',
@@ -439,7 +442,7 @@ defineNode({
   aliases: ['lattice_points', 'points_from_volume'],
   inputs: [],
   params: {
-    counts: { type: 'ivec3', default: [5, 1, 5], min: 1, desc: 'points along X Y Z' },
+    counts: { type: 'ivec3', default: [5, 1, 5], min: 1, max: 100000, desc: 'points along X Y Z' },
     size: { type: 'vec3', default: [4, 0, 4], desc: 'extent along X Y Z' },
     center: P.center(),
     jitter: { type: 'float', default: 0, min: 0, desc: 'random offset as a fraction of the spacing' },
@@ -448,6 +451,8 @@ defineNode({
   example: { type: 'point_grid', params: { counts: [10, 1, 10], size: [9, 0, 9], jitter: 0.3, seed: 1 } },
   cook: ({ p }) => {
     const [cx, cy, cz] = p.counts;
+    // each count has a max, but not their product (R-17 N4: a huge grid ran the process out of heap)
+    if (cx * cy * cz > MAX_GRID_POINTS) throw new NodeError(`point_grid: counts [${cx}, ${cy}, ${cz}] give ${(cx * cy * cz).toLocaleString('en-US')} points, more than ${MAX_GRID_POINTS.toLocaleString('en-US')}`, 'lower the counts, or scatter points instead');
     const r = rng(p.seed);
     const pos: number[] = [];
     const sp = [0, 1, 2].map((a) => (p.counts[a] > 1 ? p.size[a] / (p.counts[a] - 1) : 0));
@@ -496,7 +501,7 @@ defineNode({
   params: {
     expr: { type: 'code', default: '[cos(t*TAU), t, sin(t*TAU)]', desc: 'JS expression (or body with return) of t (and i) returning [x,y,z]. Snippet helpers available.' },
     range: { type: 'vec2', default: [0, 1], desc: 't start and end' },
-    count: { type: 'int', default: 100, min: 2, desc: 'number of points', aliases: ['points', 'segments'] },
+    count: { type: 'int', default: 100, min: 2, max: 1000000, desc: 'number of points', aliases: ['points', 'segments'] },
     closed: { type: 'bool', default: false, desc: 'closed curve (polygon)' },
   },
   usesVars: true,
@@ -527,7 +532,7 @@ defineNode({
     expr: { type: 'code', default: '[(1+0.5*cos(v*TAU))*cos(u*TAU), 0.5*sin(v*TAU), (1+0.5*cos(v*TAU))*sin(u*TAU)]', desc: 'JS expression of u, v returning [x,y,z]' },
     u_range: { type: 'vec2', default: [0, 1], desc: 'u start/end' },
     v_range: { type: 'vec2', default: [0, 1], desc: 'v start/end' },
-    divisions: { type: 'ivec2', default: [48, 24], min: 1, desc: 'quads along u and v' },
+    divisions: { type: 'ivec2', default: [48, 24], min: 1, max: 2048, desc: 'quads along u and v' },
     wrap_u: { type: 'bool', default: false, desc: 'u is periodic: join last column to first (no seam)' },
     wrap_v: { type: 'bool', default: false, desc: 'v is periodic' },
     flip: { type: 'bool', default: false, desc: 'reverse face winding' },
@@ -573,7 +578,7 @@ defineNode({
   inputs: [],
   params: {
     size: { type: 'vec2', default: [20, 20], desc: 'extent in X and Z' },
-    divisions: { type: 'ivec2', default: [128, 128], min: 1, desc: 'grid resolution (quads)', aliases: ['resolution', 'res'] },
+    divisions: { type: 'ivec2', default: [128, 128], min: 1, max: 2048, desc: 'grid resolution (quads)', aliases: ['resolution', 'res'] },
     height: { type: 'float', default: 3, desc: 'vertical scale (amplitude)', aliases: ['amplitude', 'amp'] },
     frequency: { type: 'float', default: 0.12, desc: 'base noise frequency (features per unit)', aliases: ['freq'] },
     noise: { type: 'enum', options: ['perlin', 'simplex', 'value', 'worley'], default: 'simplex', desc: 'base noise' },

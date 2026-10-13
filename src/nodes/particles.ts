@@ -18,9 +18,21 @@ import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
 import { stableStringify } from '../graph/engine.ts';
 import { evalSdf } from './sdf.ts';
+import { simBudget } from './util.ts';
 
 /** Particle-steps below which a run stays on the cooking thread. */
 const POOL_WORK = 200_000;
+/** Particle-steps of one batch at most (about 0.2–5 s of work on one thread): the time limit is checked between batches. */
+const BATCH_WORK = 10_000_000;
+
+/**
+ * Steps of a batch that starts with `live` particles and gains up to `perStep` births a step: the largest k with
+ * (live + perStep·k)·k ≤ BATCH_WORK, at least 1. An upper bound of the work (particles also die), so batches err short.
+ */
+function batchSteps(live: number, perStep: number): number {
+  if (perStep <= 0) return Math.max(1, Math.floor(BATCH_WORK / Math.max(1, live)));
+  return Math.max(1, Math.floor((Math.sqrt(live * live + 4 * perStep * BATCH_WORK) - live) / (2 * perStep)));
+}
 
 // Inputs are cooked, immutable geometry: what the simulation derives from them is kept per geometry object.
 const emitterMemo = new WeakMap<Geometry, EmitterData>();
@@ -166,7 +178,7 @@ defineNode({
     field_max_distance: { type: 'float', default: 0, min: 0, desc: 'points field: ignore points farther than this (0 = unlimited)' },
     field_resolution: { type: 'int', default: 64, min: 4, max: 256, desc: 'SDF field: samples along the longest side of the grid the distance is sampled on', advanced: true },
     seed: { type: 'float', default: 0, desc: 'random seed (emission phases, birth offsets, lifetimes, velocities, noise)' },
-    max_particles: { type: 'int', default: 1000000, min: 0, desc: 'births are refused while this many particles hold a slot (from birth to the end of their life)' },
+    max_particles: { type: 'int', default: 1000000, min: 0, max: 50000000, desc: 'births are refused while this many particles hold a slot (from birth to the end of their life)' },
     max_births: { type: 'int', default: 1000000, min: 1, max: 10000000, desc: 'guard: most particles born in one step (the rest of the step\'s births are refused, with a warning). Steps are also simulated in batches of about this many births, so memory stays bounded however many particles are born and die over a run (the result does not depend on it otherwise)' },
     trails: { type: 'int', default: 0, min: 0, max: 10000, desc: 'positions kept per particle and output as a polyline (0 = no trails; 2 or more)', aliases: ['trail_length'] },
     output: { type: 'enum', options: ['both', 'points', 'trails'], default: 'both', desc: 'points (the particles), trails (one polyline per particle) or both (points first; no trails when trails < 2)' },
@@ -210,13 +222,18 @@ defineNode({
     if (p.drag <= 0 && base.fieldAir && ctx.hasInput(2)) warn('field_mode "air" acts through drag, which is 0: the field has no effect (set drag > 0 or field_mode "force")');
 
     let contacts = 0, simulated = 0, batches = 0;
+    // the wall-clock limit of long-running nodes, checked between batches
+    const budget = simBudget(ctx, 'fewer steps or substeps, a lower emit_rate or a shorter life, or fewer emitter points; or raise the limit');
     /**
-     * Run steps [s0, s1) after `state` (null = the start) with the inputs `prep`: in batches that end where the births
-     * reach max_births (emitSteps), so a run never holds more births at once; same result as one batch.
+     * Run steps [s0, s1) after `state` (null = the start) with the inputs `prep`, in batches (same result as one run):
+     * one ends where its births reach max_births (emitSteps), so a run never holds more births at once, and after
+     * about BATCH_WORK particle-steps, so the time limit is checked every few seconds of work.
      */
     const advance = async (state: Geometry | null, s0: number, s1: number, prep: Prepared): Promise<Geometry> => {
+      const perStep = Math.min(ep.maxBirths, Math.ceil(ep.rate) * prep.emitter.count);
       for (;;) {
-        const { geo: st, end } = emitSteps(state, prep.emitter, s0, s1, ep);
+        budget.check();
+        const { geo: st, end } = emitSteps(state, prep.emitter, s0, Math.min(s1, s0 + batchSteps(state ? state.numPoints : 0, perStep)), ep);
         batches++;
         state = await integrate(st, s0, end, prep);
         if (end >= s1) return state;

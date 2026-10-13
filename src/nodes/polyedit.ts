@@ -439,7 +439,7 @@ defineNode({
   params: {
     mode: { type: 'enum', options: ['quads', 'grid', 'triangles', 'single'], default: 'quads', desc: 'quads = quad fan / paired quads; grid = Coons quad grid (even loops); triangles = ear clipping; single = one n-gon', aliases: ['fill_mode', 'fillmode'] },
     group: P.group('point', 'only loops touching these points ("" = every boundary loop)'),
-    max_edges: { type: 'int', default: 0, min: 0, desc: 'skip loops with more edges than this (0 = no limit)', aliases: ['max_size'] },
+    max_edges: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'skip loops with more edges than this (0 = no limit)', aliases: ['max_size'] },
     smooth_iterations: { type: 'int', default: 10, min: 0, max: 1000, desc: 'Laplacian relaxation steps for interior points', aliases: ['smooth', 'iterations', 'relax'] },
   },
   outputs: 'prim group fill',

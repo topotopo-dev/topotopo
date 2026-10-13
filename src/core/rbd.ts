@@ -716,8 +716,11 @@ export class RbdSim {
     this.topY = Math.max(this.topY, st.t[1] + b.extent);
   }
 
-  /** Step until `target` steps were taken in total, or the pieces have settled. */
-  advance(target: number): void {
+  /**
+   * Step until `target` steps were taken in total, or the pieces have settled. `budget` is called every few steps and
+   * may throw to stop the simulation (the caller's time limit; the world stays valid and can be advanced again).
+   */
+  advance(target: number, budget?: () => void): void {
     const o = this.o;
     const limit = Math.min(target, o.maxSteps);
     const interval = o.stack ? Math.max(1, Math.round(o.stack.interval)) : 1;
@@ -726,7 +729,7 @@ export class RbdSim {
       this.world.step();
       this.step++;
       if (this.step === 1 && !o.stack) this.startOverlaps = this.countOverlaps();
-      if (this.step % CHECK === 0) this.check();
+      if (this.step % CHECK === 0) { this.check(); if (!this.done) budget?.(); }
     }
     if (!this.done && this.step >= o.maxSteps) { this.done = true; this.reason = 'steps'; }
     if (!this.done) this.reason = 'frame';
