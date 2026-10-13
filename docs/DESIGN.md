@@ -283,7 +283,9 @@ host (`Host.compile`), which has the snippet library installed. In the Node host
 `DONT_CONTEXTIFY` (an ordinary global object, so global lookups in hot loops stay fast) and
 `microtaskMode: 'afterEvaluate'`: the realm has its own microtask queue, drained at the end of every `runInContext`
 call and inside that call's timeout.
-- `runGuarded(fn, ms)` runs synchronous code (wrangles, SDF and parametric expressions) in a timed call.
+- `runGuarded(fn, ms)` runs synchronous code (wrangles, parametric expressions, `heightfield_layer` expressions over a
+  whole layer, the `sdf_expr` probe at the origin) in a timed call. Code pasted into a wrapper function is parsed on
+  its own first (`Host.checkSyntax`), so it cannot close the wrapper and run while compiling, outside the timeout.
 - `runGuardedAsync(fn, ms)` runs the `script` node. Its synchronous part and every continuation queued inside the
   realm (`await 0`, `await` on a realm promise) run in the first timed call, so `await 0; while (true) {}` is stopped
   like a synchronous loop. With the default shared microtask queue, continuations ran after `runInContext` had
@@ -395,7 +397,9 @@ optionally more chunks per worker for uneven work (rays). `selftest.*` kernels e
 cold pool it runs the kernel once over all elements, synchronously, on the node's own arrays (the result is not a
 promise, so a node using it stays synchronous). Otherwise inputs, `outputs` (copied in, so skipped elements keep their
 values) and `results` (fresh arrays: zeroed) are copied once into SharedArrayBuffers, the range is split into
-contiguous chunks (default one per thread), and when every chunk has finished the outputs are copied back. The error of
+contiguous chunks (default one per thread), and when every chunk has finished the outputs are copied back. Inputs and
+results that already live in a SharedArrayBuffer are handed over as they are (results written in place), for large
+arrays that go through several jobs (the density-mask elimination's pairs and neighbour lists). The error of
 the first failing chunk in element order is the node's error. `Engine.poolStats` counts pool and serial runs.
 `TOPOTOPO_POOL_MIN` overrides every threshold (`1` forces the pool: `npm run test:pool` runs the golden layer so).
 
@@ -410,7 +414,7 @@ What runs in chunks:
 | `bake_normal`, `bake_height` (and the ray / curvature bakes with a high-res input) | `bake_project`: one cage ray per sample into the high-res BVH, plus its point normals | |
 | `bake_curvature` | `bake_curvature`: the edges near each sample | edges and their uniform grid shared |
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
-| `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists, conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
+| `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_elim_lists`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists (with a density mask: the pairs, then each candidate's list and weight from them), conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
 
 Not in chunks, and why:
 - `heightfield_erode`: droplets run one after another over the terrain the previous ones left; a split would change
@@ -537,8 +541,10 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
   cooks are deterministic, and the content-addressed cache gives the same result after a param is changed and
   restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line; hostile
   `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on; since R-11
-  they run in the host's vm sandbox with a timeout (`heightfield_layer` expressions and the `sdf_expr` probe still
-  run unguarded: open).
+  they run in the host's vm sandbox with a timeout. Since R-12 the code params of `heightfield_layer` and `sdf_expr`
+  run under the script timeout too (loops, also after an await or in a thrown object's message getter, and wrapper
+  escapes are fuzzed with the pool off and on); an `sdf_expr` volume sampled later (`sdf_to_mesh`, the grid nodes)
+  still runs without a time limit.
 - **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
 - **Examples**: every `NodeDef` carries an `example` (a node spec or a small graph, shown by `help` and in the node
   reference) and `test/examples.ts` cooks each one: node specs on the node's fixture inputs, graphs as written.
@@ -603,7 +609,7 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   3 s target), singularity cleanup and quads-only density; a dual-contouring quality pass (edge serration, adaptive
   extraction, speed).
 - Performance follow-ups: done (scatter on the pool, one-pass point normals, SAH BVH with a `-0` ray-direction fix,
-  relaxed scatter ≈ 1.2 s per 100k); still open: the density-mask neighbour rebuild on the main thread, the AO bake
+  relaxed scatter ≈ 1.2 s per 100k, the density-mask neighbour rebuild since R-12); still open: the AO bake
   (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
 - Packed primitives: packed disk references (Houdini packed disk prims), USD variants and per-frame layers, and
   instanced rendering in the rasteriser (it draws expanded copies within a triangle budget).

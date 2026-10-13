@@ -19,6 +19,7 @@ import { createNodePool, poolOptionsFromEnv, workersFromEnv } from '../src/host/
 import { parallelMap } from '../src/graph/parallel.ts';
 import { GEOMETRY_FUNCTIONS } from '../src/core/snippet-lib.ts';
 import { Geometry } from '../src/core/geometry.ts';
+import { rng } from '../src/core/random.ts';
 import { fingerprint } from './fingerprint.ts';
 import { ROOT } from './fixtures.ts';
 
@@ -210,6 +211,30 @@ section('ported nodes: pool on = pool off, bit for bit');
     nodes: { h: { type: 'heightfield', params: { size: [30, 30], resolution: 0.5 } }, n: { type: 'heightfield_noise', in: ['h'], params: { amplitude: 3 } }, s: { type: 'heightfield_scatter', in: ['n'], params: { count: 2000, mask_layer: '', sample: 'unreal_triangles' } } },
     output: 's',
   }, { expectParallel: true });
+  {
+    // R-12: the density-mask neighbour rebuild (scatter_elim_lists) in chunks on the pool, results in ordinary and in
+    // shared memory (written in place), = the serial loop it replaced, bit for bit
+    const n = 5000, r = rng(7), pc = new Int32Array(n), PJl: number[] = [], PFl: number[] = [];
+    for (let i = 0; i < n; i++) for (let k = Math.floor(r() * 12); k > 0; k--) { const j = Math.floor(r() * n); if (j !== i) { PJl.push(j); PFl.push(r()); pc[i]++; } }
+    const PJ = Int32Array.from(PJl), PF = Float64Array.from(PFl), m = 2 * PJ.length;
+    const w0 = new Float64Array(n), deg = new Int32Array(n);
+    for (let i = 0, q = 0; i < n; i++) for (let k = pc[i]; k > 0; k--, q++) { const j = PJ[q], f = PF[q]; w0[i] += f; w0[j] += f; deg[i]++; deg[j]++; }
+    const s0 = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) s0[i + 1] = s0[i] + deg[i];
+    const nbr0 = new Int32Array(m), con0 = new Float64Array(m), fill = s0.slice(0, n);
+    for (let i = 0, q = 0; i < n; i++) for (let k = pc[i]; k > 0; k--, q++) { const j = PJ[q], f = PF[q]; nbr0[fill[i]] = j; con0[fill[i]++] = f; nbr0[fill[j]] = i; con0[fill[j]++] = f; }
+    const pstart = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) pstart[i + 1] = pstart[i] + pc[i];
+    const eq = (x: ArrayLike<number>, y: ArrayLike<number>) => x.length === y.length && Array.prototype.every.call(x, (v: number, i: number) => Object.is(v, y[i]));
+    for (const shared of [false, true]) {
+      const mk = <T>(C: any, len: number): T => (shared ? new C(new SharedArrayBuffer(len * C.BYTES_PER_ELEMENT)) : new C(len));
+      const res = { lstart: mk<Int32Array>(Int32Array, n + 1), nbr: mk<Int32Array>(Int32Array, m), con: mk<Float64Array>(Float64Array, m), w: mk<Float64Array>(Float64Array, n) };
+      const run: any = await parallelMap(on.host.pool, 'scatter_elim_lists', { count: n, inputs: { PJ, PF, pstart }, results: res });
+      res.lstart[n] = m;
+      check(run.parallel && run.chunks === 4 && eq(res.lstart, s0) && eq(res.nbr, nbr0) && eq(res.con, con0) && eq(res.w, w0),
+        `scatter_elim_lists: ${run.chunks} chunks on the pool = the serial neighbour rebuild, bit for bit (${PJ.length} pairs, results in ${shared ? 'shared memory, written in place' : 'ordinary arrays'})`);
+    }
+  }
   const w = (code: string, extra: any = {}) => ({ nodes: { g: grid, w: { type: 'wrangle', in: ['g'], params: { code, ...extra } } }, output: 'w' });
   await same('wrangle (bench snippet)', w('@P.y += sin(@P.x * 3) * 0.1;\n@Cd = [@P.x, @P.y, 0.5];'), { expectParallel: true });
   await same('wrangle with noise, rand, groups, typed new attributes', w('f@h = noise(mul(@P, 2));\n@group_top = @P.y + @h > 0.1;\n@pscale = rand(@ptnum) * 0.5;\ni@k = @ptnum % 7;\nif (@P.x > 1) return;\n@P.z += fit(@h, -1, 1, 0, 0.2);'), { expectParallel: true });
