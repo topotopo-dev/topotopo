@@ -261,6 +261,54 @@ UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes 
   heightmap + every layer + landscape.json (the exact Landscape import settings and steps) + objects.glb + the instance
   stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). examples/unreal_demo.json is a complete scene.`,
 
+  textures: `PROCEDURAL TEXTURES AND BAKES (Substance Designer / Houdini COP style; category "texture")
+An image is a volume carried in the geometry (like a heightfield): a 2D grid of float pixels with named layers of 1
+(grey) or 4 (RGBA) channels. Layer "C" is the image; nodes add others ("id" per-cell random, "mask" bake coverage,
+"convex"/"concave" curvature, "distance" heights). Pixel (i, j): column i, row j from the TOP; uv (0,0) = bottom-left.
+Values are written to PNG as value × 255 with no transfer curve: colours hold the numbers colour params give
+("#a5462e" → 0.65, 0.27, 0.18), so files match the colours you typed; data maps (heights, masks, roughness, normals)
+are linear. Images merge, clone and cache like geometry; materials reference them as "image:<name>".
+GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/worley × fbm/ridged/turbulence,
+  tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
+  hex, dots, grid; gap = mortar, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance / edges /
+  id / crackle) · tex_gradient · tex_shape (disc, square, polygon, star, ring; falloff; tile) · tex_splatter (blobs) ·
+  tex_scratches (strokes) · tex_text.
+FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer; name renames; every
+  other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min, max,
+  difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable
+  keeps the mean) · tex_warp (directional/slope/vector by input 1) · tex_transform (offset, rotate, scale, tile) ·
+  tex_edge_detect · tex_invert · tex_threshold · tex_histogram_scan (position + contrast: THE mask maker) ·
+  tex_normal_from_height (Sobel; strength 1 = 45° for a rise of 1 over 1/64 width; opengl/directx) ·
+  tex_height_to_ao · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or extract) ·
+  tex_tile_sampler (stamp input 0 on a grid with jitter/rotation/scale; mask input 1) · tex_output (rename, or copy a
+  layer out as a new image: {name:"brick_ids", layer:"id"}; keep_only drops the rest).
+  To process a layer as its own image, copy it out first (tex_output layer:"id") and filter that.
+  Inputs of different sizes are resized to the first input (bilinear up, area average down).
+BAKES (input 0 = mesh with non-overlapping uv in 0..1: uv_unwrap; input 1 = optional high-res mesh): bake_ao
+  (samples, max_distance; white = open), bake_curvature (edges' dihedral angles within radius: 0.5 flat, bright convex,
+  dark concave; layers convex/concave), bake_thickness, bake_position (bbox/uniform/world), bake_world_normal,
+  bake_normal (tangent space from the high mesh along averaged-normal cage rays; cage distance), bake_height (high above
+  low; layer distance in metres), bake_island_id (colour per uv island, layer id, stat islands), bake_mask
+  (mask_group or a numeric attribute), bake_vertex_color (Cd + Alpha). Shared: resolution (default 1024), supersample
+  (1..4), padding (texels of edge dilation, default 4), group (prims to bake), keep_mesh (output the mesh too).
+  Rays and curvature run on the worker pool. The output is only the image unless keep_mesh.
+MATERIALS: texture_to_material {material, base_color, normal, roughness, metallic, occlusion, orm} on input 0 (mesh
+  with uv) + input 1 (merged images): writes "image:<name>" slots into the material table, assigns the material (all
+  prims when new, else group) and carries the images. occlusion/metallic images are packed into "<material>_orm".
+  The material node's *_map paths accept "image:<name>" as well.
+SEE IT: render of a geometry holding only images shows the "texture" view; render {texture:"<image>"|"image/layer"|
+  "<material>"} adds the view (a material shows its maps as a labelled strip); render {textures:true} samples base
+  colour maps on the mesh (texture × Cd, like glTF). inspect lists every image with size and per-layer ranges.
+EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metallicRoughnessTexture); usda writes
+  <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
+  <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
+RECIPE (brick wall + worn crate: examples/textures.json):
+  bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {name:"ids", layer:"id"}
+  color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)
+  normal = tex_normal_from_height(bricks) · crate: uv_unwrap → bake_ao + bake_curvature → tex_output layer "convex"
+  → tex_blend subtract noise → tex_histogram_scan = edge wear → tex_blend(wood, paint, wear) → tex_channel(ao, rough)
+  = ORM → texture_to_material {base_color, orm}.`,
+
   loops: `FOREACH LOOPS
 {"type": "foreach", "in": ["lots"], "params": {"mode": "prims", "body": {
    "nodes": {
@@ -429,8 +477,10 @@ Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
 overlays and notes pieces, open edges and back-facing % (also returned as text notes).
 VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
-  persp, front, back, left, right, top, bottom, uv, section, persp@<azimuth>. azimuth/elevation/zoom, look_at [x,y,z],
+  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>. azimuth/elevation/zoom, look_at [x,y,z],
   ortho_scale (world width of ortho views), size (pixels per view), scale 2 (a 2× image).
+  "texture" draws images flat (texture:"<image>" | "image/layer" | "<material>" picks; a geometry holding only images
+  renders as it by default); textures:true shows base colour maps on the mesh. Help topic "textures".
 QUESTION → OPTION
   How dense / clean is the topology? Where are the triangles, poles, slivers?  wireframe:"all" (every edge, 1 px)
   Which edges are creases?                         wireframe:"hard" (dihedral > hard_angle, default 30) + crease/hard/sharp edge groups
@@ -462,6 +512,7 @@ export {path:"exports/thing.glb"} — format from the extension:
   csv           point stream, one row per point: P.x,P.y,P.z,N.x,…,pscale,name (strings quoted); prims are ignored
   points.json   {format:"polyforge-points", count, attributes:{P:{type,size,data}}} (same schema on import)
   obj usda ply stl json (lossless polyforge)
+  textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
@@ -480,6 +531,9 @@ TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths r
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
   map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
   keep the paths in the material table. glTF import records texture paths (or "embedded:<name>") without decoding.
+  "image:<name>" textures (texture_to_material, texture nodes) are image volumes of the geometry: glb/gltf encode them
+  to PNG in memory, usda writes <name>_textures/<image>.png next to the .usda, format "textures" writes every image as
+  PNG into a folder (layers: extra layers); an orm map becomes glTF's occlusion + metallicRoughness texture. Topic "textures".
   USD materials: UsdPreviewSurface per table entry under /root/materials, bound per mesh or per GeomSubset.
 UNREAL: import the GLB (Interchange): meshes, materials and vertex colours. PCG points: export csv with pcg:true
   (Name, Position.X/Y/Z, Rotation.Roll/Pitch/Yaw, Scale.X/Y/Z, Density, Color.R/G/B/A, Seed, then other attributes).

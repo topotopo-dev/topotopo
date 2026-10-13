@@ -38,11 +38,11 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   const pts = pick('points');
   if (pts !== undefined) o.points = pts === 'auto' ? 'auto' : bool(pts);
   for (const [s, c] of [['point_numbers', 'pointNumbers'], ['prim_numbers', 'primNumbers'], ['label_groups', 'labelGroups'], ['label_pieces', 'labelPieces'],
-    ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute']] as const) {
+    ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute'], ['textures', 'textures']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = bool(v);
   }
-  for (const [s, c] of [['color_by', 'colorBy'], ['label_attrib', 'labelAttrib'], ['glyph_attrib', 'glyphAttrib'], ['glyphs', 'glyphs'], ['shading', 'shading'], ['title', 'title']] as const) {
+  for (const [s, c] of [['color_by', 'colorBy'], ['label_attrib', 'labelAttrib'], ['glyph_attrib', 'glyphAttrib'], ['glyphs', 'glyphs'], ['shading', 'shading'], ['title', 'title'], ['texture', 'texture']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = String(v);
   }
@@ -56,6 +56,11 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
     o.sectionAxis = p.axis; o.sectionOffset = p.offset; o.sectionAbsolute = p.absolute;
     if (!o.views) o.views = ['persp', 'section'];
     else if (!o.views.includes('section')) o.views = [...o.views, 'section'];
+  }
+  // texture: "<image>" | "<material>" | "image/layer" names what the texture view shows (and adds the view)
+  if (typeof a.texture === 'string') {
+    if (!o.views) o.views = ['texture'];
+    else if (!o.views.includes('texture')) o.views = [...o.views, 'texture'];
   }
   const cl = a.clip;
   if (typeof cl === 'string' && cl) o.clip = parsePlane(cl, 'clip');

@@ -1,0 +1,58 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["chart:int:1", "material:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "5e7fa92eda54cd74",
+      "attributes": {
+        "detail.materials": "9d906a346969774a",
+        "prim.chart": "1f5b0105473520df",
+        "prim.material": "f9cdd335f6ed360f",
+        "vertex.uv": "58f9c5f57ff01167"
+      },
+      "topology": "211195f53fcdbf2f"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "7d10b478116f1ae2"
+        },
+        "name": "noise"
+      }
+    ]
+  },
+  "name": "node.texture_to_material",
+  "ok": true,
+  "source": "fixture for node type \"texture_to_material\" (test/fixtures.ts)",
+  "warnings": []
+}

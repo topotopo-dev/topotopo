@@ -116,7 +116,7 @@ function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
 }
 
 const RENDER_PROPS = {
-  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), "turntable" (persp at azimuth 0/90/180/270), a single view, or a list of persp/front/back/left/right/top/bottom/uv/section/persp@<azimuth>. "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red. "section" slices along section_axis and looks along it: the cut filled red (blue = inside-out solid), open sheets as yellow lines, the far half ghosted', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), "turntable" (persp at azimuth 0/90/180/270), a single view, or a list of persp/front/back/left/right/top/bottom/uv/section/texture/persp@<azimuth>. "texture" draws images flat (see texture). "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red. "section" slices along section_axis and looks along it: the cut filled red (blue = inside-out solid), open sheets as yellow lines, the far half ghosted', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
   checker: { type: 'boolean', description: 'shade 3D views with an 8×8 uv checker (light cells tinted red along u, green along v) to see stretch, seams and flips' },
   size: { type: 'number', description: 'pixels per view tile (default 512 for multi-view, 800 single); scale 2 doubles it' },
   color_by: { type: 'string', description: 'colour by attribute (e.g. "height", "class", "N", "P.y"); ints/strings get categorical colours' },
@@ -153,6 +153,8 @@ const RENDER_PROPS = {
   ortho_scale: { type: 'number', description: 'ortho/section views: world width across a view (default: fit the bbox)' },
   scale: { type: 'number', description: '2 (up to 4) for a 2× image: tiles, text, lines and markers scaled' },
   annotate: { type: 'boolean', description: 'second footer line naming the active overlays plus geometry notes (pieces, open edges, back-facing %); default on whenever an overlay option is used' },
+  textures: { type: 'boolean', description: '3D views show the base colour maps of materials with image textures (texture_to_material; needs uv); texture × Cd like glTF' },
+  texture: { type: 'string', description: 'adds the "texture" view and picks what it shows: an image name, "image/layer", or a material name (its maps as a labelled strip); "" = every image. A geometry holding only images renders as the texture view by default' },
 };
 
 export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<string> } = {}): ToolDef[] {
@@ -323,16 +325,16 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless polyforge). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream).',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless polyforge). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]).',
       inputSchema: {
         type: 'object',
         required: ['path'],
         properties: {
           graph: { type: 'string' }, node: { type: 'string' },
-          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap), "exports/level" (unreal_landscape: a directory)' },
+          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap), "exports/level" (unreal_landscape: a directory), "exports/maps" (textures: a directory)' },
           format: { type: 'string', enum: EXPORT_FORMATS, description: 'default: from the extension (.points.json = pointsjson)' },
           layer: { type: 'string', description: 'heightmaps: layer to write (png16/r16 default "height", mask_png default "mask")' },
-          layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png)' },
+          layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png); textures: extra image layers to write as <image>_<layer>.png ("*" = all)' },
           height_min: { type: 'number', description: 'png16/r16: fixed range start (default: the layer minimum), e.g. shared by tiles' },
           height_max: { type: 'number', description: 'png16/r16: fixed range end (default: the layer maximum)' },
           heightfield: { type: 'number', description: 'heightmaps: which heightfield when there are several (index, default 0)' },

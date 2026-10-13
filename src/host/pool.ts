@@ -127,7 +127,11 @@ class NodeWorkerPool implements WorkerPool {
     this.slots = [];
     this.broken = null;
     this.startFailures = 0;
-    await Promise.all(exits);
+    // idle (unref'd) and still-starting workers do not keep the event loop alive until their exit events: without this
+    // timer an awaited close() could stay pending while the loop drained, and a top-level `await pool.close()` (the CLI)
+    // ended the process with exit code 13 (unsettled top-level await)
+    const keep = setInterval(() => {}, 1000);
+    try { await Promise.all(exits); } finally { clearInterval(keep); }
   }
 
   // ------------------------------------------------------------ scheduling

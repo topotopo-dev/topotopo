@@ -1,0 +1,51 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "ebd822f54edb28d7",
+          "id": "ea601df5b7b09d7f"
+        },
+        "name": "pattern"
+      }
+    ]
+  },
+  "name": "node.tex_pattern",
+  "ok": true,
+  "source": "fixture for node type \"tex_pattern\" (test/fixtures.ts)",
+  "warnings": []
+}

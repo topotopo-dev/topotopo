@@ -46,11 +46,13 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
+    '                          [--textures] (base colour maps on meshes) [--texture name|image/layer|material] (adds the texture view)',
     '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
     '                         [--instances rows|expand] [--no-meshes] (csv/points.json of packed instances: one row per instance + meshes sidecar + GLBs)',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json; heightfields .png (png16) .r16,',
-    '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle for Unreal Landscape)',
+    '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle for Unreal Landscape);',
+    '                       images: --format textures --export out/maps (one PNG per image; --layers a,b or * for extra layers)',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     '       node src/cli.ts --catalog | --help-node <type>',
   ].join('\n'));
@@ -113,8 +115,8 @@ function renderFlags(): RenderOptions {
   for (const [f, k] of [['--wireframe', 'wireframe'], ['--hard-angle', 'hard_angle'], ['--section', 'section'], ['--clip', 'clip'], ['--glyphs', 'glyphs'],
     ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
     ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
-    ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale']]) if (opt(f) !== undefined) a[k] = opt(f);
-  for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate']]) if (argv.includes(f)) a[k] = true;
+    ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture']]) if (opt(f) !== undefined) a[k] = opt(f);
+  for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures']]) if (argv.includes(f)) a[k] = true;
   try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
 }
 
@@ -127,6 +129,7 @@ async function writeOutputs(r: CookReport, frame?: number) {
     const v = opt('--views');
     let views = v === undefined || v === 'quad' ? undefined : parseViews(v);
     if (opt('--section') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('section') ? views : [...(views ?? parseViews('quad')!), 'section'];
+    if (opt('--texture') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('texture') ? views : [...(views ?? parseViews('quad')!), 'texture'];
     const title = path.basename(file, '.json') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
     const img = renderGeometry(geo, { ...ro, views, colorBy: opt('--color-by') ?? null, checker: argv.includes('--checker'), title });
     const p = at(out);

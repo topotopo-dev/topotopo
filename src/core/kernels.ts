@@ -12,6 +12,10 @@
 import { fractal, makeCurl, makeNoise } from './noise.ts';
 import type { FractalOpts } from './noise.ts';
 import { RayScene, rayMeasure } from './analysis.ts';
+import { cellsRange, noiseRange } from './texture.ts';
+import type { CellsJob, NoiseJob } from './texture.ts';
+import { curvatureRange, projectRange } from './bake.ts';
+import type { CurvatureArgs, ProjectArgs } from './bake.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -95,6 +99,38 @@ const occlusion: Kernel = {
   },
 };
 
+// ---------------------------------------------------------------- textures (src/nodes/texture.ts, src/nodes/bake.ts)
+// Bakes also use "occlusion" above (ao, thickness): one sample per covered texel instead of one per point.
+
+/** tex_noise: fractal noise per pixel (C). */
+const texNoiseK: Kernel = {
+  minElements: 65536,
+  run(a: NoiseJob, A, start, end) { noiseRange(a, A.C, start, end); },
+};
+
+/** tex_cells: Voronoi cells per pixel (C and id). */
+const texCellsK: Kernel = {
+  minElements: 65536,
+  run(a: CellsJob, A, start, end) { cellsRange(a, A.C, A.id, start, end); },
+};
+
+/** bake_height / bake_normal: one ray per texel from the low mesh into a high-res mesh shared as BVH arrays (+ its point normals HN). */
+const bakeProject: Kernel = {
+  minElements: 16384,
+  chunksPerWorker: 4,
+  run(a: ProjectArgs, A, start, end, ctx) {
+    const scene = ctx.memo('rayscene:' + ctx.sharedKey, () => RayScene.fromArrays(A as any));
+    projectRange(a, A, scene, start, end);
+  },
+};
+
+/** bake_curvature: dihedral angles of the edges near each texel sample (edges and their grid shared). */
+const bakeCurvature: Kernel = {
+  minElements: 16384,
+  chunksPerWorker: 2,
+  run(a: CurvatureArgs, A, start, end) { curvatureRange(a, A, start, end); },
+};
+
 // ---------------------------------------------------------------- self tests (test/pool.ts)
 
 /** x[i] *= factor over the range; returns the sum of the scaled values (round trips, transfer, parallelMap). */
@@ -145,6 +181,10 @@ export const KERNELS: Record<string, Kernel> = {
   noise_displace: noiseDisplace,
   attrib_noise: attribNoise,
   occlusion,
+  tex_noise: texNoiseK,
+  tex_cells: texCellsK,
+  bake_project: bakeProject,
+  bake_curvature: bakeCurvature,
   'selftest.scale': selftestScale,
   'selftest.square': selftestSquare,
   'selftest.throw': selftestThrow,
