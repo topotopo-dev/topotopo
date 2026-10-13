@@ -91,7 +91,7 @@ export function defaultValueFor(name: string, size: number, type: AttribType): n
   const ones = (n: number) => new Array(n).fill(1);
   switch (name) {
     case 'Cd': case 'scale': return ones(size);
-    case 'Alpha': case 'pscale': case 'density': case 'mass': case 'Pw': return ones(size);
+    case 'Alpha': case 'pscale': case 'density': case 'mass': case 'Pw': case 'active': return ones(size);
     case 'orient': case 'rot': return size === 4 ? [0, 0, 0, 1] : new Array(size).fill(0);
     case 'up': return size === 3 ? [0, 1, 0] : new Array(size).fill(0);
     default: return new Array(size).fill(0);

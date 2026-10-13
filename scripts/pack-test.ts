@@ -9,7 +9,8 @@
 //   temp project with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
 //   kernels loaded from the installed kernels/pkg, and the house walls come from the installed shelf).
 // - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the shelf, the bundled
-//   font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location.
+//   font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location, and
+//   rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
 // - The MCP server over stdio as a client starts it (`npm exec --no -- topotopo mcp --workspace …`, which is what
 //   `npx -y topotopo mcp` runs once the package is installed): catalog, a build that uses sdf_grid, and the preview
 //   page with three.js served from the installed dependencies.
@@ -106,6 +107,7 @@ import { createNodeHost, SHELF_DIR } from './node_modules/${NAME}/dist/host/node
 import { createNodePool } from './node_modules/${NAME}/dist/host/pool.js';
 import { kernelsWasmURL, kernelsWasmVariant, getLoadedKernels } from './node_modules/${NAME}/dist/wasm/kernels.js';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 const out = { version: meta.version, nodes: allNodeDefs().length, shelf: SHELF_DIR, wasm: fileURLToPath(kernelsWasmURL), variant: kernelsWasmVariant };
 const host = createNodeHost({ workers: 0 });
 out.font = host.findFont();
@@ -121,6 +123,9 @@ out.poolTasks = engine.host.pool.stats().tasks;
 const sdf = await engine.cook({ nodes: { b: { type: 'box' }, g: { type: 'sdf_grid', in: ['b'], params: { voxel_size: 0.1 } }, m: { type: 'grid_to_mesh', in: ['g'] } }, output: 'm' });
 out.sdf = sdf.ok ? sdf.geo.numPrims : sdf.errors.map((e) => e.message).join('; ');
 out.kernelsLoaded = !!getLoadedKernels();
+const rbd = await engine.cook({ nodes: { b: { type: 'box', params: { size: [0.5, 0.5, 0.5], center: [0, 2, 0] } }, s: { type: 'rbd_settle', in: ['b'] } }, output: 's' });
+out.rbd = rbd.ok ? rbd.geo.bbox().min[1] : rbd.errors.map((e) => e.message).join('; ');
+out.rapier = createRequire(import.meta.resolve('${NAME}')).resolve('@dimforge/rapier3d-compat');
 await engine.host.pool.close();
 console.log(JSON.stringify(out));
 `);
@@ -135,6 +140,8 @@ console.log(JSON.stringify(out));
   check(lib.poolResult === '2,4,6', `worker pool runs dist/host/worker.js (selftest ${lib.poolResult})`);
   check(typeof lib.wrangle === 'number' && lib.poolTasks > 0, `wrangle on the pool: ${lib.wrangle} points, ${lib.poolTasks} pool task(s)`);
   check(typeof lib.sdf === 'number' && lib.sdf > 0 && lib.kernelsLoaded, `sdf_grid + grid_to_mesh in the WASM kernels: ${lib.sdf} prims`);
+  check(typeof lib.rbd === 'number' && Math.abs(lib.rbd) < 0.005, `rbd_settle drops a box onto the ground (bottom at ${typeof lib.rbd === 'number' ? lib.rbd.toFixed(4) : lib.rbd})`);
+  check(typeof lib.rapier === 'string' && path.resolve(lib.rapier).toLowerCase().startsWith(path.join(app, 'node_modules', '@dimforge').toLowerCase()), `Rapier resolves from the installed dependencies (${lib.rapier && path.relative(app, lib.rapier)})`);
 
   // A fresh process per variant checks selection before import and proves both complete packages initialise.
   fs.writeFileSync(path.join(app, 'kernels.mjs'), `
