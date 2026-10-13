@@ -38,7 +38,7 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   const pts = pick('points');
   if (pts !== undefined) o.points = pts === 'auto' ? 'auto' : bool(pts);
   for (const [s, c] of [['point_numbers', 'pointNumbers'], ['prim_numbers', 'primNumbers'], ['label_groups', 'labelGroups'], ['label_pieces', 'labelPieces'],
-    ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute'], ['textures', 'textures']] as const) {
+    ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute'], ['textures', 'textures'], ['view_labels', 'viewLabels']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = bool(v);
   }

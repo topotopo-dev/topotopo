@@ -266,6 +266,15 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(note(fr, /back faces of closed pieces/) && note(fr, /back-facing \d+\.\d% of pixels/), 'annotate: back-facing pixels of a flipped sphere reported');
   const off = render(box, { views: ['persp'], size: T, wireframe: 'hard', annotate: false });
   check(off.height === T + FOOT, 'annotate:false drops the second footer line');
+  // view_labels:false: no view label (top left) and no axis gizmo (bottom left); everything else is the same
+  const on = render(box, { views: ['persp'], size: T, shading: 'matcap' });
+  const nl = render(box, { ...renderArgs({ views: 'persp', size: T, shading: 'matcap', view_labels: false }) });
+  const white = ([rr, g, b]: RGB) => rr > 240 && g > 240 && b > 240;
+  check(count(on, white, 0, 0, T, 24) > 30 && count(nl, white, 0, 0, T, 24) === 0, `view_labels:false hides the view label (${count(on, white, 0, 0, T, 24)} → ${count(nl, white, 0, 0, T, 24)} white px)`);
+  check(diff(on, nl, 30, 0, T - 64, 64, T) > 20 && diff(on, nl, 30, 0, 24, T, T - 64) === 0 && diff(on, nl, 30, 64, T - 64, T, T) === 0,
+    'view_labels:false hides the axis gizmo and leaves the rest of the tile unchanged');
+  const quadNl = render(box, { size: 160, viewLabels: false });
+  check(quadNl.width === 2 * 160 + 2 && quadNl.height === 2 * 160 + 2 + FOOT && count(quadNl, white, 162, 0, 322, 20) === 0, 'view_labels:false on the quad view: same size, no ortho view labels');
 }
 
 // ---------------------------------------------------------------- helpers: tool arguments, winding fill, label placement

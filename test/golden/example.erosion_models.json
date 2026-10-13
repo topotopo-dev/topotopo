@@ -1,0 +1,59 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "debris:float:1",
+        "flow:float:1",
+        "height:float:1",
+        "mask:float:1",
+        "sediment:float:1",
+        "uv:float:3",
+        "water:float:1",
+        "wear:float:1"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [13, 2.5401, 13],
+      "min": [-13, -0.0191, -13]
+    },
+    "counts": {
+      "points": 58564,
+      "prims": 57600,
+      "vertices": 230400,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "f2244503c263db5d",
+      "attributes": {
+        "point.Cd": "02826dbcec268452",
+        "point.N": "660c4c9c2b14ef26",
+        "point.debris": "54322e5999b4627f",
+        "point.flow": "a844932cce830f7e",
+        "point.height": "6b59460f91fc7ae5",
+        "point.mask": "17489c455a2b2f1f",
+        "point.sediment": "5b6e7408314d05b2",
+        "point.uv": "556a7ae5e5c93b7f",
+        "point.water": "6e6d475ceb2585d6",
+        "point.wear": "fdee6f4281475de0"
+      },
+      "topology": "4009bf7388bae445"
+    }
+  },
+  "name": "example.erosion_models",
+  "ok": true,
+  "source": "examples/erosion_models.json",
+  "warnings": []
+}

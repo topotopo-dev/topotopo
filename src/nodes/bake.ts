@@ -263,6 +263,14 @@ defineBake({
     cone_angle: { type: 'float', default: 0, min: 0, max: 90, desc: 'half-angle of the ray cone in degrees (0 = auto: 30)', aliases: ['spread', 'angle'] },
   },
   outputs: 'image <name> (default "thickness"): C grey 0..1, mask',
+  example: {
+    nodes: {
+      ring: { type: 'torus' },
+      uv: { type: 'uv_unwrap', in: ['ring'] },
+      thick: { type: 'bake_thickness', in: ['uv'], params: { resolution: 256, samples: 16 } },
+    },
+    output: 'thick',
+  },
   cook: (ctx) => rayBake(ctx, 'thickness'),
 });
 
@@ -342,6 +350,14 @@ defineBake({
     mode: { type: 'enum', options: ['bbox', 'uniform', 'world'], default: 'bbox', desc: 'how positions map to colour', aliases: ['normalize'] },
   },
   outputs: 'image <name> (default "position"): C RGBA, mask',
+  example: {
+    nodes: {
+      crate: { type: 'crate' },
+      uv: { type: 'uv_unwrap', in: ['crate'] },
+      pos: { type: 'bake_position', in: ['uv'], params: { resolution: 256 } },
+    },
+    output: 'pos',
+  },
   cook: (ctx) => {
     const b = setup(ctx), p = ctx.p;
     const bb = b.g.bbox();
@@ -366,6 +382,14 @@ defineBake({
   aliases: ['world_normal_bake', 'bake_worldspace_normal'],
   params: { ...BAKE_PARAMS('world_normal'), cage: cageParam(), cage_normals: cageNormalsParam() },
   outputs: 'image <name> (default "world_normal"): C RGBA, mask',
+  example: {
+    nodes: {
+      ball: { type: 'sphere', params: { rows: 8, cols: 16 } },
+      uv: { type: 'uv_unwrap', in: ['ball'] },
+      nrm: { type: 'bake_world_normal', in: ['uv'], params: { resolution: 256 } },
+    },
+    output: 'nrm',
+  },
   cook: (ctx) => {
     const b = setup(ctx);
     const high = highOf(ctx);
@@ -452,6 +476,16 @@ defineBake({
     mode: { type: 'enum', options: ['cage', 'normalize'], default: 'cage', desc: 'how distances map to 0..1', aliases: ['range'] },
   },
   outputs: 'image <name> (default "height"): C grey 0..1, distance (metres), mask',
+  example: {
+    nodes: {
+      low: { type: 'box', params: { divisions: [2, 2, 2] } },
+      uv: { type: 'uv_unwrap', in: ['low'] },
+      smooth: { type: 'subdivide', in: ['low'], params: { levels: 3 } },
+      high: { type: 'noise_displace', in: ['smooth'], params: { amplitude: 0.05, frequency: 6 } },
+      height: { type: 'bake_height', in: ['uv', 'high'], params: { resolution: 256, cage: 0.4 } },
+    },
+    output: 'height',
+  },
   cook: (ctx) => {
     const b = setup(ctx), p = ctx.p;
     const high = highOf(ctx);
@@ -484,6 +518,14 @@ defineBake({
   inputs: [INPUTS[0]],
   params: { ...BAKE_PARAMS('island_id'), seed: P.seed() },
   outputs: 'image <name> (default "island_id"): C RGBA, id (island number), mask',
+  example: {
+    nodes: {
+      crate: { type: 'crate' },
+      uv: { type: 'uv_unwrap', in: ['crate'] },
+      ids: { type: 'bake_island_id', in: ['uv'], params: { resolution: 256 } },
+    },
+    output: 'ids',
+  },
   cook: (ctx) => {
     const b = setup(ctx), p = ctx.p;
     const isl = uvIslands(b.g, b.uv, b.tris);
@@ -518,6 +560,14 @@ defineBake({
     component: { type: 'int', default: 0, min: -1, max: 15, desc: 'vector component of attrib (-1 = luminance of the first three)' },
   },
   outputs: 'image <name> (default "mask"): C grey, mask',
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      uv: { type: 'uv_unwrap', in: ['box'] },
+      top: { type: 'bake_mask', in: ['uv'], params: { resolution: 256, mask_group: '@P.y>0.4', name: 'top_mask' } },
+    },
+    output: 'top',
+  },
   cook: (ctx) => {
     const b = setup(ctx), p = ctx.p;
     const n = b.s.n, C = new Float32Array(n);
@@ -550,6 +600,15 @@ defineBake({
     alpha_attrib: { type: 'string', default: 'Alpha', desc: 'alpha attribute (missing = 1)' },
   },
   outputs: 'image <name> (default "vertex_color"): C RGBA, mask',
+  example: {
+    nodes: {
+      ball: { type: 'sphere', params: { rows: 12, cols: 24 } },
+      tint: { type: 'color', in: ['ball'], params: { mode: 'ramp', attrib: 'P.y' } },
+      uv: { type: 'uv_unwrap', in: ['tint'] },
+      cd: { type: 'bake_vertex_color', in: ['uv'], params: { resolution: 256 } },
+    },
+    output: 'cd',
+  },
   cook: (ctx) => {
     const b = setup(ctx), p = ctx.p;
     const vals = vertexValues(b.g, p.attrib, 3);

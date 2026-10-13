@@ -246,7 +246,7 @@ pub fn grid_offset(g: JsValue, d: f64) -> Result<Object, JsValue> {
 }
 #[wasm_bindgen]
 pub fn grid_blur(g: JsValue, radius: f64) -> Result<Object, JsValue> {
-    if !radius.is_finite() || radius < 0.0 || radius > 1024.0 || radius.fract() != 0.0 {
+    if !radius.is_finite() || !(0.0..=1024.0).contains(&radius) || radius.fract() != 0.0 {
         return Err(JsValue::from_str(
             "grid_blur radius must be an integer in 0..1024",
         ));
