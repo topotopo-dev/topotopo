@@ -119,12 +119,15 @@ export interface QuadRemeshOptions {
   target_length?: number;
   target_faces?: number;
   quad_only?: boolean;
+  cleanup?: boolean;
   feature_angle?: number;
   align_boundaries?: boolean;
   smooth_iterations?: number;
   preserve_sharp?: boolean;
   /** Flat pairs of input point indices; hard field alignment constraints. */
   crease_edges?: Uint32Array;
+  /** Orientation-only seam directions; do not pin the position field. */
+  direction_edges?: Uint32Array;
   /** Flat pairs of input points whose edges and endpoints must remain exact. */
   locked_edges?: Uint32Array;
   max_faces?: number;
@@ -132,6 +135,8 @@ export interface QuadRemeshOptions {
 export interface QuadRemeshQuality {
   quad_fraction: number;
   singularities: number;
+  /** Interior irregular vertices divided by all output vertices (boundaries excluded from numerator). */
+  irregular_fraction: number;
   edge_length_min: number;
   edge_length_mean: number;
   edge_length_max: number;

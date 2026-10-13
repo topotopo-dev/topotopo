@@ -255,13 +255,14 @@ dependency is used. `earcutr` is only used for flat cap triangulation, not skele
 licence is permitted by the repository's build-time licence rule. Its identifier
 tables are not linked into the shipped WASM. Sessions 2, 3 and 4 add no dependencies.
 
-## Field-aligned quad remeshing (session 3)
+## Field-aligned quad remeshing (sessions 3 and 7)
 
 ```js
 const mesh = remesh_quad(positions, tris, {
   target_length: 0.1,       // 0: input mean edge length
   target_faces: 0,         // >0: takes precedence over target_length
   quad_only: false,
+  cleanup: true,
   feature_angle: Math.PI / 4, // radians in the kernel; degrees in the node
   align_boundaries: true,
   smooth_iterations: 8,
@@ -285,10 +286,10 @@ and u32 triangle triples. The returned `QuadMesh`/JS object contains:
   and f32 `blend_weight` in the established provenance contract. `src_vertex` is -1
   because raw input triangles carry no wedge attributes. The node reconstructs
   per-corner provenance from the original geometry on each side of UV seams.
-- `quality`: `quad_fraction`, `singularities`, `edge_length_min/mean/max`,
+- `quality`: `quad_fraction`, `singularities`, `irregular_fraction`, `edge_length_min/mean/max`,
   `planarity_mean/max`, and the effective `target_edge_length`. Singularities count
   interior output vertices whose edge valence differs from four; boundaries are
-  excluded. Planarity is absolute maximum vertex distance to each face's Newell
+  excluded. `irregular_fraction` divides that count by all output vertices. Planarity is absolute maximum vertex distance to each face's Newell
   plane, averaged and maximized over faces, in input units.
 
 The implementation independently follows the local field/hierarchy approach of
@@ -304,9 +305,17 @@ origins; an unresolved or search-budget-limited attempt leaves the original fiel
 unchanged. This improves local consistency but is not a globally optimized integer
 parametrization or a guarantee of exact integrability after fitting.
 Extraction contracts edges with near-zero lattice translation subject to
-manifold/normal checks, then joins compatible triangle pairs. Pure-quad mode also
-uses residual triangle transport and local polygon-diagonal rotations to condition
-the parent faces before subdivision.
+manifold/normal checks, then joins compatible triangle pairs. Default cleanup removes valence-two doublets, conservatively collapses short edges
+below 0.3 times the target length, transports residual triangles, and rotates local
+polygon diagonals to reduce valence defects. New transport/flip diagonals must lie
+between 0.3 and 2 times the target length before final relaxation, preventing valence
+improvement from creating long boundary fans. Cleanup can be disabled with `cleanup: false`.
+Pure-quad mode uses conforming local edge splits around residual non-quads; the local
+splitter leaves unaffected quad topology intact. Convex planar patches bounded by suitable crease loops can
+use a rectangular interior grid and a single transition ring. Geometrically verified
+ruled annuli between corresponding planar loops use projected quad strips, with
+original boundary samples and complete longitudinal constraints retained. Shape,
+Euler, free-boundary and partial-crease guards reject unsuitable replacements.
 Vertices finally relax/project onto the original triangles or feature segments.
 Exact nearest-triangle barycentrics and deterministic source-index tie breaks supply
 the attribute contract. Triangle and feature-segment queries use balanced BVHs.
@@ -315,25 +324,24 @@ The `remesh_quad` node adds the aliases `quadremesh`, `quad_remesh`, `instant_me
 It preserves selected-region borders, point attributes through `GeoBuilder`, vertex
 UVs per connected wedge, prim attributes from the source triangle and existing
 normals recomputed from the result. `crease_group` supplies hard curve constraints;
-UV seams and material/group borders are also constrained. Empty group selections
+Material/group borders are also constrained. UV seams use `direction_edges`:
+orientation constraints and exact geometric seam support for the existing wedge
+transfer, without pinning lattice position origins. They remain extraction barriers. Empty group selections
 pass through. `max_faces` counts both the retained complement and generated faces.
 Detail quality statistics describe the remeshed region, excluding retained primitives.
 
-This is a conservative implementation with narrower capabilities than the reference
-remeshers. Face counts are approximate. On unconstrained surfaces, pure-quad mode
-solves at twice the requested edge length, then conformingly splits every polygon
-once to approach the requested density. With hard curves it retains the finer solve
-to avoid folded coarse parent patches, so output density can exceed the target by
-about four times or more;
-it retains residual triangles when locked borders prohibit this refinement.
-Noncollinear feature-curve vertices are pinned, so densely sampled hard curves can
-dominate the output density. Input limits are 1M points and 2M triangles; refinement
-also has a 2M-triangle work limit. Degenerate source triangles are removed; ambiguous
-non-manifold edges, inconsistent winding and disconnected vertex fans are rejected
-with an actionable error. Self-intersecting manifold input is not repaired.
-Universal hardware/compiler bit identity and arbitrary-surface quality are not
-established by same-module replay tests. Exact acceptance measurements and remaining
-quality/performance gaps are recorded in [BENCH.md](BENCH.md).
+The solver retains f64 fields, ordered clustering, CSR neighbours, cached tangent
+connections and separate position arrays. Fine hierarchy levels use fewer relaxation
+sweeps with change-based early-out. Projection keeps exact nearest-triangle searches
+with persistent source-triangle hints; provenance uses the same barycentric contract.
+
+Inputs are limited to one million points and two million triangles; refinement is
+also capped at two million triangles. Self-intersecting inputs are not repaired.
+Face counts remain approximate, especially with locked borders or dense geometric
+constraints. Local cleanup and bounded integer correction do not establish global
+integrability or intersection freedom on arbitrary surfaces. Scalar/SIMD parity is
+tested on the regression corpus, not an exhaustive operating-system/compiler matrix. Session-7 measured
+acceptance, scalar/SIMD comparisons and remaining limits are in [BENCH.md](BENCH.md).
 
 Run `node test/remeshquad.ts`, `node bench/remeshquad.ts` and
 `cargo bench --manifest-path kernels/Cargo.toml --bench remesh_quad`.
