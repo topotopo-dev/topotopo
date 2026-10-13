@@ -20,8 +20,10 @@ CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
+PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
-TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".`;
+TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
+PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".`;
 
 export const TOPICS: Record<string, string> = {
   graph: `GRAPH FORMAT
@@ -91,7 +93,9 @@ SOLVER (Houdini SOP Solver): feedback over frames.
   Each frame's state is cached, so stepping 10 → 11 runs the body once; jumping back is a cache hit.
   Body vars: iteration (frames since start_frame, from 0), substep, and frame/time/timeInc = the step's time (fractional between substeps).
 SOLVER vs FOREACH: foreach feedback:true is count-based (N iterations in one cook, no time, cached as a whole);
-  the solver's result depends on the frame you cook at and is advanced frame by frame.`,
+  the solver's result depends on the frame you cook at and is advanced frame by frame.
+PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_frame) × substeps steps, every frame's state is
+  cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}
@@ -376,6 +380,42 @@ Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named 
 Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
   with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
 
+  rbd: `RIGID BODIES: SETTLE AND STACK (Houdini RBD drop / settle, Rapier physics; category "sim")
+Use it when placed pieces must rest physically: rocks on a terrain, props on a floor, crates in a pile, a container filled.
+  rbd_settle {in: [pieces, collision?]}   every piece falls under gravity and comes to rest; the output is the input with
+                                each piece moved rigidly (packed input stays packed: only anchors and instance transforms change).
+  rbd_stack  {interval, order, lift}       the same, but pieces drop one at a time (every interval steps), each lifted
+                                above whatever is already under it: give crates the SAME position and they pile up.
+PIECES (input 0): every packed prim is one piece (copy_to_points {pack:true} or pack); its convex hull is computed once per
+  source and shared by all instances (fast: 1,000 pieces in about 1–3 s). Polygons are grouped by pieces: auto = prim
+  attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; or connectivity / name /
+  attrib + piece_attrib. Points shared by two pieces are split. Pieces must NOT start inside each other or the ground
+  (they are pushed apart violently; a warning counts them): lift the template points (transform translate [0, 1, 0]),
+  space them (scatter min_distance), or use rbd_stack.
+COLLISION (input 1): terrain mesh, heightfield, container, settled pieces from an earlier rbd node (merge them): exact
+  triangles, static. Not connected: a ground plane at y = ground (ground_plane on adds it to input 1 too).
+ATTRIBUTES IN: active (prim or point int, default 1) = 0 → the piece stays put but others collide with it; v (m/s) and
+  w (rad/s) on the points (anchors) = initial velocity. OUT (points; packed: anchors): v, w, settled (0/1), contacts
+  (how many colliders touch it), group "fallen" (fell off the collision geometry; delete_fallen removes them).
+PARAMS: collision_shape convex_hull | box | sphere | mesh (exact triangles, static pieces only); hull_points (64: hulls
+  of smooth pieces are reduced, pieces may sink in by a few % of their radius; 0 = exact); friction 0.7, restitution 0,
+  density, gravity; duration (s, upper bound: the simulation ends once every piece has stayed below sleep_threshold
+  for 0.5 s), steps_per_second 60; angular_damping 0.5 (stops round pieces rolling forever) and rest_damping (damps
+  pieces that are nearly at rest so wobbling ends); seed + jitter (a tiny random start offset/tilt that breaks
+  perfectly symmetric stacks, deterministic); max_pieces guard; keep_packed.
+DETERMINISTIC: same inputs + params + seed → the same result, bit for bit (Rapier's WASM build; bodies are inserted in
+  a spatial order, so the input order does not matter). A different Rapier version may settle differently.
+TIME: by default the node ignores the frame and shows the settled result on every frame. animate:true shows the
+  simulation at (frame - start_frame) / fps seconds; cooking a later frame resumes the previous frame's world.
+STATS: the build/inspect report lists steps, sim_time, pieces, settled, fallen per rbd node; warnings say when pieces
+  started overlapping, fell off, or were still moving at the end (raise duration or angular_damping).
+Example: rocks on a terrain, then a crate pile on the terrain and the settled rocks:
+  "rocks": {"type":"copy_to_points","in":["rock","pts_lifted"],"params":{"pack":true}},
+  "settled": {"type":"rbd_settle","in":["rocks","terrain"],"params":{"delete_fallen":true}},
+  "ground2": {"type":"merge","in":["terrain","settled"]},
+  "crates": {"type":"copy_to_points","in":["crate","same_spot_x16"],"params":{"pack":true}},
+  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (examples/rbd_settle.json)`,
+
   pcg: `PCG: SCATTERING AND INSTANCING (Houdini scatter/copy toolkit, Unreal PCG point filters)
 THE CHAIN
   mask (0..1 point attribute from features) → scatter {density_mask:"mask"} → orient (frames, random yaw/tilt/scale)
@@ -456,6 +496,30 @@ Recipes:
   Letter / logo outline: bezier {closed:true, points} (+ inner contours for holes) → convert_curve → extrude.
   Cable with sag: nurbs {points:[a, mid lowered, b]} → resample {length:0.05} → polywire; taper with curve_attribs.
 See examples/splines.json.`,
+
+  particles: `PARTICLES (Houdini POP network in one node; category "sim")
+{"type":"particles","in":["emitter","collision","field"],"params":{...}}: inputs 1 and 2 are optional.
+EMIT: every point of input 0 emits emit_rate particles per step (0.25 = one every 4 steps; per-point random phase);
+  emit_all: one per point at time 0 (emit_rate 0 = a single burst). Start velocity = point v + speed × point N (+Y without N)
+  + a random vector up to velocity_var. Point attributes and groups (Cd, pscale, custom) are copied at birth; a point id seeds
+  that point's random stream. life (s, 0 = forever) ± life_var; max_particles caps the particles holding a slot (birth to end of life).
+FORCES (per step, dt = 1/(fps × substeps)): gravity; noise (m/s², noise_size m, curl:true = divergence-free swirls, noise_octaves);
+  drag pulls the velocity toward the air velocity = wind + air fields (wind does nothing without drag); attract (spring 1/s²)
+  to attract_point or, with attract_to:"surface", to the closest point of input 1.
+FIELD (input 2): points with v (field_sample nearest | idw over field_neighbours, field_max_distance), a heightfield
+  (-gradient of height: flows downhill) or an SDF volume (-gradient of the distance: toward the surface); field_mode force (an
+  acceleration, × field_scale) or air (adds to the air velocity, acts through drag).
+COLLIDE: floor:true (+ floor_height) and the polygons / heightfields of input 1; collide none | die | slide | bounce (bounce 0..1,
+  friction = Coulomb μ). Particles collide as points (a 1e-5 × scene-size skin off the surface) or, use_pscale, as spheres.
+OUTPUT: points with P v age life id (birth order) pscale + carried attributes; trails N (>= 2) keeps the last N positions per
+  particle as an open polyline (point age at that position, curveu 0 tail → 1 head, prim id); output both | points | trails.
+TIME: a cook at start_frame (default 1) runs "steps" steps; frame f runs steps + (f - start_frame) × substeps, each frame's state
+  cached (stepping forward runs one frame; jumping back re-simulates from the latest cached earlier frame or the start).
+  animate:false = always "steps" steps, time-independent. Same bits with or without the worker pool and however it is stepped.
+RECIPES: fountain = one point, speed 6, velocity_var 1.3, life 3, floor:true, collide bounce, trails 6. Runoff on terrain =
+  emitters scattered on ridges (heightfield_mask_by_feature curvature convex + heightfield_scatter), the heightfield as input 1
+  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age
+  (examples/particles.json). Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1. Swarm on a mesh: attract_to surface.`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.

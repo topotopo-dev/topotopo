@@ -81,6 +81,12 @@ export const SRC: Record<string, NodeSpec> = {
   UVBOX: { type: 'uv_unwrap', in: ['BOX'] },
   UVCOLOR: { type: 'color', in: ['UVBOX'], params: { mode: 'random' } },
   HIGHBOX: { type: 'subdivide', in: ['BOX'], params: { levels: 2 } },
+  // rigid bodies (P3-A): 25 packed small spheres 3 m above the bumpy grid; six packed crates on one spot for stacking
+  RBD_DROP: { type: 'copy_to_points', in: ['SMALLSPHERE', 'PTS_ABOVE'], params: { pack: true } },
+  RBD_CRATE: { type: 'box', params: { size: [0.3, 0.2, 0.25], center: [0, 0.1, 0] } },
+  RBD_SPOT: { type: 'point_grid', params: { counts: [1, 1, 1] } },
+  RBD_SPOTS: { type: 'copy_xform', in: ['RBD_SPOT'], params: { count: 6, translate: [0.04, 0, 0.03] } },
+  RBD_CRATES: { type: 'copy_to_points', in: ['RBD_CRATE', 'RBD_SPOTS'], params: { pack: true } },
   // cloth (P3-C): a sheet above BOX for drape; inflate takes MESH (closed)
   CLOTH: { type: 'grid', params: { size: [2, 2], divisions: [12, 12], center: [0, 1.2, 0] } },
 };
@@ -138,9 +144,12 @@ export const INPUTS: Record<string, string[]> = {
   tex_normal_from_height: ['TEX2'], tex_height_to_ao: ['TEX2'], tex_channel: ['TEX', 'TEX2'], tex_colorize: ['TEX'],
   tex_tile_sampler: ['TEXSHAPE'], tex_output: ['TEX2'], texture_to_material: ['UVBOX', 'TEX'], tex_to_heightfield: ['TEX'],
   heightfield_to_tex: ['HFN'],
+  // particles (P3-B): a 5 × 5 point grid raining onto the bumpy grid
+  particles: ['PTS_ABOVE', 'BUMPY'],
   bake_ao: ['UVBOX'], bake_thickness: ['UVBOX'], bake_curvature: ['UVBOX'], bake_position: ['UVBOX'], bake_world_normal: ['UVBOX'],
   bake_normal: ['UVBOX', 'HIGHBOX'], bake_height: ['UVBOX', 'HIGHBOX'], bake_island_id: ['UVBOX'], bake_mask: ['UVBOX'],
   bake_vertex_color: ['UVCOLOR'],
+  rbd_settle: ['RBD_DROP', 'GRID'], rbd_stack: ['RBD_CRATES'],
   drape: ['CLOTH', 'BOX'],
 };
 
@@ -239,6 +248,9 @@ export const PARAMS: Record<string, any> = {
   bake_island_id: { resolution: 64 },
   bake_mask: { resolution: 64, mask_group: '@P.y>0' },
   bake_vertex_color: { resolution: 64, supersample: 2 },
+  particles: { steps: 24, emit_rate: 1, velocity_var: 1, life: 0.8, noise: 1, collide: 'bounce', trails: 4, seed: 1 },
+  rbd_settle: { duration: 4 },
+  rbd_stack: { interval: 10, duration: 3 },
   drape: { steps: 60 },
   inflate: { steps: 12, pressure: 1.3 },
 };

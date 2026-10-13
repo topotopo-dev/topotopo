@@ -66,7 +66,10 @@ src/core/      geometry model + algorithms (no I/O)
                  tethers, volume, collider contact planes (pseudo-normals; the "cloth_collide" kernel), floor, friction, wind
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
+  particles.ts   particle simulation (the particles node): emission, the per-particle integration kernel (forces, analytic-
+                 gradient curl noise, fields, floor and mesh collisions, trail rings), the state as a point Geometry, output
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
+  rbd.ts         rigid-body settling on Rapier: pieces (packed instances, polygon pieces), shapes, the world, write-back
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
   wrangle.ts     @-syntax compiler → per-element kernels; deferred addpoint/addprim/remove; chunked point wrangles
   kernels.ts     kernel registry for the worker pool: pure per-element functions over typed arrays (noise, rays)
@@ -85,6 +88,7 @@ src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.b
                instance stream (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts ·
                heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts) ·
                image volumes as PNG files (textures.ts: glTF/USD texture data, the "textures" format)
+src/wasm/      loaders: kernels.ts (the Rust kernels, read through Host.readFile), rapier.ts (Rapier, a lazy import)
 src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts)
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
@@ -285,7 +289,9 @@ host (`Host.compile`), which has the snippet library installed. In the Node host
 `DONT_CONTEXTIFY` (an ordinary global object, so global lookups in hot loops stay fast) and
 `microtaskMode: 'afterEvaluate'`: the realm has its own microtask queue, drained at the end of every `runInContext`
 call and inside that call's timeout.
-- `runGuarded(fn, ms)` runs synchronous code (wrangles, SDF and parametric expressions) in a timed call.
+- `runGuarded(fn, ms)` runs synchronous code (wrangles, parametric expressions, `heightfield_layer` expressions over a
+  whole layer, the `sdf_expr` probe at the origin) in a timed call. Code pasted into a wrapper function is parsed on
+  its own first (`Host.checkSyntax`), so it cannot close the wrapper and run while compiling, outside the timeout.
 - `runGuardedAsync(fn, ms)` runs the `script` node. Its synchronous part and every continuation queued inside the
   realm (`await 0`, `await` on a realm promise) run in the first timed call, so `await 0; while (true) {}` is stopped
   like a synchronous loop. With the default shared microtask queue, continuations ran after `runInContext` had
@@ -397,7 +403,9 @@ optionally more chunks per worker for uneven work (rays). `selftest.*` kernels e
 cold pool it runs the kernel once over all elements, synchronously, on the node's own arrays (the result is not a
 promise, so a node using it stays synchronous). Otherwise inputs, `outputs` (copied in, so skipped elements keep their
 values) and `results` (fresh arrays: zeroed) are copied once into SharedArrayBuffers, the range is split into
-contiguous chunks (default one per thread), and when every chunk has finished the outputs are copied back. The error of
+contiguous chunks (default one per thread), and when every chunk has finished the outputs are copied back. Inputs and
+results that already live in a SharedArrayBuffer are handed over as they are (results written in place), for large
+arrays that go through several jobs (the density-mask elimination's pairs and neighbour lists). The error of
 the first failing chunk in element order is the node's error. `Engine.poolStats` counts pool and serial runs.
 `TOPOTOPO_POOL_MIN` overrides every threshold (`1` forces the pool: `npm run test:pool` runs the golden layer so).
 
@@ -412,7 +420,8 @@ What runs in chunks:
 | `bake_normal`, `bake_height` (and the ray / curvature bakes with a high-res input) | `bake_project`: one cage ray per sample into the high-res BVH, plus its point normals | |
 | `bake_curvature` | `bake_curvature`: the edges near each sample | edges and their uniform grid shared |
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
-| `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists, conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
+| `particles` | `particles`: each particle through a whole run of steps (forces, drag, collisions, its trail ring) | births are decided first on the main thread, so the particles never interact; the collision BVH and the field (KD tree + v, heightfield gradients, a sampled SDF) are shared as arrays; threshold by particle-steps (200k); 4 chunks per thread (later births run fewer steps) |
+| `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_elim_lists`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists (with a density mask: the pairs, then each candidate's list and weight from them), conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
 | `drape`, `inflate` | `cloth_collide` (src/core/xpbd.ts): each cloth point's contact plane against the collider, once per step | the collider BVH and pseudo-normals are shared as arrays; 4096+ points. The constraint solve (Gauss-Seidel and chain solves, the order is the result) stays on the main thread |
 
 Not in chunks, and why:
@@ -498,6 +507,55 @@ drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solv
   plasticity, welds/stitches, attach-to-animated-geometry, cloth-on-cloth friction, or edge-edge self collision;
   `inflate` uses one global volume constraint (no per-piece pressure).
 
+### Particles
+
+`particles` (src/nodes/particles.ts, src/core/particles.ts) is Houdini's POP network reduced to one node: points emit,
+forces and fields push, the floor and a mesh collide, trails become polylines. The model is chosen so that it runs on the
+worker pool bit for bit and can be cut into frames anywhere:
+- **Particles never interact, and nothing that couples them depends on the integration.** Births depend only on the
+  emitters, the step and the lifetimes: a rate per step and emitter point with a per-point random phase (fractions
+  accumulate), `emit_all` at time 0, and `max_particles`, which counts a particle from its birth through its death step by
+  age, also when a `die` collision removed it earlier (those keep their slot in `__pholders`). So a run of steps is emitted
+  first (serially, cheap), then every particle integrates through it on its own: one `parallelMap` per run, not per step.
+- **Per-particle randomness is drawn at birth** from (seed, emitter key, birth index): the emitter point's `id` when it has
+  one, so reordering or adding emitter points leaves the other points' streams alone. A birth offset u ∈ (0, 1] inside the
+  step (0 is reserved for `emit_all` particles, which exist at time 0) avoids banding; a particle's age after S steps is
+  `(S − b − u)·dt` and its death step is computed from the same expression, so ages, lifetimes and the cap always agree.
+- **One step**: acceleration = gravity + noise + field force + attraction, semi-implicit Euler, then exact exponential drag
+  toward the air velocity (wind + air fields), then up to four contacts: the earliest of the floor plane and a ray along
+  the move against the collision BVH. The ray starts a stand-off behind the particle (its radius, or a skin of 1e-5 of the
+  collider size for points), so a resting particle keeps finding its surface; triangles are two-sided, the side being the
+  one the particle's centre is on, and, within the stand-off, the side of its last contact normal (kept per particle in
+  `__pcn`); a hit it moves away from is skipped. `die` removes it, `slide` removes the normal velocity, `bounce` reflects it
+  (slower than 1.5·|g|·dt it rests instead); friction is Coulomb (tangential loss = μ × normal velocity change), so a
+  particle rests on slopes below atan μ. Spheres (`use_pscale`) are also pushed out of any surface closer than their
+  radius (closest-point query), because a centre ray only sees the planes it moves toward.
+- **Curl noise** is the curl of three fBm Perlin potentials evaluated with analytic gradients (one evaluation per
+  potential and octave gives value and gradient), divergence-free to rounding; 100k particles × 200 steps with curl noise
+  and floor collisions take ≈ 2.5 s on 15 threads (≈ 13 s on one), without noise ≈ 0.3 s (≈ 1.3 s on one).
+- **Fields** (input 2) are made shareable once per input geometry: points with `v` as a KD tree + values (nearest or
+  inverse-distance weighted over k neighbours, an allocation-free k-nearest walk), a heightfield as per-sample gradient
+  arrays (bilinear, zero outside the field), an SDF (lazy or sampled) resampled on a grid of `field_resolution` along its
+  longest side over its bounds grown by a quarter on each side (outside it, the gradient at the grid boundary).
+
+**State and time.** Between runs the simulation is a point Geometry: carried emitter attributes and groups, P, v, id,
+life, pscale and the internal `__pb` (birth step), `__pu`, `__pkd` (death step), `__pcn`, `__ptrail` (a ring of the last
+`trails` positions, as a float tuple of 3 × trails per particle), plus detail step / next id / refused births / slot holders.
+A cook at `start_frame` (and any cook with `animate: false`, which never reads the frame) runs `steps` steps; with `animate`,
+frame f runs `steps + (f − start_frame) × substeps`. States are cached in the engine cache like the solver's, chained
+`S(start) = hash(params, inputs at start_frame)`, `S(f) = hash(S(f−1), f, inputs at f)`. A cook resumes from the latest
+cached frame at or before its own: with static inputs it runs the remaining steps in one kernel run and caches only the
+final state; with time-dependent inputs (an animated emitter, collider or field) it runs frame by frame with each frame's
+inputs and caches every frame. The cost is therefore one frame's steps when stepping forward (`cookFrames`), the steps
+from the start (or the latest cached earlier frame) when jumping, and a cache entry per state (≈ 100 bytes per particle
+plus 24 × trails); because a run can be cut anywhere with the same bits (test/particles.ts compares frame-by-frame, direct
+and pooled cooks), resuming never changes the result.
+
+Limits: no particle–particle interaction (no flocking, no SPH, no inter-particle collisions); sub-step emitter motion is
+not interpolated; the field is sampled at the particle and collisions are against the static collider of the frame (a
+moving collider does not push particles); spheres touching a mesh between contacts are resolved by the closest-point push,
+not by a swept test; trails record one position per step.
+
 ### Sampled SDF grids
 
 `Volume` also includes `kind: 'grid'` (`core/sdfgrid.ts`): a dense x-fast Float32
@@ -544,10 +602,78 @@ The adapter in `src/nodes/remeshquad.ts` triangulates selected polygons, records
 indices, and transfers attributes with `GeoBuilder` using final source-triangle barycentrics. Vertex attributes use
 connected wedges on each side of UV seams, while prim attributes follow the source triangle at each face centre.
 Unselected primitives pass through; existing normals are recomputed for the remeshed region. Detail attributes
-include `quad_fraction`, interior irregular-valence count `singularities`, and edge-length/planarity statistics.
-`quads_only` requests conforming refinement and may exceed the requested face count. It is best effort when locked
+include `quad_fraction`, interior irregular-valence count `singularities`, `irregular_fraction` (that count divided
+by all output vertices), and edge-length/planarity statistics. Default `cleanup` repairs local topology defects.
+UV seams retain their geometry for wedge transfer while constraining only the orientation field, leaving lattice
+position origins free. `quads_only` conformingly splits residual non-quads and affected neighbours, and fits suitable
+planar crease-bounded patches with a grid and one ring. Face counts remain approximate; it is best effort when locked
 borders prevent that refinement. Algorithm limits and measured acceptance are recorded in `kernels/README.md`
 and `kernels/BENCH.md`; `examples/quad_remesh.json` exposes every polygon edge for visual review.
+
+### Rigid bodies (Rapier)
+
+`rbd_settle` and `rbd_stack` (category `sim`) are Houdini's RBD drop/settle idiom for procedural assembly: pieces fall
+under gravity and come to rest on a terrain, in a container or on a ground plane, so scattered rocks and props sit in
+contact instead of floating or intersecting. The physics is Rapier (`@dimforge/rapier3d-compat`, Apache-2.0), the
+compat build whose JavaScript inlines the WASM as base64 (4.3 MB module, 3.1 MB of WASM; 1.66 MB gzipped). Nothing
+reads a file: `src/wasm/rapier.ts` imports the package on the first rbd cook (about 60 ms to import and instantiate),
+so the dependency costs nothing until a graph uses it, and a browser bundle splits it into its own chunk. The core
+(`src/core/rbd.ts`) receives the loaded module and stays host-agnostic.
+
+- **Pieces.** Every packed prim is a piece. Its body frame is the anchor and the rotation Q of `packedXform = Q·U`
+  (Gram-Schmidt; U holds scale and shear, a negative entry when it mirrors). The convex hull is computed once per
+  source by Rapier's quickhull, in a scratch world, and every instance applies its U to the hull vertices (hulls
+  commute with linear maps, so 1,000 instances of three rock sources cost three hulls). Polygons are grouped into
+  pieces by `piece`, `copynum` (unpacked copy_to_points), `name`, or connectivity; points shared by two pieces are split
+  first. An unpacked piece's frame is its bounding-box centre, unrotated. Hull input points are sorted by position, so a
+  piece gets the same hull packed or unpacked and whatever its point numbering.
+- **Shapes.** `convex_hull` (default), `box` and `sphere` bound the hull vertices; `mesh` (exact triangles) only for
+  static pieces (`active` = 0). Smooth pieces with more than `hull_points` (64) hull vertices are reduced: a greedy on
+  the support function (start from the extremes along 26 directions, then add the vertex that gives the full hull's
+  support in the direction where the chosen set falls shortest, over the hull's face normals and 256 sphere directions;
+  one quickhull at the end). Collision cost grows with hull size (1,000 shelf rocks: 3.5 s exact, 2.1 s reduced); a
+  reduced piece can sink in by the remaining shortfall, about 3 % of its radius for the shelf rock and at most 4.7 % in
+  `test/rbd.ts`. Input 1 (terrain, heightfields as the triangles `heightfield_to_mesh` draws, containers, earlier settled
+  pieces; packed input expanded) is one static trimesh with Rapier's internal-edge fix (two-sided); without it a ground
+  plane at `ground`.
+- **Simulation.** A fixed step (`steps_per_second`, 60), Rapier's `lengthUnit` set to the median piece size, CCD on.
+  Every 5 steps the pieces are checked: a piece more than twice its radius below the lowest collider is removed and
+  marked fallen; a piece that has stayed below 4 × `sleep_threshold` for 0.5 s gets `rest_damping` (angular, 40 % of it
+  linear) until it speeds up past 10 × the threshold again, which ends the slow wobbling that otherwise keeps convex
+  pieces on a triangle mesh awake for seconds; the simulation ends when every piece is asleep or has stayed below the
+  threshold for 0.5 s, or after `duration`. After the first step, pieces overlapping by more than 5 % of their radius
+  are counted for a warning. `rbd_stack` drops the pieces one every `interval` steps; with `lift` each is first moved up
+  until it clears what is under its drop position (a downward shape cast from above everything; one step with only the
+  static colliders runs first so the broad phase sees them).
+- **Output.** A copy of the input with every piece moved rigidly: packed pieces change only the anchor P and
+  `packedXform = R(q)·U` (instances stay instances and keep their sources); unpacked pieces move their points and rotate
+  N/up/tangentu/force and compose `orient`. Points (anchors for packed pieces) get `v`, `w`, `settled` and `contacts`;
+  fallen pieces are in point group `fallen` (or deleted). `active` defaults to 1, so geometry merged without it moves.
+- **Determinism.** Same inputs, params and seed give the same bits: Rapier's WASM arithmetic is IEEE-754 without
+  platform-dependent rounding (no SIMD build, no threads), bodies are inserted in a spatial order (y, x, z of their
+  input pose) so permuting the input changes nothing, and the jitter is seeded by that rank. Tested: two engines with
+  another simulation in between, pool off and on, reversed prim and point order. A different Rapier version may
+  settle differently (goldens would change).
+- **Time.** By default the nodes ignore the frame (a plain cook is the settled result, cached across frames). With
+  `animate` the cook reads the frame and fps and simulates `(frame - start_frame) / fps` seconds; the node keeps the
+  world of its last two signatures, so cooking frame 11 after frame 10 runs only the steps in between, and the last
+  frame equals the settled cook bit for bit.
+
+Measured (i7-10700K; other jobs kept the machine at 50–100 % CPU, so idle numbers are lower; the whole cook of the
+node, Rapier loaded):
+
+| case | time | steps |
+|---|---|---|
+| 1,000 packed shelf rocks (151 hull vertices → 64) dropped 1–2 m onto the ground | 2.1 s (3.5 s at 100 % load) | 325–415 |
+| the same with exact hulls (`hull_points` 0) | 3.5 s | 475 |
+| 1,000 packed boxes / ico spheres (42 vertices) | 0.9 s / 1.4 s | 190 / 255 |
+| 1,000 unpacked rocks (a hull per piece, 162k points written back) | 3.7 s | 335 |
+| 1,000 rocks in a 10-layer column, 219 starting in contact | 5.5 s | 440 |
+| `examples/rbd_settle.json`: 116 rocks on a 51k-triangle terrain, then 16 crates | 2.6 s + 0.35 s | 720 / 545 |
+
+Most of the time goes to the first second or two, while every piece is awake; sleeping pieces cost nothing. A piece
+on a triangle mesh touches tens of triangles, so terrain contacts are the main cost (the showcase rocks: 3.6 ms
+per step on average over 720 steps for 116 pieces).
 
 ## What makes it LLM-friendly
 
@@ -596,8 +722,10 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
   cooks are deterministic, and the content-addressed cache gives the same result after a param is changed and
   restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line; hostile
   `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on; since R-11
-  they run in the host's vm sandbox with a timeout (`heightfield_layer` expressions and the `sdf_expr` probe still
-  run unguarded: open).
+  they run in the host's vm sandbox with a timeout. Since R-12 the code params of `heightfield_layer` and `sdf_expr`
+  run under the script timeout too (loops, also after an await or in a thrown object's message getter, and wrapper
+  escapes are fuzzed with the pool off and on); an `sdf_expr` volume sampled later (`sdf_to_mesh`, the grid nodes)
+  still runs without a time limit.
 - **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
 - **Examples**: every `NodeDef` carries an `example` (a node spec or a small graph, shown by `help` and in the node
   reference) and `test/examples.ts` cooks each one: node specs on the node's fixture inputs, graphs as written.
@@ -609,6 +737,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 |---|---|---|
 | manifold-3d | Apache-2.0 | booleans, convex hull, Minkowski, smoothing/refine, level-set meshing, 2D cross-sections (Clipper2): offset, 2D booleans, text fill, extrude |
 | meshoptimizer | MIT | decimation (simplifyWithAttributes, simplifySloppy, simplifyPoints), `lod`; meshopt compression/decompression for glTF (EXT_meshopt_compression) |
+| @dimforge/rapier3d-compat (Rapier) | Apache-2.0 | rigid bodies for `rbd_settle` / `rbd_stack`: convex hulls, trimesh colliders, contacts, shape casts (WASM inlined, imported on first use) |
 | xatlas-wasm (xatlas by Jonathan Young) | MIT | `uv_unwrap` / `uv_autoseam`: chart segmentation, parameterisation, atlas packing (single-file ES module, WASM embedded) |
 | @gltf-transform/core + extensions | MIT | glTF 2.0 document model, GLB/glTF reading and writing, KHR/EXT extensions (materials, quantization, meshopt, Draco, instancing) |
 | earcut | ISC | n-gon triangulation |
@@ -662,7 +791,7 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   3 s target), singularity cleanup and quads-only density; a dual-contouring quality pass (edge serration, adaptive
   extraction, speed).
 - Performance follow-ups: done (scatter on the pool, one-pass point normals, SAH BVH with a `-0` ray-direction fix,
-  relaxed scatter ≈ 1.2 s per 100k); still open: the density-mask neighbour rebuild on the main thread, the AO bake
+  relaxed scatter ≈ 1.2 s per 100k, the density-mask neighbour rebuild since R-12); still open: the AO bake
   (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
 - Packed primitives: packed disk references (Houdini packed disk prims), USD variants and per-frame layers, and
   instanced rendering in the rasteriser (it draws expanded copies within a triangle budget).
@@ -673,8 +802,8 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
 - Houdini interop: `.bgeo.sc` (Blosc) and a USD layer writer with variants.
 - Phase 3: volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points), simulation-lite
-  (Rapier rigid bodies, particles, XPBD cloth), and an optional OpenCascade/replicad CAD module for B-rep fillets and
-  STEP export.
+  (Rapier rigid bodies: `rbd_settle` and `rbd_stack` shipped; particles, XPBD cloth), and an optional OpenCascade/replicad
+  CAD module for B-rep fillets and STEP export.
 
 **GUI (makes the app usable without an LLM)**
 - Browser app: a node editor (React Flow or LiteGraph), a three.js viewport, and parameter panels generated from

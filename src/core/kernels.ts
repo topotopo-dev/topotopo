@@ -16,10 +16,12 @@ import { cellsRange, noiseRange } from './texture.ts';
 import type { CellsJob, NoiseJob } from './texture.ts';
 import { curvatureRange, projectRange } from './bake.ts';
 import type { CurvatureArgs, ProjectArgs } from './bake.ts';
-import { candidatesRange, conflictsRange, elimNeighboursRange, elimPairsRange, kdBuildRange, relaxRange } from './scatter.ts';
+import { candidatesRange, conflictsRange, elimListsRange, elimNeighboursRange, elimPairsRange, kdBuildRange, relaxRange } from './scatter.ts';
 import type { CandidateArgs, ConflictArgs, RelaxArgs } from './scatter.ts';
 import { TriSurface } from './pcg.ts';
 import { colliderFromArrays, collideRange } from './xpbd.ts';
+import { particlesRange } from './particles.ts';
+import type { StepArgs } from './particles.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -164,6 +166,15 @@ const scatterElimPairs: Kernel = {
   run(a: { rmax: number }, A, start, end) { return elimPairsRange(a, A, start, end); },
 };
 
+/**
+ * sample elimination with radii by density, after the pairs: each candidate's neighbour list and weight (every chunk
+ * scans all pairs, so one chunk per worker).
+ */
+const scatterElimLists: Kernel = {
+  minElements: 32768,
+  run(a: unknown, A, start, end) { elimListsRange(a, A, start, end); },
+};
+
 /** exact minimum distance: each candidate's earlier candidates closer than r (returned per chunk). */
 const scatterConflicts: Kernel = {
   minElements: 16384,
@@ -190,6 +201,19 @@ const clothCollide: Kernel = {
     const c = ctx.memo('collider:' + ctx.sharedKey, () => colliderFromArrays(A));
     collideRange(c, A.X, A.R, A.CP, A.CN, A.CF, A.CT, A.QD, start, end);
   },
+};
+
+// ---------------------------------------------------------------- particles (src/core/particles.ts)
+
+/**
+ * particles: each particle integrates through a run of steps on its own (forces, drag, floor and mesh collisions,
+ * trail ring); the collision BVH and the field are shared arrays. Returns the contacts resolved in the chunk.
+ */
+const particlesK: Kernel = {
+  // the node scales this by the steps of the run (it passes minElements = particle-steps threshold / steps)
+  minElements: 4096,
+  chunksPerWorker: 4,
+  run(a: StepArgs, A, start, end, ctx) { return particlesRange(a, A, start, end, ctx); },
 };
 
 // ---------------------------------------------------------------- self tests (test/pool.ts)
@@ -250,8 +274,10 @@ export const KERNELS: Record<string, Kernel> = {
   scatter_candidates: scatterCandidates,
   scatter_elim_neighbours: scatterElimNeighbours,
   scatter_elim_pairs: scatterElimPairs,
+  scatter_elim_lists: scatterElimLists,
   scatter_conflicts: scatterConflicts,
   scatter_relax: scatterRelax,
+  particles: particlesK,
   cloth_collide: clothCollide,
   'selftest.scale': selftestScale,
   'selftest.square': selftestSquare,
