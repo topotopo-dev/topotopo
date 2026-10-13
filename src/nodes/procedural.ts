@@ -58,6 +58,7 @@ defineNode({
     max_length: { type: 'int', default: 400000, min: 1, desc: 'safety cap on the expanded string length' },
   },
   outputs: 'polylines with point width/depth, prim depth; leaf points in groups leaves, J, K, M with N, up, orient, pscale',
+  example: { type: 'lsystem', params: { generations: 4, angle: 25, tropism_strength: 0.1, seed: 2 } },
   cook: ({ p }) => {
     const r = rng(p.seed + 0.25);
     const rules: Record<string, [string, number][]> = {};
@@ -239,6 +240,7 @@ defineNode({
     center: P.center(),
   },
   signatureExtra: (p, engine) => engine.host.findFont(p.font || undefined) ?? 'nofont',
+  example: { type: 'text', params: { text: 'OPEN', size: 0.5, depth: 0.1 } },
   async cook({ p, engine, warn }) {
     const host = engine.host;
     const name = p.font || undefined;
@@ -322,6 +324,7 @@ defineNode({
     seed: P.seed(),
   },
   outputs: 'closed polygons with prim class (cell id) and site attributes',
+  example: { type: 'voronoi2d', params: { count: 40, size: [20, 20], inset: 0.2, relax: 2, seed: 1 } },
   cook: ({ inputs, p }) => {
     const F = FRAMES[p.plane as keyof typeof FRAMES];
     const src = inputs[0] ?? null;
@@ -398,6 +401,14 @@ defineNode({
   params: {
     plane: P.plane('xz'),
     max_edge: { type: 'float', default: 0, min: 0, desc: 'drop triangles with an edge longer than this (0 = keep all)' },
+  },
+  example: {
+    nodes: {
+      pts: { type: 'point_grid', params: { counts: [12, 1, 12], size: [10, 0, 10], jitter: 0.4 } },
+      hills: { type: 'noise_displace', in: ['pts'], params: { mode: 'direction', amplitude: 1, frequency: 0.3 } },
+      mesh: { type: 'triangulate2d', in: ['hills'], params: { max_edge: 2 } },
+    },
+    output: 'mesh',
   },
   cook: ({ input, p }) => {
     const g = input(0);
