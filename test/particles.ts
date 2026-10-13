@@ -304,6 +304,13 @@ section('max_particles');
   check(maxSeen <= 100 && minLate >= 50, `with life 0.5 s the slots free up: never above 100 over 60 frames, still ${minLate}+ alive after frame 30`);
   const zero = await cook(sim(emitter, { steps: 10, max_particles: 0 }));
   check(zero.geo!.numPoints === 0 && zero.geo!.points.has('age'), 'max_particles 0: an empty result with the usual attributes');
+  // R-17: refused births are counted per step and point, not looped over one by one (an emit_rate of 1e12 hung the
+  // cook), and the count does not wrap at 2^31 (it read -1894967306 here)
+  const t0 = performance.now();
+  const flood = await cook(sim({ type: 'points', params: { positions: [[0, 1, 0]] } }, { ...NOG, steps: 2, emit_rate: 1.2e9, max_particles: 10 }));
+  const floodMs = performance.now() - t0;
+  check(flood.geo!.numPoints === 10 && flood.warnings.some((w) => w.message.includes('max_particles (10) reached: 2399999990 births')) && floodMs < 2000,
+    `emit_rate 1.2e9 under max_particles 10: 2,399,999,990 refused births counted in ${floodMs.toFixed(0)} ms`);
 }
 
 // ---------------------------------------------------------------- time
