@@ -107,10 +107,11 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | R-8 | Follow-ups from P0-D/P0-F: port scatter sampling to the pool, faster pointNormals, SAH BVH (changes grazing hits), relax scatter | queued | or the Rust kernel track |
 
 ## External track
-- **Codex sessions** (orchestrated from here with `codex exec`, one worktree per session, gates re-run by the orchestrator before merge): K-1 kernels session 1 (straight skeleton crate + loader + `straight_skeleton` node) on branch `codex/kernels`, started 2026-10-13; next sessions: SDF grids + dual contouring, quad remeshing, erosion kernel.
+- **Codex sessions** (orchestrated from here with `codex exec`, one worktree per session, gates re-run by the orchestrator before merge): K-1 kernels session 1 (straight skeleton crate + loader + `straight_skeleton` node + `roof_skeleton` asset) **merged e153ec6** on 2026-10-13 (gpt-6-astra, ultra; all gates re-run by the orchestrator; limits: 4096 vertices, some near-degenerate events return errors, bit-identity across platforms not exhaustively verified). Next sessions: K-2 SDF grids + dual contouring, K-3 quad remeshing, K-4 erosion kernel.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-13: Codex K-1 merged (e153ec6): straight skeleton kernel crate, 205 node types, 37 shelf assets, 267 goldens, 27 examples. Licence policy clarified for build-time tooling (Unicode-3.0 etc.).
 - 2026-10-13: P3-T merged: procedural textures and bakes (also fixed the CLI exiting 13 after pool work). 26 examples, 264 goldens.
 - 2026-10-13: repo transferred to github.com/topotopo-dev/polyforge (private); AGENTS.md added; Codex kernels session 1 launched; texture agent (P3-T) relaunched from the cancelled attempt's WIP commit.
 - 2026-10-13: ROADMAP got a status block, §6a textures, §7 release and grants (MegaGrants 2026 cycles are closed; next expected January 2027; NLnet calls open until 2026-11-03 but NLnet declines AI-generated projects and requires an AI disclosure). P3-T launched. Name: user ~90% on TopoTopo; one domain only, topotopo.dev recommended (.com/.io/.org taken).
