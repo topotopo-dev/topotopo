@@ -1,0 +1,23 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "TopoTopo PCG",
+  "Description": "TopoTopo point streams, PCG instances and Unreal scene import.",
+  "Category": "Procedural",
+  "CreatedBy": "faxcorp",
+  "CreatedByURL": "https://topotopo.dev",
+  "EngineVersion": "5.8.0",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "SupportedTargetPlatforms": ["Win64"],
+  "Modules": [
+    { "Name": "TopoTopoPCG", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "TopoTopoPCGEditor", "Type": "Editor", "LoadingPhase": "PostEngineInit" }
+  ],
+  "Plugins": [
+    { "Name": "PCG", "Enabled": true },
+    { "Name": "Interchange", "Enabled": true }
+  ]
+}
