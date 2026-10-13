@@ -66,8 +66,8 @@ try {
   assert.deepEqual(heights, saved); checks++;
   const flowCorr = correlation(js.flow, droplet.flow), sedimentCorr = correlation(js.sediment, droplet.sediment);
   console.log(`droplet JS/WASM: flow correlation ${flowCorr.toFixed(9)}, sediment correlation ${sedimentCorr.toFixed(9)}, relative mass error ${Math.abs(sum(droplet.height) - sum(heights)) / sum(heights)}`);
-  check(flowCorr > 0.9 && sedimentCorr > 0.9, 'droplet flow and signed sediment correlations > 0.9');
-  check(Math.abs(sum(droplet.height) - sum(heights)) / sum(heights) < 1e-3, 'droplet closed conservation');
+  check(flowCorr > 0.99 && sedimentCorr > 0.99, 'droplet flow and signed sediment correlations > 0.99');
+  check(Math.abs(sum(droplet.height) - sum(heights)) / sum(heights) < 1e-6, 'droplet closed conservation within 1e-6');
   assert.deepEqual(droplet, kernels.erode_droplet(heights, null, w, h, cell, options, 1)); checks++;
   const anotherSeed = kernels.erode_droplet(heights, null, w, h, cell, options, 2);
   check(droplet.height.some((v, i) => v !== anotherSeed.height[i]), 'a different seed changes droplet erosion');
@@ -182,7 +182,8 @@ try {
   const parityW = 33, parityH = 25;
   const parityInput = Float32Array.from({ length: parityW * parityH }, (_, i) => 4 + (parityH - 1 - Math.floor(i / parityW)) / 16 + Math.abs(i % parityW - 16) / 32);
   const parity = kernels.erode_pipe(parityInput, null, parityW, parityH, 1, { iterations: 25, rainAmount: 0.01 }, 1);
-  const nativeDigests = { height: 'fe7a521d', sediment: 'cbc320b7', debris: '355aea95', flow: '27155547', water: '831ccee1', wear: '114a9886' };
+  // Session 5 native and scalar WASM agree after the pipe reciprocal/remap changes.
+  const nativeDigests = { height: 'd0714b86', sediment: 'ddd8113b', debris: '355aea95', flow: 'e02d6dc8', water: '831ccee1', wear: '114a9886' };
   for (const name of ['height', 'sediment', 'debris', 'flow', 'water', 'wear'] as const) {
     let hash = 2166136261;
     const bytes = new DataView(new ArrayBuffer(4));

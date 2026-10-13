@@ -5,6 +5,7 @@
 //! as in the TypeScript core (the node clips deposits and normalises water/flow).
 
 use crate::erosion::ErosionResult;
+use crate::erosion_profile::Profile;
 
 #[derive(Clone, Debug)]
 pub struct DropletParams {
@@ -155,6 +156,7 @@ struct Brush {
     // Contiguous brush rows give the compiler one checked slice per row instead
     // of a bounds check for every scattered write in the common interior path.
     rows: Vec<(isize, Vec<f64>)>,
+    square5: Option<[f64; 25]>,
 }
 
 impl Brush {
@@ -191,9 +193,45 @@ impl Brush {
         }
         Self {
             radius: r,
+            square5: (r == 2 && offsets.len() == 25).then(|| std::array::from_fn(|i| offsets[i].3)),
             offsets,
             rows,
         }
+    }
+}
+
+// All arguments in these hot-path comparisons are finite, bounded intermediates
+// of a validated simulation. Unlike Rust's NaN-aware min/max, compare-select
+// needs no fmin/fmax helper call on scalar WebAssembly.
+#[inline(always)]
+fn finite_min(a: f64, b: f64) -> f64 {
+    if a < b { a } else { b }
+}
+
+#[inline(always)]
+fn finite_max(a: f64, b: f64) -> f64 {
+    if a > b { a } else { b }
+}
+
+#[inline(always)]
+fn quad(height: &[f64], k: usize, w: usize) -> [f64; 4] {
+    let top = &height[k..k + 2];
+    let bottom = &height[k + w..k + w + 2];
+    [top[0], top[1], bottom[0], bottom[1]]
+}
+
+#[inline(always)]
+fn erode_square5(height: &mut [f64], k: usize, w: usize, weights: &[f64; 25], amount: f64) {
+    let first = k - 2 * w - 2;
+    for z in 0..5 {
+        // The interior check establishes each full brush row is in the field;
+        // the one checked slice removes all five individual write checks.
+        let row = &mut height[first + z * w..first + z * w + 5];
+        row[0] -= weights[z * 5] * amount;
+        row[1] -= weights[z * 5 + 1] * amount;
+        row[2] -= weights[z * 5 + 2] * amount;
+        row[3] -= weights[z * 5 + 3] * amount;
+        row[4] -= weights[z * 5 + 4] * amount;
     }
 }
 
@@ -216,22 +254,41 @@ fn mobility(layer: Option<&[f32]>, k: usize) -> f64 {
 /// Deposit all material onto movable bilinear samples. The fallback is a sample
 /// this droplet actually eroded, so a fully frozen termination quad is safe too.
 #[inline]
-fn deposit(f: &mut Field<'_>, k: usize, fx: f64, fz: f64, amount: f64, fallback: usize) {
-    let q = [k, k + 1, k + f.w, k + f.w + 1];
+#[allow(clippy::too_many_arguments)]
+fn deposit<const MASKED: bool>(
+    height: &mut [f64],
+    freeze: Option<&[f32]>,
+    w: usize,
+    k: usize,
+    fx: f64,
+    fz: f64,
+    amount: f64,
+    fallback: usize,
+) {
+    if !MASKED || freeze.is_none() {
+        let top = &mut height[k..k + 2];
+        top[0] += (1.0 - fx) * (1.0 - fz) * amount;
+        top[1] += fx * (1.0 - fz) * amount;
+        let bottom = &mut height[k + w..k + w + 2];
+        bottom[0] += (1.0 - fx) * fz * amount;
+        bottom[1] += fx * fz * amount;
+        return;
+    }
+    let q = [k, k + 1, k + w, k + w + 1];
     let mut weights = [
         (1.0 - fx) * (1.0 - fz),
         fx * (1.0 - fz),
         (1.0 - fx) * fz,
         fx * fz,
     ];
-    if f.freeze.is_some() {
+    if freeze.is_some() {
         let mut sum = 0.0;
         for s in 0..4 {
-            weights[s] *= mobility(f.freeze, q[s]);
+            weights[s] *= mobility(freeze, q[s]);
             sum += weights[s];
         }
         if sum <= 0.0 {
-            f.height[fallback] += amount;
+            height[fallback] += amount;
             return;
         }
         for weight in &mut weights {
@@ -239,7 +296,7 @@ fn deposit(f: &mut Field<'_>, k: usize, fx: f64, fz: f64, amount: f64, fallback:
         }
     }
     for s in 0..4 {
-        f.height[q[s]] += weights[s] * amount;
+        height[q[s]] += weights[s] * amount;
     }
 }
 
@@ -266,23 +323,19 @@ impl RainScratch {
     }
 }
 
+#[inline(never)]
 fn hydraulic_pass(
     f: &mut Field<'_>,
     p: &DropletParams,
     rng: &mut Rng,
     brush: &Brush,
     scratch: &mut RainScratch,
+    profile: &mut Profile,
+    #[cfg(feature = "profile")] samples: &mut Profile,
 ) {
     let w = f.w;
     let max_x = w - 1;
     let max_z = f.h - 1;
-    let inv = 1.0 / f.cell;
-    let inertia = p.inertia.clamp(0.0, 1.0);
-    let follow = 1.0 - inertia;
-    let erode_k = p.erosion_rate.clamp(0.0, 1.0);
-    let dep_k = p.deposition_rate.clamp(0.0, 1.0);
-    let keep = 1.0 - p.evaporation.clamp(0.0, 1.0);
-    let plain = f.hardness.is_none() && f.freeze.is_none();
     let count = scratch.xs.len();
     for d in 0..count {
         scratch.xs[d] = rng.next() * max_x as f64;
@@ -296,6 +349,7 @@ fn hydraulic_pass(
         let s = (rng.next() * (t + 1) as f64) as usize;
         scratch.rank.swap(t, s);
     }
+    profile.mark("rain_rng");
     scratch.start.fill(0);
     let ntx = w.div_ceil(32);
     for d in 0..count {
@@ -312,24 +366,89 @@ fn hydraulic_pass(
         scratch.order[scratch.start[t]] = d;
         scratch.start[t] += 1;
     }
+    profile.mark("rain_tile_sort");
+    if f.hardness.is_none() && f.freeze.is_none() {
+        droplet_loop::<false>(
+            &mut f.height,
+            &mut f.flow,
+            &mut f.water,
+            f.hardness,
+            f.freeze,
+            w,
+            f.h,
+            f.cell,
+            p,
+            brush,
+            scratch,
+            #[cfg(feature = "profile")]
+            samples,
+        );
+    } else {
+        droplet_loop::<true>(
+            &mut f.height,
+            &mut f.flow,
+            &mut f.water,
+            f.hardness,
+            f.freeze,
+            w,
+            f.h,
+            f.cell,
+            p,
+            brush,
+            scratch,
+            #[cfg(feature = "profile")]
+            samples,
+        );
+    }
+    profile.mark("droplet_motion_brush_deposit");
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn droplet_loop<const MASKED: bool>(
+    height: &mut [f64],
+    flow: &mut [f64],
+    water_layer: &mut [f64],
+    hardness: Option<&[f32]>,
+    freeze: Option<&[f32]>,
+    w: usize,
+    h: usize,
+    cell: f64,
+    p: &DropletParams,
+    brush: &Brush,
+    scratch: &RainScratch,
+    #[cfg(feature = "profile")] samples: &mut Profile,
+) {
+    let max_x = w - 1;
+    let max_z = h - 1;
+    let inv = 1.0 / cell;
+    let inertia = p.inertia.clamp(0.0, 1.0);
+    let follow = 1.0 - inertia;
+    let erode_k = p.erosion_rate.clamp(0.0, 1.0);
+    let dep_k = p.deposition_rate.clamp(0.0, 1.0);
+    let keep = 1.0 - p.evaporation.clamp(0.0, 1.0);
+    let plain = !MASKED;
     for &d in &scratch.order {
+        // Sample one in 256 droplets. These sub-pass intervals overlap the
+        // complete hydraulic timer and must not be added to its elapsed time.
+        #[cfg(feature = "profile")]
+        let sampled = d & 255 == 0;
         let mut px = scratch.xs[d];
         let mut pz = scratch.zs[d];
         let (mut dx, mut dz, mut speed, mut water, mut load) = (0.0, 0.0, 1.0, p.rain_amount, 0.0);
         let mut alive = true;
         let mut fallback = 0;
+        let mut ix = px as i32 as usize;
+        let mut iz = pz as i32 as usize;
+        let mut fx = px - ix as f64;
+        let mut fz = pz - iz as f64;
+        let mut k = iz * w + ix;
         for _ in 0..p.max_lifetime.max(1) {
-            let ix = px as usize;
-            let iz = pz as usize;
-            let fx = px - ix as f64;
-            let fz = pz - iz as f64;
-            let k = iz * w + ix;
-            let [h00, h10, h01, h11] = [
-                f.height[k],
-                f.height[k + 1],
-                f.height[k + w],
-                f.height[k + w + 1],
-            ];
+            #[cfg(feature = "profile")]
+            if sampled {
+                samples.reset();
+            }
+            let [h00, h10, h01, h11] = quad(height, k, w);
             let gx = ((h10 - h00) * (1.0 - fz) + (h11 - h01) * fz) * inv;
             let gz = ((h01 - h00) * (1.0 - fx) + (h11 - h10) * fx) * inv;
             let h_old =
@@ -337,7 +456,7 @@ fn hydraulic_pass(
             dx = dx * inertia - gx * follow;
             dz = dz * inertia - gz * follow;
             let len = (dx * dx + dz * dz).sqrt();
-            f.flow[k] += water;
+            flow[k] += water;
             if len < 1e-12 {
                 break;
             }
@@ -352,22 +471,28 @@ fn hydraulic_pass(
                 alive = false;
                 break;
             }
-            let jx = nx as usize;
-            let jz = nz as usize;
+            let jx = nx as i32 as usize;
+            let jz = nz as i32 as usize;
             let ux = nx - jx as f64;
             let uz = nz - jz as f64;
             let m = jz * w + jx;
-            let h_new = (f.height[m] * (1.0 - ux) + f.height[m + 1] * ux) * (1.0 - uz)
-                + (f.height[m + w] * (1.0 - ux) + f.height[m + w + 1] * ux) * uz;
+            let [h00, h10, h01, h11] = quad(height, m, w);
+            let h_new =
+                (h00 * (1.0 - ux) + h10 * ux) * (1.0 - uz) + (h01 * (1.0 - ux) + h11 * ux) * uz;
             let dh = (h_new - h_old) * inv;
-            let cap = (-dh).max(p.min_slope) * speed * water * p.sediment_capacity;
+            let cap = finite_max(-dh, p.min_slope) * speed * water * p.sediment_capacity;
+            #[cfg(feature = "profile")]
+            if sampled {
+                samples.mark("motion_capacity");
+                samples.reset();
+            }
             if load > cap || dh > 0.0 {
                 let mut amount = if dh > 0.0 {
-                    dh.min(load)
+                    finite_min(dh, load)
                 } else {
                     (load - cap) * dep_k
                 };
-                if let Some(freeze) = f.freeze {
+                if MASKED && let Some(freeze) = freeze {
                     // JS typed-array reads are doubles: promote before summing.
                     let mean = (f64::from(freeze[k])
                         + f64::from(freeze[k + 1])
@@ -378,18 +503,26 @@ fn hydraulic_pass(
                 }
                 if amount > 0.0 {
                     load -= amount;
-                    deposit(f, k, fx, fz, amount * f.cell, fallback);
+                    deposit::<MASKED>(height, freeze, w, k, fx, fz, amount * cell, fallback);
+                }
+                #[cfg(feature = "profile")]
+                if sampled {
+                    samples.mark("deposit");
                 }
             } else {
-                let amount = ((cap - load) * erode_k).min(-dh) * f.cell;
+                let amount = finite_min((cap - load) * erode_k, -dh) * cell;
                 if amount > 0.0 {
                     let r = brush.radius as usize;
                     if plain && ix >= r && ix + r <= max_x && iz >= r && iz + r <= max_z {
-                        for (offset, weights) in &brush.rows {
-                            let first = (k as isize + offset) as usize;
-                            let row = &mut f.height[first..first + weights.len()];
-                            for (sample, weight) in row.iter_mut().zip(weights) {
-                                *sample -= weight * amount;
+                        if let Some(weights) = &brush.square5 {
+                            erode_square5(height, k, w, weights, amount);
+                        } else {
+                            for (offset, weights) in &brush.rows {
+                                let first = (k as isize + offset) as usize;
+                                let row = &mut height[first..first + weights.len()];
+                                for (sample, weight) in row.iter_mut().zip(weights) {
+                                    *sample -= weight * amount;
+                                }
                             }
                         }
                         load += amount * inv;
@@ -402,9 +535,12 @@ fn hydraulic_pass(
                                 continue;
                             }
                             let q = z as usize * w + x as usize;
-                            let eroded =
-                                weight * amount * mobility(f.hardness, q) * mobility(f.freeze, q);
-                            f.height[q] -= eroded;
+                            let eroded = if MASKED {
+                                weight * amount * mobility(hardness, q) * mobility(freeze, q)
+                            } else {
+                                weight * amount
+                            };
+                            height[q] -= eroded;
                             taken += eroded;
                             if eroded > 0.0 {
                                 fallback = q;
@@ -413,88 +549,130 @@ fn hydraulic_pass(
                         load += taken * inv;
                     }
                 }
+                #[cfg(feature = "profile")]
+                if sampled {
+                    samples.mark("brush");
+                }
             }
             let v2 = speed * speed - dh * p.gravity;
             speed = if v2 > 0.0 { v2.sqrt() } else { 0.0 };
             water *= keep;
             px = nx;
             pz = nz;
+            ix = jx;
+            iz = jz;
+            fx = ux;
+            fz = uz;
+            k = m;
         }
         if load > 0.0 {
-            let ix = px as usize;
-            let iz = pz as usize;
-            deposit(
-                f,
-                iz * w + ix,
-                px - ix as f64,
-                pz - iz as f64,
-                load * f.cell,
-                fallback,
-            );
+            deposit::<MASKED>(height, freeze, w, k, fx, fz, load * cell, fallback);
         }
         if alive {
-            f.water[pz as usize * w + px as usize] += water / (1.0 + speed * speed);
+            water_layer[k] += water / (1.0 + speed * speed);
         }
     }
 }
 
-fn smooth_deposits(f: &mut Field<'_>, before: &[f64], deposits: &mut [f64], scratch: &mut [f64]) {
+fn hydraulic_layers(height: &[f64], before: &[f64], sediment: &mut [f64], wear: &mut [f64]) {
+    for (((height, before), sediment), wear) in height.iter().zip(before).zip(sediment).zip(wear) {
+        let delta = height - before;
+        *sediment += delta;
+        *wear += finite_max(-delta, 0.0);
+    }
+}
+
+#[inline(never)]
+fn smooth_deposits(
+    f: &mut Field<'_>,
+    before: &[f64],
+    deposits: &mut [f64],
+    scratch: &mut [f64],
+    sediment: &mut [f64],
+    wear: &mut [f64],
+) {
     if f.freeze.is_some() {
+        hydraulic_layers(&f.height, before, sediment, wear);
         return;
     }
-    deposits.fill(0.0);
-    scratch.fill(0.0);
     let mut any = false;
-    for k in 0..f.height.len() {
-        let d = f.height[k] - before[k];
+    for ((height, before), deposited) in f.height.iter_mut().zip(before).zip(deposits.iter_mut()) {
+        let d = *height - before;
         if d > 0.0 {
-            deposits[k] = d;
-            f.height[k] -= d;
+            *deposited = d;
+            *height -= d;
             any = true;
+        } else {
+            *deposited = 0.0;
         }
     }
     if !any {
+        hydraulic_layers(&f.height, before, sediment, wear);
         return;
     }
     let w = f.w;
-    for j in 0..f.h {
-        for i in 0..w {
-            let k = j * w + i;
-            let v = deposits[k];
-            if v == 0.0 {
-                continue;
-            }
-            if i == 0 {
-                scratch[k] += v * (2.0 / 3.0);
-                scratch[k + 1] += v / 3.0;
-            } else if i == w - 1 {
-                scratch[k] += v * (2.0 / 3.0);
-                scratch[k - 1] += v / 3.0;
+    for (source, target) in deposits.chunks_exact(w).zip(scratch.chunks_exact_mut(w)) {
+        if w == 2 {
+            target[0] = source[0] * (2.0 / 3.0) + source[1] / 3.0;
+            target[1] = source[0] / 3.0 + source[1] * (2.0 / 3.0);
+        } else {
+            target[0] = source[0] * (2.0 / 3.0) + source[1] * 0.25;
+            target[w - 1] = source[w - 2] * 0.25 + source[w - 1] * (2.0 / 3.0);
+            if w == 3 {
+                target[1] = source[0] / 3.0 + source[1] * 0.5 + source[2] / 3.0;
             } else {
-                scratch[k - 1] += v * 0.25;
-                scratch[k] += v * 0.5;
-                scratch[k + 1] += v * 0.25;
+                target[1] = source[0] / 3.0 + source[1] * 0.5 + source[2] * 0.25;
+                target[w - 2] = source[w - 3] * 0.25 + source[w - 2] * 0.5 + source[w - 1] / 3.0;
+                for (target, source) in target[2..w - 2].iter_mut().zip(source[1..w - 1].windows(3))
+                {
+                    *target = source[0] * 0.25 + source[1] * 0.5 + source[2] * 0.25;
+                }
             }
         }
     }
     for j in 0..f.h {
-        for i in 0..w {
-            let k = j * w + i;
-            let v = scratch[k];
-            if v == 0.0 {
-                continue;
+        let base = j * w;
+        let above = if j > 0 { &scratch[base - w..base] } else { &[] };
+        let row = &scratch[base..base + w];
+        let below = if j + 1 < f.h {
+            &scratch[base + w..base + 2 * w]
+        } else {
+            &[]
+        };
+        for (i, (((height, before), sediment), wear)) in f.height[base..base + w]
+            .iter_mut()
+            .zip(&before[base..base + w])
+            .zip(&mut sediment[base..base + w])
+            .zip(&mut wear[base..base + w])
+            .enumerate()
+        {
+            // Gather in the original scatter's addition order, retaining exact
+            // border divisions and skipping zero additions to preserve -0.
+            if j > 0 && above[i] != 0.0 {
+                *height += if j == 1 {
+                    above[i] / 3.0
+                } else {
+                    above[i] * 0.25
+                };
             }
-            if j == 0 {
-                f.height[k] += v * (2.0 / 3.0);
-                f.height[k + w] += v / 3.0;
-            } else if j == f.h - 1 {
-                f.height[k] += v * (2.0 / 3.0);
-                f.height[k - w] += v / 3.0;
-            } else {
-                f.height[k - w] += v * 0.25;
-                f.height[k] += v * 0.5;
-                f.height[k + w] += v * 0.25;
+            if row[i] != 0.0 {
+                *height += row[i]
+                    * if j == 0 || j + 1 == f.h {
+                        2.0 / 3.0
+                    } else {
+                        0.5
+                    };
             }
+            if j + 1 < f.h && below[i] != 0.0 {
+                *height += if j + 2 == f.h {
+                    below[i] / 3.0
+                } else {
+                    below[i] * 0.25
+                };
+            }
+            let delta = *height - before;
+            *sediment += delta;
+            *wear += finite_max(-delta, 0.0);
         }
     }
 }
@@ -536,7 +714,7 @@ fn thermal_cell(
         if d > 0.0 && !freeze.is_some_and(|f| f[q] >= 0.5) {
             excess[s] = d;
             total += d;
-            maximum = maximum.max(d);
+            maximum = finite_max(maximum, d);
         }
     }
     if total <= 0.0 {
@@ -555,12 +733,85 @@ fn thermal_cell(
     }
 }
 
+/// No-alias row stencil. All six row lengths are checked once before the loop.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn thermal_row(
+    previous_height: &[f64],
+    height: &[f64],
+    next_height: &[f64],
+    previous_delta: &mut [f64],
+    delta: &mut [f64],
+    next_delta: &mut [f64],
+    hardness: Option<&[f32]>,
+    talus: f64,
+    diagonal: f64,
+    rate: f64,
+) {
+    let w = height.len();
+    assert!(w >= 2);
+    assert_eq!(previous_height.len(), w);
+    assert_eq!(next_height.len(), w);
+    assert_eq!(previous_delta.len(), w);
+    assert_eq!(delta.len(), w);
+    assert_eq!(next_delta.len(), w);
+    assert!(hardness.is_none_or(|a| a.len() == w));
+    for i in 1..w - 1 {
+        // SAFETY: every row has the checked length w and 1 <= i < w - 1,
+        // hence i - 1, i and i + 1 are valid in every row. No pointer escapes.
+        let mut excess = unsafe {
+            let hk = *height.get_unchecked(i);
+            [
+                hk - *height.get_unchecked(i + 1) - talus,
+                hk - *height.get_unchecked(i - 1) - talus,
+                hk - *next_height.get_unchecked(i) - talus,
+                hk - *previous_height.get_unchecked(i) - talus,
+                hk - *next_height.get_unchecked(i + 1) - diagonal,
+                hk - *previous_height.get_unchecked(i + 1) - diagonal,
+                hk - *next_height.get_unchecked(i - 1) - diagonal,
+                hk - *previous_height.get_unchecked(i - 1) - diagonal,
+            ]
+        };
+        if excess.iter().all(|v| *v <= 0.0) {
+            continue;
+        }
+        let mut maximum = 0.0;
+        let mut total = 0.0;
+        for value in &mut excess {
+            *value = finite_max(*value, 0.0);
+            total += *value;
+            maximum = finite_max(maximum, *value);
+        }
+        let moved = rate * maximum * 0.5 * mobility(hardness, i);
+        if moved <= 0.0 {
+            continue;
+        }
+        let scale = moved / total;
+        // SAFETY: same checked row bounds as the reads. The mutable rows are
+        // separate split_at_mut slices and each temporary element borrow ends
+        // before the next write. Preserve the original neighbour update order.
+        unsafe {
+            *delta.get_unchecked_mut(i) -= moved;
+            *delta.get_unchecked_mut(i + 1) += excess[0] * scale;
+            *delta.get_unchecked_mut(i - 1) += excess[1] * scale;
+            *next_delta.get_unchecked_mut(i) += excess[2] * scale;
+            *previous_delta.get_unchecked_mut(i) += excess[3] * scale;
+            *next_delta.get_unchecked_mut(i + 1) += excess[4] * scale;
+            *previous_delta.get_unchecked_mut(i + 1) += excess[5] * scale;
+            *next_delta.get_unchecked_mut(i - 1) += excess[6] * scale;
+            *previous_delta.get_unchecked_mut(i - 1) += excess[7] * scale;
+        }
+    }
+}
+
 /// Jacobi eight-neighbour talus relaxation. Scratch is reused by the caller.
 #[allow(clippy::too_many_arguments)]
+#[inline(never)]
 pub(crate) fn thermal_pass(
     height: &mut [f64],
     debris: &mut [f64],
     delta: &mut [f64],
+    wear: &mut [f64],
     hardness: Option<&[f32]>,
     freeze: Option<&[f32]>,
     w: usize,
@@ -573,62 +824,80 @@ pub(crate) fn thermal_pass(
     let talus = libm::tan(angle.clamp(0.0, 89.9 * std::f64::consts::PI / 180.0)) * cell;
     let diagonal = talus * std::f64::consts::SQRT_2;
     let rate = rate.clamp(0.0, 1.0);
-    for j in 0..h {
-        for i in 0..w {
-            if i == 0 || i + 1 == w || j == 0 || j + 1 == h || freeze.is_some() {
+    if freeze.is_some() {
+        for j in 0..h {
+            for i in 0..w {
                 thermal_cell(
                     height, delta, hardness, freeze, w, h, i, j, talus, diagonal, rate,
                 );
-                continue;
             }
-            let k = j * w + i;
-            let hk = height[k];
-            let q = [
-                k + 1,
-                k - 1,
-                k + w,
-                k - w,
-                k + w + 1,
-                k - w + 1,
-                k + w - 1,
-                k - w - 1,
-            ];
-            let mut e = [
-                hk - height[q[0]] - talus,
-                hk - height[q[1]] - talus,
-                hk - height[q[2]] - talus,
-                hk - height[q[3]] - talus,
-                hk - height[q[4]] - diagonal,
-                hk - height[q[5]] - diagonal,
-                hk - height[q[6]] - diagonal,
-                hk - height[q[7]] - diagonal,
-            ];
-            if e.iter().all(|d| *d <= 0.0) {
-                continue;
-            }
-            let mut maximum: f64 = 0.0;
-            let mut total = 0.0;
-            for d in &mut e {
-                *d = d.max(0.0);
-                total += *d;
-                maximum = maximum.max(*d);
-            }
-            let moved = rate * maximum * 0.5 * mobility(hardness, k);
-            if moved <= 0.0 {
-                continue;
-            }
-            let scale = moved / total;
-            delta[k] -= moved;
-            for s in 0..8 {
-                delta[q[s]] += e[s] * scale;
-            }
+        }
+    } else {
+        for i in 0..w {
+            thermal_cell(
+                height, delta, hardness, None, w, h, i, 0, talus, diagonal, rate,
+            );
+        }
+        for j in 1..h - 1 {
+            thermal_cell(
+                height, delta, hardness, None, w, h, 0, j, talus, diagonal, rate,
+            );
+            let base = j * w;
+            let previous_height = &height[base - w..base];
+            let current_height = &height[base..base + w];
+            let next_height = &height[base + w..base + 2 * w];
+            let (previous, remainder) = delta.split_at_mut(base);
+            let previous_delta = &mut previous[base - w..];
+            let (current_delta, next) = remainder.split_at_mut(w);
+            let next_delta = &mut next[..w];
+            thermal_row(
+                previous_height,
+                current_height,
+                next_height,
+                previous_delta,
+                current_delta,
+                next_delta,
+                hardness.map(|a| &a[base..base + w]),
+                talus,
+                diagonal,
+                rate,
+            );
+            thermal_cell(
+                height,
+                delta,
+                hardness,
+                None,
+                w,
+                h,
+                w - 1,
+                j,
+                talus,
+                diagonal,
+                rate,
+            );
+        }
+        for i in 0..w {
+            thermal_cell(
+                height,
+                delta,
+                hardness,
+                None,
+                w,
+                h,
+                i,
+                h - 1,
+                talus,
+                diagonal,
+                rate,
+            );
         }
     }
-    for k in 0..height.len() {
-        if delta[k] != 0.0 {
-            height[k] += delta[k];
-            debris[k] += delta[k];
+    for (((height, debris), delta), wear) in height.iter_mut().zip(debris).zip(delta).zip(wear) {
+        if *delta != 0.0 {
+            *height += *delta;
+            *debris += *delta;
         }
+        *wear += finite_max(-*delta, 0.0);
     }
 }
 
@@ -651,6 +920,9 @@ pub fn erode_droplet(
     params: &DropletParams,
     seed: u64,
 ) -> Result<ErosionResult, String> {
+    let mut profile = Profile::new("droplet");
+    #[cfg(feature = "profile")]
+    let mut samples = Profile::new("droplet_samples_1_in_256");
     let n = validate_field(height, hardness, freeze, w, h, cell)?;
     let count = validate_params(params, n)?;
     let mut field = Field {
@@ -672,22 +944,37 @@ pub fn erode_droplet(
     let mut rain = RainScratch::new(count, w, h);
     let brush = Brush::new(params.erosion_radius, w);
     let mut rng = params.rng_state.map_or_else(|| Rng::new(seed), Rng);
+    profile.mark("validation_setup");
     for _ in 0..params.iterations {
         if params.rain_density > 0.0 && params.rain_amount > 0.0 {
             before.copy_from_slice(&field.height);
-            hydraulic_pass(&mut field, params, &mut rng, &brush, &mut rain);
-            smooth_deposits(&mut field, &before, &mut deposits, &mut scratch);
-            for k in 0..n {
-                let delta = field.height[k] - before[k];
-                sediment[k] += delta;
-                wear[k] += (-delta).max(0.0);
-            }
+            profile.mark("copy_height");
+            hydraulic_pass(
+                &mut field,
+                params,
+                &mut rng,
+                &brush,
+                &mut rain,
+                &mut profile,
+                #[cfg(feature = "profile")]
+                &mut samples,
+            );
+            smooth_deposits(
+                &mut field,
+                &before,
+                &mut deposits,
+                &mut scratch,
+                &mut sediment,
+                &mut wear,
+            );
+            profile.mark("smooth_deposits_and_layers");
         }
         if params.thermal_rate > 0.0 {
             thermal_pass(
                 &mut field.height,
                 &mut debris,
                 &mut scratch,
+                &mut wear,
                 hardness,
                 freeze,
                 w,
@@ -696,19 +983,22 @@ pub fn erode_droplet(
                 params.talus_angle,
                 params.thermal_rate,
             );
-            for k in 0..n {
-                wear[k] += (-scratch[k]).max(0.0);
-            }
+            profile.mark("thermal_and_wear");
         }
     }
-    Ok(ErosionResult {
+    let result = ErosionResult {
         height: layer_f32(field.height)?,
         sediment: layer_f32(sediment)?,
         debris: layer_f32(debris)?,
         flow: layer_f32(field.flow)?,
         water: layer_f32(field.water)?,
         wear: layer_f32(wear)?,
-    })
+    };
+    profile.mark("output_layers");
+    profile.finish();
+    #[cfg(feature = "profile")]
+    samples.finish();
+    Ok(result)
 }
 
 /// Standalone mass-conserving eight-neighbour thermal erosion, angle in radians.
@@ -755,6 +1045,172 @@ mod tests {
 
     fn sum(a: &[f32]) -> f64 {
         a.iter().map(|v| f64::from(*v)).sum()
+    }
+
+    #[test]
+    fn thermal_rows_match_checked_cells_at_small_grid_borders() {
+        for w in 2..8 {
+            for h in 2..8 {
+                for masked in 0..3 {
+                    let input: Vec<f64> = terrain(w, h, 3).into_iter().map(f64::from).collect();
+                    let hard: Vec<f32> = (0..w * h).map(|k| (k % 5) as f32 * 0.25).collect();
+                    let frozen: Vec<f32> = (0..w * h)
+                        .map(|k| if k % 7 == 0 { 1.0 } else { 0.0 })
+                        .collect();
+                    let hardness = (masked > 0).then_some(hard.as_slice());
+                    let freeze = (masked == 2).then_some(frozen.as_slice());
+                    let mut expected = input.clone();
+                    let mut reference_delta = vec![0.0; w * h];
+                    let talus = libm::tan(0.2) * 0.7;
+                    for j in 0..h {
+                        for i in 0..w {
+                            thermal_cell(
+                                &input,
+                                &mut reference_delta,
+                                hardness,
+                                freeze,
+                                w,
+                                h,
+                                i,
+                                j,
+                                talus,
+                                talus * std::f64::consts::SQRT_2,
+                                0.3,
+                            );
+                        }
+                    }
+                    for (height, delta) in expected.iter_mut().zip(&reference_delta) {
+                        if *delta != 0.0 {
+                            *height += delta;
+                        }
+                    }
+                    let mut actual = input;
+                    let mut debris = vec![0.0; w * h];
+                    let mut delta = vec![0.0; w * h];
+                    let mut wear = vec![0.0; w * h];
+                    thermal_pass(
+                        &mut actual,
+                        &mut debris,
+                        &mut delta,
+                        &mut wear,
+                        hardness,
+                        freeze,
+                        w,
+                        h,
+                        0.7,
+                        0.2,
+                        0.3,
+                    );
+                    assert_eq!(actual, expected, "{w} x {h}, mask {masked}");
+                    assert_eq!(delta, reference_delta);
+                    assert_eq!(debris, reference_delta);
+                    for (wear, delta) in wear.iter().zip(&reference_delta) {
+                        assert_eq!(*wear, finite_max(-*delta, 0.0));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gathered_deposits_match_scatter_at_small_grid_borders() {
+        // A scalar scatter reference checks the gather's special 2/3 borders,
+        // overlapping small-grid cases and fused signed-layer accounting.
+        for w in 2..8 {
+            for h in 2..8 {
+                let n = w * h;
+                let before: Vec<f64> = (0..n).map(|k| 4.0 + (k % 7) as f64 / 16.0).collect();
+                for pattern in 0..3 {
+                    let after: Vec<f64> = before
+                        .iter()
+                        .enumerate()
+                        .map(|(k, v)| {
+                            v + if pattern == 0 {
+                                -0.125
+                            } else {
+                                [-0.375, 0.0, 0.1, 0.75][(k + pattern) % 4]
+                            }
+                        })
+                        .collect();
+                    let mut expected = after.clone();
+                    let mut deposited = vec![0.0; n];
+                    let mut horizontal = vec![0.0; n];
+                    for k in 0..n {
+                        let d = expected[k] - before[k];
+                        if d > 0.0 {
+                            deposited[k] = d;
+                            expected[k] -= d;
+                        }
+                    }
+                    for j in 0..h {
+                        for i in 0..w {
+                            let k = j * w + i;
+                            let v = deposited[k];
+                            if v == 0.0 {
+                                continue;
+                            }
+                            if i == 0 {
+                                horizontal[k] += v * (2.0 / 3.0);
+                                horizontal[k + 1] += v / 3.0;
+                            } else if i + 1 == w {
+                                horizontal[k] += v * (2.0 / 3.0);
+                                horizontal[k - 1] += v / 3.0;
+                            } else {
+                                horizontal[k - 1] += v * 0.25;
+                                horizontal[k] += v * 0.5;
+                                horizontal[k + 1] += v * 0.25;
+                            }
+                        }
+                    }
+                    for j in 0..h {
+                        for i in 0..w {
+                            let k = j * w + i;
+                            let v = horizontal[k];
+                            if v == 0.0 {
+                                continue;
+                            }
+                            if j == 0 {
+                                expected[k] += v * (2.0 / 3.0);
+                                expected[k + w] += v / 3.0;
+                            } else if j + 1 == h {
+                                expected[k] += v * (2.0 / 3.0);
+                                expected[k - w] += v / 3.0;
+                            } else {
+                                expected[k - w] += v * 0.25;
+                                expected[k] += v * 0.5;
+                                expected[k + w] += v * 0.25;
+                            }
+                        }
+                    }
+                    let mut field = Field {
+                        w,
+                        h,
+                        cell: 1.0,
+                        height: after,
+                        hardness: None,
+                        freeze: None,
+                        flow: vec![0.0; n],
+                        water: vec![0.0; n],
+                    };
+                    let mut sediment = vec![0.0; n];
+                    let mut wear = vec![0.0; n];
+                    smooth_deposits(
+                        &mut field,
+                        &before,
+                        &mut deposited,
+                        &mut horizontal,
+                        &mut sediment,
+                        &mut wear,
+                    );
+                    assert_eq!(field.height, expected, "{w} x {h}, pattern {pattern}");
+                    for k in 0..n {
+                        let delta = expected[k] - before[k];
+                        assert_eq!(sediment[k], delta);
+                        assert_eq!(wear[k], (-delta).max(0.0));
+                    }
+                }
+            }
+        }
     }
 
     #[test]
