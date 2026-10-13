@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-218 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+220 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -26,7 +26,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [io](#io-nodes): [file](#file)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [roof_skeleton](#roof_skeleton) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
-- [sim](#sim-nodes): [particles](#particles)
+- [sim](#sim-nodes): [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
 - [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_curves](#tex_curves) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
@@ -10569,6 +10569,270 @@ Steps of dt = 1 / (fps × substeps). Each step, every emitter point (input 0: po
     }
   },
   "output": "out"
+}
+```
+
+### rbd_settle
+
+category: `sim` · aliases: `rbd`, `rigid_body`, `rigidbody`, `settle`, `drop`, `rbd_drop`, `physics_settle`, `rbdbulletsolver`
+
+Drop pieces (packed instances or polygon pieces) onto a terrain, container or ground plane and let them come to rest (Houdini RBD drop / settle), with the Rapier physics engine.
+
+For procedural assembly: scatter pieces above a surface, settle them, and they rest in contact instead of floating or intersecting. Input 0 = the pieces: every packed prim (copy_to_points {pack: true}, pack) is one piece whose convex hull is computed once per source and shared by all its instances; polygons are grouped into pieces by the pieces param. Input 1 = static collision geometry (terrain mesh, heightfield, container; exact triangles; packed input is unpacked); without it a ground plane at y = ground. Pieces with a prim or point attribute active = 0 stay put and others collide with them (active defaults to 1, so geometry merged without it moves); point (or prim) attributes v (m/s) and w (rad/s) give initial velocities. The output is the input with each piece moved rigidly (packed input stays packed: only anchors and instance transforms change), plus v, w, settled and contacts on the moved points. Pieces must not start inside each other (they are pushed apart violently; a warning says how many did): space them, or use rbd_stack, which drops them one at a time. Same inputs and seed give the same result (Rapier's WASM build is deterministic; bodies are inserted in a spatial order, so the input order does not matter). By default the node ignores time and shows the settled state on every frame; animate shows the fall frame by frame (cooking frame 11 after 10 resumes the simulation).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `pieces` | no | no | pieces to drop: packed instances and/or polygon pieces |
+| 1 | `collision` | yes | no | static collision geometry (polygons and heightfields); none = ground plane |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `pieces` | enum | `"auto"` |  | `auto`, `connectivity`, `name`, `attrib` |  | how polygons form pieces (packed prims are always one piece each): auto = prim attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; connectivity; name; attrib (piece_attrib) |
+| `piece_attrib` | string | `""` |  |  |  | pieces = attrib: the prim (or point) attribute whose values name the pieces, e.g. "class" from connectivity |
+| `collision_shape` | enum | `"convex_hull"` |  | `convex_hull`, `box`, `sphere`, `mesh` | `shape`, `collision` | shape the pieces collide with: convex_hull (computed once per packed source, scaled per instance), box (bounding box in the piece frame), sphere (bounding sphere), mesh = the exact triangles, only for static pieces (active = 0; moving pieces fall back to convex_hull). The collision input is always used as exact triangles |
+| `hull_points` | int | `64` | 0..4096 |  | `max_hull_points`, `hull_vertices` | convex_hull: most vertices per hull (0 = the exact hull). Collision cost grows with hull size; a smooth piece with more hull vertices is reduced to the ones that matter most, so pieces can sink into each other by a few % of their radius at cut corners |
+| `duration` | float | `8` | 0..120 |  | `time`, `seconds` | simulated seconds at most; the simulation stops earlier once every piece has settled |
+| `steps_per_second` | int | `60` | 10..1000 |  | `steps`, `rate`, `hz` | solver steps per simulated second (time step 1 / steps_per_second); raise it for small or fast pieces |
+| `gravity` | vec3 | `[0,-9.81,0]` |  |  |  | gravity (m/s²) |
+| `friction` | float | `0.7` | 0..2 |  |  | friction coefficient of every collider (pieces, collision geometry, ground) |
+| `restitution` | float | `0` | 0..1 |  | `bounce`, `bounciness` | bounciness (0 = no bounce, settles fastest) |
+| `density` | float | `1000` | 1..100000 |  |  | density of the pieces (kg/m³); with one density for all pieces only the shapes matter |
+| `linear_damping` | float | `0` | 0..10 |  |  | linear velocity damping (1/s) *(advanced)* |
+| `angular_damping` | float | `0.5` | 0..10 |  |  | angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling |
+| `rest_damping` | float | `5` | 0..100 |  |  | extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics |
+| `sleep_threshold` | float | `0.05` | 0.0001..10 |  | `settle_threshold` | a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces |
+| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected |
+| `ground` | float | `0` |  |  | `ground_height` | height of the ground plane |
+| `ccd` | bool | `true` |  |  |  | continuous collision detection, so fast pieces do not pass through thin collision geometry *(advanced)* |
+| `solver_iterations` | int | `4` | 1..32 |  |  | Rapier solver iterations per step (more = stiffer stacks, slower) *(advanced)* |
+| `max_pieces` | int | `5000` | 1..1000000 |  |  | guard: fail instead of simulating more pieces than this (1,000 convex pieces take about 1–3 s) |
+| `seed` | int | `0` |  |  |  | seed of the jitter |
+| `jitter` | float | `0.001` | 0..0.1 |  |  | random start offset (fraction of each piece radius, horizontal) and tilt (radians), so perfectly symmetric stacks still topple deterministically; 0 = none |
+| `keep_packed` | bool | `true` |  |  |  | packed input stays packed with updated instance transforms (false = unpack the result) |
+| `delete_fallen` | bool | `false` |  |  |  | remove pieces that fell off the collision geometry (otherwise they stay where they were stopped, in point group "fallen") |
+| `animate` | bool | `false` |  |  |  | false: every frame shows the settled result (the node does not depend on time). true: the frame shows the simulation at (frame - start_frame) / fps seconds, for viewing the drop |
+| `start_frame` | int | `1` |  |  |  | animate: the frame the simulation starts at |
+
+**Writes:** pieces moved to their settled transforms (packed: anchor P and the instance transform; unpacked: P, N, up, orient), point attributes on the moved points (packed: the anchors) v (velocity, m/s), w (angular velocity, rad/s), settled (int 0/1), contacts (int: colliders touching the piece); point group fallen (pieces that fell off the collision geometry); stats steps, sim_time, pieces, settled, fallen
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "rock": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 1,
+        "radius": 0.25,
+        "scale": [
+          1,
+          0.6,
+          0.85
+        ]
+      }
+    },
+    "rock_shape": {
+      "type": "noise_displace",
+      "in": [
+        "rock"
+      ],
+      "params": {
+        "amplitude": 0.06,
+        "frequency": 3
+      }
+    },
+    "spots": {
+      "type": "point_grid",
+      "params": {
+        "counts": [
+          4,
+          1,
+          4
+        ],
+        "size": [
+          3,
+          0,
+          3
+        ],
+        "center": [
+          0,
+          2,
+          0
+        ]
+      }
+    },
+    "spin": {
+      "type": "attrib_randomize",
+      "in": [
+        "spots"
+      ],
+      "params": {
+        "name": "orient",
+        "distribution": "orient",
+        "seed": 3
+      }
+    },
+    "rocks": {
+      "type": "copy_to_points",
+      "in": [
+        "rock_shape",
+        "spin"
+      ],
+      "params": {
+        "pack": true
+      }
+    },
+    "ground": {
+      "type": "terrain",
+      "params": {
+        "size": [
+          6,
+          6
+        ],
+        "divisions": [
+          24,
+          24
+        ],
+        "height": 0.6,
+        "frequency": 0.3,
+        "seed": 2
+      }
+    },
+    "settle": {
+      "type": "rbd_settle",
+      "in": [
+        "rocks",
+        "ground"
+      ]
+    }
+  },
+  "output": "settle"
+}
+```
+
+### rbd_stack
+
+category: `sim` · aliases: `rbd_pile`, `stack_pieces`, `pile`, `rbd_fill`
+
+Drop pieces one at a time (every interval steps), each lifted above what already lies under it, so crates stack and rocks pile up instead of starting inside each other.
+
+rbd_settle for pieces that overlap where they are: give every crate the same position (or a few spawn points) and they come down one after another onto the pile. Each piece keeps its input X/Z and rotation; with lift its drop height is raised until it clears whatever is under it (a downward shape cast through the pieces already dropped and the collision geometry), plus clearance. Pieces drop in the order param's order, one every interval steps; duration counts from the last drop. Same inputs, outputs and parameters as rbd_settle (see there); with animate, pieces that have not dropped yet are not in the output.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `pieces` | no | no | pieces to drop: packed instances and/or polygon pieces, possibly overlapping |
+| 1 | `collision` | yes | no | static collision geometry (polygons and heightfields); none = ground plane |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `interval` | int | `15` | 1..10000 |  |  | solver steps between two drops (15 at 60 steps/s = four pieces per second) |
+| `order` | enum | `"input"` |  | `input`, `height`, `random` |  | drop order: input = prim order, height = lowest first, random = seeded shuffle |
+| `lift` | bool | `true` |  |  |  | raise each piece above whatever already lies under its drop position (a shape cast from above), so pieces given the same position stack |
+| `clearance` | float | `0.02` | 0..10 |  |  | lift: gap left between a dropped piece and the pile under it (m) |
+| `pieces` | enum | `"auto"` |  | `auto`, `connectivity`, `name`, `attrib` |  | how polygons form pieces (packed prims are always one piece each): auto = prim attribute piece, else copynum (unpacked copy_to_points), else name, else connected parts; connectivity; name; attrib (piece_attrib) |
+| `piece_attrib` | string | `""` |  |  |  | pieces = attrib: the prim (or point) attribute whose values name the pieces, e.g. "class" from connectivity |
+| `collision_shape` | enum | `"convex_hull"` |  | `convex_hull`, `box`, `sphere`, `mesh` | `shape`, `collision` | shape the pieces collide with: convex_hull (computed once per packed source, scaled per instance), box (bounding box in the piece frame), sphere (bounding sphere), mesh = the exact triangles, only for static pieces (active = 0; moving pieces fall back to convex_hull). The collision input is always used as exact triangles |
+| `hull_points` | int | `64` | 0..4096 |  | `max_hull_points`, `hull_vertices` | convex_hull: most vertices per hull (0 = the exact hull). Collision cost grows with hull size; a smooth piece with more hull vertices is reduced to the ones that matter most, so pieces can sink into each other by a few % of their radius at cut corners |
+| `duration` | float | `8` | 0..120 |  | `time`, `seconds` | simulated seconds at most; the simulation stops earlier once every piece has settled |
+| `steps_per_second` | int | `60` | 10..1000 |  | `steps`, `rate`, `hz` | solver steps per simulated second (time step 1 / steps_per_second); raise it for small or fast pieces |
+| `gravity` | vec3 | `[0,-9.81,0]` |  |  |  | gravity (m/s²) |
+| `friction` | float | `0.7` | 0..2 |  |  | friction coefficient of every collider (pieces, collision geometry, ground) |
+| `restitution` | float | `0` | 0..1 |  | `bounce`, `bounciness` | bounciness (0 = no bounce, settles fastest) |
+| `density` | float | `1000` | 1..100000 |  |  | density of the pieces (kg/m³); with one density for all pieces only the shapes matter |
+| `linear_damping` | float | `0` | 0..10 |  |  | linear velocity damping (1/s) *(advanced)* |
+| `angular_damping` | float | `0.5` | 0..10 |  |  | angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling |
+| `rest_damping` | float | `5` | 0..100 |  |  | extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics |
+| `sleep_threshold` | float | `0.05` | 0.0001..10 |  | `settle_threshold` | a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces |
+| `ground_plane` | enum | `"auto"` |  | `auto`, `on`, `off` |  | infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected |
+| `ground` | float | `0` |  |  | `ground_height` | height of the ground plane |
+| `ccd` | bool | `true` |  |  |  | continuous collision detection, so fast pieces do not pass through thin collision geometry *(advanced)* |
+| `solver_iterations` | int | `4` | 1..32 |  |  | Rapier solver iterations per step (more = stiffer stacks, slower) *(advanced)* |
+| `max_pieces` | int | `5000` | 1..1000000 |  |  | guard: fail instead of simulating more pieces than this (1,000 convex pieces take about 1–3 s) |
+| `seed` | int | `0` |  |  |  | seed of the jitter |
+| `jitter` | float | `0.001` | 0..0.1 |  |  | random start offset (fraction of each piece radius, horizontal) and tilt (radians), so perfectly symmetric stacks still topple deterministically; 0 = none |
+| `keep_packed` | bool | `true` |  |  |  | packed input stays packed with updated instance transforms (false = unpack the result) |
+| `delete_fallen` | bool | `false` |  |  |  | remove pieces that fell off the collision geometry (otherwise they stay where they were stopped, in point group "fallen") |
+| `animate` | bool | `false` |  |  |  | false: every frame shows the settled result (the node does not depend on time). true: the frame shows the simulation at (frame - start_frame) / fps seconds, for viewing the drop |
+| `start_frame` | int | `1` |  |  |  | animate: the frame the simulation starts at |
+
+**Writes:** pieces moved to their settled transforms (packed: anchor P and the instance transform; unpacked: P, N, up, orient), point attributes on the moved points (packed: the anchors) v (velocity, m/s), w (angular velocity, rad/s), settled (int 0/1), contacts (int: colliders touching the piece); point group fallen (pieces that fell off the collision geometry); stats steps, sim_time, pieces, settled, fallen
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "crate": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.5,
+          0.4,
+          0.4
+        ]
+      }
+    },
+    "spots": {
+      "type": "point_grid",
+      "params": {
+        "counts": [
+          2,
+          1,
+          1
+        ],
+        "size": [
+          0.3,
+          0,
+          0
+        ]
+      }
+    },
+    "many": {
+      "type": "copy_xform",
+      "in": [
+        "spots"
+      ],
+      "params": {
+        "count": 5,
+        "translate": [
+          0,
+          0,
+          0.05
+        ]
+      }
+    },
+    "crates": {
+      "type": "copy_to_points",
+      "in": [
+        "crate",
+        "many"
+      ],
+      "params": {
+        "pack": true
+      }
+    },
+    "pile": {
+      "type": "rbd_stack",
+      "in": [
+        "crates"
+      ],
+      "params": {
+        "interval": 10,
+        "duration": 3
+      }
+    }
+  },
+  "output": "pile"
 }
 ```
 

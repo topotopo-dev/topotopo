@@ -1,0 +1,76 @@
+{
+  "description": "Rigid-body settling: shelf rocks dropped onto the rocks_on_terrain landscape come to rest on it (rbd_settle), then crates are dropped one at a time onto three spots and pile up on the terrain and the rocks (rbd_stack).",
+  "vars": { "rock_count": 150, "seed": 7 },
+  "nodes": {
+    "terrain": {
+      "type": "terrain",
+      "params": {
+        "size": [30, 30],
+        "divisions": [160, 160],
+        "height": 3.2,
+        "frequency": 0.06,
+        "fractal": "fbm",
+        "seed": "=seed",
+        "octaves": 6
+      }
+    },
+    "tint": {
+      "type": "color",
+      "in": ["terrain"],
+      "params": {
+        "mode": "ramp",
+        "attrib": "height",
+        "ramp": [[0, "#3b5f2a"], [0.45, "#6b8f3a"], [0.75, "#8a7b5a"], [1, "#e8e6e1"]]
+      }
+    },
+    "pts": {
+      "type": "scatter",
+      "in": ["terrain"],
+      "params": { "count": "=rock_count * 2", "seed": "=seed", "min_distance": 1.2, "emit_attributes": "^*" }
+    },
+    "flat": {
+      "type": "wrangle",
+      "in": ["pts"],
+      "note": "rocks on the gentler slopes, away from the edges and the pad",
+      "params": { "code": "if (@N.y < 0.9 || Math.abs(@P.x) > 12.5 || Math.abs(@P.z) > 12.5 || (Math.abs(@P.x - 3.75) < 2.6 && Math.abs(@P.z - 2.25) < 2.6)) removepoint(0, @ptnum);" }
+    },
+    "sized": {
+      "type": "orient",
+      "in": ["flat"],
+      "params": { "mode": "random", "axis": [0, 0, 0], "scale_min": 0.35, "scale_max": 1, "seed": "=seed" }
+    },
+    "lifted": { "type": "transform", "in": ["sized"], "params": { "translate": [0, 1.2, 0] } },
+    "rock_a": { "type": "rock", "params": { "seed": 1 } },
+    "rock_b": { "type": "rock", "params": { "seed": 2, "flatness": 0.5 } },
+    "rock_c": { "type": "rock", "params": { "seed": 3, "roughness": 0.45 } },
+    "rock_set": { "type": "merge", "in": ["rock_a", "rock_b", "rock_c"] },
+    "rocks": {
+      "type": "copy_to_points",
+      "in": ["rock_set", "lifted"],
+      "params": { "pack": true, "variants": "piece", "variant_weights": [1, 1, 1], "seed": "=seed" }
+    },
+    "pad": { "type": "box", "params": { "size": [3.4, 1.2, 3.4], "center": [3.75, -0.6, 2.25] } },
+    "pad_col": { "type": "color", "in": ["pad"], "params": { "color": "#9a968c" } },
+    "ground": { "type": "merge", "in": ["terrain", "pad_col"] },
+    "settled_rocks": {
+      "type": "rbd_settle",
+      "in": ["rocks", "ground"],
+      "params": { "duration": 12, "angular_damping": 1, "delete_fallen": true }
+    },
+    "spots": { "type": "points", "params": { "positions": [[3.75, 0, 2.25]] } },
+    "spot_copies": { "type": "copy_xform", "in": ["spots"], "params": { "count": 16, "translate": [0, 0, 0] } },
+    "spread": { "type": "jitter", "in": ["spot_copies"], "params": { "scale": [1, 0, 1], "seed": "=seed" } },
+    "turned": {
+      "type": "orient",
+      "in": ["spread"],
+      "params": { "mode": "direction", "align_axis": "y", "direction": [0, 0, 1], "random_yaw": [0, 360], "scale_min": 0.6, "scale_max": 0.6, "seed": "=seed" }
+    },
+    "crate": { "type": "crate" },
+    "crates": { "type": "copy_to_points", "in": ["crate", "turned"], "params": { "pack": true } },
+    "ground_and_rocks": { "type": "merge", "in": ["ground", "settled_rocks"] },
+    "crate_piles": { "type": "rbd_stack", "in": ["crates", "ground_and_rocks"], "params": { "interval": 30, "duration": 4 } },
+    "out": { "type": "merge", "in": ["tint", "pad_col", "settled_rocks", "crate_piles"] }
+  },
+  "output": "out",
+  "meta": { "render": { "views": ["persp"], "size": 1100, "azimuth": 30, "elevation": 30, "zoom": 2 } }
+}

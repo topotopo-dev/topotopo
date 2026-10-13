@@ -67,6 +67,7 @@ src/core/      geometry model + algorithms (no I/O)
   particles.ts   particle simulation (the particles node): emission, the per-particle integration kernel (forces, analytic-
                  gradient curl noise, fields, floor and mesh collisions, trail rings), the state as a point Geometry, output
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
+  rbd.ts         rigid-body settling on Rapier: pieces (packed instances, polygon pieces), shapes, the world, write-back
   noise.ts       perlin / simplex / value / worley, fBm / ridged / turbulence, curl
   wrangle.ts     @-syntax compiler → per-element kernels; deferred addpoint/addprim/remove; chunked point wrangles
   kernels.ts     kernel registry for the worker pool: pure per-element functions over typed arrays (noise, rays)
@@ -85,6 +86,7 @@ src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.b
                instance stream (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts ·
                heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts) ·
                image volumes as PNG files (textures.ts: glTF/USD texture data, the "textures" format)
+src/wasm/      loaders: kernels.ts (the Rust kernels, read through Host.readFile), rapier.ts (Rapier, a lazy import)
 src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts)
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
@@ -546,6 +548,71 @@ include `quad_fraction`, interior irregular-valence count `singularities`, and e
 borders prevent that refinement. Algorithm limits and measured acceptance are recorded in `kernels/README.md`
 and `kernels/BENCH.md`; `examples/quad_remesh.json` exposes every polygon edge for visual review.
 
+### Rigid bodies (Rapier)
+
+`rbd_settle` and `rbd_stack` (category `sim`) are Houdini's RBD drop/settle idiom for procedural assembly: pieces fall
+under gravity and come to rest on a terrain, in a container or on a ground plane, so scattered rocks and props sit in
+contact instead of floating or intersecting. The physics is Rapier (`@dimforge/rapier3d-compat`, Apache-2.0), the
+compat build whose JavaScript inlines the WASM as base64 (4.3 MB module, 3.1 MB of WASM; 1.66 MB gzipped). Nothing
+reads a file: `src/wasm/rapier.ts` imports the package on the first rbd cook (about 60 ms to import and instantiate),
+so the dependency costs nothing until a graph uses it, and a browser bundle splits it into its own chunk. The core
+(`src/core/rbd.ts`) receives the loaded module and stays host-agnostic.
+
+- **Pieces.** Every packed prim is a piece. Its body frame is the anchor and the rotation Q of `packedXform = Q·U`
+  (Gram-Schmidt; U holds scale and shear, a negative entry when it mirrors). The convex hull is computed once per
+  source by Rapier's quickhull, in a scratch world, and every instance applies its U to the hull vertices (hulls
+  commute with linear maps, so 1,000 instances of three rock sources cost three hulls). Polygons are grouped into
+  pieces by `piece`, `copynum` (unpacked copy_to_points), `name`, or connectivity; points shared by two pieces are split
+  first. An unpacked piece's frame is its bounding-box centre, unrotated. Hull input points are sorted by position, so a
+  piece gets the same hull packed or unpacked and whatever its point numbering.
+- **Shapes.** `convex_hull` (default), `box` and `sphere` bound the hull vertices; `mesh` (exact triangles) only for
+  static pieces (`active` = 0). Smooth pieces with more than `hull_points` (64) hull vertices are reduced: a greedy on
+  the support function (start from the extremes along 26 directions, then add the vertex that gives the full hull's
+  support in the direction where the chosen set falls shortest, over the hull's face normals and 256 sphere directions;
+  one quickhull at the end). Collision cost grows with hull size (1,000 shelf rocks: 3.5 s exact, 2.1 s reduced); a
+  reduced piece can sink in by the remaining shortfall, about 3 % of its radius for the shelf rock and at most 4.7 % in
+  `test/rbd.ts`. Input 1 (terrain, heightfields as the triangles `heightfield_to_mesh` draws, containers, earlier settled
+  pieces; packed input expanded) is one static trimesh with Rapier's internal-edge fix (two-sided); without it a ground
+  plane at `ground`.
+- **Simulation.** A fixed step (`steps_per_second`, 60), Rapier's `lengthUnit` set to the median piece size, CCD on.
+  Every 5 steps the pieces are checked: a piece more than twice its radius below the lowest collider is removed and
+  marked fallen; a piece that has stayed below 4 × `sleep_threshold` for 0.5 s gets `rest_damping` (angular, 40 % of it
+  linear) until it speeds up past 10 × the threshold again, which ends the slow wobbling that otherwise keeps convex
+  pieces on a triangle mesh awake for seconds; the simulation ends when every piece is asleep or has stayed below the
+  threshold for 0.5 s, or after `duration`. After the first step, pieces overlapping by more than 5 % of their radius
+  are counted for a warning. `rbd_stack` drops the pieces one every `interval` steps; with `lift` each is first moved up
+  until it clears what is under its drop position (a downward shape cast from above everything; one step with only the
+  static colliders runs first so the broad phase sees them).
+- **Output.** A copy of the input with every piece moved rigidly: packed pieces change only the anchor P and
+  `packedXform = R(q)·U` (instances stay instances and keep their sources); unpacked pieces move their points and rotate
+  N/up/tangentu/force and compose `orient`. Points (anchors for packed pieces) get `v`, `w`, `settled` and `contacts`;
+  fallen pieces are in point group `fallen` (or deleted). `active` defaults to 1, so geometry merged without it moves.
+- **Determinism.** Same inputs, params and seed give the same bits: Rapier's WASM arithmetic is IEEE-754 without
+  platform-dependent rounding (no SIMD build, no threads), bodies are inserted in a spatial order (y, x, z of their
+  input pose) so permuting the input changes nothing, and the jitter is seeded by that rank. Tested: two engines with
+  another simulation in between, pool off and on, reversed prim and point order. A different Rapier version may
+  settle differently (goldens would change).
+- **Time.** By default the nodes ignore the frame (a plain cook is the settled result, cached across frames). With
+  `animate` the cook reads the frame and fps and simulates `(frame - start_frame) / fps` seconds; the node keeps the
+  world of its last two signatures, so cooking frame 11 after frame 10 runs only the steps in between, and the last
+  frame equals the settled cook bit for bit.
+
+Measured (i7-10700K; other jobs kept the machine at 50–100 % CPU, so idle numbers are lower; the whole cook of the
+node, Rapier loaded):
+
+| case | time | steps |
+|---|---|---|
+| 1,000 packed shelf rocks (151 hull vertices → 64) dropped 1–2 m onto the ground | 2.1 s (3.5 s at 100 % load) | 325–415 |
+| the same with exact hulls (`hull_points` 0) | 3.5 s | 475 |
+| 1,000 packed boxes / ico spheres (42 vertices) | 0.9 s / 1.4 s | 190 / 255 |
+| 1,000 unpacked rocks (a hull per piece, 162k points written back) | 3.7 s | 335 |
+| 1,000 rocks in a 10-layer column, 219 starting in contact | 5.5 s | 440 |
+| `examples/rbd_settle.json`: 116 rocks on a 51k-triangle terrain, then 16 crates | 2.6 s + 0.35 s | 720 / 545 |
+
+Most of the time goes to the first second or two, while every piece is awake; sleeping pieces cost nothing. A piece
+on a triangle mesh touches tens of triangles, so terrain contacts are the main cost (the showcase rocks: 3.6 ms
+per step on average over 720 steps for 116 pieces).
+
 ## What makes it LLM-friendly
 
 These are the decisions that most affect how well an agent can work with it:
@@ -608,6 +675,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 |---|---|---|
 | manifold-3d | Apache-2.0 | booleans, convex hull, Minkowski, smoothing/refine, level-set meshing, 2D cross-sections (Clipper2): offset, 2D booleans, text fill, extrude |
 | meshoptimizer | MIT | decimation (simplifyWithAttributes, simplifySloppy, simplifyPoints), `lod`; meshopt compression/decompression for glTF (EXT_meshopt_compression) |
+| @dimforge/rapier3d-compat (Rapier) | Apache-2.0 | rigid bodies for `rbd_settle` / `rbd_stack`: convex hulls, trimesh colliders, contacts, shape casts (WASM inlined, imported on first use) |
 | xatlas-wasm (xatlas by Jonathan Young) | MIT | `uv_unwrap` / `uv_autoseam`: chart segmentation, parameterisation, atlas packing (single-file ES module, WASM embedded) |
 | @gltf-transform/core + extensions | MIT | glTF 2.0 document model, GLB/glTF reading and writing, KHR/EXT extensions (materials, quantization, meshopt, Draco, instancing) |
 | earcut | ISC | n-gon triangulation |
@@ -672,8 +740,8 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
 - Houdini interop: `.bgeo.sc` (Blosc) and a USD layer writer with variants.
 - Phase 3: volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points), simulation-lite
-  (Rapier rigid bodies, particles, XPBD cloth), and an optional OpenCascade/replicad CAD module for B-rep fillets and
-  STEP export.
+  (Rapier rigid bodies: `rbd_settle` and `rbd_stack` shipped; particles, XPBD cloth), and an optional OpenCascade/replicad
+  CAD module for B-rep fillets and STEP export.
 
 **GUI (makes the app usable without an LLM)**
 - Browser app: a node editor (React Flow or LiteGraph), a three.js viewport, and parameter panels generated from

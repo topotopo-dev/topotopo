@@ -1,0 +1,61 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "contacts:int:1",
+        "height:float:1",
+        "settled:int:1",
+        "v:float:3",
+        "w:float:3"
+      ],
+      "prim": ["copynum:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [15, 2.4767, 15],
+      "min": [-15, -2.3512, -15]
+    },
+    "counts": {
+      "points": 26061,
+      "prims": 25738,
+      "vertices": 102556,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "c6c6ebac88e9f5ee",
+      "attributes": {
+        "detail.materials": "ccaa1eebd298a641",
+        "point.Cd": "d0327fda53fad78c",
+        "point.N": "7405726f38f17a19",
+        "point.contacts": "7ba88704d129c1be",
+        "point.height": "5a04588637340e64",
+        "point.settled": "4bbe36a5304a8d1f",
+        "point.v": "7617ec0e4b8ae8d8",
+        "point.w": "7b3fa8594dad4b5b",
+        "prim.copynum": "c0fab5454c0d093f",
+        "vertex.uv": "52cf526d20e01f07"
+      },
+      "topology": "3b41bf1fa9f5d0d1"
+    },
+    "packed": {
+      "hash": "f0241ddd0eb7cfff",
+      "instances": 132,
+      "sources": ["932d9e46666813b4", "5281deb6f75fa8cc", "5c6e1a66eed21780", "842f2e736af08c05"]
+    }
+  },
+  "name": "example.rbd_settle",
+  "ok": true,
+  "source": "examples/rbd_settle.json",
+  "warnings": []
+}
