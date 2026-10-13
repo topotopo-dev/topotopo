@@ -5,6 +5,8 @@ import { Geometry } from '../core/geometry.ts';
 import type { SdfVolume as Volume, Volume as AnyVolume } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
+import type { CookContext } from '../graph/types.ts';
+import { runUserCode } from '../core/usercode.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { triangulate } from '../core/topology.ts';
@@ -18,8 +20,34 @@ interface Box { min: Vec3; max: Vec3 }
 
 const len = Math.hypot;
 
-function vol(name: string, bounds: Box, sample: Fn): Volume {
-  return { name, kind: 'sdf', bounds, sample };
+/** An SDF volume; `scripted` when sample runs user code (see SdfVolume.scripted). */
+function vol(name: string, bounds: Box, sample: Fn, scripted?: boolean): Volume {
+  return scripted ? { name, kind: 'sdf', bounds, sample, scripted: true } : { name, kind: 'sdf', bounds, sample };
+}
+
+/**
+ * Evaluate an SDF volume: `work` samples the field with the function it is given (directly, or from inside manifold's
+ * WASM level-set mesher). A field that runs user code (`scripted`: an sdf_expr upstream) is evaluated like a wrangle:
+ * the whole call runs under the script timeout, and what the code throws is read inside it. The sampler handed to
+ * `work` also checks the deadline itself (every 64 samples), so a field that is merely slow stops with an ordinary
+ * exception between samples rather than wherever the host's watchdog interrupts (it is armed a little later and stops
+ * a sample that never returns; the mesher's working memory is then not freed). Analytic fields run `work` as it is,
+ * with no limit and no overhead.
+ */
+export function evalSdf<T>(ctx: CookContext, v: Volume, work: (sample: Fn) => T): T {
+  if (!v.scripted) return work(v.sample);
+  const ms = ctx.engine.scriptTimeoutMs, f = v.sample, deadline = Date.now() + ms;
+  let n = 0, expired = false;
+  const sample: Fn = (x, y, z) => {
+    if ((++n & 63) === 0 && Date.now() > deadline) { expired = true; throw new Error('SDF sampling ran out of time'); }
+    return f(x, y, z);
+  };
+  try {
+    return runUserCode(ctx.engine.host, () => work(sample), ms + Math.min(ms, 2000));
+  } catch (e: any) {
+    if (expired || e.timedOut) throw new NodeError(`${ctx.type}: SDF code (sdf_expr) exceeded ${ms} ms (infinite loop?)`);
+    throw new NodeError(`${ctx.type}: SDF code (sdf_expr) failed: ${e.message}`);
+  }
 }
 
 /** The SDF volumes of a geometry (heightfields are skipped; heightfield_to_sdf converts them). */
@@ -30,7 +58,7 @@ function unionVolumes(g: Geometry, what: string): Volume {
   if (!vs.length) throw new NodeError(`${what}: input has no SDF volume (create one with sdf_shape, sdf_expr or sdf_from_mesh${g.volumes.length ? '; heightfields convert with heightfield_to_sdf' : ''})`);
   if (vs.length === 1) return vs[0];
   const b = boxUnion(vs.map((v) => v.bounds));
-  return vol('union', b, (x, y, z) => { let d = Infinity; for (const v of vs) d = Math.min(d, v.sample(x, y, z)); return d; });
+  return vol('union', b, (x, y, z) => { let d = Infinity; for (const v of vs) d = Math.min(d, v.sample(x, y, z)); return d; }, vs.some((v) => v.scripted));
 }
 
 function boxUnion(bs: Box[]): Box {
@@ -139,6 +167,12 @@ defineNode({
   type: 'sdf_expr',
   category: 'sdf',
   summary: 'SDF from JS code: return a signed distance for point p ([x,y,z]). IQ helpers built in (sdSphere, sdBox, smin, opTwist…). sdf(i, p) samples input i.',
+  description:
+    'The code runs sandboxed like a wrangle, under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s). ' +
+    'This node only probes the field at the origin; the nodes that sample it later (sdf_to_mesh, sdf_grid, also after ' +
+    'transform, sdf_modify or sdf_combine) run all of their sampling under that limit, so the whole mesh or grid must ' +
+    'be computed within it: a field that loops anywhere, or is too slow for the resolution, fails the sampling node ' +
+    'with "SDF code (sdf_expr) exceeded N ms".',
   aliases: ['sdf_code', 'sdf_wrangle', 'implicit'],
   inputs: [
     { name: 'a', desc: 'optional SDF input, sampled as sdf(0, p)', optional: true },
@@ -187,7 +221,7 @@ defineNode({
       if (vs.length) bounds = pad(boxUnion(vs), 0.1);
     }
     const g = new Geometry();
-    g.volumes = [vol(p.name, bounds, f)];
+    g.volumes = [vol(p.name, bounds, f, true)];
     return g;
   },
 });
@@ -237,7 +271,7 @@ defineNode({
       bounds = { min: [0, 1, 2].map((a) => Math.max(...b.map((x) => x.min[a]))) as Vec3, max: [0, 1, 2].map((a) => Math.min(...b.map((x) => x.max[a]))) as Vec3 };
     }
     const g = A.clone();
-    g.volumes = [vol(op, bounds, sample)];
+    g.volumes = [vol(op, bounds, sample, vs.some((v) => v.scripted))];
     if (hasInput(1)) return Geometry.merge([g, (() => { const h = input(1).clone(); h.volumes = []; return h; })()]);
     return g;
   },
@@ -307,7 +341,7 @@ defineNode({
         break;
       }
     }
-    g.volumes = [vol(v.name, bounds, sample)];
+    g.volumes = [vol(v.name, bounds, sample, v.scripted)];
     return g;
   },
 });
@@ -480,6 +514,12 @@ defineNode({
   type: 'sdf_to_mesh',
   category: 'sdf',
   summary: 'Polygonise SDF volumes into a watertight triangle mesh (all volumes are unioned). Smooth normals from the field gradient.',
+  description:
+    'Meshes with the level-set mesher of manifold-3d. A field that runs user code (an sdf_expr upstream, also through ' +
+    'transform, sdf_modify or sdf_combine) is meshed under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s): ' +
+    'the whole meshing, normals included, must finish within it, else this node fails with "SDF code (sdf_expr) ' +
+    'exceeded N ms" (raise edge_length or the timeout for a slow field). Analytic volumes (sdf_shape, sdf_from_mesh, ' +
+    'grid_to_sdf, heightfield_to_sdf) have no limit.',
   aliases: ['convert_sdf', 'convert_vdb', 'mesh_sdf', 'polygonize', 'isosurface'],
   inputs: [{ name: 'sdf', desc: 'geometry with SDF volume(s)' }],
   params: {
@@ -496,13 +536,15 @@ defineNode({
     },
     output: 'mesh',
   },
-  cook: ({ input, p }) => {
+  cook: (ctx) => {
+    const { input, p } = ctx;
     const g = input(0);
     const v = unionVolumes(g, 'sdf_to_mesh');
     const edge = p.edge_length > 0 ? p.edge_length : autoVoxel(v.bounds, p.divisions);
     const cells = [0, 1, 2].map((a) => (v.bounds.max[a] - v.bounds.min[a]) / edge).reduce((s, x) => s * x, 1);
     if (cells > 3e7) throw new NodeError(`sdf_to_mesh: ~${(cells / 1e6).toFixed(0)}M cells; raise edge_length`);
-    const mesh = sdfToMesh(v, edge, p.iso, p.normals);
+    // user code (sdf_expr) runs under the script timeout, inside manifold's mesher too
+    const mesh = evalSdf(ctx, v, (sample) => sdfToMesh(sample === v.sample ? v : { ...v, sample }, edge, p.iso, p.normals));
     if (!p.keep_input) return mesh;
     const rest = g.clone();
     rest.volumes = [];
