@@ -58,8 +58,10 @@ src/core/      geometry model + algorithms (no I/O)
   remesh.ts      isotropic remeshing kernel (typed arrays in/out: the swap point for a native remesher), closest-point BVH,
                  Geometry wrapper (features, seams, provenance); decimate.ts meshoptimizer decimation; repair.ts mesh repair
   spatial.ts     KD-tree (points), triangle BVH (closest point, rays, inside tests)
-  pcg.ts         PCG kernels: incremental point grid, exact min-distance and sphere-overlap selection, surface relaxation,
-                 k-means / radius clusters, mask bands and combination, image sampling, instance frames (scatter v2, pcg nodes)
+  pcg.ts         PCG kernels: incremental point grid, exact min-distance and sphere-overlap selection, k-means / radius
+                 clusters, mask bands and combination, image sampling, instance frames (scatter v2, pcg nodes)
+  scatter.ts     scatter kernels for the pool: candidate sampling, blue-noise sample elimination (neighbour lists, pairs,
+                 conflicts), surface relaxation, KD build; the same code runs single-threaded (bit-identical)
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
@@ -408,6 +410,7 @@ What runs in chunks:
 | `bake_normal`, `bake_height` (and the ray / curvature bakes with a high-res input) | `bake_project`: one cage ray per sample into the high-res BVH, plus its point normals | |
 | `bake_curvature` | `bake_curvature`: the edges near each sample | edges and their uniform grid shared |
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
+| `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists, conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
 
 Not in chunks, and why:
 - `heightfield_erode`: droplets run one after another over the terrain the previous ones left; a split would change
@@ -415,10 +418,6 @@ Not in chunks, and why:
 - `sdf_to_mesh`: manifold's level-set mesher calls the SDF from WASM at grid positions it chooses. Evaluating the SDF
   is ~10% of the cook (128³ torus: 1.83M calls, ~0.1 s of ~1 s); precomputing it would need manifold's grid
   positions bit for bit and still pay the per-call crossing. The rest is the mesher.
-- `scatter`: the surface sampling stage is separable (mulberry32 jumps ahead in O(1): the state after k draws is
-  a0 + k·0x6d2b79f5, and each candidate takes exactly three draws), but it is ~30% of the node and builds candidate
-  objects that the GeoBuilder output stage (the larger part) consumes; that code belongs to the performance item
-  (P0-F). Port it after that lands.
 - `script` (whole geometry, async `lib.run`, engine cache), prim/vertex/detail wrangles, wrangles that read other
   elements or edit the geometry, and every node without a ported kernel run on the main thread as before.
 
@@ -537,7 +536,9 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 - **Property**: random chains from the registry check the engine's contracts: errors are per node and never thrown,
   cooks are deterministic, and the content-addressed cache gives the same result after a param is changed and
   restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line; hostile
-  `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on.
+  `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on; since R-11
+  they run in the host's vm sandbox with a timeout (`heightfield_layer` expressions and the `sdf_expr` probe still
+  run unguarded: open).
 - **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
 - **Examples**: every `NodeDef` carries an `example` (a node spec or a small graph, shown by `help` and in the node
   reference) and `test/examples.ts` cooks each one: node specs on the node's fixture inputs, graphs as written.
@@ -597,16 +598,17 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   there is revenue or a grant.
 
 **Next for the engine**
-- Kernels: erosion speed (in progress; the pipe model takes 21.8 s for 1024² × 200 steps in Node against a 4 s
-  target, and the droplet kernel runs at TypeScript speed); quad remesher speed (100k triangles take 8.4 s against a
+- Kernels: erosion speed (after session 5 the pipe model takes 6.6 s native / 14.3 s in Node for 1024² × 200 steps
+  against 2 s / 4 s targets, the droplet kernel 1.3× TypeScript; next: SIMD build by default); quad remesher speed (100k triangles take 8.4 s against a
   3 s target), singularity cleanup and quads-only density; a dual-contouring quality pass (edge serration, adaptive
   extraction, speed).
-- Performance follow-ups (in progress): scatter sampling on the pool, faster point normals, a SAH BVH, relaxed
-  scatter; then the AO bake (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
+- Performance follow-ups: done (scatter on the pool, one-pass point normals, SAH BVH with a `-0` ray-direction fix,
+  relaxed scatter ≈ 1.2 s per 100k); still open: the density-mask neighbour rebuild on the main thread, the AO bake
+  (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
 - Packed primitives: packed disk references (Houdini packed disk prims), USD variants and per-frame layers, and
   instanced rendering in the rasteriser (it draws expanded copies within a triangle budget).
-- Heightfields: an Unreal-triangulation sampling mode so scattered bases match a Landscape to the millimetre (in
-  progress), heightfield tiles, Unreal weight-layer import presets, depression filling for drainage.
+- Heightfields: `sample: unreal_triangles` is done (scatter and project_curve match a Landscape to 2e-14 m); still
+  open: heightfield tiles, Unreal weight-layer import presets, depression filling for drainage.
 - Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
