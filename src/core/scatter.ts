@@ -286,7 +286,16 @@ function eliminate(
     for (let e = start[a]; e < start[a + 1]; e++) {
       const b = nbr[e], k = where[b];
       if (k < 0) continue;
-      siftDown(heap, hw, where, size, k, b, hw[k] - con[e]);
+      const nw = hw[k] - con[e];
+      siftDown(heap, hw, where, size, k, b, nw);
+      // a NaN weight (non-finite positions) compares false both ways: it rose to the top before, so it still does
+      if (nw !== nw)
+        for (let q = where[b]; q > 0;) {
+          const p = (q - 1) >> 1, c = heap[p];
+          heap[q] = c; hw[q] = hw[p]; where[c] = q;
+          heap[p] = b; hw[p] = nw; where[b] = p;
+          q = p;
+        }
     }
   }
   const out = new Int32Array(size);
@@ -460,7 +469,7 @@ export function relaxWeight(cw: Float64Array, t: number, b0: number, b1: number,
 }
 
 /**
- * One relaxation pass for points [start, end) (relaxPoints' operations, then the surface projection): each point moves
+ * One relaxation pass for points [start, end) (Lloyd-style repulsion, then the surface projection): each point moves
  * away from the neighbours closer than the pair spacing (S_i + S_j) / 2 by half the overlap per neighbour (coincident
  * pairs push along a direction hashed from the pair), the move capped at half its spacing, then to the closest point
  * on the surface, where it takes the triangle, barycentrics and spacing. A: the KD tree of the pass (TP, idx, axis),
@@ -509,9 +518,9 @@ export function relaxRange(a: RelaxArgs, A: Record<string, any>, start: number, 
 }
 
 /**
- * Lloyd-style relaxation of points on a surface (relaxPoints with the closest-point projection), `iterations` passes
+ * Lloyd-style relaxation of points on a surface (repulsion, then the closest surface point), `iterations` passes
  * in chunks on the pool (scatter_relax). P, S (spacing), tri and bary (the points' triangles and barycentrics) are
- * updated in place. The KD tree of each pass is built here; the surface goes to the workers once (shared, cached).
+ * updated in place. Each pass builds its KD tree (buildKDTree); the surface goes to the workers once (shared, cached).
  */
 export function relaxOnSurface(
   surf: TriSurface, P: Float64Array, S: Float64Array, tri: Int32Array, bary: Float64Array, iterations: number,
