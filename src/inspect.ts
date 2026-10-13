@@ -9,6 +9,7 @@ import { halfEdges } from './core/halfedge.ts';
 import { fmtNum } from './render/raster.ts';
 import { packedSummaryLine } from './core/packed.ts';
 import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
+import { imageSummary } from './core/image.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
@@ -84,7 +85,8 @@ export function summarize(g: Geometry): string {
   const pk = packedSummaryLine(g);
   if (pk) lines.push(pk);
   lines.push(...heightfieldSummary(g));
-  if (g.numPoints || g.volumes.length) {
+  lines.push(...imageSummary(g));
+  if (g.numPoints || g.volumes.some((v) => v.kind !== 'image')) {
     const b = g.bbox(true);
     const size = [0, 1, 2].map((a) => b.max[a] - b.min[a]);
     lines.push(`bbox: min ${v3(b.min)} max ${v3(b.max)} size ${size.map(fmtNum).join(' × ')} center ${v3([0, 1, 2].map((a) => (b.min[a] + b.max[a]) / 2))}`);

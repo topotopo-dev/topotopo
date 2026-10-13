@@ -21,12 +21,13 @@ import type { Slice } from './section.ts';
 import { LabelPlacer, ambientOcclusion, dotOv, drawLabel, drawLegend, lineOv } from './overlay.ts';
 import type { DepthTol, LegendItem, RGB } from './overlay.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
+import { drawTextureView, textureSampler } from './texview.ts';
 
 /**
  * 3D views, 'persp@<azimuth>' (a persp view at that azimuth), 'section' (the cut through the section plane,
  * looking along its axis), plus 'uv': the 0..1 UV square (UDIM tiles) with every polygon drawn at its uv.
  */
-export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'uv' | 'section' | `persp@${number}`;
+export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'uv' | 'section' | 'texture' | `persp@${number}`;
 /** Edge overlays: every polygon edge, edges sharper than hardAngle (+ crease/hard/sharp edge groups), open/non-manifold/flipped edges, edge groups. */
 export type WireMode = 'none' | 'all' | 'hard' | 'boundary' | 'groups';
 export type GlyphMode = 'none' | 'N' | 'up' | 'orient' | 'v' | 'custom';
@@ -97,6 +98,10 @@ export interface RenderOptions {
   scale?: number;
   /** second footer line naming the active overlays plus geometry notes (default: on when any overlay option is used) */
   annotate?: boolean;
+  /** 3D views sample base colour maps of materials with "image:<name>" textures (needs uv; render/texview.ts) */
+  textures?: boolean;
+  /** 'texture' view: "" = every image, an image name, "image/layer", or a material name (its maps as a strip) */
+  texture?: string;
 }
 
 /** View presets accepted by parseViews (MCP render "views", CLI --views). */
@@ -105,7 +110,7 @@ export const VIEW_PRESETS: Record<string, ViewName[]> = {
   quad_uv: ['persp', 'uv'],
   turntable: ['persp@0', 'persp@90', 'persp@180', 'persp@270'],
 };
-export const BASE_VIEWS = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', 'uv', 'section'];
+export const BASE_VIEWS = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', 'uv', 'section', 'texture'];
 
 /** Views from a preset name, a comma/space separated list or an array (presets expand inside lists). Throws on unknown names. */
 export function parseViews(spec: string | readonly string[] | null | undefined): ViewName[] | undefined {
@@ -197,7 +202,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   if (g.hasPacked() || g.hasSplines()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
   g = withHeightfieldPreview(g); // heightfields draw as their (decimated) grid mesh with layers as attributes
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
-  const views: ViewName[] = vlist?.length ? vlist : ['persp', 'front', 'right', 'top'];
+  // images and nothing else to draw in 3D: the texture view (render/texview.ts)
+  const onlyImages = !g.numPoints && g.volumes.length > 0 && g.volumes.every((v) => v.kind === 'image');
+  const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : ['persp', 'front', 'right', 'top'];
   const ui = Math.max(1, Math.min(4, Math.round(o.scale ?? 1)));
   const tile = Math.max(128, Math.min(1600, Math.round(o.size ?? (views.length === 1 ? 800 : 512)))) * ui;
   let ss = Math.max(1, Math.min(3, Math.round(o.ssaa ?? 2)));
@@ -372,9 +379,15 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   for (let i = 0; i < out.length; i += 3) { out[i] = 0.12; out[i + 1] = 0.12; out[i + 2] = 0.13; }
 
   // --- uv data (uv view, checker shading)
-  const uvd = views.includes('uv') || o.checker ? readUV(g) : null;
+  const uvd = views.includes('uv') || o.checker || o.textures ? readUV(g) : null;
   const checkerOn = !!(o.checker && uvd);
   if (o.checker && !uvd) notes.push('checker: no uv attribute (run uv_project, uv_unwrap or uv_flatten first)');
+  // base colour maps (image textures) on the mesh: texture × Cd (as glTF multiplies COLOR_0), off under checker / colour-by
+  const texS = o.textures && uvd && !checkerOn && !o.colorBy && !o.highlight ? textureSampler(g, notes) : null;
+  if (o.textures && !uvd && nTri) notes.push('textures: no uv attribute, maps not shown');
+  else if (o.textures && uvd && !texS && !checkerOn) notes.push('textures: no material with an image base colour (texture_to_material)');
+  const texCd = !!(texS && g.findAttrib('Cd', ['vertex', 'point', 'prim', 'detail']));
+  const texRGB = [0, 0, 0];
 
   // ---------------------------------------------------------------- opt-in overlays, shared by all views
   const ovDesc: string[] = []; // footer line 2: what is switched on
@@ -640,8 +653,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   }
   if (o.legend && !cbLegend.length) notes.push('legend: nothing to explain (use with color_by or highlight)');
   const hasOverlay = oeA.length > 0 || dotPts.length > 0 || wl.length > 0 || glCol.length > 0 || legendItems.length > 0 || hasSection || clipK >= 0;
-  const legendView = views.findIndex((v) => v !== 'uv');
-  const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'section' && !(clipK >= 0 && v.startsWith('persp'))) : -1;
+  const legendView = views.findIndex((v) => v !== 'uv' && v !== 'texture');
+  const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'texture' && v !== 'section' && !(clipK >= 0 && v.startsWith('persp'))) : -1;
   let backPix = 0, shadedPix = 0;
   let labelsSkipped = 0;
 
@@ -664,6 +677,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     };
     if (vname === 'uv') {
       blit(drawUVView(g, col, W, H, ss * ui, uvd, tris, colorOf, colorByActive, notes));
+      return;
+    }
+    if (vname === 'texture') {
+      blit(drawTextureView(g, col, W, H, ss * ui, o.texture ?? '', notes));
       return;
     }
     const kind = vname.startsWith('persp') ? 'persp' : vname;
@@ -779,6 +796,13 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       }
       const za = cz[a], zb2 = cz[b], zc = cz[c];
       const inv = 1 / area;
+      // base colour map: mip level from the triangle's texels per screen pixel (render/texview.ts)
+      const texP = texS && texS.has(triPrim[t]) ? triPrim[t] : -1;
+      let texLod = 0;
+      if (texP >= 0) {
+        const uvA = Math.abs((uvd![vb * 2] - uvd![va * 2]) * (uvd![vc * 2 + 1] - uvd![va * 2 + 1]) - (uvd![vb * 2 + 1] - uvd![va * 2 + 1]) * (uvd![vc * 2] - uvd![va * 2]));
+        texLod = Math.max(0, 0.5 * Math.log2(Math.max(1e-30, (uvA * texS!.texelArea(texP)) / Math.abs(area))));
+      }
       for (let py = minY; py <= maxY; py++) {
         const yy = py + 0.5;
         for (let px = minX; px <= maxX; px++) {
@@ -826,6 +850,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           if (checkerOn) {
             checkerColor(uvd![va * 2] * w0 + uvd![vb * 2] * w1 + uvd![vc * 2] * w2, uvd![va * 2 + 1] * w0 + uvd![vb * 2 + 1] * w1 + uvd![vc * 2 + 1] * w2, chk);
             fr = chk[0]; fg = chk[1]; fb = chk[2];
+            if (suspicious) { fr = fr * 0.35 + 0.12; fg = fg * 0.35 + 0.22; fb = fb * 0.35 + 0.6; }
+          } else if (texP >= 0) {
+            texS!.sample(texP, uvd![va * 2] * w0 + uvd![vb * 2] * w1 + uvd![vc * 2] * w2, uvd![va * 2 + 1] * w0 + uvd![vb * 2 + 1] * w1 + uvd![vc * 2 + 1] * w2, texLod, texRGB);
+            if (texCd) { fr *= texRGB[0]; fg *= texRGB[1]; fb *= texRGB[2]; } else { fr = texRGB[0]; fg = texRGB[1]; fb = texRGB[2]; }
             if (suspicious) { fr = fr * 0.35 + 0.12; fg = fg * 0.35 + 0.22; fb = fb * 0.35 + 0.6; }
           }
           col[ci] = aces(fr * k + spec + rim);
@@ -898,9 +926,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         drawDisc(col, zb, W, H, sx[i], sy[i], cz[i], rad, pc, tol(cz[i]));
       }
     }
-    // volumes without polygons: draw their bounds
-    if (g.volumes.length && !nTri) {
+    // volumes without polygons: draw their bounds (images live in uv space: the texture view shows them)
+    if (g.volumes.some((v) => v.kind !== 'image') && !nTri) {
       for (const vol of g.volumes) {
+        if (vol.kind === 'image') continue;
         const bmn = vol.bounds.min, bmx = vol.bounds.max;
         const corners: number[][] = [];
         for (let k = 0; k < 8; k++) { const q = [0, 0, 0, 0]; project(k & 1 ? bmx[0] : bmn[0], k & 2 ? bmx[1] : bmn[1], k & 4 ? bmx[2] : bmn[2], q); corners.push(q); }

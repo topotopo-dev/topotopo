@@ -3,6 +3,7 @@ import { Attribute, AttribTable, Geometry, baseType, isArrayType } from '../core
 import type { AttribType } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
+import { imageFromJSON, imageToJSON, imagesOf } from '../core/image.ts';
 
 function tableToJSON(t: AttribTable) {
   const out: Record<string, any> = {};
@@ -76,6 +77,9 @@ export function geoToJSON(g: Geometry) {
   // heightfield volumes (written only when present): grid + layers (SDF volumes are functions and are not stored)
   const hfs = heightfieldsOf(g);
   if (hfs.length) out.heightfields = hfs.map((h) => ({ name: h.name, width: h.width, height: h.height, cellSize: h.cellSize, origin: h.origin, layers: Object.fromEntries([...h.layers].map(([k, a]) => [k, Array.from(a)])) }));
+  // image volumes (written only when present): size + layers as base64 float32 (core/image.ts)
+  const imgs = imagesOf(g);
+  if (imgs.length) out.images = imgs.map(imageToJSON);
   return out;
 }
 
@@ -137,5 +141,6 @@ export function geoFromJSON(j: any): Geometry {
     }
     g.volumes.push(hf);
   }
+  for (const im of j.images ?? []) g.volumes.push(imageFromJSON(im));
   return g;
 }

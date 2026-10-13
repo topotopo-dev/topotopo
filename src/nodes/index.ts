@@ -22,3 +22,5 @@ import './deform.ts';
 import './uv.ts';
 import './measure.ts';
 import './pcg.ts';
+import './texture.ts';
+import './bake.ts';

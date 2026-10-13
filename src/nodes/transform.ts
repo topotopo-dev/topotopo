@@ -65,6 +65,7 @@ export function applyMatrix(src: Geometry, m: Mat4, ptMask: Uint8Array | null = 
   for (let k = 0; k < g.volumes.length; k++) {
     const v = g.volumes[k];
     if (ptMask) continue;
+    if (v.kind === 'image') continue; // images live in uv space, not in the scene
     if (v.kind === 'heightfield') { g.volumes[k] = transformHeightfield(v, m); continue; } // stays an axis-aligned grid
     const inv = invertAffine(m);
     const sc = Math.cbrt(Math.abs(m4determinant3(m))) || 1;

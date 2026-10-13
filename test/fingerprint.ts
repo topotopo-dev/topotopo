@@ -71,11 +71,12 @@ export interface Fingerprint {
   };
   /**
    * SDFs: bounds + a hash of a 9³ sample lattice. Heightfields: grid (samples, cell size, origin), bounds and a hash
-   * of each layer's quantised values.
+   * of each layer's quantised values. Images: size and a hash of each layer (no bounds: they are not in space).
    */
   volumes?: {
     name: string; kind: string; bounds: { min: number[]; max: number[] }; samples?: string;
     grid?: { width: number; height: number; cellSize: number; origin: number[] }; layers?: Record<string, string>;
+    image?: { width: number; height: number };
   }[];
   /** packed instances (only present when there are some): count, per-source fingerprint hashes, per-prim source + xform hash */
   packed?: { instances: number; sources: string[]; hash: string };
@@ -215,6 +216,18 @@ export function fingerprint(g: Geometry): Fingerprint {
           grid: { width: vol.width, height: vol.height, cellSize: round(vol.cellSize, 1e6), origin: vol.origin.map((v) => round(v, BBOX_Q)) },
           layers,
         };
+      }
+      if (vol.kind === 'image') {
+        // images: size and a hash of each layer's quantised values (length says grey or RGBA)
+        const layers: Record<string, string> = {};
+        for (const name of [...vol.layers.keys()].sort()) {
+          const h = new Hasher();
+          const a = vol.layers.get(name)!;
+          h.int(a.length);
+          for (let i = 0; i < a.length; i++) h.float(a[i], ATTR_Q);
+          layers[name] = h.hex();
+        }
+        return { name: vol.name, kind: vol.kind, bounds: { min: [], max: [] }, image: { width: vol.width, height: vol.height }, layers };
       }
       const h = new Hasher();
       const { min, max } = vol.bounds;
