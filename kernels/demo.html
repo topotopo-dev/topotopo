@@ -3,7 +3,7 @@
 <style>body{font:16px/1.5 system-ui;max-width:880px;margin:3rem auto;padding:1rem;background:#151921;color:#e5eaf1}h1{font-size:1.5rem}pre{white-space:pre-wrap;color:#a8e4c0}</style>
 <h1>Polyforge kernels: browser smoke</h1><p>The committed WebAssembly file is fetched and initialized once. Results below are computed in this browser.</p><pre id="result">Loading…</pre>
 <script type="module">
-import init,{straight_skeleton,offset_polygon,roof} from './pkg/polyforge_kernels.js';
+import init,{straight_skeleton,offset_polygon,roof,dual_contour,grid_offset,grid_csg} from './pkg/polyforge_kernels.js';
 const result=document.querySelector('#result');
 try {
   const response=await fetch('./pkg/polyforge_kernels_bg.wasm');
@@ -20,7 +20,20 @@ try {
       lines.push(`PASS ${name}: ${mode}, ${a.face_edge?.length??a.polygon_hole.length} faces/loops, identical repeat`);
     }
   }
-  result.textContent=lines.join('\n')+'\n\n9 browser kernel checks passed.';
+  const grid={dims:new Uint32Array([13,13,13]),origin:new Float64Array([-1.2,-1.2,-1.2]),voxel:0.2,values:new Float32Array(13**3)};
+  for(let z=0;z<13;z++)for(let y=0;y<13;y++)for(let x=0;x<13;x++)grid.values[x+13*(y+13*z)]=Math.hypot(x*.2-1.2,y*.2-1.2,z*.2-1.2)-.7;
+  for(const [name,field]of [['sphere',grid],['offset',grid_offset(grid,.1)],['CSG',grid_csg(grid,grid,'smooth_union',.1)]]){
+    const run=()=>dual_contour(field,0,1e-6,true,true),a=run(),b=run();
+    if(!a.positions.length||!Array.from(a.positions).every(Number.isFinite)||digest(a)!==digest(b))throw new Error(`grid ${name}: invalid or nondeterministic contour`);
+    const edges=new Map();
+    for(let p=0;p<a.prim_start.length-1;p++){
+      const s=a.prim_start[p],e=a.prim_start[p+1];
+      for(let v=s;v<e;v++){const i=a.vertex_point[v],j=a.vertex_point[v+1<e?v+1:s],key=`${Math.min(i,j)},${Math.max(i,j)}`;edges.set(key,(edges.get(key)||0)+1);}
+    }
+    if([...edges.values()].some(n=>n!==2))throw new Error(`grid ${name}: nonmanifold edge`);
+    lines.push(`PASS grid ${name}: ${a.positions.length/3} vertices, ${a.prim_start.length-1} faces, closed and identical repeat`);
+  }
+  result.textContent=lines.join('\n')+'\n\n12 browser kernel checks passed.';
   document.documentElement.dataset.status='passed';
 }catch(error){result.textContent=`FAILED: ${error?.message??error}`;document.documentElement.dataset.status='failed';throw error;}
 </script></html>

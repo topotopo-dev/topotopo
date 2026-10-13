@@ -1,0 +1,38 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "grid_cell:int:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.5998, 0.5998, 0.5998],
+      "min": [-0.5998, -0.5998, -0.5998]
+    },
+    "counts": {
+      "points": 1358,
+      "prims": 2712,
+      "vertices": 8136,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "9bb027171d66c82d",
+      "attributes": {
+        "point.grid_cell": "b61fe77ddf043277"
+      },
+      "topology": "93de17aceecf130e"
+    }
+  },
+  "name": "node.grid_to_mesh",
+  "ok": true,
+  "source": "fixture for node type \"grid_to_mesh\" (test/fixtures.ts)",
+  "warnings": []
+}

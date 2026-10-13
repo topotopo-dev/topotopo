@@ -23,11 +23,17 @@ wasm-bindgen 0.2.129 (locked crate and generated bindings)
 target wasm32-unknown-unknown
 ```
 
-`Cargo.lock` must be retained. Release settings are size optimization, LTO, one codegen
+`Cargo.lock` must be retained. Release settings are optimization level 3, LTO, one codegen
 unit, stripped symbols and panic=abort. Invalid geometry is handled by Rust `Result`
-errors, not panics. `wasm-pack` runs `wasm-opt -Oz --enable-bulk-memory
+errors, not panics. `wasm-pack` runs `wasm-opt -O3 --enable-bulk-memory
 --enable-nontrapping-float-to-int`. The session's budget is strictly below 1,000,000 bytes
-for `pkg/polyforge_kernels_bg.wasm`; see [BENCH.md](BENCH.md) for the measured size.
+for session 1; session 2's total WASM budget is 1,500,000 bytes. See [BENCH.md](BENCH.md)
+for the measured size.
+
+The speed-focused release settings are intentional: sampled-grid BVH traversal and
+dual-contouring loops are CPU-bound, and the combined module remains comfortably
+within the session-2 size budget. No fast-math, relaxed SIMD, or explicit fused
+multiply-add flags are enabled; scalar operation order remains deterministic.
 
 Commit `pkg/polyforge_kernels.js`, `polyforge_kernels_bg.wasm`, both `.d.ts` files,
 `package.json`, `README.md` and `LICENSE`. `wasm-pack` writes a `pkg/.gitignore` containing

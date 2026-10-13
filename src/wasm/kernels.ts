@@ -45,11 +45,55 @@ export interface RoofResult extends KernelProvenance {
 }
 
 export interface Kernels {
+  sdf_from_mesh(positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean): KernelGrid;
+  grid_csg(a: GridInput, b: GridInput, op: GridOperation, k?: number): KernelGrid;
+  grid_offset(grid: GridInput, distance: number): KernelGrid;
+  grid_blur(grid: GridInput, radius: number): KernelGrid;
+  grid_dilate(grid: GridInput, distance: number): KernelGrid;
+  grid_erode(grid: GridInput, distance: number): KernelGrid;
+  grid_resample(grid: GridInput, voxel: number): KernelGrid;
+  dual_contour(grid: GridInput, iso?: number, qefTolerance?: number, sharp?: boolean, clampToCell?: boolean): DualContourResult;
   straight_skeleton(outer: ArrayLike<number>, holes?: readonly ArrayLike<number>[], weights?: ArrayLike<number>): SkeletonResult;
   /** Positive distances move inward; negative distances move outward. */
   offset_polygon(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], distance: number): OffsetResult;
   /** Pitches are degrees: one value or one value for each outgoing contour edge. */
   roof(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], pitch: number | ArrayLike<number>, heightCap?: number): RoofResult;
+}
+
+export type GridOperation = 'union' | 'intersect' | 'subtract' | 'smooth_union' | 'smooth_intersect' | 'smooth_subtract';
+export interface GridInput {
+  dims: ArrayLike<number>;
+  origin: ArrayLike<number>;
+  voxel: number;
+  values: Float32Array;
+}
+export interface KernelGrid extends GridInput { dims: Uint32Array; origin: Float64Array }
+export interface DualContourResult {
+  positions: Float64Array;
+  prim_start: Uint32Array;
+  vertex_point: Uint32Array;
+  /** Flattened grid sample index at the lower corner of each output vertex's cell. */
+  cell_index: Uint32Array;
+}
+function gridArg(g: GridInput): KernelGrid {
+  if (!g || !g.dims || !g.origin || !(g.values instanceof Float32Array))
+    throw new Error('grid: dims, origin and Float32Array values are required');
+  if (g.dims.length !== 3 || Array.from(g.dims).some(v => !Number.isInteger(v) || v < 2 || v > 0xffffffff))
+    throw new Error('grid: dims must contain three integers >= 2');
+  if (g.origin.length !== 3 || Array.from(g.origin).some(v => !Number.isFinite(v)))
+    throw new Error('grid: origin must contain three finite coordinates');
+  if (!Number.isFinite(g.voxel) || g.voxel <= 0) throw new Error('grid: voxel must be finite and > 0');
+  const count = g.dims[0] * g.dims[1] * g.dims[2];
+  if (!Number.isSafeInteger(count) || count > 64 * 1024 * 1024 || g.values.length !== count)
+    throw new Error('grid: values length must match dims and stay within the 67108864 sample limit');
+  for (let a = 0; a < 3; a++) {
+    const extent = (g.dims[a] - 1) * g.voxel;
+    if (!Number.isFinite(g.origin[a] + extent) || extent > 3.4028234663852886e38 / 16)
+      throw new Error('grid: origin or extent exceeds the supported finite distance range');
+    if (g.origin[a] + g.voxel <= g.origin[a] || g.origin[a] + extent <= g.origin[a] + (g.dims[a] - 2) * g.voxel)
+      throw new Error('grid: voxel spacing is not representable at this origin/extent; increase voxel size or move the grid closer to zero');
+  }
+  return { dims: Uint32Array.from(g.dims), origin: array(g.origin), voxel: g.voxel, values: g.values };
 }
 
 export const kernelsWasmURL = new URL('../../kernels/pkg/polyforge_kernels_bg.wasm', import.meta.url);
@@ -70,6 +114,20 @@ export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
       const wasm = await import('../../kernels/pkg/polyforge_kernels.js');
       await wasm.default({ module_or_path: bytes });
       return Object.freeze({
+        sdf_from_mesh: (positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean) =>
+          call('sdf_from_mesh', () => wasm.sdf_from_mesh(positions, tris, voxel, band, padding, fill) as KernelGrid),
+        grid_csg: (a: GridInput, b: GridInput, op: GridOperation, k = 0) =>
+          call('grid_csg', () => wasm.grid_csg(gridArg(a), gridArg(b), op, k) as KernelGrid),
+        grid_offset: (grid: GridInput, d: number) => call('grid_offset', () => wasm.grid_offset(gridArg(grid), d) as KernelGrid),
+        grid_blur: (grid: GridInput, radius: number) => call('grid_blur', () => {
+          if (!Number.isInteger(radius) || radius < 0 || radius > 1024) throw new Error('radius must be an integer in 0..1024');
+          return wasm.grid_blur(gridArg(grid), radius) as KernelGrid;
+        }),
+        grid_dilate: (grid: GridInput, d: number) => call('grid_dilate', () => wasm.grid_dilate(gridArg(grid), d) as KernelGrid),
+        grid_erode: (grid: GridInput, d: number) => call('grid_erode', () => wasm.grid_erode(gridArg(grid), d) as KernelGrid),
+        grid_resample: (grid: GridInput, voxel: number) => call('grid_resample', () => wasm.grid_resample(gridArg(grid), voxel) as KernelGrid),
+        dual_contour: (grid: GridInput, iso = 0, qefTolerance = 1e-6, sharp = true, clampToCell = true) =>
+          call('dual_contour', () => wasm.dual_contour(gridArg(grid), iso, qefTolerance, sharp, clampToCell) as DualContourResult),
         straight_skeleton: (outer: ArrayLike<number>, holes: readonly ArrayLike<number>[] = [], weights?: ArrayLike<number>) =>
           call('straight_skeleton', () => wasm.straight_skeleton(array(outer), rings(holes), weights ? array(weights) : undefined) as SkeletonResult),
         offset_polygon: (outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], distance: number) =>

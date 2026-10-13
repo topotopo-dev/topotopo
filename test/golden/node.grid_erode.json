@@ -1,0 +1,49 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [1.19, 1.19, 1.19],
+          "min": [-1.11, -1.11, -1.11]
+        },
+        "kind": "grid",
+        "name": "grid",
+        "sdfGrid": {
+          "dims": [24, 24, 24],
+          "origin": [-1.11, -1.11, -1.11],
+          "values": "37b526745c14e506",
+          "voxel": 0.1
+        }
+      }
+    ]
+  },
+  "name": "node.grid_erode",
+  "ok": true,
+  "source": "fixture for node type \"grid_erode\" (test/fixtures.ts)",
+  "warnings": []
+}

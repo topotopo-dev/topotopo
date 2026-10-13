@@ -1,0 +1,104 @@
+// Standalone core sampled-volume regression checks; also imported by test/sdfgrid.ts.
+import assert from 'node:assert/strict';
+import { Geometry } from '../src/core/geometry.ts';
+import { Heightfield } from '../src/core/heightfield.ts';
+import { Image } from '../src/core/image.ts';
+import { geoContentHash } from '../src/core/geohash.ts';
+import { loadManifold } from '../src/core/manifold.ts';
+import { m4trs } from '../src/core/math.ts';
+import { gridFromImplicit, gridsOf, SdfGrid, transformSdfGrid, withSdfGridPreview } from '../src/core/sdfgrid.ts';
+import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
+import { renderGeometry } from '../src/render/raster.ts';
+import { summarize } from '../src/inspect.ts';
+import { fingerprint } from './fingerprint.ts';
+
+const bounds = { min: [0, 0, 0] as [number, number, number], max: [1, 1, 1] as [number, number, number] };
+const linear = gridFromImplicit((x, y, z) => x + 2 * y + 4 * z - 3.5, bounds, 0.5);
+assert.deepEqual(linear.dims, [3, 3, 3]);
+assert.deepEqual(linear.bounds, bounds);
+assert.equal(linear.sample(0.25, 0.25, 0.25), -1.75);
+assert.equal(linear.sample(1, 1, 1), 3.5);
+assert.equal(linear.values[linear.index(2, 0, 1)], -0.5);
+assert.equal(linear.sample(-0.01, 0, 0), Infinity);
+assert.equal(linear.sample(1.01, 0, 0), Infinity);
+const fractional = gridFromImplicit((x, y, z) => x + y + z, { min: [-1, -1, -1], max: [1, 1, 1] }, 0.15);
+assert.ok(Number.isFinite(fractional.sample(...fractional.bounds.max)), 'fractional voxel boundary nodes stay inside');
+assert.throws(() => new SdfGrid([2, 2, 2], [0, 0, 0], 0), /voxel/);
+assert.throws(() => new SdfGrid([2, 2, 2], [1e308, 0, 0], 1), /spacing is not representable/);
+assert.throws(() => new SdfGrid([3, 2, 2], [1 - Number.EPSILON / 2, 0, 0], Number.EPSILON / 2), /spacing is not representable/);
+assert.throws(() => new SdfGrid([2.5, 2, 2], [0, 0, 0], 1), /dimensions/);
+assert.throws(() => new SdfGrid([2, 2, 2], [0, 0, 0], 1, new Float32Array(7)), /expected 8/);
+assert.throws(() => new SdfGrid([2, 2, 2], [0, 0, 0], 1, new Float32Array(8).fill(NaN)), /NaN/);
+assert.throws(() => gridFromImplicit(() => NaN, bounds, 0.5), /NaN/);
+
+const band = new SdfGrid([2, 2, 2], [0, 0, 0], 1);
+assert.equal(band.sample(0.3, 0.7, 0.2), Infinity);
+band.values.fill(-Infinity);
+assert.equal(band.sample(0.3, 0.7, 0.2), -Infinity);
+band.values[0] = 2;
+assert.equal(band.sample(0, 0, 0), 2); // zero-weight infinite corners never poison lattice samples
+assert.ok(Number.isFinite(band.sample(0.5, 0, 0)));
+band.values[1] = Infinity;
+assert.ok(Number.isFinite(band.sample(0.5, 0.5, 0.5)));
+
+const geo = new Geometry({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], prims: [[0, 1, 2]] });
+geo.volumes.push(linear);
+const clone = geo.clone(), clonedGrid = gridsOf(clone)[0];
+assert.notEqual(clonedGrid, linear);
+assert.equal(clonedGrid.values, linear.values);
+clonedGrid.writable()[0] = 123;
+assert.equal(linear.values[0], -3.5);
+assert.equal(gridsOf(geo.subsetPoints([1, 0, 1]))[0].sample(0.25, 0.25, 0.25), -1.75);
+assert.equal(gridsOf(geo.subsetPrims([0]))[0].sample(0.25, 0.25, 0.25), -1.75);
+assert.equal(gridsOf(Geometry.merge([geo, geo]))[1].sample(0.25, 0.25, 0.25), -1.75);
+assert.deepEqual(fingerprint(geo), fingerprint(geo.clone()));
+assert.notDeepEqual(fingerprint(geo), fingerprint(clone));
+assert.equal(geoContentHash(geo), geoContentHash(geo.clone()));
+assert.notEqual(geoContentHash(geo), geoContentHash(clone));
+assert.match(summarize(geo), /1 SDF grid\(s\)/);
+assert.match(summarize(geo), /3 × 3 × 3 samples/);
+
+const infGeo = new Geometry();
+band.values[2] = -0;
+assert.ok(Object.is(band.sample(0, 1, 0), -0), 'exact lattice sampling preserves negative zero');
+infGeo.volumes = [band, new Heightfield(2, 2, 1, [0, 0]), new Image(2, 2), linear];
+const serialized = JSON.stringify(geoToJSON(infGeo));
+assert.ok(serialized.includes('"+Infinity"') && serialized.includes('"-Infinity"'));
+const restored = geoFromJSON(JSON.parse(serialized));
+assert.deepEqual(restored.volumes.map((v) => v.kind), ['grid', 'heightfield', 'image', 'grid']);
+assert.deepEqual(fingerprint(restored), fingerprint(infGeo));
+assert.deepEqual(gridsOf(restored)[0].values, band.values);
+assert.ok(Object.is(gridsOf(restored)[0].values[2], -0), 'JSON preserves negative zero samples');
+const positiveZero = restored.clone();
+gridsOf(positiveZero)[0].writable()[2] = 0;
+assert.notDeepEqual(fingerprint(positiveZero), fingerprint(restored), 'grid fingerprints preserve the negative-zero inside sign');
+const signedZeroA = new Geometry(), signedZeroB = new Geometry();
+signedZeroA.volumes = [gridsOf(restored)[0]]; signedZeroB.volumes = [gridsOf(positiveZero)[0]];
+assert.notEqual(geoContentHash(signedZeroA), geoContentHash(signedZeroB), 'grid content hashes preserve the negative-zero inside sign');
+assert.ok(!('grids' in geoToJSON(new Geometry())));
+assert.ok(!('volumeOrder' in geoToJSON(new Geometry())));
+const corrupt = JSON.parse(serialized);
+corrupt.grids[0].values[0] = null;
+assert.throws(() => geoFromJSON(corrupt), /must be finite/);
+
+const transformed = transformSdfGrid(linear, m4trs([2, 3, 4], [0, 90, 0], [2, 2, 2]));
+// (x,y,z) -> (2*z+2, 2*y+3, -2*x+4), signed distances scale by two.
+assert.equal(transformed.sample(2.5, 3.5, 3.5), linear.sample(0.25, 0.25, 0.25) * 2);
+assert.equal(transformed.voxel, 1);
+const mirrored = transformSdfGrid(linear, m4trs([0, 0, 0], [0, 0, 0], [-1, 1, 1]));
+assert.equal(mirrored.sample(-0.25, 0.25, 0.25), linear.sample(0.25, 0.25, 0.25));
+assert.throws(() => transformSdfGrid(linear, m4trs([0, 0, 0], [0, 45, 0], [1, 1, 1])), /grid_to_sdf/);
+assert.throws(() => transformSdfGrid(linear, m4trs([0, 0, 0], [0, 0, 0], [1, 2, 1])), /grid_to_sdf/);
+
+await loadManifold();
+const sphereGeo = new Geometry();
+sphereGeo.volumes.push(gridFromImplicit((x, y, z) => Math.hypot(x, y, z) - 0.7, { min: [-1, -1, -1], max: [1, 1, 1] }, 0.2));
+const preview = withSdfGridPreview(sphereGeo, 16);
+assert.ok(preview.numPrims > 0 && preview.numPoints > 0);
+assert.equal(preview.volumes.length, 0);
+assert.equal(sphereGeo.volumes.length, 1);
+assert.equal(withSdfGridPreview(geo.subsetPrims([0])).volumes.length, 0);
+const rendered = renderGeometry(sphereGeo, { size: 128, ssaa: 1, views: ['persp'] });
+assert.equal(rendered.width, 128);
+assert.ok(!rendered.notes.some((note) => note.includes('green boxes')));
+console.log('sdfgrid core: sampling, validation, clone/subset/merge, JSON, hashes, transforms and preview passed');
