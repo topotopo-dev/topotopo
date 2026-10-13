@@ -7,7 +7,9 @@ export function erode_droplet(height: Float32Array, hardness: Float32Array, free
 
 export function erode_pipe(height: Float32Array, hardness: Float32Array, freeze: Float32Array, rain: Float32Array, w: number, h: number, cell: number, params: any, seed: bigint): object;
 
-export function flow_accumulation(height: Float32Array, w: number, h: number, cell: number, method: string): object;
+export function fill_sinks(height: Float32Array, w: number, h: number, params: any, mask: Float32Array): object;
+
+export function flow_accumulation(height: Float32Array, w: number, h: number, cell: number, method: string, fill_sinks?: boolean | null): object;
 
 export function grid_blur(g: any, radius: number): object;
 
@@ -50,7 +52,8 @@ export interface InitOutput {
     readonly dual_contour: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly erode_droplet: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: bigint) => void;
     readonly erode_pipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: bigint) => void;
-    readonly flow_accumulation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly fill_sinks: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly flow_accumulation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly grid_blur: (a: number, b: number, c: number) => void;
     readonly grid_csg: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly grid_dilate: (a: number, b: number, c: number) => void;

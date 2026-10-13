@@ -22,13 +22,15 @@ import { sampleEliminate } from './copy.ts';
 import { P, simBudget } from './util.ts';
 import { wasmCallUnderBudget } from './wasmcall.ts';
 import { getLoadedKernels, loadHostKernels } from '../wasm/kernels.ts';
-import type { ErosionResult, Kernels } from '../wasm/kernels.ts';
+import type { ErosionResult, FillSinksResult, FlowAccumulationResult, Kernels } from '../wasm/kernels.ts';
 
 // ---------------------------------------------------------------- shared
 
 const NO_FIELD = 'create one with heightfield, heightfield_from_mesh or heightfield_from_image';
 /** Samples × iterations from which a kernel erosion runs on a pool worker, under the time limit (about a second of work). */
 const WORKER_SAMPLE_ITERATIONS = 20_000_000;
+/** A global flood cannot be split into independent tiles; large calls run intact on one worker. */
+const FLOOD_WORKER_SAMPLES = 1_000_000;
 const clamp01 = (x: number) => (x > 0 ? (x < 1 ? x : 1) : 0);
 
 /** Clone the input and run fn on each heightfield (each has its own layer map); fn may return a replacement. */
@@ -974,7 +976,7 @@ defineNode({
   type: 'heightfield_erode',
   category: 'heightfield',
   summary: 'Droplet or virtual-pipe hydraulic erosion with thermal talus relaxation and optional stream-power incision.',
-  description: 'Houdini: HeightField Erode. The default droplet/js path retains the original seeded droplet model and outputs. Droplets erode below carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Kernel droplet uses the same parameters and layer meanings. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.',
+  description: 'Houdini: HeightField Erode. The default droplet/js path retains the original seeded droplet model and outputs. Droplets erode below carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Kernel droplet uses the same parameters and layer meanings. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. An existing lake layer supplies initial standing water to pipe/stream_power; lake is updated to the same final depth within its original footprint, while water includes every wet sample. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.',
   aliases: ['hf_erode', 'erosion', 'heightfield_erosion', 'heightfield_hydro_erode'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1002,6 +1004,7 @@ defineNode({
     stream_power_k: { type: 'float', default: 0.01, min: 0, desc: 'stream_power only: incision coefficient K in K × drainage^m × slope^n', aliases: ['incision_k'] },
     stream_power_m: { type: 'float', default: 0.5, min: 0, desc: 'stream_power only: exponent m of contributing drainage area', aliases: ['incision_m'] },
     stream_power_n: { type: 'float', default: 1, min: 0, desc: 'stream_power only: exponent n of downhill slope', aliases: ['incision_n'] },
+    fill_sinks: { type: 'bool', default: false, desc: 'stream_power only: route incision over a depression-filled surface each iteration without raising the ground; fully hard/frozen cells stay protected' },
     boundary: { type: 'enum', options: ['closed', 'open'], default: 'closed', desc: 'closed: water remains inside (material conserved); open: water exits, carrying sediment for droplet, while pipe retains sediment' },
   },
   outputs: 'layers height, flow, sediment, debris, water; kernel backends also write wear',
@@ -1044,10 +1047,10 @@ defineNode({
               sedimentCapacity: p.sediment_capacity, erosionRate: p.erosion_rate, depositionRate: p.deposition_rate,
               gravity: p.gravity, talusAngle: p.thermal_talus_angle * Math.PI / 180, thermalRate: p.thermal_rate,
               timeStep: p.time_step, boundary: p.boundary, streamPowerK: p.method === 'stream_power' ? p.stream_power_k : 0,
-              streamPowerM: p.stream_power_m, streamPowerN: p.stream_power_n,
+              streamPowerM: p.stream_power_m, streamPowerN: p.stream_power_n, fillSinks: p.method === 'stream_power' && p.fill_sinks,
             },
           },
-        { height: H, hardness: hard, freeze: frz, rain: p.method === 'droplet' ? null : maskOf(hf, p.rain_layer, ctx.type) },
+        { height: H, hardness: hard, freeze: frz, rain: p.method === 'droplet' ? null : maskOf(hf, p.rain_layer, ctx.type), initialWater: p.method === 'droplet' ? null : hf.layer('lake') },
         hf.count * Math.max(1, p.iterations), WORKER_SAMPLE_ITERATIONS, budget);
         hf.layers.set('height', result.height);
         for (const name of ['sediment', 'debris', 'wear'] as const) {
@@ -1057,6 +1060,11 @@ defineNode({
         }
         hf.layers.set('flow', p.method === 'droplet' ? normalizeAccum(result.flow) : result.flow);
         hf.layers.set('water', p.method === 'droplet' ? normalizeAccum(result.water) : result.water);
+        if (p.method !== 'droplet' && hf.layer('lake')) {
+          const previous = hf.layer('lake')!, lake = new Float32Array(hf.count);
+          for (let k = 0; k < lake.length; k++) if (previous[k] > 0) lake[k] = result.water[k];
+          hf.layers.set('lake', lake);
+        }
         if (p.method === 'droplet') droplets += Math.round(p.rain_density * hf.count) * p.iterations;
         return;
       }
@@ -1079,14 +1087,47 @@ defineNode({
 });
 
 defineNode({
+  type: 'heightfield_fill_sinks',
+  category: 'heightfield',
+  summary: 'Fill closed terrain depressions for drainage, retaining deep lakes when requested.',
+  description: 'Deterministic eight-neighbour priority flood (Barnes et al., 2014). Raises terrain to its lowest spill elevation so every unmasked cell has a route to the border; epsilon adds a minimum rise per receiver step so ordinary downhill flow can cross filled flats. With epsilon 0 the filled surface may be flat: use heightfield_flow fill_sinks to resolve its receivers. max_depth retains an entire connected depression when its deepest required fill exceeds the limit. Retained beds stay unchanged and lake stores standing-water depth in metres up to the spill surface, not a 0..1 mask; fill stores only actual added terrain thickness. Pipe and stream_power erosion use lake as initial water and update its depths inside the retained footprint; their water layer is the same depth quantity across the whole field. Droplet water remains a legacy normalised activity mask. A 0..1 mask_layer protects hard/frozen samples with value 1 as unchanged outlets; protected outlets and retained lakes are exceptions to border drainage. Loads the WASM kernel.',
+  aliases: ['hf_fill_sinks'],
+  inputs: [{ name: 'heightfield', desc: 'geometry with a height layer' }],
+  params: {
+    epsilon: { type: 'float', default: 0, min: 0, desc: 'minimum elevation rise in metres per receiver step; 0 fills to the spill level, positive values give strictly descending routes (at least one Float32 step)' },
+    max_depth: { type: 'float', default: 0, min: 0, desc: 'retain whole connected depressions deeper than this many metres as lakes; 0 fills every depression' },
+    mask_layer: { type: 'string', default: '', desc: 'optional 0..1 hardness/frozen layer: value 1 remains unchanged and acts as a drainage outlet; lower values may be filled' },
+    write_fill: { type: 'bool', default: true, desc: 'write fill: actual added terrain thickness in metres, nonnegative' },
+    write_lake: { type: 'bool', default: true, desc: 'write lake: retained standing-water depth in metres above the unchanged bed, zero outside lakes' },
+  },
+  outputs: 'filled height; optional fill and lake depth layers; other layers preserved',
+  example: { nodes: { hf: { type: 'heightfield', params: { size: [8, 8], resolution: 0.5 } }, bowl: { type: 'heightfield_layer', in: ['hf'], params: { expression: 'min(2, (x*x + z*z) / 8)' } }, fill: { type: 'heightfield_fill_sinks', in: ['bowl'], params: { epsilon: 0.001 } } }, output: 'fill' },
+  cook: async ctx => {
+    let kernels: Kernels;
+    try { kernels = await loadHostKernels(ctx.engine.host); }
+    catch (error) { throw new NodeError(`${ctx.type}: kernel could not be loaded: ${error instanceof Error ? error.message : String(error)}`, 'Build or install kernels/pkg with npm run kernels:build.'); }
+    const budget = simBudget(ctx, 'a coarser field (heightfield_resample), or raise the limit');
+    return eachFieldAsync(ctx, async hf => {
+      const result: FillSinksResult = await wasmCallUnderBudget(ctx, kernels, {
+        fn: 'fill_sinks', w: hf.width, h: hf.height, options: { epsilon: ctx.p.epsilon, maxDepth: ctx.p.max_depth },
+      }, { height: layerOf(hf, 'height', ctx.type), mask: maskOf(hf, ctx.p.mask_layer, ctx.type) }, hf.count, FLOOD_WORKER_SAMPLES, budget);
+      hf.layers.set('height', result.height);
+      if (ctx.p.write_fill) hf.layers.set('fill', result.fill);
+      if (ctx.p.write_lake) hf.layers.set('lake', result.lake);
+    });
+  },
+});
+
+defineNode({
   type: 'heightfield_flow',
   category: 'heightfield',
   summary: 'Compute downhill drainage accumulation and flow direction for river masks.',
-  description: 'Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. Local minima retain drainage (no depression filling). The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Without normalise or log_scale, drainage is contributing area in square metres. Loads the erosion WASM kernel.',
+  description: 'Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. By default local minima retain drainage. fill_sinks routes over a priority-flood filled surface and resolves flats with stable receivers, without modifying the stored height or lake layers. The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Without normalise or log_scale, drainage is contributing area in square metres. Loads the erosion WASM kernel.',
   aliases: ['hf_flow', 'heightfield_drainage'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a height layer' }],
   params: {
     method: { type: 'enum', options: ['d8', 'dinf'], default: 'dinf', desc: 'D8 chooses one steepest receiver; D-infinity splits contributing area between two downslope receivers' },
+    fill_sinks: { type: 'bool', default: false, desc: 'route over a priority-flood filled surface with stable flat receivers, preserving the original height; false leaves local minima as sinks' },
     normalise: { type: 'bool', default: true, desc: 'scale drainage to 0..1 after applying log_scale', aliases: ['normalize'] },
     log_scale: { type: 'bool', default: true, desc: 'apply log(1 + drainage) to reveal small tributaries alongside main rivers' },
   },
@@ -1096,8 +1137,11 @@ defineNode({
     let kernels: Kernels;
     try { kernels = await loadHostKernels(ctx.engine.host); }
     catch (error) { throw new NodeError(`${ctx.type}: kernel could not be loaded: ${error instanceof Error ? error.message : String(error)}`, 'Build or install kernels/pkg with npm run kernels:build.'); }
-    return eachField(ctx, hf => {
-      const result = kernels.flow_accumulation(layerOf(hf, 'height', ctx.type), hf.width, hf.height, hf.cellSize, ctx.p.method);
+    const budget = simBudget(ctx, 'a coarser field (heightfield_resample), or raise the limit');
+    return eachFieldAsync(ctx, async hf => {
+      const result: FlowAccumulationResult = await wasmCallUnderBudget(ctx, kernels, {
+        fn: 'flow_accumulation', w: hf.width, h: hf.height, cell: hf.cellSize, method: ctx.p.method, fillSinks: ctx.p.fill_sinks,
+      }, { height: layerOf(hf, 'height', ctx.type) }, hf.count, FLOOD_WORKER_SAMPLES, budget);
       const drainage = result.drainage;
       let maximum = 0;
       for (let k = 0; k < drainage.length; k++) {

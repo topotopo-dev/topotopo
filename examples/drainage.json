@@ -1,0 +1,24 @@
+{
+  "description": "Drainage on the demo massif: left, the original ground with D8 flow stopping in pits; right, shallow depressions filled with an epsilon slope and deeper basins retained as lakes. Both tiles use the same drainage colour scale: grey-green hillsides, gold tributaries and orange rivers; blue is standing lake water. The deep bowl and small pits are deliberate edits to the shared massif. The filled heightfield is node filled; water_surface raises only the display mesh by the lake depth, leaving the saved ground and lake layers separate.",
+  "meta": { "render": { "views": ["persp"], "azimuth": 0, "elevation": 65, "size": 1100, "grid": false } },
+  "nodes": {
+    "field": { "type": "heightfield", "params": { "size": [20, 20], "resolution": 0.125 } },
+    "massif": { "type": "heightfield_layer", "in": ["field"], "params": { "expression": "2.2 * (1 - smoothstep(1, 11, sqrt(x * x + (z + 1) * (z + 1))))" } },
+    "ridges": { "type": "heightfield_noise", "in": ["massif"], "params": { "fractal": "ridged", "amplitude": 2.4, "element_size": 8, "range": "positive", "seed": 11 } },
+    "detail": { "type": "heightfield_noise", "in": ["ridges"], "params": { "amplitude": 0.35, "element_size": 2.5, "seed": 5 } },
+    "falloff": { "type": "heightfield_layer", "in": ["detail"], "params": { "expression": "height * (0.35 + 0.65 * (1 - smoothstep(3, 10.5, sqrt(x * x + (z + 1) * (z + 1)))))" } },
+    "basins": { "type": "heightfield_layer", "in": ["falloff"], "params": { "expression": "height - 2.0 * (1 - smoothstep(0.5, 2.3, sqrt((x + 2.5) * (x + 2.5) + (z - 3) * (z - 3)))) - 0.25 * (1 - smoothstep(0.1, 0.55, sqrt((x - 2) * (x - 2) + (z - 2) * (z - 2)))) - 0.3 * (1 - smoothstep(0.1, 0.6, sqrt((x - 4) * (x - 4) + (z + 2) * (z + 2))))" } },
+    "raw_flow": { "type": "heightfield_flow", "in": ["basins"], "params": { "method": "d8", "normalise": false, "log_scale": false, "fill_sinks": false } },
+    "filled": { "type": "heightfield_fill_sinks", "in": ["basins"], "params": { "epsilon": 0.00001, "max_depth": 0.3, "write_fill": true, "write_lake": true } },
+    "filled_flow": { "type": "heightfield_flow", "in": ["filled"], "params": { "method": "d8", "normalise": false, "log_scale": false, "fill_sinks": true } },
+    "water_surface": { "type": "heightfield_layer", "in": ["filled_flow"], "params": { "expression": "height + lake" } },
+    "raw_mesh": { "type": "heightfield_to_mesh", "in": ["raw_flow"], "params": { "color": "terrain" } },
+    "filled_mesh": { "type": "heightfield_to_mesh", "in": ["water_surface"], "params": { "color": "terrain" } },
+    "raw_colour": { "type": "wrangle", "in": ["raw_mesh"], "params": { "code": "const t = smoothstep(0.08, 2.0, f@drainage); @Cd = mix(mix([0.34, 0.40, 0.34], [1.0, 0.70, 0.08], t), [1.0, 0.25, 0.04], smoothstep(2, 8, f@drainage));" } },
+    "filled_colour": { "type": "wrangle", "in": ["filled_mesh"], "params": { "code": "const t = smoothstep(0.08, 2.0, f@drainage); @Cd = f@lake > 0 ? [0.035, 0.34, 0.9] : mix(mix([0.34, 0.40, 0.34], [1.0, 0.70, 0.08], t), [1.0, 0.25, 0.04], smoothstep(2, 8, f@drainage));" } },
+    "raw_tile": { "type": "transform", "in": ["raw_colour"], "params": { "translate": [-11, 0, 0] } },
+    "filled_tile": { "type": "transform", "in": ["filled_colour"], "params": { "translate": [11, 0, 0] } },
+    "out": { "type": "merge", "in": ["raw_tile", "filled_tile"] }
+  },
+  "output": "out"
+}

@@ -273,8 +273,18 @@ EROSION: droplets (rain_density per sample per iteration, rain_amount, erosion_r
   Kernel erosion also writes wear (cumulative eroded depth); pipe water is remaining water depth in metres.
   heightfield_flow {method:"dinf", normalise:true, log_scale:true} writes drainage and direction without erosion.
   Raw drainage is contributing area (m²); direction E/SE/S/SW/W/NW/N/NE = 0..7, sink = 255. D8 routes one receiver,
-  D-infinity splits across two downhill receivers; local pits retain flow (no depression filling).
+  D-infinity splits across two downhill receivers; local pits retain flow unless fill_sinks:true routes over a
+  virtually filled surface (height stays unchanged). stream_power accepts the same opt-in fill_sinks flag.
   See examples/erosion_models.json for all four erosion methods on the same ridged terrain.
+DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise closed depressions to their spill level.
+  epsilon:0 keeps flat spill surfaces; epsilon>0 adds a strict downhill gradient (metres per neighbour step).
+  max_depth:0 fills every depression; a positive limit retains each connected depression whose maximum depth exceeds
+  it. The entire retained lake bed stays unchanged. fill is added terrain depth, lake is standing water depth, both
+  in metres and nonnegative; water surface = height + lake. write_fill/write_lake control those output layers.
+  mask_layer names a no-fill layer (values must be 0..1; cells at 1 stay untouched as terminal outlets).
+  Protected outlets and retained lakes are exceptions to border drainage. Pipe/stream_power erosion initializes from lake and writes simulated water
+  depth back to lake within that original lake footprint. Droplet water remains its legacy normalised resting mask.
+  See examples/drainage.json: unfilled massif beside shallow fills, blue retained lakes and coloured accumulation.
 RENDER / INSPECT: render draws heightfields as a shaded grid (the mask in red); color_by any layer name. inspect and
   every cook summary list the grid and each layer's min/max/mean.
 UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with

@@ -13,11 +13,14 @@ import type { SimBudget } from './util.ts';
 export type WasmCall =
   | { fn: 'remesh_quad'; options: Record<string, any> }
   | { fn: 'erode_droplet'; w: number; h: number; cell: number; params: Record<string, any>; seed: number }
-  | { fn: 'erode_pipe'; w: number; h: number; cell: number; params: Record<string, any>; seed: number };
+  | { fn: 'erode_pipe'; w: number; h: number; cell: number; params: Record<string, any>; seed: number }
+  | { fn: 'fill_sinks'; w: number; h: number; options: Record<string, any> }
+  | { fn: 'flow_accumulation'; w: number; h: number; cell: number; method: 'd8' | 'dinf'; fillSinks: boolean };
 
 /**
  * Run a call on loaded kernels, on whichever thread. Arrays: remesh_quad positions, tris, crease_edges, locked_edges,
- * direction_edges; erode_* height, hardness?, freeze?, and rain? (pipe).
+ * direction_edges; erode_* height, hardness?, freeze?, rain?, initialWater? (pipe); fill_sinks height, mask?;
+ * flow_accumulation height.
  */
 export function runWasmCall(k: Kernels, c: WasmCall, a: Record<string, any>): any {
   switch (c.fn) {
@@ -26,7 +29,11 @@ export function runWasmCall(k: Kernels, c: WasmCall, a: Record<string, any>): an
     case 'erode_droplet':
       return k.erode_droplet(a.height, a.hardness ?? null, c.w, c.h, c.cell, c.params, c.seed, a.freeze ?? null);
     case 'erode_pipe':
-      return k.erode_pipe(a.height, a.hardness ?? null, c.w, c.h, c.cell, c.params, c.seed, a.freeze ?? null, a.rain ?? null);
+      return k.erode_pipe(a.height, a.hardness ?? null, c.w, c.h, c.cell, { ...c.params, initialWater: a.initialWater }, c.seed, a.freeze ?? null, a.rain ?? null);
+    case 'fill_sinks':
+      return k.fill_sinks(a.height, c.w, c.h, c.options, a.mask ?? null);
+    case 'flow_accumulation':
+      return k.flow_accumulation(a.height, c.w, c.h, c.cell, c.method, c.fillSinks);
   }
   throw new Error(`unknown WASM call "${(c as any).fn}"`);
 }

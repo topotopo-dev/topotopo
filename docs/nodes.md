@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-222 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+223 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -19,7 +19,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
-- [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_flow](#heightfield_flow) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
+- [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_fill_sinks](#heightfield_fill_sinks) · [heightfield_flow](#heightfield_flow) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
 - [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
@@ -6949,7 +6949,7 @@ category: `heightfield` · aliases: `hf_erode`, `erosion`, `heightfield_erosion`
 
 Droplet or virtual-pipe hydraulic erosion with thermal talus relaxation and optional stream-power incision.
 
-Houdini: HeightField Erode. The default droplet/js path retains the original seeded droplet model and outputs. Droplets erode below carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Kernel droplet uses the same parameters and layer meanings. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.
+Houdini: HeightField Erode. The default droplet/js path retains the original seeded droplet model and outputs. Droplets erode below carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Kernel droplet uses the same parameters and layer meanings. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. An existing lake layer supplies initial standing water to pipe/stream_power; lake is updated to the same final depth within its original footprint, while water includes every wet sample. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.
 
 **Inputs**
 
@@ -6985,6 +6985,7 @@ Houdini: HeightField Erode. The default droplet/js path retains the original see
 | `stream_power_k` | float | `0.01` | 0.. |  | `incision_k` | stream_power only: incision coefficient K in K × drainage^m × slope^n |
 | `stream_power_m` | float | `0.5` | 0.. |  | `incision_m` | stream_power only: exponent m of contributing drainage area |
 | `stream_power_n` | float | `1` | 0.. |  | `incision_n` | stream_power only: exponent n of downhill slope |
+| `fill_sinks` | bool | `false` |  |  |  | stream_power only: route incision over a depression-filled surface each iteration without raising the ground; fully hard/frozen cells stay protected |
 | `boundary` | enum | `"closed"` |  | `closed`, `open` |  | closed: water remains inside (material conserved); open: water exits, carrying sediment for droplet, while pipe retains sediment |
 
 **Writes:** layers height, flow, sediment, debris, water; kernel backends also write wear
@@ -7030,13 +7031,77 @@ Houdini: HeightField Erode. The default droplet/js path retains the original see
 }
 ```
 
+### heightfield_fill_sinks
+
+category: `heightfield` · aliases: `hf_fill_sinks`
+
+Fill closed terrain depressions for drainage, retaining deep lakes when requested.
+
+Deterministic eight-neighbour priority flood (Barnes et al., 2014). Raises terrain to its lowest spill elevation so every unmasked cell has a route to the border; epsilon adds a minimum rise per receiver step so ordinary downhill flow can cross filled flats. With epsilon 0 the filled surface may be flat: use heightfield_flow fill_sinks to resolve its receivers. max_depth retains an entire connected depression when its deepest required fill exceeds the limit. Retained beds stay unchanged and lake stores standing-water depth in metres up to the spill surface, not a 0..1 mask; fill stores only actual added terrain thickness. Pipe and stream_power erosion use lake as initial water and update its depths inside the retained footprint; their water layer is the same depth quantity across the whole field. Droplet water remains a legacy normalised activity mask. A 0..1 mask_layer protects hard/frozen samples with value 1 as unchanged outlets; protected outlets and retained lakes are exceptions to border drainage. Loads the WASM kernel.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a height layer |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `epsilon` | float | `0` | 0.. |  |  | minimum elevation rise in metres per receiver step; 0 fills to the spill level, positive values give strictly descending routes (at least one Float32 step) |
+| `max_depth` | float | `0` | 0.. |  |  | retain whole connected depressions deeper than this many metres as lakes; 0 fills every depression |
+| `mask_layer` | string | `""` |  |  |  | optional 0..1 hardness/frozen layer: value 1 remains unchanged and acts as a drainage outlet; lower values may be filled |
+| `write_fill` | bool | `true` |  |  |  | write fill: actual added terrain thickness in metres, nonnegative |
+| `write_lake` | bool | `true` |  |  |  | write lake: retained standing-water depth in metres above the unchanged bed, zero outside lakes |
+
+**Writes:** filled height; optional fill and lake depth layers; other layers preserved
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          8,
+          8
+        ],
+        "resolution": 0.5
+      }
+    },
+    "bowl": {
+      "type": "heightfield_layer",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "expression": "min(2, (x*x + z*z) / 8)"
+      }
+    },
+    "fill": {
+      "type": "heightfield_fill_sinks",
+      "in": [
+        "bowl"
+      ],
+      "params": {
+        "epsilon": 0.001
+      }
+    }
+  },
+  "output": "fill"
+}
+```
+
 ### heightfield_flow
 
 category: `heightfield` · aliases: `hf_flow`, `heightfield_drainage`
 
 Compute downhill drainage accumulation and flow direction for river masks.
 
-Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. Local minima retain drainage (no depression filling). The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Without normalise or log_scale, drainage is contributing area in square metres. Loads the erosion WASM kernel.
+Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. By default local minima retain drainage. fill_sinks routes over a priority-flood filled surface and resolves flats with stable receivers, without modifying the stored height or lake layers. The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Without normalise or log_scale, drainage is contributing area in square metres. Loads the erosion WASM kernel.
 
 **Inputs**
 
@@ -7049,6 +7114,7 @@ Routes contributing cell area downhill without modifying height. D8 sends it to 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `method` | enum | `"dinf"` |  | `d8`, `dinf` |  | D8 chooses one steepest receiver; D-infinity splits contributing area between two downslope receivers |
+| `fill_sinks` | bool | `false` |  |  |  | route over a priority-flood filled surface with stable flat receivers, preserving the original height; false leaves local minima as sinks |
 | `normalise` | bool | `true` |  |  | `normalize` | scale drainage to 0..1 after applying log_scale |
 | `log_scale` | bool | `true` |  |  |  | apply log(1 + drainage) to reveal small tributaries alongside main rivers |
 
