@@ -402,8 +402,8 @@ console.log(`code params: ${codeRuns} hostile heightfield_layer/sdf_expr/paramet
  * sampling node with its own error within the timeout, also when the field passed through transform, sdf_modify and
  * sdf_combine (the "user code" mark travels with it). Analytic fields keep running without a limit.
  */
-type SampleType = 'sdf_to_mesh' | 'sdf_grid' | 'sdf_to_mesh (chain)';
-const SAMPLE_TYPES: SampleType[] = ['sdf_to_mesh', 'sdf_grid', 'sdf_to_mesh (chain)'];
+type SampleType = 'sdf_to_mesh' | 'sdf_grid' | 'sdf_to_mesh (chain)' | 'particles';
+const SAMPLE_TYPES: SampleType[] = ['sdf_to_mesh', 'sdf_grid', 'sdf_to_mesh (chain)', 'particles'];
 const SAMPLE_CASES: { code: string; want: RegExp; loop?: boolean }[] = [
   { code: 'p[0] > 0.5 ? (() => { while (true) {} })() : sdSphere(p, 0.5)', want: /: SDF code \(sdf_expr\) exceeded \d+ ms \(infinite loop\?\)$/, loop: true },
   { code: 'p[0] > 0.5 ? (() => { throw { get message() { while (true) {} } } })() : sdSphere(p, 0.5)', want: /exceeded \d+ ms/, loop: true },
@@ -417,6 +417,8 @@ const sampleGraph = (type: SampleType, code: string): GraphSpec => {
   const field: NodeSpec = { type: 'sdf_expr', params: { code } };
   if (type === 'sdf_grid') return { nodes: { s: field, t: { type: 'sdf_grid', in: ['s'], params: { voxel_size: 0.1 } } }, output: 't' };
   if (type === 'sdf_to_mesh') return { nodes: { s: field, t: { type: 'sdf_to_mesh', in: ['s'], params: { divisions: 24 } } }, output: 't' };
+  // the particles node samples its field input (input 2) onto a grid before the run
+  if (type === 'particles') return { nodes: { s: field, g: { type: 'grid', params: { divisions: [3, 3] } }, t: { type: 'particles', in: ['g', null, 's'], params: { steps: 2, field_resolution: 16 } } }, output: 't' };
   return {
     nodes: {
       s: field, moved: { type: 'transform', in: ['s'], params: { translate: [0.1, 0, 0] } },
