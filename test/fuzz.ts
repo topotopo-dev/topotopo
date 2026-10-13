@@ -555,4 +555,37 @@ for (const workers of [0, 2]) {
   for (const p of problems) { poisonFail++; console.log(`FAIL poisoned realm, ${mode}: ${p}`); }
 }
 console.log(`poisoned realm: ${POISON_CASES.length} failing nodes × pool off/on after Error.prepareStackTrace loops, ${poisonFail} failed (${((performance.now() - tp) / 1000).toFixed(1)}s)`);
-process.exit(fail || exprFail || codeFail || laterFail || poisonFail ? 1 : 0);
+
+// ------------------------------------------------------------------ a realm whose Promise.prototype.then never returns
+
+/**
+ * R-17: the script node subscribed to its run's promise outside the time limit, through the realm's
+ * Promise.prototype.then, which a script can replace: `Promise.prototype.then = function () { while (true) {} }` hung
+ * the process (and the MCP server) for good. The poisoning script itself and every later script must fail within the
+ * timeout instead. Each variant gets an engine (a realm) of its own; the script node runs on the cooking thread.
+ */
+const THEN_POISONS = [
+  'Promise.prototype.then = function () { while (true) {} };',
+  "Object.defineProperty(Promise.prototype, 'then', { get() { while (true) {} }, configurable: true });",
+  'Promise.prototype.then = function () {};',
+];
+let thenFail = 0;
+const tt = performance.now();
+for (const poison of THEN_POISONS) {
+  const e = new Engine(createNodeHost({ workers: 0, shelf: false }));
+  e.manifold = engine.manifold;
+  e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+  const problems: string[] = [];
+  for (const code of [poison + '\nreturn geo;', 'return geo;']) {
+    e.cache.clear();
+    const t = performance.now();
+    const r = await e.cook(throwGraph({ node: 'script', code }));
+    const ms = performance.now() - t;
+    const err = r.errors.find((x) => x.node === 't');
+    if (r.ok || !err || !/^script exceeded \d+ ms/.test(err.message)) problems.push(`${JSON.stringify(code.slice(0, 40))}: ${r.ok ? 'cooked' : r.errors.map((x) => `[${x.node}] ${x.message}`).join('; ')}`);
+    if (ms > EXPR_TIMEOUT_MS * 3 + 2000) problems.push(`${JSON.stringify(code.slice(0, 40))}: took ${ms.toFixed(0)} ms for a ${EXPR_TIMEOUT_MS} ms limit`);
+  }
+  for (const p of problems) { thenFail++; console.log(`FAIL poisoned Promise.prototype.then (${poison.slice(0, 40)}…): ${p}`); }
+}
+console.log(`poisoned Promise.prototype.then: ${THEN_POISONS.length} poisons × (the poisoning script, a later script), ${thenFail} failed (${((performance.now() - tt) / 1000).toFixed(1)}s)`);
+process.exit(fail || exprFail || codeFail || laterFail || poisonFail || thenFail ? 1 : 0);

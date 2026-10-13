@@ -176,7 +176,9 @@ class NodeWorkerPool implements WorkerPool {
     clearTimeout(slot.idleTimer);
     slot.worker.ref();
     let shared: { key: string; arrays?: Record<string, ArrayBufferView> } | undefined;
-    if (t.shared) shared = slot.shared.has(t.shared.key) ? { key: t.shared.key } : t.shared;
+    // a retry (the data was missing in a worker) always carries the data: it can land on another worker whose cache
+    // dropped the key too (workers keep 8 keys; slot.shared still lists the dropped ones)
+    if (t.shared) shared = slot.shared.has(t.shared.key) && !job.resent ? { key: t.shared.key } : t.shared;
     const transfer: ArrayBuffer[] = [];
     if (t.transfer) {
       for (const a of Object.values(t.arrays ?? {})) {

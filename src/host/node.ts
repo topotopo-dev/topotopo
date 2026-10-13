@@ -209,12 +209,20 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
       // waits in the realm queue until a timed drain below. `wake` (called when such a promise settles) triggers
       // the drain at once; a slow poll covers promises nobody announced. The whole run has a wall-clock deadline.
       const t0 = Date.now(), limit = Math.max(1, timeoutMs);
-      let state = 0, value: any, woken = false, wakeUp: (() => void) | null = null;
+      let state = 0, value: any, woken = false, wakeUp: (() => void) | null = null, thenable = false;
       const wake = () => { woken = true; wakeUp?.(); };
-      const res = guarded(() => fn(wake), limit);
-      if (!res || typeof res.then !== 'function') return res;
-      // handlers created out here run in the main queue (also after a drain that settled res)
-      res.then((v: any) => { state = 1; value = v; wake(); }, (e: any) => { state = 2; value = e; wake(); });
+      // Subscribing to the result runs user code too: `then` is looked up on the realm's Promise.prototype, which a
+      // script can replace with a loop (or a getter that loops), so it happens inside the timed call. The handlers are
+      // functions of this realm, so they still run in the main queue (also after a drain that settled the result).
+      const res = guarded(() => {
+        const r: any = fn(wake);
+        if (r && typeof r.then === 'function') {
+          thenable = true;
+          r.then((v: any) => { state = 1; value = v; wake(); }, (e: any) => { state = 2; value = e; wake(); });
+        }
+        return r;
+      }, limit);
+      if (!thenable) return res;
       while (!state) {
         if (!woken) await null; // a promise already settled by the last call needs no timer
         if (!woken && !state) {
