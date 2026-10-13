@@ -170,8 +170,8 @@ defineNode({
     'self-intersection test (BVH, triangle pairs that cross; report → prim group "self_intersecting", ' +
     'remove_faces → delete them and fill the holes); points no prim uses removed. Detail string "repair_report" ' +
     'holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed ' +
-    'or found something. Polylines pass through. For a quick tidy without topology changes use clean; for meshes ' +
-    'beyond repair, remesh (voxel) rebuilds a watertight surface.',
+    'or found something (warn off: only the detail string). Polylines pass through. For a quick tidy without ' +
+    'topology changes use clean; for meshes beyond repair, remesh (voxel) rebuilds a watertight surface.',
   aliases: ['repair', 'polydoctor', 'mesh_doctor', 'fix_mesh'],
   inputs: [{ name: 'geo', desc: 'polygon mesh' }],
   params: {
@@ -186,9 +186,18 @@ defineNode({
     max_hole_edges: { type: 'int', default: 8, min: 0, desc: 'only fill holes with at most this many edges (0 = any size)' },
     self_intersections: { type: 'enum', options: ['off', 'report', 'remove_faces'], default: 'off', desc: 'find faces that cross other faces: report (prim group self_intersecting) or remove them and fill the holes' },
     remove_isolated: { type: 'bool', default: true, desc: 'remove points no prim uses (only when the geometry has prims)' },
+    warn: { type: 'bool', default: true, desc: 'warn with a summary when something was found or changed (off: the counts are only in repair_report, e.g. for meshes known to need the fixes)', aliases: ['warnings', 'report_warning'] },
   },
   outputs: 'detail string repair_report (JSON counts); prim groups filled, self_intersecting (report mode)',
-  example: { type: 'mesh_repair', params: { tolerance: 0.001, max_hole_edges: 12, self_intersections: 'report' } },
+  example: {
+    nodes: {
+      box: { type: 'box', params: { divisions: [2, 2, 2] } },
+      hole: { type: 'delete', in: ['box'], params: { group: '0' } },
+      flipped: { type: 'reverse', in: ['hole'], params: { group: '1-4' } },
+      fixed: { type: 'mesh_repair', in: ['flipped'], params: { self_intersections: 'report', warn: false } },
+    },
+    output: 'fixed',
+  },
   cook: ({ input, p, warn }) => {
     const g = input(0);
     const { geo, report } = repairMesh(g, {
@@ -198,7 +207,7 @@ defineNode({
     });
     (geo.detail.add('repair_report', 'string', 1).data as string[])[0] = JSON.stringify(report);
     const s = repairSummary(report);
-    if (s) warn(`mesh_repair: ${s}`);
+    if (s && p.warn) warn(`mesh_repair: ${s}`);
     return geo;
   },
 });

@@ -1717,11 +1717,35 @@ Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all p
 
 ```json
 {
-  "type": "spline_fit",
-  "params": {
-    "tolerance": 0.02,
-    "smoothing": 0.5
-  }
+  "nodes": {
+    "spiral": {
+      "type": "spiral",
+      "params": {
+        "turns": 1.5,
+        "points_per_turn": 40
+      }
+    },
+    "noisy": {
+      "type": "jitter",
+      "in": [
+        "spiral"
+      ],
+      "params": {
+        "amount": 0.04
+      }
+    },
+    "fit": {
+      "type": "spline_fit",
+      "in": [
+        "noisy"
+      ],
+      "params": {
+        "tolerance": 0.1,
+        "smoothing": 1
+      }
+    }
+  },
+  "output": "fit"
 }
 ```
 
@@ -4402,10 +4426,31 @@ class edge: each set of faces joined by grouped edges becomes one polygon (its o
 
 ```json
 {
-  "type": "dissolve",
-  "params": {
-    "group": "loop:p4-5"
-  }
+  "nodes": {
+    "grid": {
+      "type": "grid",
+      "params": {
+        "size": [
+          2,
+          2
+        ],
+        "divisions": [
+          6,
+          6
+        ]
+      }
+    },
+    "d": {
+      "type": "dissolve",
+      "in": [
+        "grid"
+      ],
+      "params": {
+        "group": "loop:p10-17"
+      }
+    }
+  },
+  "output": "d"
 }
 ```
 
@@ -4747,7 +4792,7 @@ category: `topology` · aliases: `repair`, `polydoctor`, `mesh_doctor`, `fix_mes
 
 Diagnose and fix meshes: fuse duplicates, degenerate/duplicate faces, non-manifold edges, winding, small holes, self-intersections.
 
-Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switched off: fuse points within tolerance (by default only where one of the two lies on an open border: cracks and polygon soups close, solids that merely touch, like fracture pieces, keep their own points); drop repeated points and faces with < 3 distinct points, zero-area triangles hand their middle point to the neighbour across their long side (no slit is left); duplicate faces (compared by position: a copy with the same winding goes, an opposite-winding pair on the same points, i.e. an internal wall, goes entirely); non-manifold edges (3+ faces): keep, remove the extra faces, or split (faces around the edge are paired by angle and orientation, then every point whose corners form several fans (also bowtie points) is duplicated so each fan is manifold); winding made consistent across manifold edges (each piece keeps its majority orientation); holes with at most max_hole_edges edges ear-clipped (no new points, attributes from the neighbouring faces, prim group "filled"); closed pieces turned outward (signed volume); optional self-intersection test (BVH, triangle pairs that cross; report → prim group "self_intersecting", remove_faces → delete them and fill the holes); points no prim uses removed. Detail string "repair_report" holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed or found something. Polylines pass through. For a quick tidy without topology changes use clean; for meshes beyond repair, remesh (voxel) rebuilds a watertight surface.
+Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switched off: fuse points within tolerance (by default only where one of the two lies on an open border: cracks and polygon soups close, solids that merely touch, like fracture pieces, keep their own points); drop repeated points and faces with < 3 distinct points, zero-area triangles hand their middle point to the neighbour across their long side (no slit is left); duplicate faces (compared by position: a copy with the same winding goes, an opposite-winding pair on the same points, i.e. an internal wall, goes entirely); non-manifold edges (3+ faces): keep, remove the extra faces, or split (faces around the edge are paired by angle and orientation, then every point whose corners form several fans (also bowtie points) is duplicated so each fan is manifold); winding made consistent across manifold edges (each piece keeps its majority orientation); holes with at most max_hole_edges edges ear-clipped (no new points, attributes from the neighbouring faces, prim group "filled"); closed pieces turned outward (signed volume); optional self-intersection test (BVH, triangle pairs that cross; report → prim group "self_intersecting", remove_faces → delete them and fill the holes); points no prim uses removed. Detail string "repair_report" holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed or found something (warn off: only the detail string). Polylines pass through. For a quick tidy without topology changes use clean; for meshes beyond repair, remesh (voxel) rebuilds a watertight surface.
 
 **Inputs**
 
@@ -4770,6 +4815,7 @@ Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switc
 | `max_hole_edges` | int | `8` | 0.. |  |  | only fill holes with at most this many edges (0 = any size) |
 | `self_intersections` | enum | `"off"` |  | `off`, `report`, `remove_faces` |  | find faces that cross other faces: report (prim group self_intersecting) or remove them and fill the holes |
 | `remove_isolated` | bool | `true` |  |  |  | remove points no prim uses (only when the geometry has prims) |
+| `warn` | bool | `true` |  |  | `warnings`, `report_warning` | warn with a summary when something was found or changed (off: the counts are only in repair_report, e.g. for meshes known to need the fixes) |
 
 **Writes:** detail string repair_report (JSON counts); prim groups filled, self_intersecting (report mode)
 
@@ -4777,12 +4823,47 @@ Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switc
 
 ```json
 {
-  "type": "mesh_repair",
-  "params": {
-    "tolerance": 0.001,
-    "max_hole_edges": 12,
-    "self_intersections": "report"
-  }
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "divisions": [
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    "hole": {
+      "type": "delete",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "group": "0"
+      }
+    },
+    "flipped": {
+      "type": "reverse",
+      "in": [
+        "hole"
+      ],
+      "params": {
+        "group": "1-4"
+      }
+    },
+    "fixed": {
+      "type": "mesh_repair",
+      "in": [
+        "flipped"
+      ],
+      "params": {
+        "self_intersections": "report",
+        "warn": false
+      }
+    }
+  },
+  "output": "fixed"
 }
 ```
 
@@ -9795,7 +9876,7 @@ House built from a footprint polygon: one wall_segment per footprint edge (facin
 
 ![house](../shelf/thumbs/house.png)
 
-Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are the shelf generators themselves, so editing wall_segment or roof_hip changes every house. Pivot: the footprint's origin on the ground. Pieces come from the child assets (wall, window_frame, door_frame, roof).
+Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are the shelf generators themselves, so editing wall_segment or roof_skeleton changes every house. Pivot: the footprint's origin on the ground. Pieces come from the child assets (wall, window_frame, door_frame, roof).
 
 **Inputs**
 
@@ -10601,20 +10682,21 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
     "box": {
       "type": "box"
     },
-    "bevel": {
-      "type": "poly_bevel",
+    "pocket": {
+      "type": "poly_extrude",
       "in": [
         "box"
       ],
       "params": {
-        "offset": 0.06,
-        "divisions": 3
+        "group": "@P.y>0.4",
+        "distance": -0.2,
+        "inset": 0.15
       }
     },
     "uv": {
       "type": "uv_unwrap",
       "in": [
-        "bevel"
+        "pocket"
       ]
     },
     "curv": {
