@@ -4,36 +4,41 @@
     "attributes": {
       "detail": ["materials:string:1"],
       "point": ["P:float:3"],
-      "prim": ["Cd:float:3", "copynum:int:1", "material:string:1", "name:string:1"],
-      "vertex": ["uv:float:3"]
+      "prim": ["N:float:3", "copynum:int:1", "edge:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["Cd:float:3", "N:float:3", "uv:float:3"]
     },
     "bbox": {
-      "max": [10.5, 9.1609, 9.5],
-      "min": [-0.5, 0, -0.5]
+      "max": [10.5379, 8.3448, 9.5457],
+      "min": [-0.5634, 0, -0.5617]
     },
     "counts": {
-      "points": 2218,
-      "prims": 2139,
-      "vertices": 7834,
+      "points": 2220,
+      "prims": 2142,
+      "vertices": 7848,
       "volumes": 0
     },
     "groups": {
       "edge": [],
       "point": [],
-      "prim": [],
+      "prim": ["front", "side"],
       "vertex": []
     },
     "hashes": {
-      "P": "c10fdf20ed76ac7e",
+      "P": "7f61d06c7c287a3a",
       "attributes": {
-        "detail.materials": "c15e30b07627662e",
-        "prim.Cd": "a0acbd591c80f907",
-        "prim.copynum": "3ab283a5b149269f",
-        "prim.material": "830abd22a768a05c",
-        "prim.name": "5431352ff4370aad",
-        "vertex.uv": "90d6d18bc4b26b99"
+        "detail.materials": "93ca07e8bef22c6a",
+        "group.prim.front": "f0184de17280395b",
+        "group.prim.side": "af9c337284ae4b88",
+        "prim.N": "1c2b795d6c9fdf37",
+        "prim.copynum": "567f0e85b5dfb41f",
+        "prim.edge": "47600ea48e236e7e",
+        "prim.material": "98578095247b01a7",
+        "prim.name": "56cf40816731460b",
+        "vertex.Cd": "2e73b195573b84af",
+        "vertex.N": "ce5f6b692f7e7ab3",
+        "vertex.uv": "7965088b04c7bf59"
       },
-      "topology": "e9a3ec3808f0d5d6"
+      "topology": "d07319d7634cc191"
     }
   },
   "name": "shelf.house",
