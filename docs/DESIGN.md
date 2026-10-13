@@ -553,6 +553,11 @@ worker pool bit for bit and can be cut into frames anywhere:
   accumulate), `emit_all` at time 0, and `max_particles`, which counts a particle from its birth through its death step by
   age, also when a `die` collision removed it earlier (those keep their slot in `__pholders`). So a run of steps is emitted
   first (serially, cheap), then every particle integrates through it on its own: one `parallelMap` per run, not per step.
+  Since `max_particles` counts live particles only, a high rate with a short life over many steps once materialised
+  hundreds of millions of births in one run and exhausted the heap (R-17 N3). A run is now emitted and integrated in
+  batches: emission stops at the end of the step at which its births reach `max_births` (default 1,000,000), the batch is
+  integrated and compacted, and the next one starts from there (the result is the one of a single run, as for frames);
+  and one step gives at most `max_births` births (the rest are refused and reported, like `max_particles`).
 - **Per-particle randomness is drawn at birth** from (seed, emitter key, birth index): the emitter point's `id` when it has
   one, so reordering or adding emitter points leaves the other points' streams alone. A birth offset u ∈ (0, 1] inside the
   step (0 is reserved for `emit_all` particles, which exist at time 0) avoids banding; a particle's age after S steps is

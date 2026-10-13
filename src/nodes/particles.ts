@@ -9,7 +9,8 @@ import { heightfieldToMesh, heightfieldsOf } from '../core/heightfield.ts';
 import { pointNormals } from '../core/topology.ts';
 import { hashString } from '../core/random.ts';
 import {
-  COLLIDE_MODES, MAX_STEPS, compactState, emitSteps, fieldFrom, particlePoints, particleTrails, stateSkipped, stateStep,
+  COLLIDE_MODES, MAX_STEPS, compactState, emitSteps, fieldFrom, particlePoints, particleTrails, stateSkipped, stateSkippedBirths,
+  stateStep,
 } from '../core/particles.ts';
 import type { ColliderData, EmitParams, EmitterData, FieldData, StepArgs } from '../core/particles.ts';
 import { defineNode } from '../graph/registry.ts';
@@ -166,6 +167,7 @@ defineNode({
     field_resolution: { type: 'int', default: 64, min: 4, max: 256, desc: 'SDF field: samples along the longest side of the grid the distance is sampled on', advanced: true },
     seed: { type: 'float', default: 0, desc: 'random seed (emission phases, birth offsets, lifetimes, velocities, noise)' },
     max_particles: { type: 'int', default: 1000000, min: 0, desc: 'births are refused while this many particles hold a slot (from birth to the end of their life)' },
+    max_births: { type: 'int', default: 1000000, min: 1, max: 10000000, desc: 'guard: most particles born in one step (the rest of the step\'s births are refused, with a warning). Steps are also simulated in batches of about this many births, so memory stays bounded however many particles are born and die over a run (the result does not depend on it otherwise)' },
     trails: { type: 'int', default: 0, min: 0, max: 10000, desc: 'positions kept per particle and output as a polyline (0 = no trails; 2 or more)', aliases: ['trail_length'] },
     output: { type: 'enum', options: ['both', 'points', 'trails'], default: 'both', desc: 'points (the particles), trails (one polyline per particle) or both (points first; no trails when trails < 2)' },
   },
@@ -190,7 +192,8 @@ defineNode({
     const dt = 1 / (p.fps * p.substeps);
     const ep: EmitParams = {
       dt, seed: p.seed, rate: p.emit_rate, emitAll: !!p.emit_all, life: p.life, lifeVar: p.life_var, speed: p.speed,
-      velocityVar: p.velocity_var, pscale: p.pscale, maxParticles: Math.max(0, Math.floor(p.max_particles)), trail: T,
+      velocityVar: p.velocity_var, pscale: p.pscale, maxParticles: Math.max(0, Math.floor(p.max_particles)),
+      maxBirths: Math.max(1, Math.floor(p.max_births)), trail: T,
     };
     const g3 = vec(p.gravity, [0, -9.81, 0]);
     const collideIdx = Math.max(0, COLLIDE_MODES.indexOf(p.collide));
@@ -206,10 +209,22 @@ defineNode({
     if (p.drag <= 0 && (base.wind.some((w) => w !== 0))) warn('wind has no effect without drag (set drag > 0: the rate at which particles take the wind speed)');
     if (p.drag <= 0 && base.fieldAir && ctx.hasInput(2)) warn('field_mode "air" acts through drag, which is 0: the field has no effect (set drag > 0 or field_mode "force")');
 
-    let contacts = 0, simulated = 0;
-    /** Run steps [s0, s1) after `state` (null = the start) with the inputs `prep`. */
+    let contacts = 0, simulated = 0, batches = 0;
+    /**
+     * Run steps [s0, s1) after `state` (null = the start) with the inputs `prep`: in batches that end where the births
+     * reach max_births (emitSteps), so a run never holds more births at once; same result as one batch.
+     */
     const advance = async (state: Geometry | null, s0: number, s1: number, prep: Prepared): Promise<Geometry> => {
-      const st = emitSteps(state, prep.emitter, s0, s1, ep);
+      for (;;) {
+        const { geo: st, end } = emitSteps(state, prep.emitter, s0, s1, ep);
+        batches++;
+        state = await integrate(st, s0, end, prep);
+        if (end >= s1) return state;
+        s0 = end;
+      }
+    };
+    /** Integrate the particles of `st` (births included) through steps [s0, s1). */
+    const integrate = async (st: Geometry, s0: number, s1: number, prep: Prepared): Promise<Geometry> => {
       const n = st.numPoints;
       if (s1 <= s0 || !n) return compactState(st, null, s1);
       const coll = prep.collider, fld = prep.field;
@@ -253,7 +268,10 @@ defineNode({
     if (now.field && !now.field.type) warn('the field input has no v attribute and no heightfield or SDF volume: ignored');
     const skipped = stateSkipped(state);
     if (skipped) warn(`max_particles (${p.max_particles}) reached: ${skipped} births were refused`);
+    const skippedBirths = stateSkippedBirths(state);
+    if (skippedBirths) warn(`max_births (${p.max_births}) reached: ${skippedBirths} births were refused (more particles were due in one step than max_births allows; raise it, or lower emit_rate)`);
     ctx.stat('steps', simulated);
+    ctx.stat('batches', batches);
     ctx.stat('particles', state.numPoints);
     ctx.stat('contacts', contacts);
     const pts = p.output !== 'trails' ? particlePoints(state, S, dt) : null;

@@ -506,7 +506,8 @@ See examples/splines.json.`,
 EMIT: every point of input 0 emits emit_rate particles per step (0.25 = one every 4 steps; per-point random phase);
   emit_all: one per point at time 0 (emit_rate 0 = a single burst). Start velocity = point v + speed × point N (+Y without N)
   + a random vector up to velocity_var. Point attributes and groups (Cd, pscale, custom) are copied at birth; a point id seeds
-  that point's random stream. life (s, 0 = forever) ± life_var; max_particles caps the particles holding a slot (birth to end of life).
+  that point's random stream. life (s, 0 = forever) ± life_var; max_particles caps the particles holding a slot (birth to end of life);
+  max_births (guard, 1,000,000) caps the births of one step and the births held at once (runs are simulated in batches).
 FORCES (per step, dt = 1/(fps × substeps)): gravity; noise (m/s², noise_size m, curl:true = divergence-free swirls, noise_octaves);
   drag pulls the velocity toward the air velocity = wind + air fields (wind does nothing without drag); attract (spring 1/s²)
   to attract_point or, with attract_to:"surface", to the closest point of input 1.

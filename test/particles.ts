@@ -1,6 +1,6 @@
 // Behavioural tests for the particles node (src/nodes/particles.ts, src/core/particles.ts): emission counts and
 // lifetimes, attribute carry, determinism, pool parity (bit-identical), floor and mesh collisions, trails (lengths,
-// curveu, ages), the max_particles guard, time stepping (frames = one long run, resume, jump back, time-dependent
+// curveu, ages), the max_particles and max_births guards (batched runs), time stepping (frames = one long run, resume, jump back, time-dependent
 // inputs), fields (points, heightfield, SDF), forces (wind, attraction, curl noise), and the speed target.
 //   node test/particles.ts
 import '../src/nodes/index.ts';
@@ -311,6 +311,40 @@ section('max_particles');
   const floodMs = performance.now() - t0;
   check(flood.geo!.numPoints === 10 && flood.warnings.some((w) => w.message.includes('max_particles (10) reached: 2399999990 births')) && floodMs < 2000,
     `emit_rate 1.2e9 under max_particles 10: 2,399,999,990 refused births counted in ${floodMs.toFixed(0)} ms`);
+}
+
+section('max_births');
+{
+  // R-17 N3: max_particles counts live particles, but a run of steps materialised every birth of the run before
+  // integrating it, so a high rate with a short life over many steps exhausted the heap and killed the process. Runs are
+  // now emitted and integrated in batches of about max_births births (same result), and one step gives at most
+  // max_births births.
+  const one: NodeSpec = { type: 'points', params: { positions: [[0, 1, 0]] } };
+  const step = await cook(sim(one, { ...NOG, steps: 2, emit_rate: 5000, max_births: 1000 }));
+  check(step.ok && step.geo!.numPoints === 2000 && step.warnings.some((w) => w.message.includes('max_births (1000) reached: 8000 births were refused')),
+    `max_births 1000 caps the births of a step (${step.geo?.numPoints} particles from 2 steps of 5,000) and the refused ones are reported`);
+  const allAt0 = await cook(sim({ type: 'point_grid', params: { counts: [50, 1, 1], size: [4, 0, 0] } }, { ...NOG, steps: 0, emit_rate: 0, emit_all: true, max_births: 20 }));
+  check(allAt0.geo!.numPoints === 20 && allAt0.warnings.some((w) => w.message.includes('max_births (20) reached: 30 births')), `emit_all births are capped too (${allAt0.geo!.numPoints} of 50)`);
+  // short-lived particles from a high rate: 3,000 births a step that die within two steps, 120,000 over the run
+  // (emitted 5 cm above a grid and shot down, so they bounce off it and the floor below)
+  const churn = (maxBirths: number, extra: Record<string, any> = {}) => sim({ type: 'point_grid', params: { counts: [10, 1, 1], size: [4, 0, 0], center: [0, 0.05, 0] } }, {
+    steps: 40, emit_rate: 300, life: 0.08, life_var: 0.03, velocity_var: 1, speed: -3, noise: 2, collide: 'bounce', floor: true, floor_height: -0.05,
+    trails: 3, seed: 4, max_births: maxBirths, ...extra,
+  }, { ground: { type: 'grid', params: { size: [3, 3], divisions: [6, 6] } } }, ['ground']);
+  const whole = await cook(churn(1000000)), batched = await cook(churn(5000)), batchedPool = await cook(churn(5000), forced);
+  const sw = whole.results.get('sim')!.stats!, sb = batched.results.get('sim')!.stats!;
+  check(whole.ok && sw.batches === 1 && sb.batches === 20 && sameBits(whole.geo!, batched.geo!) === null && sameBits(batched.geo!, batchedPool.geo!) === null
+    && whole.geo!.numPoints > 0 && sw.contacts > 0 && sw.contacts === sb.contacts && sw.steps === sb.steps && !batched.warnings.length,
+    `a run in batches of 5,000 births (${sb.batches} batches, ${sw.batches} without) = one run, bit for bit, pool off and on (${whole.geo?.numPoints} particles, ${sw.contacts} contacts)`);
+  // frames resumed from a cached state cut the run elsewhere: still the same result
+  const anim = (maxBirths: number) => { const g = churn(maxBirths, { steps: 4 }); return g; };
+  const e = new Engine(createNodeHost({ workers: 0 }));
+  await e.init();
+  let last: CookReport | null = null;
+  await e.cookFrames(anim(7000), { start: 1, end: 9 }, (r) => { last = r; });
+  const direct = await cook(anim(1000000), new Engine(createNodeHost({ workers: 0 })), 9);
+  check(sameBits((last as unknown as CookReport).geo!, direct.geo!) === null, 'frames cut into batches = a direct cook in one batch');
+  check((getNodeDef('particles')!.params.max_births.max ?? Infinity) <= 10_000_000 && getNodeDef('particles')!.params.max_births.default === 1_000_000, 'max_births: default 1,000,000, at most 10,000,000');
 }
 
 // ---------------------------------------------------------------- time
