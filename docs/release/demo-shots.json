@@ -1,0 +1,133 @@
+{
+  "description": "Engine shots of the demo video (docs/release/demo-video-plan.md), rendered by scripts/demo-footage.ts (npm run demo:footage) into out/video/<id>/frame_0001.png …, out/video/<id>.mp4 and out/video/contact_sheet.png. Unreal, Blender, Houdini, terminal and MCP shots are screen captures and are not listed. kind: orbit = one cook, the camera turns by degrees_per_frame from azimuth; sequence = the frames cooked in order (simulation state carries over); still = one frame held for seconds. render takes the keys of an example's meta.render (src/render/options.ts). set changes the graph in memory (dotted paths) instead of editing the example. pane: the right half of the 1920 x 1080 timeline; frames are centred in it with bands of the render footer colour above and below for captions, unless crop is given ([width, height, top edge] of the frame for a full-frame shot). left: the graph JSON shown in the left pane, written verbatim to out/video/<id>/left.txt.",
+  "fps": 30,
+  "pane": [960, 1080],
+  "shots": [
+    {
+      "id": "s01_title_bg",
+      "plan": "shot 1, 0:00-0:10: title card background (dim it in the edit)",
+      "graph": "examples/unreal_demo.json",
+      "kind": "still",
+      "seconds": 10,
+      "render": { "views": ["persp"], "azimuth": 30, "elevation": 32, "zoom": 1.5, "size": 960, "scale": 2, "view_labels": false },
+      "crop": [1920, 1080, 500]
+    },
+    {
+      "id": "s02a_house_city",
+      "plan": "shot 2, 0:10-0:22: house_city orbit, seed 7 (one full turn; cut to s02b at the same frame number so the camera keeps moving)",
+      "graph": "examples/house_city.json",
+      "kind": "orbit",
+      "orbit": { "azimuth": 38, "degrees_per_frame": 1, "frames": 360 },
+      "render": { "views": ["persp"], "elevation": 28, "shading": "matcap", "annotate": false, "size": 960, "view_labels": false },
+      "caption": "12 houses · each house is a shelf asset made of shelf assets",
+      "left": [
+        { "file": "examples/house_city.json", "paths": ["vars", "nodes.w", "nodes.d", "nodes.fl", "nodes.pit", "nodes.yaw", "nodes.houses"] },
+        { "file": "shelf/house.json", "paths": ["nodes.walls", "nodes.roof"] }
+      ]
+    },
+    {
+      "id": "s02b_house_city_seed8",
+      "plan": "shot 2, 0:22-0:28: the same orbit after \"seed\": 7 → 8",
+      "graph": "examples/house_city.json",
+      "set": { "vars.seed": 8 },
+      "kind": "orbit",
+      "orbit": { "azimuth": 38, "degrees_per_frame": 1, "frames": 360 },
+      "render": { "views": ["persp"], "elevation": 28, "shading": "matcap", "annotate": false, "size": 960, "view_labels": false },
+      "caption": "12 houses · each house is a shelf asset made of shelf assets",
+      "left": [
+        { "file": "examples/house_city.json", "paths": ["vars"], "note": "edit \"seed\": 7 to \"seed\": 8 on screen" }
+      ]
+    },
+    {
+      "id": "s03_erosion_models",
+      "plan": "shot 3, 0:28-0:44: erosion_models orbit (one full turn)",
+      "graph": "examples/erosion_models.json",
+      "kind": "orbit",
+      "orbit": { "azimuth": 25, "degrees_per_frame": 0.75, "frames": 480 },
+      "render": { "views": ["persp"], "elevation": 55, "size": 960, "view_labels": false },
+      "caption": "back: droplets (TypeScript, WebAssembly) · front: virtual pipes, pipes + stream power",
+      "left": [
+        { "file": "examples/erosion_models.json", "paths": ["nodes.droplet_js", "nodes.droplet_kernel", "nodes.pipe", "nodes.stream"] }
+      ]
+    },
+    {
+      "id": "s04a_quad_remesh",
+      "plan": "shot 4, 0:44-0:51: quad_remesh still (input left of each pair, quads right)",
+      "graph": "examples/quad_remesh.json",
+      "kind": "still",
+      "seconds": 7,
+      "render": { "views": ["persp"], "size": 960, "azimuth": 12, "elevation": 18, "zoom": 1.1, "look_at": [0.25, 0.07, 0.06], "wireframe": "all", "grid": false, "shading": "default", "view_labels": false },
+      "left": [
+        { "file": "examples/quad_remesh.json", "paths": ["nodes.sphere_quad", "nodes.box_quad", "nodes.rock_quad", "nodes.tube_quad"] }
+      ]
+    },
+    {
+      "id": "s04b_textures",
+      "plan": "shot 4, 0:51-0:58: textures still (brick wall and crate left, the maps right)",
+      "graph": "examples/textures.json",
+      "kind": "still",
+      "seconds": 7,
+      "render": { "views": ["persp", "texture"], "textures": true, "azimuth": 30, "elevation": 18, "size": 479, "view_labels": false },
+      "left": [
+        {
+          "file": "examples/textures.json",
+          "paths": ["nodes.bricks", "nodes.grain", "nodes.height", "nodes.brick_ids", "nodes.brick_tint", "nodes.mortar", "nodes.brick_mask", "nodes.masonry",
+            "nodes.brick_color", "nodes.brick_normal", "nodes.brick_rough", "nodes.brick_maps", "nodes.brick_wall",
+            "nodes.crate_ao", "nodes.crate_curv", "nodes.edges", "nodes.chips", "nodes.wear_raw", "nodes.wear", "nodes.wood_grain", "nodes.wood",
+            "nodes.paint_worn", "nodes.worn", "nodes.crate_color", "nodes.crate_rough", "nodes.crate_orm", "nodes.crate_maps", "nodes.crate_textured"]
+        }
+      ]
+    },
+    {
+      "id": "s05a_rbd_settle",
+      "plan": "shot 5, 0:58-1:08: the crate drop (rbd_stack with animate on; frame f shows (f - 1) / 30 s of simulation)",
+      "graph": "examples/rbd_settle.json",
+      "set": { "nodes.crate_piles.params.animate": true },
+      "kind": "sequence",
+      "frames": [1, 300],
+      "sim_fps": 30,
+      "render": { "views": ["persp"], "azimuth": 30, "elevation": 30, "zoom": 2, "size": 960, "view_labels": false },
+      "caption": "rbd_settle · rbd_stack (Rapier): 116 rocks settled, 16 crates stacked",
+      "left": [
+        { "file": "examples/rbd_settle.json", "paths": ["nodes.settled_rocks", "nodes.crate_piles"] }
+      ]
+    },
+    {
+      "id": "s05b_drape",
+      "plan": "shot 5, 1:08-1:15: partial orbit of drape (persp only)",
+      "graph": "examples/drape.json",
+      "kind": "orbit",
+      "orbit": { "azimuth": 32, "degrees_per_frame": 1, "frames": 210 },
+      "render": { "views": ["persp"], "elevation": 22, "wireframe": "none", "size": 960, "view_labels": false },
+      "caption": "drape · XPBD cloth",
+      "left": [
+        { "file": "examples/drape.json", "paths": ["nodes.crates", "nodes.tarp", "nodes.tarp_draped"] }
+      ]
+    },
+    {
+      "id": "s05c_particles",
+      "plan": "shot 5, 1:15-1:22: runoff trails growing from zero steps (the particles run at their own 24 fps, so 210 frames at 30 fps play slightly fast)",
+      "graph": "examples/particles.json",
+      "set": { "nodes.runoff.params.steps": 0, "nodes.fountain.params.steps": 0 },
+      "kind": "sequence",
+      "frames": [1, 210],
+      "render": { "views": ["persp"], "azimuth": 30, "elevation": 32, "size": 960, "view_labels": false },
+      "caption": "particles · runoff trails on the eroded massif",
+      "left": [
+        { "file": "examples/particles.json", "paths": ["nodes.runoff"] }
+      ]
+    },
+    {
+      "id": "s06_unreal_demo",
+      "plan": "shot 6, 1:22-1:36: unreal_demo orbit (then 4 s of the out/unreal_demo/ folder, a screen capture)",
+      "graph": "examples/unreal_demo.json",
+      "kind": "orbit",
+      "orbit": { "azimuth": 30, "degrees_per_frame": 0.75, "frames": 420 },
+      "render": { "views": ["persp"], "elevation": 32, "size": 960, "view_labels": false },
+      "caption": "126 m terrain · 292 trees, 244 rocks · 536 packed instances",
+      "left": [
+        { "file": "examples/unreal_demo.json", "paths": ["description", "nodes.field", "nodes.tree_pts", "nodes.trees", "nodes.rock_pts", "nodes.rocks"] }
+      ]
+    }
+  ]
+}
