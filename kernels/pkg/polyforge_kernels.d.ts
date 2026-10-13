@@ -17,6 +17,8 @@ export function grid_resample(g: any, voxel: number): object;
 
 export function offset_polygon(outer: Float64Array, hole_arrays: Array<any>, distance: number): object;
 
+export function remesh_quad(positions: Float64Array, tris: Uint32Array, options: any): object;
+
 export function roof(outer: Float64Array, hole_arrays: Array<any>, pitch: Float64Array, height_cap?: number | null): object;
 
 export function sdf_from_mesh(positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean): object;
@@ -35,6 +37,7 @@ export interface InitOutput {
     readonly grid_offset: (a: number, b: number, c: number) => void;
     readonly grid_resample: (a: number, b: number, c: number) => void;
     readonly offset_polygon: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly remesh_quad: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly roof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly sdf_from_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly straight_skeleton: (a: number, b: number, c: number, d: number, e: number, f: number) => void;

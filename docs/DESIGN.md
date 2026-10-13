@@ -419,6 +419,23 @@ with `GeoBuilder`, and writes prim `kind` on arcs or prim `edge` on roof faces. 
 outgoing edge of a point, or all edges of a primitive. See `kernels/README.md` for the event algorithm, numerical
 limits, array contracts and dependency licences; `kernels/BUILD.md` records the reproducible build commands.
 
+### Field-aligned quad remeshing
+
+`remesh_quad` is a separate topology node backed by `kernels/src/remesh_quad.rs`; the existing isotropic and voxel
+remeshers retain their APIs and outputs. The kernel accepts f64 positions and indexed triangles, optimizes four-way
+tangent orientations and periodic position origins on a hierarchy, and extracts polygon CSR. Density is a target
+length or an approximate face count. Sharp edges, explicit creases and boundaries constrain the solve; locked edges
+preserve the exact partition at a selected group's border.
+
+The adapter in `src/nodes/remeshquad.ts` triangulates selected polygons, records their original point/corner/prim
+indices, and transfers attributes with `GeoBuilder` using final source-triangle barycentrics. Vertex attributes use
+connected wedges on each side of UV seams, while prim attributes follow the source triangle at each face centre.
+Unselected primitives pass through; existing normals are recomputed for the remeshed region. Detail attributes
+include `quad_fraction`, interior irregular-valence count `singularities`, and edge-length/planarity statistics.
+`quads_only` requests conforming refinement and may exceed the requested face count. It is best effort when locked
+borders prevent that refinement. Algorithm limits and measured acceptance are recorded in `kernels/README.md`
+and `kernels/BENCH.md`; `examples/quad_remesh.json` exposes every polygon edge for visual review.
+
 ## What makes it LLM-friendly
 
 These are the decisions that most affect how well an agent can work with it:

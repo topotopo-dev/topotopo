@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "description": "Field-aligned quad remeshing. In each pair the grey input is on the left and the coloured result is on the right. Top row: noisy sphere, bevelled box with sharp feature alignment. Bottom row: shelf rock, capped tube in quads-only mode. All polygon edges are drawn to expose the actual edge flow and irregular vertices.",
+  "meta": {
+    "render": { "views": ["persp"], "size": 1600, "azimuth": 12, "elevation": 18, "wireframe": "all", "grid": false, "shading": "default" }
+  },
+  "nodes": {
+    "sphere": { "type": "sphere", "params": { "type": "ico", "level": 3, "radius": 0.8 } },
+    "sphere_noise": { "type": "noise_displace", "in": ["sphere"], "params": { "amplitude": 0.07, "frequency": 2.2, "seed": 17 } },
+    "sphere_quad": { "type": "remesh_quad", "in": ["sphere_noise"], "params": { "target_faces": 450, "smooth_iterations": 10 } },
+    "sphere_input_color": { "type": "color", "in": ["sphere_noise"], "params": { "color": "#b8bec6" } },
+    "sphere_result_color": { "type": "color", "in": ["sphere_quad"], "params": { "color": "#75b7ce" } },
+    "sphere_input_place": { "type": "transform", "in": ["sphere_input_color"], "params": { "translate": [-3.3, 1.45, 0] } },
+    "sphere_result_place": { "type": "transform", "in": ["sphere_result_color"], "params": { "translate": [-1.1, 1.45, 0] } },
+    "box": { "type": "box", "params": { "size": [1.45, 1.45, 1.45] } },
+    "box_bevel": { "type": "poly_bevel", "in": ["box"], "params": { "offset": 0.16, "divisions": 1 } },
+    "box_quad": { "type": "remesh_quad", "in": ["box_bevel"], "params": { "target_faces": 350, "feature_angle": 30, "preserve_sharp": true, "smooth_iterations": 10 } },
+    "box_input_color": { "type": "color", "in": ["box_bevel"], "params": { "color": "#b8bec6" } },
+    "box_result_color": { "type": "color", "in": ["box_quad"], "params": { "color": "#dfaa72" } },
+    "box_input_place": { "type": "transform", "in": ["box_input_color"], "params": { "translate": [1.1, 1.45, 0], "rotate": [0, -15, 0] } },
+    "box_result_place": { "type": "transform", "in": ["box_result_color"], "params": { "translate": [3.3, 1.45, 0], "rotate": [0, -15, 0] } },
+    "rock": { "type": "rock", "params": { "size": 1.85, "roughness": 0.38, "flatness": 0.8, "detail": 3, "seed": 6 } },
+    "rock_center": { "type": "transform", "in": ["rock"], "params": { "translate": [0, -0.7, 0] } },
+    "rock_quad": { "type": "remesh_quad", "in": ["rock_center"], "params": { "target_faces": 450, "smooth_iterations": 10 } },
+    "rock_input_color": { "type": "color", "in": ["rock_center"], "params": { "class": "prim", "color": "#b8bec6" } },
+    "rock_result_color": { "type": "color", "in": ["rock_quad"], "params": { "class": "prim", "color": "#a7ba80" } },
+    "rock_input_place": { "type": "transform", "in": ["rock_input_color"], "params": { "translate": [-3.3, -1.15, 0] } },
+    "rock_result_place": { "type": "transform", "in": ["rock_result_color"], "params": { "translate": [-1.1, -1.15, 0] } },
+    "tube": { "type": "tube", "params": { "radius": 0.65, "height": 1.6, "cols": 32, "rows": 8, "caps": true } },
+    "tube_quad": { "type": "remesh_quad", "in": ["tube"], "params": { "target_faces": 350, "mode": "quads_only", "feature_angle": 45, "preserve_sharp": true, "smooth_iterations": 10 } },
+    "tube_input_color": { "type": "color", "in": ["tube"], "params": { "color": "#b8bec6" } },
+    "tube_result_color": { "type": "color", "in": ["tube_quad"], "params": { "color": "#c39ccb" } },
+    "tube_input_place": { "type": "transform", "in": ["tube_input_color"], "params": { "translate": [1.1, -1.15, 0], "rotate": [18, 0, -12] } },
+    "tube_result_place": { "type": "transform", "in": ["tube_result_color"], "params": { "translate": [3.3, -1.15, 0], "rotate": [18, 0, -12] } },
+    "out": { "type": "merge", "in": ["sphere_input_place", "sphere_result_place", "box_input_place", "box_result_place", "rock_input_place", "rock_result_place", "tube_input_place", "tube_result_place"] }
+  },
+  "output": "out"
+}

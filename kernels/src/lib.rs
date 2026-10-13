@@ -8,6 +8,7 @@ mod skeleton;
 pub use skeleton::{Offset, Provenance, Roof, Skeleton, offset, roof_mesh, skeleton};
 
 pub mod dual_contour;
+pub mod remesh_quad;
 pub mod sdf;
 
 #[cfg(target_arch = "wasm32")]
