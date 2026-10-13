@@ -1186,3 +1186,209 @@ Final ordinary WASM SHA-256:
 An intermediate scalar/SIMD mismatch was caused by changing contour source between
 the two builds; rebuilding both from a frozen, hash-checked source resolved it. The
 final parity gate has no tolerated numeric differences. No push or merge was performed.
+
+# Session 12: K-10 scatter selection and projected relaxation (2026-10-14)
+
+Branch `codex/kernels`, based on current main `eae1bc4` including the R-17 review.
+No runtime dependencies were added. Implementation and correctness gates pass;
+**all three requested performance targets remain unmet**.
+
+## Algorithms and output contract
+
+- Weighted sample elimination ports the TypeScript Yuksel-style algorithm, with
+  the same KD quickselect, widest-axis ties, distance/preorder neighbour order,
+  contribution addition order and indexed binary max-heap with left-child ties.
+  Compact domains use a bounded dense grid, sorting each result by distance and
+  KD preorder rank; sparse/extreme domains retain KD queries. Variable radii
+  discover pairs from the larger-radius endpoint and retain discovery order.
+- `scatter_min_distance` performs serial greedy rejection through a hashed grid
+  in the supplied order, with optional per-group caps. Distances exactly equal
+  to the requested radius are accepted. Rejection can reduce the output count.
+- `scatter_relax` runs the complete repulsion/projection loop over f64 arrays,
+  rebuilding the KD tree per pass and using the existing flat TriSurface/BVH
+  projection, closest-triangle ties and barycentric recomputation. Sampling,
+  attribute interpolation and `heightfield_scatter` integration remain in TS.
+- Both f32 and f64 selection bindings ship. The node uses f64 to avoid rounding
+  the existing candidate geometry. `backend:auto|kernel|js` defaults to auto;
+  auto uses already loaded WASM and otherwise JS, while kernel loads WASM.
+  Auto falls back to JS beyond the 5M selection / 4M relaxation budgets.
+
+This is a **documented deterministic variant**, not legacy output identity:
+`(1-d/r)^8` uses three repeated squarings in both JS and Rust because V8
+`Math.pow` and Rust `libm::pow` differed by an ulp and changed heap comparisons.
+For coincident pairs below `1e-12`, normalized hash-bit directions replace
+sin/cos in both backends. The updated JS reference, scalar WASM and SIMD WASM
+are byte-identical in the tested corpus, including pool on/off. No numeric
+tolerance is used. The full OS/architecture matrix has not been exercised.
+
+Elimination returns exactly `min(target, candidates)` points, but **does not
+guarantee a hard computed r_min** for arbitrary inputs (duplicate candidates
+make such a guarantee impossible). The uniform spacing property applies the
+explicit minimum-distance pass after elimination and checks its pair distances;
+it does not claim that WSE alone guarantees r_min. Rust properties also cover
+counts, determinism, KD/grid query parity with distance ties, hostile parameters,
+extreme radii, group caps, and valid/invalid projection BVHs.
+
+## Node/SIMD timings versus targets
+
+Node **v24.14.0**, Windows x64, Intel Core i7-10700K (16 logical CPUs). All tables
+use one warm-up and **best of three** timed calls, as `bench/bench.ts` reports.
+Graph input cooks are excluded from the scatter node time; the direct elimination
+case includes KD/search/heap work and ABI copies, with candidate generation
+outside timing. Final WASM packages are ordinary release builds, without profile.
+
+| Case | Legacy JS, pool off | Final kernel, pool off | Legacy JS, 4 workers | Final kernel, 4 workers | Target |
+|---|---:|---:|---:|---:|---:|
+| 1M uniform candidates -> 100k elimination | not measured | 3185.9 ms | 9134.0 ms | **3754.7 ms** | <1500 ms, missed |
+| 100k blue-noise points (500k candidates) | 2450.9 ms | 1186.2 ms | 1176.9 ms | **1070.7 ms** | <500 ms, missed |
+| 100k blue-noise points with density mask | 3965.9 ms | 2111.1 ms | 1845.0 ms | **2333.2 ms** | <1000 ms, missed |
+| 50k points, five projected relaxation passes | 2138.9 ms | 1081.5 ms | 900.8 ms | 1166.2 ms | 2000 ms |
+| 100k requested, exact minimum distance (86.1k accepted) | 5146.5 ms | 1420.5 ms | 1995.2 ms | 1356.9 ms | 2000 ms |
+| 1M points, relax off | 315.7 ms | 327.8 ms | 243.2 ms | 237.6 ms | 1000 ms |
+| heightfield_scatter 100k (TS integration retained) | 1648.9 ms | 1412.7 ms | 972.6 ms | 958.2 ms | 2000 ms |
+
+The direct elimination case always runs on the benchmark's calling thread; its
+"4 workers" column describes the surrounding benchmark configuration, not
+parallel heap execution. The final node offloads whole elimination stages only
+at 1M+ candidates, so the 500k-candidate node cases above use main-thread WASM
+with candidate sampling on the pool. Pool-off data uses the same final Rust
+package; the final 4-worker column is a later run of the final selected policy.
+
+Final selected-policy samples (ms, in execution order):
+
+| Case | Samples |
+|---|---|
+| scatter_eliminate_1m | 3832.9, 3754.7, 3832.6 |
+| scatter_1m | 262.9, 264.7, 237.6 |
+| scatter_relax_100k | 1127.6, 1100.0, 1070.7 |
+| scatter_relax_mask_100k | 2545.9, 2404.8, 2333.2 |
+| scatter_relax_iter_50k | 1166.2, 1354.1, 1212.2 |
+| scatter_min_distance_100k | 1473.9, 1356.9, 1877.5 |
+| heightfield_scatter_100k | 1005.9, 1085.3, 958.2 |
+
+These runs were sequential with our other CPU-intensive work stopped, but this
+was not a controlled idle-machine measurement. Other repository activity was
+observed, and sampled machine CPU busy around an earlier benchmark batch was
+34.71% / 32.60%. An earlier final-package main-thread run reached 911.8 ms
+uniform / 1845.0 ms mask / 3237.4 ms direct elimination. All three targets
+missed there too. The updated JS reference with four workers reached 994.7 ms
+uniform / 1521.6 ms mask / 868.4 ms five-pass relaxation / 8243.6 ms direct
+elimination. Thus the serial kernel is not a universal improvement over the
+parallel JS path: density-mask and multi-pass node timings regress in the final
+batch. Background-load differences limit precise speedup claims.
+
+Commands (PowerShell environment variables):
+
+```powershell
+$env:TOPOTOPO_WORKERS='0' # then repeat with '4'
+$env:TOPOTOPO_WASM='simd'
+node bench/bench.ts --filter scatter --backend kernel --runs 3 --output out/session12/final-selected.json
+node bench/bench.ts --filter scatter --backend js --runs 3 --output out/session12/final-js-on.json
+node bench/scatter-placement.ts --runs 3 --output out/session12/placement.json
+cargo bench --manifest-path kernels/Cargo.toml --features profile --bench scatter
+```
+
+Local ignored raw reports/logs: `out/session12/before-off.json`, `before-on.json`,
+`final-kernel-off.json`, `final-kernel-on.json`, `final-js-on.json`,
+`final-selected.json`, and `placement.json`. Legacy baseline cooks preceded the
+arithmetic change; the new direct case was measured against legacy JS before
+editing that implementation.
+
+## Worker placement and profiling
+
+The same 1M planar candidates -> 100k selection was run in rotating interleaved
+order on the main thread, a warmed worker with structured-cloned inputs, and a
+worker with a prepared shared copy. Initial module loading/input generation are
+outside timing; ABI copies, messages and shared-copy preparation are inside.
+Every returned index array is checked exactly against the main-thread result.
+
+| Placement | Three calls (ms) | Best | Median |
+|---|---|---:|---:|
+| main | 4228.8, 4147.0, 3959.5 | 3959.5 | 4147.0 |
+| worker, cloned inputs | 4356.5, 3757.2, 3796.2 | 3757.2 | **3796.2** |
+| worker, shared-copy preparation included | 4160.6, 4478.8, 3593.4 | 3593.4 | 4160.6 |
+
+The cloned worker had the lowest median (8.5% below main); samples overlap and
+do not establish a universal crossover. The node conservatively uses one
+initialized pool worker for 1M+ candidates, retaining its arrays for interpolation.
+Smaller/cold-pool jobs and unavailable-pool fallbacks run main-thread WASM.
+The pool threshold override forces the worker path in parity tests. A trial
+65536-candidate threshold did not improve the 500k-candidate node cases, so it
+was not retained. Minimum-distance rejection and projected relaxation remain
+on the cooking thread. Each worker loads WASM lazily once; the registry rejects
+split ranges for this serial full-stage operation.
+
+Native stage profiling on a separate deterministic LCG planar dataset (not the
+Node RNG corpus) measured KD build 233.65 ms, neighbour search/list construction
+1516.05 ms, heap build 35.02 ms and heap removals 1393.19 ms, 3202 ms total.
+Neighbour construction and heap updates remain the major costs. The initial
+pow/KD port took 3587 ms natively and about 8595 ms in the recovered Node retry.
+Scatter's arithmetic is scalar in both packages; the SIMD package does not
+introduce vectorized heap updates.
+
+## Allocation failure recovery
+
+The previous process died with `memory allocation of 1048576 bytes failed` in
+the first kernel benchmark, with an earlier log also recording a WASM
+`unreachable` trap. **It did not reproduce** after recovery with plentiful
+memory: the initial package completed the same 1M elimination, and repeated
+final full-size runs completed successfully. The original crash's exact cause
+is not established; no runaway allocation was reproduced.
+
+Review found a separate concrete capacity hazard: geometrically growing Vec
+buffers could reserve beyond the logical 64M directed-neighbour budget. Large
+KD/CSR/heap buffers now reserve fallibly, and neighbour capacity growth is capped
+at the budget, returning a clear error instead of blindly requesting spare
+capacity beyond it. Compact-grid allocation is also bounded and can fall back
+to KD. This is bounded high-memory work, not a guarantee against host exhaustion
+at the ABI or every scratch allocation. Whole benchmark process peak RSS was
+1561.4 MB with the pool off and 1859.0 MB in the final selected four-worker run
+(1899.7 MB in the earlier four-worker run). These are process peaks across the
+entire batch, including workers/retained WASM memory, not live per-call bytes.
+
+## Goldens, visual review and gates
+
+`npm run test:update`: **3 written, 287 unchanged, 0 failed** (290 total):
+`example.particles.json`, `example.terrain_erosion.json`,
+`example.unreal_demo.json`. Their three matching PNGs changed; the other
+**30/33** tracked render SHA-256 hashes are unchanged. Old/new images were
+visually inspected: particle trail placement and scattered rock/tree placement
+shift, with no visible projection failures; terrain and road geometry remain
+the same. No node-type golden changed.
+
+All required commands exited **0**:
+
+- `cargo test --manifest-path kernels/Cargo.toml`: **111 tests passed**.
+- `cargo test --manifest-path kernels/Cargo.toml --features simd`: **111 passed**.
+- `cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings`.
+- The same clippy command with `--features simd`.
+- `cargo fmt --manifest-path kernels/Cargo.toml --check`.
+- `npm run kernels:build`: scalar **759383 bytes**, SIMD **750700 bytes**,
+  combined **1510083 bytes**, below the 2.5M budget.
+- `npm run typecheck`, including a final repeat after the adapter edge-case fix.
+- `npm run docs`; `npm run test:update`.
+- `npm test`: complete chain exit 0, **290 goldens**, **222 examples**,
+  **106 pool checks**, **514 exact scalar/SIMD comparisons across 21 exports**;
+  the scatter suite passed 1593 checks in that chain and **1594** in the final
+  focused run after adding the duplicate-order/group-cap regression.
+- An additional SIMD-preloaded run of all 290 goldens passed, exercising auto
+  scatter with WASM loaded from process start.
+- `npm run build`: **114 modules**, one asset.
+- `npm run pack:test`: installed CLI/library/MCP/preview and WASM cook passed,
+  **21 seconds**.
+- `npm run showcase`: **33 renders**, only the three reviewed changes above.
+- `git diff --check`.
+
+The first full npm attempt correctly stopped on missing coverage for the five
+new public exports in the existing all-binding scalar/SIMD test. Actual result
+comparisons were added for all five; the complete chain was then rerun to exit 0.
+
+Final ordinary WASM SHA-256:
+
+- Scalar: `c0aac4bcaf93f82ec3b50e6009e807ad1c7a5a73d61ea6a271f2017a347531be`.
+- SIMD: `a4a7487dc849c5d433c8d10ca202552679358f584d84b6d352711195414aea3f`.
+
+Remaining misses: 100k uniform <0.5 s, masked <1 s, and 1M elimination <1.5 s;
+hard r_min is an explicit rejection contract rather than a WSE guarantee;
+full cross-platform bit identity remains unverified. Current main was merged
+before the final gates. No push was performed.

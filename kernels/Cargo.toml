@@ -27,6 +27,10 @@ harness = false
 name = "remesh_quad"
 harness = false
 
+[[bench]]
+name = "scatter"
+harness = false
+
 [dependencies]
 robust = "1.2.0"
 libm = "0.2.16"

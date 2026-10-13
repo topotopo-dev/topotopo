@@ -2,6 +2,7 @@
 import type { Host } from '../host/types.ts';
 import type { ErosionParams } from '../core/erosion.ts';
 import { hash32 } from '../core/random.ts';
+import type { TriBVHArrays } from '../core/spatial.ts';
 
 /** Source indices use flattened contour order: outer first, then each hole. */
 export interface KernelProvenance {
@@ -47,6 +48,12 @@ export interface RoofResult extends KernelProvenance {
 }
 
 export interface Kernels {
+  /** Weighted sample elimination; scale is a per-candidate radius multiplier, empty/absent means uniform. */
+  scatter_eliminate(positions: Float32Array | Float64Array, target: number, rmax: number, scale?: Float32Array | Float64Array): Int32Array;
+  /** Ordered greedy rejection; optional per-candidate group IDs enforce a uniform per-group cap. */
+  scatter_min_distance(positions: Float32Array | Float64Array, order: Int32Array, radius: number, limit?: number, groups?: Int32Array, groupCap?: number): Int32Array;
+  /** Repulsion and closest-surface projection, retaining the surface's triangle order and f64 precision. */
+  scatter_relax(positions: Float64Array, spacing: Float64Array, triangles: Int32Array, barycentrics: Float64Array, surface: Required<TriBVHArrays> & { C: Float64Array }, iterations: number, options: ScatterRelaxOptions, cornerWeights?: Float64Array): ScatterRelaxResult;
   erode_droplet(height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params?: DropletErosionOptions, seed?: number | bigint, freeze?: Float32Array | null): ErosionResult;
   erode_pipe(height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params?: PipeErosionOptions, seed?: number | bigint, freeze?: Float32Array | null, rain?: Float32Array | null): ErosionResult;
   /** Talus angle is radians. Returned debris is signed thermal height change. */
@@ -66,6 +73,14 @@ export interface Kernels {
   offset_polygon(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], distance: number): OffsetResult;
   /** Pitches are degrees: one value or one value for each outgoing contour edge. */
   roof(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], pitch: number | ArrayLike<number>, heightCap?: number): RoofResult;
+}
+
+export interface ScatterRelaxOptions { radius: number; weighted: boolean; dBar: number; wMean: number }
+export interface ScatterRelaxResult {
+  positions: Float64Array;
+  spacing: Float64Array;
+  triangles: Int32Array;
+  barycentrics: Float64Array;
 }
 
 /** Parameters match core/erosion.ts, except talusAngle is radians at the kernel boundary. */
@@ -238,6 +253,20 @@ function call<T>(name: string, fn: () => T): T {
 }
 
 const emptyLayer = new Float32Array(0);
+const emptyScatterScale = new Float64Array(0);
+const emptyScatterGroups = new Int32Array(0);
+export const SCATTER_KERNEL_MAX_POINTS = 5_000_000;
+export const SCATTER_RELAX_MAX_POINTS = 4_000_000;
+function scatterPositions(positions: Float32Array | Float64Array): void {
+  if (!(positions instanceof Float32Array || positions instanceof Float64Array))
+    throw new Error('positions must be Float32Array or Float64Array');
+  if (positions.length % 3 || positions.length / 3 > SCATTER_KERNEL_MAX_POINTS)
+    throw new Error('positions must contain xyz triples for at most 5000000 candidates');
+}
+function scatterCount(value: number, name: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff)
+    throw new Error(`${name} must be a nonnegative 32-bit integer`);
+}
 function erosionGrid(height: Float32Array, w: number, h: number, cell: number): void {
   if (!(height instanceof Float32Array)) throw new Error('height must be a Float32Array');
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 2 || h < 2 || w > 0xffffffff || h > 0xffffffff)
@@ -294,6 +323,43 @@ export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
         : await import('../../kernels/pkg/topotopo_kernels.js');
       await wasm.default({ module_or_path: bytes });
       const result: Kernels = Object.freeze({
+        scatter_eliminate: (positions: Float32Array | Float64Array, target: number, rmax: number, scale?: Float32Array | Float64Array) =>
+          call('scatter_eliminate', () => {
+            scatterPositions(positions); scatterCount(target, 'target');
+            target = Math.min(target, positions.length / 3);
+            if (scale !== undefined && !(scale instanceof Float32Array || scale instanceof Float64Array))
+              throw new Error('scale must be Float32Array or Float64Array');
+            // Keep geometry's f64 coordinates exact; f32 callers get the same algorithm on their rounded input.
+            // Widen a mixed-precision scale rather than silently rounding it to match the positions.
+            if (positions instanceof Float32Array && (scale === undefined || scale instanceof Float32Array))
+              return wasm.scatter_eliminate(positions, scale ?? emptyLayer, target, rmax);
+            return wasm.scatter_eliminate_f64(array(positions), scale ? array(scale) : emptyScatterScale, target, rmax);
+          }),
+        scatter_min_distance: (positions: Float32Array | Float64Array, order: Int32Array, radius: number, limit = Infinity, groups?: Int32Array, groupCap = 0) =>
+          call('scatter_min_distance', () => {
+            scatterPositions(positions);
+            if (!(order instanceof Int32Array)) throw new Error('order must be Int32Array');
+            if (groups !== undefined && !(groups instanceof Int32Array)) throw new Error('groups must be Int32Array');
+            if (limit !== Infinity) scatterCount(limit, 'limit');
+            scatterCount(groupCap, 'groupCap');
+            groupCap = Math.min(groupCap, order.length);
+            const count = Math.min(limit, order.length);
+            return positions instanceof Float32Array
+              ? wasm.scatter_min_distance(positions, order, radius, count, groups ?? emptyScatterGroups, groupCap)
+              : wasm.scatter_min_distance_f64(positions, order, radius, count, groups ?? emptyScatterGroups, groupCap);
+          }),
+        scatter_relax: (positions: Float64Array, spacing: Float64Array, triangles: Int32Array, barycentrics: Float64Array, surface: Required<TriBVHArrays> & { C: Float64Array }, iterations: number, options: ScatterRelaxOptions, cornerWeights?: Float64Array) =>
+          call('scatter_relax', () => {
+            for (const [name, value] of Object.entries({ positions, spacing, barycentrics, T: surface.T, nodes: surface.nodes, C: surface.C }))
+              if (!(value instanceof Float64Array)) throw new Error(`${name} must be Float64Array`);
+            if (!(triangles instanceof Int32Array) || !(surface.child instanceof Int32Array) || !(surface.order instanceof Int32Array) || !(surface.triPrim instanceof Uint32Array))
+              throw new Error('triangles and surface child/order must be Int32Array; triPrim must be Uint32Array');
+            if (cornerWeights !== undefined && !(cornerWeights instanceof Float64Array)) throw new Error('cornerWeights must be Float64Array');
+            scatterCount(iterations, 'iterations');
+            return wasm.scatter_relax(positions, spacing, triangles, barycentrics, surface.T, surface.nodes,
+              surface.child, surface.order, surface.triPrim, surface.C, cornerWeights ?? emptyScatterScale,
+              iterations, { radius: options.radius, weighted: options.weighted, d_bar: options.dBar, w_mean: options.wMean }) as ScatterRelaxResult;
+          }),
         erode_droplet: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params: DropletErosionOptions = {}, seed: number | bigint = 0, freeze?: Float32Array | null) =>
           call('erode_droplet', () => {
             erosionGrid(height, w, h, cell);

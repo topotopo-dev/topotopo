@@ -137,6 +137,12 @@ export function surfaceCandidates(
 
 // ---------------------------------------------------------------- weighted sample elimination
 
+/** Fixed eighth-power operation order shared with Rust (libm/V8 pow can differ by an ulp and change heap ties). */
+function weightPower8(base: number): number {
+  const square = base * base, fourth = square * square;
+  return fourth * fourth;
+}
+
 /**
  * One radius: for KD-tree slots [start, end), each candidate's neighbours within r2 = 2 rmax (as KDTree.neighbours
  * lists them, self excluded, as slot labels) and their contributions (1 - min(d, r2) / r2)^8; deg[s] and w[s] (the
@@ -162,7 +168,7 @@ export function elimNeighboursRange(a: { r2: number }, A: Record<string, any>, s
       const b = labelOf[j];
       // |a - b| is symmetric bit for bit, so both ends of a pair get the same contribution
       const d = hypot3(ax - TP[b * 3], ay - TP[b * 3 + 1], az - TP[b * 3 + 2]);
-      const c = Math.pow(1 - Math.min(d, r2) / r2, 8);
+      const c = weightPower8(1 - Math.min(d, r2) / r2);
       list[len] = b; con[len] = c; len++;
       ws += c;
     }
@@ -196,7 +202,7 @@ export function elimPairsRange(a: { rmax: number }, A: Record<string, any>, star
       const rr = rmax * (si + scale[j]);
       const d = hypot3(x - pos[j * 3], y - pos[j * 3 + 1], z - pos[j * 3 + 2]);
       if (d >= rr) continue;
-      pj[np] = j; pf[np] = Math.pow(1 - d / rr, 8); np++;
+      pj[np] = j; pf[np] = weightPower8(1 - d / rr); np++;
     }
     pc[i] = np - p0;
   }
@@ -551,10 +557,13 @@ export function relaxRange(a: RelaxArgs, A: Record<string, any>, start: number, 
         let d = hypot3(ex, ey, ez);
         if (d >= rest) continue;
         if (d < 1e-12) {
-          // coincident: push in a direction that depends on the pair only
+          // Coincident: hash a direction from the pair and normalize algebraically.
+          // This degeneracy-only variant avoids engine-dependent sin/cos rounding.
           const h = hash32(Math.min(i, j) * 7919 + Math.max(i, j));
-          const ang = (h / 4294967296) * Math.PI * 2;
-          ex = Math.cos(ang); ey = 0; ez = Math.sin(ang); d = 1;
+          ex = (h & 65535) / 32768 - 1; ey = 0; ez = (h >>> 16) / 32768 - 1;
+          if (ex === 0 && ez === 0) ex = 1;
+          const norm = hypot3(ex, 0, ez);
+          ex /= norm; ez /= norm; d = 1;
           if (i > j) { ex = -ex; ez = -ez; }
           const push = rest * 0.5;
           dx += ex * push; dy += ey * push; dz += ez * push;

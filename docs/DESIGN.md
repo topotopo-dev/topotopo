@@ -435,8 +435,19 @@ What runs in chunks:
 | `bake_curvature` | `bake_curvature`: the edges near each sample | edges and their uniform grid shared |
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
 | `particles` | `particles`: each particle through a whole run of steps (forces, drag, collisions, its trail ring) | births are decided first on the main thread, so the particles never interact; the collision BVH and the field (KD tree + v, heightfield gradients, a sampled SDF) are shared as arrays; threshold by particle-steps (200k); 4 chunks per thread (later births run fewer steps) |
-| `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_elim_lists`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists (with a density mask: the pairs, then each candidate's list and weight from them), conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
+| `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_elim_lists`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling and the JS backend's search/relaxation stages run in chunks, bit-identical to the single-thread path; `scatter` also supports Rust/WASM elimination, ordered minimum-distance selection and projected relaxation through `backend` (see below); `heightfield_scatter` retains its JS path |
 | `drape`, `inflate` | `cloth_collide` (src/core/xpbd.ts): each cloth point's contact plane against the collider, once per step | the collider BVH and pseudo-normals are shared as arrays; 4096+ points. The constraint solve (Gauss-Seidel and chain solves, the order is the result) stays on the main thread |
+
+`scatter.backend` is `auto` by default: use the already loaded WASM module, otherwise the existing JS path.
+`kernel` explicitly loads it through the host; `js` forces the reference implementation. The cache signature tracks
+auto's loaded state. The Rust call retains f64 geometry coordinates, builds its KD tree and weighted interaction
+lists, and consumes them through an indexed binary max-heap. Minimum-distance rejection is an ordered incremental
+grid pass with optional per-prim capacities. Projected repulsion uses the existing flat triangle BVH and triangle
+tie order. Candidate sampling and attribute interpolation remain in TS; large elimination jobs use one warmed
+worker with cloned inputs when a pool is present, and otherwise run on the cooking thread; minimum-distance
+selection and projected relaxation stay on that thread.
+Elimination itself has no hard minimum-spacing guarantee; the separate `min_distance` pass provides that constraint.
+See `kernels/BENCH.md` session 12 for parity checks, worker placement measurements and performance limits.
 
 Not in chunks, and why:
 - `heightfield_erode`: droplets run one after another over the terrain the previous ones left; a split would change
