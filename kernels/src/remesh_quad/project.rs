@@ -143,12 +143,21 @@ impl Projector {
         id
     }
     pub(super) fn closest(&self, p: V3) -> (V3, usize, V3) {
+        self.closest_hint(p, self.hint.get())
+    }
+    // A persistent per-vertex source triangle gives relaxation queries a tight
+    // bound. The exact BVH traversal and input-index tie break remain unchanged.
+    pub(super) fn closest_hint(&self, p: V3, hint: usize) -> (V3, usize, V3) {
         let mut hit = (p, usize::MAX, [0.; 3]);
         let mut best = f64::INFINITY;
         if self.nodes.is_empty() {
             return hit;
         }
-        let hint = self.hint.get();
+        let hint = if hint == usize::MAX {
+            self.hint.get()
+        } else {
+            hint
+        };
         if hint != usize::MAX {
             let (q, bary) = triangle(p, &self.triangles[hint]);
             best = dot(sub(q, p), sub(q, p));
@@ -321,6 +330,7 @@ mod tests {
             let a = projector.closest(p);
             projector.closest([50., 30., -10.]);
             assert_eq!(a, projector.closest(p));
+            assert_eq!(a, projector.closest_hint(p, 0));
         }
     }
 }

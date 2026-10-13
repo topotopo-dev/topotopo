@@ -664,3 +664,71 @@ fn adversarial_collinear_locked_border_keeps_exact_partition() {
         }
     }
 }
+
+// Session-3-scale acceptance uses a polar sphere, independently generated here
+// with libm. The Node suite tests the exact JS-generated benchmark as well.
+#[test]
+fn large_noisy_sphere_regular_and_without_degree_two_vertices() {
+    let rows = 201usize;
+    let cols = 250usize;
+    let mut p = vec![0., 1., 0.];
+    for row in 1..rows {
+        let theta = std::f64::consts::PI * row as f64 / rows as f64;
+        for col in 0..cols {
+            let phi = std::f64::consts::TAU * col as f64 / cols as f64;
+            let x = libm::sin(theta) * libm::cos(phi);
+            let y = libm::cos(theta);
+            let z = -libm::sin(theta) * libm::sin(phi);
+            let radius = 1. + 0.025 * libm::sin(x * 7.) * libm::sin(y * 5.) * libm::cos(z * 6.);
+            p.extend([x * radius, y * radius, z * radius]);
+        }
+    }
+    let bottom = (p.len() / 3) as u32;
+    p.extend([0., -1., 0.]);
+    let at = |row: usize, col: usize| (1 + row * cols + col % cols) as u32;
+    let mut t = Vec::with_capacity(300_000);
+    for col in 0..cols {
+        t.extend([0, at(0, col), at(0, col + 1)]);
+        for row in 0..rows - 2 {
+            let a = at(row, col);
+            let b = at(row + 1, col);
+            let c = at(row + 1, col + 1);
+            let d = at(row, col + 1);
+            t.extend([a, b, c, a, c, d]);
+        }
+        t.extend([at(rows - 2, col), bottom, at(rows - 2, col + 1)]);
+    }
+    assert_eq!(t.len() / 3, 100_000);
+    let m = remesh_quad(
+        &p,
+        &t,
+        &RemeshOptions {
+            target_face_count: 25_000,
+            ..RemeshOptions::default()
+        },
+    )
+    .unwrap();
+    assert_mesh(&m, &p, &t, true);
+    let mut valence = vec![0usize; m.positions.len() / 3];
+    for &(a, b) in edges(&m).keys() {
+        valence[a as usize] += 1;
+        valence[b as usize] += 1;
+    }
+    let irregular = valence.iter().filter(|&&n| n != 4).count();
+    assert!(
+        !valence.contains(&2),
+        "cleanup retained degree-two vertices"
+    );
+    let fraction = irregular as f64 / valence.len() as f64;
+    assert_eq!(fraction, m.quality.irregular_fraction);
+    println!(
+        "large sphere: {} irregular / {} points = {}",
+        irregular,
+        valence.len(),
+        fraction
+    );
+    assert!(
+        fraction < 0.02,
+        "large sphere irregular fraction {fraction} must be <2%"
+    );
+}

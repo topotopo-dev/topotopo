@@ -64,7 +64,7 @@ function sourceMesh(g: Geometry, selection: Uint8Array | null, explicitCreases: 
     if (twin < 0) continue;
     const seam = attrs.length > 0 && (vertexAttribsDiffer(attrs, vertices[h], vertices[nextTriangle(twin)]) ||
       vertexAttribsDiffer(attrs, vertices[nextTriangle(h)], vertices[twin]));
-    if (seam) { seams.add(a, b); creases.add(a, b); }
+    if (seam) seams.add(a, b);
     if (regions && regions[prims[Math.floor(h / 3)]] !== regions[prims[Math.floor(twin / 3)]]) creases.add(a, b);
   }
   return { positions, tris, points, vertices, prims, creases, locked, seams, normalCreases, selected };
@@ -216,27 +216,30 @@ defineNode({
   summary: 'Field-aligned quad-dominant remeshing in Rust/WASM, with feature alignment and source attribute transfer.',
   description: 'Smooths a four-way orientation field and a position field through a multiresolution hierarchy, then ' +
     'extracts mostly quads on the original surface. Density is approximate: target_faces takes precedence over ' +
-    'target_length; 0 for both uses the input scale. Quads-only conformingly subdivides all faces and can exceed ' +
-    'the target density, especially around hard curves; locked group borders can retain triangles. ' +
-    'Feature edges, explicit creases, UV seams and material/group borders constrain the field. Selected group ' +
+    'target_length; 0 for both uses the input scale. Quads-only splits residual non-quads and their affected ' +
+    'neighbors conformingly; locked group borders can retain triangles. Cleanup removes avoidable topology defects. ' +
+    'Feature edges, explicit creases and material/group borders constrain the fields; UV seams constrain the orientation field ' +
+    'without fixing the position field. Original seam geometry is retained for attribute transfer. Selected group ' +
     'borders stay fixed and unselected primitives pass through. Point attributes interpolate from final source-triangle ' +
     'barycentrics, vertex attributes interpolate per seam wedge, and prim attributes copy the source triangle. ' +
     'Existing normals are recomputed. Detail quality statistics describe the remeshed region. ' +
+    'irregular_fraction is the number of interior vertices with valence other than four divided by all remeshed vertices. ' +
     'This is an independent implementation, not the Instant Meshes library.',
   inputs: [{ name: 'geo', desc: 'consistently oriented manifold polygon mesh' }],
   params: {
     target_length: { type: 'float', default: 0, min: 0, desc: 'target quad edge length in scene units (0 = automatic input scale)', aliases: ['edge_length', 'target_size'] },
     target_faces: { type: 'int', default: 0, min: 0, desc: 'approximate target face count (> 0 overrides target_length)' },
-    mode: { type: 'enum', options: ['quad_dominant', 'quads_only'], default: 'quad_dominant', desc: 'quad_dominant permits triangles; quads_only subdivides every face when unlocked and can exceed target density' },
+    mode: { type: 'enum', options: ['quad_dominant', 'quads_only'], default: 'quad_dominant', desc: 'quad_dominant permits triangles; quads_only conformingly splits residual non-quads when unlocked' },
     feature_angle: { type: 'float', default: 45, min: 0, max: 180, desc: 'dihedral threshold in degrees for automatic sharp-feature alignment (0 disables it)' },
     align_boundaries: { type: 'bool', default: true, desc: 'align the orientation field along open boundaries' },
     smooth_iterations: { type: 'int', default: 8, min: 0, max: 100, desc: 'orientation and position field smoothing passes per hierarchy level' },
     preserve_sharp: { type: 'bool', default: true, desc: 'constrain extraction to detected sharp feature curves' },
+    cleanup: { type: 'bool', default: true, desc: 'remove avoidable irregular vertices and short edges after extraction' },
     crease_group: { type: 'group', default: '', groupClass: 'edge', desc: 'edge group or pattern used as hard alignment constraints (empty = none)' },
     group: P.group('prim', 'primitives to remesh (empty = all); edges shared with the remainder stay fixed'),
     max_faces: { type: 'int', default: 1000000, min: 1, desc: 'refuse estimated or extracted output above this primitive count, including the retained group complement', advanced: true },
   },
-  outputs: 'quad-dominant polygons; interpolated point/vertex attributes and copied prim attributes; detail quad_fraction, singularities and edge/planarity statistics',
+  outputs: 'quad-dominant polygons; interpolated point/vertex attributes and copied prim attributes; detail quad_fraction, singularities, irregular_fraction and edge/planarity statistics',
   example: { type: 'remesh_quad', in: ['mesh'], params: { target_faces: 1000, feature_angle: 45 } },
   cook: async ({ input, p, engine, stat }) => {
     const g = input(0), selection = mask(g, 'prim', p.group);
@@ -251,8 +254,9 @@ defineNode({
       result = kernels.remesh_quad(source.positions, source.tris, {
         target_length: p.target_length, target_faces: p.target_faces, quad_only: p.mode === 'quads_only',
         feature_angle: p.feature_angle * Math.PI / 180, align_boundaries: p.align_boundaries,
-        smooth_iterations: p.smooth_iterations, preserve_sharp: p.preserve_sharp,
+        smooth_iterations: p.smooth_iterations, preserve_sharp: p.preserve_sharp, cleanup: p.cleanup,
         crease_edges: Uint32Array.from(source.creases.toPairs()), locked_edges: Uint32Array.from(source.locked.toPairs()),
+        direction_edges: Uint32Array.from(source.seams.toPairs()),
         max_faces: availableFaces,
       });
     } catch (error) {
@@ -263,6 +267,7 @@ defineNode({
     stat('faces', result.prim_start.length - 1);
     stat('quad_fraction', result.quality.quad_fraction);
     stat('singularities', result.quality.singularities);
+    stat('irregular_fraction', result.quality.irregular_fraction);
     stat('target_length', result.quality.target_edge_length);
     return out;
   },

@@ -85,11 +85,13 @@ pub fn remesh_quad(positions: &[f64], tris: &[u32], options: JsValue) -> Result<
         target_edge_length: option_number(&options, "target_length", 0.0)?,
         target_face_count: option_integer(&options, "target_faces", 0)?,
         quad_only: option_bool(&options, "quad_only", false)?,
+        cleanup: option_bool(&options, "cleanup", true)?,
         feature_angle: option_number(&options, "feature_angle", std::f64::consts::FRAC_PI_4)?,
         align_boundaries: option_bool(&options, "align_boundaries", true)?,
         smooth_iterations: option_integer(&options, "smooth_iterations", 8)?,
         preserve_sharp: option_bool(&options, "preserve_sharp", true)?,
         crease_edges: option_edges(&options, "crease_edges")?,
+        direction_edges: option_edges(&options, "direction_edges")?,
         locked_edges: option_edges(&options, "locked_edges")?,
         max_faces: option_integer(&options, "max_faces", 1_000_000)?,
     };
@@ -155,6 +157,7 @@ pub fn remesh_quad(positions: &[f64], tris: &[u32], options: JsValue) -> Result<
     let q = Object::new();
     put(&q, "quad_fraction", m.quality.quad_fraction)?;
     put(&q, "singularities", m.quality.singularities)?;
+    put(&q, "irregular_fraction", m.quality.irregular_fraction)?;
     put(&q, "edge_length_min", m.quality.edge_length_min)?;
     put(&q, "edge_length_mean", m.quality.edge_length_mean)?;
     put(&q, "edge_length_max", m.quality.edge_length_max)?;
