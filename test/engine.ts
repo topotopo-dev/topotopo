@@ -483,6 +483,26 @@ section('expression sandbox');
   check(fbOk.ok && size3(fbOk.geo).join() === '2,4,1', 'fallback evaluates plain and timed forms');
 }
 
+// ------------------------------------------------------------------ param coercion
+section('param coercion');
+{
+  // R-17: a number param had to be finite, a numeric string did not: "Infinity" or "1e999" (JSON has no Infinity, so a
+  // string is how one arrives from a graph file or an MCP client) reached the node as Infinity (resample
+  // {count: "Infinity"} ran the process out of memory); here a box of infinite size cooked with a warning
+  const bad = [
+    { type: 'box', params: { size: ['Infinity', 1, 1] } }, { type: 'sphere', params: { radius: '-Infinity' } },
+    { type: 'box', params: { center: [0, '1e999', 0] } },
+  ];
+  const msgs: string[] = [];
+  for (const n of bad) {
+    const r = await cook({ nodes: { n } });
+    msgs.push(r.ok ? `${JSON.stringify(n.params)} cooked` : r.errors[0].message);
+  }
+  check(msgs.every((m) => /^param "(size|radius|center)"(\[\d\])? (expects a number|is not a number)/.test(m)), `non-finite numeric strings are rejected like non-finite numbers: ${msgs.join(' | ')}`);
+  const ok = await cook({ nodes: { b: { type: 'box', params: { size: ['2', ' 0.5 ', '1e2'] } } } });
+  check(ok.ok && size3(ok.geo).join() === '2,0.5,100', 'finite numeric strings still coerce');
+}
+
 // ------------------------------------------------------------------ versioning and deprecation
 section('graph versioning');
 {

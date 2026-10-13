@@ -197,7 +197,8 @@ export function parseColor(v: any): [number, number, number] | null {
 function toNum(v: any): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'boolean') return v ? 1 : 0;
-  if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v))) return Number(v);
+  // finite, like numbers: "Infinity" and "1e999" are how a non-finite number arrives in JSON
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
   return null;
 }
 
