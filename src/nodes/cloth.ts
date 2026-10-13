@@ -150,8 +150,8 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
     sim.queryRadius(R);
     const c = collider!;
     return ctx.parallelMap('cloth_collide', {
-      count: n, inputs: { X: sim.x, R }, results: { CP: sim.cp, CN: sim.cn, CF: sim.cf }, shared: shared!, sharedKey,
-    }, { serial: () => collideRange(c, sim.x, R, sim.cp, sim.cn, sim.cf, 0, n) });
+      count: n, inputs: { X: sim.x, R }, outputs: { CP: sim.cp, CN: sim.cn, CF: sim.cf, CT: sim.ct, QD: sim.qd }, shared: shared!, sharedKey,
+    }, { serial: () => collideRange(c, sim.x, R, sim.cp, sim.cn, sim.cf, sim.ct, sim.qd, 0, n) });
   };
 
   sim.settleFloor();
@@ -183,7 +183,7 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
   const y0 = p.floor_height + p.thickness * 1.01;
   for (let i = 0; i < n; i++) if (!pinned[i] && ((collider && sim.cf[i]) || (p.floor && sim.x[i * 3 + 1] <= y0))) contacts++;
   stat('substeps', p.steps * p.substeps);
-  stat('constraints', model.dA.length + model.bRest.length + (sim.tA ? n - nPinned : 0));
+  stat('constraints', model.dA.length + model.bRest.length + model.iAlpha.length + (sim.tA ? n - nPinned : 0));
   stat('contacts', contacts);
   if (mode === 'inflate' && sim.vRest > 0) stat('volume_ratio', sim.volume() / sim.vRest);
   return g;
@@ -197,10 +197,10 @@ defineNode({
     'Simulates the `cloth` input for `steps` steps and outputs the final state (same points, prims and attributes; P moved, ' +
     'v, rest_P, N, pinned). Constraints in compliance form, so stiffnesses are physical and independent of the step size: ' +
     'stretch on the polygon edges (rows and columns solved as whole chains, so hanging cloth does not sag), shear on the ' +
-    'quad diagonals, bending across edges (dihedral, rest angle from the input), tethers to the nearest pin. Collides ' +
+    'quad diagonals, bending across edges (isometric where flat at rest, dihedral towards the rest angle of the input elsewhere), tethers to the nearest pin. Collides ' +
     'with the `collider` input (a static mesh; points stay `thickness` away; closed pieces push out points that get ' +
-    'inside) and the floor plane, with friction. Collision is per point: a sharp collider corner can poke through between ' +
-    'cloth points (use a finer cloth there). Pins: `pin_group`, a `pin` point attribute, or the nearest cloth points to ' +
+    'inside) and the floor plane, with friction; sharp collider corners get extra corner contacts, but a sharp collider ' +
+    'edge can still pass between the points of a coarse cloth (use a finer cloth there). Pins: `pin_group`, a `pin` point attribute, or the nearest cloth points to ' +
     'the `pins` input. Typical graphs: grid above a box → drape(grid, box); grid with a pinned top edge + wind → a banner. ' +
     'Deterministic (bit-identical with and without the worker pool). Houdini: Vellum Cloth + Vellum Solver, run to a ' +
     'settled frame.',

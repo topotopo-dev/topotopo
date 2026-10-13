@@ -451,11 +451,15 @@ drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solv
 - **Model.** One particle per point, mass from the triangle areas (`density`, kg/m²) or a `mass` attribute, inverse
   mass 0 when pinned. Polygons are triangulated for the constraints only. Every constraint is in compliance form
   (α = 1/k, α̃ = α/h²), so stiffnesses are physical and do not change with the step size: stretch on the polygon sides
-  (N/m), shear on both quad diagonals (N/m), dihedral bending across shared edges with the rest angle from the input
-  (bending rigidity N·m scaled by 3|e|²/(A₁+A₂), the discrete-shells weight, so it is resolution independent; Bridson
-  gradients, which are well defined at the flat rest state; a polynomial atan2 so the angle has the same bits
-  everywhere), tethers from every point to its nearest pin (`tethers`), and for `inflate` one volume constraint
-  C = V − pressure·V₀ with compliance V₀²/(k·area).
+  (N/m), shear on both quad diagonals (N/m), bending across shared edges (bending rigidity N·m scaled by 3|e|²/(A₁+A₂),
+  the discrete-shells weight, so it is resolution independent), tethers from every point to its nearest pin
+  (`tethers`), and for `inflate` one volume constraint C = V − pressure·V₀ with compliance V₀²/(k·area). Hinges that are
+  flat at rest (every hinge of a grid) use the isometric bending of Bergou et al. 2006: q = Σ Kᵢxᵢ over a cotangent
+  stencil is a linear vector constraint (no trigonometry, a precomputed denominator; a sweep is ~4× cheaper than the
+  dihedral one), its compliance (K₃h)²/k matches ½kθ² for small folds, and a hinge folded past 90° (|q|² > 2(K₃h)²,
+  where the quadratic energy ∝ 1 − cos θ stops pulling) is projected with the dihedral constraint instead. Hinges curved
+  at rest (the edges of an inflated box) use the dihedral angle towards the input's rest angle (Bridson gradients, well
+  defined at the flat state; a polynomial atan2 so the angle has the same bits everywhere).
 - **Stretch chains.** Point-wise Gauss-Seidel moves a correction one edge per sweep, so cloth hanging N edges deep keeps a
   steady-state stretch that grows like N²·g·h² (a 1 m cloth on 20 rows, pinned at the top, 4 substeps × 2 sweeps: mean
   strain 6.5 %, max 48 %; a tablecloth over a box: max 100 %+ at the box edges). Over-relaxation made it worse (the PBD
@@ -467,8 +471,8 @@ drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solv
   instead of pushing them in, where the contact projection would undo it (a rope over a box kept its edge link 20 %
   long). A sweep runs the point-wise constraints (shear, bend, tethers, volume, self collision) first and the chains
   last before the contacts, so the stiffest constraint has the last word. Measured (60 × 60 cloth, 150 steps, defaults):
-  hanging cloth max strain 0.7 % without tethers, 0.03 % with them; tablecloth over a box mean 0.7 % (the remaining peaks
-  are the one quad that sits on each sharp top corner); over a sphere mean 0.7 %, p99 4.4 % (was 9.2 % / 61 %).
+  hanging cloth max strain 0.7 % without tethers, 0.03 % with them; tablecloth over a box mean 0.8 % (the remaining peaks
+  are the one quad that tents over each sharp top corner); over a sphere mean 0.5 %, p99 3.2 % (was 9.2 % / 61 %).
 - **Collisions** are speculative contact planes found once per step (`collideRange`, kernel `cloth_collide`): a point
   within its query radius (1.5 × thickness plus twice its travel in the step) of a collider triangle gets the plane
   through the closest point with the normal towards its side; the substeps keep it `thickness` in front. On closed,
@@ -476,13 +480,21 @@ drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solv
   up inside are pushed out; on open pieces a point keeps the side it started the step on (a sheet collides from both
   sides). The floor is the plane y = floor_height. Coulomb friction removes tangential motion up to friction × the
   normal correction of the substep. Self collision is point-point with a spatial hash (pairs found per step, minimum
-  distance 2 × thickness or the rest distance). Initial overlaps are pushed out without velocity.
+  distance 2 × thickness or the rest distance). Initial overlaps are pushed out without velocity. Point contacts let a
+  sharp collider corner poke between cloth points (a tarp over crates showed the crate corners), so sharp convex
+  corners of closed pieces facing up (a face normal more than 25° off the pseudo-normal, every neighbour below the
+  tangent plane) get a corner-triangle contact per step: the cloth triangle around the nearest contacting point into
+  which the corner projects is kept `thickness` in front of it (barycentric shares of the correction). Query cost:
+  a point with a contact keeps its plane while it moves less than thickness/4, a point skips the query while the
+  distance found at its last query (a miss searches twice the radius) minus its travel exceeds the radius, and the BVH
+  search starts from the point's last triangle; on the 100 × 100 drape this halves the query time.
 - **Determinism and threads.** The point-wise constraints are colour-sorted (no two constraints of a colour share a point),
   chains run in build order, sweeps alternate direction, and the solve runs on the cooking thread. Only the collider
   queries go through `ctx.parallelMap`; they are pure per point, so a cook is bit-identical with and without the pool
   (test/cloth.ts checks it with a forced pool).
-- **Limits** (against Vellum): static colliders only; per-point collision (a sharp collider corner can poke between
-  cloth points, and an edge of the cloth can pass a thin collider edge), contacts found once per step; no tearing,
+- **Limits** (against Vellum): static colliders only; per-point collision plus corner contacts (a sharp collider edge
+  can still pass between the points of a coarse cloth, a cloth edge can slip past a thin collider), contacts found once per
+  step; folded-over micro-wrinkles can remain where wrapping compresses the cloth (no self collision by default); no tearing,
   plasticity, welds/stitches, attach-to-animated-geometry, cloth-on-cloth friction, or edge-edge self collision;
   `inflate` uses one global volume constraint (no per-piece pressure).
 

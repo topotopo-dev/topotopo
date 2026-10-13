@@ -12,10 +12,13 @@
 //    a contact plane get the mobility w·(I - ν νᵀ) in that solve, so it slides them along the surface instead of pushing
 //    them into it (where the contact would undo the correction: a cloth over an edge would stay stretched at the edge);
 //  - shear: both diagonals of every quad, the inner triangulation edges of larger polygons, k = shear_stiffness;
-//  - bend: the dihedral angle across every edge shared by two triangles (not the diagonal inside a quad, which the
-//    crossed shear diagonals keep flat), rest angle from the input, k = bend_stiffness · 3|e|² / (A1 + A2) (discrete
-//    shells; bend_stiffness is a bending rigidity in N·m, resolution independent). Gradients after Bridson et al. 2003,
-//    well defined at the flat rest state; the angle uses a polynomial atan2 (fastAtan2: the same bits everywhere);
+//  - bend: across every edge shared by two triangles (not the diagonal inside a quad, which the crossed shear diagonals
+//    keep flat), k = bend_stiffness · 3|e|² / (A1 + A2) per hinge (discrete shells; bend_stiffness is a bending rigidity
+//    in N·m, resolution independent). Hinges flat at rest use the isometric bending of Bergou et al. 2006 (a linear
+//    vector constraint over a cotangent stencil, no trigonometry, ~4× cheaper; compliance matched to ½ k θ²), falling
+//    back to the dihedral constraint once folded past 90°, where the quadratic energy loses its pull; hinges curved at
+//    rest use the dihedral angle towards the input's rest angle (Bridson et al. 2003 gradients, well defined at the flat
+//    state; a polynomial atan2, fastAtan2, so the angle has the same bits everywhere);
 //  - tethers (long-range attachments, Kim et al. 2012): each point reachable from a pin may not get farther from its
 //    nearest pin than along the cloth at rest, which stops pinned cloth from stretching under its weight or the wind;
 //  - volume (inflate): C = V - pressure · V0 over the closed triangulation, compliance V0² / (k · area);
@@ -37,13 +40,16 @@
 //
 // Collisions are speculative contact planes found once per step (collideRange): each point within its query radius
 // (thickness + a multiple of how far it can move in the step) of a collider triangle gets the plane through the closest
-// point, normal towards the point's side; the substeps keep the point `thickness` in front of it. On closed, consistently
+// point, normal towards the point's side; the substeps keep the point `thickness` in front of it. A point keeps its plane
+// while it moves less than thickness/4, skips the query while its last distance minus its travel exceeds the radius, and
+// starts the BVH search from its last triangle. Sharp convex collider corners also get corner-triangle contacts
+// (findCornerContacts), so a box corner cannot poke between cloth points. On closed, consistently
 // wound pieces the side is decided by angle-weighted pseudo-normals (Bærentzen & Aanæs 2005), so points that end up inside
 // are pushed out; on open pieces a point keeps the side it started the step on (two-sided sheets). The floor is the plane
 // y = floor_height. Coulomb friction removes tangential motion up to friction × the normal correction (Macklin et al. 2014).
 import type { Geometry } from './geometry.ts';
 import { triangulate } from './topology.ts';
-import { TriBVH, closestScratch } from './spatial.ts';
+import { TriBVH, closestOnTri, closestScratch } from './spatial.ts';
 import type { ClosestScratch } from './spatial.ts';
 
 // ---------------------------------------------------------------- model
@@ -86,6 +92,10 @@ export interface ClothModel {
   /** bend constraints, Bridson order per constraint: wing 1, wing 2, edge start, edge end (4 ints), colour-sorted */
   bP: Int32Array; bRest: Float64Array; bAlpha: Float64Array;
   bColours: Int32Array;
+  /** isometric bends of the hinges flat at rest: edge start, edge end, wing 1, wing 2 (4 ints), stencil (4), compliance */
+  iP: Int32Array; iK: Float64Array; iAlpha: Float64Array;
+  /** (K₃·h)² per isometric bend: |q|² of a fold θ is iC·2(1 - cos θ) */
+  iC: Float64Array;
   /** mean stretch edge length (0 when there are none) */
   meanEdge: number;
   /** rest length multiplier (rest_scale) */
@@ -139,6 +149,25 @@ export function dihedralAngle(P: ArrayLike<number>, i1: number, i2: number, i3: 
   if (!(el > 1e-300 && l1 > 1e-300 && l2 > 1e-300)) return NaN;
   const cx = n1y * n2z - n1z * n2y, cy = n1z * n2x - n1x * n2z, cz = n1x * n2y - n1y * n2x;
   return fastAtan2((cx * ex + cy * ey + cz * ez) * (1 / el), n1x * n2x + n1y * n2y + n1z * n2z);
+}
+
+/**
+ * Isometric bending stencil of the hinge (x0, x1) with wings x2, x3 (Bergou et al. 2006): K = (c03 + c04, c01 + c02,
+ * -c01 - c03, -c02 - c04) from the cotangents of the angles at the hinge ends (e0 = x1 - x0, e1 = x2 - x0, e2 = x3 - x0,
+ * e3 = x2 - x1, e4 = x3 - x1). Σ Kᵢ xᵢ vanishes for any flat placement and is unchanged by rigid motions of a flat
+ * hinge. null for a degenerate hinge.
+ */
+export function isoStencil(P: ArrayLike<number>, i0: number, i1: number, i2: number, i3: number): [number, number, number, number] | null {
+  const v = (a: number, b: number) => [P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]];
+  const cot = (a: number[], b: number[]) => {
+    const cx = a[1] * b[2] - a[2] * b[1], cy = a[2] * b[0] - a[0] * b[2], cz = a[0] * b[1] - a[1] * b[0];
+    const s = Math.sqrt(cx * cx + cy * cy + cz * cz);
+    return s > 1e-300 ? (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / s : NaN;
+  };
+  const e0 = v(i0, i1), e1 = v(i0, i2), e2 = v(i0, i3), e3 = v(i1, i2), e4 = v(i1, i3), ne0 = [-e0[0], -e0[1], -e0[2]];
+  const c01 = cot(e0, e1), c02 = cot(e0, e2), c03 = cot(ne0, e3), c04 = cot(ne0, e4);
+  const K: [number, number, number, number] = [c03 + c04, c01 + c02, -c01 - c03, -c02 - c04];
+  return K.every(Number.isFinite) ? K : null;
 }
 
 /**
@@ -326,6 +355,7 @@ export function buildCloth(g: Geometry, o: ClothBuildOptions): ClothModel {
 
   // bends: triangle pairs across an edge, except the diagonal inside a quad
   const bl: number[] = [], bRest: number[] = [], bAlpha: number[] = [];
+  const il: number[] = [], iK: number[] = [], iAlpha: number[] = [], iC: number[] = [];
   if (o.bend > 0 && nt > 1) {
     const first = new Map<number, number>(); // edge key → tri * 3 + k of the first triangle, -1 = more than two
     const second = new Map<number, number>();
@@ -354,6 +384,17 @@ export function buildCloth(g: Geometry, o: ClothBuildOptions): ClothModel {
       const el2 = (X[e0 * 3] - X[e1 * 3]) ** 2 + (X[e0 * 3 + 1] - X[e1 * 3 + 1]) ** 2 + (X[e0 * 3 + 2] - X[e1 * 3 + 2]) ** 2;
       const k = (o.bend * 3 * el2) / (A1 + A2);
       if (!(k > 0) || !Number.isFinite(k)) continue;
+      if (Math.abs(th) < 1e-6) {
+        // flat at rest: the isometric (quadratic) bending of Bergou et al. 2006, q = Σ Kᵢ xᵢ over (e0, e1, w1, w2) with
+        // cotangent weights, q = 0 when flat; |q| ≈ |K₃|·h·θ for a fold θ (h = the wing's distance from the hinge),
+        // so the compliance (K₃ h)² / k gives the same energy ½ k θ² as the dihedral constraint
+        const iso = isoStencil(X, e0, e1, w1, w2);
+        if (!iso) continue;
+        const h = (2 * A2) / Math.sqrt(el2);
+        const c2 = (iso[3] * h) ** 2;
+        il.push(e0, e1, w1, w2); iK.push(iso[0], iso[1], iso[2], iso[3]); iAlpha.push(c2 / k); iC.push(c2);
+        continue;
+      }
       bl.push(w1, w2, e0, e1); bRest.push(th); bAlpha.push(1 / k);
     }
   }
@@ -364,6 +405,7 @@ export function buildCloth(g: Geometry, o: ClothBuildOptions): ClothModel {
     dColours: new Int32Array(1), nStretch,
     bP: new Int32Array(bl.length), bRest: new Float64Array(bRest.length), bAlpha: new Float64Array(bAlpha.length), bColours: new Int32Array(1),
     cPts: new Int32Array(0), cStart: Int32Array.of(0), cCons: new Int32Array(0),
+    iP: new Int32Array(0), iK: new Float64Array(0), iAlpha: new Float64Array(0), iC: new Float64Array(0),
     meanEdge, area, restScale: o.restScale,
   };
   const colours: number[] = [0];
@@ -388,6 +430,13 @@ export function buildCloth(g: Geometry, o: ClothBuildOptions): ClothModel {
     m.bRest[j] = bRest[c]; m.bAlpha[j] = bAlpha[c];
   }
   m.bColours = bc.starts;
+  const ni = iAlpha.length, ic = colourConstraints(4, Int32Array.from(il), ni, n);
+  m.iP = new Int32Array(ni * 4); m.iK = new Float64Array(ni * 4); m.iAlpha = new Float64Array(ni); m.iC = new Float64Array(ni);
+  for (let j = 0; j < ni; j++) {
+    const c = ic.order[j];
+    for (let q = 0; q < 4; q++) { m.iP[j * 4 + q] = il[c * 4 + q]; m.iK[j * 4 + q] = iK[c * 4 + q]; }
+    m.iAlpha[j] = iAlpha[c]; m.iC[j] = iC[c];
+  }
   return m;
 }
 
@@ -645,20 +694,40 @@ export function colliderFromArrays(A: Record<string, any>): Collider {
 }
 
 /**
- * Contact planes for points [start, end): for point i at X[3i..] with query radius R[i] > 0, the closest collider
- * point within R[i] (CP) and the plane normal (CN, unit, towards the side the point belongs on); CF[i] = 1 when found.
- * Pure per point, so any chunking gives the same bits.
+ * Contact planes for points [start, end) with R[i] > 0 (points with R[i] <= 0 are left untouched): the closest collider
+ * point within 2·R[i]; when it is within R[i] the point gets the contact plane through it (CP, normal CN, unit, towards
+ * the side the point belongs on) and CF[i] = 1, else CF[i] = 0. QD[i] is the distance found (2·R[i] when nothing is
+ * that close), a lower bound the caller uses to skip later queries. CT[i] is the triangle of the previous query (-1 =
+ * none) and is updated: its distance bounds the BVH search (warm start). Pure per point, so any chunking gives the same
+ * bits.
  */
-export function collideRange(c: Collider, X: Float64Array, R: Float64Array, CP: Float64Array, CN: Float64Array, CF: Uint8Array, start: number, end: number, scratch: ClosestScratch = closestScratch()) {
-  const FN = c.FN, EN = c.EN, VN = c.VN, TC = c.TC, tp = c.bvh.triPt, bvh = c.bvh;
+export function collideRange(c: Collider, X: Float64Array, R: Float64Array, CP: Float64Array, CN: Float64Array, CF: Uint8Array, CT: Int32Array, QD: Float64Array, start: number, end: number, scratch: ClosestScratch = closestScratch()) {
+  const FN = c.FN, EN = c.EN, VN = c.VN, TC = c.TC, tp = c.bvh.triPt, bvh = c.bvh, T = bvh.T, nt = c.numTris;
+  const wp = [0, 0, 0], wb = [0, 0, 0];
   for (let i = start; i < end; i++) {
-    CF[i] = 0;
     const r = R[i];
     if (!(r > 0)) continue;
-    const x = X[i * 3], y = X[i * 3 + 1], z = X[i * 3 + 2];
-    const t = bvh.closestInto(x, y, z, r, scratch);
-    if (t < 0) continue;
+    CF[i] = 0;
+    const x = X[i * 3], y = X[i * 3 + 1], z = X[i * 3 + 2], reach = 2 * r;
+    // warm start: the previous triangle's distance (when within reach) bounds the search
+    const prev = CT[i];
+    let bound = reach, warm = -1;
+    if (prev >= 0 && prev < nt) {
+      const d2 = closestOnTri(T, prev * 9, x, y, z, wp, wb);
+      if (d2 <= reach * reach) { warm = prev; bound = Math.sqrt(d2) * (1 + 1e-9) + 1e-12; }
+    }
+    let t = bvh.closestInto(x, y, z, bound, scratch);
     const s = scratch;
+    if (t < 0 && warm >= 0) {
+      // nothing nearer than the previous triangle: it is the closest
+      t = warm;
+      s.x = wp[0]; s.y = wp[1]; s.z = wp[2]; s.b0 = wb[0]; s.b1 = wb[1]; s.b2 = wb[2];
+    }
+    CT[i] = t;
+    if (t < 0) { QD[i] = reach; continue; }
+    const qd = Math.sqrt((x - s.x) ** 2 + (y - s.y) ** 2 + (z - s.z) ** 2);
+    QD[i] = qd;
+    if (qd > r) continue;
     // pseudo-normal of the feature the closest point lies on (exact zeros mark edges and corners)
     let px: number, py: number, pz: number;
     const b0 = s.b0, b1 = s.b1, b2 = s.b2;
@@ -727,6 +796,10 @@ export class XpbdCloth {
   cp: Float64Array;
   cn: Float64Array;
   cf: Uint8Array;
+  /** collider triangle of each point's last contact (-1 = none): the warm start of the next query */
+  ct: Int32Array;
+  /** distance to the collider at each point's last query (a lower bound later; collideRange writes it) */
+  qd: Float64Array;
   /** tether anchor (-1 = none) and maximum distance per point */
   tA: Int32Array | null = null;
   tD: Float64Array | null = null;
@@ -744,7 +817,6 @@ export class XpbdCloth {
   private kStamp = 0;
   /** collider query lower bounds (queryRadius / afterQuery): position at the last query and the distance then */
   private qX: Float64Array | null = null;
-  private qD: Float64Array | null = null;
   /** corner search data (findCornerContacts): point → triangles, triangle stamps, hashed corners, per-corner scratch */
   private corners: {
     col: Collider; start: Int32Array; tri: Int32Array; stamp: Int32Array; cst: Int32Array; cent: Int32Array; mask: number; inv: number;
@@ -759,6 +831,9 @@ export class XpbdCloth {
   private bAlphaT: Float64Array;
   private dLambda: Float64Array;
   private bLambda: Float64Array;
+  private iAlphaT: Float64Array;
+  private iInvDen: Float64Array;
+  private iLambda: Float64Array;
   private vLambda = 0;
   /** accumulated contact corrections this substep (floor, collider), for friction */
   private penF: Float64Array;
@@ -795,6 +870,14 @@ export class XpbdCloth {
       // 1 / (w_a + w_b + alpha~), 0 = inactive (both ends pinned, or no stiffness)
       this.dInvDen[c] = ws === 0 || at === Infinity ? 0 : 1 / (ws + at);
     }
+    const ni = m.iAlpha.length;
+    this.iAlphaT = new Float64Array(ni); this.iInvDen = new Float64Array(ni); this.iLambda = new Float64Array(ni * 3);
+    for (let c = 0; c < ni; c++) {
+      const at = (this.iAlphaT[c] = m.iAlpha[c] / h2);
+      let ws = 0;
+      for (let q = 0; q < 4; q++) ws += this.w[m.iP[c * 4 + q]] * m.iK[c * 4 + q] * m.iK[c * 4 + q];
+      this.iInvDen[c] = ws === 0 ? 0 : 1 / (ws + at);
+    }
     this.bAlphaT = new Float64Array(m.bAlpha.length);
     for (let c = 0; c < m.bAlpha.length; c++) this.bAlphaT[c] = m.bAlpha[c] / h2;
     this.dLambda = new Float64Array(m.dAlpha.length);
@@ -802,6 +885,8 @@ export class XpbdCloth {
     this.cp = new Float64Array(n * 3);
     this.cn = new Float64Array(n * 3);
     this.cf = new Uint8Array(n);
+    this.ct = new Int32Array(n).fill(-1);
+    this.qd = new Float64Array(n);
     this.penF = new Float64Array(n);
     this.penC = new Float64Array(n);
     if (o.tethers) this.pinTethers(pinned);
@@ -869,40 +954,39 @@ export class XpbdCloth {
   }
 
   /**
-   * Query radius per point for the next step: thickness plus twice the distance the point can travel in a step at its
-   * current speed under gravity, plus half a thickness of margin. 0 (no query) for pinned points and for points that
-   * cannot be that close to the collider: the distance found at a point's last query, less how far it has moved since,
-   * is a lower bound on its distance now (afterQuery keeps it), so skipping them changes nothing.
+   * Collider query radius per point for the next step (collideRange): thickness plus twice the distance the point can
+   * travel in a step at its current speed under gravity, plus half a thickness of margin; 0 = no query this step, for
+   * - pinned points;
+   * - points with a contact that have moved less than a quarter of the thickness since their query: the contact plane
+   *   is kept (on a curved collider it is off by (thickness/4)²/(2·radius) at most);
+   * - points that cannot be within the radius: the distance found at the last query (qd, at least twice that query's
+   *   radius when nothing was found) less how far the point has moved since is a lower bound on its distance now.
    */
   queryRadius(R: Float64Array) {
-    const o = this.o, dt = o.dt, v = this.v, w = this.w, x = this.x;
+    const o = this.o, dt = o.dt, v = this.v, w = this.w, x = this.x, cf = this.cf, qd = this.qd, keep = 0.25 * o.thickness;
     const g = Math.hypot(o.gravity[0], o.gravity[1], o.gravity[2]);
     const base = 1.5 * o.thickness + 2 * g * dt * dt;
-    const QX = (this.qX ??= Float64Array.from(x)), QD = (this.qD ??= new Float64Array(this.n));
+    const QX = (this.qX ??= Float64Array.from(x));
     for (let i = 0; i < this.n; i++) {
-      if (w[i] === 0) { R[i] = 0; continue; }
+      if (w[i] === 0) { R[i] = 0; cf[i] = 0; continue; }
       const k = i * 3;
+      const ex = x[k] - QX[k], ey = x[k + 1] - QX[k + 1], ez = x[k + 2] - QX[k + 2];
+      const moved = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      if (cf[i] && moved < keep) { R[i] = 0; continue; }
       const s = Math.sqrt(v[k] * v[k] + v[k + 1] * v[k + 1] + v[k + 2] * v[k + 2]);
       const r = base + 2 * s * dt;
-      const ex = x[k] - QX[k], ey = x[k + 1] - QX[k + 1], ez = x[k + 2] - QX[k + 2];
-      R[i] = QD[i] - Math.sqrt(ex * ex + ey * ey + ez * ez) > r ? 0 : r;
+      if (qd[i] - moved > r) { R[i] = 0; cf[i] = 0; continue; }
+      R[i] = r;
     }
   }
 
-  /**
-   * After the collider query with radii R (queryRadius): every queried point remembers where it was and its distance to
-   * the collider then (the contact distance, or at least the radius when nothing was within it).
-   */
+  /** After the collider query with radii R (queryRadius): the queried points remember where they were. */
   afterQuery(R: Float64Array) {
-    const x = this.x, QX = this.qX!, QD = this.qD!, cf = this.cf, cp = this.cp;
+    const x = this.x, QX = this.qX!;
     for (let i = 0; i < this.n; i++) {
       if (!(R[i] > 0)) continue;
       const k = i * 3;
       QX[k] = x[k]; QX[k + 1] = x[k + 1]; QX[k + 2] = x[k + 2];
-      if (cf[i]) {
-        const ex = x[k] - cp[k], ey = x[k + 1] - cp[k + 1], ez = x[k + 2] - cp[k + 2];
-        QD[i] = Math.sqrt(ex * ex + ey * ey + ez * ez);
-      } else QD[i] = R[i];
     }
   }
 
@@ -1021,7 +1105,7 @@ export class XpbdCloth {
       }
       // with one sweep per substep the multipliers are always 0 when read: skip them (same bits, less work)
       const lam = o.iterations > 1;
-      if (lam) { this.dLambda.fill(0); this.bLambda.fill(0); }
+      if (lam) { this.dLambda.fill(0); this.bLambda.fill(0); this.iLambda.fill(0); }
       this.vLambda = 0;
       this.penF.fill(0);
       this.penC.fill(0);
@@ -1030,6 +1114,7 @@ export class XpbdCloth {
         // soft and point-wise constraints first; the stiff, contact-aware stretch chains last before the contacts
         if (lam) this.solveDistances(fwd); else this.solveDistancesOnce(fwd);
         if (this.m.bAlpha.length) this.solveBends(fwd, lam);
+        if (this.iInvDen.length) this.solveIso(fwd, lam);
         if (this.tA) this.solveTethers();
         if (this.grad) this.solveVolume();
         if (this.sCount) this.solveSelf();
@@ -1192,53 +1277,95 @@ export class XpbdCloth {
     }
   }
 
+  /**
+   * Isometric bends (flat rest): the vector constraint q = Σ Kᵢ xᵢ, gradient Kᵢ·I, so Δλ = -(q + α̃λ) / (Σ wᵢ Kᵢ² + α̃).
+   * |q|² = (K₃h)²·2(1 - cos θ) for a fold θ, so the quadratic energy loses its pull towards flat as a hinge folds over
+   * (none at all at 180°: a crumpled quad would stay folded); past 90° (|q|² > 2(K₃h)²) the hinge is projected with
+   * the dihedral constraint instead, whose restoring force grows with the angle.
+   */
+  private solveIso(fwd: boolean, lam: boolean) {
+    const x = this.x, w = this.w, IP = this.m.iP, IK = this.m.iK, IC = this.m.iC, ID = this.iInvDen, AT = this.iAlphaT, L = this.iLambda;
+    const ni = ID.length;
+    for (let j = 0; j < ni; j++) {
+      const c = fwd ? j : ni - 1 - j, id = ID[c];
+      if (id === 0) continue;
+      const o = c * 4, i0 = IP[o], i1 = IP[o + 1], i2 = IP[o + 2], i3 = IP[o + 3];
+      const a = i0 * 3, b = i1 * 3, p = i2 * 3, q = i3 * 3, k0 = IK[o], k1 = IK[o + 1], k2 = IK[o + 2], k3 = IK[o + 3];
+      const qx = k0 * x[a] + k1 * x[b] + k2 * x[p] + k3 * x[q];
+      const qy = k0 * x[a + 1] + k1 * x[b + 1] + k2 * x[p + 1] + k3 * x[q + 1];
+      const qz = k0 * x[a + 2] + k1 * x[b + 2] + k2 * x[p + 2] + k3 * x[q + 2];
+      if (qx * qx + qy * qy + qz * qz > 2 * IC[c]) {
+        // folded past 90°: the dihedral constraint towards flat, compliance 1/k = α / (K₃h)²
+        this.dihedral(i2, i3, i0, i1, 0, AT[c] / IC[c], null, 0);
+        continue;
+      }
+      let dx: number, dy: number, dz: number;
+      if (lam) {
+        const at = AT[c], l = c * 3;
+        dx = -(qx + at * L[l]) * id; dy = -(qy + at * L[l + 1]) * id; dz = -(qz + at * L[l + 2]) * id;
+        L[l] += dx; L[l + 1] += dy; L[l + 2] += dz;
+      } else { dx = -qx * id; dy = -qy * id; dz = -qz * id; }
+      let f = w[i0] * k0; x[a] += f * dx; x[a + 1] += f * dy; x[a + 2] += f * dz;
+      f = w[i1] * k1; x[b] += f * dx; x[b + 1] += f * dy; x[b + 2] += f * dz;
+      f = w[i2] * k2; x[p] += f * dx; x[p + 1] += f * dy; x[p + 2] += f * dz;
+      f = w[i3] * k3; x[q] += f * dx; x[q + 1] += f * dy; x[q + 2] += f * dz;
+    }
+  }
+
+  /** Dihedral bends (curved rest): one dihedral projection per hinge. */
   private solveBends(fwd: boolean, lam: boolean) {
-    const m = this.m, x = this.x, w = this.w, BP = m.bP, R = m.bRest, AT = this.bAlphaT, L = this.bLambda;
-    const nb = R.length;
+    const BP = this.m.bP, R = this.m.bRest, AT = this.bAlphaT, nb = R.length;
     for (let j = 0; j < nb; j++) {
       const c = fwd ? j : nb - 1 - j;
-      const i1 = BP[c * 4], i2 = BP[c * 4 + 1], i3 = BP[c * 4 + 2], i4 = BP[c * 4 + 3];
-      const w1 = w[i1], w2 = w[i2], w3 = w[i3], w4 = w[i4];
-      if (w1 + w2 + w3 + w4 === 0) continue;
-      const p1 = i1 * 3, p2 = i2 * 3, p3 = i3 * 3, p4 = i4 * 3;
-      const ex = x[p4] - x[p3], ey = x[p4 + 1] - x[p3 + 1], ez = x[p4 + 2] - x[p3 + 2];
-      const a1x = x[p1] - x[p3], a1y = x[p1 + 1] - x[p3 + 1], a1z = x[p1 + 2] - x[p3 + 2];
-      const b1x = x[p1] - x[p4], b1y = x[p1 + 1] - x[p4 + 1], b1z = x[p1 + 2] - x[p4 + 2];
-      const a2x = x[p2] - x[p4], a2y = x[p2 + 1] - x[p4 + 1], a2z = x[p2 + 2] - x[p4 + 2];
-      const b2x = x[p2] - x[p3], b2y = x[p2 + 1] - x[p3 + 1], b2z = x[p2 + 2] - x[p3 + 2];
-      const n1x = a1y * b1z - a1z * b1y, n1y = a1z * b1x - a1x * b1z, n1z = a1x * b1y - a1y * b1x;
-      const n2x = a2y * b2z - a2z * b2y, n2y = a2z * b2x - a2x * b2z, n2z = a2x * b2y - a2y * b2x;
-      const e2 = ex * ex + ey * ey + ez * ez;
-      const l1 = n1x * n1x + n1y * n1y + n1z * n1z, l2 = n2x * n2x + n2y * n2y + n2z * n2z;
-      if (!(e2 > 1e-24 && l1 > 1e-24 && l2 > 1e-24)) continue;
-      const el = Math.sqrt(e2), iel = 1 / el;
-      const cx = n1y * n2z - n1z * n2y, cy = n1z * n2x - n1x * n2z, cz = n1x * n2y - n1y * n2x;
-      const cs = n1x * n2x + n1y * n2y + n1z * n2z;
-      const theta = fastAtan2((cx * ex + cy * ey + cz * ez) * iel, cs);
-      let C = theta - R[c];
-      if (C > Math.PI) C -= 2 * Math.PI; else if (C < -Math.PI) C += 2 * Math.PI;
-      // ∂θ/∂x = -(u1, u2, u3, u4) of Bridson et al. 2003 for this θ (checked against finite differences in test/cloth.ts):
-      // u1 = |E| N1/|N1|², u2 = |E| N2/|N2|², u3 and u4 from the wings' projections on the edge (they sum to zero).
-      // Every gradient is a combination g = α N1 + β N2, so |g|² = α²|N1|² + β²|N2|² + 2αβ N1·N2.
-      const il1 = 1 / l1, il2 = 1 / l2;
-      const s1 = el * il1, s2 = el * il2, q1 = iel * il1, q2 = iel * il2;
-      const e14 = a1x * ex + a1y * ey + a1z * ez, e24 = b2x * ex + b2y * ey + b2z * ez;
-      // (x1 - x4)·E = (x1 - x3)·E - |E|², likewise for x2
-      const d13 = (e14 - e2) * q1, d23 = (e24 - e2) * q2, d14 = e14 * q1, d24 = e24 * q2;
-      const at = AT[c];
-      const den = w1 * e2 * il1 + w2 * e2 * il2 + w3 * (d13 * d13 * l1 + d23 * d23 * l2 + 2 * d13 * d23 * cs) +
-        w4 * (d14 * d14 * l1 + d24 * d24 * l2 + 2 * d14 * d24 * cs) + at;
-      if (!(den > 1e-300)) continue;
-      let dl: number;
-      if (lam) { dl = (-C - at * L[c]) / den; L[c] += dl; } else dl = -C / den;
-      // Δx_i = w_i Δλ g_i with g1 = -s1 N1, g2 = -s2 N2, g3 = -(d13 N1 + d23 N2), g4 = d14 N1 + d24 N2
-      let k = -w1 * dl * s1; x[p1] += k * n1x; x[p1 + 1] += k * n1y; x[p1 + 2] += k * n1z;
-      k = -w2 * dl * s2; x[p2] += k * n2x; x[p2 + 1] += k * n2y; x[p2 + 2] += k * n2z;
-      let k1 = -w3 * dl * d13, k2 = -w3 * dl * d23;
-      x[p3] += k1 * n1x + k2 * n2x; x[p3 + 1] += k1 * n1y + k2 * n2y; x[p3 + 2] += k1 * n1z + k2 * n2z;
-      k1 = w4 * dl * d14; k2 = w4 * dl * d24;
-      x[p4] += k1 * n1x + k2 * n2x; x[p4 + 1] += k1 * n1y + k2 * n2y; x[p4 + 2] += k1 * n1z + k2 * n2z;
+      this.dihedral(BP[c * 4], BP[c * 4 + 1], BP[c * 4 + 2], BP[c * 4 + 3], R[c], AT[c], lam ? this.bLambda : null, c);
     }
+  }
+
+  /**
+   * Project the dihedral angle of the hinge (wings i1, i2; edge i3 → i4) towards `rest` with compliance at = α / h²
+   * (multiplier L[li] when L is given, else the multiplier-free first-sweep update).
+   */
+  private dihedral(i1: number, i2: number, i3: number, i4: number, rest: number, at: number, L: Float64Array | null, li: number) {
+    const x = this.x, w = this.w;
+    const w1 = w[i1], w2 = w[i2], w3 = w[i3], w4 = w[i4];
+    if (w1 + w2 + w3 + w4 === 0) return;
+    const p1 = i1 * 3, p2 = i2 * 3, p3 = i3 * 3, p4 = i4 * 3;
+    const ex = x[p4] - x[p3], ey = x[p4 + 1] - x[p3 + 1], ez = x[p4 + 2] - x[p3 + 2];
+    const a1x = x[p1] - x[p3], a1y = x[p1 + 1] - x[p3 + 1], a1z = x[p1 + 2] - x[p3 + 2];
+    const b1x = x[p1] - x[p4], b1y = x[p1 + 1] - x[p4 + 1], b1z = x[p1 + 2] - x[p4 + 2];
+    const a2x = x[p2] - x[p4], a2y = x[p2 + 1] - x[p4 + 1], a2z = x[p2 + 2] - x[p4 + 2];
+    const b2x = x[p2] - x[p3], b2y = x[p2 + 1] - x[p3 + 1], b2z = x[p2 + 2] - x[p3 + 2];
+    const n1x = a1y * b1z - a1z * b1y, n1y = a1z * b1x - a1x * b1z, n1z = a1x * b1y - a1y * b1x;
+    const n2x = a2y * b2z - a2z * b2y, n2y = a2z * b2x - a2x * b2z, n2z = a2x * b2y - a2y * b2x;
+    const e2 = ex * ex + ey * ey + ez * ez;
+    const l1 = n1x * n1x + n1y * n1y + n1z * n1z, l2 = n2x * n2x + n2y * n2y + n2z * n2z;
+    if (!(e2 > 1e-24 && l1 > 1e-24 && l2 > 1e-24)) return;
+    const el = Math.sqrt(e2), iel = 1 / el;
+    const cx = n1y * n2z - n1z * n2y, cy = n1z * n2x - n1x * n2z, cz = n1x * n2y - n1y * n2x;
+    const cs = n1x * n2x + n1y * n2y + n1z * n2z;
+    const theta = fastAtan2((cx * ex + cy * ey + cz * ez) * iel, cs);
+    let C = theta - rest;
+    if (C > Math.PI) C -= 2 * Math.PI; else if (C < -Math.PI) C += 2 * Math.PI;
+    // ∂θ/∂x = -(u1, u2, u3, u4) of Bridson et al. 2003 for this θ (checked against finite differences in test/cloth.ts):
+    // u1 = |E| N1/|N1|², u2 = |E| N2/|N2|², u3 and u4 from the wings' projections on the edge (they sum to zero).
+    // Every gradient is a combination g = α N1 + β N2, so |g|² = α²|N1|² + β²|N2|² + 2αβ N1·N2.
+    const il1 = 1 / l1, il2 = 1 / l2;
+    const s1 = el * il1, s2 = el * il2, q1 = iel * il1, q2 = iel * il2;
+    const e14 = a1x * ex + a1y * ey + a1z * ez, e24 = b2x * ex + b2y * ey + b2z * ez;
+    // (x1 - x4)·E = (x1 - x3)·E - |E|², likewise for x2
+    const d13 = (e14 - e2) * q1, d23 = (e24 - e2) * q2, d14 = e14 * q1, d24 = e24 * q2;
+    const den = w1 * e2 * il1 + w2 * e2 * il2 + w3 * (d13 * d13 * l1 + d23 * d23 * l2 + 2 * d13 * d23 * cs) +
+      w4 * (d14 * d14 * l1 + d24 * d24 * l2 + 2 * d14 * d24 * cs) + at;
+    if (!(den > 1e-300)) return;
+    let dl: number;
+    if (L) { dl = (-C - at * L[li]) / den; L[li] += dl; } else dl = -C / den;
+    // Δx_i = w_i Δλ g_i with g1 = -s1 N1, g2 = -s2 N2, g3 = -(d13 N1 + d23 N2), g4 = d14 N1 + d24 N2
+    let k = -w1 * dl * s1; x[p1] += k * n1x; x[p1 + 1] += k * n1y; x[p1 + 2] += k * n1z;
+    k = -w2 * dl * s2; x[p2] += k * n2x; x[p2 + 1] += k * n2y; x[p2 + 2] += k * n2z;
+    let k1 = -w3 * dl * d13, k2 = -w3 * dl * d23;
+    x[p3] += k1 * n1x + k2 * n2x; x[p3 + 1] += k1 * n1y + k2 * n2y; x[p3 + 2] += k1 * n1z + k2 * n2z;
+    k1 = w4 * dl * d14; k2 = w4 * dl * d24;
+    x[p4] += k1 * n1x + k2 * n2x; x[p4 + 1] += k1 * n1y + k2 * n2y; x[p4 + 2] += k1 * n1z + k2 * n2z;
   }
 
   private solveTethers() {
