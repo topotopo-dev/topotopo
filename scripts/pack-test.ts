@@ -62,9 +62,12 @@ try {
     'dist/host/worker.js', 'dist/wasm/kernels.js', 'dist/viewer/server.js', 'dist/viewer/index.html',
     'shelf/index.json', 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
     'kernels/pkg/topotopo_kernels.js', 'kernels/pkg/topotopo_kernels_bg.wasm', 'kernels/pkg/LICENSE',
+    'kernels/pkg-simd/topotopo_kernels.js', 'kernels/pkg-simd/topotopo_kernels_bg.wasm', 'kernels/pkg-simd/LICENSE',
   ];
   const missing = required.filter((f) => !files.includes(f));
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
+  const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
+  check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
   const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|workspace|tmp|kernels\/(src|target|tests|benches)|shelf\/thumbs)\//.test(f) ||
     (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
   check(!stray.length, `tarball has no sources, tests, examples or build output${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
@@ -101,9 +104,9 @@ import { Engine, allNodeDefs } from '${NAME}';
 import meta from '${NAME}/package.json' with { type: 'json' };
 import { createNodeHost, SHELF_DIR } from './node_modules/${NAME}/dist/host/node.js';
 import { createNodePool } from './node_modules/${NAME}/dist/host/pool.js';
-import { kernelsWasmURL, getLoadedKernels } from './node_modules/${NAME}/dist/wasm/kernels.js';
+import { kernelsWasmURL, kernelsWasmVariant, getLoadedKernels } from './node_modules/${NAME}/dist/wasm/kernels.js';
 import { fileURLToPath } from 'node:url';
-const out = { version: meta.version, nodes: allNodeDefs().length, shelf: SHELF_DIR, wasm: fileURLToPath(kernelsWasmURL) };
+const out = { version: meta.version, nodes: allNodeDefs().length, shelf: SHELF_DIR, wasm: fileURLToPath(kernelsWasmURL), variant: kernelsWasmVariant };
 const host = createNodeHost({ workers: 0 });
 out.font = host.findFont();
 const pool = createNodePool({ size: 1 });
@@ -121,14 +124,33 @@ out.kernelsLoaded = !!getLoadedKernels();
 await engine.host.pool.close();
 console.log(JSON.stringify(out));
 `);
-  const lib = JSON.parse(sh('node lib.mjs', app).trim().split('\n').pop()!);
+  const autoEnv = { ...process.env };
+  delete autoEnv.TOPOTOPO_WASM;
+  const lib = JSON.parse(sh('node lib.mjs', app, autoEnv).trim().split('\n').pop()!);
   check(lib.version === pkg.version && lib.nodes >= 200, `import '${NAME}': ${lib.nodes} node types, ${NAME}/package.json ${lib.version}`);
   check(inPkg(lib.shelf) && fs.existsSync(path.join(lib.shelf, 'index.json')), `shelf from the installed package (${path.relative(app, lib.shelf)})`);
   check(inPkg(lib.font) && path.basename(lib.font) === 'DejaVuSans.ttf', `bundled font from the installed package (${lib.font && path.relative(app, lib.font)})`);
   check(inPkg(lib.wasm) && fs.existsSync(lib.wasm), `kernel WASM from the installed package (${path.relative(app, lib.wasm)})`);
+  check(lib.variant === 'simd' && lib.wasm.includes('pkg-simd'), 'installed loader selects SIMD by feature detection on Node 22+');
   check(lib.poolResult === '2,4,6', `worker pool runs dist/host/worker.js (selftest ${lib.poolResult})`);
   check(typeof lib.wrangle === 'number' && lib.poolTasks > 0, `wrangle on the pool: ${lib.wrangle} points, ${lib.poolTasks} pool task(s)`);
   check(typeof lib.sdf === 'number' && lib.sdf > 0 && lib.kernelsLoaded, `sdf_grid + grid_to_mesh in the WASM kernels: ${lib.sdf} prims`);
+
+  // A fresh process per variant checks selection before import and proves both complete packages initialise.
+  fs.writeFileSync(path.join(app, 'kernels.mjs'), `
+import assert from 'node:assert/strict';
+import { createNodeHost } from './node_modules/${NAME}/dist/host/node.js';
+import { kernelsWasmVariant, kernelsWasmURL, loadHostKernels } from './node_modules/${NAME}/dist/wasm/kernels.js';
+const kernels = await loadHostKernels(createNodeHost({ workers: 0 }));
+const roof = kernels.roof([0, 0, 6, 0, 6, 4, 0, 4], [], 35);
+assert.ok(roof.vertices.length > 0);
+console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.href, vertices: Array.from(roof.vertices) }));
+`);
+  const scalar = JSON.parse(sh('node kernels.mjs', app, { ...autoEnv, TOPOTOPO_WASM: 'scalar' }).trim().split('\n').pop()!);
+  const simd = JSON.parse(sh('node kernels.mjs', app, { ...autoEnv, TOPOTOPO_WASM: 'simd' }).trim().split('\n').pop()!);
+  check(scalar.variant === 'scalar' && scalar.url.includes('/pkg/') && scalar.vertices.length > 0, 'installed scalar override loads and cooks a roof');
+  check(simd.variant === 'simd' && simd.url.includes('/pkg-simd/') && JSON.stringify(simd.vertices) === JSON.stringify(scalar.vertices),
+    'installed SIMD override loads and matches the scalar roof exactly');
 
   step('types: tsc on a consumer file');
   fs.writeFileSync(path.join(app, 'check.ts'), [

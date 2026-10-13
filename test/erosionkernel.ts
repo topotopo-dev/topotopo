@@ -8,7 +8,7 @@ import { heightfieldsOf } from '../src/core/heightfield.ts';
 import { DEFAULT_EROSION, erodeStep, makeErosionField } from '../src/core/erosion.ts';
 import { fractal, makeNoise } from '../src/core/noise.ts';
 import { rng } from '../src/core/random.ts';
-import { kernelsWasmURL, loadKernels, getLoadedKernels } from '../src/wasm/kernels.ts';
+import { kernelsWasmURL, kernelsWasmVariant, loadKernels, getLoadedKernels } from '../src/wasm/kernels.ts';
 import type { ErosionResult } from '../src/wasm/kernels.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { fingerprint } from './fingerprint.ts';
@@ -159,7 +159,10 @@ try {
   assert.throws(() => kernels.flow_accumulation(flat, 9.1, 9, 1)); checks++;
   assert.throws(() => kernels.thermal_erode(flat, null, 9, 9, 1, 0.5, 0.2, 1.5)); checks++;
   // Check generated WASM directly too: malformed options must return a validation error, never a trap.
-  const raw = await import('../kernels/pkg/topotopo_kernels.js'), empty = new Float32Array(0);
+  const raw = kernelsWasmVariant === 'simd'
+    ? await import('../kernels/pkg-simd/topotopo_kernels.js')
+    : await import('../kernels/pkg/topotopo_kernels.js');
+  const empty = new Float32Array(0);
   const badRawCalls: Array<() => unknown> = [
     () => raw.erode_droplet(flat, empty, empty, 9, 9, 1, null, 0n),
     () => raw.erode_droplet(flat, empty, empty, 9, 9, 1, { iterations: 1.5 }, 0n),
@@ -182,8 +185,8 @@ try {
   const parityW = 33, parityH = 25;
   const parityInput = Float32Array.from({ length: parityW * parityH }, (_, i) => 4 + (parityH - 1 - Math.floor(i / parityW)) / 16 + Math.abs(i % parityW - 16) / 32);
   const parity = kernels.erode_pipe(parityInput, null, parityW, parityH, 1, { iterations: 25, rainAmount: 0.01 }, 1);
-  // Session 5 native and scalar WASM agree after the pipe reciprocal/remap changes.
-  const nativeDigests = { height: 'd0714b86', sediment: 'ddd8113b', debris: '355aea95', flow: 'e02d6dc8', water: '831ccee1', wear: '114a9886' };
+  // Session 6 native, scalar and SIMD WASM agree after conservative split gathering.
+  const nativeDigests = { height: '13671b26', sediment: 'b2627087', debris: '355aea95', flow: 'b8715d6e', water: 'ac938cfe', wear: '4f1e6002' };
   for (const name of ['height', 'sediment', 'debris', 'flow', 'water', 'wear'] as const) {
     let hash = 2166136261;
     const bytes = new DataView(new ArrayBuffer(4));

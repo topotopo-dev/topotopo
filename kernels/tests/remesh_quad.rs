@@ -1,5 +1,5 @@
-use topotopo_kernels::remesh_quad::{QuadMesh, RemeshOptions, remesh_quad};
 use std::collections::{BTreeMap, BTreeSet};
+use topotopo_kernels::remesh_quad::{QuadMesh, RemeshOptions, remesh_quad};
 
 type Point = [f64; 3];
 

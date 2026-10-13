@@ -610,3 +610,304 @@ after the final showcase found matching droplet views and no obvious checkerboar
 grid-aligned streaks or spikes. The shaded terrain view is not a water-stability
 test. Gate logs, original binaries, hashes and experimental candidates are retained
 locally in ignored `out/session5/`; none are added to the repository.
+
+## Session 6 - default SIMD and erosion continuation (K-4c, 2026-10-13)
+
+Machine: Intel Core i7-10700K @ 3.80 GHz, Windows 10.0.26200 x64,
+Node v24.14.0. The cases, options, seed, f32 input terrain and small warmups are
+unchanged from session 4: pipe 1024^2 x 200, and the noisy TypeScript-reference
+droplet 512^2 x 100. Allocation, validation and all output layers remain inside
+the timers; Node also includes JS/WASM input/output copies. Compilation and
+module loading are outside the timers. Native droplet still uses the separate
+analytic valley and cannot establish a speedup against the noisy JS fixture.
+
+**The requested idle-machine condition was not achieved.** `tasklist` and process
+command-line checks found no overlapping repository build/test/benchmark work,
+but two repository MCP servers (PIDs 40020 and 29840) remained running. Their
+cumulative CPU times stayed at 1.859375 and 1.5 seconds during the checked window;
+that is evidence of inactivity during those observations, not evidence that the
+processes were absent. Desktop activity included SysCap, Taskmgr and Godot. An
+unrelated `npm install -g @openai/codex` also started during the droplet A/B run.
+No unrelated processes were terminated. The tables report observed timings with
+these limitations; they are not idle-machine acceptance evidence or controlled
+cross-session speedup claims. Final pre-run total CPU snapshots were about 72%
+before native timing and 59% before WASM timing.
+
+### Builds, selection and parity
+
+`npm run kernels:build` now writes two ordinary release packages: scalar
+`kernels/pkg/` with `-C target-feature=-simd128,-relaxed-simd`, and
+`kernels/pkg-simd/` with feature `simd` and
+`-C target-feature=+simd128,-relaxed-simd`. Both have their own JS glue and
+`topotopo_kernels_bg.wasm`. Both builds retain wasm-opt -O3, delete wasm-pack's
+generated `.gitignore`, and retain `.npmignore` so npm includes the module.
+Build and tarball checks enforce a combined WASM limit of 2,500,000 bytes.
+
+The loader validates a minimal simd128 module, chooses SIMD when supported, and
+otherwise loads scalar. `TOPOTOPO_WASM=scalar|simd` overrides selection before
+the first import, including workers. No user-agent sniffing, relaxed SIMD,
+fast-math, explicit fused multiply-add or new runtime dependencies are used.
+
+The expanded parity corpus checks every kernel export: skeleton/offset/roof,
+SDF construction and grid operations, dual contouring, quad remeshing, pipe and
+droplet erosion, standalone thermal erosion, and D8/D-infinity drainage. It
+compares every returned typed-array byte, topology/provenance/quality field and
+signed zero. It includes odd/even vector tails, small grids, masks, zero rain,
+open/closed boundaries, nonuniform rainfall, plateaus and positive/negative
+impulses. The current corpus has **426 exact result comparisons** and **23
+matching documented contour rejections**; rejections are not counted as cooked
+results. No floating tolerance is needed. Golden and pool-parity tests retain
+the default selected SIMD path; they are not silently forced to scalar.
+The final ordinary modules pass the parity suite again. Scalar WASM is 576,140
+bytes; SIMD is 571,237 bytes; combined **1,147,377 bytes**, below the budget.
+Independent `wasm-opt --disable-simd` validation passes on the scalar bytes.
+Both modules have 32 imports and no profiling/clock/log hooks. Final SHA-256:
+
+```text
+scalar 144aa933ffbc4fb8e9e5dbd8c98eea54133e64dac94d47ef81c393d6f9abf5c2
+SIMD   e34137b0d297df06cacb083e9b4afeeb45eefb128429ccb56e0d68b3b7e24239
+```
+
+Final gate results are recorded below.
+
+### What changed in erosion
+
+- Pipe sediment transport now uses conservative X-then-Z gathering: subtract
+  each outgoing transfer from its donor and gather the corresponding transfers
+  from adjacent donors. Constant velocity yields separable bilinear remapping;
+  converging/diverging flow conserves material up to f32 rounding without global
+  rescaling. A backward bilinear heightfield sample alone would not provide that
+  conservation property. The CFL limit keeps each displacement at most about
+  0.45 cells, retaining nonnegative loads.
+- Transport streams with the existing water/erosion rows: one velocity row,
+  horizontal scratch rows and a three-row vertical-transfer ring. The initial
+  full-grid gather experiment was replaced; the final implementation does not
+  allocate a full-grid velocity or transfer array. Splitting interior stencils
+  from borders permits contiguous compiler-vectorized work.
+- The SIMD water/velocity helper handles four f32 cells per vector. A group
+  whose velocity limiter is inactive avoids its division and second square
+  root; a partially active group preserves scalar selection and operation order.
+  Scalar tails handle widths not divisible by four.
+- Droplet terrain/trajectories remain f64 with their original RNG and arithmetic
+  order. Explicit f64x2 interior deposit smoothing preserves the original three
+  ordered additions and skips zero contributions without changing signed zeros.
+  Paired thermal checks skip inactive cells; active transfers keep scalar order.
+- Sixteen-byte row alignment/padding was considered, but no aligned-allocation
+  performance experiment or benefit is claimed. Neighbor stencils offset by one
+  float cannot all be aligned together. The existing padded flux layout remains;
+  the explicit SIMD loads/stores support unaligned addresses.
+
+The new transport is a model change, not an algebraically identical rewrite of
+the old scatter. On varying flow, the Z step uses the intermediate receiver's
+velocity; fixed X-then-Z order introduces directional splitting bias. Frozen
+cardinal receivers reflect each transfer, whereas the old diagonal scatter could
+bypass a frozen cardinal cell. Dedicated tests check an independent f64 forward
+remap, constant-velocity bilinear weights, repeated converging/diverging transfer,
+nonnegative loads, mass preservation and frozen barriers. Existing all-layer
+native/WASM parity is updated for the changed pipe model: height `13671b26`,
+sediment `b2627087`, debris `355aea95`, flow `b8715d6e`, water `ac938cfe`, wear
+`4f1e6002` (FNV-1a over f32 little-endian bytes). SHA-256 comparison against
+session-start files confirms only `test/golden/example.erosion_models.json` and
+`examples/renders/erosion_models.png` changed: the other **281 goldens and 29
+renders are byte-identical**. Visual comparison retains the matching droplet
+panels and shows no obvious new checkerboards or spikes in the pipe panels;
+this shaded preview is not a water-stability proof.
+
+### Fresh baseline and final ordinary measurements
+
+The session-start scalar snapshot was retained before solver edits. Its ordinary
+native pipe calls were 4499.663 / 4170.329 / 4072.085 ms. Scalar WASM calls were
+16607.065 / 8925.160 / 8910.335 ms, including the cold first call in the median.
+The native analytic-valley droplet call was 1428.598 ms.
+
+| Same session-4 case | Session-start median ms | Final ordinary median ms | Target/result |
+|---|---:|---:|---|
+| Native pipe, 1024^2 x 200 | 4170.329 | **3185.542** | <=2000 ms; miss |
+| Node/WASM pipe, 1024^2 x 200 | 8925.160 (scalar) | **4639.353** (SIMD) | <=4000 ms; miss |
+| TypeScript droplet, 512^2 x 100 | 2486.240 | **2650.972** | Reference |
+| Node/WASM droplet, 512^2 x 100 | 2142.122 (scalar), 1.161x JS | **1813.429** (SIMD) | >=3x JS; **1.462x**, miss |
+
+Final native pipe calls: 3085.156 / 3185.542 / 3567.371 ms. SIMD WASM pipe:
+7690.746 / 4616.315 / 4639.353 ms. TypeScript droplet: 2729.081 / 2650.972 /
+2474.717 ms; SIMD droplet: 1719.819 / 1813.429 / 1835.044 ms. The final native
+analytic-valley droplet call is 1728.425 ms, a different terrain from the JS test.
+Node process CPU times are pipe 7578 / 4547 / 4531 ms, TypeScript droplet
+3078 / 2907 / 2515 ms, SIMD droplet 1687 / 1782 / 1765 ms. Those CPU totals
+include all Node threads and cannot replace wall-time acceptance.
+
+All three observed performance targets remain missed, in addition to the idle
+condition being unmet. Benchmark exit 0 checks execution/statistics, not speed.
+The session-start/final changes include scalar-to-SIMD selection and varying
+background load; the differences are not an isolated estimate of solver gains.
+
+Representative commands from the repository root (compile before timing):
+
+```powershell
+cargo bench --manifest-path kernels/Cargo.toml --bench erosion --no-run
+# Run the executable printed by Cargo, after the process audit.
+tasklist /FI "IMAGENAME eq node.exe"
+tasklist /FI "IMAGENAME eq cargo.exe"
+& kernels/target/release/deps/erosion-20ea4bed521e97c8.exe --runs=3
+npm run kernels:build
+$env:TOPOTOPO_WASM = 'simd'
+# Repeat tasklist and check repository command lines before each timed command.
+node bench/erosion.ts --runs=3
+Remove-Item Env:TOPOTOPO_WASM
+```
+
+### Per-pass profile of the streamed implementation
+
+Opt-in commands: `cargo bench --manifest-path kernels/Cargo.toml --bench erosion
+--features profile --no-run` followed by the generated benchmark executable;
+`node scripts/kernels-build.ts --features profile` followed by
+`TOPOTOPO_WASM=simd node bench/erosion.ts --runs=3` (set the environment variable
+with PowerShell as above). Ordinary packages are rebuilt after profiling.
+
+Pipe rows below are medians over the three full calls, excluding the small warmup
+and parity fixture. Droplet native is one analytic-valley call; WASM is the median
+of three noisy-reference calls. These are different droplet inputs. Medians of
+individual passes need not add to the median complete call.
+
+| Pipe pass, 1024^2 x 200, ms | Native | SIMD WASM |
+|---|---:|---:|
+| Setup | 39.571 | 38.232 |
+| Cached terrain gradients | 137.641 | 211.078 |
+| Rain / surface / flux | 1239.354 | 1217.198 |
+| Water / velocity | 1215.575 | 1265.261 |
+| Erosion / deposition | 787.684 | 1086.611 |
+| Reductions / evaporation | 431.402 | 1022.007 |
+| Sediment transport | 924.572 | 1238.593 |
+| Thermal | 0.111 | 0.447 |
+| Finalize | 17.708 | 11.426 |
+| Profiled outer median | **4784.554** | **6097.608** |
+
+Native profiled pipe calls: 4638.472 / 4884.005 / 4784.554 ms. SIMD WASM calls:
+11311.012 / 5219.487 / 6097.608 ms. Both finish with height sum
+44032000.007682800; the session-start scatter sum was 44032000.007678986.
+Only 9,436,140 terrain-gradient updates are needed out of 209,715,200
+cell-iterations. The conservative inactivity proof keeps this fixture's thermal
+pass almost entirely inactive. Native final-step subnormal counts are flux 0,
+water 0, suspension 4; those counts do not establish a broad denormal bottleneck.
+
+| Droplet pass, 512^2 x 100, ms | Native analytic valley | SIMD WASM noisy reference |
+|---|---:|---:|
+| Validation / setup | 0.957 | 1.323 |
+| Copy height | 35.982 | 30.066 |
+| RNG | 2.546 | 2.991 |
+| Tile sort | 4.197 | 4.221 |
+| Motion / brush / deposition | 1447.685 | 1356.000 |
+| Smoothing / hydraulic layers | 464.545 | 500.661 |
+| Thermal / wear | 212.009 | 431.186 |
+| Output layers | 8.916 | 5.904 |
+| Profiled outer call / median | **2177.425** | **2333.879** |
+
+The one-in-256 droplet sub-step samples report motion/brush/deposit totals of
+7.033 / 1.450 / 2.580 ms native and 10.319 / 2.831 / 4.024 ms SIMD WASM. These
+overlap the whole motion timer and include timing overhead; they cannot be added
+or extrapolated into true whole-pass costs. Motion still dominates droplet work.
+The pipe profile performs 204,800 marks for each of four row stages, plus
+iteration marks. WASM clock crossings, stage accounting, tiering and background
+load materially perturb its timings. Neither these measurements nor process CPU
+time can replace ordinary wall-time acceptance.
+
+### Pipe SIMD implementation A/B
+
+`node out/session6/pipe-ab.ts` compares the original-source SIMD snapshot with
+the final ordinary SIMD module on the exact session-4 pipe input. Each module
+receives a full-size warmup before three alternating before/after pairs, with
+`tasklist` before every timed call. Both sides already use SIMD, so this
+comparison exercises the transport/water changes independently of merely
+enabling the target feature. These warmups differ from acceptance.
+
+| Fully warmed SIMD pipe implementation | Three calls, ms | Median ms |
+|---|---|---:|
+| Original session-start solver | 7328.898 / 6961.075 / 6077.325 | 6961.075 |
+| Final streamed gather / water solver | 6402.720 / 5316.817 / 4665.263 | 5316.817 |
+
+The observed median is 23.62% lower, or 1.309x the previous SIMD implementation.
+Process CPU times were 6875 / 6547 / 6062 ms before and 5593 / 5078 / 4594 ms
+after. Both series trend downward and background process counts changed during
+the run; this remains an exploratory comparison on a non-idle machine.
+
+Every returned layer is finite and nonnegative, flow stays normalized, and all
+six layers replay byte-for-byte within each implementation. Relative closed
+material errors are 1.74396e-10 before and 1.74482e-10 after. Equality across
+the old and new pipe solvers is deliberately not asserted because the transport
+model changed. Logs are retained locally in `out/session6/pipe-ab.log`,
+`pipe-ab-processes.log` and `pipe-ab-initial-processes.txt`.
+
+### Droplet SIMD implementation A/B
+
+An isolated original-source snapshot was built with the same strict SIMD target
+flags and wasm-opt settings into `out/session6/pkg-simd-before/`. The ignored
+`node out/session6/droplet-ab.ts` loads that module and the candidate directly, uses
+the exact session-4 noisy terrain, `DEFAULT_EROSION` with radians, and
+`rngState(1)`. Each implementation receives one complete full-size warmup,
+followed by three alternating pairs; `tasklist` is captured before every timed
+call. All six returned layers match byte-for-byte after warmup and every pair.
+
+| Fully warmed SIMD implementation | Three calls, ms | Median ms |
+|---|---|---:|
+| Original session-start solver | 1931.110 / 2053.323 / 2722.507 | 2053.323 |
+| Candidate droplet SIMD helpers | 1900.833 / 1811.636 / 2176.417 | 1900.833 |
+
+The observed median is 7.43% lower, or 1.080x the previous SIMD implementation.
+This is not the speedup against TypeScript and uses different warmups from the
+acceptance benchmark. Process CPU times were 1890 / 2016 / 2125 ms before and
+1907 / 1813 / 2047 ms after. An unrelated Codex npm installation appeared during
+the pairs and accumulated 11.141 CPU seconds, so this modest delta is not a
+clean causal measurement. No 3x droplet acceptance is inferred from it.
+
+On the full noisy reference, profiled SIMD flow/sediment correlations with JS
+remain approximately 1.0 (1.0000000000000695 / 1.0000000000000167), with relative
+closed material error 8.06482685248169e-11. Full-size six-layer equality against
+the previous SIMD droplet implementation is additional evidence; it is not an
+exhaustive operating-system/compiler/platform identity matrix.
+
+### Final gates and remaining limits
+
+All required final gates exited **0** on the ordinary packages:
+
+- `cargo test --manifest-path kernels/Cargo.toml`, with default features and
+  again with `--features simd`: **86 tests passed in each feature set**.
+- `cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings`,
+  and again with `--features simd` before `--`: both passed. Additional
+  `--target wasm32-unknown-unknown --lib --features simd` Clippy passed, checking
+  the actual SIMD-only code as well as native code.
+- `cargo fmt --manifest-path kernels/Cargo.toml --check`. Formatting also fixes
+  std/crate import ordering in six existing benchmark/test files after the rename.
+- `npm run kernels:build`: both ordinary modules, **1,147,377 bytes combined**.
+  Independent scalar validation with SIMD disabled passed; no profiling imports
+  remain in either module. A final rebuild after the test-only lint correction
+  reproduced both tested binaries byte-for-byte (SHA-256 values above).
+- `npm run typecheck`; `npm run docs` (generated node docs unchanged).
+- `npm run test:update`: **1 written, 281 unchanged, 0 failed**; only the permitted
+  erosion example changed.
+- `npm test`: the entire chained command passed, including **282 goldens**, all
+  earlier suites and NOTICE checks, **7 loader scenarios**, **55 kernel / 89 SDF /
+  748 quad / 2077 erosion checks**, and **426 exact scalar/SIMD results plus 23
+  matching validation errors**.
+- Additional `TOPOTOPO_WORKERS=4 TOPOTOPO_POOL_MIN=1 node test/golden.ts`:
+  **282 passed**, using default SIMD with the pool forced on.
+- `npm run build`: publishable JavaScript and both module-path checks passed.
+- `npm run pack:test`: **25 checks passed**, installing the tarball into an empty
+  project and exercising CLI, library/types, worker, MCP, automatic SIMD selection
+  and both scalar/SIMD overrides.
+- `npm run showcase`: **30 graphs rendered**; the hash and visual audit is above.
+- `git diff --check`: passed.
+
+The initial Clippy run flagged an indexed loop in the new test oracle; iterating
+explicit axis descriptors resolved it, then both test/Clippy feature sets passed.
+PowerShell's npm wrapper consumed forwarded profiling flags on the first attempt;
+the documented direct `node scripts/kernels-build.ts --features profile` command
+built both profiled packages successfully. Neither failure remains outstanding.
+Logs, saved baseline modules, process audits and A/B scripts are retained only in
+ignored `out/session6/`; build output and tarballs are not committed.
+
+The strict idle-machine requirement remains unfulfilled, and all three observed
+speed targets are still missed. Four-lane water work,
+conservative gathering and f64x2 smoothing reduce identified costs, but remaining
+water/flux/reduction passes, serial droplet trajectories and model-preserving
+arithmetic remain substantial costs. Threads, GPU,
+quad/contour feature work, relaxed arithmetic and new runtime dependencies remain
+outside this session.

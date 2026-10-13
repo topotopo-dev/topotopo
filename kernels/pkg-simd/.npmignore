@@ -1,0 +1,2 @@
+# wasm-pack writes a .gitignore with "*" next to the module; npm would honour it and drop the kernels from the
+# tarball. An .npmignore in this directory takes precedence, so everything here ships.
