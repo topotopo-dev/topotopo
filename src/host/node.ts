@@ -215,7 +215,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
       // script can replace with a loop (or a getter that loops), so it happens inside the timed call. The handlers are
       // functions of this realm, so they still run in the main queue (also after a drain that settled the result).
       const res = guarded(() => {
-        const r = fn(wake);
+        const r: any = fn(wake);
         if (r && typeof r.then === 'function') {
           thenable = true;
           r.then((v: any) => { state = 1; value = v; wake(); }, (e: any) => { state = 2; value = e; wake(); });
