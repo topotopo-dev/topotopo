@@ -82,6 +82,26 @@
    "group": "architecture"
   },
   {
+   "name": "roof_hip",
+   "file": "roof_hip.json",
+   "group": "architecture"
+  },
+  {
+   "name": "window_frame",
+   "file": "window_frame.json",
+   "group": "architecture"
+  },
+  {
+   "name": "wall_segment",
+   "file": "wall_segment.json",
+   "group": "architecture"
+  },
+  {
+   "name": "house",
+   "file": "house.json",
+   "group": "architecture"
+  },
+  {
    "name": "lamp_post",
    "file": "lamp_post.json",
    "group": "props"
@@ -127,11 +147,6 @@
    "group": "architecture"
   },
   {
-   "name": "roof_hip",
-   "file": "roof_hip.json",
-   "group": "architecture"
-  },
-  {
    "name": "sandbag_wall",
    "file": "sandbag_wall.json",
    "group": "props"
@@ -164,16 +179,6 @@
   {
    "name": "tile_floor",
    "file": "tile_floor.json",
-   "group": "architecture"
-  },
-  {
-   "name": "window_frame",
-   "file": "window_frame.json",
-   "group": "architecture"
-  },
-  {
-   "name": "wall_segment",
-   "file": "wall_segment.json",
    "group": "architecture"
   }
  ]

@@ -1,0 +1,32 @@
+{
+  "description": "Nested generators: the house shelf asset (walls from wall_segment per footprint edge + roof_hip) spawned on a grid of lots, each lot varying the house's parameters from its point attributes. Edit shelf/wall_segment.json or shelf/roof_hip.json and every house changes.",
+  "vars": { "houses_x": 4, "houses_z": 3, "spacing": 16, "seed": 7 },
+  "meta": { "render": { "views": ["persp"], "azimuth": 38, "elevation": 28, "shading": "matcap" } },
+  "nodes": {
+    "lots": { "type": "point_grid", "params": { "counts": ["=houses_x", 1, "=houses_z"], "size": ["=(houses_x - 1) * spacing", 0, "=(houses_z - 1) * spacing"] } },
+    "w": { "type": "attrib_randomize", "in": ["lots"], "params": { "name": "w", "min": 6, "max": 12, "seed": "=seed" } },
+    "d": { "type": "attrib_randomize", "in": ["w"], "params": { "name": "d", "min": 5, "max": 9, "seed": "=seed + 1" } },
+    "fl": { "type": "attrib_randomize", "in": ["d"], "params": { "name": "floors", "min": 1, "max": 3.99, "seed": "=seed + 2" } },
+    "pit": { "type": "attrib_randomize", "in": ["fl"], "params": { "name": "pitch", "min": 25, "max": 45, "seed": "=seed + 3" } },
+    "yaw": { "type": "attrib_randomize", "in": ["pit"], "params": { "name": "yaw", "distribution": "choice", "values": [0, 90, 180, 270], "seed": "=seed + 4" } },
+    "houses": {
+      "type": "foreach",
+      "in": ["yaw"],
+      "params": {
+        "mode": "points",
+        "body": {
+          "nodes": {
+            "pt": { "type": "input", "params": { "index": 0 } },
+            "h": { "type": "house", "params": { "width": "=point('pt', 0, 'w')", "depth": "=point('pt', 0, 'd')", "floors": "=floor(point('pt', 0, 'floors'))", "pitch": "=point('pt', 0, 'pitch')", "door": true } },
+            "pl": { "type": "transform", "in": ["h"], "params": { "rotate": [0, "=point('pt', 0, 'yaw')", 0], "translate": ["=point('pt', 0, 'P', 0)", 0, "=point('pt', 0, 'P', 2)"] } }
+          },
+          "output": "pl"
+        }
+      }
+    },
+    "ground": { "type": "grid", "params": { "size": ["=houses_x * spacing + 10", "=houses_z * spacing + 10"], "divisions": [1, 1] } },
+    "ground_col": { "type": "color", "in": ["ground"], "params": { "color": [0.55, 0.62, 0.42] } },
+    "out": { "type": "merge", "in": ["houses", "ground_col"] }
+  },
+  "output": "out"
+}
