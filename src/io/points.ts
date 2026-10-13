@@ -12,7 +12,7 @@
 //   exporter use: Position "(X=…,Y=…,Z=…)", Rotation "(Pitch=…,Yaw=…,Roll=…)", Scale "(X=…,Y=…,Z=…)", Density,
 //   Color "(X=r,Y=g,Z=b,W=a)" (FVector4), Seed. A row struct {FVector Position; FRotator Rotation; FVector Scale;
 //   float Density; FVector4 Color; int32 Seed} imports it directly.
-// Points JSON: { format: "polyforge-points", version: 1, count, attributes: { P: { type, size, data } } }.
+// Points JSON: { format: "topotopo-points", version: 1, count, attributes: { P: { type, size, data } } }.
 //
 // Instance stream (geometry with packed prims, instances 'rows', the default): one row per packed instance instead of
 // one per point. P = anchor position, orient + scale = the instance's 3×3 decomposed (rotation · per-axis scale; a
@@ -256,7 +256,7 @@ export function instanceMeshesJSON(g: Geometry, o: ExportOptions & { meshDir?: s
     };
   });
   return JSON.stringify({
-    format: 'polyforge-instance-meshes', version: 1,
+    format: 'topotopo-instance-meshes', version: 1,
     stream: o.stream ?? null, scene: o.scene ?? null, mesh_column: 'Mesh', instances: counts.reduce((a, b) => a + b, 0),
     units: 'mesh files: metres, Y-up, mesh at its own origin (the instance transform places it); PCG CSV rows: centimetres, Unreal axes X = x, Y = z, Z = y',
     meshes,
@@ -453,12 +453,12 @@ export function exportPointsJSON(g: Geometry, o: ExportOptions = {}): string {
     }
     attributes[n] = { type: a.type, size: a.type === 'string' ? 1 : a.size, data };
   }
-  return JSON.stringify({ format: 'polyforge-points', version: 1, count: g.numPoints, ...(meshes ? { kind: 'instances', meshes } : {}), attributes });
+  return JSON.stringify({ format: 'topotopo-points', version: 1, count: g.numPoints, ...(meshes ? { kind: 'instances', meshes } : {}), attributes });
 }
 
 /** True for a parsed object that looks like a points JSON stream. */
 export function isPointsJSON(j: any): boolean {
-  return !!j && typeof j === 'object' && !Array.isArray(j) && (j.format === 'polyforge-points' || (typeof j.count === 'number' && j.attributes && typeof j.attributes === 'object' && !j.points));
+  return !!j && typeof j === 'object' && !Array.isArray(j) && (j.format === 'topotopo-points' || j.format === 'polyforge-points' || (typeof j.count === 'number' && j.attributes && typeof j.attributes === 'object' && !j.points));
 }
 
 export function importPointsJSON(j: any): Geometry {

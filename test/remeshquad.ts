@@ -269,7 +269,7 @@ try {
   }
   checks++;
   // The raw wasm-bindgen object parser must reject malformed JS, not silently coerce counts or flags.
-  const raw = await import('../kernels/pkg/polyforge_kernels.js');
+  const raw = await import('../kernels/pkg/topotopo_kernels.js');
   for (const options of [
     { target_faces: 1.5 }, { target_faces: NaN }, { target_faces: -1 }, { max_faces: 3.5 },
     { smooth_iterations: 1.5 }, { feature_angle: Infinity }, { quad_only: 'yes' }, { align_boundaries: 1 },

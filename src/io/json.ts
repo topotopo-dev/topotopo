@@ -52,7 +52,7 @@ export function geoToJSON(g: Geometry) {
   if (g.vertexGroups.size) groups.vertex = groupsToJSON(g.vertexGroups);
   if (g.edgeGroups.size) groups.edge = edgeGroupsToJSON(g.edgeGroups);
   const out: Record<string, any> = {
-    format: 'polyforge-geo',
+    format: 'topotopo-geo',
     version: 1,
     points: { count: g.numPoints, attribs: tableToJSON(g.points) },
     vertices: { count: g.numVertices, points: Array.from(g.vertexPoint), attribs: tableToJSON(g.vertices) },
@@ -91,7 +91,7 @@ export function geoToJSON(g: Geometry) {
 }
 
 export function geoFromJSON(j: any): Geometry {
-  if (j?.format !== 'polyforge-geo') throw new Error('not a polyforge-geo JSON file');
+  if (j?.format !== 'topotopo-geo' && j?.format !== 'polyforge-geo') throw new Error('not a topotopo-geo JSON file');
   const g = new Geometry();
   g.points = tableFromJSON(j.points.count, j.points.attribs);
   if (!g.points.has('P')) g.points.add('P', 'float', 3);

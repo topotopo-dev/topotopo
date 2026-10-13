@@ -187,7 +187,7 @@ function gridArg(g: GridInput): KernelGrid {
   return { dims: Uint32Array.from(g.dims), origin: array(g.origin), voxel: g.voxel, values: g.values };
 }
 
-export const kernelsWasmURL = new URL('../../kernels/pkg/polyforge_kernels_bg.wasm', import.meta.url);
+export const kernelsWasmURL = new URL('../../kernels/pkg/topotopo_kernels_bg.wasm', import.meta.url);
 let modulePromise: Promise<Kernels> | undefined;
 let loadedKernels: Kernels | undefined;
 const hosts = new WeakMap<Host, Promise<Kernels>>();
@@ -251,7 +251,7 @@ export function getLoadedKernels(): Kernels | undefined { return loadedKernels; 
 export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
   if (!modulePromise) {
     modulePromise = (async () => {
-      const wasm = await import('../../kernels/pkg/polyforge_kernels.js');
+      const wasm = await import('../../kernels/pkg/topotopo_kernels.js');
       await wasm.default({ module_or_path: bytes });
       const result: Kernels = Object.freeze({
         erode_droplet: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params: DropletErosionOptions = {}, seed: number | bigint = 0, freeze?: Float32Array | null) =>

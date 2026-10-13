@@ -27,7 +27,7 @@ import { makeTools } from '../src/mcp/tools.ts';
 import { fingerprint } from './fingerprint.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-hf-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-hf-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
 

@@ -36,7 +36,7 @@ export function importFormatFromPath(path: string): string {
   return p.slice(p.lastIndexOf('.') + 1);
 }
 
-/** JSON of any supported flavour: polyforge geometry, points stream, or Houdini .geo (a key/value array). */
+/** JSON of any supported flavour: topotopo geometry, points stream, or Houdini .geo (a key/value array). */
 function importAnyJSON(j: any, warn?: (m: string) => void): Geometry {
   if (Array.isArray(j)) return importHoudiniGeo(j, warn);
   if (isPointsJSON(j)) return importPointsJSON(j);

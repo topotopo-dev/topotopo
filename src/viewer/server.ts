@@ -21,7 +21,7 @@ const threeDir = (() => {
 
 const MIME: Record<string, string> = { '.js': 'text/javascript', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.glb': 'model/gltf-binary' };
 
-export async function startViewer(ws: Workspace, port = Number(process.env.POLYFORGE_PORT ?? 7341)): Promise<{ url: string; close: () => void }> {
+export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341)): Promise<{ url: string; close: () => void }> {
   const clients = new Set<http.ServerResponse>();
   ws.listeners.add((ev) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;

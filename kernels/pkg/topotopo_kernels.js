@@ -1,4 +1,4 @@
-/* @ts-self-types="./polyforge_kernels.d.ts" */
+/* @ts-self-types="./topotopo_kernels.d.ts" */
 
 /**
  * @param {any} g
@@ -570,7 +570,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./polyforge_kernels_bg.js": import0,
+        "./topotopo_kernels_bg.js": import0,
     };
 }
 
@@ -864,7 +864,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('polyforge_kernels_bg.wasm', import.meta.url);
+        module_or_path = new URL('topotopo_kernels_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 

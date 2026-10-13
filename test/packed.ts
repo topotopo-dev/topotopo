@@ -333,7 +333,7 @@ const SRC: Record<string, NodeSpec> = {
   valid(j, 'json round trip');
   check(fpEq(j, g), 'JSON round trip keeps the instances, sources and transforms (fingerprint)');
   const jb = new TextDecoder().decode(exportGeometry(g, 'json'));
-  check((jb.match(/"format":"polyforge-geo"/g) ?? []).length === 2, 'JSON writes the shared source once');
+  check((jb.match(/"format":"topotopo-geo"/g) ?? []).length === 2, 'JSON writes the shared source once');
   // GLB: EXT_mesh_gpu_instancing
   for (const opts of [{}, { quantize: true }, { compress: 'meshopt' as const }, { upAxis: 'z' as const }]) {
     const label = JSON.stringify(opts);

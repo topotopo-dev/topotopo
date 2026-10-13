@@ -1,4 +1,4 @@
-// Generate NOTICE: every third-party licence text that ships with or is bundled into Polyforge.
+// Generate NOTICE: every third-party licence text that ships with or is bundled into TopoTopo.
 //   node scripts/gen-notice.ts          writes NOTICE
 //   node scripts/gen-notice.ts --check  exits 1 when NOTICE is stale (part of npm test)
 //
@@ -243,7 +243,7 @@ function committedRust(): { text: string; fingerprint: string } | null {
 
 function render(deps: Dep[], optional: OptionalDep[], rust: string): string {
   const out: string[] = [];
-  out.push('Polyforge');
+  out.push('TopoTopo');
   out.push('Copyright (c) 2026 faxcorp');
   out.push('');
   out.push('This product is licensed under the Apache License, Version 2.0 (see LICENSE).');

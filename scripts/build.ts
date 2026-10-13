@@ -62,8 +62,8 @@ for (const f of js) {
 for (const [from, target] of [
   ['host/node.js', '../../shelf/index.json'],
   ['host/node.js', '../../assets/fonts/DejaVuSans.ttf'],
-  ['wasm/kernels.js', '../../kernels/pkg/polyforge_kernels_bg.wasm'],
-  ['wasm/kernels.js', '../../kernels/pkg/polyforge_kernels.js'],
+  ['wasm/kernels.js', '../../kernels/pkg/topotopo_kernels_bg.wasm'],
+  ['wasm/kernels.js', '../../kernels/pkg/topotopo_kernels.js'],
   ['host/pool.js', './worker.js'],
   ['viewer/server.js', './index.html'],
   ['index.js', './index.d.ts'],

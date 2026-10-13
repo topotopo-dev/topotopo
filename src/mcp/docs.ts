@@ -2,7 +2,7 @@
 import type { NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
 
-export const INSTRUCTIONS = `Polyforge: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
+export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
 WORKFLOW
 1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…).
@@ -68,7 +68,7 @@ SANDBOX: an expression sees only graph vars (read-only copies), frame/time/fps/t
   reference functions; any other name (process, require, globalThis, fetch, Number, JSON …) is an error, and so are
   import, \`this\` and assigning to a name. Errors name the param and the expression: param "size": expression "=…" failed: ….
   Straight-line expressions (operators, helper and Math calls) run directly; ones with functions, loops, regular
-  expressions or method calls run under the script timeout (POLYFORGE_SCRIPT_TIMEOUT_MS, default 30 s), ~0.5 ms more
+  expressions or method calls run under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s), ~0.5 ms more
   each the first time (the result is reused while the vars, time and nodes it read stay the same).
 SECURITY: a graph is code. Expressions and wrangles run sandboxed with a timeout on Node, but can still allocate
   memory and burn CPU until the timeout; do not cook graphs from untrusted sources in a privileged process.`,
@@ -533,8 +533,8 @@ export {path:"exports/thing.glb"} — format from the extension:
   glb / gltf    glTF 2.0 via gltf-transform (recommended for Unreal, Blender, web)
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)
   csv           point stream, one row per point: P.x,P.y,P.z,N.x,…,pscale,name (strings quoted); prims are ignored
-  points.json   {format:"polyforge-points", count, attributes:{P:{type,size,data}}} (same schema on import)
-  obj usda ply stl json (lossless polyforge)
+  points.json   {format:"topotopo-points", count, attributes:{P:{type,size,data}}} (same schema on import)
+  obj usda ply stl json (lossless topotopo)
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
@@ -604,7 +604,7 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
   EXT_mesh_gpu_instancing as packed prims with their _NAME instance attributes on the anchors, instancing:"expand" for
   geometry; names → "name", materials → "material" + table with texture paths), geo and uncompressed bgeo
   (Houdini; embedded packed geometry → packed prims; not .bgeo.sc; volumes and packed disk prims skipped), csv (P.x | x,y,z | P[x] | Unreal Position.X or struct cells), points.json,
-  json (polyforge, points stream or Houdini geo, detected). up_axis "z" converts Z-up sources.`,
+  json (topotopo, points stream or Houdini geo, detected). up_axis "z" converts Z-up sources.`,
 
   verify: `VERIFY YOUR WORK (cheap checks before reaching for a render)
 1. ASSERT IN THE GRAPH: an assert node passes geometry through and fails the build/edit when an invariant breaks,

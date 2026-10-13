@@ -147,7 +147,7 @@ for (const method of ['dual_contouring', 'marching_cubes']) {
   check(!mesh.points.has('Cd') && !mesh.prims.has('material') && !mesh.detail.has('source_tag') && !mesh.detail.has('materials'), `${method} deliberately drops all source attribute tables`);
 }
 // Exercise the raw generated exports as well as the TS convenience wrapper.
-const raw = await import('../kernels/pkg/polyforge_kernels.js');
+const raw = await import('../kernels/pkg/topotopo_kernels.js');
 const rawGrid = { dims: new Uint32Array([2, 2, 2]), origin: new Float64Array(3), voxel: 1, values: new Float32Array(8) };
 for (const invalid of [
   { ...rawGrid, dims: [2, 2, 2] }, { ...rawGrid, origin: [0, 0, 0] }, { ...rawGrid, values: new Float64Array(8) },

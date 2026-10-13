@@ -7,10 +7,10 @@
 //   POSITION · NORMAL (N, else computed) · TEXCOORD_0/1 from uv/uv2 (V flipped) · COLOR_0 from Cd (+Alpha → VEC4).
 //   Custom attributes: every other numeric point/vertex attribute of size 1–4 becomes `_NAME` (upper-cased; float,
 //   or the smallest integer type that holds an int attribute). The original names and types are kept in mesh
-//   extras (polyforge.attributes), so imports restore them exactly. POINTS always carry pscale as `_PSCALE`.
+//   extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale as `_PSCALE`.
 //   Materials: the prim "material" attribute names a material of the detail table "materials" (core/materials.ts).
 //   Vertex colours win: a primitive with Cd gets baseColorFactor white × COLOR_0, the material supplies the PBR
-//   scalars; the original material is kept in material extras (polyforge.material) for lossless re-import.
+//   scalars; the original material is kept in material extras (topotopo.material) for lossless re-import.
 //   Options: quantize (KHR_mesh_quantization), compress 'meshopt' (EXT_meshopt_compression, implies quantize),
 //   compress 'draco' (KHR_draco_mesh_compression, only when the optional draco3dgltf package is installed).
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
@@ -21,7 +21,7 @@
 //   of size 1–4 → _NAME, single strings → _NAME indices into a table in the node's extras; all as 32-bit floats (exact
 //   for integers below 2^24; 1- and 2-byte components break EXT_meshopt_compression's 4-byte instance strides); the
 //   transform inputs (N, up, orient, rot, scale, trans, pivot) are folded into TRS and skipped.
-//   Node extras (polyforge.instanceAttributes) keep names, classes, types and string tables for re-import.
+//   Node extras (topotopo.instanceAttributes) keep names, classes, types and string tables for re-import.
 //   Node and mesh names are packedSourceNames() (the source's prim "name", else source_<i>), as in the instance stream.
 //   Textures: the material table's texture paths (base colour, normal, roughness) are read with options.readFile and
 //   embedded (PNG / JPEG) as baseColorTexture, normalTexture and metallicRoughnessTexture (roughness = green channel);
@@ -36,7 +36,7 @@
 //   relative to the file. Mesh/node names → prim "name", materials → prim "material" + table, COLOR_0 → Cd/Alpha,
 //   TEXCOORD_0/1 → uv/uv2, custom `_X` → attributes, instance `_X` accessors → anchor attributes. Texture images are
 //   not decoded: their paths (URI resolved against the file, or "embedded:<name>" for images inside a GLB) go into the
-//   material table's textures entries; files written by polyforge restore the original paths from material extras,
+//   material table's textures entries; files written by topotopo restore the original paths from material extras,
 //   and their "image:<name>" textures are decoded back into image volumes (8-bit precision).
 import { Document, GLB_BUFFER, MathUtils, PlatformIO, Primitive } from '@gltf-transform/core';
 import type { Accessor, JSONDocument, Material as GMaterial, Node as GNode, Texture } from '@gltf-transform/core';
@@ -315,7 +315,7 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   } else m.setEmissiveFactor([mat.emissive[0], mat.emissive[1], mat.emissive[2]]);
   if (mat.alpha < 1 || blend) m.setAlphaMode('BLEND');
   if (mat.unlit) m.setExtension('KHR_materials_unlit', st.doc.createExtension(KHRMaterialsUnlit).createUnlit());
-  m.setExtras({ polyforge: isDefault ? { default: true } : { material: mat } });
+  m.setExtras({ topotopo: isDefault ? { default: true } : { material: mat } });
   st.cache.set(key, m);
   return m;
 }
@@ -332,7 +332,7 @@ const rgbAllOnes = (d: number[], size: number) => {
 export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   if (hasSplinesDeep(g)) g = splinesToPolylinesDeep(g).geo; // Bezier/NURBS prims (also in packed sources) as polylines
   const doc = new Document();
-  doc.getRoot().getAsset().generator = 'polyforge';
+  doc.getRoot().getAsset().generator = 'topotopo';
   const buffer = doc.createBuffer();
   const scene = doc.createScene('scene');
   doc.getRoot().setDefaultScene(scene);
@@ -536,7 +536,7 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
           im.setAttribute(ia.sem, doc.createAccessor().setArray(vals).setType(TYPES[ia.size - 1]).setBuffer(buffer));
         }
         node.setExtension('EXT_mesh_gpu_instancing', im);
-        if (iattrs.length) node.setExtras({ polyforge: { instanceAttributes: info } });
+        if (iattrs.length) node.setExtras({ topotopo: { instanceAttributes: info } });
       },
     });
   }
@@ -668,7 +668,7 @@ function writeMesh(doc: Document, buffer: ReturnType<Document['createBuffer']>, 
     if (out.material) prim.setMaterial(out.material);
     mesh.addPrimitive(prim);
   }
-  if (Object.keys(info).length) mesh.setExtras({ polyforge: { attributes: info } });
+  if (Object.keys(info).length) mesh.setExtras({ topotopo: { attributes: info } });
   scene.addChild(node);
   return { node, center, extent };
 }
@@ -790,9 +790,9 @@ function texturePathOf(t: Texture | null, base: string, index: (t: Texture) => n
   return `embedded:${t.getName() || (uri && !uri.startsWith('data:') ? uri : `image_${index(t)}`)}`;
 }
 
-/** Material table entry from a glTF material (lossless for polyforge files via extras). */
+/** Material table entry from a glTF material (lossless for topotopo files via extras). */
 function materialEntry(m: GMaterial, base = '', index: (t: Texture) => number = () => 0): Material {
-  const ex = (m.getExtras() as any)?.polyforge?.material;
+  const ex = (m.getExtras() as any)?.topotopo?.material;
   if (ex) return normalizeMaterial(ex);
   const bc = m.getBaseColorFactor(), em = m.getEmissiveFactor();
   const strength = (m.getExtension('KHR_materials_emissive_strength') as EmissiveStrength | null)?.getEmissiveStrength() ?? 1;
@@ -910,7 +910,7 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
     if (!m) return null;
     let n = matNames.get(m);
     if (n !== undefined) return n;
-    if ((m.getExtras() as any)?.polyforge?.default) n = null;
+    if ((m.getExtras() as any)?.topotopo?.default) n = null;
     else {
       n = m.getName() || `material_${root.listMaterials().indexOf(m)}`;
       if (!(n in table)) table[n] = materialEntry(m, base, texIndex);
@@ -928,7 +928,7 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
     const world = Float64Array.from(node.getWorldMatrix()) as unknown as Mat4;
     const inst = node.getExtension('EXT_mesh_gpu_instancing') as InstancedMesh | null;
     const mats = inst ? instanceMatrices(inst).map((m) => m4mul(world, m)) : [world];
-    const info = ((mesh.getExtras() as any)?.polyforge?.attributes ?? {}) as Record<string, CustomInfo>;
+    const info = ((mesh.getExtras() as any)?.topotopo?.attributes ?? {}) as Record<string, CustomInfo>;
     const label = node.getName() || mesh.getName();
     if (inst && instancing === 'packed') {
       // one packed source per mesh (and node name): the mesh in its local space, the instances as packed prims
@@ -951,7 +951,7 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
         byLabel.set(label, src);
       }
       const part = packedFromMatrices(src, mats);
-      applyInstanceAttribs(part, inst, ((node.getExtras() as any)?.polyforge?.instanceAttributes ?? {}) as Record<string, InstanceAttribInfo>, warn);
+      applyInstanceAttribs(part, inst, ((node.getExtras() as any)?.topotopo?.instanceAttributes ?? {}) as Record<string, InstanceAttribInfo>, warn);
       parts.push(part);
       return;
     }
@@ -975,7 +975,7 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
   if (instanced) warn('EXT_mesh_gpu_instancing instances were expanded into geometry');
   const out = Geometry.merge(parts);
   if (Object.keys(table).length) writeMaterials(out, table);
-  // "image:<name>" textures (polyforge files keep the paths in material extras): decode the embedded PNGs back into
+  // "image:<name>" textures (topotopo files keep the paths in material extras): decode the embedded PNGs back into
   // image volumes, so a re-export writes them again
   const images = new Map<string, Image>();
   for (const [gm, n] of matNames) {

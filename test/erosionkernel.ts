@@ -159,7 +159,7 @@ try {
   assert.throws(() => kernels.flow_accumulation(flat, 9.1, 9, 1)); checks++;
   assert.throws(() => kernels.thermal_erode(flat, null, 9, 9, 1, 0.5, 0.2, 1.5)); checks++;
   // Check generated WASM directly too: malformed options must return a validation error, never a trap.
-  const raw = await import('../kernels/pkg/polyforge_kernels.js'), empty = new Float32Array(0);
+  const raw = await import('../kernels/pkg/topotopo_kernels.js'), empty = new Float32Array(0);
   const badRawCalls: Array<() => unknown> = [
     () => raw.erode_droplet(flat, empty, empty, 9, 9, 1, null, 0n),
     () => raw.erode_droplet(flat, empty, empty, 9, 9, 1, { iterations: 1.5 }, 0n),

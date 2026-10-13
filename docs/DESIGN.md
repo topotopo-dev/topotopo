@@ -1,4 +1,4 @@
-# Polyforge design notes
+# TopoTopo design notes
 
 ## The question: browser, or a desktop app?
 
@@ -239,7 +239,7 @@ branches overlap where a cook awaits: a chunked kernel on the pool, file I/O. Tw
   reached (it stops at a node's first failed input or reference); results that shared an in-flight cook swap roles so
   the first one in that order is the one that cooked. Results, errors and warnings are therefore the same with and
   without the pool (test/pool.ts compares them; the golden and property layers pass in both modes).
-Without a pool (`POLYFORGE_WORKERS=0`) inputs are pulled one at a time, exactly as before.
+Without a pool (`TOPOTOPO_WORKERS=0`) inputs are pulled one at a time, exactly as before.
 
 **Time.** A cook happens at a frame (`CookOptions.frame`/`time`/`fps`; frame 1 = time 0, 24 fps by default), exposed
 to nodes as `ctx.frame`, `ctx.time`, `ctx.fps`, `ctx.timeInc`. Time enters a signature only for nodes that depend on
@@ -373,11 +373,11 @@ there only the attribute arrays travel, the workers are already running, and the
 worker threads. A `PoolTask` names a kernel and carries typed arrays (shared, copied, or moved with `transfer: true`), a
 small JSON argument, an element range, optional `shared` read-only data under a content key, and an optional
 `timeoutMs`. The Node implementation (`src/host/pool.ts`, workers load `src/host/worker.ts`):
-- `POLYFORGE_WORKERS` threads (default `availableParallelism() - 1`; `0` = no pool, everything as before). Every host
+- `TOPOTOPO_WORKERS` threads (default `availableParallelism() - 1`; `0` = no pool, everything as before). Every host
   created with the environment's settings shares one pool; `createNodeHost({ workers })` gives a host its own.
 - Lazy: no thread exists before the first task, and a cold pool runs that first job on the calling thread while its
   threads start in the background (~0.3 s for 15 threads, mostly module loading), so a one-shot CLI cook is not
-  slower. Threads stop after `POLYFORGE_WORKERS_IDLE_MS` (30 s) idle and keep the process alive only while busy.
+  slower. Threads stop after `TOPOTOPO_WORKERS_IDLE_MS` (30 s) idle and keep the process alive only while busy.
 - One task per worker at a time. A kernel error rejects the task with the kernel's name ("kernel "x" failed: …"); a
   wrangle error comes back as the same message the main thread would give (with the snippet line). A worker that
   crashes, or runs past the task's `timeoutMs` (it is terminated), fails only its task and is replaced on demand.
@@ -397,7 +397,7 @@ promise, so a node using it stays synchronous). Otherwise inputs, `outputs` (cop
 values) and `results` (fresh arrays: zeroed) are copied once into SharedArrayBuffers, the range is split into
 contiguous chunks (default one per thread), and when every chunk has finished the outputs are copied back. The error of
 the first failing chunk in element order is the node's error. `Engine.poolStats` counts pool and serial runs.
-`POLYFORGE_POOL_MIN` overrides every threshold (`1` forces the pool: `npm run test:pool` runs the golden layer so).
+`TOPOTOPO_POOL_MIN` overrides every threshold (`1` forces the pool: `npm run test:pool` runs the golden layer so).
 
 What runs in chunks:
 | node | kernel | notes |
@@ -421,7 +421,7 @@ Not in chunks, and why:
 - `script` (whole geometry, async `lib.run`, engine cache), prim/vertex/detail wrangles, wrangles that read other
   elements or edit the geometry, and every node without a ported kernel run on the main thread as before.
 
-Measured (i7-10700K, 8 cores / 16 threads; serial = `POLYFORGE_WORKERS=0`; the node's cook time, best of 5 after a
+Measured (i7-10700K, 8 cores / 16 threads; serial = `TOPOTOPO_WORKERS=0`; the node's cook time, best of 5 after a
 warm-up, two rounds; other jobs shared the machine, so ±10%):
 
 | case | serial | 7 workers | 15 workers (default) | the serial remainder |

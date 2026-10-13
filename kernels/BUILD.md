@@ -72,7 +72,7 @@ so a SIMD-capable module is not passed to the scalar optimizer configuration. To
 optimize that optional artifact manually, enable SIMD in wasm-opt. It is not the
 checked-in default module. Do not enable relaxed SIMD, fast-math or FMA.
 
-Commit `pkg/polyforge_kernels.js`, `polyforge_kernels_bg.wasm`, both `.d.ts` files,
+Commit `pkg/topotopo_kernels.js`, `topotopo_kernels_bg.wasm`, both `.d.ts` files,
 `package.json`, `README.md` and `LICENSE`. `wasm-pack` writes a `pkg/.gitignore` containing
 `*`; add generated files with explicit `git add -f <paths>` the first time. Once tracked,
 subsequent builds update them normally. Never commit `target/`.

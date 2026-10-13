@@ -340,7 +340,7 @@ export function graphIsEnvDependent(graph: GraphSpec): boolean {
  * (the `file` node fixture). PARAMS.file.path is set to that absolute path.
  */
 export async function createFixtureEngine(): Promise<{ engine: Engine; tmp: string; objPath: string }> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-test-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-test-'));
   const engine = new Engine(createNodeHost({ baseDir: tmp }));
   await engine.init();
   const objPath = path.join(tmp, 'cube.obj');

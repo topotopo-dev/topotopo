@@ -7,13 +7,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'polyforge-mcp-'));
+const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-'));
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [path.join(root, 'src/mcp/server.ts'), '--workspace', wsDir],
   stderr: 'pipe',
 });
-const client = new Client({ name: 'polyforge-test', version: '0.0.1' });
+const client = new Client({ name: 'topotopo-test', version: '0.0.1' });
 await client.connect(transport);
 
 let failures = 0;
@@ -26,7 +26,7 @@ const call = async (name: string, args: any) => {
 };
 
 const info = client.getServerVersion();
-check(info?.name === 'polyforge', `server name ${info?.name}`);
+check(info?.name === 'topotopo', `server name ${info?.name}`);
 check((client.getInstructions() ?? '').includes('WORKFLOW'), 'server instructions present');
 const { tools } = await client.listTools();
 check(tools.length >= 9, `tools: ${tools.map((t) => t.name).join(', ')}`);

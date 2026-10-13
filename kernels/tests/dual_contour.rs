@@ -1,5 +1,5 @@
-use polyforge_kernels::dual_contour::{DualMesh, dual_contour};
-use polyforge_kernels::sdf::Grid;
+use topotopo_kernels::dual_contour::{DualMesh, dual_contour};
+use topotopo_kernels::sdf::Grid;
 use std::collections::{BTreeMap, BTreeSet};
 
 fn field(n: u32, voxel: f64, origin: [f64; 3], sample: impl Fn(f64, f64, f64) -> f64) -> Grid {

@@ -1,4 +1,4 @@
-Polyforge
+TopoTopo
 Copyright (c) 2026 faxcorp
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
@@ -4511,7 +4511,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 Rust crates compiled into the WebAssembly kernels (kernels/pkg)
 ---------------------------------------------------------------
-Resolved by cargo metadata for wasm32-unknown-unknown from kernels/Cargo.lock (sha256 2fb9c83a4cc33715).
+Resolved by cargo metadata for wasm32-unknown-unknown from kernels/Cargo.lock (sha256 48ed57b29ffeba2e).
 "build-time" marks proc-macro crates and build-script dependencies: they run while the module is compiled and
 are not linked into it. Identical licence texts are printed once, followed by the crates that carry them.
 

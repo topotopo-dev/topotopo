@@ -1,20 +1,20 @@
 {
-  "name": "polyforge-kernels",
+  "name": "topotopo-kernels",
   "type": "module",
-  "description": "Deterministic geometry kernels for Polyforge",
+  "description": "Deterministic geometry kernels for TopoTopo",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/topotopo-dev/polyforge"
+    "url": "https://github.com/topotopo-dev/topotopo"
   },
   "files": [
-    "polyforge_kernels_bg.wasm",
-    "polyforge_kernels.js",
-    "polyforge_kernels.d.ts"
+    "topotopo_kernels_bg.wasm",
+    "topotopo_kernels.js",
+    "topotopo_kernels.d.ts"
   ],
-  "main": "polyforge_kernels.js",
-  "types": "polyforge_kernels.d.ts",
+  "main": "topotopo_kernels.js",
+  "types": "topotopo_kernels.d.ts",
   "sideEffects": [
     "./snippets/*"
   ]

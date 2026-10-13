@@ -46,7 +46,7 @@ export interface NodeHostOptions {
   /** shelf directory (default SHELF_DIR), or false for an engine without the shelf */
   shelf?: string | false;
   /**
-   * Worker threads for Host.pool. Default: POLYFORGE_WORKERS (availableParallelism() - 1 when unset), shared by every
+   * Worker threads for Host.pool. Default: TOPOTOPO_WORKERS (availableParallelism() - 1 when unset), shared by every
    * host of the process; a number gives this host its own pool (0 = none).
    */
   workers?: number;
@@ -85,7 +85,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   // runInContext call and inside its timeout: continuations of awaits in script code can only run there, so
   // `await 0; while (true) {}` is stopped like a synchronous loop (see runGuardedAsync).
   const fast = (vm as any).constants?.DONT_CONTEXTIFY;
-  const ctxOpts = { name: 'polyforge-scripts', microtaskMode: 'afterEvaluate' as const };
+  const ctxOpts = { name: 'topotopo-scripts', microtaskMode: 'afterEvaluate' as const };
   const ctx: any = fast ? vm.createContext(fast, ctxOpts) : vm.createContext({}, ctxOpts);
   const realmGlobal = vm.runInContext('globalThis', ctx);
   realmGlobal.__hostApi = hostApi;
@@ -123,7 +123,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   let exprRealm: { ctx: any; setJob: (job: (() => void) | undefined) => void } | null = null;
   const exprCtx = () => {
     if (!exprRealm) {
-      const opts = { name: 'polyforge-expressions', microtaskMode: 'afterEvaluate' as const };
+      const opts = { name: 'topotopo-expressions', microtaskMode: 'afterEvaluate' as const };
       const ectx: any = fast ? vm.createContext(fast, opts) : vm.createContext({}, opts);
       const setJob = vm.runInContext('const __exprJob = { f: undefined };\n(f) => { __exprJob.f = f; }', ectx);
       realmPromiseProtos.add(vm.runInContext('Promise.prototype', ectx));

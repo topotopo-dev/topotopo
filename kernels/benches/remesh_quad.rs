@@ -1,4 +1,4 @@
-use polyforge_kernels::remesh_quad::{RemeshOptions, remesh_quad};
+use topotopo_kernels::remesh_quad::{RemeshOptions, remesh_quad};
 use std::{hint::black_box, time::Instant};
 
 fn main() {

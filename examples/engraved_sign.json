@@ -1,6 +1,6 @@
 {
   "description": "Rounded slab with text engraved by a boolean subtract, on a smoothed base.",
-  "vars": { "label": "POLYFORGE" },
+  "vars": { "label": "TOPOTOPO" },
   "nodes": {
     "slab_shape": {
       "type": "shape2d",

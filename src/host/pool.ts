@@ -1,9 +1,9 @@
 // Node worker pool (worker_threads) behind Host.pool: runs registered kernels (src/core/kernels.ts, plus the
 // wrangle kernel in src/host/worker.ts) on typed arrays.
 //
-//   POLYFORGE_WORKERS         number of worker threads (default: availableParallelism() - 1; 0 disables the pool)
-//   POLYFORGE_WORKERS_IDLE_MS idle time after which a worker stops (default 30000)
-//   POLYFORGE_POOL_MIN        overrides every kernel's size threshold (tests force the pool with 1)
+//   TOPOTOPO_WORKERS         number of worker threads (default: availableParallelism() - 1; 0 disables the pool)
+//   TOPOTOPO_WORKERS_IDLE_MS idle time after which a worker stops (default 30000)
+//   TOPOTOPO_POOL_MIN        overrides every kernel's size threshold (tests force the pool with 1)
 //
 // Workers start on demand (no thread exists until the first task), one task each at a time. Idle workers do not
 // keep the process alive (unref) and stop after the idle time. A kernel error rejects its task with the kernel's
@@ -21,9 +21,9 @@ export interface NodePoolOptions {
   workerUrl?: URL;
 }
 
-/** POLYFORGE_WORKERS → worker count (default: one less than the available parallelism; 0 disables). */
+/** TOPOTOPO_WORKERS → worker count (default: one less than the available parallelism; 0 disables). */
 export function workersFromEnv(env: Record<string, string | undefined> = process.env): number {
-  const v = env.POLYFORGE_WORKERS;
+  const v = env.TOPOTOPO_WORKERS;
   if (v === undefined || v.trim() === '') {
     const n = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
     return Math.max(0, n - 1);
@@ -161,7 +161,7 @@ class NodeWorkerPool implements WorkerPool {
   }
 
   private spawn() {
-    const worker = new Worker(this.url, { name: 'polyforge-kernels' });
+    const worker = new Worker(this.url, { name: 'topotopo-kernels' });
     const slot: Slot = { worker, ready: false, busy: null, shared: new Set() };
     this.slots.push(slot);
     this.counters.started++;
@@ -292,8 +292,8 @@ export function createNodePool(o: NodePoolOptions): WorkerPool | undefined {
   return o.size > 0 ? new NodeWorkerPool(o) : undefined;
 }
 
-/** Pool settings from the environment (POLYFORGE_WORKERS, POLYFORGE_WORKERS_IDLE_MS, POLYFORGE_POOL_MIN). */
+/** Pool settings from the environment (TOPOTOPO_WORKERS, TOPOTOPO_WORKERS_IDLE_MS, TOPOTOPO_POOL_MIN). */
 export function poolOptionsFromEnv(env: Record<string, string | undefined> = process.env): NodePoolOptions {
   const num = (v: string | undefined) => (v !== undefined && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : undefined);
-  return { size: workersFromEnv(env), idleMs: num(env.POLYFORGE_WORKERS_IDLE_MS), minElements: num(env.POLYFORGE_POOL_MIN) };
+  return { size: workersFromEnv(env), idleMs: num(env.TOPOTOPO_WORKERS_IDLE_MS), minElements: num(env.TOPOTOPO_POOL_MIN) };
 }

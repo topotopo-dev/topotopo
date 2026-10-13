@@ -1,5 +1,5 @@
 {
-  "name": "polyforge",
+  "name": "topotopo",
   "version": "0.1.0",
   "description": "A procedural geometry engine: Houdini-style node graphs, headless, deterministic, exports to Unreal, Blender and Houdini",
   "main": "dist/index.js",
@@ -16,7 +16,8 @@
     }
   },
   "bin": {
-    "polyforge": "dist/cli.js"
+    "topotopo": "dist/cli.js",
+    "topo": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -37,7 +38,7 @@
     "preview": "node scripts/preview.ts --examples",
     "cook": "node src/cli.ts",
     "test": "node test/smoke.ts && node test/golden.ts && node test/property.ts && node test/fuzz.ts && node test/docs.ts && node test/examples.ts && node scripts/gen-notice.ts --check && node test/io.ts && node test/interop.ts && node test/mcp.ts && node test/engine.ts && node test/topology.ts && node test/deform.ts && node test/arrays.ts && node test/bugs.ts && node test/uv.ts && node test/polyedit.ts && node test/bevel.ts && node test/measure.ts && node test/render.ts && node test/packed.ts && node test/heightfield.ts && node test/remesh.ts && node test/pcg.ts && node test/splines.ts && node test/shelf.ts && node test/textures.ts && node test/pool.ts && node test/kernels.ts && node test/sdfgrid.ts && node test/remeshquad.ts && node test/erosionkernel.ts",
-    "kernels:build": "wasm-pack build kernels --target web --release",
+    "kernels:build": "wasm-pack build kernels --target web --release && node -e \"require('fs').rmSync('kernels/pkg/.gitignore',{force:true})\"",
     "test:kernels": "node test/kernels.ts && node test/sdfgrid.ts && node test/remeshquad.ts && node test/erosionkernel.ts",
     "test:remeshquad": "node test/remeshquad.ts",
     "test:erosionkernel": "node test/erosionkernel.ts",
@@ -68,10 +69,16 @@
   "keywords": [
     "procedural",
     "geometry",
-    "mcp",
     "houdini",
-    "sop",
-    "llm"
+    "pcg",
+    "unreal",
+    "blender",
+    "gltf",
+    "usd",
+    "mcp",
+    "node-graph",
+    "terrain",
+    "instancing"
   ],
   "license": "Apache-2.0",
   "type": "module",
@@ -97,5 +104,14 @@
   },
   "engines": {
     "node": ">=22.18"
-  }
+  },
+  "homepage": "https://topotopo.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/topotopo-dev/topotopo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/topotopo-dev/topotopo/issues"
+  },
+  "author": "faxcorp <hello@topotopo.dev>"
 }
