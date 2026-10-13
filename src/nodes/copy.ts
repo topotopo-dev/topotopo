@@ -8,7 +8,7 @@ import { connectivity, primNormals, triangulate } from '../core/topology.ts';
 import { composePackedXforms } from '../core/packed.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { TriSurface, elementSeed } from '../core/pcg.ts';
-import { minDistanceSelectWith, relaxOnSurface, relaxSpacing, relaxWeight, sampleEliminate, surfaceCandidates } from '../core/scatter.ts';
+import { minDistanceSelectWith, relaxOnSurface, relaxSpacing, relaxWeight, sampleEliminate, scatterAutoUsesJs, surfaceCandidates } from '../core/scatter.ts';
 import { lookAtBasis, m4apply, m4applyDir, m4basis, m4euler, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate, normalize, qAxisAngle, qFromMat, qMul, qNormalize } from '../core/math.ts';
 import type { Mat4, Quat, Vec3 } from '../core/math.ts';
 import { P, mask } from './util.ts';
@@ -201,7 +201,7 @@ defineNode({
     density: { type: 'float', default: 0, min: 0, desc: 'points per unit area/length/volume (overrides count when > 0)' },
     mode: { type: 'enum', options: ['auto', 'surface', 'curve', 'volume'], default: 'auto', desc: 'auto = surface if polygons, curve if only polylines' },
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing via sample elimination' },
-    backend: { type: 'enum', options: ['auto', 'kernel', 'js'], default: 'auto', desc: 'auto uses WASM only when already loaded, otherwise js; kernel loads WASM for elimination, distance rejection and surface relaxation' },
+    backend: { type: 'enum', options: ['auto', 'kernel', 'js'], default: 'auto', desc: 'auto selects loaded WASM or parallel js per stage and workload, otherwise js; kernel loads WASM for elimination, distance rejection and surface relaxation' },
     density_attrib: { type: 'string', default: '', desc: 'point, vertex or prim float attribute (≥ 0) scaling the local density (e.g. a noise mask; 2 = twice as many points as 1)', aliases: ['densityattrib', 'density_attribute'] },
     seed: P.seed(),
     group: P.group('prim'),
@@ -234,6 +234,12 @@ defineNode({
       try { kernels = await loadHostKernels(engine.host); }
       catch (error) { throw new NodeError(`scatter: kernel backend could not be loaded: ${error instanceof Error ? error.message : String(error)}`, 'Build or install the kernels with npm run kernels:build, or use backend js.'); }
     } else if (p.backend === 'auto') kernels = getLoadedKernels();
+    const pool = engine.host.pool;
+    // Capture cold-pool state before candidate sampling can start its threads.
+    const workers = pool && typeof SharedArrayBuffer !== 'undefined' ? Math.min(pool.size, pool.threads) : 0;
+    const autoJs = (stage: 'eliminate' | 'relax', count: number, varying = false) => p.backend === 'auto' &&
+      scatterAutoUsesJs(stage, count, varying,
+        count >= Math.max(1, pool?.minElements ?? (stage === 'eliminate' ? 32768 : 2048)) ? workers : 0);
     const g = input(0);
     const r = rng(p.seed + 0.5);
     const sel = mask(g, 'prim', p.group);
@@ -249,10 +255,10 @@ defineNode({
     const extra = md > 0 || cap > 0;
     const canSelectKernel = (pos: Float64Array) => !!kernels && (p.backend !== 'auto' || pos.length / 3 <= SCATTER_KERNEL_MAX_POINTS);
     const eliminate = (pos: Float64Array, target: number, radius: number, scale?: Float64Array) => {
-      if (!canSelectKernel(pos)) return sampleEliminate(pos, target, radius, scale, parallelMap);
-      const pool = engine.host.pool;
+      if (!canSelectKernel(pos) || autoJs('eliminate', pos.length / 3, !!scale))
+        return sampleEliminate(pos, target, radius, scale, parallelMap);
       // Whole-stage elimination stays serial. A warmed worker was faster for large
-      // jobs with cloned inputs; preserve the candidate arrays for interpolation.
+      // jobs; shared surface inputs also remain available for interpolation.
       if (pool && pool.size > 0 && pool.threads > 0 && pos.length / 3 >= Math.max(1, pool.minElements ?? 1_000_000)) {
         return pool.run<PoolResult<Int32Array>>({ kernel: 'scatter_wasm_eliminate', args: { target, rmax: radius },
           range: [0, pos.length / 3], arrays: scale ? { pos, scale } : { pos } }).then(result => {
@@ -396,7 +402,8 @@ defineNode({
         const spacing = new Float64Array(n);
         for (let i = 0; i < n; i++) spacing[i] = relaxSpacing({ ...base, smax: 0 }, cw, RT[i], RW[i * 3], RW[i * 3 + 1], RW[i * 3 + 2]);
         const surface = new TriSurface(g, tris);
-        if (kernels && (p.backend !== 'auto' || (n <= SCATTER_RELAX_MAX_POINTS && surface.numTris <= SCATTER_RELAX_MAX_POINTS))) {
+        if (kernels && !autoJs('relax', n) &&
+          (p.backend !== 'auto' || (n <= SCATTER_RELAX_MAX_POINTS && surface.numTris <= SCATTER_RELAX_MAX_POINTS))) {
           const result = kernels.scatter_relax(RP, spacing, RT, RW, surface.arrays(), p.relax_iterations, base, cw ?? undefined);
           RP.set(result.positions); spacing.set(result.spacing); RT.set(result.triangles); RW.set(result.barycentrics);
         } else await relaxOnSurface(surface, RP, spacing, RT, RW, p.relax_iterations, base, cw, parallelMap);

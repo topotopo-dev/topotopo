@@ -1392,3 +1392,432 @@ Remaining misses: 100k uniform <0.5 s, masked <1 s, and 1M elimination <1.5 s;
 hard r_min is an explicit rejection contract rather than a WSE guarantee;
 full cross-platform bit identity remains unverified. Current main was merged
 before the final gates. No push was performed.
+# Session 13 (K-10b): scatter speed and measured auto selection
+
+## Measurement conditions and scope
+
+Measured on Windows x64, Node v24.14.0, Intel i7-10700K at 3.80 GHz, 16 logical
+processors. The default pool has 15 workers; four workers also reproduce session
+12's comparison. No other Node, Cargo, rustc, build or test jobs from this
+repository ran during timed measurements; collaborating agents held CPU-heavy
+commands. Process audits are saved under `out/session13/`; the Codex launcher
+was excluded. Unrelated user applications and MCP services remained open. Total
+host CPU samples before the optimized profile were 3.8-8.3%, and before the first
+final assertion 19.4-24.7%. Thus the repository was idle apart from the benchmark,
+but the operating system was not completely quiescent.
+
+Acceptance uses ordinary release SIMD packages. Separate profile builds provide
+the stage breakdown and are replaced by `npm run kernels:build` before backend
+comparisons. Baseline and optimized stage profiles are separate runs, so
+scheduling, allocator state and code layout can affect their deltas. These are
+machine-specific results; they do not establish a crossover on every CPU, mask
+distribution or custom pool configuration.
+
+Initial same-session baseline medians (three samples, four workers) were 4767.0
+ms for direct 1M kernel elimination, 1650.3 ms for uniform 100k kernel scatter,
+2884.6 ms for masked kernel scatter versus 2190.8 ms parallel JS, and 1247.7 ms
+for projected 50k kernel scatter. Session 12 reported historical best times;
+those must not be presented as like-for-like median baselines.
+
+## Final auto rule
+
+`auto` uses an already-loaded WASM module. Without one it retains the JS path;
+explicit `kernel` loads WASM, and explicit `js` bypasses the rule. The benchmark
+preloads WASM so it tests the loaded-module auto decision.
+
+The following inclusive thresholds select parallel JS for an individual stage;
+other eligible stages retain WASM:
+
+| Stage | Candidate or point count | Effective workers |
+|---|---:|---:|
+| Adaptive elimination (density-dependent spacing) | >=200,000 candidates | >=3 |
+| Adaptive elimination | >=500,000 candidates | 2 |
+| Uniform elimination | >=500,000 candidates | >=4 |
+| Uniform elimination | >=250,000 candidates | >=8 |
+| Projected relaxation | >=50,000 retained points | >=3 |
+
+Minimum-distance rejection stays in WASM when eligible, independently of the
+elimination choice. This permits a mixed path, such as JS elimination followed
+by WASM minimum-distance selection. Existing WASM size limits and JS fallbacks
+remain in effect.
+
+Effective workers are captured before candidate sampling can start a cold pool:
+`min(pool.size, pool.threads)`. A missing/cold pool, unavailable
+`SharedArrayBuffer`, or a stage below its pool threshold contributes zero.
+The normal parallel eligibility thresholds are 32,768 candidates for elimination
+and 2,048 points for relaxation; a host's `pool.minElements` override takes
+precedence. Capturing actual started slots avoids selecting a parallel policy
+from configured capacity alone.
+
+Large surface-candidate and existing shared intermediate arrays use
+`SharedArrayBuffer` where available, avoiding repeated preparation/copy-back
+between stages. The WASM heap still receives its ABI copy. Whole WASM elimination
+retains the existing started-pool threshold of 1M candidates (or the explicit
+pool threshold override); the 500k placement experiment below did not justify
+lowering it.
+
+## Crossover calibration
+
+These are whole scatter-node medians, with input-node cooks excluded.
+The relaxed surface cases generate five candidates per requested point.
+The preliminary adaptive sweep used three timed rounds; the final 200k
+three-worker boundary check used six balanced rounds.
+
+| Adaptive candidates | Workers | Kernel ms | JS ms |
+|---:|---:|---:|---:|
+| 25,000 | 4 | 65.6 | 128.6 |
+| 50,000 | 4 | 120.8 | 141.3 |
+| 75,000 | 4 | 174.9 | 191.8 |
+| 100,000 | 4 | 243.9 | 252.3 |
+| 150,000 | 4 | 374.0 | 414.6 |
+| 200,000 | 4 | 586.8 | 528.9 |
+| 250,000 | 4 | 844.9 | 687.8 |
+| 500,000 | 4 | 2178.6 | 1505.1 |
+| 500,000 | 2 | 2176.7 | 2080.2 |
+| 200,000 | 3 | 521.4 | 514.3 |
+| 250,000 | 3 | 778.4 | 706.1 |
+| 500,000 | 3 | 2245.2 | 1622.1 |
+| 500,000 | 15 | 2223.7 | 1228.2 |
+
+The three-worker 200k boundary is measured, not interpolated: auto was 521.8 ms
+against kernel 521.4 / JS 514.3 ms, a ratio of 1.0147 to the faster explicit
+backend (`adaptive-3-40000.json`). The two-worker 500k boundary is close to
+crossover. The four-worker sweep brackets its selected cutoff between 150k and
+200k candidates; it does not identify a universal exact crossover.
+
+Uniform calibration used six timed rounds covering all backend permutations.
+The old policy still selected WASM during this calibration; the wider pool
+results motivated the added uniform rule.
+
+| Uniform candidates | Workers | Kernel ms | JS ms |
+|---:|---:|---:|---:|
+| 500,000 | 3 | 1072.7 | 1106.5 |
+| 500,000 | 4 | 1006.0 | 998.5 |
+| 500,000 | 8 | 1011.3 | 791.6 |
+| 500,000 | 15 | 1043.1 | 729.8 |
+| 250,000 | 8 | 465.0 | 360.1 |
+| 250,000 | 15 | 506.3 | 379.0 |
+
+The four-worker 500k result is near crossover; three workers retain WASM.
+At eight and fifteen workers JS wins at both measured candidate counts.
+The 250k cutoff at eight workers was checked directly rather than inferred
+from the fifteen-worker result. Raw files are `uniform-{workers}-{count}.json`
+in `out/session13/`, where the filename count is requested output points.
+
+| Projected points (5 passes) | Workers | Entire kernel path ms | Entire JS path ms |
+|---:|---:|---:|---:|
+| 10,000 | 4 | 276.7 | 279.9 |
+| 50,000 | 2 | 1165.6 | 1341.0 |
+| 50,000 | 3 | 1090.1 | 1052.4 |
+| 50,000 | 4 | 1078.2 | 954.2 |
+| 50,000 | 15 | 1059.4 | 743.9 |
+
+At three workers, mixed auto (WASM elimination, JS projected passes) measured
+978.5 ms, below either whole-backend choice. Smaller projected workloads and
+two-worker pools retain WASM. Adaptive/projected raw calibration files are
+`mask-*.json` and `tune-scatter_*.json`; `tune-relax.json` records the old
+policy's masked and projected regressions before dispatch changed.
+
+## Auto assertion protocol and failed earlier run
+
+`bench/bench.ts --assert-auto` checks, without rounding before comparison:
+
+```text
+median(auto) <= 1.05 * min(median(kernel), median(js))
+```
+
+The final protocol is fixed in advance: three warm-up rounds and twelve timed
+rounds, using all six backend permutations twice. It balances execution
+positions and preceding backends. Explicit `--runs` values are honored;
+multiples of six preserve that balance. The six orders are auto/kernel/js,
+kernel/js/auto, js/auto/kernel, auto/js/kernel, js/kernel/auto, and
+kernel/auto/js. There are no conditional retries or relaxed comparison bounds.
+
+Each case/pool combination runs in its own child process to release retained
+WASM heaps and worker caches between cases. Graph caches are cleared and exposed
+GC runs outside timing. Every complete backend path is warmed, including worker
+WASM. Requested and started thread counts must match; crashes/timeouts fail the
+measurement. Reports include samples, medians, requested/actual worker counts,
+pool threshold overrides, per-backend pool counter deltas and process peak RSS.
+Pool counter deltas cover timed whole-graph cooks, including input nodes.
+
+The five scatter node cases run both without the pool and with the configured
+pool. Direct 1M elimination has no pool integration and is measured once with
+zero workers: eleven comparisons for a nonzero pool configuration.
+`heightfield_scatter` has no backend parameter and is outside this assertion.
+`--scatter-count N` tunes node counts without changing the direct case;
+descriptions, throughput and count metadata reflect the override, and original
+full-size speed targets are not claimed for smaller custom workloads.
+
+The preceding seven-round run is retained as
+`out/session13/assert-auto-4.json`: **7 passed, 5 failed, exit 1**.
+Four failures used the same implementation under their compared labels
+(random 1M scatter with pool off/on, uniform scatter with pool off, and
+minimum-distance scatter with pool off); their ratios ranged from 1.0531 to
+1.1882. These show timing variation, not established backend regressions.
+Four-worker uniform scatter also failed (auto 1119.8 / kernel 1082.5 /
+JS 1016.6 ms; ratio 1.1015), prompting the uniform crossover calibration.
+The seven-round schedule had unequal positional exposure. Changing to a fixed
+balanced schedule reduces order bias but does not guarantee a passing timing
+result. Its failures remain recorded and are not counted as successful gates.
+
+The local assertion checks the measured rule; it cannot guarantee that auto is
+fastest on every workload or machine. Explicit backend overrides remain
+available.
+
+## Kernel changes and identity
+
+Compact neighbour-grid cells now hold contiguous x/y/z columns instead of linked
+lists. The SIMD package evaluates two independent f64 squared distances with
+strict `f64x2` multiply/add operations in the scalar expression order; scalar
+tails and the scalar package use the same distances. Both paths sort by distance
+and original KD preorder, preserving equal-distance ties. Adaptive elimination
+discards pairs already excluded by the selection rule before sorting them.
+Projected relaxation uses the compact grid on each pass, while retaining the KD
+layout needed for exact tie order. Sparse domains still use KD queries.
+
+The minimum-distance selector uses direct dense-cell buckets for compact domains,
+clamping searches to occupied domain bounds (nine cells rather than 27 on a flat
+surface with span one); sparse domains retain the existing hash grid. Dense grids
+require at least 256 candidates, at most four cells per candidate/order entry and
+at most 16M cells. Cell dimensions use checked conversion, including on wasm32;
+the new >2^32-cell-extent parity case exercises the sparse fallback.
+
+The node continues to use f64 positions. The f32 ABI widens already-f32 inputs;
+the node does not quantize f64 geometry because even small changes can alter
+distance ties, accumulated weights, heap decisions and projected coordinates.
+Neighbour lists are rebuilt per relaxation pass: positions, adaptive spacing and
+KD tie rank change. A reused radius-margin list was not implemented or measured.
+The heap algorithm and its left-child tie rule are unchanged. Its lower measured
+time below is an observed end-to-end implementation result, not evidence of a new
+heap algorithm; allocation/layout and runtime variation may contribute.
+
+## WASM stage profile
+
+`bench/scatter-profile.ts` runs the same prepared corpus before and after, with
+one warm-up and three measured calls per case. The profile build reports Rust
+stages; generated glue is instrumented in memory to time ABI allocation/copy-in
+and copy-out. Shipped glue is not edited. Values below are per-stage medians in
+milliseconds, so their sums need not equal the median total. Major corpus and
+surface preparation, candidate generation and warm-up are outside these direct
+calls. The synthetic relaxation callback still allocates its 50k triangle-index
+array and small BVH/options objects inside total timing; Rust stage and ABI
+copy timers exclude that JS preparation.
+
+| Case | Stage | Before ms | After ms |
+|---|---|---:|---:|
+| Uniform 1M -> 100k | ABI copy-in / copy-out | 2.75 / 0.09 | 1.92 / 0.07 |
+| | KD build | 340.35 | 308.47 |
+| | Neighbour search + lists | 2001.75 | 1646.68 |
+| | Heap build / removals | 41.25 / 2388.86 | 25.11 / 1285.89 |
+| | Total | 4799.21 | 3258.10 |
+| Uniform 500k -> 100k | ABI copy-in / copy-out | 1.75 / 0.10 | 1.17 / 0.07 |
+| | KD build | 169.27 | 151.60 |
+| | Neighbour search + lists | 523.09 | 499.60 |
+| | Heap build / removals | 14.74 / 578.60 | 13.12 / 373.62 |
+| | Total | 1291.80 | 1024.07 |
+| Adaptive 500k -> 100k | ABI copy-in / copy-out | 1.92 / 0.07 | 1.67 / 0.07 |
+| | KD build | 168.41 | 157.55 |
+| | Neighbour search + lists | 2310.08 | 1852.02 |
+| | Heap build / removals | 8.05 / 580.16 | 7.99 / 536.17 |
+| | Total | 3048.66 | 2577.94 |
+| Minimum-distance 500k | ABI copy-in / copy-out | 1.83 / 0.06 | 1.44 / 0.05 |
+| | Grid preparation / selection | 4.09 / 257.19 | 7.52 / 71.56 |
+| | Total | 263.64 | 82.95 |
+| Planar relaxation 50k x 5 | ABI copy-in / copy-out | 0.34 / 0.58 | 0.36 / 0.62 |
+| | KD build / grid build | 68.43 / 0.00 | 68.54 / 8.51 |
+| | Neighbour search + repulsion | 205.71 | 112.80 |
+| | Surface projection | 19.23 | 18.59 |
+| | Total | 295.82 | 211.05 |
+| Noisy-surface relaxation 50k x 5 | ABI copy-in / copy-out | 0.82 / 0.67 | 0.88 / 0.59 |
+| | KD build / grid build | 68.15 / 0.00 | 71.40 / 2.62 |
+| | Neighbour search + repulsion | 199.55 | 180.41 |
+| | Surface projection | 315.72 | 279.18 |
+| | Total | 589.88 | 548.82 |
+
+Neighbour/list construction and serial heap removals still dominate elimination;
+projection dominates the noisy-surface relaxation case. Median ABI copying stays
+below three milliseconds per profiled call, so eliminating one copy cannot close the
+remaining target gaps. The direct 1M profile still exceeds the 1500 ms target;
+the synthetic adaptive corpus is not the node density-mask acceptance case.
+Final node medians and the 500/1000/1500 ms acceptance targets belong in the
+separate ordinary-build benchmark table.
+
+Raw reports: `out/session13/before-profile.json`, `after-profile.json`, and the
+derived `profile-summary.md`. The same native LCG corpus also improved; its
+baseline is one sample, and after values are medians of three independent runs:
+
+| Native corpus | Before ms | After ms | Selected stages, before -> after ms |
+|---|---:|---:|---|
+| Uniform 1M -> 100k | 4035.13 | 3058.36 | KD 229.06 -> 220.98; neighbours 1599.09 -> 1508.27; heap removals 2124.44 -> 1267.32 |
+| Adaptive 500k -> 100k | 3599.99 | 2505.88 | neighbours 2469.65 -> 1859.35; heap removals 994.26 -> 498.79 |
+| Minimum-distance 500k | 288.26 | 61.13 | grid preparation 5.12 -> 5.52; selection 282.70 -> 55.36 |
+| Planar relaxation 100k x 5 | 895.15 | 426.36 | KD 119.24 -> 94.04; grid 0 -> 13.64; repulsion 735.09 -> 278.63; projection 34.78 -> 28.39 |
+
+Native logs: `out/session13/before-native-profile.log` and
+`native-after-{1,2,3}.log`. Native and WASM profile corpora use different RNGs and
+relaxation sizes; their absolute timings are not directly comparable.
+
+## Whole-worker placement check
+
+The optimized 500k uniform candidates -> 100k case was measured in rotating
+interleaved order after warming both WASM instances. Every worker result matched
+the main-thread indices exactly. The three-call medians were:
+
+| Placement | Median ms |
+|---|---:|
+| Main thread | 900.5 |
+| One worker, structured-cloned inputs | 965.6 |
+| One worker, shared-copy preparation included | 1000.6 |
+| One worker, existing SharedArrayBuffer input | 1021.8 |
+
+Moving the serial selection to a worker frees the cooking thread but did not
+improve elapsed time in this measured case, even with existing shared inputs.
+This does not establish a crossover for every size or density pattern. The
+report is `out/session13/placement-500k.json` (Node v24.14.0, i7-10700K, SIMD).
+
+## Final ordinary-build medians and targets
+
+The balanced twelve-round acceptance run passed **11/11 comparisons, exit 0**
+with the pool off/four workers. The five additional default-pool cases passed
+**5/5, exit 0** with fifteen workers. All **16/16** comparisons meet the unchanged
+1.05 limit; the largest ratio is **1.0456809255**, on four-worker projected
+relaxation. These are ordinary SIMD release-build medians; input-node cooks
+are excluded from scatter node timings, and direct elimination includes its
+ABI copies. Ratios are calculated from unrounded medians.
+
+| Case | Auto, pool off ms | Auto, 4 workers ms | Auto, 15 workers ms | Target ms | Target outcome |
+|---|---:|---:|---:|---:|---|
+| 1M candidates -> 100k direct elimination | 3237.7 | n/a (no pool integration) | n/a | 1500 | missed |
+| Uniform 100k blue-noise points | 1050.2 | 902.9 | 649.6 | 500 | missed in all configurations |
+| Masked 100k blue-noise points | 2106.9 | 1234.4 | 811.0 | 1000 | met with 15 workers |
+| 50k points, five projected passes | 1110.2 | 851.9 | 586.6 | 2000 | met in all configurations |
+| 100k requested, exact minimum distance | 1175.3 | 958.0 | 707.4 | 2000 | met in all configurations |
+| 1M points, relaxation off | 369.6 | 257.4 | 235.1 | 1000 | met in all configurations |
+
+Of the three K-10b speed targets, the 100k masked target is met by the default
+15-worker pool. Uniform 100k still takes 649.6 ms against 500 ms, and direct 1M
+elimination takes 3237.7 ms against 1500 ms. With four workers both uniform
+(902.9 ms) and masked (1234.4 ms) scatter miss their targets. Passing the auto
+regression check does not mean these absolute speed targets were all reached.
+
+| Case | Workers | Auto ms | Kernel ms | JS ms | Auto / faster explicit | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Direct elimination 1M -> 100k | 0 | 3237.7 | 3240.1 | 6913.3 | 0.9993 | pass |
+| 1M points, relaxation off | 0 | 369.6 | 387.7 | 378.4 | 0.9767 | pass |
+| Uniform 100k | 0 | 1050.2 | 1040.8 | 1773.5 | 1.0091 | pass |
+| Masked 100k | 0 | 2106.9 | 2123.8 | 2900.3 | 0.9920 | pass |
+| Projected 50k, five passes | 0 | 1110.2 | 1172.2 | 1854.0 | 0.9471 | pass |
+| Minimum distance, 100k requested | 0 | 1175.3 | 1130.2 | 3343.6 | 1.0399 | pass |
+| 1M points, relaxation off | 4 | 257.4 | 255.2 | 254.5 | 1.0114 | pass |
+| Uniform 100k | 4 | 902.9 | 912.5 | 896.5 | 1.0071 | pass |
+| Masked 100k | 4 | 1234.4 | 1779.0 | 1210.4 | 1.0198 | pass |
+| Projected 50k, five passes | 4 | 851.9 | 957.1 | 814.7 | 1.0457 | pass |
+| Minimum distance, 100k requested | 4 | 958.0 | 991.9 | 1308.6 | 0.9659 | pass |
+| 1M points, relaxation off | 15 | 235.1 | 230.6 | 232.5 | 1.0198 | pass |
+| Uniform 100k | 15 | 649.6 | 901.7 | 629.9 | 1.0313 | pass |
+| Masked 100k | 15 | 811.0 | 1782.3 | 820.8 | 0.9881 | pass |
+| Projected 50k, five passes | 15 | 586.6 | 944.4 | 562.7 | 1.0424 | pass |
+| Minimum distance, 100k requested | 15 | 707.4 | 967.9 | 820.5 | 0.8621 | pass |
+
+Raw reports are `out/session13/assert-auto-final-4.json` and
+`out/session13/assert-auto-final-15.json`. The four-worker command was:
+
+```powershell
+$env:TOPOTOPO_WASM = 'simd'
+node bench/bench.ts --assert-auto --workers 4 --runs 12 --output out/session13/assert-auto-final-4.json
+```
+
+`out/session13/verify-default-pool.ps1` then ran the five node cases with
+`node --expose-gc bench/bench.ts --assert-auto-case CASE --workers 15 --runs 12`,
+checked each child exit code and its `passed` result, and would exit 1 on an
+assertion failure. It exited 0. The wrapper avoids repeating the completed
+pool-off cases and the direct kernel case, which has no pool integration.
+
+The largest reported child-process peak RSS was **2543.6 MiB** (2,667,159,552
+bytes), in masked scatter with fifteen workers. This is the process high-water
+mark across warm-ups and timed calls, including worker/WASM heaps and retained
+allocations; it is not live allocation for one call or the sum of every child.
+
+Ordinary release packages recorded in `out/session13/wasm-hashes.json`:
+
+| Package | Bytes | SHA-256 |
+|---|---:|---|
+| Scalar | 764717 | `2e778b90e1cb697e74bf2f901f40b5ef36bab0266e7e304be5dd588ee3fe291d` |
+| SIMD | 757192 | `23ed8e5d78f2134e988e0c6ba34343d106fa4596446663a3c811a8abbceafe94` |
+
+Combined WASM size is **1,521,909 bytes**. Stage-profile timings above remain
+separate from these ordinary-build acceptance measurements.
+
+## Final identity and gates
+
+The Rust commands below cover the final, unchanged Rust sources and the ordinary
+release packages. The earlier focused profile-package runs passed 1716 scatter
+checks and 124 pool checks; the expanded final TypeScript suites are verified
+by the full npm chain below. No new runtime dependency was added.
+
+| Required gate | Final result |
+|---|---|
+| `cargo test --manifest-path kernels/Cargo.toml` | Exit 0; 112 tests passed |
+| `cargo test --manifest-path kernels/Cargo.toml --features simd` | Exit 0; 112 tests passed |
+| `cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings` | Exit 0 |
+| Same clippy command with `--features simd` | Exit 0 |
+| `cargo fmt --manifest-path kernels/Cargo.toml --check` | Exit 0 |
+| `npm run kernels:build` | Exit 0; scalar 764717 / SIMD 757192 bytes |
+| `npm run typecheck` | Exit 0 after all dispatch/test edits |
+| `npm test` (full chain) | Exit 0; 290 goldens, 222 examples, 1741 scatter checks, 151 pool checks, 514 scalar/SIMD comparisons across 21 exports |
+| `npm run build` | Exit 0; 115 modules, one asset |
+| `npm run pack:test` | Exit 0; installed CLI/library/MCP/preview and WASM cook passed, 16 seconds |
+| `npm run showcase` and tracked-render byte comparison | Exit 0; all 33 SHA-256 hashes unchanged |
+| Balanced `--assert-auto`, pool off/four workers | Exit 0; 11 passed, 0 failed |
+| Additional default-pool (15 workers) auto coverage | Exit 0; 5 passed, 0 failed |
+
+All 290 goldens and 33 tracked showcase renders remained unchanged; no golden
+update was run. The particles, terrain_erosion and unreal_demo renders were also
+visually inspected. Exact parity covers JS/scalar WASM/SIMD WASM, grid cutoffs and
+SIMD tails, sparse/extreme domains, ordinary/shared worker inputs, and pool
+on/off node cooks for the new adaptive, uniform and projected mixed paths.
+Cross-platform determinism beyond the exercised machine is not established.
+`npm run docs` and the final `git diff --check` also passed. Logs and gate exit
+codes are retained in `out/session13/`, including `gate-status.json` and the
+before/after render hash manifests. Package README copies were synchronized
+after documenting the final auto rule; ordinary WASM binaries were unchanged.
+
+Earlier unsuccessful setup attempts were corrected before their measurements:
+the npm profile-build invocation stripped `--features` and was retried with
+`node scripts/kernels-build.ts --features profile`; the first profile harness
+call omitted TriSurface's explicit triangle list; typecheck found a profile
+harness sample-array annotation error. Those attempts were not successful gates.
+The corrected profile runner completed both before/after corpora, and a later
+ordinary `npm run kernels:build` restored release packages. The chronological
+log below preserves these retries and the last command for recovery.
+
+## Progress and recovery log (chronological appendix)
+
+Earlier policy descriptions in this appendix are progress snapshots; the final
+rule and protocol above supersede them. Existing entries are retained verbatim.
+
+- Started from clean `codex/kernels`, HEAD `66474568de0ab8a7ad3356aa30f10d363b316a42`.
+- Process inventory before baseline: no other repository Node/Cargo/rustc jobs; the session's Codex launcher is excluded. Unrelated MCP services remain running. All agents are holding CPU-heavy commands during measurements.
+- Last command starting: `TOPOTOPO_WORKERS=4 TOPOTOPO_WASM=simd node bench/bench.ts --filter scatter --backend kernel --runs 3 --output out/session13/before-kernel-4.json`.
+- Baseline kernel (4 workers) completed, exit 0; last command starting: `TOPOTOPO_WORKERS=4 TOPOTOPO_WASM=simd node bench/bench.ts --filter scatter --backend js --runs 3 --output out/session13/before-js-4.json`.
+- Baseline JS (4 workers) completed, exit 0; last command starting: `cargo bench --manifest-path kernels/Cargo.toml --features profile --bench scatter`, followed by baseline profile WASM build.
+- Native baseline profile completed. The profile build command through npm failed before compilation because npm stripped `--features`; retrying with `node scripts/kernels-build.ts --features profile` (ordinary final build still uses `npm run kernels:build`).
+- Baseline profile WASM build completed, exit 0; last command starting: `node --expose-gc bench/scatter-profile.ts --runs 3 --output out/session13/before-profile.json`.
+- First profile runner stopped before measurements: missing explicit triangle list to TriSurface; fixed harness and retrying the same command.
+- Baseline WASM profiling completed (all six cases), exit 0. Optimized Rust implementation restored; next commands: Rust format/tests/native profile (agent) and `npm run typecheck`.
+- Typecheck passed after fixing the profile harness array annotation. Next: optimized profile WASM build; native tests may run concurrently, but timings wait until both finish.
+- Optimized Rust gates passed: 112 tests per feature set, clippy both, fmt; focused WASM parity 1716 checks and pool 124 checks passed. Last command starting: optimized `bench/scatter-profile.ts` (all other repository tests/builds stopped).
+- Optimized profile complete: direct1m median 3258ms, adaptive500k 2578ms, dense min-distance 83ms. Next: ordinary release `npm run kernels:build`, then interleaved auto selection benchmarks (not profile binaries).
+- Ordinary scalar/SIMD build passed (764717/757192 bytes). Last command: `node bench/bench.ts --assert-auto --filter scatter_relax --workers 4 --runs 3 --output out/session13/tune-relax.json`; auto still selects all eligible kernels for this measurement.
+- First interleaved assertion correctly failed old auto policy: four-worker masked auto2073/kernel2179/js1505ms and iterative auto1065/kernel1078/js954ms; uniform auto/kernel identical routing also showed 8% timing spread in three samples. Last command: masked crossover sweep, 4 workers at 5k/10k/50k output points and 2/15 workers at 100k, three timed rounds each.
+- Masked crossover: 4 workers, 25k/50k candidates favour kernel (66/121ms vs JS129/141); 250k favours JS (688 vs845); 500k at2 workers is near crossover (2080 vs2177), and 15 workers favours JS (1228ms). Last command: refine 4-worker candidate cutoff and measure iterative cases at pool2/15.
+- Iterative measurements: 10k output at4 workers roughly tied (kernel277/JS280ms), 50k at2 favours kernel (1166/1341), 50k at15 favours JS (1059/744). Last command: final crossover refinement (4-worker masked 30k/40k output; 3-worker masked and relaxation).
+- Auto policy implemented: adaptive elimination uses JS at200k candidates/3+ workers or500k/2workers; projected relaxation uses JS at50k kept points/3+workers; other eligible stages stay WASM. Last command: 500k-candidate worker placement with ordinary/shared inputs.
+- Placement500k favours main (median900.5ms vs worker clone965.6/shared-ready1021.8); retained 1M worker threshold. Policy typecheck and docs generation passed. Last command: final `node bench/bench.ts --assert-auto --workers 4 --runs 7 --output out/session13/assert-auto-4.json` (all repository build/test jobs stopped).
+- First seven-round final assertion completed: 7 passed, 5 failed (four same-path/no-selection timing failures and a four-worker uniform crossover). Preserved `assert-auto-4.json`; switching to a fixed 12-round six-permutation schedule, three warm-ups, with the 1.05 bound unchanged. Next: six-round uniform pool-size calibration, then the complete final suite.
+- Balanced uniform calibration completed (six timed rounds): 500k candidates kernel/JS medians at3 workers1073/1107ms, at4 workers1006/999, at8 workers1011/792, at15 workers1043/730; 250k at15 workers506/379. Next: verify250k uniform at8 workers and adaptive200k at3 before finalizing the extended rule.
+- Uniform250k at8 workers confirmed kernel465/JS360ms; adaptive200k at3 confirmed auto522/kernel521/JS514 (ratio1.015). Final auto now also selects uniform JS at500k candidates/4+ workers or250k/8+. Last command starting: balanced final `node bench/bench.ts --assert-auto --workers 4 --runs 12 --output out/session13/assert-auto-final-4.json`.
+- Balanced full assertion finished: 11 passed, 0 failed, exit0; maximum auto ratio1.0457. Last command starting: `out/session13/verify-default-pool.ps1`, five node cases at15 workers with three warm-ups/twelve balanced timed rounds each, using the same assertion measurement function (direct elimination has no pool path and is not repeated).
+- Default15-worker follow-up finished: 5 passed, 0 failed, exit0; total16/16 final comparisons pass. Masked auto811ms meets1s target at15 workers; uniform650ms and direct3238ms still miss. Last command starting: `out/session13/verify-gates.ps1` (typecheck, full npm test, build, pack:test, showcase and SHA-256 render comparison); timing runs are finished.
+- Final gates completed, all exit0: typecheck, full npm test, build, pack:test and showcase; 290 goldens unchanged and33/33 render hashes identical, with three relevant renders visually inspected. No process died during session13. Final review and signed-off commit follow; no push.

@@ -223,12 +223,14 @@ struct Lists {
     weights: Vec<f64>,
 }
 
-/// A dense grid is worthwhile for flat and compact candidate sets. Sorting by
-/// distance and KD preorder reproduces the KD query's stable order exactly.
-/// Sparse/extreme domains retain KD queries rather than allocating their volume.
-struct SearchGrid {
-    heads: Vec<usize>,
-    next: Vec<usize>,
+/// Compact cells store contiguous coordinate columns for cache-friendly scalar
+/// and strict f64x2 SIMD distance loops. Sorting by distance and KD preorder
+/// reproduces the KD query's stable order exactly. Sparse/extreme domains retain
+/// KD queries rather than allocating their volume; no f32 rounding is introduced.
+pub(crate) struct SearchGrid {
+    start: Vec<usize>,
+    slots: Vec<usize>,
+    coordinates: [Vec<f64>; 3],
     rank: Vec<usize>,
     origin: [i64; 3],
     dims: [usize; 3],
@@ -236,7 +238,7 @@ struct SearchGrid {
 }
 
 impl SearchGrid {
-    fn new(kd: &KdTree, cell: f64) -> Option<Self> {
+    pub(crate) fn new(kd: &KdTree, cell: f64) -> Option<Self> {
         let n = kd.indices.len();
         if n < 256 || cell * cell < f64::MIN_POSITIVE {
             return None;
@@ -254,21 +256,42 @@ impl SearchGrid {
                 high[c] = high[c].max(x as i64);
             }
         }
-        let dims = std::array::from_fn(|c| (high[c] - low[c] + 1) as usize);
+        let dims = [
+            usize::try_from(high[0] - low[0] + 1).ok()?,
+            usize::try_from(high[1] - low[1] + 1).ok()?,
+            usize::try_from(high[2] - low[2] + 1).ok()?,
+        ];
         let size = dims[0].checked_mul(dims[1])?.checked_mul(dims[2])?;
         if size > n.saturating_mul(4) || size > 16_000_000 {
             return None;
         }
-        let mut heads = Vec::new();
-        heads.try_reserve_exact(size).ok()?;
-        heads.resize(size, usize::MAX);
-        let mut next = filled(n, usize::MAX).ok()?;
-        for (s, p) in kd.positions.chunks_exact(3).enumerate() {
+        let mut start = filled(size + 1, 0_usize).ok()?;
+        let mut cells = reserved(n).ok()?;
+        for p in kd.positions.chunks_exact(3) {
             let cell: [usize; 3] =
                 std::array::from_fn(|c| ((p[c] * inv).floor() as i64 - low[c]) as usize);
             let k = (cell[0] * dims[1] + cell[1]) * dims[2] + cell[2];
-            next[s] = heads[k];
-            heads[k] = s;
+            start[k + 1] += 1;
+            cells.push(k);
+        }
+        for k in 0..size {
+            start[k + 1] += start[k];
+        }
+        let mut fill = reserved(size).ok()?;
+        fill.extend_from_slice(&start[..size]);
+        let mut slots = filled(n, 0).ok()?;
+        let mut coordinates = [
+            filled(n, 0.0).ok()?,
+            filled(n, 0.0).ok()?,
+            filled(n, 0.0).ok()?,
+        ];
+        for (s, k) in cells.into_iter().enumerate() {
+            let e = fill[k];
+            fill[k] += 1;
+            slots[e] = s;
+            for (c, values) in coordinates.iter_mut().enumerate() {
+                values[e] = kd.positions[s * 3 + c];
+            }
         }
         let mut rank = filled(n, 0).ok()?;
         fn preorder(rank: &mut [usize], lo: usize, hi: usize, counter: &mut usize) {
@@ -283,8 +306,9 @@ impl SearchGrid {
         }
         preorder(&mut rank, 0, n, &mut 0);
         Some(Self {
-            heads,
-            next,
+            start,
+            slots,
+            coordinates,
             rank,
             origin: low,
             dims,
@@ -292,9 +316,27 @@ impl SearchGrid {
         })
     }
 
-    fn neighbours(&self, kd: &KdTree, p: [f64; 3], radius: f64, out: &mut Vec<Neighbour>) {
+    pub(crate) fn neighbours(
+        &self,
+        kd: &KdTree,
+        p: [f64; 3],
+        radius: f64,
+        out: &mut Vec<Neighbour>,
+    ) {
+        self.neighbours_filtered(kd, p, radius, out, |_| true);
+    }
+
+    fn neighbours_filtered(
+        &self,
+        kd: &KdTree,
+        p: [f64; 3],
+        radius: f64,
+        out: &mut Vec<Neighbour>,
+        accept: impl Fn(usize) -> bool,
+    ) {
         if radius * radius < f64::MIN_POSITIVE || radius * self.inv > 4_503_599_627_370_492.0 {
             kd.neighbours(p, radius, out);
+            out.retain(|v| accept(v.index));
             return;
         }
         out.clear();
@@ -316,29 +358,120 @@ impl SearchGrid {
         for x in lo[0]..=hi[0] {
             for y in lo[1]..=hi[1] {
                 for z in lo[2]..=hi[2] {
-                    let mut s = self.heads[(x * self.dims[1] + y) * self.dims[2] + z];
-                    while s != usize::MAX {
-                        let dx = kd.positions[s * 3] - p[0];
-                        let dy = kd.positions[s * 3 + 1] - p[1];
-                        let dz = kd.positions[s * 3 + 2] - p[2];
+                    let cell = (x * self.dims[1] + y) * self.dims[2] + z;
+                    let start = self.start[cell];
+                    let end = self.start[cell + 1];
+                    #[cfg(all(feature = "simd", target_arch = "wasm32"))]
+                    // SAFETY: the SIMD package requires simd128. Grid construction
+                    // gives all coordinate/slot arrays n entries and every cell
+                    // range lies in 0..n; the helper loads only full lane pairs.
+                    let start =
+                        unsafe { self.neighbours_simd(kd, p, r2, start, end, out, &accept) };
+                    for e in start..end {
+                        let dx = self.coordinates[0][e] - p[0];
+                        let dy = self.coordinates[1][e] - p[1];
+                        let dz = self.coordinates[2][e] - p[2];
                         let distance2 = dx * dx + dy * dy + dz * dz;
                         if distance2 <= r2 {
+                            let s = self.slots[e];
+                            if !accept(kd.indices[s]) {
+                                continue;
+                            }
                             out.push(Neighbour {
                                 index: kd.indices[s],
                                 slot: s,
                                 distance2,
                             });
                         }
-                        s = self.next[s];
                     }
                 }
             }
         }
-        out.sort_unstable_by(|a, b| {
+        let compare = |a: &Neighbour, b: &Neighbour| {
             a.distance2
                 .total_cmp(&b.distance2)
                 .then_with(|| self.rank[a.slot].cmp(&self.rank[b.slot]))
-        });
+        };
+        if out.len() <= 32 {
+            for k in 1..out.len() {
+                let value = out[k];
+                let mut j = k;
+                while j > 0 && compare(&out[j - 1], &value).is_gt() {
+                    out[j] = out[j - 1];
+                    j -= 1;
+                }
+                out[j] = value;
+            }
+        } else {
+            out.sort_unstable_by(compare);
+        }
+    }
+
+    /// Two independent f64 squared distances, with the scalar add order.
+    #[cfg(all(feature = "simd", target_arch = "wasm32"))]
+    #[target_feature(enable = "simd128")]
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn neighbours_simd(
+        &self,
+        kd: &KdTree,
+        p: [f64; 3],
+        radius2: f64,
+        mut start: usize,
+        end: usize,
+        out: &mut Vec<Neighbour>,
+        accept: &impl Fn(usize) -> bool,
+    ) -> usize {
+        use std::arch::wasm32::{
+            f64x2_add, f64x2_extract_lane, f64x2_le, f64x2_mul, f64x2_splat, f64x2_sub,
+            i64x2_bitmask, v128_load,
+        };
+        debug_assert!(end <= self.slots.len());
+        debug_assert!(self.coordinates.iter().all(|v| end <= v.len()));
+        let [px, py, pz] = [f64x2_splat(p[0]), f64x2_splat(p[1]), f64x2_splat(p[2])];
+        let r2 = f64x2_splat(radius2);
+        while start + 1 < end {
+            // SAFETY: start + 2 <= end <= n, and new() allocated n coordinates
+            // per axis. Private immutable fields preserve these invariants.
+            let (dx, dy, dz) = unsafe {
+                (
+                    f64x2_sub(
+                        v128_load(self.coordinates[0].as_ptr().add(start).cast()),
+                        px,
+                    ),
+                    f64x2_sub(
+                        v128_load(self.coordinates[1].as_ptr().add(start).cast()),
+                        py,
+                    ),
+                    f64x2_sub(
+                        v128_load(self.coordinates[2].as_ptr().add(start).cast()),
+                        pz,
+                    ),
+                )
+            };
+            let d2 = f64x2_add(
+                f64x2_add(f64x2_mul(dx, dx), f64x2_mul(dy, dy)),
+                f64x2_mul(dz, dz),
+            );
+            let mask = i64x2_bitmask(f64x2_le(d2, r2));
+            if mask & 1 != 0 && accept(kd.indices[self.slots[start]]) {
+                let slot = self.slots[start];
+                out.push(Neighbour {
+                    index: kd.indices[slot],
+                    slot,
+                    distance2: f64x2_extract_lane::<0>(d2),
+                });
+            }
+            if mask & 2 != 0 && accept(kd.indices[self.slots[start + 1]]) {
+                let slot = self.slots[start + 1];
+                out.push(Neighbour {
+                    index: kd.indices[slot],
+                    slot,
+                    distance2: f64x2_extract_lane::<1>(d2),
+                });
+            }
+            start += 2;
+        }
+        start
     }
 }
 
@@ -414,7 +547,9 @@ fn varying_lists(
         let p = [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]];
         let si = scale[i];
         if let Some(grid) = &grid {
-            grid.neighbours(kd, p, 2.0 * rmax * si, &mut found);
+            grid.neighbours_filtered(kd, p, 2.0 * rmax * si, &mut found, |j| {
+                j != i && (scale[j] < si || (scale[j] == si && j > i))
+            });
         } else {
             kd.neighbours(p, 2.0 * rmax * si, &mut found);
         }
@@ -601,6 +736,32 @@ fn cell_key(x: i64, y: i64, z: i64) -> u32 {
         ^ (z as u32).wrapping_mul(83_492_791)
 }
 
+fn dense_domain(
+    positions: &[f64],
+    inv: f64,
+    limit: usize,
+) -> Option<([i64; 3], [usize; 3], usize)> {
+    if positions.len() < 256 * 3 || inv == 0.0 {
+        return None;
+    }
+    let mut low = [i64::MAX; 3];
+    let mut high = [i64::MIN; 3];
+    for p in positions.chunks_exact(3) {
+        for c in 0..3 {
+            let q = (p[c] * inv).floor() as i64;
+            low[c] = low[c].min(q);
+            high[c] = high[c].max(q);
+        }
+    }
+    let dims = [
+        usize::try_from(high[0] - low[0] + 1).ok()?,
+        usize::try_from(high[1] - low[1] + 1).ok()?,
+        usize::try_from(high[2] - low[2] + 1).ok()?,
+    ];
+    let size = dims[0].checked_mul(dims[1])?.checked_mul(dims[2])?;
+    (size <= limit.saturating_mul(4) && size <= 16_000_000).then_some((low, dims, size))
+}
+
 /// Greedy dart throwing in the supplied order, optionally capped per group.
 /// A zero radius only applies order/limit/group filtering. Distances equal to the
 /// radius are accepted. Empty groups or a zero cap disable the group restriction.
@@ -612,6 +773,7 @@ pub fn min_distance(
     groups: &[i32],
     group_cap: usize,
 ) -> Result<Vec<i32>, String> {
+    let mut profile = crate::erosion_profile::Profile::new("scatter_min_distance");
     let n = validate_positions(positions)?;
     if order.len() > MAX_POINTS || order.iter().any(|&i| i < 0 || i as usize >= n) {
         return Err("scatter order contains an invalid candidate index or is too long".into());
@@ -641,7 +803,11 @@ pub fn min_distance(
     {
         return Err("scatter position/radius ratio exceeds the exact grid coordinate range".into());
     }
-    let table_size = (order.len().saturating_mul(2)).max(16).next_power_of_two();
+    let dense = dense_domain(positions, inv, order.len());
+    let table_size = dense.map_or_else(
+        || (order.len().saturating_mul(2)).max(16).next_power_of_two(),
+        |(_, _, size)| size,
+    );
     let mut heads = filled(table_size, usize::MAX)?;
     let mut next = reserved(limit)?;
     let mut keys = reserved(limit)?;
@@ -649,6 +815,7 @@ pub fn min_distance(
     let capped = group_cap > 0 && !groups.is_empty();
     let r2 = radius * radius;
     let span = (radius * inv).ceil().max(1.0) as i64;
+    profile.mark("grid_prepare");
     for &candidate in order {
         if out.len() == limit {
             break;
@@ -665,13 +832,28 @@ pub fn min_distance(
         ];
         let mut conflict = false;
         if radius > 0.0 {
-            'cells: for x in cell[0] - span..=cell[0] + span {
-                for y in cell[1] - span..=cell[1] + span {
-                    for z in cell[2] - span..=cell[2] + span {
+            let mut lo = cell.map(|v| v - span);
+            let mut hi = cell.map(|v| v + span);
+            if let Some((origin, dims, _)) = dense {
+                for c in 0..3 {
+                    lo[c] = lo[c].max(origin[c]);
+                    hi[c] = hi[c].min(origin[c] + dims[c] as i64 - 1);
+                }
+            }
+            'cells: for x in lo[0]..=hi[0] {
+                for y in lo[1]..=hi[1] {
+                    for z in lo[2]..=hi[2] {
                         let key = cell_key(x, y, z);
-                        let mut e = heads[key as usize & (table_size - 1)];
+                        let bucket = if let Some((origin, dims, _)) = dense {
+                            (((x - origin[0]) as usize * dims[1] + (y - origin[1]) as usize)
+                                * dims[2])
+                                + (z - origin[2]) as usize
+                        } else {
+                            key as usize & (table_size - 1)
+                        };
+                        let mut e = heads[bucket];
                         while e != usize::MAX {
-                            if keys[e] == key {
+                            if dense.is_some() || keys[e] == key {
                                 let j = out[e] as usize;
                                 let dx = positions[j * 3] - p[0];
                                 let dy = positions[j * 3 + 1] - p[1];
@@ -691,7 +873,12 @@ pub fn min_distance(
             continue;
         }
         let key = cell_key(cell[0], cell[1], cell[2]);
-        let bucket = key as usize & (table_size - 1);
+        let bucket = if let Some((origin, dims, _)) = dense {
+            (((cell[0] - origin[0]) as usize * dims[1] + (cell[1] - origin[1]) as usize) * dims[2])
+                + (cell[2] - origin[2]) as usize
+        } else {
+            key as usize & (table_size - 1)
+        };
         next.push(heads[bucket]);
         keys.push(key);
         heads[bucket] = out.len();
@@ -703,6 +890,8 @@ pub fn min_distance(
             *counts.entry(groups[i]).or_default() += 1;
         }
     }
+    profile.mark("grid_select");
+    profile.finish();
     Ok(out)
 }
 
@@ -853,6 +1042,13 @@ mod tests {
                             .map(|n| (n.slot, n.distance2.to_bits()))
                             .collect::<Vec<_>>()
                     );
+                    let accept = |j: usize| j.is_multiple_of(3);
+                    a.retain(|v| accept(v.index));
+                    grid.neighbours_filtered(&kd, q, radius, &mut b, accept);
+                    assert_eq!(
+                        a.iter().map(|n| n.slot).collect::<Vec<_>>(),
+                        b.iter().map(|n| n.slot).collect::<Vec<_>>()
+                    );
                 }
             }
         }
@@ -905,8 +1101,9 @@ mod tests {
     #[test]
     fn greedy_minimum_matches_brute_force_and_spacing() {
         for seed in 0..20 {
-            let p = points(128, seed);
-            let order: Vec<i32> = (0..128).rev().collect();
+            let n = if seed % 2 == 0 { 128 } else { 513 };
+            let p = points(n, seed);
+            let order: Vec<i32> = (0..n as i32).rev().collect();
             let radius = 0.025 + f64::from(seed) * 0.005;
             let mut brute = Vec::new();
             for &i in &order {
@@ -928,6 +1125,51 @@ mod tests {
                 min_distance(&p, &order, radius, order.len(), &[], 0).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn dense_minimum_grid_keeps_order_duplicates_and_group_caps() {
+        let p = points(513, 17);
+        let groups: Vec<i32> = (0..513).map(|i| i % 7).collect();
+        let order: Vec<i32> = (0..513).rev().flat_map(|i| [i, i]).collect();
+        let mut brute = Vec::<i32>::new();
+        let mut counts = [0; 7];
+        let radius = 0.07;
+        assert!(dense_domain(&p, 1.0 / radius, order.len()).is_some());
+        for &i in &order {
+            if counts[groups[i as usize] as usize] == 12 {
+                continue;
+            }
+            if brute.iter().all(|&j| {
+                let a = i as usize * 3;
+                let b = j as usize * 3;
+                let dx = p[a] - p[b];
+                let dy = p[a + 1] - p[b + 1];
+                let dz = p[a + 2] - p[b + 2];
+                dx * dx + dy * dy + dz * dz >= radius * radius
+            }) {
+                brute.push(i);
+                counts[groups[i as usize] as usize] += 1;
+            }
+        }
+        assert_eq!(
+            min_distance(&p, &order, radius, order.len(), &groups, 12).unwrap(),
+            brute
+        );
+        let sparse: Vec<f64> = p
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                if i.is_multiple_of(3) && (i / 3).is_multiple_of(2) {
+                    v + 4_294_967_296.0
+                } else {
+                    v
+                }
+            })
+            .collect();
+        assert!(dense_domain(&sparse, 1.0 / radius, order.len()).is_none());
+        let kd = KdTree::new(&sparse).unwrap();
+        assert!(SearchGrid::new(&kd, radius).is_none());
     }
 
     #[test]
