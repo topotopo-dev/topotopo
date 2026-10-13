@@ -376,7 +376,14 @@ defineNode({
     group: P.group('prim'),
   },
   outputs: 'prim fit_error (largest distance from an input point to the fitted curve)',
-  example: { type: 'spline_fit', params: { tolerance: 0.02, smoothing: 0.5 } },
+  example: {
+    nodes: {
+      spiral: { type: 'spiral', params: { turns: 1.5, points_per_turn: 40 } },
+      noisy: { type: 'jitter', in: ['spiral'], params: { amount: 0.04 } },
+      fit: { type: 'spline_fit', in: ['noisy'], params: { tolerance: 0.1, smoothing: 1 } },
+    },
+    output: 'fit',
+  },
   cook: ({ input, p, warn }) => {
     const src = input(0);
     const sel = mask(src, 'prim', p.group);
