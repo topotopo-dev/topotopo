@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-220 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+222 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -26,7 +26,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [io](#io-nodes): [file](#file)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [roof_skeleton](#roof_skeleton) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
-- [sim](#sim-nodes): [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
+- [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
 - [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_curves](#tex_curves) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
@@ -164,6 +164,8 @@ None (generator).
 category: `generate`
 
 Surface from a JS expression of (u, v) returning [x,y,z]; optional wrapping for closed surfaces.
+
+The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
 
 **Inputs**
 
@@ -1337,6 +1339,8 @@ Each edge moves by distance along its side vector direction × up (positive = to
 category: `curve`
 
 Curve from a JS expression of t returning [x,y,z] (e.g. helices, knots, Lissajous).
+
+The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
 
 **Inputs**
 
@@ -6398,6 +6402,8 @@ category: `sdf` · aliases: `sdf_code`, `sdf_wrangle`, `implicit`
 
 SDF from JS code: return a signed distance for point p ([x,y,z]). IQ helpers built in (sdSphere, sdBox, smin, opTwist…). sdf(i, p) samples input i.
 
+The code runs sandboxed like a wrangle, under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s). This node only probes the field at the origin; the nodes that sample it later (sdf_to_mesh, sdf_grid, also after transform, sdf_modify or sdf_combine) run all of their sampling under that limit, so the whole mesh or grid must be computed within it: a field that loops anywhere, or is too slow for the resolution, fails the sampling node with "SDF code (sdf_expr) exceeded N ms".
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -6483,7 +6489,7 @@ category: `sdf`
 
 Sample implicit SDF volumes or a polygon mesh into a regular 3D distance grid.
 
-SDF volumes are unioned before sampling; if none exist, polygons are sampled using a triangle BVH and generalized winding-number sign. Values outside the narrow band are signed infinity unless fill is enabled. Grid bounds include padding in voxels. Mesh attributes are dropped.
+SDF volumes are unioned before sampling; if none exist, polygons are sampled using a triangle BVH and generalized winding-number sign. Values outside the narrow band are signed infinity unless fill is enabled. Grid bounds include padding in voxels. Mesh attributes are dropped. A field that runs user code (an sdf_expr upstream, also through transform, sdf_modify or sdf_combine) is sampled under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s): the whole grid must be sampled within it, else this node fails with "SDF code (sdf_expr) exceeded N ms" (raise voxel_size or the timeout). Implicit analytic volumes and meshes have no limit.
 
 **Inputs**
 
@@ -6620,6 +6626,8 @@ None (generator).
 category: `sdf` · aliases: `convert_sdf`, `convert_vdb`, `mesh_sdf`, `polygonize`, `isosurface`
 
 Polygonise SDF volumes into a watertight triangle mesh (all volumes are unioned). Smooth normals from the field gradient.
+
+Meshes with the level-set mesher of manifold-3d. A field that runs user code (an sdf_expr upstream, also through transform, sdf_modify or sdf_combine) is meshed under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s): the whole meshing, normals included, must finish within it, else this node fails with "SDF code (sdf_expr) exceeded N ms" (raise edge_length or the timeout for a slow field). Analytic volumes (sdf_shape, sdf_from_mesh, grid_to_sdf, heightfield_to_sdf) have no limit.
 
 **Inputs**
 
@@ -10437,6 +10445,191 @@ None (generator).
 | `sill_depth` | float | `0.08` | 0..0.5 |  |  | how far the sill reaches in front of the frame (m) |
 
 ## sim nodes
+
+### drape
+
+category: `sim` · aliases: `cloth`, `vellum_cloth`, `vellum`, `cloth_sim`
+
+Cloth simulation (XPBD, Vellum-lite): drape a mesh over colliders and the floor, hang it from pins, blow it in the wind.
+
+Simulates the `cloth` input for `steps` steps and outputs the final state (same points, prims and attributes; P moved, v, rest_P, N, pinned). Constraints in compliance form, so stiffnesses are physical and independent of the step size: stretch on the polygon edges (rows and columns solved as whole chains, so hanging cloth does not sag), shear on the quad diagonals, bending across edges (isometric where flat at rest, dihedral towards the rest angle of the input elsewhere), tethers to the nearest pin. Collides with the `collider` input (a static mesh; points stay `thickness` away; closed pieces push out points that get inside) and the floor plane, with friction; sharp collider corners get extra corner contacts, but a sharp collider edge can still pass between the points of a coarse cloth (use a finer cloth there). Pins: `pin_group`, a `pin` point attribute, or the nearest cloth points to the `pins` input. Typical graphs: grid above a box → drape(grid, box); grid with a pinned top edge + wind → a banner. Deterministic (bit-identical with and without the worker pool). Houdini: Vellum Cloth + Vellum Solver, run to a settled frame.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `cloth` | no | no | the cloth: any polygon mesh (quads are triangulated internally for the constraints; the output keeps the topology), polylines become strings |
+| 1 | `collider` | yes | no | static collision geometry (its polygons; closed pieces push out points that end up inside) |
+| 2 | `pins` | yes | no | pin points: the nearest cloth point to each is pinned (see pin_snap) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `steps` | int | `100` | 0..100000 |  | `frames` | simulation steps of 1/fps s each; the output is the state after the last one (settle time = steps / fps) |
+| `substeps` | int | `4` | 1..100 |  | `sub_steps` | substeps per step: more = stiffer cloth and fewer missed contacts (cost grows linearly) |
+| `iterations` | int | `1` | 1..100 |  | `constraint_iterations` | constraint sweeps per substep (stretch chains solved exactly, the rest Gauss-Seidel); substeps help more than iterations |
+| `fps` | float | `24` | 1.. |  |  | steps per simulated second (step length 1/fps s) *(advanced)* |
+| `gravity` | vec3 | `[0,-9.81,0]` |  |  |  | gravity acceleration in m/s² |
+| `stretch_stiffness` | float | `100000` | 0.. |  | `stretch`, `stiffness` | stretch stiffness of the polygon edges in N/m (≈ the sheet's 2D Young's modulus); 1e4+ is practically inextensible, 100 is rubbery; 0 = no stretch constraints |
+| `shear_stiffness` | float | `1000` | 0.. |  | `shear` | shear stiffness of the quad diagonals (and inner polygon edges) in N/m; low = fabric that drapes on the bias; 0 = none |
+| `bend_stiffness` | float | `0.001` | 0.. |  | `bend`, `bending` | bending rigidity in N·m (resolution independent): 1e-5 silk, 1e-4 cotton, 1e-3 canvas, 1e-2 tarp/leather; 0 = no bend constraints |
+| `density` | float | `0.2` | 0.. |  |  | surface density in kg/m² for the point masses (a point float `mass` attribute overrides it); only matters relative to the stiffnesses and the wind *(advanced)* |
+| `damping` | float | `0.2` | 0.. |  | `velocity_damping` | velocity damping rate in 1/s (velocities shrink by e^(-damping·t)); higher settles sooner |
+| `drag` | float | `0.5` | 0.. |  | `air_drag` | air drag ½·ρ·Cd in kg/m³ on each triangle against the wind (normal component, quadratic); 0 = vacuum |
+| `wind` | vec3 | `[0,0,0]` |  |  |  | wind velocity in m/s (acts through drag) |
+| `thickness` | float | `0.02` | 0.. |  | `collision_thickness`, `pscale` | collision offset in m: points stay this far from colliders and the floor (and 2× apart with self_collision, which works best with about half the edge length) |
+| `friction` | float | `0.4` | 0.. |  |  | Coulomb friction coefficient against colliders and the floor (0 = slippery) |
+| `floor` | bool | `true` |  |  | `ground`, `ground_plane` | collide with the ground plane y = floor_height |
+| `floor_height` | float | `0` |  |  | `ground_height` | height of the ground plane |
+| `self_collision` | bool | `false` |  |  | `selfcollision` | point-point self collision (spatial hash, pairs found per step); effective when thickness is about half the edge length |
+| `rest_scale` | float | `1` | 0.01.. |  | `restlength_scale` | multiplies the stretch and shear rest lengths: < 1 tightens the cloth (a taut tarp, a cushion that pulls in its seams), > 1 slackens it |
+| `seed` | int | `0` |  |  |  | seed of a tiny deterministic jitter of the start positions (10⁻³ of the edge length) that breaks perfect symmetry |
+| `pin_group` | group (point) | `""` |  |  |  | points pinned in place ("" = none); a point attribute `pin` != 0 and the nearest cloth point to each point of the `pins` input are pinned too |
+| `pin_snap` | bool | `false` |  |  |  | move the cloth points pinned by the `pins` input onto those pin points first (hang a cloth from hooks) |
+| `tethers` | bool | `true` |  |  |  | long-range attachments: no point gets farther from its nearest pin than along the cloth at rest, so pinned cloth does not stretch under its weight or the wind *(advanced)* |
+| `keep_rest` | bool | `true` |  |  |  | write the input positions to the point attribute rest_P |
+| `max_points` | int | `100000` | 1.. |  |  | refuse inputs with more points than this (cost grows with points × steps × substeps × iterations) *(advanced)* |
+
+**Writes:** point v, rest_P (keep_rest), N, pinned (int, when anything is pinned)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "cloth": {
+      "type": "grid",
+      "params": {
+        "size": [
+          2,
+          2
+        ],
+        "divisions": [
+          24,
+          24
+        ],
+        "center": [
+          0,
+          1.3,
+          0
+        ]
+      }
+    },
+    "table": {
+      "type": "box",
+      "params": {
+        "size": [
+          1,
+          1,
+          1
+        ],
+        "center": [
+          0,
+          0.5,
+          0
+        ]
+      }
+    },
+    "out": {
+      "type": "drape",
+      "in": [
+        "cloth",
+        "table"
+      ],
+      "params": {
+        "steps": 48,
+        "thickness": 0.03
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
+### inflate
+
+category: `sim` · aliases: `vellum_pressure`, `pressure`, `balloon`
+
+Inflate a closed mesh with an XPBD volume constraint (Vellum pressure): cushions, balloons, bulging sacks.
+
+Simulates the `geo` input as a closed cloth bag whose volume is driven towards `pressure` × its rest volume, against the same stretch, shear and bend constraints as drape (and the same collider, floor, pins and wind). pressure 1 keeps the volume, 1.5 puffs a box into a cushion, < 1 deflates it; pressure_stiffness sets how hard the volume pushes against the cloth (a stiff cloth caps the volume: a sphere needs a soft stretch_stiffness to grow, a box bulges into a pillow). The pressure rises smoothly over the first half of the steps, and the skin is solved edge by edge so it stretches evenly. Gravity and the floor are off by default (the shape inflates in place); turn them on to rest a cushion on the ground. Houdini: Vellum Pressure constraint.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | a closed polygon mesh (box, sphere, a sewn sack) |
+| 1 | `collider` | yes | no | static collision geometry (its polygons; closed pieces push out points that end up inside) |
+| 2 | `pins` | yes | no | pin points: the nearest cloth point to each is pinned (see pin_snap) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `pressure` | float | `1.5` | 0.. |  | `volume_scale` | target volume / rest volume (1 = keep, 1.5 = cushion, 3 = balloon if the cloth can stretch) |
+| `pressure_stiffness` | float | `10000` | 0.. |  |  | stiffness of the volume constraint in N/m (compared with stretch_stiffness: equal values split the difference); 0 = no pressure |
+| `steps` | int | `60` | 0..100000 |  | `frames` | simulation steps of 1/fps s each; the output is the state after the last one (settle time = steps / fps) |
+| `substeps` | int | `4` | 1..100 |  | `sub_steps` | substeps per step: more = stiffer cloth and fewer missed contacts (cost grows linearly) |
+| `iterations` | int | `1` | 1..100 |  | `constraint_iterations` | constraint sweeps per substep (stretch chains solved exactly, the rest Gauss-Seidel); substeps help more than iterations |
+| `fps` | float | `24` | 1.. |  |  | steps per simulated second (step length 1/fps s) *(advanced)* |
+| `gravity` | vec3 | `[0,0,0]` |  |  |  | gravity acceleration in m/s² |
+| `stretch_stiffness` | float | `10000` | 0.. |  | `stretch`, `stiffness` | stretch stiffness of the polygon edges in N/m (≈ the sheet's 2D Young's modulus); 1e4+ is practically inextensible, 100 is rubbery; 0 = no stretch constraints |
+| `shear_stiffness` | float | `1000` | 0.. |  | `shear` | shear stiffness of the quad diagonals (and inner polygon edges) in N/m; low = fabric that drapes on the bias; 0 = none |
+| `bend_stiffness` | float | `0.001` | 0.. |  | `bend`, `bending` | bending rigidity in N·m (resolution independent): 1e-5 silk, 1e-4 cotton, 1e-3 canvas, 1e-2 tarp/leather; 0 = no bend constraints |
+| `density` | float | `0.2` | 0.. |  |  | surface density in kg/m² for the point masses (a point float `mass` attribute overrides it); only matters relative to the stiffnesses and the wind *(advanced)* |
+| `damping` | float | `1` | 0.. |  | `velocity_damping` | velocity damping rate in 1/s (velocities shrink by e^(-damping·t)); higher settles sooner |
+| `drag` | float | `0` | 0.. |  | `air_drag` | air drag ½·ρ·Cd in kg/m³ on each triangle against the wind (normal component, quadratic); 0 = vacuum |
+| `wind` | vec3 | `[0,0,0]` |  |  |  | wind velocity in m/s (acts through drag) |
+| `thickness` | float | `0.02` | 0.. |  | `collision_thickness`, `pscale` | collision offset in m: points stay this far from colliders and the floor (and 2× apart with self_collision, which works best with about half the edge length) |
+| `friction` | float | `0.4` | 0.. |  |  | Coulomb friction coefficient against colliders and the floor (0 = slippery) |
+| `floor` | bool | `false` |  |  | `ground`, `ground_plane` | collide with the ground plane y = floor_height |
+| `floor_height` | float | `0` |  |  | `ground_height` | height of the ground plane |
+| `self_collision` | bool | `false` |  |  | `selfcollision` | point-point self collision (spatial hash, pairs found per step); effective when thickness is about half the edge length |
+| `rest_scale` | float | `1` | 0.01.. |  | `restlength_scale` | multiplies the stretch and shear rest lengths: < 1 tightens the cloth (a taut tarp, a cushion that pulls in its seams), > 1 slackens it |
+| `seed` | int | `0` |  |  |  | seed of a tiny deterministic jitter of the start positions (10⁻³ of the edge length) that breaks perfect symmetry |
+| `pin_group` | group (point) | `""` |  |  |  | points pinned in place ("" = none); a point attribute `pin` != 0 and the nearest cloth point to each point of the `pins` input are pinned too |
+| `pin_snap` | bool | `false` |  |  |  | move the cloth points pinned by the `pins` input onto those pin points first (hang a cloth from hooks) |
+| `tethers` | bool | `false` |  |  |  | long-range attachments: no point gets farther from its nearest pin than along the cloth at rest, so pinned cloth does not stretch under its weight or the wind *(advanced)* |
+| `keep_rest` | bool | `true` |  |  |  | write the input positions to the point attribute rest_P |
+| `max_points` | int | `100000` | 1.. |  |  | refuse inputs with more points than this (cost grows with points × steps × substeps × iterations) *(advanced)* |
+
+**Writes:** point v, rest_P (keep_rest), N, pinned (int, when anything is pinned)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "bag": {
+      "type": "box",
+      "params": {
+        "size": [
+          1,
+          0.3,
+          1
+        ],
+        "divisions": [
+          8,
+          3,
+          8
+        ]
+      }
+    },
+    "out": {
+      "type": "inflate",
+      "in": [
+        "bag"
+      ],
+      "params": {
+        "pressure": 1.6,
+        "steps": 30
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ### particles
 

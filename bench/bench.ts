@@ -414,6 +414,19 @@ const CASES: Case[] = [
       },
     }),
   },
+  {
+    name: 'drape_100x100',
+    what: (q) => `drape: a ${q ? 50 : 100}×${q ? 50 : 100} cloth, 200 steps over a 5k-triangle sphere and the floor`,
+    elements: (q) => (q ? 51 : 101) ** 2 * 200, unit: 'point-steps',
+    target: 3000, targetSource: 'brief P3-C (100×100 cloth, 200 steps, floor + mesh collisions under 3 s)',
+    graph: (q) => ({
+      nodes: {
+        cloth: { type: 'grid', params: { size: [4, 4], divisions: [q ? 50 : 100, q ? 50 : 100], center: [0, 2.2, 0] } },
+        ball: { type: 'sphere', params: { type: 'ico', level: 4, radius: 1, center: [0, 1, 0] } },
+        target: { type: 'drape', in: ['cloth', 'ball'], params: { steps: 200 } },
+      },
+    }),
+  },
 ];
 
 /** Faces of a UV sphere with `rows` rows and 2·rows columns (triangle caps + quads). */

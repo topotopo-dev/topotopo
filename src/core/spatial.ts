@@ -805,7 +805,7 @@ function rayTri(
 }
 
 /** Closest point on triangle (Ericson). Writes point to out, barycentrics to bary; returns squared distance. */
-function closestOnTri(T: Float64Array, o: number, px: number, py: number, pz: number, out: number[], bary: number[]): number {
+export function closestOnTri(T: Float64Array, o: number, px: number, py: number, pz: number, out: number[], bary: number[]): number {
   const ax = T[o], ay = T[o + 1], az = T[o + 2], bx = T[o + 3], by = T[o + 4], bz = T[o + 5], cx = T[o + 6], cy = T[o + 7], cz = T[o + 8];
   const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az;
   const apx = px - ax, apy = py - ay, apz = pz - az;

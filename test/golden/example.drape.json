@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["N:float:3", "P:float:3", "pinned:int:1", "rest_P:float:3", "v:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": ["Cd:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.13, 2.2, 1.326],
+      "min": [-2.5251, 0, -1.2375]
+    },
+    "counts": {
+      "points": 6106,
+      "prims": 5708,
+      "vertices": 22832,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "f584b83518fb1fa3",
+      "attributes": {
+        "detail.materials": "e84a28e1f9fd15e7",
+        "point.N": "14bc89d76862c6a9",
+        "point.pinned": "0bbaed84c799f11e",
+        "point.rest_P": "9c01baa0c2981f4a",
+        "point.v": "fa2552347ad1bc02",
+        "prim.material": "71a3844d2708db57",
+        "prim.name": "0f85f12d1e2e49f7",
+        "vertex.Cd": "73175c155ac0d62f",
+        "vertex.uv": "9802fe4ddac41c37"
+      },
+      "topology": "f159cb7cf3f0e9ea"
+    }
+  },
+  "name": "example.drape",
+  "ok": true,
+  "source": "examples/drape.json",
+  "warnings": []
+}

@@ -16,6 +16,7 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
 import { stableStringify } from '../graph/engine.ts';
+import { evalSdf } from './sdf.ts';
 
 /** Particle-steps below which a run stays on the cooking thread. */
 const POOL_WORK = 200_000;
@@ -71,12 +72,15 @@ function colliderOf(g: Geometry): ColliderData {
   return c;
 }
 
-function fieldOf(g: Geometry, res: number): FieldData {
+function fieldOf(ctx: CookContext, g: Geometry, res: number): FieldData {
   let m = fieldMemo.get(g);
   if (!m) fieldMemo.set(g, (m = new Map()));
   let f = m.get(res);
   if (f) return f;
-  f = fieldFrom(g, { sdfResolution: res, heightfields: heightfieldsOf(g) });
+  const opts = { sdfResolution: res, heightfields: heightfieldsOf(g) };
+  // a field that runs user code (sdf_expr upstream) is sampled under the script timeout, like sdf_to_mesh does
+  const vol = g.volumes.find((v) => v.kind === 'sdf' || v.kind === 'grid');
+  f = vol && vol.kind === 'sdf' && vol.scripted ? evalSdf(ctx, vol, (sample) => fieldFrom(g, { ...opts, sdfSample: sample })) : fieldFrom(g, opts);
   if (f.type === 1) {
     const kd = new KDTree(g.P).arrays();
     f.shared = { ...f.shared, fTP: kd.TP, fIdx: kd.idx, fAxis: kd.axis };
@@ -87,13 +91,13 @@ function fieldOf(g: Geometry, res: number): FieldData {
 
 interface Prepared { emitter: EmitterData; collider: ColliderData | null; field: FieldData | null }
 
-function prepare(geos: (Geometry | null)[], p: Record<string, any>): Prepared {
+function prepare(ctx: CookContext, geos: (Geometry | null)[], p: Record<string, any>): Prepared {
   const [e, c, f] = geos;
   const collide = p.collide !== 'none' || p.attract_to === 'surface';
   return {
     emitter: emitterOf(e ?? new Geometry()),
     collider: c && collide && (c.numPrims || c.volumes.length) ? colliderOf(c) : null,
-    field: f && (f.numPoints || f.volumes.length) ? fieldOf(f, p.field_resolution) : null,
+    field: f && (f.numPoints || f.volumes.length) ? fieldOf(ctx, f, p.field_resolution) : null,
   };
 }
 
@@ -234,7 +238,7 @@ defineNode({
     };
 
     // the inputs as cooked now (at the cook frame): the run without animate, and the notes either way
-    const now = prepare([ctx.input(0), ctx.inputs[1], ctx.inputs[2]], p);
+    const now = prepare(ctx, [ctx.input(0), ctx.inputs[1], ctx.inputs[2]], p);
     let state: Geometry;
     let S: number;
     if (!p.animate) {
@@ -298,11 +302,11 @@ async function animated(ctx: CookContext, p: Record<string, any>, advance: Advan
   if (k < last) {
     if (!timeDep) {
       // static inputs: the remaining steps in one run
-      state = await advance(k >= 0 ? state! : null, k >= 0 ? stepsAt(start + k) : 0, stepsAt(frame), prepare(geos(last), p));
+      state = await advance(k >= 0 ? state! : null, k >= 0 ? stepsAt(start + k) : 0, stepsAt(frame), prepare(ctx, geos(last), p));
       cache.set('particles:' + chain[last], state);
     } else {
       for (let j = k + 1; j <= last; j++) {
-        state = await advance(j === 0 ? null : state!, j === 0 ? 0 : stepsAt(start + j - 1), stepsAt(start + j), prepare(geos(j), p));
+        state = await advance(j === 0 ? null : state!, j === 0 ? 0 : stepsAt(start + j - 1), stepsAt(start + j), prepare(ctx, geos(j), p));
         cache.set('particles:' + chain[j], state);
       }
     }

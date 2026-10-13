@@ -10,7 +10,7 @@ import { halfEdges } from '../core/halfedge.ts';
 import { dissolveEdges } from '../core/polyedit.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { evalRamp, parseColor } from '../graph/params.ts';
-import { then } from '../graph/parallel.ts';
+import { andThen } from '../graph/parallel.ts';
 import { runWrangle } from '../core/wrangle.ts';
 import { P, edgeMask, getPointNormals, mask, wrangleTime } from './util.ts';
 import { normalize } from '../core/math.ts';
@@ -516,7 +516,7 @@ defineNode({
       // every value is written: the shared copy need not start from the current data
       inputs: { Q: Pd }, results: { D: a.data as Float64Array },
     });
-    return then(run, () => g);
+    return andThen(run, () => g);
   },
 });
 
