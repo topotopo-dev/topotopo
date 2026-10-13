@@ -830,8 +830,13 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
 - Packed primitives: packed disk references (Houdini packed disk prims), USD variants and per-frame layers, and
   instanced rendering in the rasteriser (it draws expanded copies within a triangle budget).
-- Heightfields: `sample: unreal_triangles` is done (scatter and project_curve match a Landscape to 2e-14 m); still
-  open: heightfield tiles, Unreal weight-layer import presets, depression filling for drainage.
+- Heightfields: `sample: unreal_triangles` is done (scatter and project_curve match a Landscape to 2e-14 m).
+  The UE 5.8 TopoTopoPCG importer now creates ordered layer infos and imports the bundle's PNG weights with
+  `ALandscape::Import`. Independent paint-layer storage preserves the exported bytes (including already
+  normalised sediment/debris); the generated Landscape material blends colour/roughness and normalizes only
+  its appearance. `layers=0` and `material=0` opt out independently. See the plugin's
+  [editor workflow](../integrations/unreal/TopoTopoPCG/EDITOR_WORKFLOW.md) for assets and editor acceptance.
+  Still open: heightfield tiles and depression filling for drainage.
 - Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
