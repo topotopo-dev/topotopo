@@ -9,7 +9,7 @@ public class TopoTopoPCGEditor : ModuleRules
         PrivateDependencyModuleNames.AddRange(new[]
         {
             "Core", "CoreUObject", "Engine", "TopoTopoPCG", "PCG", "Projects", "UnrealEd", "ToolMenus",
-            "Slate", "SlateCore", "Json", "AssetRegistry", "InterchangeCore",
+            "Slate", "SlateCore", "Json", "ImageCore", "AssetRegistry", "InterchangeCore",
             "InterchangeEngine", "InterchangePipelines", "Landscape", "LandscapeEditor"
         });
     }
