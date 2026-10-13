@@ -19,6 +19,14 @@ defineNode({
   aliases: ['combine', 'join'],
   inputs: [{ name: 'inputs', desc: 'any number of geometries', multi: true }],
   params: {},
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      ball: { type: 'sphere', params: { center: [2, 0, 0] } },
+      both: { type: 'merge', in: ['box', 'ball'] },
+    },
+    output: 'both',
+  },
   cook: ({ inputs }) => {
     const geos = inputs.filter((g): g is Geometry => !!g);
     const out = Geometry.merge(geos);
@@ -40,6 +48,15 @@ defineNode({
     const i = Math.max(0, Math.min(n - 1, p.index));
     return Array.from({ length: n }, (_, k) => k === i);
   },
+  example: {
+    vars: { variant: 1 },
+    nodes: {
+      box: { type: 'box' },
+      ball: { type: 'sphere' },
+      pick: { type: 'switch', in: ['box', 'ball'], params: { index: '=variant' } },
+    },
+    output: 'pick',
+  },
   cook: ({ inputs, p }) => {
     if (!inputs.length) return new Geometry();
     const i = Math.max(0, Math.min(inputs.length - 1, p.index));
@@ -55,6 +72,7 @@ defineNode({
   aliases: ['output', 'out', 'passthrough'],
   inputs: [{ name: 'geo', desc: 'geometry', optional: true }],
   params: {},
+  example: { nodes: { box: { type: 'box' }, OUT: { type: 'null', in: ['box'] } }, output: 'OUT' },
   cook: ({ input }) => input(0),
 });
 
@@ -67,6 +85,26 @@ defineNode({
   params: {
     index: { type: 'int', default: 0, min: 0, desc: 'foreach: 0 = current piece/feedback, 1 = whole input, 2 = foreach second input. solver: 0 = previous frame, 1 = initial, 2/3 = extra inputs. assets: input number' },
     label: { type: 'string', default: '', desc: 'documentation label for asset inputs' },
+  },
+  example: {
+    nodes: {
+      box: { type: 'box', params: { divisions: [2, 2, 2] } },
+      each: {
+        type: 'foreach',
+        in: ['box'],
+        params: {
+          mode: 'prims',
+          body: {
+            nodes: {
+              face: { type: 'input', params: { index: 0 } },
+              x: { type: 'poly_extrude', in: ['face'], params: { distance: '=0.05 + iteration * 0.02' } },
+            },
+            output: 'x',
+          },
+        },
+      },
+    },
+    output: 'each',
   },
   cook: () => new Geometry(), // provided by the engine
 });
@@ -326,6 +364,7 @@ defineNode({
     const g = (engine as any).graphResolver?.(p.graph);
     return g ? String(hashString(stableStringify(g))) : 'missing';
   },
+  example: { type: 'graph_ref', params: { graph: 'island', node: 'ground', vars: { seed: 7 } } },
   async cook(ctx) {
     const { p, engine } = ctx;
     const resolver = (engine as any).graphResolver as ((n: string) => any) | undefined;
@@ -354,6 +393,7 @@ defineNode({
     instancing: { type: 'enum', options: ['packed', 'expand'], default: 'packed', desc: 'glTF EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry' },
   },
   signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
+  example: { type: 'file', params: { path: 'props/chair.obj', up_axis: 'z', weld: true } },
   async cook({ p, engine, warn }) {
     if (!p.path) throw new NodeError('path is empty');
     const bytes = await engine.host.readFile(p.path).catch((e: any) => { throw new NodeError(`cannot read "${p.path}": ${e.message}`); });

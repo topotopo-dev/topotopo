@@ -80,6 +80,7 @@ defineNode({
     seed: P.seed(),
     group: { type: 'group', default: '', desc: 'only these elements' },
   },
+  example: { type: 'attrib_randomize', params: { name: 'pscale', min: 0.5, max: 1.5, seed: 3 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const n = elemCount(g, p.class);
@@ -132,6 +133,7 @@ defineNode({
     new_name: { type: 'string', default: '', desc: 'rename on promotion ("" = same name)' },
     keep_original: { type: 'bool', default: false, desc: 'keep the source attribute' },
   },
+  example: { type: 'attrib_promote', params: { name: 'N', from: 'point', to: 'prim', method: 'average' } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const src = g.table(p.from).get(p.name);
@@ -196,6 +198,7 @@ defineNode({
     class: { type: 'enum', options: ['all', 'point', 'prim', 'vertex', 'detail'], default: 'all', desc: 'which classes' },
     groups: { type: 'string', default: '', desc: 'also delete groups (of every class) matching this pattern' },
   },
+  example: { type: 'attrib_delete', params: { names: 'N uv*', groups: 'tmp*' } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const m = globRe(p.names);
@@ -223,6 +226,14 @@ defineNode({
     to: { type: 'string', default: '', desc: 'new name' },
     class: { type: 'enum', options: ['auto', 'point', 'prim', 'vertex', 'detail'], default: 'auto', desc: 'class (auto = first found)' },
   },
+  example: {
+    nodes: {
+      ball: { type: 'sphere', params: { type: 'ico', level: 2 } },
+      rocks: { type: 'voronoi_fracture', in: ['ball'], params: { count: 6 } },
+      renamed: { type: 'attrib_rename', in: ['rocks'], params: { from: 'class', to: 'piece' } },
+    },
+    output: 'renamed',
+  },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const classes: AttribClass[] = p.class === 'auto' ? ['point', 'vertex', 'prim', 'detail'] : [p.class];
@@ -245,6 +256,14 @@ defineNode({
     names: { type: 'string', default: '*', desc: 'attribute name pattern', aliases: ['name', 'pattern'] },
     class: { type: 'enum', options: ['point', 'prim', 'vertex', 'detail'], default: 'point', desc: 'class' },
     match_by: { type: 'string', default: '', desc: 'match elements by this int/string attribute instead of index (e.g. "id" or "name")' },
+  },
+  example: {
+    nodes: {
+      base: { type: 'grid' },
+      tinted: { type: 'color', in: ['base'], params: { mode: 'random' } },
+      out: { type: 'attrib_copy', in: ['base', 'tinted'], params: { names: 'Cd' } },
+    },
+    output: 'out',
   },
   cook: ({ input, p }) => {
     const g = input(0).clone(), s = input(1);
@@ -281,6 +300,15 @@ defineNode({
     method: { type: 'enum', options: ['nearest_point', 'surface'], default: 'nearest_point', desc: 'nearest source point, or barycentric interpolation on the closest surface point' },
     max_distance: { type: 'float', default: 1e9, desc: 'no transfer beyond this distance' },
     blend_width: { type: 'float', default: 0, min: 0, desc: 'fade out over this distance before max_distance (0 = hard)' },
+  },
+  example: {
+    nodes: {
+      ground: { type: 'grid', params: { size: [10, 10], divisions: [40, 40] } },
+      pts: { type: 'scatter', in: ['ground'], params: { count: 20 } },
+      colored: { type: 'color', in: ['pts'], params: { mode: 'random' } },
+      painted: { type: 'attrib_transfer', in: ['ground', 'colored'], params: { names: 'Cd', max_distance: 1.5, blend_width: 0.5 } },
+    },
+    output: 'painted',
   },
   cook: ({ input, p }) => {
     const g = input(0).clone(), s = input(1);
@@ -472,6 +500,7 @@ defineNode({
     seed: P.seed(),
     rest_attrib: { type: 'string', default: 'rest', desc: 'sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P)' },
   },
+  example: { type: 'attrib_noise', params: { name: 'mask', frequency: 2, contrast: 1.5 } },
   cook: ({ input, p, parallelMap }) => {
     const g = input(0).clone();
     const ra = p.rest_attrib ? g.points.get(p.rest_attrib) : undefined;
@@ -512,6 +541,7 @@ defineNode({
     group: { type: 'group', default: '', desc: 'only colour these elements (point/prim class)' },
     seed: P.seed(),
   },
+  example: { type: 'color', params: { mode: 'ramp', attrib: 'P.y' } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const cls: AttribClass = p.class;
@@ -616,6 +646,7 @@ defineNode({
     mode: { type: 'enum', options: ['replace', 'union', 'intersect', 'subtract'], default: 'replace', desc: 'combine with an existing group of the same name' },
     invert: { type: 'bool', default: false, desc: 'invert the selection' },
   },
+  example: { type: 'group', params: { name: 'top', class: 'prim', normal: [0, 1, 0], spread_angle: 20 } },
   cook: (ctx) => {
     const { input, p, engine, vars, inputs } = ctx;
     let g = input(0).clone();
@@ -747,6 +778,7 @@ defineNode({
     remove_unused_points: { type: 'bool', default: true, desc: 'drop points no longer used by prims (prim, vertex and edge modes)' },
     edge_mode: { type: 'enum', options: ['prims', 'dissolve'], default: 'prims', desc: 'class edge: prims = delete the prims using the edges (leaves holes); dissolve = remove the edges and merge their faces (dissolve node with defaults)' },
   },
+  example: { type: 'delete', params: { group: '@P.y<0', class: 'point' } },
   cook: ({ input, p }) => {
     const g = input(0);
     if (p.class === 'vertex') {
@@ -791,6 +823,7 @@ defineNode({
     name: { type: 'string', default: '', desc: 'output attribute ("" = the measure name)' },
   },
   outputs: 'prim area/perimeter/length/volume, point curvature',
+  example: { type: 'measure', params: { measure: 'area', name: 'area' } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const name = p.name || p.measure;
@@ -854,6 +887,14 @@ defineNode({
     name_prefix: { type: 'string', default: '', desc: 'if set, also write prim string attribute "name" = prefix + id' },
   },
   outputs: 'class (int), optional prim name',
+  example: {
+    nodes: {
+      ball: { type: 'sphere', params: { type: 'ico', level: 2 } },
+      shards: { type: 'voronoi_fracture', in: ['ball'], params: { count: 8, gap: 0.02 } },
+      ids: { type: 'connectivity', in: ['shards'], params: { attrib: 'piece', name_prefix: 'shard_' } },
+    },
+    output: 'ids',
+  },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const c = connectivity(g);
@@ -881,6 +922,7 @@ defineNode({
     descending: { type: 'bool', default: false, desc: 'reverse the order' },
     seed: P.seed(),
   },
+  example: { type: 'sort', params: { class: 'prim', by: 'random', seed: 3 } },
   cook: ({ input, p }) => {
     const g = input(0);
     const n = p.class === 'point' ? g.numPoints : g.numPrims;
@@ -933,6 +975,7 @@ defineNode({
     cusp_angle: { type: 'float', default: 60, min: 0, max: 180, desc: 'vertex mode: faces meeting sharper than this keep hard edges' },
     hard_edges: { type: 'group', default: '', desc: 'vertex mode: edge group or edge pattern that is always hard, on top of cusp_angle ("" = none), e.g. "seams", "boundary", "angle>30", "p0-1-2"', aliases: ['hardedges', 'hard_edge_group'] },
   },
+  example: { type: 'normal', params: { class: 'vertex', cusp_angle: 30 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     for (const c of ['point', 'vertex', 'prim'] as const) if (c !== p.class) g.table(c).delete('N');
@@ -957,6 +1000,7 @@ defineNode({
     center: { type: 'vec3', default: [0, 0, 0], desc: 'projection center (cyl/sph)' },
   },
   outputs: 'vertex uv',
+  example: { type: 'uv_project', params: { method: 'cylindrical', axis: 'y' } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     g.points.delete('uv');
@@ -1002,6 +1046,14 @@ defineNode({
     scale: { type: 'vec2', default: [1, 1], desc: 'scale', aliases: ['s'] },
     rotate: { type: 'float', default: 0, desc: 'degrees', aliases: ['r'] },
     pivot: { type: 'vec2', default: [0.5, 0.5], desc: 'pivot' },
+  },
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      uv: { type: 'uv_project', in: ['box'], params: { method: 'box' } },
+      tiled: { type: 'uv_transform', in: ['uv'], params: { scale: [2, 2], rotate: 90 } },
+    },
+    output: 'tiled',
   },
   cook: ({ input, p }) => {
     const g = input(0).clone();

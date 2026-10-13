@@ -24,6 +24,7 @@ defineNode({
     average: { type: 'bool', default: false, desc: 'move fused points to their average position (default keeps the first)' },
     group: P.group('point'),
   },
+  example: { type: 'fuse', params: { distance: 0.001 } },
   cook: ({ input, p }) => {
     const g = input(0);
     const sel = mask(g, 'point', p.group);
@@ -45,6 +46,7 @@ defineNode({
     remove_unused_points: { type: 'bool', default: true, desc: 'remove points not used by prims (only when the geometry has prims)' },
     fix_winding: { type: 'bool', default: false, desc: 'make closed meshes face outward' },
   },
+  example: { type: 'clean', params: { fuse_distance: 0.0001, fix_winding: true } },
   cook: ({ input, p }) => {
     let g = input(0);
     if (p.fuse_distance > 0) g = fusePoints(g, p.fuse_distance);
@@ -66,6 +68,7 @@ defineNode({
   aliases: ['flip', 'flip_normals'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: { group: P.group('prim') },
+  example: { type: 'reverse', params: { group: '@P.y<0' } },
   cook: ({ input, p }) => {
     const g = input(0);
     return reversePrims(g, mask(g, 'prim', p.group));
@@ -81,6 +84,7 @@ defineNode({
   params: {
     mode: { type: 'enum', options: ['unique', 'consolidate'], default: 'unique', desc: 'unique = every prim gets its own points; consolidate = fuse identical positions' },
   },
+  example: { type: 'facet', params: { mode: 'unique' } },
   cook: ({ input, p }) => {
     const g = input(0);
     if (p.mode === 'consolidate') return fusePoints(g, 1e-9);
@@ -101,6 +105,7 @@ defineNode({
   aliases: ['divide', 'triangles'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: { group: P.group('prim') },
+  example: { type: 'triangulate', params: { group: '@P.y>0' } },
   cook: ({ input, p }) => {
     const g = input(0);
     const sel = mask(g, 'prim', p.group);
@@ -792,6 +797,7 @@ defineNode({
     keep_back: { type: 'bool', default: false, desc: 'keep the original faces (reversed) underneath' },
   },
   outputs: 'prim groups front, side',
+  example: { type: 'poly_extrude', params: { group: '@P.y>0.4', distance: 0.3, inset: 0.1 } },
   cook: ({ input, p }) => {
     const g = input(0);
     const sel = mask(g, 'prim', p.group);
@@ -922,6 +928,13 @@ defineNode({
     divisions: { type: 'ivec2', default: [2, 2], min: 1, desc: 'count mode: cells along the quad\'s first and second edge' },
   },
   outputs: 'prim int cell_u, cell_v (cell indices within the original quad)',
+  example: {
+    nodes: {
+      facade: { type: 'box', params: { size: [6, 3, 4] } },
+      cells: { type: 'grid_split', in: ['facade'], params: { size: [1.5, 1] } },
+    },
+    output: 'cells',
+  },
   cook: ({ input, p }) => {
     const g = input(0);
     const sel = mask(g, 'prim', p.group);
@@ -999,6 +1012,7 @@ defineNode({
     triangulate: { type: 'bool', default: false, desc: 'fan-triangulate the caps' },
   },
   outputs: 'prim group filled',
+  example: { nodes: { pipe: { type: 'tube', params: { caps: false } }, capped: { type: 'fill_holes', in: ['pipe'] } }, output: 'capped' },
   cook: ({ input, p }) => {
     const g = input(0);
     const loops = boundaryLoops(g).filter((l) => !p.max_edges || l.length <= p.max_edges);
@@ -1032,6 +1046,7 @@ defineNode({
     per_piece: { type: 'bool', default: false, desc: 'one box per connected piece' },
     divisions: { type: 'ivec3', default: [1, 1, 1], min: 1, desc: 'box divisions' },
   },
+  example: { type: 'bound', params: { padding: [0.1, 0.1, 0.1] } },
   cook: ({ input, p }) => {
     const g = input(0);
     const boxes: Geometry[] = [];
@@ -1056,6 +1071,13 @@ defineNode({
   aliases: ['hull', 'shrinkwrap'],
   inputs: [{ name: 'geo', desc: 'points or geometry' }],
   params: {},
+  example: {
+    nodes: {
+      pts: { type: 'point_grid', params: { counts: [6, 4, 6], size: [2, 1, 2], jitter: 0.8, seed: 2 } },
+      hull: { type: 'convex_hull', in: ['pts'] },
+    },
+    output: 'hull',
+  },
   cook: ({ input }) => {
     const g = input(0);
     if (g.numPoints < 4) throw new NodeError('convex hull needs at least 4 non-coplanar points');

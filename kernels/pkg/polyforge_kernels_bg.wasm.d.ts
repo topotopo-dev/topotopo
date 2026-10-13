@@ -2,6 +2,9 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const dual_contour: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const erode_droplet: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: bigint) => void;
+export const erode_pipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: bigint) => void;
+export const flow_accumulation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const grid_blur: (a: number, b: number, c: number) => void;
 export const grid_csg: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const grid_dilate: (a: number, b: number, c: number) => void;
@@ -13,7 +16,8 @@ export const remesh_quad: (a: number, b: number, c: number, d: number, e: number
 export const roof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const sdf_from_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
 export const straight_skeleton: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-export const __wbindgen_export: (a: number) => void;
+export const thermal_erode: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
+export const __wbindgen_export: (a: number, b: number) => number;
+export const __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_export3: (a: number) => void;
 export const __wbindgen_add_to_stack_pointer: (a: number) => number;
-export const __wbindgen_export2: (a: number, b: number) => number;
-export const __wbindgen_export3: (a: number, b: number, c: number, d: number) => number;

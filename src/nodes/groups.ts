@@ -59,7 +59,14 @@ defineNode({
     new_name: { type: 'string', default: '', desc: 'name of the converted group ("" = keep the name; several matched groups are unioned into it)', aliases: ['output', 'newname'] },
     delete_source: { type: 'bool', default: true, desc: 'remove the source group after converting' },
   },
-  example: { type: 'group_promote', params: { group: 'top', from: 'point', to: 'prim', include: 'all' } },
+  example: {
+    nodes: {
+      box: { type: 'box', params: { divisions: [2, 2, 2] } },
+      top: { type: 'group', in: ['box'], params: { name: 'top', class: 'point', expr: '@P.y > 0.4' } },
+      faces: { type: 'group_promote', in: ['top'], params: { group: 'top', from: 'point', to: 'prim', include: 'all' } },
+    },
+    output: 'faces',
+  },
   cook: ({ input, p, warn }) => {
     const g = input(0).clone();
     const from = p.from as GroupClass, to = p.to as GroupClass;
@@ -136,7 +143,14 @@ defineNode({
     connectivity: { type: 'enum', options: ['edge', 'point'], default: 'edge', desc: 'prim class: neighbours share an edge or only a point' },
     new_name: { type: 'string', default: '', desc: 'output group ("" = overwrite the input group)', aliases: ['output', 'newname'] },
   },
-  example: { type: 'group_expand', params: { group: 'top', class: 'prim', steps: 2 } },
+  example: {
+    nodes: {
+      ball: { type: 'sphere', params: { type: 'quad' } },
+      top: { type: 'group', in: ['ball'], params: { name: 'top', normal: [0, 1, 0], spread_angle: 15 } },
+      grown: { type: 'group_expand', in: ['top'], params: { group: 'top', class: 'prim', steps: 2 } },
+    },
+    output: 'grown',
+  },
   cook: ({ input, p, warn }) => {
     const g = input(0).clone();
     const cls = p.class as 'point' | 'prim' | 'edge';
@@ -181,6 +195,14 @@ defineNode({
     groups: { type: 'string', default: '', desc: 'names to delete: "tmp*", "a b c", "* ^keep"', aliases: ['group', 'names', 'pattern'] },
     class: { type: 'enum', options: ['all', ...CLASS4], default: 'all', desc: 'which classes' },
   },
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      tmp: { type: 'group', in: ['box'], params: { name: 'tmp_top', normal: [0, 1, 0] } },
+      clean: { type: 'group_delete', in: ['tmp'], params: { groups: 'tmp*' } },
+    },
+    output: 'clean',
+  },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const match = nameMatcher(p.groups);
@@ -203,6 +225,14 @@ defineNode({
     from: { type: 'string', default: '', desc: 'existing group name' },
     to: { type: 'string', default: '', desc: 'new name (replaces a same-named group of that class)' },
     class: { type: 'enum', options: ['auto', ...CLASS4], default: 'auto', desc: 'class (auto = first class that has the group: point, vertex, prim, edge)' },
+  },
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      top: { type: 'group', in: ['box'], params: { name: 'top', normal: [0, 1, 0] } },
+      roof: { type: 'group_rename', in: ['top'], params: { from: 'top', to: 'roof' } },
+    },
+    output: 'roof',
   },
   cook: ({ input, p, warn }) => {
     const g = input(0).clone();
@@ -318,7 +348,15 @@ defineNode({
     class: { type: 'enum', options: ['prim', 'point', 'vertex', 'edge'], default: 'prim', desc: 'element class' },
     expr: { type: 'string', default: '', desc: 'boolean expression, e.g. "top & !side*", "(a | b) & @P.y>0", "boundary ^ seams"', aliases: ['expression', 'pattern'] },
   },
-  example: { type: 'group_combine', params: { name: 'top_only', class: 'prim', expr: 'top & !side' } },
+  example: {
+    nodes: {
+      box: { type: 'box', params: { divisions: [3, 3, 3] } },
+      upper: { type: 'group', in: ['box'], params: { name: 'upper', expr: '@P.y > 0' } },
+      top: { type: 'group', in: ['upper'], params: { name: 'top', normal: [0, 1, 0] } },
+      walls: { type: 'group_combine', in: ['top'], params: { name: 'upper_walls', class: 'prim', expr: 'upper & !top' } },
+    },
+    output: 'walls',
+  },
   cook: ({ input, p, warn }) => {
     const g = input(0).clone();
     if (!String(p.expr).trim()) { warn(`"expr" is empty: no group created (groups: ${available(g)})`); return g; }
