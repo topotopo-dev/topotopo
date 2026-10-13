@@ -10,7 +10,7 @@ import type { NodeSpec, GraphSpec } from '../src/graph/types.ts';
 import { halfEdges } from '../src/core/halfedge.ts';
 import { primArea, topologyReport } from '../src/core/topology.ts';
 import { selfIntersections } from '../src/core/analysis.ts';
-import { kernelsWasmURL, loadKernels } from '../src/wasm/kernels.ts';
+import { kernelsWasmURL, kernelsWasmVariant, loadKernels } from '../src/wasm/kernels.ts';
 import { fingerprint } from './fingerprint.ts';
 
 const off = new Engine(createNodeHost({ workers: 0 }));
@@ -269,7 +269,9 @@ try {
   }
   checks++;
   // The raw wasm-bindgen object parser must reject malformed JS, not silently coerce counts or flags.
-  const raw = await import('../kernels/pkg/topotopo_kernels.js');
+  const raw = kernelsWasmVariant === 'simd'
+    ? await import('../kernels/pkg-simd/topotopo_kernels.js')
+    : await import('../kernels/pkg/topotopo_kernels.js');
   for (const options of [
     { target_faces: 1.5 }, { target_faces: NaN }, { target_faces: -1 }, { max_faces: 3.5 },
     { smooth_iterations: 1.5 }, { feature_angle: Infinity }, { quad_only: 'yes' }, { align_boundaries: 1 },

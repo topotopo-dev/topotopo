@@ -64,6 +64,8 @@ for (const [from, target] of [
   ['host/node.js', '../../assets/fonts/DejaVuSans.ttf'],
   ['wasm/kernels.js', '../../kernels/pkg/topotopo_kernels_bg.wasm'],
   ['wasm/kernels.js', '../../kernels/pkg/topotopo_kernels.js'],
+  ['wasm/kernels.js', '../../kernels/pkg-simd/topotopo_kernels_bg.wasm'],
+  ['wasm/kernels.js', '../../kernels/pkg-simd/topotopo_kernels.js'],
   ['host/pool.js', './worker.js'],
   ['viewer/server.js', './index.html'],
   ['index.js', './index.d.ts'],
@@ -71,6 +73,12 @@ for (const [from, target] of [
   const p = path.resolve(path.dirname(path.join(DIST, from)), target);
   if (!fs.existsSync(p)) problems.push(`dist/${from} looks for ${target}, which is missing (${rel(p)})`);
 }
+
+const wasmBytes = ['pkg', 'pkg-simd'].reduce((sum, dir) => {
+  const file = path.join(ROOT, 'kernels', dir, 'topotopo_kernels_bg.wasm');
+  return sum + (fs.existsSync(file) ? fs.statSync(file).size : 0);
+}, 0);
+if (wasmBytes > 2_500_000) problems.push(`combined scalar/SIMD WASM is ${wasmBytes} bytes (limit 2500000)`);
 
 if (problems.length) {
   for (const p of problems) console.error('build: ' + p);

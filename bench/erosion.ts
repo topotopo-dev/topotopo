@@ -1,9 +1,10 @@
-// Includes JS/WASM copying and all returned layers. Run after kernels:build, without SIMD.
+// Includes JS/WASM copying and all returned layers. Run after kernels:build.
+// SIMD is selected automatically; TOPOTOPO_WASM=scalar tests the fallback.
 // node bench/erosion.ts --runs=3 [--droplet-only | --pipe-only]
 // Build with Cargo feature `profile` for pass timings (see kernels/BENCH.md).
 import fs from 'node:fs';
 import os from 'node:os';
-import { kernelsWasmURL, loadKernels } from '../src/wasm/kernels.ts';
+import { kernelsWasmURL, kernelsWasmVariant, loadKernels } from '../src/wasm/kernels.ts';
 import { DEFAULT_EROSION, makeErosionField, erodeStep } from '../src/core/erosion.ts';
 import { fractal, makeNoise } from '../src/core/noise.ts';
 import { rng } from '../src/core/random.ts';
@@ -13,7 +14,7 @@ import type { ErosionResult } from '../src/wasm/kernels.ts';
 const runs = Number(process.argv.find(v => v.startsWith('--runs='))?.split('=')[1] ?? 3);
 if (!Number.isSafeInteger(runs) || runs < 1 || runs > 10) throw new Error('runs must be 1..10');
 const kernels = await loadKernels(fs.readFileSync(kernelsWasmURL));
-console.log(JSON.stringify({ cpu: os.cpus()[0]?.model, os: `${os.platform()} ${os.release()} ${os.arch()}`, node: process.version, wasmBytes: fs.statSync(kernelsWasmURL).size, runs }));
+console.log(JSON.stringify({ cpu: os.cpus()[0]?.model, os: `${os.platform()} ${os.release()} ${os.arch()}`, node: process.version, variant: kernelsWasmVariant, wasmBytes: fs.statSync(kernelsWasmURL).size, runs }));
 function measure(name: string, run: () => Float32Array | Float64Array): number {
   const times: number[] = [], processCpuMilliseconds: number[] = []; let checksum = 0;
   for (let i = 0; i < runs; i++) {

@@ -1,5 +1,5 @@
-use topotopo_kernels::{roof_mesh, skeleton};
 use std::{hint::black_box, time::Instant};
+use topotopo_kernels::{roof_mesh, skeleton};
 
 fn main() {
     let mut state = 11u64;
