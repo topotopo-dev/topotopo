@@ -1,0 +1,502 @@
+{
+  "version": 1,
+  "description": "Straight-skeleton roofs: an L-shaped house using the house shelf wall layout, a courtyard roof surrounding a hole, and nested inward offsets making a staircase.",
+  "vars": {
+    "width": 8,
+    "depth": 6,
+    "floors": 1,
+    "floor_height": 3,
+    "window_spacing": 2.5,
+    "pitch": 32,
+    "overhang": 0.5,
+    "door": true
+  },
+  "nodes": {
+    "l_footprint": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            6
+          ],
+          [
+            5,
+            0,
+            6
+          ],
+          [
+            5,
+            0,
+            9
+          ],
+          [
+            0,
+            0,
+            9
+          ]
+        ],
+        "closed": true
+      }
+    },
+    "l_house": {
+      "type": "foreach",
+      "in": [
+        "l_footprint"
+      ],
+      "params": {
+        "mode": "prims",
+        "body": {
+          "nodes": {
+            "inp": {
+              "type": "input",
+              "params": {
+                "index": 0,
+                "label": "footprint: a closed polygon on the XZ plane (optional)"
+              }
+            },
+            "rect": {
+              "type": "grid",
+              "params": {
+                "size": [
+                  "=width",
+                  "=depth"
+                ],
+                "divisions": [
+                  1,
+                  1
+                ]
+              }
+            },
+            "fp": {
+              "type": "switch",
+              "in": [
+                "inp",
+                "rect"
+              ],
+              "params": {
+                "index": "=npoints('inp') > 2 ? 0 : 1"
+              }
+            },
+            "edges": {
+              "type": "wrangle",
+              "in": [
+                "fp"
+              ],
+              "params": {
+                "run_over": "prims",
+                "code": "const pts = primpoints(0, @primnum); const n = pts.length;\n// winding of the footprint in the XZ plane decides which side is outside: for a positive signed area the left\n// normal (-dz, dx) points inward, so the edges are walked the other way round\nlet area = 0;\nfor (let k = 0; k < n; k++) { const a = point(0, 'P', pts[k]), b = point(0, 'P', pts[(k + 1) % n]); area += a[0] * b[2] - b[0] * a[2]; }\nconst flip = area > 0;\nfor (let k = 0; k < n; k++) {\n  let a = point(0, 'P', pts[k]), b = point(0, 'P', pts[(k + 1) % n]);\n  if (flip) { const t = a; a = b; b = t; }\n  const dx = b[0] - a[0], dz = b[2] - a[2];\n  const len = Math.sqrt(dx * dx + dz * dz);\n  if (len < 1e-6) continue;\n  const p0 = addpoint(0, [a[0], 0, a[2]]), p1 = addpoint(0, [b[0], 0, b[2]]);\n  const pr = addprim(0, 'polyline', [p0, p1]);\n  setprimattrib(0, 'len', pr, len);\n  setprimattrib(0, 'ang', pr, Math.atan2(-dz, dx) * 180 / Math.PI);\n  setprimattrib(0, 'x0', pr, a[0]);\n  setprimattrib(0, 'z0', pr, a[2]);\n}\nremoveprim(0, @primnum, true);"
+              }
+            },
+            "walls": {
+              "type": "foreach",
+              "in": [
+                "edges"
+              ],
+              "params": {
+                "mode": "prims",
+                "body": {
+                  "nodes": {
+                    "piece": {
+                      "type": "input",
+                      "params": {
+                        "index": 0
+                      }
+                    },
+                    "ground": {
+                      "type": "wall_segment",
+                      "params": {
+                        "length": "=prim('piece', 0, 'len')",
+                        "height": "=floor_height",
+                        "windows": "=max(0, floor(prim('piece', 0, 'len') / window_spacing))",
+                        "door": "=door && iteration == 0"
+                      }
+                    },
+                    "upper": {
+                      "type": "wall_segment",
+                      "params": {
+                        "length": "=prim('piece', 0, 'len')",
+                        "height": "=floor_height",
+                        "windows": "=max(0, floor(prim('piece', 0, 'len') / window_spacing))",
+                        "door": false
+                      }
+                    },
+                    "upper_up": {
+                      "type": "transform",
+                      "in": [
+                        "upper"
+                      ],
+                      "params": {
+                        "translate": [
+                          0,
+                          "=floor_height",
+                          0
+                        ]
+                      }
+                    },
+                    "upper_stack": {
+                      "type": "copy_xform",
+                      "in": [
+                        "upper_up"
+                      ],
+                      "params": {
+                        "count": "=max(1, floors - 1)",
+                        "translate": [
+                          0,
+                          "=floor_height",
+                          0
+                        ]
+                      }
+                    },
+                    "nothing": {
+                      "type": "null"
+                    },
+                    "upper_sel": {
+                      "type": "switch",
+                      "in": [
+                        "nothing",
+                        "upper_stack"
+                      ],
+                      "params": {
+                        "index": "=floors > 1 ? 1 : 0"
+                      }
+                    },
+                    "wall": {
+                      "type": "merge",
+                      "in": [
+                        "ground",
+                        "upper_sel"
+                      ]
+                    },
+                    "place": {
+                      "type": "transform",
+                      "in": [
+                        "wall"
+                      ],
+                      "params": {
+                        "rotate": [
+                          0,
+                          "=prim('piece', 0, 'ang')",
+                          0
+                        ],
+                        "translate": [
+                          "=prim('piece', 0, 'x0')",
+                          0,
+                          "=prim('piece', 0, 'z0')"
+                        ]
+                      }
+                    }
+                  },
+                  "output": "place"
+                }
+              }
+            },
+            "roof": {
+              "type": "roof_skeleton",
+              "in": [
+                "fp"
+              ],
+              "params": {
+                "pitch": "=pitch",
+                "overhang": "=overhang",
+                "thickness": 0.16
+              }
+            },
+            "roof_place": {
+              "type": "transform",
+              "in": [
+                "roof"
+              ],
+              "params": {
+                "translate": [
+                  0,
+                  "=floors * floor_height",
+                  0
+                ]
+              }
+            },
+            "out": {
+              "type": "merge",
+              "in": [
+                "walls",
+                "roof_place"
+              ]
+            }
+          },
+          "output": "out"
+        }
+      }
+    },
+    "courtyard_outer": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            12,
+            0,
+            0
+          ],
+          [
+            12,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            10
+          ]
+        ],
+        "closed": true
+      }
+    },
+    "courtyard_hole": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            4,
+            0,
+            3
+          ],
+          [
+            4,
+            0,
+            7
+          ],
+          [
+            8,
+            0,
+            7
+          ],
+          [
+            8,
+            0,
+            3
+          ]
+        ],
+        "closed": true
+      }
+    },
+    "courtyard_footprint": {
+      "type": "merge",
+      "in": [
+        "courtyard_outer",
+        "courtyard_hole"
+      ]
+    },
+    "courtyard_walls": {
+      "type": "extrude",
+      "in": [
+        "courtyard_footprint"
+      ],
+      "params": {
+        "height": 3,
+        "plane": "xz"
+      }
+    },
+    "courtyard_wall_color": {
+      "type": "color",
+      "in": [
+        "courtyard_walls"
+      ],
+      "params": {
+        "color": "#dfcaa7"
+      }
+    },
+    "courtyard_roof": {
+      "type": "roof_skeleton",
+      "in": [
+        "courtyard_footprint"
+      ],
+      "params": {
+        "pitch": 38,
+        "overhang": 0.35,
+        "thickness": 0.14
+      }
+    },
+    "courtyard_roof_up": {
+      "type": "transform",
+      "in": [
+        "courtyard_roof"
+      ],
+      "params": {
+        "translate": [
+          0,
+          3,
+          0
+        ]
+      }
+    },
+    "courtyard": {
+      "type": "merge",
+      "in": [
+        "courtyard_wall_color",
+        "courtyard_roof_up"
+      ]
+    },
+    "courtyard_place": {
+      "type": "transform",
+      "in": [
+        "courtyard"
+      ],
+      "params": {
+        "translate": [
+          15,
+          0,
+          0
+        ]
+      }
+    },
+    "stair_footprint": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            9,
+            0,
+            0
+          ],
+          [
+            9,
+            0,
+            5
+          ],
+          [
+            5,
+            0,
+            5
+          ],
+          [
+            5,
+            0,
+            8
+          ],
+          [
+            0,
+            0,
+            8
+          ]
+        ],
+        "closed": true
+      }
+    },
+    "staircase": {
+      "type": "foreach",
+      "in": [
+        "stair_footprint"
+      ],
+      "params": {
+        "mode": "count",
+        "count": 6,
+        "body": {
+          "nodes": {
+            "footprint": {
+              "type": "input",
+              "params": {
+                "index": 0
+              }
+            },
+            "inset": {
+              "type": "straight_skeleton",
+              "in": [
+                "footprint"
+              ],
+              "params": {
+                "mode": "offset",
+                "distance": "=iteration * 0.25"
+              }
+            },
+            "tread": {
+              "type": "extrude",
+              "in": [
+                "inset"
+              ],
+              "params": {
+                "height": 0.2,
+                "plane": "xz"
+              }
+            },
+            "rise": {
+              "type": "transform",
+              "in": [
+                "tread"
+              ],
+              "params": {
+                "translate": [
+                  0,
+                  "=iteration * 0.2",
+                  0
+                ]
+              }
+            },
+            "paint": {
+              "type": "color",
+              "in": [
+                "rise"
+              ],
+              "params": {
+                "color": [
+                  "=0.32 + iteration * 0.045",
+                  "=0.40 + iteration * 0.045",
+                  "=0.43 + iteration * 0.045"
+                ]
+              }
+            }
+          },
+          "output": "paint"
+        }
+      }
+    },
+    "stair_place": {
+      "type": "transform",
+      "in": [
+        "staircase"
+      ],
+      "params": {
+        "translate": [
+          7,
+          0,
+          14
+        ]
+      }
+    },
+    "all": {
+      "type": "merge",
+      "in": [
+        "l_house",
+        "courtyard_place",
+        "stair_place"
+      ]
+    }
+  },
+  "output": "all",
+  "meta": {
+    "render": {
+      "views": "quad",
+      "azimuth": 35,
+      "elevation": 30
+    }
+  }
+}

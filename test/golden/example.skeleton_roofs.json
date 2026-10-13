@@ -1,0 +1,49 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["N:float:3", "edge:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["Cd:float:3", "N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [27.3967, 5.3448, 22],
+      "min": [-0.5634, 0, -0.5617]
+    },
+    "counts": {
+      "points": 1284,
+      "prims": 1222,
+      "vertices": 4528,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["bottom", "front", "side", "top"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "e37e1cc7e3cc134d",
+      "attributes": {
+        "detail.materials": "93ca07e8bef22c6a",
+        "group.prim.bottom": "12f02a07f0186aad",
+        "group.prim.front": "58ab6c0decd2a2a7",
+        "group.prim.side": "ac49ae1e062dd42c",
+        "group.prim.top": "c57865cf86cf640d",
+        "prim.N": "f7ad83ed9713fbf7",
+        "prim.edge": "f1caa5a4bdbc3b7e",
+        "prim.material": "50662ed572e763b7",
+        "prim.name": "8af26d315e164d8b",
+        "vertex.Cd": "7c793dd52862790f",
+        "vertex.N": "19e2b3c923ddfdb3",
+        "vertex.uv": "396bdbdb4f4c3cb1"
+      },
+      "topology": "9d69da3bd35437cd"
+    }
+  },
+  "name": "example.skeleton_roofs",
+  "ok": true,
+  "source": "examples/skeleton_roofs.json",
+  "warnings": []
+}

@@ -1,0 +1,34 @@
+[package]
+name = "polyforge-kernels"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+description = "Deterministic geometry kernels for Polyforge"
+repository = "https://github.com/topotopo-dev/polyforge"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bench]]
+name = "wavefront"
+harness = false
+
+[dependencies]
+robust = "1.2.0"
+libm = "0.2.16"
+earcutr = "0.5.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.114"
+js-sys = "0.3.91"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
