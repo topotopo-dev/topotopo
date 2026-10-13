@@ -269,6 +269,16 @@ Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`,
 node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{frame:04}.png" --export out/growth.glb
 ```
 
+## Unreal Engine 5.8
+
+The optional [TopoTopoPCG plugin](integrations/unreal/TopoTopoPCG/README.md) reads CSV or `points.json`
+directly into PCG, resolves mesh names through the instance sidecar and editable asset mappings, and provides a
+**TopoTopo Instance Spawner** backed by Unreal's Static Mesh Spawner. **Tools > Import TopoTopo scene** imports
+the GLB prototypes and materials, places the CSV instances as HISM components, and can import an exact-fit
+Landscape heightmap. Generate the sample with `npm run export:demo`; the plugin README gives installation,
+the two-node PCG graph, coordinates, automation tests and editor verification steps. It is separate from the npm
+package; copy it into your Unreal project's `Plugins/` directory.
+
 ## Shelf
 
 [shelf/](shelf) holds ready-made graph assets (TopoTopo's answer to a shelf of HDAs): walls with windows and doors,
