@@ -7092,7 +7092,7 @@ None (generator).
 
 category: `shelf`
 
-House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_hip sized to the footprint's box.
+House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_skeleton hip roof that follows the footprint exactly (straight skeleton: L-shapes, courtyards and any simple polygon get correct valleys and ridges).
 
 ![house](../shelf/thumbs/house.png)
 

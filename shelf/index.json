@@ -82,8 +82,8 @@
    "group": "architecture"
   },
   {
-   "name": "roof_hip",
-   "file": "roof_hip.json",
+   "name": "roof_skeleton",
+   "file": "roof_skeleton.json",
    "group": "architecture"
   },
   {
@@ -147,8 +147,8 @@
    "group": "architecture"
   },
   {
-   "name": "roof_skeleton",
-   "file": "roof_skeleton.json",
+   "name": "roof_hip",
+   "file": "roof_hip.json",
    "group": "architecture"
   },
   {
