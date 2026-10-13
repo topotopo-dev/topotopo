@@ -10,6 +10,7 @@ import { fmtNum } from './render/raster.ts';
 import { packedSummaryLine } from './core/packed.ts';
 import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
 import { imageSummary } from './core/image.ts';
+import { sdfGridSummary } from './core/sdfgrid.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
@@ -85,6 +86,7 @@ export function summarize(g: Geometry): string {
   const pk = packedSummaryLine(g);
   if (pk) lines.push(pk);
   lines.push(...heightfieldSummary(g));
+  lines.push(...sdfGridSummary(g));
   lines.push(...imageSummary(g));
   if (g.numPoints || g.volumes.some((v) => v.kind !== 'image')) {
     const b = g.bbox(true);

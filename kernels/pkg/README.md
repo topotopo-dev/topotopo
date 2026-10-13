@@ -110,7 +110,7 @@ Current limits are explicit:
   the weights and then convert the returned times accordingly. Ordinary roof pitches
   and the explicit 90-degree gable are covered by tests; pitches extremely close to
   zero or 90 degrees can encounter the same limit.
-- Later remesh/erosion/SDF kernels are not included in this first slice.
+- Later quad/isotropic remeshing, erosion and point kernels are not included.
 
 ## Tests
 
@@ -156,8 +156,98 @@ dependency is used. `earcutr` is only used for flat cap triangulation, not skele
 | wasm-bindgen-macro-support | 0.2.129 | MIT OR Apache-2.0 | Bindgen build dependency |
 | wasm-bindgen-shared | 0.2.129 | MIT OR Apache-2.0 | Bindgen transitive |
 
-**Allowlist exception pending:** `unicode-ident` includes the additional Unicode-3.0
-data-table licence, which is outside the task's literal five-licence allowlist. It is
-a compiler-only transitive dependency of the explicitly requested `wasm-bindgen`;
-its identifier tables are not linked into the shipped WASM. This is disclosed rather
-than representing the entire build dependency graph as satisfying that allowlist.
+`unicode-ident` is a compiler-only transitive dependency; its Unicode-3.0 data-table
+licence is permitted by the repository's build-time licence rule. Its identifier
+tables are not linked into the shipped WASM. Session 2 adds no dependencies.
+
+## Sampled SDF grids (session 2)
+
+The original skeleton API is unchanged. Additional generated WASM exports are:
+
+```js
+const grid = sdf_from_mesh(positions, tris, voxel, band, padding, fill);
+grid_csg(a, b, 'smooth_union', k);
+grid_offset(grid, distance);
+grid_dilate(grid, distance);
+grid_erode(grid, distance);
+grid_blur(grid, radius);
+grid_resample(grid, newVoxel);
+dual_contour(grid, iso, qefTolerance, sharp, clampToCell);
+```
+
+`positions` are xyz `Float64Array`; `tris` are point indices in `Uint32Array`.
+Grid objects contain `dims: Uint32Array(3)`, `origin: Float64Array(3)`, `voxel: number`
+and `values: Float32Array(nx*ny*nz)`. X varies fastest: `x + nx*(y + ny*z)`.
+Samples lie at grid nodes, so world extent is `(dims-1)*voxel`. Distances are negative
+inside. Band and bounding-box padding are both in voxels; padding is independent of
+the band. `fill=false` stores signed infinities outside the exact distance band.
+All operations validate inputs, allocate outputs and leave inputs unchanged. Dense
+allocation is limited to 64 Mi samples; this is not a sparse OpenVDB tree.
+
+Mesh conversion uses exact point-triangle distances with a deterministic BVH.
+Signs use absolute generalized winding greater than one half. Consistently oriented
+closed meshes use signed scanline crossings (integer winding), so overlapping shells
+accumulate instead of cancelling by parity. Open soups use triangle solid angles,
+accelerated in the far field by BVH dipole moments with exact evaluation near the
+classification threshold (this acceleration has no certified error bound). The
+mathematical reference is [Barill et al., Fast Winding Numbers (2018)](https://www.dgp.toronto.edu/projects/fast-winding-numbers/);
+the implementation is original. This sign is usable for many open meshes, not a guarantee
+that every open sheet defines an interior. Oppositely wound overlapping shells can
+cancel. Degenerate triangles contribute distance but no winding.
+
+With `fill=true`, up to four cycles of eight-direction Eikonal fast sweeping propagate unsigned distances
+outside the exact band while retaining the winding signs and all exact band samples.
+These farther distances are approximations. CSG resamples B trilinearly onto A's
+layout and clips to A's bounds. Smooth operations use polynomial smooth min/max.
+Offset and morphology subtract/add distance; blur is a separable box filter. Those
+operations do not redistance or enlarge the grid. Start filled and sufficiently padded
+for large edits. Trilinear sampling outside bounds is positive infinity; mixed
+finite/infinite stencils use a signed domain-diagonal cap, so distances beyond a narrow
+band are intentionally not exact.
+
+Dual contouring returns `positions: Float64Array`, polygon CSR `prim_start` and
+`vertex_point: Uint32Array`, plus `cell_index: Uint32Array` identifying the flattened
+lower grid corner for every output vertex. The native equivalent is `DualMesh`.
+Hermite samples interpolate sign-changing grid edges and use minmod finite-difference
+gradients. A centered symmetric-Jacobi pseudoinverse minimizes the QEF; an active-set
+solver minimizes it within the cell when clamping is enabled. Shared bilinear face
+asymptotic decisions split separate crossing loops. Each loop is triangulated through
+its QEF vertex and shared grid-edge crossings, keeping triangles within one cell
+instead of emitting potentially folded dual quads. Multi-loop cells use separate
+crossing centroids; `sharp=false` uses centroids throughout. A 1e-6-voxel inset avoids
+exact-zero endpoint collapses. Signed negative zero at iso zero retains inside sign.
+This is a conservative uniform primal/dual hybrid, not the full Schaefer/Ju adaptive
+octree algorithm. Unclamped QEF fits are accepted only when they stay in their cells;
+otherwise the caller gets a clear enable-clamping error.
+
+The surface budget is 1M active cells, 2M output vertices and 4M triangles, with checked
+growth and fallible reservations. Boundary-crossing level sets and infinite samples
+on crossing edges return actionable errors. Increase padding/band width or use a
+coarser grid. Tests establish area, sharpness, incidence, vertex fans and absence of
+proper nonadjacent crossings on the corpus; arbitrary coplanar contacts and all
+exotic multi-loop cases are not proven. Cross-platform bit identity still needs a
+platform matrix. No Rust marching-cubes kernel is included; the TypeScript adapter
+uses existing manifold-3d. That fallback can fold at coarse concave junctions: the
+showcase uses 0.06m voxels after its 0.08m comparison exposed two crossings in the
+fallback. All three final showcase variants pass the crossing check.
+
+`src/core/sdfgrid.ts` carries these grids through geometry cloning, merging, subsets,
+bounds, JSON and fingerprints. JSON uses explicit `+Infinity`, `-Infinity` and `-0`
+string sentinels to preserve Float32 values. Grid transforms support translation,
+uniform scale, mirrors and axis-aligned rotations; convert to an implicit SDF before
+arbitrary rotations or nonuniform scale. Renderer previews use the smooth existing
+mesher, capped at 64 cells along the largest dimension.
+
+The ten `sdf` nodes expose sampling, CSG, filters and conversions. `grid_to_mesh`
+drops source attributes and supplies point `grid_cell` provenance for dual contouring.
+`voxel_remesh` optionally transfers `Cd` by barycentric interpolation on the nearest
+source triangle and `material` by the nearest triangle to each new face centre,
+including the material table and referenced image volumes. UVs and other source
+attributes are not transferred. `voxel_remesh` now names this dedicated node; the
+existing `remesh` node and its `remesh_voxel` alias retain their old behavior.
+
+Run `node test/sdfgrid.ts` for Node integration, `node bench/sdfgrid.ts` for the 256³
+box benchmark, and inspect `examples/renders/voxel_remesh.png` (sharp left, smooth
+middle, dilate/erode/blur right). Existing goldens and render hashes are checked
+separately from the new example. Benchmarks and platform verification limits are in
+[BENCH.md](BENCH.md).

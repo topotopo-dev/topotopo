@@ -556,9 +556,11 @@ const fmt = (x: number) => {
 
 /** "1 SDF volume, 1 heightfield, 2 images" style counts (empty string when there are no volumes). */
 export function volumeCounts(g: Geometry): string {
-  const nh = g.volumes.filter(isHeightfield).length, ni = g.volumes.filter((v) => v.kind === 'image').length, ns = g.volumes.length - nh - ni;
+  const nh = g.volumes.filter(isHeightfield).length, ni = g.volumes.filter((v) => v.kind === 'image').length;
+  const ng = g.volumes.filter((v) => v.kind === 'grid').length, ns = g.volumes.length - nh - ni - ng;
   const parts: string[] = [];
   if (ns) parts.push(`${ns} SDF volume(s)`);
+  if (ng) parts.push(`${ng} SDF grid(s)`);
   if (nh) parts.push(`${nh} heightfield(s)`);
   if (ni) parts.push(`${ni} image(s)`);
   return parts.join(', ');

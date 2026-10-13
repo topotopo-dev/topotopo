@@ -2,7 +2,7 @@
 
 # Polyforge node reference
 
-205 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+215 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -18,7 +18,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
-- [sdf](#sdf-nodes): [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh)
+- [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
 - [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
 - [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
@@ -3493,7 +3493,7 @@ loop mode: the seed edge (first edge matching "edge") defines an edge ring: the 
 
 ### remesh
 
-category: `topology` · aliases: `voxel_remesh`, `remesh_voxel`
+category: `topology` · aliases: `remesh_voxel`
 
 Voxel remesh: rebuild a closed mesh as an even, watertight triangle mesh (mesh → SDF → isosurface).
 
@@ -4048,6 +4048,281 @@ Shatter a closed solid into convex Voronoi pieces (sites from input 2 or scatter
 
 ## sdf nodes
 
+### grid_blur
+
+category: `sdf`
+
+Separable box blur of sampled distances.
+
+Creates new value arrays and preserves other input geometry. Offset/morphology/blur preserve bounds: use sufficient padding. Narrow-band infinities are distance sentinels; fill the source for large edits.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `grid` | no | no | sampled SDF grid(s) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `radius` | int | `1` | 0..1024 |  |  | box-filter radius in voxels |
+
+**Example**
+
+```json
+{
+  "type": "grid_blur",
+  "in": [
+    "grid"
+  ],
+  "params": {
+    "radius": 1
+  }
+}
+```
+
+### grid_combine
+
+category: `sdf`
+
+Boolean or smooth CSG on sampled SDF grids; B is resampled onto A.
+
+The result keeps A's layout and clips to its bounds. Pad A before sampling if a union must include distant B. The first grid from each input is used; without B all A grids are combined.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `a` | no | no | grid A defines output layout |
+| 1 | `b` | yes | no | grid B |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `operation` | enum | `"union"` |  | `union`, `intersect`, `subtract`, `smooth_union`, `smooth_intersect`, `smooth_subtract` | `op` | CSG operation |
+| `smooth` | float | `0.1` | 0.. |  | `k` | smooth CSG blend distance in world units |
+
+**Example**
+
+```json
+{
+  "type": "grid_combine",
+  "in": [
+    "a",
+    "b"
+  ],
+  "params": {
+    "operation": "smooth_union",
+    "smooth": 0.1
+  }
+}
+```
+
+### grid_dilate
+
+category: `sdf`
+
+Dilate the solid by subtracting a distance.
+
+Creates new value arrays and preserves other input geometry. Offset/morphology/blur preserve bounds: use sufficient padding. Narrow-band infinities are distance sentinels; fill the source for large edits.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `grid` | no | no | sampled SDF grid(s) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `distance` | float | `0.05` | 0.. |  | `d`, `amount` | nonnegative morphology distance in world units |
+
+**Example**
+
+```json
+{
+  "type": "grid_dilate",
+  "in": [
+    "grid"
+  ],
+  "params": {
+    "distance": 0.05
+  }
+}
+```
+
+### grid_erode
+
+category: `sdf`
+
+Erode the solid by adding a distance.
+
+Creates new value arrays and preserves other input geometry. Offset/morphology/blur preserve bounds: use sufficient padding. Narrow-band infinities are distance sentinels; fill the source for large edits.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `grid` | no | no | sampled SDF grid(s) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `distance` | float | `0.05` | 0.. |  | `d`, `amount` | nonnegative morphology distance in world units |
+
+**Example**
+
+```json
+{
+  "type": "grid_erode",
+  "in": [
+    "grid"
+  ],
+  "params": {
+    "distance": 0.05
+  }
+}
+```
+
+### grid_offset
+
+category: `sdf`
+
+Offset sampled distances (positive grows the solid).
+
+Creates new value arrays and preserves other input geometry. Offset/morphology/blur preserve bounds: use sufficient padding. Narrow-band infinities are distance sentinels; fill the source for large edits.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `grid` | no | no | sampled SDF grid(s) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `distance` | float | `0.05` |  |  | `d`, `amount` | distance in world units; positive grows the solid |
+
+**Example**
+
+```json
+{
+  "type": "grid_offset",
+  "in": [
+    "grid"
+  ],
+  "params": {
+    "distance": 0.05
+  }
+}
+```
+
+### grid_resample
+
+category: `sdf`
+
+Resample distance grids at a new voxel spacing.
+
+Creates new value arrays and preserves other input geometry. Offset/morphology/blur preserve bounds: use sufficient padding. Narrow-band infinities are distance sentinels; fill the source for large edits.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `grid` | no | no | sampled SDF grid(s) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `voxel_size` | float | `0.05` | 0.000001.. |  |  | grid spacing in world units; smaller voxels need more memory |
+
+**Example**
+
+```json
+{
+  "type": "grid_resample",
+  "in": [
+    "grid"
+  ],
+  "params": {
+    "voxel_size": 0.08
+  }
+}
+```
+
+### grid_to_mesh
+
+category: `sdf`
+
+Extract sharp dual-contour triangles or smooth marching-cubes triangles from sampled grids.
+
+No source attributes are transferred. Dual contouring records the lower-corner sample index as point grid_cell. Extraction is uniform: adaptive=true is currently unsupported. Closed surfaces must fit inside the grid with a positive boundary; increase source padding for offsets. Subvoxel features cannot be recovered.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `grid` | no | no | sampled SDF grid(s) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `method` | enum | `"dual_contouring"` |  | `dual_contouring`, `marching_cubes` |  | surface extraction method |
+| `iso` | float | `0` |  |  |  | iso distance (+ grows) |
+| `sharp` | bool | `true` |  |  |  | QEF feature fitting (false uses Hermite intersection centroids) |
+| `adaptive` | bool | `false` |  |  |  | adaptive octree extraction (not implemented; true reports an error) |
+| `qef_tolerance` | float | `0.000001` | 1e-12..1 |  |  | relative rank tolerance of the QEF solver |
+| `clamp_to_cell` | bool | `true` |  |  |  | constrain fitted points to their source cells |
+
+**Example**
+
+```json
+{
+  "type": "grid_to_mesh",
+  "in": [
+    "grid"
+  ],
+  "params": {
+    "method": "dual_contouring",
+    "sharp": true
+  }
+}
+```
+
+### grid_to_sdf
+
+category: `sdf`
+
+Expose each sampled grid as a lazy trilinear implicit SDF.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `grid` | no | no | sampled SDF grid(s) |
+
+**Parameters**
+
+None.
+
+**Example**
+
+```json
+{
+  "type": "grid_to_sdf",
+  "in": [
+    "grid"
+  ]
+}
+```
+
 ### sdf_combine
 
 category: `sdf` · aliases: `sdf_boolean`, `sdf_blend`, `vdb_combine`
@@ -4122,6 +4397,46 @@ Convert a closed mesh to an SDF volume (narrow band + sweeping), for blending me
 | `divisions` | int | `64` | 8..256 |  |  | voxels across the largest dimension when voxel_size = 0 |
 | `keep_mesh` | bool | `false` |  |  |  | keep the input polygons alongside the volume |
 
+### sdf_grid
+
+category: `sdf`
+
+Sample implicit SDF volumes or a polygon mesh into a regular 3D distance grid.
+
+SDF volumes are unioned before sampling; if none exist, polygons are sampled using a triangle BVH and generalized winding-number sign. Values outside the narrow band are signed infinity unless fill is enabled. Grid bounds include padding in voxels. Mesh attributes are dropped.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `source` | no | no | implicit SDF volume(s), or a polygon mesh |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `voxel_size` | float | `0.05` | 0.000001.. |  |  | grid spacing in world units; smaller voxels need more memory |
+| `band` | float | `3` | 2.. |  |  | exact narrow-band half width in voxels (at least 2 for gradients) |
+| `padding` | float | `4` | 1.. |  |  | bounding-box padding in voxels; allow room for growth |
+| `fill` | bool | `true` |  |  |  | fill distances outside the exact band (fast sweeping for mesh inputs) |
+| `name` | string | `"grid"` |  |  |  | volume name |
+
+**Example**
+
+```json
+{
+  "type": "sdf_grid",
+  "in": [
+    "shape"
+  ],
+  "params": {
+    "voxel_size": 0.05,
+    "band": 3,
+    "fill": true
+  }
+}
+```
+
 ### sdf_modify
 
 category: `sdf` · aliases: `sdf_offset`, `sdf_noise`, `sdf_twist`, `vdb_reshape`
@@ -4190,6 +4505,44 @@ Polygonise SDF volumes into a watertight triangle mesh (all volumes are unioned)
 | `iso` | float | `0` |  |  | `level`, `offset` | iso value (+ grows, − shrinks) |
 | `normals` | bool | `true` |  |  |  | write point N from the field gradient |
 | `keep_input` | bool | `false` |  |  |  | also keep the input polygons |
+
+### voxel_remesh
+
+category: `sdf`
+
+Mesh to sampled grid to sharp dual contouring in one operation.
+
+Unions overlapping consistently oriented polygon shells by winding number. Uniform QEF contouring preserves resolved features. With transfer_attributes, Cd is interpolated on the nearest source triangle and material is chosen at each output face centre. Other attributes are dropped; UVs and exact seams are not retained.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `mesh` | no | no | polygon mesh (open shells use generalized winding-number sign) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `voxel_size` | float | `0.05` | 0.000001.. |  |  | grid spacing in world units; smaller voxels need more memory |
+| `offset` | float | `0` |  |  | `d`, `amount` | distance in world units; positive grows the solid |
+| `smooth_iterations` | int | `0` | 0..32 |  |  | passes of radius-1 distance-grid blur before contouring |
+| `transfer_attributes` | bool | `false` |  |  |  | transfer source Cd and material using nearest source triangles |
+
+**Example**
+
+```json
+{
+  "type": "voxel_remesh",
+  "in": [
+    "mesh"
+  ],
+  "params": {
+    "voxel_size": 0.05,
+    "transfer_attributes": true
+  }
+}
+```
 
 ## heightfield nodes
 
