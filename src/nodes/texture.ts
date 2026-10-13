@@ -195,6 +195,7 @@ defineNode({
     name: nameParam('gradient'),
   },
   outputs: 'image <name>: C grey 0..1',
+  example: { type: 'tex_gradient', params: { resolution: 256, mode: 'radial', radius: 0.5 } },
   cook: ({ p, type }) => {
     const [w, h] = size2(p, type);
     return imageGeo(new Image(w, h, imgName(p, 'gradient')).set(MAIN_LAYER, genGradient(p.mode, p.angle, [p.center[0], p.center[1]], p.radius, w, h)));
@@ -280,6 +281,7 @@ defineNode({
     name: nameParam('scratches'),
   },
   outputs: 'image <name>: C grey 0..1',
+  example: { type: 'tex_scratches', params: { resolution: 512, count: 150, angle: 45, seed: 3 } },
   cook: ({ p, type }) => {
     const [w, h] = size2(p, type);
     const C = genScratches({ count: p.count, length: [p.length[0], p.length[1]], width: p.width, angle: p.angle, spread: p.spread, curvature: p.curvature, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable }, w, h);
@@ -307,6 +309,7 @@ defineNode({
     name: nameParam('splatter'),
   },
   outputs: 'image <name>: C grey 0..1',
+  example: { type: 'tex_splatter', params: { resolution: 512, count: 40, size: [0.03, 0.1], seed: 2 } },
   cook: ({ p, type }) => {
     const [w, h] = size2(p, type);
     const C = genSplatter({ count: p.count, size: [p.size[0], p.size[1]], irregularity: p.irregularity, softness: p.softness, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable, add: p.combine === 'add' }, w, h);
@@ -362,6 +365,7 @@ defineNode({
     name: nameParam('text'),
   },
   outputs: 'image <name>: C grey 0..1',
+  example: { type: 'tex_text', params: { resolution: [512, 128], text: 'EXIT', size: 0.7 } },
   async cook(ctx) {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
@@ -449,6 +453,13 @@ defineNode({
     clamp: { type: 'bool', default: true, desc: 'clamp to 0..1' },
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
+  example: {
+    nodes: {
+      n: { type: 'tex_noise', params: { resolution: 256 } },
+      out: { type: 'tex_levels', in: ['n'], params: { in_low: 0.3, in_high: 0.7, gamma: 1.2 } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -490,6 +501,13 @@ defineNode({
     tileable: tileParam(),
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
+  example: {
+    nodes: {
+      bricks: { type: 'tex_pattern', params: { resolution: 256 } },
+      out: { type: 'tex_blur', in: ['bricks'], params: { radius: 2 } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -516,6 +534,14 @@ defineNode({
     warp_layer: { type: 'string', default: '', desc: 'layer of the warp image ("" = main)' },
     name: renameParam(),
   },
+  example: {
+    nodes: {
+      bricks: { type: 'tex_pattern', params: { resolution: 256 } },
+      n: { type: 'tex_noise', params: { resolution: 256, scale: 4 } },
+      out: { type: 'tex_warp', in: ['bricks', 'n'], params: { mode: 'slope', intensity: 0.03 } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -541,6 +567,13 @@ defineNode({
     tileable: tileParam('repeat the source outside 0..1 (else black)'),
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
+  example: {
+    nodes: {
+      star: { type: 'tex_shape', params: { resolution: 256, shape: 'star' } },
+      out: { type: 'tex_transform', in: ['star'], params: { rotate: 45, tile: [4, 4] } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -561,6 +594,13 @@ defineNode({
     tileable: tileParam(),
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
+  example: {
+    nodes: {
+      bricks: { type: 'tex_pattern', params: { resolution: 256 } },
+      out: { type: 'tex_edge_detect', in: ['bricks'], params: { width: 1 } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -575,6 +615,7 @@ defineNode({
   aliases: ['invert', 'cop_invert', 'negate'],
   inputs: FILTER_INPUT,
   params: { image: imageParam(), layer: layerParam(), name: renameParam() },
+  example: { nodes: { n: { type: 'tex_noise', params: { resolution: 256 } }, out: { type: 'tex_invert', in: ['n'] } }, output: 'out' },
   cook: (ctx) => {
     const s = source(ctx, 0, ctx.p.image, ctx.p.layer);
     return withLayer(s, mapValues(s.data, s.ch, (x) => 1 - x), ctx.p.name);
@@ -591,6 +632,13 @@ defineNode({
     threshold: { type: 'float', default: 0.5, desc: 'cut value', aliases: ['level', 'value'] },
     softness: { type: 'float', default: 0, min: 0, max: 1, desc: 'width of the smooth transition around threshold', aliases: ['smooth', 'falloff'] },
     image: imageParam(), layer: layerParam(), name: renameParam(),
+  },
+  example: {
+    nodes: {
+      n: { type: 'tex_noise', params: { resolution: 256 } },
+      out: { type: 'tex_threshold', in: ['n'], params: { threshold: 0.55, softness: 0.05 } },
+    },
+    output: 'out',
   },
   cook: (ctx) => {
     const { p } = ctx;
@@ -618,6 +666,13 @@ defineNode({
     contrast: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'hardness of the transition (1 = hard cut)' },
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
+  example: {
+    nodes: {
+      n: { type: 'tex_noise', params: { resolution: 256, scale: 4 } },
+      out: { type: 'tex_histogram_scan', in: ['n'], params: { position: 0.4, contrast: 0.8 } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -641,6 +696,13 @@ defineNode({
     tileable: tileParam(),
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
+  example: {
+    nodes: {
+      bricks: { type: 'tex_pattern', params: { resolution: 256 } },
+      out: { type: 'tex_normal_from_height', in: ['bricks'], params: { strength: 3, name: 'brick_normal' } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
@@ -662,6 +724,13 @@ defineNode({
     steps: { type: 'int', default: 6, min: 1, max: 64, desc: 'samples along each direction' },
     tileable: tileParam(),
     image: imageParam(), layer: layerParam(), name: renameParam(),
+  },
+  example: {
+    nodes: {
+      bricks: { type: 'tex_pattern', params: { resolution: 256 } },
+      out: { type: 'tex_height_to_ao', in: ['bricks'], params: { radius: 0.03, name: 'brick_ao' } },
+    },
+    output: 'out',
   },
   cook: (ctx) => {
     const { p } = ctx;
@@ -800,6 +869,13 @@ defineNode({
     image: imageParam(),
     layer: { type: 'string', default: '', desc: 'copy this layer out as a new image ("" = rename the whole image)' },
     keep_only: { type: 'bool', default: false, desc: 'output only this image' },
+  },
+  example: {
+    nodes: {
+      bricks: { type: 'tex_pattern', params: { resolution: 256 } },
+      out: { type: 'tex_output', in: ['bricks'], params: { name: 'brick_id', layer: 'id' } },
+    },
+    output: 'out',
   },
   cook: (ctx) => {
     const { p, type } = ctx;
@@ -989,6 +1065,14 @@ defineNode({
     name: nameParam('', 'image name ("" = the layer name)'),
   },
   outputs: 'image <name> (default: the layer name): C grey',
+  example: {
+    nodes: {
+      hf: { type: 'heightfield' },
+      hills: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3 } },
+      out: { type: 'heightfield_to_tex', in: ['hills'], params: { name: 'height' } },
+    },
+    output: 'out',
+  },
   cook: (ctx) => {
     const { p, type } = ctx;
     const hfs = heightfieldsOf(ctx.input(0));

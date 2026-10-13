@@ -91,6 +91,24 @@ None (generator).
 
 **Writes:** point uv
 
+**Example**
+
+```json
+{
+  "type": "grid",
+  "params": {
+    "size": [
+      10,
+      6
+    ],
+    "divisions": [
+      20,
+      12
+    ]
+  }
+}
+```
+
 ### lsystem
 
 category: `generate` · aliases: `l_system`, `turtle`, `plant`, `tree`
@@ -126,6 +144,20 @@ None (generator).
 
 **Writes:** polylines with point width/depth, prim depth; leaf points in groups leaves, J, K, M with N, up, orient, pscale
 
+**Example**
+
+```json
+{
+  "type": "lsystem",
+  "params": {
+    "generations": 4,
+    "angle": 25,
+    "tropism_strength": 0.1,
+    "seed": 2
+  }
+}
+```
+
 ### parametric_surface
 
 category: `generate`
@@ -150,6 +182,21 @@ None (generator).
 
 **Writes:** vertex uv
 
+**Example**
+
+```json
+{
+  "type": "parametric_surface",
+  "params": {
+    "expr": "[(u - 0.5) * 4, 0.25 * sin(u * TAU * 2), (v - 0.5) * 2]",
+    "divisions": [
+      64,
+      16
+    ]
+  }
+}
+```
+
 ### platonic
 
 category: `generate`
@@ -167,6 +214,18 @@ None (generator).
 | `shape` | enum | `"icosahedron"` |  | `tetrahedron`, `cube`, `octahedron`, `dodecahedron`, `icosahedron` |  | solid type |
 | `radius` | float | `1` |  |  |  | circumradius |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
+
+**Example**
+
+```json
+{
+  "type": "platonic",
+  "params": {
+    "shape": "dodecahedron",
+    "radius": 0.5
+  }
+}
+```
 
 ### point_grid
 
@@ -187,6 +246,28 @@ None (generator).
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 | `jitter` | float | `0` | 0.. |  |  | random offset as a fraction of the spacing |
 | `seed` | float | `0` |  |  |  | random seed |
+
+**Example**
+
+```json
+{
+  "type": "point_grid",
+  "params": {
+    "counts": [
+      10,
+      1,
+      10
+    ],
+    "size": [
+      9,
+      0,
+      9
+    ],
+    "jitter": 0.3,
+    "seed": 1
+  }
+}
+```
 
 ### points
 
@@ -265,6 +346,19 @@ None (generator).
 
 **Writes:** point N; uv (uv type)
 
+**Example**
+
+```json
+{
+  "type": "sphere",
+  "params": {
+    "type": "quad",
+    "radius": 0.5,
+    "divisions": 6
+  }
+}
+```
+
 ### terrain
 
 category: `generate` · aliases: `landscape`
@@ -297,6 +391,28 @@ None (generator).
 
 **Writes:** point height (0..1), point N, point uv
 
+**Example**
+
+```json
+{
+  "type": "terrain",
+  "params": {
+    "size": [
+      40,
+      40
+    ],
+    "divisions": [
+      96,
+      96
+    ],
+    "height": 6,
+    "fractal": "ridged",
+    "falloff": 0.5,
+    "seed": 3
+  }
+}
+```
+
 ### text
 
 category: `generate` · aliases: `font`, `type`, `lettering`
@@ -322,6 +438,19 @@ None (generator).
 | `curve_segments` | int | `6` | 1..32 |  |  | segments per glyph curve |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
+**Example**
+
+```json
+{
+  "type": "text",
+  "params": {
+    "text": "OPEN",
+    "size": 0.5,
+    "depth": 0.1
+  }
+}
+```
+
 ### torus
 
 category: `generate`
@@ -343,6 +472,20 @@ None (generator).
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
 **Writes:** vertex uv
+
+**Example**
+
+```json
+{
+  "type": "torus",
+  "params": {
+    "radius": 1.5,
+    "radius2": 0.3,
+    "rows": 12,
+    "cols": 36
+  }
+}
+```
 
 ### tube
 
@@ -368,6 +511,20 @@ None (generator).
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
 **Writes:** vertex uv
+
+**Example**
+
+```json
+{
+  "type": "tube",
+  "params": {
+    "radius": 0.3,
+    "radius_top": 0.1,
+    "height": 2,
+    "cols": 16
+  }
+}
+```
 
 ## curve nodes
 
@@ -450,6 +607,44 @@ category: `curve` · aliases: `curve_boolean`, `shape_boolean`
 | `output` | enum | `"faces"` |  | `outlines`, `faces` |  | faces = filled (holes cut, triangulated where needed); outlines = closed contour polygons |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "plate": {
+      "type": "shape2d",
+      "params": {
+        "shape": "rounded_rect",
+        "size": [
+          3,
+          1.5
+        ],
+        "corner_radius": 0.2
+      }
+    },
+    "hole": {
+      "type": "circle",
+      "params": {
+        "radius": 0.4,
+        "segments": 32
+      }
+    },
+    "cut": {
+      "type": "boolean2d",
+      "in": [
+        "plate",
+        "hole"
+      ],
+      "params": {
+        "operation": "subtract"
+      }
+    }
+  },
+  "output": "cut"
+}
+```
+
 ### carve
 
 category: `curve`
@@ -468,6 +663,32 @@ Trim curves to a portion of their length (u range 0..1).
 |---|---|---|---|---|---|---|
 | `start` | float | `0` | 0..1 |  |  | start u (0..1 of arc length) |
 | `end` | float | `0.5` | 0..1 |  |  | end u |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "path": {
+      "type": "spiral",
+      "params": {
+        "turns": 2
+      }
+    },
+    "part": {
+      "type": "carve",
+      "in": [
+        "path"
+      ],
+      "params": {
+        "start": 0.25,
+        "end": 0.75
+      }
+    }
+  },
+  "output": "part"
+}
+```
 
 ### circle
 
@@ -490,6 +711,22 @@ None (generator).
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 | `arc` | vec2 | `[0,360]` |  |  |  | begin/end angle in degrees (anything < 360 makes an open arc) |
 | `open` | bool | `false` |  |  |  | output an open polyline instead of a closed polygon face |
+
+**Example**
+
+```json
+{
+  "type": "circle",
+  "params": {
+    "radius": 2,
+    "segments": 48,
+    "arc": [
+      0,
+      180
+    ]
+  }
+}
+```
 
 ### convert_curve
 
@@ -547,6 +784,40 @@ None (generator).
 | `closed` | bool | `false` |  |  |  | close the curve (makes a polygon) |
 | `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points |
 | `subdivisions` | int | `8` | 1.. |  |  | smooth: samples per segment |
+
+**Example**
+
+```json
+{
+  "type": "curve",
+  "params": {
+    "points": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        0,
+        1
+      ],
+      [
+        4,
+        0,
+        -1
+      ],
+      [
+        6,
+        0,
+        0
+      ]
+    ],
+    "smooth": true,
+    "subdivisions": 12
+  }
+}
+```
 
 ### curve_attribs
 
@@ -621,6 +892,32 @@ Convert between closed polygons and open polylines (unroll outlines / close curv
 | `mode` | enum | `"unroll"` |  | `unroll`, `close`, `open` |  | unroll: polygon → polyline outline (ends meet); close: polyline → polygon; open: polygon → polyline (drops closing edge) |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "ring": {
+      "type": "circle",
+      "params": {
+        "radius": 1,
+        "segments": 32
+      }
+    },
+    "outline": {
+      "type": "ends",
+      "in": [
+        "ring"
+      ],
+      "params": {
+        "mode": "unroll"
+      }
+    }
+  },
+  "output": "outline"
+}
+```
+
 ### extrude
 
 category: `curve` · aliases: `linear_extrude`, `extrude2d`
@@ -647,6 +944,38 @@ Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon cap
 
 **Writes:** prim groups top, bottom, side
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "star": {
+      "type": "shape2d",
+      "params": {
+        "shape": "star",
+        "radius": 1,
+        "inner_radius": 0.5,
+        "sides": 5
+      }
+    },
+    "solid": {
+      "type": "extrude",
+      "in": [
+        "star"
+      ],
+      "params": {
+        "height": 0.3,
+        "scale_top": [
+          0.8,
+          0.8
+        ]
+      }
+    }
+  },
+  "output": "solid"
+}
+```
+
 ### fill
 
 category: `curve` · aliases: `fill_curves`, `fill_outlines`
@@ -665,6 +994,29 @@ Fill closed outlines into faces, cutting holes (even-odd), e.g. text outlines or
 |---|---|---|---|---|---|---|
 | `rule` | enum | `"EvenOdd"` |  | `EvenOdd`, `NonZero` |  | fill rule for overlapping contours |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "glyph": {
+      "type": "text",
+      "params": {
+        "text": "B",
+        "output": "outlines"
+      }
+    },
+    "face": {
+      "type": "fill",
+      "in": [
+        "glyph"
+      ]
+    }
+  },
+  "output": "face"
+}
+```
 
 ### fillet_curve
 
@@ -725,6 +1077,23 @@ None (generator).
 | `length` | float | `1` |  |  | `dist` | length |
 | `points` | int | `2` | 2.. |  | `count`, `npts` | number of points |
 
+**Example**
+
+```json
+{
+  "type": "line",
+  "params": {
+    "direction": [
+      1,
+      0,
+      0
+    ],
+    "length": 5,
+    "points": 11
+  }
+}
+```
+
 ### loft
 
 category: `curve` · aliases: `skin`
@@ -745,6 +1114,64 @@ Skin a surface through a sequence of curves (in prim order). Curves are resample
 | `caps` | bool | `false` |  |  |  | cap the first and last curves (when they are closed) |
 
 **Writes:** vertex uv
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "a": {
+      "type": "circle",
+      "params": {
+        "radius": 1,
+        "segments": 32
+      }
+    },
+    "b": {
+      "type": "circle",
+      "params": {
+        "radius": 0.5,
+        "segments": 32,
+        "center": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "c": {
+      "type": "circle",
+      "params": {
+        "radius": 0.8,
+        "segments": 32,
+        "center": [
+          0,
+          2,
+          0
+        ]
+      }
+    },
+    "rings": {
+      "type": "merge",
+      "in": [
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    "skin": {
+      "type": "loft",
+      "in": [
+        "rings"
+      ],
+      "params": {
+        "caps": true
+      }
+    }
+  },
+  "output": "skin"
+}
+```
 
 ### nurbs
 
@@ -828,6 +1255,37 @@ category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
 | `segments` | int | `16` | 3.. |  |  | segments per full circle for round joins |
 | `output` | enum | `"outlines"` |  | `outlines`, `faces` |  | outlines = closed polygons per contour; faces = filled with holes cut |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "plan": {
+      "type": "shape2d",
+      "params": {
+        "shape": "L",
+        "size": [
+          4,
+          3
+        ],
+        "thickness": 1.2
+      }
+    },
+    "inner": {
+      "type": "offset_curve",
+      "in": [
+        "plan"
+      ],
+      "params": {
+        "distance": -0.2,
+        "join": "miter"
+      }
+    }
+  },
+  "output": "inner"
+}
+```
 
 ### offset_curve_3d
 
@@ -932,6 +1390,31 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 **Writes:** vertex uv; prim groups caps, sides
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "tree": {
+      "type": "lsystem",
+      "params": {
+        "generations": 4
+      }
+    },
+    "branches": {
+      "type": "polywire",
+      "in": [
+        "tree"
+      ],
+      "params": {
+        "divisions": 6
+      }
+    }
+  },
+  "output": "branches"
+}
+```
+
 ### project_curve
 
 category: `curve` · aliases: `curve_project`, `ray_curve`, `projectcurve`
@@ -1004,6 +1487,49 @@ Bezier/NURBS prims are sampled on the true curve, evenly by arc length (treat_sp
 
 **Writes:** point curveu (0..1 along each curve), optional tangentu
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "path": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            3,
+            0,
+            2
+          ],
+          [
+            6,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "even": {
+      "type": "resample",
+      "in": [
+        "path"
+      ],
+      "params": {
+        "length": 0.25,
+        "smooth": true,
+        "tangent": true
+      }
+    }
+  },
+  "output": "even"
+}
+```
+
 ### revolve
 
 category: `curve` · aliases: `lathe`
@@ -1026,6 +1552,58 @@ Lathe: revolve profile curves (drawn in XY, x = radius) around the Y axis. Profi
 | `flip` | bool | `false` |  |  |  | reverse face orientation |
 
 **Writes:** vertex uv
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "profile": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.4,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.6,
+            0
+          ],
+          [
+            0.45,
+            1.2,
+            0
+          ],
+          [
+            0,
+            1.2,
+            0
+          ]
+        ],
+        "smooth": true
+      }
+    },
+    "vase": {
+      "type": "revolve",
+      "in": [
+        "profile"
+      ],
+      "params": {
+        "segments": 48
+      }
+    }
+  },
+  "output": "vase"
+}
+```
 
 ### shape2d
 
@@ -1053,6 +1631,20 @@ None (generator).
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
+**Example**
+
+```json
+{
+  "type": "shape2d",
+  "params": {
+    "shape": "gear",
+    "radius": 1,
+    "inner_radius": 0.8,
+    "sides": 16
+  }
+}
+```
+
 ### spiral
 
 category: `curve` · aliases: `helix`
@@ -1074,6 +1666,20 @@ None (generator).
 | `points_per_turn` | int | `32` | 3.. |  |  | resolution |
 | `clockwise` | bool | `false` |  |  |  | turn direction when seen from above |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
+
+**Example**
+
+```json
+{
+  "type": "spiral",
+  "params": {
+    "radius": 1,
+    "radius_end": 0.3,
+    "height": 3,
+    "turns": 5
+  }
+}
+```
 
 ### spline_fit
 
@@ -1230,6 +1836,64 @@ Sweep a cross-section along curves using rotation-minimising frames (tubes, ribb
 
 **Writes:** vertex uv; prim groups caps, sides
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "path": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            1,
+            0
+          ],
+          [
+            3,
+            1.5,
+            1
+          ],
+          [
+            4,
+            3,
+            1
+          ]
+        ],
+        "smooth": true
+      }
+    },
+    "horn": {
+      "type": "sweep",
+      "in": [
+        "path"
+      ],
+      "params": {
+        "radius": 0.3,
+        "divisions": 16,
+        "scale_ramp": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0.1
+          ]
+        ]
+      }
+    }
+  },
+  "output": "horn"
+}
+```
+
 ### triangulate2d
 
 category: `curve` · aliases: `delaunay`, `triangulate_2d`
@@ -1248,6 +1912,52 @@ Delaunay-triangulate points projected on a plane (keeps 3D positions) — terrai
 |---|---|---|---|---|---|---|
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
 | `max_edge` | float | `0` | 0.. |  |  | drop triangles with an edge longer than this (0 = keep all) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "pts": {
+      "type": "point_grid",
+      "params": {
+        "counts": [
+          12,
+          1,
+          12
+        ],
+        "size": [
+          10,
+          0,
+          10
+        ],
+        "jitter": 0.4
+      }
+    },
+    "hills": {
+      "type": "noise_displace",
+      "in": [
+        "pts"
+      ],
+      "params": {
+        "mode": "direction",
+        "amplitude": 1,
+        "frequency": 0.3
+      }
+    },
+    "mesh": {
+      "type": "triangulate2d",
+      "in": [
+        "hills"
+      ],
+      "params": {
+        "max_edge": 2
+      }
+    }
+  },
+  "output": "mesh"
+}
+```
 
 ### voronoi2d
 
@@ -1275,6 +1985,24 @@ category: `curve` · aliases: `voronoi_cells`, `voronoi_2d`
 
 **Writes:** closed polygons with prim class (cell id) and site attributes
 
+**Example**
+
+```json
+{
+  "type": "voronoi2d",
+  "params": {
+    "count": 40,
+    "size": [
+      20,
+      20
+    ],
+    "inset": 0.2,
+    "relax": 2,
+    "seed": 1
+  }
+}
+```
+
 ## transform nodes
 
 ### match_size
@@ -1299,6 +2027,23 @@ Align / fit the bounding box: e.g. sit on the ground (justify y=min), center, or
 | `scale_to_fit` | bool | `false` |  |  |  | scale uniformly so the largest dimension equals target_size |
 | `target_size` | float | `1` |  |  |  | size for scale_to_fit |
 
+**Example**
+
+```json
+{
+  "type": "match_size",
+  "params": {
+    "justify": [
+      "center",
+      "min",
+      "center"
+    ],
+    "scale_to_fit": true,
+    "target_size": 2
+  }
+}
+```
+
 ### mirror
 
 category: `transform`
@@ -1320,6 +2065,49 @@ Mirror across a plane; optionally keep the original and weld the seam.
 | `origin` | vec3 | `[0,0,0]` |  |  |  | point on the mirror plane |
 | `keep_original` | bool | `true` |  |  |  | output original + mirrored copy |
 | `fuse` | float | `0.00001` | 0.. |  |  | weld points on the seam within this distance (0 = off) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "divisions": [
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    "half": {
+      "type": "clip",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "keep": "below"
+      }
+    },
+    "both": {
+      "type": "mirror",
+      "in": [
+        "half"
+      ],
+      "params": {
+        "axis": "x"
+      }
+    }
+  },
+  "output": "both"
+}
+```
 
 ### transform
 
@@ -1347,6 +2135,27 @@ Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, or
 | `rotate_order` | enum | `"xyz"` |  | `xyz`, `xzy`, `yxz`, `yzx`, `zxy`, `zyx` | `rord` | rotation order |
 | `group` | group (point) | `""` |  |  |  | point group to transform ("" = all) |
 
+**Example**
+
+```json
+{
+  "type": "transform",
+  "params": {
+    "translate": [
+      0,
+      1,
+      0
+    ],
+    "rotate": [
+      0,
+      45,
+      0
+    ],
+    "uniform_scale": 2
+  }
+}
+```
+
 ## deform nodes
 
 ### bend
@@ -1369,6 +2178,19 @@ Bend along an axis into an arc of the given angle (like a simple-deform bend).
 | `toward` | enum | `"x"` |  | `x`, `y`, `z`, `-x`, `-y`, `-z` |  | direction the end bends toward |
 | `angle` | float | `90` |  |  |  | total bend angle in degrees |
 
+**Example**
+
+```json
+{
+  "type": "bend",
+  "params": {
+    "axis": "y",
+    "toward": "x",
+    "angle": 90
+  }
+}
+```
+
 ### jitter
 
 category: `deform`
@@ -1388,6 +2210,18 @@ Random offset per point (deterministic by seed).
 | `scale` | vec3 | `[0.05,0.05,0.05]` |  |  | `amount`, `amplitude` | max offset per axis (single number = uniform) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Example**
+
+```json
+{
+  "type": "jitter",
+  "params": {
+    "scale": 0.02,
+    "seed": 5
+  }
+}
+```
 
 ### lattice
 
@@ -1504,6 +2338,20 @@ Displace points with fractal noise (Houdini Mountain): along normals, a fixed di
 | `rest_attrib` | string | `"rest"` |  |  |  | sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P) |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
+**Example**
+
+```json
+{
+  "type": "noise_displace",
+  "params": {
+    "amplitude": 0.15,
+    "frequency": 3,
+    "fractal": "ridged",
+    "seed": 2
+  }
+}
+```
+
 ### path_deform
 
 category: `deform` · aliases: `pathdeform`, `curve_deform`, `curvedeform`
@@ -1608,6 +2456,17 @@ Push points along their normals by a distance (inflate / shrink).
 |---|---|---|---|---|---|---|
 | `distance` | float | `0.05` |  |  | `dist`, `amount` | offset along N |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Example**
+
+```json
+{
+  "type": "peak",
+  "params": {
+    "distance": 0.02
+  }
+}
+```
 
 ### point_deform
 
@@ -1723,6 +2582,64 @@ Project points onto a target surface (along a direction, along N, or to the clos
 
 **Writes:** point N (orient), hitprim, hitdist
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "ground": {
+      "type": "terrain",
+      "params": {
+        "size": [
+          10,
+          10
+        ],
+        "divisions": [
+          40,
+          40
+        ],
+        "height": 1
+      }
+    },
+    "pts": {
+      "type": "point_grid",
+      "params": {
+        "counts": [
+          8,
+          1,
+          8
+        ],
+        "size": [
+          8,
+          0,
+          8
+        ],
+        "center": [
+          0,
+          5,
+          0
+        ]
+      }
+    },
+    "drop": {
+      "type": "ray",
+      "in": [
+        "pts",
+        "ground"
+      ],
+      "params": {
+        "direction": [
+          0,
+          -1,
+          0
+        ]
+      }
+    }
+  },
+  "output": "drop"
+}
+```
+
 ### rest
 
 category: `deform` · aliases: `rest_position`, `restpos`
@@ -1814,6 +2731,19 @@ Relax point positions (Laplacian or volume-preserving Taubin smoothing).
 | `preserve_boundary` | bool | `true` |  |  |  | pin open-boundary and curve end points |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
+**Example**
+
+```json
+{
+  "type": "smooth",
+  "params": {
+    "iterations": 20,
+    "strength": 0.5,
+    "method": "taubin"
+  }
+}
+```
+
 ### soft_transform
 
 category: `deform` · aliases: `softxform`, `soft_xform`, `edit`, `soft_edit`
@@ -1904,6 +2834,19 @@ Scale cross-sections along an axis (linear or ramp), e.g. tapering columns or ho
 | `scale_end` | float | `0.5` |  |  |  | scale at the bbox end |
 | `ramp` | ramp | `[[0,0],[1,1]]` |  |  |  | interpolation profile from start (0) to end (1) |
 
+**Example**
+
+```json
+{
+  "type": "taper",
+  "params": {
+    "axis": "y",
+    "scale_start": 1,
+    "scale_end": 0.3
+  }
+}
+```
+
 ### twist
 
 category: `deform`
@@ -1924,6 +2867,18 @@ Twist around an axis: rotation grows linearly along that axis across the boundin
 | `angle` | float | `90` |  |  |  | total twist in degrees from bbox start to end |
 | `center` | vec3 | `[0,0,0]` |  |  |  | axis passes through this point (use_bbox_center overrides) |
 | `use_bbox_center` | bool | `true` |  |  |  | twist about the bbox center |
+
+**Example**
+
+```json
+{
+  "type": "twist",
+  "params": {
+    "axis": "y",
+    "angle": 180
+  }
+}
+```
 
 ## attribute nodes
 
@@ -1995,6 +2950,38 @@ Copy attributes from the second input by element index (or by matching an id att
 | `class` | enum | `"point"` |  | `point`, `prim`, `vertex`, `detail` |  | class |
 | `match_by` | string | `""` |  |  |  | match elements by this int/string attribute instead of index (e.g. "id" or "name") |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "base": {
+      "type": "grid"
+    },
+    "tinted": {
+      "type": "color",
+      "in": [
+        "base"
+      ],
+      "params": {
+        "mode": "random"
+      }
+    },
+    "out": {
+      "type": "attrib_copy",
+      "in": [
+        "base",
+        "tinted"
+      ],
+      "params": {
+        "names": "Cd"
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### attrib_create
 
 category: `attribute` · aliases: `attribcreate`, `set_attrib`, `attribute_create`
@@ -2056,6 +3043,18 @@ Delete attributes by name pattern (wildcards, "^name" to keep).
 | `class` | enum | `"all"` |  | `all`, `point`, `prim`, `vertex`, `detail` |  | which classes |
 | `groups` | string | `""` |  |  |  | also delete groups (of every class) matching this pattern |
 
+**Example**
+
+```json
+{
+  "type": "attrib_delete",
+  "params": {
+    "names": "N uv*",
+    "groups": "tmp*"
+  }
+}
+```
+
 ### attrib_noise
 
 category: `attribute` · aliases: `attribnoise`
@@ -2084,6 +3083,19 @@ Write fractal noise into a float or vector attribute (e.g. for masks, colour var
 | `seed` | float | `0` |  |  |  | random seed |
 | `rest_attrib` | string | `"rest"` |  |  |  | sample the noise at this point vec3 attribute instead of P when it exists, so the pattern sticks to deforming geometry (see the rest node; "" = always P) |
 
+**Example**
+
+```json
+{
+  "type": "attrib_noise",
+  "params": {
+    "name": "mask",
+    "frequency": 2,
+    "contrast": 1.5
+  }
+}
+```
+
 ### attrib_promote
 
 category: `attribute` · aliases: `attribpromote`, `promote`
@@ -2106,6 +3118,20 @@ Move an attribute between classes (point ↔ prim ↔ vertex ↔ detail) with av
 | `method` | enum | `"average"` |  | `average`, `min`, `max`, `sum`, `first`, `last` |  | how to combine multiple sources (array attributes are copied: first or last only) |
 | `new_name` | string | `""` |  |  |  | rename on promotion ("" = same name) |
 | `keep_original` | bool | `false` |  |  |  | keep the source attribute |
+
+**Example**
+
+```json
+{
+  "type": "attrib_promote",
+  "params": {
+    "name": "N",
+    "from": "point",
+    "to": "prim",
+    "method": "average"
+  }
+}
+```
 
 ### attrib_randomize
 
@@ -2132,6 +3158,20 @@ Random attribute values: uniform range, normal distribution, unit directions, or
 | `seed` | float | `0` |  |  |  | random seed |
 | `group` | group | `""` |  |  |  | only these elements |
 
+**Example**
+
+```json
+{
+  "type": "attrib_randomize",
+  "params": {
+    "name": "pscale",
+    "min": 0.5,
+    "max": 1.5,
+    "seed": 3
+  }
+}
+```
+
 ### attrib_rename
 
 category: `attribute` · aliases: `attribrename`, `rename_attrib`
@@ -2151,6 +3191,42 @@ Rename an attribute.
 | `from` | string | `""` |  |  |  | existing name |
 | `to` | string | `""` |  |  |  | new name |
 | `class` | enum | `"auto"` |  | `auto`, `point`, `prim`, `vertex`, `detail` |  | class (auto = first found) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 2
+      }
+    },
+    "rocks": {
+      "type": "voronoi_fracture",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "count": 6
+      }
+    },
+    "renamed": {
+      "type": "attrib_rename",
+      "in": [
+        "rocks"
+      ],
+      "params": {
+        "from": "class",
+        "to": "piece"
+      }
+    }
+  },
+  "output": "renamed"
+}
+```
 
 ### attrib_transfer
 
@@ -2173,6 +3249,59 @@ Transfer point attributes from the nearest points (or surface) of the second inp
 | `method` | enum | `"nearest_point"` |  | `nearest_point`, `surface` |  | nearest source point, or barycentric interpolation on the closest surface point |
 | `max_distance` | float | `1000000000` |  |  |  | no transfer beyond this distance |
 | `blend_width` | float | `0` | 0.. |  |  | fade out over this distance before max_distance (0 = hard) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size": [
+          10,
+          10
+        ],
+        "divisions": [
+          40,
+          40
+        ]
+      }
+    },
+    "pts": {
+      "type": "scatter",
+      "in": [
+        "ground"
+      ],
+      "params": {
+        "count": 20
+      }
+    },
+    "colored": {
+      "type": "color",
+      "in": [
+        "pts"
+      ],
+      "params": {
+        "mode": "random"
+      }
+    },
+    "painted": {
+      "type": "attrib_transfer",
+      "in": [
+        "ground",
+        "colored"
+      ],
+      "params": {
+        "names": "Cd",
+        "max_distance": 1.5,
+        "blend_width": 0.5
+      }
+    }
+  },
+  "output": "painted"
+}
+```
 
 ### color
 
@@ -2203,6 +3332,18 @@ Set Cd: constant, random per element/piece, or a ramp driven by an attribute (au
 | `group` | group | `""` |  |  |  | only colour these elements (point/prim class) |
 | `seed` | float | `0` |  |  |  | random seed |
 
+**Example**
+
+```json
+{
+  "type": "color",
+  "params": {
+    "mode": "ramp",
+    "attrib": "P.y"
+  }
+}
+```
+
 ### connectivity
 
 category: `attribute` · aliases: `pieces`, `label_pieces`
@@ -2224,6 +3365,43 @@ Label connected pieces with an integer attribute (default "class"), optionally a
 | `name_prefix` | string | `""` |  |  |  | if set, also write prim string attribute "name" = prefix + id |
 
 **Writes:** class (int), optional prim name
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 2
+      }
+    },
+    "shards": {
+      "type": "voronoi_fracture",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "count": 8,
+        "gap": 0.02
+      }
+    },
+    "ids": {
+      "type": "connectivity",
+      "in": [
+        "shards"
+      ],
+      "params": {
+        "attrib": "piece",
+        "name_prefix": "shard_"
+      }
+    }
+  },
+  "output": "ids"
+}
+```
 
 ### material
 
@@ -2292,6 +3470,18 @@ Measure prim area/perimeter, curve length, per-piece volume/area, or point curva
 | `name` | string | `""` |  |  |  | output attribute ("" = the measure name) |
 
 **Writes:** prim area/perimeter/length/volume, point curvature
+
+**Example**
+
+```json
+{
+  "type": "measure",
+  "params": {
+    "measure": "area",
+    "name": "area"
+  }
+}
+```
 
 ## measure nodes
 
@@ -2677,6 +3867,18 @@ Delete (or keep only) points/prims/vertices matching a group pattern, or the pri
 | `remove_unused_points` | bool | `true` |  |  |  | drop points no longer used by prims (prim, vertex and edge modes) |
 | `edge_mode` | enum | `"prims"` |  | `prims`, `dissolve` |  | class edge: prims = delete the prims using the edges (leaves holes); dissolve = remove the edges and merge their faces (dissolve node with defaults) |
 
+**Example**
+
+```json
+{
+  "type": "delete",
+  "params": {
+    "group": "@P.y<0",
+    "class": "point"
+  }
+}
+```
+
 ### group
 
 category: `group` · aliases: `group_create`, `groupcreate`, `select`
@@ -2708,6 +3910,24 @@ Edge groups are sets of point pairs. Edge patterns add selectors: "boundary" (un
 | `mode` | enum | `"replace"` |  | `replace`, `union`, `intersect`, `subtract` |  | combine with an existing group of the same name |
 | `invert` | bool | `false` |  |  |  | invert the selection |
 
+**Example**
+
+```json
+{
+  "type": "group",
+  "params": {
+    "name": "top",
+    "class": "prim",
+    "normal": [
+      0,
+      1,
+      0
+    ],
+    "spread_angle": 20
+  }
+}
+```
+
 ### group_combine
 
 category: `group` · aliases: `groupcombine`, `combine_groups`, `group_bool`, `groupbool`
@@ -2734,12 +3954,54 @@ Operands are group names (wildcards allowed) or any single group-pattern token o
 
 ```json
 {
-  "type": "group_combine",
-  "params": {
-    "name": "top_only",
-    "class": "prim",
-    "expr": "top & !side"
-  }
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "divisions": [
+          3,
+          3,
+          3
+        ]
+      }
+    },
+    "upper": {
+      "type": "group",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "upper",
+        "expr": "@P.y > 0"
+      }
+    },
+    "top": {
+      "type": "group",
+      "in": [
+        "upper"
+      ],
+      "params": {
+        "name": "top",
+        "normal": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "walls": {
+      "type": "group_combine",
+      "in": [
+        "top"
+      ],
+      "params": {
+        "name": "upper_walls",
+        "class": "prim",
+        "expr": "upper & !top"
+      }
+    }
+  },
+  "output": "walls"
 }
 ```
 
@@ -2761,6 +4023,42 @@ Delete groups by name (wildcards, "^name" keeps) from one or all classes.
 |---|---|---|---|---|---|---|
 | `groups` | string | `""` |  |  | `group`, `names`, `pattern` | names to delete: "tmp*", "a b c", "* ^keep" |
 | `class` | enum | `"all"` |  | `all`, `point`, `vertex`, `prim`, `edge` |  | which classes |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "tmp": {
+      "type": "group",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "tmp_top",
+        "normal": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "clean": {
+      "type": "group_delete",
+      "in": [
+        "tmp"
+      ],
+      "params": {
+        "groups": "tmp*"
+      }
+    }
+  },
+  "output": "clean"
+}
+```
 
 ### group_expand
 
@@ -2790,12 +4088,41 @@ Grow adds every neighbour of the group per step; shrink removes every member tha
 
 ```json
 {
-  "type": "group_expand",
-  "params": {
-    "group": "top",
-    "class": "prim",
-    "steps": 2
-  }
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "quad"
+      }
+    },
+    "top": {
+      "type": "group",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "name": "top",
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "spread_angle": 15
+      }
+    },
+    "grown": {
+      "type": "group_expand",
+      "in": [
+        "top"
+      ],
+      "params": {
+        "group": "top",
+        "class": "prim",
+        "steps": 2
+      }
+    }
+  },
+  "output": "grown"
 }
 ```
 
@@ -2828,13 +4155,42 @@ An element of the target class joins when any (or all) of the source-class eleme
 
 ```json
 {
-  "type": "group_promote",
-  "params": {
-    "group": "top",
-    "from": "point",
-    "to": "prim",
-    "include": "all"
-  }
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "divisions": [
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    "top": {
+      "type": "group",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "top",
+        "class": "point",
+        "expr": "@P.y > 0.4"
+      }
+    },
+    "faces": {
+      "type": "group_promote",
+      "in": [
+        "top"
+      ],
+      "params": {
+        "group": "top",
+        "from": "point",
+        "to": "prim",
+        "include": "all"
+      }
+    }
+  },
+  "output": "faces"
 }
 ```
 
@@ -2858,6 +4214,43 @@ Rename a group (any class).
 | `to` | string | `""` |  |  |  | new name (replaces a same-named group of that class) |
 | `class` | enum | `"auto"` |  | `auto`, `point`, `vertex`, `prim`, `edge` |  | class (auto = first class that has the group: point, vertex, prim, edge) |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "top": {
+      "type": "group",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "top",
+        "normal": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "roof": {
+      "type": "group_rename",
+      "in": [
+        "top"
+      ],
+      "params": {
+        "from": "top",
+        "to": "roof"
+      }
+    }
+  },
+  "output": "roof"
+}
+```
+
 ## topology nodes
 
 ### bound
@@ -2879,6 +4272,21 @@ Bounding box of the input (whole or per connected piece) as a box mesh.
 | `padding` | vec3 | `[0,0,0]` |  |  |  | extra size added on each side |
 | `per_piece` | bool | `false` |  |  |  | one box per connected piece |
 | `divisions` | ivec3 | `[1,1,1]` | 1.. |  |  | box divisions |
+
+**Example**
+
+```json
+{
+  "type": "bound",
+  "params": {
+    "padding": [
+      0.1,
+      0.1,
+      0.1
+    ]
+  }
+}
+```
 
 ### clean
 
@@ -2903,6 +4311,18 @@ For holes, non-manifold edges, inconsistent winding and self-intersections use m
 | `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep) |
 | `remove_unused_points` | bool | `true` |  |  |  | remove points not used by prims (only when the geometry has prims) |
 | `fix_winding` | bool | `false` |  |  |  | make closed meshes face outward |
+
+**Example**
+
+```json
+{
+  "type": "clean",
+  "params": {
+    "fuse_distance": 0.0001,
+    "fix_winding": true
+  }
+}
+```
 
 ### decimate
 
@@ -3076,6 +4496,17 @@ Unique points per prim (hard, faceted look; pieces fall apart) or consolidate sh
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"unique"` |  | `unique`, `consolidate` |  | unique = every prim gets its own points; consolidate = fuse identical positions |
 
+**Example**
+
+```json
+{
+  "type": "facet",
+  "params": {
+    "mode": "unique"
+  }
+}
+```
+
 ### fill_holes
 
 category: `topology` · aliases: `polycap`, `cap_holes`, `close_holes`
@@ -3097,6 +4528,28 @@ Cap open boundary loops with new polygons (makes meshes watertight).
 
 **Writes:** prim group filled
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "pipe": {
+      "type": "tube",
+      "params": {
+        "caps": false
+      }
+    },
+    "capped": {
+      "type": "fill_holes",
+      "in": [
+        "pipe"
+      ]
+    }
+  },
+  "output": "capped"
+}
+```
+
 ### fuse
 
 category: `topology` · aliases: `weld`, `merge_points`
@@ -3116,6 +4569,17 @@ Weld points closer than a distance; collapsed prims are removed.
 | `distance` | float | `0.0001` | 0.. |  | `dist`, `tolerance` | snap distance |
 | `average` | bool | `false` |  |  |  | move fused points to their average position (default keeps the first) |
 | `group` | group (point) | `""` |  |  |  | point group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+
+**Example**
+
+```json
+{
+  "type": "fuse",
+  "params": {
+    "distance": 0.001
+  }
+}
+```
 
 ### grid_split
 
@@ -3139,6 +4603,38 @@ Split quads into a grid of cells by target size (facades → window cells) or fi
 | `divisions` | ivec2 | `[2,2]` | 1.. |  |  | count mode: cells along the quad's first and second edge |
 
 **Writes:** prim int cell_u, cell_v (cell indices within the original quad)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "facade": {
+      "type": "box",
+      "params": {
+        "size": [
+          6,
+          3,
+          4
+        ]
+      }
+    },
+    "cells": {
+      "type": "grid_split",
+      "in": [
+        "facade"
+      ],
+      "params": {
+        "size": [
+          1.5,
+          1
+        ]
+      }
+    }
+  },
+  "output": "cells"
+}
+```
 
 ### knife
 
@@ -3308,6 +4804,18 @@ Compute normals N on points (smooth), vertices (hard edges above the cusp angle)
 | `cusp_angle` | float | `60` | 0..180 |  |  | vertex mode: faces meeting sharper than this keep hard edges |
 | `hard_edges` | group | `""` |  |  | `hardedges`, `hard_edge_group` | vertex mode: edge group or edge pattern that is always hard, on top of cusp_angle ("" = none), e.g. "seams", "boundary", "angle>30", "p0-1-2" |
 
+**Example**
+
+```json
+{
+  "type": "normal",
+  "params": {
+    "class": "vertex",
+    "cusp_angle": 30
+  }
+}
+```
+
 ### poly_bevel
 
 category: `topology` · aliases: `polybevel`, `bevel`, `chamfer`
@@ -3374,6 +4882,19 @@ Extrude/inset faces along normals (individually or as connected regions). Groups
 
 **Writes:** prim groups front, side
 
+**Example**
+
+```json
+{
+  "type": "poly_extrude",
+  "params": {
+    "group": "@P.y>0.4",
+    "distance": 0.3,
+    "inset": 0.1
+  }
+}
+```
+
 ### polybridge
 
 category: `topology` · aliases: `bridge`, `bridge_loops`, `bridge_edges`, `bridge_edge_loops`
@@ -3406,13 +4927,69 @@ source and target are edge patterns that must each form one open or closed chain
 
 ```json
 {
-  "type": "polybridge",
-  "params": {
-    "source": "border:hole_a",
-    "target": "border:hole_b",
-    "divisions": 4,
-    "delete_inner_faces": true
-  }
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "divisions": [
+          3,
+          3,
+          3
+        ]
+      }
+    },
+    "front": {
+      "type": "group",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "hole_a",
+        "bbox_min": [
+          -0.1,
+          -0.1,
+          0.4
+        ],
+        "bbox_max": [
+          0.1,
+          0.1,
+          0.6
+        ]
+      }
+    },
+    "back": {
+      "type": "group",
+      "in": [
+        "front"
+      ],
+      "params": {
+        "name": "hole_b",
+        "bbox_min": [
+          -0.1,
+          -0.1,
+          -0.6
+        ],
+        "bbox_max": [
+          0.1,
+          0.1,
+          -0.4
+        ]
+      }
+    },
+    "tunnel": {
+      "type": "polybridge",
+      "in": [
+        "back"
+      ],
+      "params": {
+        "source": "border:hole_a",
+        "target": "border:hole_b",
+        "divisions": 4,
+        "delete_inner_faces": true
+      }
+    }
+  },
+  "output": "tunnel"
 }
 ```
 
@@ -3512,6 +5089,18 @@ Always watertight and merges overlapping parts, but sharp edges round off and at
 | `edge_length` | float | `0` | 0.. |  |  | target edge length (0 = auto from divisions) |
 | `divisions` | int | `48` | 8..256 |  |  | resolution across the largest dimension when edge_length = 0 |
 | `offset` | float | `0` |  |  |  | grow (+) / shrink (−) the surface |
+
+**Example**
+
+```json
+{
+  "type": "remesh",
+  "params": {
+    "divisions": 40,
+    "offset": 0.02
+  }
+}
+```
 
 ### remesh_isotropic
 
@@ -3621,6 +5210,17 @@ Flip polygon winding (normals).
 |---|---|---|---|---|---|---|
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
+**Example**
+
+```json
+{
+  "type": "reverse",
+  "params": {
+    "group": "@P.y<0"
+  }
+}
+```
+
 ### sort
 
 category: `topology`
@@ -3642,6 +5242,19 @@ Reorder points or prims: by axis, random, attribute value, or reverse.
 | `attrib` | string | `""` |  |  |  | attribute for by=attribute (first component) |
 | `descending` | bool | `false` |  |  |  | reverse the order |
 | `seed` | float | `0` |  |  |  | random seed |
+
+**Example**
+
+```json
+{
+  "type": "sort",
+  "params": {
+    "class": "prim",
+    "by": "random",
+    "seed": 3
+  }
+}
+```
 
 ### subdivide
 
@@ -3699,6 +5312,17 @@ Split polygons into triangles (ear clipping for concave n-gons).
 |---|---|---|---|---|---|---|
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
+**Example**
+
+```json
+{
+  "type": "triangulate",
+  "params": {
+    "group": "@P.y>0"
+  }
+}
+```
+
 ## copy nodes
 
 ### copy_to_points
@@ -3738,16 +5362,92 @@ pack:false (default) makes real copies. pack:true makes one packed prim per temp
 
 ```json
 {
-  "type": "copy_to_points",
-  "in": [
-    "trees",
-    "pts"
-  ],
-  "params": {
-    "pack": true,
-    "variants": "name",
-    "variant_attrib": "variant"
-  }
+  "nodes": {
+    "pine": {
+      "type": "tube",
+      "params": {
+        "radius": 0.4,
+        "radius_top": 0,
+        "height": 1.5,
+        "center": [
+          0,
+          0.75,
+          0
+        ]
+      }
+    },
+    "pine_named": {
+      "type": "attrib_create",
+      "in": [
+        "pine"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "pine"
+      }
+    },
+    "rock": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 1,
+        "radius": 0.3
+      }
+    },
+    "rock_named": {
+      "type": "attrib_create",
+      "in": [
+        "rock"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "rock"
+      }
+    },
+    "library": {
+      "type": "merge",
+      "in": [
+        "pine_named",
+        "rock_named"
+      ]
+    },
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size": [
+          20,
+          20
+        ]
+      }
+    },
+    "pts": {
+      "type": "scatter",
+      "in": [
+        "ground"
+      ],
+      "params": {
+        "count": 200
+      }
+    },
+    "forest": {
+      "type": "copy_to_points",
+      "in": [
+        "library",
+        "pts"
+      ],
+      "params": {
+        "pack": true,
+        "variants": "name",
+        "variant_weights": [
+          3,
+          1
+        ]
+      }
+    }
+  },
+  "output": "forest"
 }
 ```
 
@@ -3775,6 +5475,27 @@ Make N copies, each transformed cumulatively (Houdini Copy and Transform): stair
 | `copy_attrib` | string | `"copynum"` |  |  |  | prim int attribute storing the copy index ("" = none) |
 
 **Writes:** prim copynum
+
+**Example**
+
+```json
+{
+  "type": "copy_xform",
+  "params": {
+    "count": 12,
+    "translate": [
+      0,
+      0.2,
+      0
+    ],
+    "rotate": [
+      0,
+      30,
+      0
+    ]
+  }
+}
+```
 
 ### pack
 
@@ -3968,6 +5689,37 @@ Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, 
 
 **Writes:** prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 3,
+        "radius": 0.65
+      }
+    },
+    "cut": {
+      "type": "boolean",
+      "in": [
+        "box",
+        "ball"
+      ],
+      "params": {
+        "operation": "subtract"
+      }
+    }
+  },
+  "output": "cut"
+}
+```
+
 ### clip
 
 category: `solid` · aliases: `cut`, `slice_plane`, `trim`
@@ -3991,6 +5743,28 @@ Cut geometry with a plane; keep one side or both. Works on any polygons; can cap
 
 **Writes:** prim groups above/below (keep=both), cap
 
+**Example**
+
+```json
+{
+  "type": "clip",
+  "params": {
+    "origin": [
+      0,
+      0.2,
+      0
+    ],
+    "normal": [
+      0,
+      1,
+      0
+    ],
+    "keep": "below",
+    "cap": true
+  }
+}
+```
+
 ### convex_hull
 
 category: `solid` · aliases: `hull`, `shrinkwrap`
@@ -4006,6 +5780,39 @@ Convex hull of all points (watertight triangles).
 **Parameters**
 
 None.
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "pts": {
+      "type": "point_grid",
+      "params": {
+        "counts": [
+          6,
+          4,
+          6
+        ],
+        "size": [
+          2,
+          1,
+          2
+        ],
+        "jitter": 0.8,
+        "seed": 2
+      }
+    },
+    "hull": {
+      "type": "convex_hull",
+      "in": [
+        "pts"
+      ]
+    }
+  },
+  "output": "hull"
+}
+```
 
 ### minkowski
 
@@ -4025,6 +5832,34 @@ Minkowski sum of two solids (e.g. A ⊕ small sphere = rounded/dilated A). Slow 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `operation` | enum | `"sum"` |  | `sum`, `difference` |  | sum grows A by B; difference erodes A by B |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 1,
+        "radius": 0.1
+      }
+    },
+    "rounded": {
+      "type": "minkowski",
+      "in": [
+        "box",
+        "ball"
+      ]
+    }
+  },
+  "output": "rounded"
+}
+```
 
 ### slice
 
@@ -4048,6 +5883,18 @@ Contour a closed solid with parallel planes (closed polygons per level) — e.g.
 
 **Writes:** prim float height, int slice
 
+**Example**
+
+```json
+{
+  "type": "slice",
+  "params": {
+    "count": 12,
+    "axis": "y"
+  }
+}
+```
+
 ### smooth_solid
 
 category: `solid` · aliases: `refine`, `round`, `smooth_out`, `subdivide_solid`
@@ -4067,6 +5914,18 @@ Smooth a closed mesh into curved surfaces and refine it (manifold smoothOut + re
 | `refine` | int | `4` | 1..32 |  |  | split every edge into this many segments |
 | `sharp_angle` | float | `60` | 0..180 |  |  | edges with a dihedral angle sharper than this stay sharp (180 = smooth everything) |
 | `smoothness` | float | `0` | 0..1 |  |  | smoothness kept on sharp edges (0 = crisp) |
+
+**Example**
+
+```json
+{
+  "type": "smooth_solid",
+  "params": {
+    "refine": 4,
+    "sharp_angle": 80
+  }
+}
+```
 
 ### voronoi_fracture
 
@@ -4091,6 +5950,19 @@ Shatter a closed solid into convex Voronoi pieces (sites from input 2 or scatter
 | `neighbors` | int | `24` | 4.. |  |  | nearest sites considered per cell (raise if cells look wrong) |
 
 **Writes:** prim name ("piece0"...), class (int), group inside; point/prim attributes from the source
+
+**Example**
+
+```json
+{
+  "type": "voronoi_fracture",
+  "params": {
+    "count": 20,
+    "gap": 0.02,
+    "seed": 4
+  }
+}
+```
 
 ## sdf nodes
 
@@ -4389,6 +6261,53 @@ Combine SDF volumes: union / subtract / intersect, hard or smooth (blend radius 
 | `operation` | enum | `"smooth_union"` |  | `union`, `subtract`, `intersect`, `smooth_union`, `smooth_subtract`, `smooth_intersect` | `op`, `mode` | operation |
 | `k` | float | `0.2` | 0.. |  | `smoothness`, `blend`, `radius` | blend radius for smooth operations |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "body": {
+      "type": "sdf_shape",
+      "params": {
+        "shape": "capsule",
+        "radius": 0.3,
+        "height": 1
+      }
+    },
+    "head": {
+      "type": "sdf_shape",
+      "params": {
+        "shape": "sphere",
+        "radius": 0.35,
+        "center": [
+          0,
+          0.8,
+          0
+        ]
+      }
+    },
+    "blob": {
+      "type": "sdf_combine",
+      "in": [
+        "body",
+        "head"
+      ],
+      "params": {
+        "operation": "smooth_union",
+        "k": 0.2
+      }
+    },
+    "mesh": {
+      "type": "sdf_to_mesh",
+      "in": [
+        "blob"
+      ]
+    }
+  },
+  "output": "mesh"
+}
+```
+
 ### sdf_expr
 
 category: `sdf` · aliases: `sdf_code`, `sdf_wrangle`, `implicit`
@@ -4442,6 +6361,37 @@ Convert a closed mesh to an SDF volume (narrow band + sweeping), for blending me
 | `voxel_size` | float | `0` | 0.. |  |  | voxel size (0 = auto from divisions) |
 | `divisions` | int | `64` | 8..256 |  |  | voxels across the largest dimension when voxel_size = 0 |
 | `keep_mesh` | bool | `false` |  |  |  | keep the input polygons alongside the volume |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "field": {
+      "type": "sdf_from_mesh",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "divisions": 48
+      }
+    },
+    "grown": {
+      "type": "sdf_to_mesh",
+      "in": [
+        "field"
+      ],
+      "params": {
+        "iso": 0.1
+      }
+    }
+  },
+  "output": "grown"
+}
+```
 
 ### sdf_grid
 
@@ -4507,6 +6457,40 @@ Modify SDF volumes: offset (grow/shrink), shell, noise displacement, twist, bend
 | `count` | ivec3 | `[3,1,3]` | 1.. |  |  | repeat: number of copies per axis (limits the domain) |
 | `seed` | float | `0` |  |  |  | random seed |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sdf_shape",
+      "params": {
+        "shape": "sphere",
+        "radius": 0.8
+      }
+    },
+    "rough": {
+      "type": "sdf_modify",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "operation": "noise",
+        "amount": 0.08,
+        "frequency": 4
+      }
+    },
+    "mesh": {
+      "type": "sdf_to_mesh",
+      "in": [
+        "rough"
+      ]
+    }
+  },
+  "output": "mesh"
+}
+```
+
 ### sdf_shape
 
 category: `sdf` · aliases: `sdf_primitive`, `sdf`
@@ -4530,6 +6514,23 @@ None (generator).
 | `rotate` | vec3 | `[0,0,0]` |  |  |  | rotation in degrees |
 | `name` | string | `"sdf"` |  |  |  | volume name |
 
+**Example**
+
+```json
+{
+  "type": "sdf_shape",
+  "params": {
+    "shape": "round_box",
+    "size": [
+      1,
+      0.5,
+      1
+    ],
+    "radius2": 0.1
+  }
+}
+```
+
 ### sdf_to_mesh
 
 category: `sdf` · aliases: `convert_sdf`, `convert_vdb`, `mesh_sdf`, `polygonize`, `isosurface`
@@ -4551,6 +6552,33 @@ Polygonise SDF volumes into a watertight triangle mesh (all volumes are unioned)
 | `iso` | float | `0` |  |  | `level`, `offset` | iso value (+ grows, − shrinks) |
 | `normals` | bool | `true` |  |  |  | write point N from the field gradient |
 | `keep_input` | bool | `false` |  |  |  | also keep the input polygons |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ring": {
+      "type": "sdf_shape",
+      "params": {
+        "shape": "torus",
+        "radius": 0.8,
+        "radius2": 0.25
+      }
+    },
+    "mesh": {
+      "type": "sdf_to_mesh",
+      "in": [
+        "ring"
+      ],
+      "params": {
+        "divisions": 80
+      }
+    }
+  },
+  "output": "mesh"
+}
+```
 
 ### voxel_remesh
 
@@ -6244,6 +8272,18 @@ Project UVs: planar, box (tri-planar per face), cylindrical or spherical.
 
 **Writes:** vertex uv
 
+**Example**
+
+```json
+{
+  "type": "uv_project",
+  "params": {
+    "method": "cylindrical",
+    "axis": "y"
+  }
+}
+```
+
 ### uv_transform
 
 category: `uv` · aliases: `uvtransform`
@@ -6264,6 +8304,41 @@ Translate / scale / rotate existing UVs (vertex or point uv).
 | `scale` | vec2 | `[1,1]` |  |  | `s` | scale |
 | `rotate` | float | `0` |  |  | `r` | degrees |
 | `pivot` | vec2 | `[0.5,0.5]` |  |  |  | pivot |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "uv": {
+      "type": "uv_project",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "method": "box"
+      }
+    },
+    "tiled": {
+      "type": "uv_transform",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "scale": [
+          2,
+          2
+        ],
+        "rotate": 90
+      }
+    }
+  },
+  "output": "tiled"
+}
+```
 
 ### uv_unwrap
 
@@ -6475,6 +8550,21 @@ None (generator).
 | `node` | string | `""` |  |  |  | node in that graph ("" = its output) |
 | `vars` | json | `{}` |  |  |  | override that graph's vars |
 
+**Example**
+
+```json
+{
+  "type": "graph_ref",
+  "params": {
+    "graph": "island",
+    "node": "ground",
+    "vars": {
+      "seed": 7
+    }
+  }
+}
+```
+
 ### input
 
 category: `flow` · aliases: `subnet_input`, `loop_input`
@@ -6492,6 +8582,55 @@ None (generator).
 | `index` | int | `0` | 0.. |  |  | foreach: 0 = current piece/feedback, 1 = whole input, 2 = foreach second input. solver: 0 = previous frame, 1 = initial, 2/3 = extra inputs. assets: input number |
 | `label` | string | `""` |  |  |  | documentation label for asset inputs |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "divisions": [
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    "each": {
+      "type": "foreach",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "mode": "prims",
+        "body": {
+          "nodes": {
+            "face": {
+              "type": "input",
+              "params": {
+                "index": 0
+              }
+            },
+            "x": {
+              "type": "poly_extrude",
+              "in": [
+                "face"
+              ],
+              "params": {
+                "distance": "=0.05 + iteration * 0.02"
+              }
+            }
+          },
+          "output": "x"
+        }
+      }
+    }
+  },
+  "output": "each"
+}
+```
+
 ### merge
 
 category: `flow` · aliases: `combine`, `join`
@@ -6508,6 +8647,36 @@ Combine any number of inputs into one geometry (attributes, groups and material 
 
 None.
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "center": [
+          2,
+          0,
+          0
+        ]
+      }
+    },
+    "both": {
+      "type": "merge",
+      "in": [
+        "box",
+        "ball"
+      ]
+    }
+  },
+  "output": "both"
+}
+```
+
 ### null
 
 category: `flow` · aliases: `output`, `out`, `passthrough`
@@ -6523,6 +8692,25 @@ Pass-through. Use as a named output/marker (e.g. "OUT").
 **Parameters**
 
 None.
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "OUT": {
+      "type": "null",
+      "in": [
+        "box"
+      ]
+    }
+  },
+  "output": "OUT"
+}
+```
 
 ### solver
 
@@ -6601,6 +8789,35 @@ Pass through one of several inputs by index (use "=expr" to drive it from vars).
 |---|---|---|---|---|---|---|
 | `index` | int | `0` |  |  | `input` | which input to output (clamped) |
 
+**Example**
+
+```json
+{
+  "vars": {
+    "variant": 1
+  },
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "ball": {
+      "type": "sphere"
+    },
+    "pick": {
+      "type": "switch",
+      "in": [
+        "box",
+        "ball"
+      ],
+      "params": {
+        "index": "=variant"
+      }
+    }
+  },
+  "output": "pick"
+}
+```
+
 ## io nodes
 
 ### file
@@ -6623,6 +8840,19 @@ None (generator).
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
 | `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances) |
 | `instancing` | enum | `"packed"` |  | `packed`, `expand` |  | glTF EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry |
+
+**Example**
+
+```json
+{
+  "type": "file",
+  "params": {
+    "path": "props/chair.obj",
+    "up_axis": "z",
+    "weld": true
+  }
+}
+```
 
 ## pcg nodes
 
@@ -8226,6 +10456,62 @@ Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap)
 
 **Writes:** image <name> (default "height"): C grey 0..1, distance (metres), mask
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "low": {
+      "type": "box",
+      "params": {
+        "divisions": [
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "low"
+      ]
+    },
+    "smooth": {
+      "type": "subdivide",
+      "in": [
+        "low"
+      ],
+      "params": {
+        "levels": 3
+      }
+    },
+    "high": {
+      "type": "noise_displace",
+      "in": [
+        "smooth"
+      ],
+      "params": {
+        "amplitude": 0.05,
+        "frequency": 6
+      }
+    },
+    "height": {
+      "type": "bake_height",
+      "in": [
+        "uv",
+        "high"
+      ],
+      "params": {
+        "resolution": 256,
+        "cage": 0.4
+      }
+    }
+  },
+  "output": "height"
+}
+```
+
 ### bake_island_id
 
 category: `texture` · aliases: `island_id_bake`, `bake_id`, `id_bake`, `bake_uv_islands`
@@ -8254,6 +10540,34 @@ Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 
 | `seed` | float | `0` |  |  |  | random seed |
 
 **Writes:** image <name> (default "island_id"): C RGBA, id (island number), mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "crate": {
+      "type": "crate"
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "crate"
+      ]
+    },
+    "ids": {
+      "type": "bake_island_id",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    }
+  },
+  "output": "ids"
+}
+```
 
 ### bake_mask
 
@@ -8285,6 +10599,36 @@ Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv 
 | `component` | int | `0` | -1..15 |  |  | vector component of attrib (-1 = luminance of the first three) |
 
 **Writes:** image <name> (default "mask"): C grey, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "box"
+      ]
+    },
+    "top": {
+      "type": "bake_mask",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256,
+        "mask_group": "@P.y>0.4",
+        "name": "top_mask"
+      }
+    }
+  },
+  "output": "top"
+}
+```
 
 ### bake_normal
 
@@ -8393,6 +10737,34 @@ Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwra
 
 **Writes:** image <name> (default "position"): C RGBA, mask
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "crate": {
+      "type": "crate"
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "crate"
+      ]
+    },
+    "pos": {
+      "type": "bake_position",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    }
+  },
+  "output": "pos"
+}
+```
+
 ### bake_thickness
 
 category: `texture` · aliases: `thickness_bake`, `bake_thick`
@@ -8430,6 +10802,35 @@ Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 
 **Writes:** image <name> (default "thickness"): C grey 0..1, mask
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "ring": {
+      "type": "torus"
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "ring"
+      ]
+    },
+    "thick": {
+      "type": "bake_thickness",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256,
+        "samples": 16
+      }
+    }
+  },
+  "output": "thick"
+}
+```
+
 ### bake_vertex_color
 
 category: `texture` · aliases: `vertex_color_bake`, `bake_color`, `bake_cd`, `color_bake`
@@ -8459,6 +10860,48 @@ Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..
 | `alpha_attrib` | string | `"Alpha"` |  |  |  | alpha attribute (missing = 1) |
 
 **Writes:** image <name> (default "vertex_color"): C RGBA, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "rows": 12,
+        "cols": 24
+      }
+    },
+    "tint": {
+      "type": "color",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "mode": "ramp",
+        "attrib": "P.y"
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "tint"
+      ]
+    },
+    "cd": {
+      "type": "bake_vertex_color",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    }
+  },
+  "output": "cd"
+}
+```
 
 ### bake_world_normal
 
@@ -8491,6 +10934,38 @@ Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1
 
 **Writes:** image <name> (default "world_normal"): C RGBA, mask
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "rows": 8,
+        "cols": 16
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "ball"
+      ]
+    },
+    "nrm": {
+      "type": "bake_world_normal",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    }
+  },
+  "output": "nrm"
+}
+```
+
 ### heightfield_to_tex
 
 category: `texture` · aliases: `heightfield_to_image`, `hf2tex`, `heightfield_texture`
@@ -8515,6 +10990,37 @@ Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits the lay
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = the layer name) |
 
 **Writes:** image <name> (default: the layer name): C grey
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "hf": {
+      "type": "heightfield"
+    },
+    "hills": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "amplitude": 3
+      }
+    },
+    "out": {
+      "type": "heightfield_to_tex",
+      "in": [
+        "hills"
+      ],
+      "params": {
+        "name": "height"
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ### tex_blend
 
@@ -8605,6 +11111,31 @@ Substance: Blur HQ; Houdini COP: Blur. radius in pixels (gaussian: radius = 2 si
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "bricks": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_blur",
+      "in": [
+        "bricks"
+      ],
+      "params": {
+        "radius": 2
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ### tex_cells
 
@@ -8866,6 +11397,31 @@ Substance: Edge Detect; Houdini COP: Edge Detect. A 0 → 1 step gives about 1 a
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "bricks": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_edge_detect",
+      "in": [
+        "bricks"
+      ],
+      "params": {
+        "width": 1
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### tex_gradient
 
 category: `texture` · aliases: `gradient`, `ramp_texture`, `gradient_linear`, `gradient_radial`, `cop_ramp`
@@ -8890,6 +11446,19 @@ None (generator).
 | `name` | string | `"gradient"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
 
 **Writes:** image <name>: C grey 0..1
+
+**Example**
+
+```json
+{
+  "type": "tex_gradient",
+  "params": {
+    "resolution": 256,
+    "mode": "radial",
+    "radius": 0.5
+  }
+}
+```
 
 ### tex_height_to_ao
 
@@ -8918,6 +11487,32 @@ Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `st
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "bricks": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_height_to_ao",
+      "in": [
+        "bricks"
+      ],
+      "params": {
+        "radius": 0.03,
+        "name": "brick_ao"
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### tex_histogram_scan
 
 category: `texture` · aliases: `histogram_scan`, `histogramscan`, `scan`
@@ -8942,6 +11537,33 @@ Substance: Histogram Scan. position 0 = black, 1 = white, 0.5 with contrast 0 = 
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "n": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 256,
+        "scale": 4
+      }
+    },
+    "out": {
+      "type": "tex_histogram_scan",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "position": 0.4,
+        "contrast": 0.8
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### tex_invert
 
 category: `texture` · aliases: `invert`, `cop_invert`, `negate`
@@ -8961,6 +11583,28 @@ Invert: 1 - value (grey or RGB; alpha untouched).
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "n": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_invert",
+      "in": [
+        "n"
+      ]
+    }
+  },
+  "output": "out"
+}
+```
 
 ### tex_levels
 
@@ -8989,6 +11633,33 @@ Substance: Levels; Houdini COP: Levels. value = out_low + (out_high - out_low) �
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "n": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_levels",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "in_low": 0.3,
+        "in_high": 0.7,
+        "gamma": 1.2
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ### tex_noise
 
@@ -9060,6 +11731,32 @@ Substance: Normal (from height); Houdini COP: Bump to Normal. strength 1 tilts t
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "bricks": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_normal_from_height",
+      "in": [
+        "bricks"
+      ],
+      "params": {
+        "strength": 3,
+        "name": "brick_normal"
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### tex_output
 
 category: `texture` · aliases: `texture_output`, `rename_image`, `image_output`, `cop_null`
@@ -9082,6 +11779,32 @@ Substance: Output node; Houdini COP: Null / Output. With layer "" the image is r
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
 | `layer` | string | `""` |  |  |  | copy this layer out as a new image ("" = rename the whole image) |
 | `keep_only` | bool | `false` |  |  |  | output only this image |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "bricks": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_output",
+      "in": [
+        "bricks"
+      ],
+      "params": {
+        "name": "brick_id",
+        "layer": "id"
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ### tex_pattern
 
@@ -9158,6 +11881,20 @@ None (generator).
 
 **Writes:** image <name>: C grey 0..1
 
+**Example**
+
+```json
+{
+  "type": "tex_scratches",
+  "params": {
+    "resolution": 512,
+    "count": 150,
+    "angle": 45,
+    "seed": 3
+  }
+}
+```
+
 ### tex_shape
 
 category: `texture` · aliases: `shape_texture`, `cop_shape`, `polygon_shape`, `disc_texture`
@@ -9232,6 +11969,23 @@ None (generator).
 
 **Writes:** image <name>: C grey 0..1
 
+**Example**
+
+```json
+{
+  "type": "tex_splatter",
+  "params": {
+    "resolution": 512,
+    "count": 40,
+    "size": [
+      0.03,
+      0.1
+    ],
+    "seed": 2
+  }
+}
+```
+
 ### tex_text
 
 category: `texture` · aliases: `text_texture`, `label_texture`, `stencil`
@@ -9258,6 +12012,22 @@ None (generator).
 
 **Writes:** image <name>: C grey 0..1
 
+**Example**
+
+```json
+{
+  "type": "tex_text",
+  "params": {
+    "resolution": [
+      512,
+      128
+    ],
+    "text": "EXIT",
+    "size": 0.7
+  }
+}
+```
+
 ### tex_threshold
 
 category: `texture` · aliases: `threshold`, `cop_threshold`, `binarize`
@@ -9279,6 +12049,32 @@ Threshold: grey 1 where the value (luminance) is above threshold, else 0, with a
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "n": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "out": {
+      "type": "tex_threshold",
+      "in": [
+        "n"
+      ],
+      "params": {
+        "threshold": 0.55,
+        "softness": 0.05
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ### tex_tile_sampler
 
@@ -9431,6 +12227,36 @@ Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `t
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
 
+**Example**
+
+```json
+{
+  "nodes": {
+    "star": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": 256,
+        "shape": "star"
+      }
+    },
+    "out": {
+      "type": "tex_transform",
+      "in": [
+        "star"
+      ],
+      "params": {
+        "rotate": 45,
+        "tile": [
+          4,
+          4
+        ]
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### tex_warp
 
 category: `texture` · aliases: `warp`, `directional_warp`, `vector_warp`, `cop_displace`, `distort`
@@ -9458,6 +12284,40 @@ Substance: Warp / Directional Warp / Vector Warp; Houdini COP: Displace. intensi
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `warp_layer` | string | `""` |  |  |  | layer of the warp image ("" = main) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "bricks": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": 256
+      }
+    },
+    "n": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 256,
+        "scale": 4
+      }
+    },
+    "out": {
+      "type": "tex_warp",
+      "in": [
+        "bricks",
+        "n"
+      ],
+      "params": {
+        "mode": "slope",
+        "intensity": 0.03
+      }
+    }
+  },
+  "output": "out"
+}
+```
 
 ### texture_to_material
 
