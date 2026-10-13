@@ -128,6 +128,8 @@ const fmtFixed = (x: number) => (Number.isFinite(x) ? x.toFixed(6) : '0.000000')
 
 /** Attributes consumed by the PCG columns. */
 const PCG_USED = new Set(['P', 'N', 'v', 'up', 'orient', 'rot', 'pscale', 'scale', 'Cd', 'Alpha', 'density', 'seed', 'trans']);
+/** Standard PCG column bases, compared case-insensitively (Unreal FNames are case-insensitive). */
+const PCG_CANONICAL: Record<string, string> = { name: 'Name', position: 'Position', rotation: 'Rotation', scale: 'Scale', density: 'Density', color: 'Color', seed: 'Seed', mesh: 'Mesh' };
 
 function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: string[][] } {
   const s = o.scale ?? 100;
@@ -138,7 +140,10 @@ function pcgRows(g: Geometry, o: ExportOptions): { header: string[]; rows: strin
     : ['Name', 'Position.X', 'Position.Y', 'Position.Z', 'Rotation.Roll', 'Rotation.Pitch', 'Rotation.Yaw', 'Scale.X', 'Scale.Y', 'Scale.Z', 'Density', 'Color.R', 'Color.G', 'Color.B', 'Color.A', 'Seed'];
   const ue = (keys: string[], vals: number[]) => quote('(' + keys.map((k, j) => `${k}=${fmtFixed(vals[j])}`).join(',') + ')');
   const XYZ = ['X', 'Y', 'Z'];
-  for (const [n, a] of extras) header.push(...columnsFor(n, a));
+  // PCG attribute names are case-insensitive (FName): an attribute whose name collides with a standard column
+  // (a prim `name` next to the row key `Name`, a `mesh` next to `Mesh`) is written with an `_attr` suffix.
+  const pcgColumn = (n: string) => { const c = PCG_CANONICAL[n.toLowerCase()]; return c && c !== n ? n + '_attr' : n; };
+  for (const [n, a] of extras) header.push(...columnsFor(pcgColumn(n), a));
   const P = g.P, tr = get('trans'), ps = get('pscale'), sc = get('scale'), cd = get('Cd'), al = get('Alpha'), de = get('density'), sd = get('seed');
   const rows: string[][] = [];
   for (let i = 0; i < g.numPoints; i++) {
