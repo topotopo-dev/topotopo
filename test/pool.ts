@@ -16,10 +16,12 @@ import type { GraphSpec } from '../src/graph/types.ts';
 import { NodeError } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { createNodePool, poolOptionsFromEnv, workersFromEnv } from '../src/host/pool.ts';
+import type { PoolResult, PoolTask } from '../src/host/types.ts';
 import { parallelMap } from '../src/graph/parallel.ts';
 import { GEOMETRY_FUNCTIONS } from '../src/core/snippet-lib.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { rng } from '../src/core/random.ts';
+import { sampleEliminate } from '../src/core/scatter.ts';
 import { fingerprint } from './fingerprint.ts';
 import { ROOT } from './fixtures.ts';
 import { kernelsWasmURL, loadKernels } from '../src/wasm/kernels.ts';
@@ -430,6 +432,43 @@ section('processes end with the pool in use');
 section('scatter JS and loaded WASM backends preserve pool parity');
 {
   await loadKernels(fs.readFileSync(kernelsWasmURL));
+  // Workers initialize their own selected WASM variant. A full elimination is one task even for shared
+  // candidates, and neither the ordinary structured clone nor the SAB path may detach or change its inputs.
+  const originalVariant = process.env.TOPOTOPO_WASM;
+  for (const variant of ['scalar', 'simd']) {
+    process.env.TOPOTOPO_WASM = variant;
+    const worker = createNodePool({ size: 1 })!;
+    await worker.warm();
+    if (originalVariant === undefined) delete process.env.TOPOTOPO_WASM;
+    else process.env.TOPOTOPO_WASM = originalVariant;
+    try {
+      const n = 513, radius = 0.375, target = 103;
+      const positions = Float64Array.from({ length: n * 3 }, (_, k) => {
+        const i = Math.floor(k / 3);
+        return k % 3 === 0 ? (i % 17 - 8) * 0.25 : k % 3 === 1 ? 0 : (Math.floor(i / 17) - 15) * 0.25;
+      });
+      const bytes = (a: ArrayBufferView) => Buffer.from(a.buffer, a.byteOffset, a.byteLength);
+      for (const adaptive of [false, true]) for (const shared of [false, true]) {
+        const pos = shared ? new Float64Array(new SharedArrayBuffer(positions.byteLength)) : positions.slice();
+        pos.set(positions);
+        const sourceScale = adaptive ? Float64Array.from({ length: n }, (_, i) => 0.25 * (1 + i % 7)) : undefined;
+        const scale = sourceScale && (shared ? new Float64Array(new SharedArrayBuffer(sourceScale.byteLength)) : sourceScale.slice());
+        if (scale) scale.set(sourceScale!);
+        const expected = sampleEliminate(positions, target, radius, sourceScale), tasks = worker.stats().tasks;
+        const result = await worker.run<PoolResult<Int32Array>>({ kernel: 'scatter_wasm_eliminate',
+          args: { target, rmax: radius }, range: [0, n], arrays: scale ? { pos, scale } : { pos } });
+        check(bytes(result.value).equals(bytes(expected)) && worker.stats().tasks === tasks + 1,
+          `${variant} whole-worker elimination, adaptive ${adaptive}, shared ${shared}: one task = JS bytes`);
+        check(bytes(pos).equals(bytes(positions)) && (!scale || bytes(scale).equals(bytes(sourceScale!))),
+          `${variant} whole-worker elimination, adaptive ${adaptive}, shared ${shared}: input ownership retained`);
+      }
+      const splitError = await worker.run({ kernel: 'scatter_wasm_eliminate', args: { target, rmax: radius },
+        range: [1, n], arrays: { pos: positions } }).then(() => '', error => error.message);
+      check(/requires one full range/.test(splitError), `${variant} whole-worker elimination rejects a split range`);
+    } finally {
+      await worker.close();
+    }
+  }
   const graphs: [string, GraphSpec][] = [
     ['surface density, caps and projected relaxation', { nodes: {
       g: { type: 'grid', params: { size: [20, 20], divisions: [20, 20] } },
@@ -467,6 +506,60 @@ section('scatter JS and loaded WASM backends preserve pool parity');
   largeScatter.nodes.s.params!.backend = 'js';
   const largeJs = await off.cook(largeScatter);
   check(!!largeKernel.geo && !!largeJs.geo && !sameBits(largeKernel.geo, largeJs.geo), 'large worker elimination matches JS bytes');
+
+  // Exercise the measured crossovers through actual node cooks, including the mixed JS/WASM paths. Eight source
+  // triangles keep projection cheap while all output arrays, provenance and seeds are compared without tolerance.
+  type AutoRouting = { elimination: 'kernel' | 'js'; adaptive: boolean; relaxation: 'kernel' | 'js' | 'none' };
+  const mixedCases: [label: string, graph: GraphSpec, routing: AutoRouting][] = [
+    ['adaptive elimination at 200k candidates, kernel distance and relaxation', { nodes: {
+      g: { type: 'grid', params: { size: [100, 100], divisions: [2, 2] } },
+      m: { type: 'wrangle', in: ['g'], params: { code: 'f@mask = 0.25 + 0.75 * (@P.x / 100 + 0.5);' } },
+      s: { type: 'scatter', in: ['m'], params: { count: 40_000, seed: 117, generate_by: 'count', density_mask: 'mask',
+        min_distance: 0.02, relax_iterations: 1, write_primuv: true, write_seed: true } },
+    }, output: 's' }, { elimination: 'js', adaptive: true, relaxation: 'kernel' }],
+    ['uniform kernel elimination, JS relaxation at 50k kept points', { nodes: {
+      g: { type: 'grid', params: { size: [100, 100], divisions: [2, 2] } },
+      s: { type: 'scatter', in: ['g'], params: { count: 50_000, seed: 118, relax_iterations: 2,
+        write_primuv: true, write_seed: true } },
+    }, output: 's' }, { elimination: 'kernel', adaptive: false, relaxation: 'js' }],
+    ['uniform JS elimination at 500k candidates, kernel distance rejection', { nodes: {
+      g: { type: 'grid', params: { size: [100, 100], divisions: [2, 2] } },
+      s: { type: 'scatter', in: ['g'], params: { count: 100_000, seed: 119, min_distance: 0.02,
+        write_primuv: true, write_seed: true } },
+    }, output: 's' }, { elimination: 'js', adaptive: false, relaxation: 'none' }],
+  ];
+  const pool = on.host.pool!, originalRun = pool.run, jobs: string[] = [];
+  pool.run = function<T = PoolResult>(task: PoolTask): Promise<T> {
+    jobs.push(task.kernel);
+    return originalRun.call(pool, task) as Promise<T>;
+  };
+  try {
+    for (const [label, base, routing] of mixedCases) {
+      let reference: Geometry | undefined;
+      for (const backend of ['js', 'kernel', 'auto']) {
+        await pool.warm();
+        jobs.length = 0;
+        const graph = structuredClone(base);
+        graph.nodes.s.params = { ...graph.nodes.s.params, backend };
+        const { a, b } = await same(`scatter mixed ${backend}: ${label}`, graph, { expectParallel: true });
+        check(a.ok && b.ok && !!a.geo && !!b.geo, `${backend}: ${label} cooked`);
+        if (!reference) reference = a.geo ?? undefined;
+        else check(!!a.geo && !sameBits(reference!, a.geo), `${backend}: ${label} matches JS bytes`);
+        if (backend === 'auto') {
+          const jsElimination = routing.adaptive
+            ? jobs.includes('scatter_elim_pairs') && jobs.includes('scatter_elim_lists')
+            : jobs.includes('scatter_elim_neighbours');
+          const elimination = routing.elimination === 'js'
+            ? jsElimination && !jobs.includes('scatter_wasm_eliminate')
+            : jobs.includes('scatter_wasm_eliminate') && !jobs.includes('scatter_elim_neighbours') && !jobs.includes('scatter_elim_pairs');
+          check(elimination && jobs.includes('scatter_relax') === (routing.relaxation === 'js') && !jobs.includes('scatter_conflicts'),
+            `auto dispatch: ${label}`);
+        }
+      }
+    }
+  } finally {
+    pool.run = originalRun;
+  }
 }
 
 // ------------------------------------------------------------------ golden layer with the pool forced

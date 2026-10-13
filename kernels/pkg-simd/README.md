@@ -6,7 +6,7 @@ SIMD and scalar WebAssembly builds; normal TopoTopo users do not install Rust.
 The loader feature-detects simd128 and defaults to SIMD, with scalar fallback.
 See [BUILD.md](BUILD.md).
 
-## Scatter selection (session 12)
+## Scatter selection (sessions 12-13)
 
 `scatter_eliminate(positions, scale, target_count, r_max)` and
 `scatter_min_distance(positions, order, radius, limit, groups, group_cap)` expose
@@ -37,10 +37,17 @@ domains and extreme radii use the KD search. Large selection buffers reserve
 fallibly, and geometric growth is capped at the neighbour budget, so spare capacity
 cannot silently double past that limit.
 
+Grid cells store contiguous coordinate arrays. The SIMD package checks two f64
+distances at a time with the same multiplication/addition order as scalar WASM;
+there is no f32 rounding, relaxed SIMD or fused multiply-add. Adaptive pairs that
+cannot be emitted are filtered before sorting, preserving the surviving order.
+The node always uses f64 positions; the public f32 ABI widens already-rounded input.
+
 Elimination improves spacing but does not promise a hard minimum distance for an
 arbitrary candidate set. `scatter_min_distance` provides that guarantee: greedy
 dart throwing visits the supplied order, checks previously accepted candidates in
-a hashed grid, and accepts pairs at exactly the requested radius. Optional
+a compact dense grid when its bounds fit the cell budget (a hashed grid otherwise),
+and accepts pairs at exactly the requested radius. Optional
 nonnegative per-candidate group IDs and a uniform positive group cap express the
 node's per-primitive limit. Hash collisions only add distance checks; bucket order
 and randomized group-map hashes do not affect the result. Radius zero applies the
@@ -60,7 +67,8 @@ added. See [BENCH.md](BENCH.md) for measured parity, timing and remaining limits
 `scatter_relax` accepts f64 positions, per-point spacing, triangle indices and
 barycentrics, plus the existing `TriSurface.arrays()` buffers (`T`, `nodes`, `child`,
 `order`, `triPrim`, `C`), optional corner weights, iterations and spacing options.
-It rebuilds a KD tree for each repulsion pass, caps each movement at half its
+It rebuilds a KD tree and, for compact domains, a search grid for each repulsion pass,
+caps each movement at half its
 spacing and projects through the supplied BVH, preserving its closest-triangle
 ties and recomputing barycentrics in the original corner order. Returned arrays
 are `positions`, `spacing`, `triangles`, `barycentrics`; inputs remain unchanged.
@@ -69,23 +77,36 @@ directions replace host trigonometry in both JS and Rust for deterministic round
 Point/triangle budgets are 4M each, iterations at most 1024, finite coordinates,
 weights and spacing bounded by `1e50`. BVH validation rejects invalid indices,
 cycles, multiple parents and unreachable nodes before traversal.
+Neighbour lists are rebuilt: movement and changing spacing alter both membership
+and distance/tie order, so reusing old lists would not preserve the JS arithmetic.
 
-The scatter node defaults to `backend:auto`: already loaded kernels, otherwise JS;
-`kernel` loads the shipped package, and `js` forces the reference path. Auto uses JS
-for candidate/relaxation counts beyond the kernel budgets. Sampling and attribute
+The scatter node defaults to `backend:auto`: it uses JS when kernels are not loaded;
+`kernel` loads the shipped package, and `js` forces the reference path. With loaded
+kernels, auto chooses parallel JS for adaptive elimination from 200k candidates
+with at least three started pool slots, or 500k with two; uniform elimination from
+500k candidates with at least four, or 250k with at least eight; and projected
+relaxation from 50k kept points with at least three. Minimum-distance rejection
+uses WASM. Cold/disabled pools and stages below a pool threshold use WASM;
+counts beyond kernel budgets use JS. See session 13 in BENCH.md for the measured
+crossover and its machine-specific scope. Sampling and attribute
 interpolation remain in TS; heightfield_scatter retains its TS integration.
 `cargo bench --manifest-path kernels/Cargo.toml --features profile --bench scatter`
-prints native KD/search/heap stage timings. `bench/bench.ts` measures Node acceptance
-with ABI copies, while `bench/scatter-placement.ts` compares full worker round trips.
-For 1M+ candidates, the node sends elimination to one warmed pool worker with
-cloned inputs; the candidate arrays remain available for attribute interpolation.
-Small/cold-pool jobs, minimum-distance rejection and projected relaxation run on the
-cooking thread. The host initializes WASM once per worker on its first such job;
+prints native KD/search/heap/grid/projection stage timings. `bench/bench.ts` measures
+Node acceptance with ABI copies, while `bench/scatter-placement.ts` compares full
+worker round trips. `bench/scatter-profile.ts` instruments a profile package in
+memory to measure ABI copies alongside Rust stages; shipped glue is unchanged.
+When WASM is selected for 1M+ candidates and pool slots have started, the node sends
+the whole elimination to one worker. Large surface candidates already use shared
+storage; other inputs are cloned, preserving the arrays for interpolation.
+Smaller WASM jobs, WASM minimum-distance rejection and WASM projected relaxation
+run on the cooking thread. Auto's JS stages can instead use the parallel pool.
+Candidate generation can start pool slots before whole-stage placement; the host
+initializes WASM once per worker on its first such job;
 the full-stage registry entry rejects split ranges, and an unavailable pool falls
 back to the loaded main-thread kernel.
 The pool threshold override can force this path for parity tests. The conservative
-default only offloads the size measured by the placement benchmark; smaller jobs
-retain the main-thread path.
+default retains session 12's 1M placement cutoff; session 13's 500k measurement
+did not support lowering it.
 
 ## Heightfield erosion (session 4)
 

@@ -5648,7 +5648,7 @@ Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sample
 | `density` | float | `0` | 0.. |  |  | points per unit area/length/volume (overrides count when > 0) |
 | `mode` | enum | `"auto"` |  | `auto`, `surface`, `curve`, `volume` |  | auto = surface if polygons, curve if only polylines |
 | `relax` | bool | `true` |  |  |  | even (blue-noise) spacing via sample elimination |
-| `backend` | enum | `"auto"` |  | `auto`, `kernel`, `js` |  | auto uses WASM only when already loaded, otherwise js; kernel loads WASM for elimination, distance rejection and surface relaxation |
+| `backend` | enum | `"auto"` |  | `auto`, `kernel`, `js` |  | auto selects loaded WASM or parallel js per stage and workload, otherwise js; kernel loads WASM for elimination, distance rejection and surface relaxation |
 | `density_attrib` | string | `""` |  |  | `densityattrib`, `density_attribute` | point, vertex or prim float attribute (≥ 0) scaling the local density (e.g. a noise mask; 2 = twice as many points as 1) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |

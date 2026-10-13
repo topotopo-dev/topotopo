@@ -2,7 +2,7 @@
 //! All arithmetic stays f64, in the operation and traversal order of scatter.ts,
 //! spatial.ts and TriSurface.closest. No triangle rebuilding changes projection ties.
 
-use crate::scatter::{KdTree, hypot3};
+use crate::scatter::{KdTree, SearchGrid, hypot3};
 
 /// Borrowed arrays from `TriSurface.arrays()` (T and C may have different corner order).
 #[derive(Clone, Copy)]
@@ -342,6 +342,7 @@ pub fn relax(
     cw: &[f64],
     p: Params,
 ) -> Result<Relaxed, String> {
+    let mut profile = crate::erosion_profile::Profile::new("scatter_relax");
     let n = initial_spacing.len();
     if n > MAX_POINTS
         || positions.len() != n * 3
@@ -379,18 +380,26 @@ pub fn relax(
     let mut next_s = out.spacing.clone();
     let mut neighbours = Vec::with_capacity(64);
     let mut stack = Vec::with_capacity(128);
+    profile.mark("validate_copy");
     for _ in 0..p.iterations {
         let smax = out.spacing.iter().copied().fold(0.0, f64::max);
         if smax <= 0.0 {
             break;
         }
         let kd = KdTree::new(&out.positions)?;
+        profile.mark("kd_build");
+        let grid = SearchGrid::new(&kd, smax);
+        profile.mark("grid_build");
         for i in 0..n {
             let q = triple(&out.positions, i * 3);
             let si = out.spacing[i];
             let mut d = [0.0; 3];
             if si > 0.0 {
-                kd.neighbours(q, (si + smax) / 2.0, &mut neighbours);
+                if let Some(grid) = &grid {
+                    grid.neighbours(&kd, q, (si + smax) / 2.0, &mut neighbours);
+                } else {
+                    kd.neighbours(q, (si + smax) / 2.0, &mut neighbours);
+                }
                 for neighbour in &neighbours {
                     let j = neighbour.index;
                     if j == i {
@@ -421,19 +430,25 @@ pub fn relax(
                     }
                 }
             }
-            if let Some(hit) = surface.closest([q[0] + d[0], q[1] + d[1], q[2] + d[2]], &mut stack)
-            {
+            for k in 0..3 {
+                next_p[i * 3 + k] = q[k] + d[k];
+            }
+        }
+        profile.mark("neighbour_repulsion");
+        for i in 0..n {
+            if let Some(hit) = surface.closest(triple(&next_p, i * 3), &mut stack) {
                 next_p[i * 3..i * 3 + 3].copy_from_slice(&hit.point);
                 next_s[i] = spacing(p, cw, hit);
                 out.triangles[i] = hit.triangle as i32;
                 out.barycentrics[i * 3..i * 3 + 3].copy_from_slice(&hit.bary);
             } else {
-                next_p[i * 3..i * 3 + 3].copy_from_slice(&q);
-                next_s[i] = si;
+                next_p[i * 3..i * 3 + 3].copy_from_slice(&out.positions[i * 3..i * 3 + 3]);
+                next_s[i] = out.spacing[i];
             }
         }
         std::mem::swap(&mut out.positions, &mut next_p);
         std::mem::swap(&mut out.spacing, &mut next_s);
+        profile.mark("projection");
     }
     if !finite_bounded(&out.positions, f64::MAX)
         || !finite_bounded(&out.spacing, f64::MAX)
@@ -441,6 +456,8 @@ pub fn relax(
     {
         return Err("scatter_relax: non-finite relaxation result".into());
     }
+    profile.mark("validate_output");
+    profile.finish();
     Ok(out)
 }
 
