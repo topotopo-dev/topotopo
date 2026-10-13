@@ -6266,9 +6266,9 @@ Creates new value arrays and preserves other input geometry. Offset/morphology/b
 
 category: `sdf`
 
-Extract sharp dual-contour triangles or smooth marching-cubes triangles from sampled grids.
+Extract sharp dual-contour quads or smooth marching-cubes triangles from sampled grids.
 
-No source attributes are transferred. Dual contouring records the lower-corner sample index as point grid_cell. Extraction is uniform: adaptive=true is currently unsupported. Closed surfaces must fit inside the grid with a positive boundary; increase source padding for offsets. Subvoxel features cannot be recovered.
+No source attributes are transferred. Dual contouring records the lower-corner sample index as point grid_cell, with fallback_cells and adaptive_collapses detail counts. Planar dual faces remain quads; nonplanar faces are triangulated consistently. Conservative extraction uses cell-local triangle fans. Closed surfaces must fit inside the grid; increase source padding for offsets. Subvoxel features cannot be recovered.
 
 **Inputs**
 
@@ -6280,10 +6280,11 @@ No source attributes are transferred. Dual contouring records the lower-corner s
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `method` | enum | `"dual_contouring"` |  | `dual_contouring`, `marching_cubes` |  | surface extraction method |
+| `method` | enum | `"dual_contouring"` |  | `dual_contouring`, `dual_contouring_conservative`, `marching_cubes` |  | dual quads, conservative cell-local triangle fans, or smooth marching cubes |
 | `iso` | float | `0` |  |  |  | iso distance (+ grows) |
 | `sharp` | bool | `true` |  |  |  | QEF feature fitting (false uses Hermite intersection centroids) |
-| `adaptive` | bool | `false` |  |  |  | adaptive octree extraction (not implemented; true reports an error) |
+| `adaptive` | float | `0` | 0.. |  |  | adaptive error tolerance in voxels; currently retains the uniform surface because octree simplification is not implemented |
+| `sharp_threshold` | float | `0.5` | 0..1 |  |  | normal variation threshold for sharp-feature fitting (0..1) |
 | `qef_tolerance` | float | `0.000001` | 1e-12..1 |  |  | relative rank tolerance of the QEF solver |
 | `clamp_to_cell` | bool | `true` |  |  |  | constrain fitted points to their source cells |
 
@@ -6678,7 +6679,7 @@ category: `sdf`
 
 Mesh to sampled grid to sharp dual contouring in one operation.
 
-Unions overlapping consistently oriented polygon shells by winding number. Uniform QEF contouring preserves resolved features. With transfer_attributes, Cd is interpolated on the nearest source triangle and material is chosen at each output face centre. Other attributes are dropped; UVs and exact seams are not retained.
+Unions overlapping consistently oriented polygon shells by winding number. Dual QEF contouring preserves resolved features and reports local conservative fallback counts. The conservative and marching-cubes methods are also available. With transfer_attributes, Cd is interpolated on the nearest source triangle and material is chosen at each output face centre. Other attributes are dropped; UVs and exact seams are not retained.
 
 **Inputs**
 
@@ -6691,6 +6692,9 @@ Unions overlapping consistently oriented polygon shells by winding number. Unifo
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `voxel_size` | float | `0.05` | 0.000001.. |  |  | grid spacing in world units; smaller voxels need more memory |
+| `method` | enum | `"dual_contouring"` |  | `dual_contouring`, `dual_contouring_conservative`, `marching_cubes` |  | dual quads, conservative cell-local triangle fans, or smooth marching cubes |
+| `adaptive` | float | `0` | 0.. |  |  | adaptive error tolerance in voxels; currently retains the uniform surface because octree simplification is not implemented |
+| `sharp_threshold` | float | `0.5` | 0..1 |  |  | normal variation threshold for sharp-feature fitting (0..1) |
 | `offset` | float | `0` |  |  | `d`, `amount` | distance in world units; positive grows the solid |
 | `smooth_iterations` | int | `0` | 0..32 |  |  | passes of radius-1 distance-grid blur before contouring |
 | `transfer_attributes` | bool | `false` |  |  |  | transfer source Cd and material using nearest source triangles |
