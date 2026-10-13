@@ -391,6 +391,11 @@ section('fields and forces');
     { sd: { type: 'sdf_shape', params: { shape: 'sphere', radius: 0.5 } } }, [null as any, 'sd']));
   const sP = sdfF.geo!.P;
   check(sP[0] < 2 && Math.abs(sP[1]) < 1e-6 && sP[5] > -2.5 && Math.abs(sP[3]) < 1e-6, `SDF field: particles accelerate toward the surface along -gradient (${sP[0].toFixed(3)}, ${sP[5].toFixed(3)})`);
+  // R-17: bounds that overflow the sampling grid made its size NaN: the cook succeeded with v = NaN on every particle
+  // (and P reset to 0 by the engine's finite check)
+  const huge = await cook(sim({ type: 'points', params: { positions: [[0, 1, 0]] } }, { ...NOG, steps: 5, emit_all: true, emit_rate: 0 },
+    { sd: { type: 'sdf_shape', params: { shape: 'sphere', radius: 1e308 } } }, [null as any, 'sd']));
+  check(!huge.ok && /SDF volume ".*" cannot be sampled: its bounds .* are too large/.test(huge.errors[0]?.message ?? ''), `an SDF field too large to sample fails the node: ${huge.errors[0]?.message ?? 'cooked'}`);
   const att = await cook(sim(one, { ...NOG, steps: 120, emit_all: true, emit_rate: 0, attract: 4, attract_point: [1, 0, 0], drag: 3 }));
   check(Math.abs(att.geo!.P[0] - 1) < 0.02, `attract to a point with drag settles near it (${att.geo!.P[0].toFixed(3)})`);
   const surf = await cook(sim({ type: 'points', params: { positions: [[0, 2, 0], [0.3, -1.6, 0.2]] } }, { ...NOG, steps: 96, emit_all: true, emit_rate: 0, attract: 6, attract_to: 'surface', drag: 3, collide: 'slide' },

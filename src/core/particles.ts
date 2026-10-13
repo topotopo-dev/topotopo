@@ -563,6 +563,9 @@ export function fieldFrom(
     const voxel = (size * 1.5) / res;
     const nx = Math.max(2, Math.ceil((ext[0] * 1.5) / voxel) + 1), ny = Math.max(2, Math.ceil((ext[1] * 1.5) / voxel) + 1), nz = Math.max(2, Math.ceil((ext[2] * 1.5) / voxel) + 1);
     const ox = (bmin[0] + bmax[0]) / 2 - ((nx - 1) * voxel) / 2, oy = (bmin[1] + bmax[1]) / 2 - ((ny - 1) * voxel) / 2, oz = (bmin[2] + bmax[2]) / 2 - ((nz - 1) * voxel) / 2;
+    // bounds that overflow (an SDF of radius 1e308) give a NaN grid, and NaN velocities in every particle
+    if (![voxel, nx, ny, nz, ox, oy, oz].every(Number.isFinite))
+      throw new Error(`the field's SDF volume "${vol.name}" cannot be sampled: its bounds (${bmin.join(', ')}) to (${bmax.join(', ')}) are too large`);
     const GV = new Float32Array(nx * ny * nz);
     // sdfSample: the node passes a guarded sampler when the field runs user code (an sdf_expr upstream)
     const sampleAt = opts.sdfSample ?? ((x: number, y: number, z: number) => vol.sample(x, y, z));
