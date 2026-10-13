@@ -3,7 +3,7 @@
 // Pieces end up resting: above the ground or terrain, not inside each other (checked here on exact convex hulls,
 // independently of Rapier's contacts), settled, touching something. Deterministic across cooks, engines and the
 // worker pool; independent of the input order; packed and unpacked input; static pieces, initial velocities,
-// heightfield collision, fallen pieces, animate (frames resume), the max_pieces guard, stacking, and the 1,000-piece
+// heightfield collision, fallen pieces, ground_plane auto, animate (frames resume), the max_pieces guard, stacking, and the 1,000-piece
 // timing (target 3 s, reported; fails only beyond a generous limit because the machine may be loaded).
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
@@ -263,6 +263,39 @@ if (!perfOnly) {
     const ex = expandPacked(p).geo;
     check(!pu.hasPacked() && pu.numPrims === ex.numPrims && same(pu.P, ex.P), 'keep_packed false returns the unpacked result');
   }
+  {
+    // R-17 N7: pieces at the same position were ordered by input index, so permuting coincident pieces of different
+    // shapes changed the result (bodies and jitter follow that order). Ties now go by a hash of the piece's content.
+    const tag = (n: number) => ({ type: 'attrib_create', params: { name: 'tag', class: 'prim', type: 'int', value: n } });
+    const nodes: Record<string, NodeSpec> = {
+      a: { type: 'box', params: { size: [0.4, 0.4, 0.4], center: [0, 0.6, 0] } },
+      b: { type: 'box', params: { size: [0.7, 0.2, 0.3], center: [0, 0.6, 0] } },
+      c: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.25, center: [0, 0.6, 0] } },
+      d: { type: 'tube', params: { radius: 0.15, height: 0.5, center: [0, 0.6, 0], cols: 12 } },
+      ta: { ...tag(1), in: ['a'] }, tb: { ...tag(2), in: ['b'] }, tc: { ...tag(3), in: ['c'] }, td: { ...tag(4), in: ['d'] },
+      m: { type: 'merge', in: ['ta', 'tb', 'tc', 'td'] },
+      r: { type: 'sort', in: ['m'], params: { class: 'prim', by: 'reverse' } },
+      r2: { type: 'merge', in: ['tc', 'ta', 'td', 'tb'] },
+    };
+    const perTag = (g: Geometry) => {
+      const t = g.prims.get('tag')!.data as Int32Array, s = new Map<number, number[]>();
+      for (let p = 0; p < g.numPrims; p++) {
+        const c = s.get(t[p]) ?? [0, 0, 0, 0];
+        for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) { const pt = g.vertexPoint[v]; c[0] += g.P[pt * 3]; c[1] += g.P[pt * 3 + 1]; c[2] += g.P[pt * 3 + 2]; c[3]++; }
+        s.set(t[p], c);
+      }
+      return [...s.entries()].sort((x, y) => x[0] - y[0]).map(([, c]) => c);
+    };
+    for (const [type, params] of [['rbd_settle', {}], ['rbd_stack', { order: 'height', interval: 20 }], ['rbd_stack', { order: 'random', interval: 20 }]] as const) {
+      const run = (input: string) => cook({ ...nodes, s: { type, in: [input], params: { pieces: 'attrib', piece_attrib: 'tag', duration: 4, ...params } } }, 's');
+      const [x, y, z] = [await run('m'), await run('r'), await run('r2')];
+      const px = perTag(x.geo), py = perTag(y.geo), pz = perTag(z.geo);
+      // (centroids summed in point order, which the permutation changes: compared to 1e-9 m)
+      let dmax = px.length === py.length && px.length === pz.length ? 0 : Infinity;
+      for (let i = 0; i < px.length && dmax < Infinity; i++) for (let k = 0; k < 3; k++) dmax = Math.max(dmax, Math.abs(px[i][k] / px[i][3] - py[i][k] / py[i][3]), Math.abs(px[i][k] / px[i][3] - pz[i][k] / pz[i][3]));
+      check(px.length === 4 && dmax < 1e-9, `${type}${'order' in params ? ` order ${params.order}` : ''}: four coincident pieces of different shapes settle the same in any input order (largest difference ${dmax.toExponential(1)} m)`);
+    }
+  }
 
   // ---------------------------------------------------------------- pieces: name, connectivity, shared points, static, velocity
   {
@@ -327,6 +360,17 @@ if (!perfOnly) {
     check(o.warnings.some((w) => /started inside/.test(w)), `pieces that start inside each other are reported (${o.warnings.join(' | ')})`);
     const many = await engine.cook({ nodes: { ...ROCKS(12, { max_pieces: 5 }) }, output: 'settle' });
     check(!many.ok && /12 pieces is more than max_pieces \(5\)/.test(many.errors[0]?.message ?? ''), `max_pieces guards the cook (${many.errors[0]?.message})`);
+    // R-17 N6: ground_plane auto adds the ground only when input 1 is not connected (as the param says); a connected
+    // input without triangles (points only here) leaves nothing to land on, with a warning; on adds the ground anyway
+    const pts = { type: 'points', params: { positions: [[0, 0, 0], [1, 0, 0]] } };
+    const none = await cook({ a: nodes.a, pts, s: { type: 'rbd_settle', in: ['a', 'pts'], params: { duration: 3 } } }, 's');
+    check(none.stats.fallen === 1 && none.warnings.some((w) => /input 1\) has no polygons or heightfields: there is nothing to land on/.test(w)),
+      `auto with a connected input without triangles: no ground, the piece falls (${none.stats.fallen} fallen) and a warning says why`);
+    const on = await cook({ a: nodes.a, pts, s: { type: 'rbd_settle', in: ['a', 'pts'], params: { duration: 3, ground_plane: 'on' } } }, 's');
+    check(on.stats.fallen === 0 && on.stats.settled === 1 && Math.abs(on.geo.bbox().min[1]) < 0.01 && !on.warnings.some((w) => /nothing to land on/.test(w)),
+      `ground_plane on: the piece rests on the ground (lowest point ${on.geo.bbox().min[1].toFixed(4)} m)`);
+    const off = await cook({ a: nodes.a, s: { type: 'rbd_settle', in: ['a'], params: { duration: 3 } } }, 's');
+    check(off.stats.settled === 1 && Math.abs(off.geo.bbox().min[1]) < 0.01, 'auto without input 1: the ground plane');
   }
 
   // ---------------------------------------------------------------- rbd_stack: a pile keeps every crate

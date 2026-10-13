@@ -597,7 +597,7 @@ defineNode({
     { name: 'deformed', desc: 'deformed lattice: the rest lattice with its points moved (same count and order)', optional: true },
   ],
   params: {
-    divisions: { type: 'ivec3', default: [2, 2, 2], min: 1, desc: 'two-input form without a "rest" attribute: lattice divisions, matching the box/bound (or point_grid counts - 1) that was deformed; inferred with a warning when they do not match', aliases: ['divs', 'div'] },
+    divisions: { type: 'ivec3', default: [2, 2, 2], min: 1, max: 128, desc: 'two-input form without a "rest" attribute: lattice divisions, matching the box/bound (or point_grid counts - 1) that was deformed; inferred with a warning when they do not match', aliases: ['divs', 'div'] },
     interp: { type: 'enum', options: ['trilinear', 'bernstein'], default: 'trilinear', desc: 'trilinear = piecewise per lattice cell (local); bernstein = smooth Bezier volume over the whole lattice (global; evenly spaced lattices)', aliases: ['interpolation', 'mode'] },
     group: P.group('point', 'points to deform ("" = all)'),
   },

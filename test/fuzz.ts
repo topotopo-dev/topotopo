@@ -20,11 +20,15 @@
 //     message getters of what it throws fail the sampling node with its own error, and manifold still works after,
 //   - what wrangle and script code throws is read inside the timeout (message, stack and toString getters that never
 //     return), with the pool off and on (point wrangles in workers), and a script cannot close its function either;
-//     ordinary error texts are unchanged.
+//     ordinary error texts are unchanged,
+//   - code that redefines properties of the realm's global object with looping accessors (`__job`, `__cur`, which the
+//     engine used to write outside the timeout) changes nothing for later cooks, and what a script returns or passes
+//     to lib.run (Proxies, look-alikes, getters an async node would read later) never runs outside the timeout (R-18).
 import { spawnSync } from 'node:child_process';
 import { rng } from '../src/core/random.ts';
 import { heightfieldsOf } from '../src/core/heightfield.ts';
 import { Engine } from '../src/graph/engine.ts';
+import { Geometry } from '../src/core/geometry.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { addFixture, checkGeo, createFixtureEngine } from './fixtures.ts';
@@ -588,4 +592,98 @@ for (const poison of THEN_POISONS) {
   for (const p of problems) { thenFail++; console.log(`FAIL poisoned Promise.prototype.then (${poison.slice(0, 40)}…): ${p}`); }
 }
 console.log(`poisoned Promise.prototype.then: ${THEN_POISONS.length} poisons × (the poisoning script, a later script), ${thenFail} failed (${((performance.now() - tt) / 1000).toFixed(1)}s)`);
-process.exit(fail || exprFail || codeFail || laterFail || poisonFail || thenFail ? 1 : 0);
+
+// ------------------------------------------------------------------ realm slots and values handed back (R-18)
+
+/**
+ * R-17 N1: the engine handed jobs and the wrangle's geometry API to the scripting realm through properties of its
+ * global object (`__job`, `__cur`), written outside the time limit, so code that gave them a looping setter hung the
+ * process for good (in a pool worker: the worker, until the pool's own limit). The job and the API are now closure
+ * variables of the realm: the poisoning code and everything after it cook normally. Each poison gets an engine (a
+ * realm) of its own, pool off and on; the point wrangle poisons the realm it runs in (the workers' with the pool on).
+ */
+const reach = "[].constructor.constructor('return glob' + 'alThis')()"; // the global object, past the pool's eligibility test
+const loopProp = (target: string, name: string) => `Object.defineProperty(${target}, '${name}', { get() { for (;;) {} }, set(v) { for (;;) {} }, configurable: true });`;
+const SLOT_POISONS: { label: string; graph: GraphSpec }[] = [
+  { label: 'script, __job', graph: throwGraph({ node: 'script', code: loopProp('globalThis', '__job') + '\nreturn geo;' }) },
+  { label: 'script, __cur', graph: throwGraph({ node: 'script', code: loopProp('globalThis', '__cur') + '\nreturn geo;' }) },
+  {
+    label: 'detail wrangle, __cur and __job',
+    graph: { nodes: { g: { type: 'grid', params: { divisions: [20, 20] } }, t: { type: 'wrangle', in: ['g'], params: { run_over: 'detail', code: loopProp('globalThis', '__cur') + '\n' + loopProp('globalThis', '__job') } } }, output: 't' },
+  },
+  { label: 'point wrangle, __cur and __job', graph: throwGraph({ node: 'wrangle', code: `const G = ${reach};\n${loopProp('G', '__cur')}\n${loopProp('G', '__job')}` }) },
+];
+const AFTER_POISON: { label: string; graph: GraphSpec; check: (g: any) => boolean }[] = [
+  { label: 'a script', graph: throwGraph({ node: 'script', code: "return await lib.run('box', { size: 2 });" }), check: (g) => g.bbox().max[1] === 1 },
+  { label: 'a point wrangle', graph: throwGraph({ node: 'wrangle', code: '@P.y += @ptnum;' }), check: (g) => g.bbox().max[1] === 440 },
+  { label: 'a prim wrangle calling geometry functions', graph: throwGraph({ node: 'wrangle', code: 'if (@primnum == 0) { const p = addpoint(0, [0, npoints(0), 0]); addprim(0, "polyline", [0, p]); }' }), check: (g) => g.bbox().max[1] === 441 },
+];
+let slotFail = 0, slotRuns = 0;
+const ts = performance.now();
+for (const workers of [0, 2]) {
+  const mode = workers ? 'pool on' : 'pool off';
+  for (const poison of SLOT_POISONS) {
+    const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+    e.manifold = engine.manifold;
+    e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+    const problems: string[] = [];
+    for (const c of [{ label: 'the poisoning code', graph: poison.graph, check: () => true }, ...AFTER_POISON]) {
+      slotRuns++;
+      e.cache.clear();
+      const t = performance.now();
+      const r = await e.cook(c.graph);
+      const ms = performance.now() - t;
+      if (!r.ok || !c.check(r.geo)) problems.push(`${c.label}: ${r.ok ? 'wrong result' : r.errors.map((x) => `[${x.node}] ${x.message}`).join('; ')}`);
+      if (ms > 2000) problems.push(`${c.label}: took ${ms.toFixed(0)} ms`);
+      if (VERBOSE) console.log(`slots ${mode} ${ms.toFixed(0).padStart(5)}ms ${poison.label} → ${c.label}: ${r.ok ? 'ok' : r.errors[0]?.message}`);
+    }
+    await e.host.pool?.close();
+    for (const p of problems) { slotFail++; console.log(`FAIL poisoned realm slot (${poison.label}), ${mode}: ${p}`); }
+  }
+}
+console.log(`poisoned realm slots: ${SLOT_POISONS.length} poisons × (the poisoning code, ${AFTER_POISON.length} later cooks) × pool off/on (${slotRuns} cooks), ${slotFail} failed (${((performance.now() - ts) / 1000).toFixed(1)}s)`);
+
+/**
+ * R-17 N2: what a script returns, and what it passes to lib.run, is read by the engine after the timed call: a Proxy
+ * returned by a script hung the process at `instanceof` (its getPrototypeOf trap), and an async node given a Proxy
+ * input or a param with a getter read them later, outside the limit. Results are now brand-checked, lib.run inputs
+ * too, and lib.run params are copied as plain data inside the call. Nothing here may run past the time limit.
+ */
+const forEachBody = "{ nodes: { i: { type: 'input' }, x: { type: 'transform', in: ['i'] } }, output: 'x' }";
+const RESULT_CASES: { label: string; code: string; want: RegExp | null }[] = [
+  { label: 'a Proxy whose getPrototypeOf loops', code: 'return new Proxy(geo, { getPrototypeOf() { for (;;) {} } });', want: /^script must return a Geometry \(got an object that is not a Geometry the engine made/ },
+  { label: 'a transparent Proxy', code: 'return new Proxy(geo, {});', want: /^script must return a Geometry \(got an object that is not a Geometry the engine made/ },
+  { label: 'a look-alike', code: 'return Object.create(lib.Geometry.prototype);', want: /^script must return a Geometry \(got an object that is not a Geometry the engine made/ },
+  { label: 'a number', code: 'return 3;', want: /^script must return a Geometry \(got number\)$/ },
+  { label: 'nothing', code: 'geo;', want: /^script must return a Geometry \(got undefined — add "return geo;"\)$/ },
+  { label: 'a looping Symbol.hasInstance on lib.Geometry', code: "Object.defineProperty(lib.Geometry, Symbol.hasInstance, { value() { for (;;) {} }, configurable: true });\nreturn geo;", want: null },
+  { label: 'an armed Proxy input to an async node', code: `let armed = false;\nconst pr = new Proxy(geo, { get(t, k) { if (armed) for (;;) {} return Reflect.get(t, k, t); } });\nconst pending = lib.run('foreach', { mode: 'count', count: 3, body: ${forEachBody} }, pr);\narmed = true;\nreturn await pending;`, want: /^script error: lib\.run\(foreach\): input 0 is not a Geometry/ },
+  { label: 'an armed getter in an async node\'s params', code: `let armed = false;\nconst body = { nodes: { i: { type: 'input' } }, get output() { if (armed) for (;;) {} return 'i'; } };\nconst pending = lib.run('foreach', { mode: 'count', count: 2, body }, geo);\narmed = true;\nreturn await pending;`, want: null },
+  { label: 'Proxy params', code: "return await lib.run('box', new Proxy({}, { ownKeys() { for (;;) {} } }));", want: /^script error: lib\.run\(box\): params must be plain data/ },
+];
+let resultFail = 0;
+const tr = performance.now();
+for (const workers of [0, 2]) {
+  const mode = workers ? 'pool on' : 'pool off';
+  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  e.manifold = engine.manifold;
+  e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+  const problems: string[] = [];
+  for (const c of RESULT_CASES) {
+    e.cache.clear();
+    const t = performance.now();
+    const r = await e.cook({ nodes: { g: { type: 'box' }, t: { type: 'script', in: ['g'], params: { code: c.code } } }, output: 't' });
+    const ms = performance.now() - t;
+    const err = r.errors.find((x) => x.node === 't');
+    if (c.want === null ? !r.ok : r.ok || !err || !c.want.test(err.message)) problems.push(`${c.label}: ${r.ok ? 'cooked' : r.errors.map((x) => `[${x.node}] ${x.message}`).join('; ')}`);
+    if (ms > 2000) problems.push(`${c.label}: took ${ms.toFixed(0)} ms`);
+    if (VERBOSE) console.log(`results ${mode} ${ms.toFixed(0).padStart(5)}ms ${c.label}: ${r.ok ? 'ok' : err?.message}`);
+  }
+  delete (Geometry as any)[Symbol.hasInstance];
+  const after = await e.cook(throwGraph({ node: 'script', code: 'return geo;' }));
+  if (!after.ok) problems.push(`a later script fails: ${after.errors.map((x) => x.message).join('; ')}`);
+  await e.host.pool?.close();
+  for (const p of problems) { resultFail++; console.log(`FAIL values a script hands back, ${mode}: ${p}`); }
+}
+console.log(`values a script hands back: ${RESULT_CASES.length} cases × pool off/on, ${resultFail} failed (${((performance.now() - tr) / 1000).toFixed(1)}s)`);
+process.exit(fail || exprFail || codeFail || laterFail || poisonFail || thenFail || slotFail || resultFail ? 1 : 0);

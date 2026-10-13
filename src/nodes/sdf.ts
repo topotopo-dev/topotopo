@@ -289,7 +289,7 @@ defineNode({
     frequency: { type: 'float', default: 3, desc: 'noise frequency' },
     octaves: { type: 'int', default: 3, min: 1, max: 8, desc: 'noise octaves' },
     period: { type: 'vec3', default: [1, 0, 1], desc: 'repeat: spacing per axis (0 = no repetition on that axis)' },
-    count: { type: 'ivec3', default: [3, 1, 3], min: 1, desc: 'repeat: number of copies per axis (limits the domain)' },
+    count: { type: 'ivec3', default: [3, 1, 3], min: 1, max: 1000000, desc: 'repeat: number of copies per axis (limits the domain)' },
     seed: P.seed(),
   },
   example: {

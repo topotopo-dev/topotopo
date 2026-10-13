@@ -662,7 +662,7 @@ defineNode({
   params: {
     mode: { type: 'enum', options: ['distance', 'subdivision', 'at_points'], default: 'distance', desc: 'distance = by spacing (or count); subdivision = per segment; at_points = the curve vertices' },
     spacing: { type: 'float', default: 1, min: 1e-4, desc: 'distance: metres of arc length between points', aliases: ['step', 'length', 'seglen', 'distance'] },
-    count: { type: 'int', default: 0, min: 0, desc: 'distance: exactly this many points per curve, evenly spread (0 = use spacing)', aliases: ['npts', 'points'] },
+    count: { type: 'int', default: 0, min: 0, max: 5000000, desc: 'distance: exactly this many points per curve, evenly spread (0 = use spacing)', aliases: ['npts', 'points'] },
     per_segment: { type: 'int', default: 1, min: 1, max: 10000, desc: 'subdivision: points per segment', aliases: ['segments', 'subdivisions'] },
     start_offset: { type: 'float', default: 0, min: 0, desc: 'skip this many metres at the start', aliases: ['start'] },
     end_offset: { type: 'float', default: 0, min: 0, desc: 'skip this many metres at the end', aliases: ['end'] },

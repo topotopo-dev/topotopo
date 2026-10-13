@@ -127,7 +127,7 @@ defineNode({
     }
     // output: anchors + packed prims (+ isolated points, kept as they are)
     const count = srcIdx.length;
-    const out = Object.create(Geometry.prototype) as Geometry;
+    const out = Geometry.blank();
     out.points = new AttribTable(count);
     (out.points.add('P', 'float', 3).data as Float64Array).set(pivots);
     out.vertices = new AttribTable(count);
@@ -178,7 +178,7 @@ defineNode({
   params: {
     group: P.group('prim', 'packed prims to unpack ("" = all); the others stay packed'),
     transfer_attributes: { type: 'string', default: DEFAULT_TRANSFER, desc: 'anchor point / packed prim attributes copied onto the unpacked points / prims (names or patterns, "*" = all, "" = none)', aliases: ['transfer', 'attributes'] },
-    limit: { type: 'int', default: 0, min: 0, desc: 'unpack at most this many instances (in prim order) and drop the rest of the selection; 0 = all', aliases: ['max_instances'] },
+    limit: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'unpack at most this many instances (in prim order) and drop the rest of the selection; 0 = all', aliases: ['max_instances'] },
     piece_attrib: { type: 'string', default: '', desc: 'prim int attribute receiving the packed prim number of every unpacked prim (-1 on prims that were not packed; "" = none)' },
     recursive: { type: 'bool', default: false, desc: 'also unpack instances inside the sources (false = one level, as in Houdini: nested instances become packed prims)' },
   },

@@ -95,7 +95,10 @@ SOLVER (Houdini SOP Solver): feedback over frames.
 SOLVER vs FOREACH: foreach feedback:true is count-based (N iterations in one cook, no time, cached as a whole);
   the solver's result depends on the frame you cook at and is advanced frame by frame.
 PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_frame) × substeps steps, every frame's state is
-  cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).`,
+  cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).
+LIMITS: one cook of rbd_settle, rbd_stack, drape, inflate, particles, heightfield_erode or remesh_quad stops with an error
+  naming the node after TOPOTOPO_SIM_TIMEOUT_MS (default 10 min; lower steps/duration/iterations, not the limit). Params that
+  count something have a max (help shows it); larger values are clamped.`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}
@@ -397,7 +400,8 @@ PIECES (input 0): every packed prim is one piece (copy_to_points {pack:true} or 
   (they are pushed apart violently; a warning counts them): lift the template points (transform translate [0, 1, 0]),
   space them (scatter min_distance), or use rbd_stack.
 COLLISION (input 1): terrain mesh, heightfield, container, settled pieces from an earlier rbd node (merge them): exact
-  triangles, static. Not connected: a ground plane at y = ground (ground_plane on adds it to input 1 too).
+  triangles, static. Not connected: a ground plane at y = ground (ground_plane on adds it to input 1 too; connected but
+  without polygons or heightfields: nothing to land on, with a warning).
 ATTRIBUTES IN: active (prim or point int, default 1) = 0 → the piece stays put but others collide with it; v (m/s) and
   w (rad/s) on the points (anchors) = initial velocity. OUT (points; packed: anchors): v, w, settled (0/1), contacts
   (how many colliders touch it), group "fallen" (fell off the collision geometry; delete_fallen removes them).
@@ -509,7 +513,8 @@ See examples/splines.json.`,
 EMIT: every point of input 0 emits emit_rate particles per step (0.25 = one every 4 steps; per-point random phase);
   emit_all: one per point at time 0 (emit_rate 0 = a single burst). Start velocity = point v + speed × point N (+Y without N)
   + a random vector up to velocity_var. Point attributes and groups (Cd, pscale, custom) are copied at birth; a point id seeds
-  that point's random stream. life (s, 0 = forever) ± life_var; max_particles caps the particles holding a slot (birth to end of life).
+  that point's random stream. life (s, 0 = forever) ± life_var; max_particles caps the particles holding a slot (birth to end of life);
+  max_births (guard, 1,000,000) caps the births of one step and the births held at once (runs are simulated in batches).
 FORCES (per step, dt = 1/(fps × substeps)): gravity; noise (m/s², noise_size m, curl:true = divergence-free swirls, noise_octaves);
   drag pulls the velocity toward the air velocity = wind + air fields (wind does nothing without drag); attract (spring 1/s²)
   to attract_point or, with attract_to:"surface", to the closest point of input 1.

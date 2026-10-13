@@ -13,7 +13,7 @@ import { Attribute, Geometry, defaultValueFor, isArrayType } from './geometry.ts
 import type { AttribClass, AttribType } from './geometry.ts';
 import { primCentroid, primNormals, pointNeighbors, pointPrims } from './topology.ts';
 import { KDTree, TriBVH } from './spatial.ts';
-import { GEOMETRY_FUNCTIONS } from './snippet-lib.ts';
+import { GEOMETRY_FUNCTIONS, REALM_CONTROL } from './snippet-lib.ts';
 import type { TypedArray } from './kernels.ts';
 import type { Host } from '../host/types.ts';
 import { runUserCode } from './usercode.ts';
@@ -63,7 +63,7 @@ interface Binding {
 
 export interface WrangleResult { geo: Geometry; log: string[] }
 
-/** compiled kernels per host: a kernel belongs to its host's realm (its library globals and __cur live there) */
+/** compiled kernels per host: a kernel belongs to its host's realm (its library globals and geometry API live there) */
 const kernelCaches = new WeakMap<Host, Map<string, any>>();
 
 /** Rewrite @refs to locals and collect what is referenced. */
@@ -349,15 +349,17 @@ function prepareWrangle(geo: Geometry, opts: WrangleOptions): WrangleRun {
 
 /** Run the kernel over all elements in the host's realm. */
 function execWrangle(w: WrangleRun, opts: WrangleOptions) {
-  const realm = opts.host.compile('globalThis');
-  realm.__cur = w.api;
+  // the library's geometry API is a closure variable set through the realm's frozen control object: no property of
+  // the realm's global object (which the snippet can redefine) is touched outside the time limit
+  const ctl = opts.host.compile(REALM_CONTROL);
+  ctl.setCur(w.api);
   try {
     // what the snippet throws is read inside the time limit too (a thrown object's message getter is user code)
     runUserCode(opts.host, () => w.kernel(w.env), opts.timeoutMs, true);
   } catch (e: any) {
     throw wrangleRunError(e, w.bodyLine, opts.code, opts.timeoutMs);
   } finally {
-    realm.__cur = null;
+    ctl.setCur(null);
   }
 }
 

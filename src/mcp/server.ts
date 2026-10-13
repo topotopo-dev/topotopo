@@ -2,7 +2,7 @@
 // TopoTopo MCP server (stdio). Exposes the geometry engine as tools for LLM agents.
 //   node src/mcp/server.ts [--workspace <dir>] [--viewer]
 //   topotopo mcp [--workspace <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
-// Env: TOPOTOPO_WORKSPACE, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_WORKERS
+// Env: TOPOTOPO_WORKSPACE, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_SIM_TIMEOUT_MS, TOPOTOPO_WORKERS
 // stdout carries the MCP protocol — log only to stderr.
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -24,6 +24,7 @@ const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + 
 
 const engine = new Engine(createNodeHost({ baseDir: wsDir }));
 if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
+if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) engine.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
 await engine.init();
 const ws = new Workspace(wsDir, engine);
 const loaded = ws.load();
