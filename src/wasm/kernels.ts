@@ -187,7 +187,36 @@ function gridArg(g: GridInput): KernelGrid {
   return { dims: Uint32Array.from(g.dims), origin: array(g.origin), voxel: g.voxel, values: g.values };
 }
 
-export const kernelsWasmURL = new URL('../../kernels/pkg/topotopo_kernels_bg.wasm', import.meta.url);
+export type KernelsWasmVariant = 'scalar' | 'simd';
+
+/** Probe an unexecuted function returning v128.const; no browser/version assumptions or relaxed SIMD. */
+export function supportsWasmSimd(): boolean {
+  const wasm = (globalThis as { WebAssembly?: { validate(bytes: Uint8Array): boolean } }).WebAssembly;
+  return wasm !== undefined && wasm.validate(Uint8Array.of(
+    0, 97, 115, 109, 1, 0, 0, 0, // magic/version
+    1, 5, 1, 96, 0, 1, 123, // () -> v128
+    3, 2, 1, 0, // one function
+    10, 22, 1, 20, 0, 253, 12, // function body, v128.const
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11,
+  ));
+}
+
+function selectWasmVariant(): KernelsWasmVariant {
+  // Reading an optional environment variable needs no Node import; browsers select by feature detection.
+  const override = (globalThis as { process?: { env?: { TOPOTOPO_WASM?: string } } }).process?.env?.TOPOTOPO_WASM;
+  if (override !== undefined && override !== '' && override !== 'scalar' && override !== 'simd')
+    throw new Error('TOPOTOPO_WASM must be scalar or simd');
+  if (override === 'scalar') return 'scalar';
+  const simd = supportsWasmSimd();
+  if (override === 'simd' && !simd) throw new Error('TOPOTOPO_WASM=simd requires WebAssembly simd128 support');
+  return simd ? 'simd' : 'scalar';
+}
+
+/** Selection is fixed on first import. Set TOPOTOPO_WASM before importing this module or starting workers. */
+export const kernelsWasmVariant = selectWasmVariant();
+export const kernelsWasmURL = kernelsWasmVariant === 'simd'
+  ? new URL('../../kernels/pkg-simd/topotopo_kernels_bg.wasm', import.meta.url)
+  : new URL('../../kernels/pkg/topotopo_kernels_bg.wasm', import.meta.url);
 let modulePromise: Promise<Kernels> | undefined;
 let loadedKernels: Kernels | undefined;
 const hosts = new WeakMap<Host, Promise<Kernels>>();
@@ -251,7 +280,9 @@ export function getLoadedKernels(): Kernels | undefined { return loadedKernels; 
 export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
   if (!modulePromise) {
     modulePromise = (async () => {
-      const wasm = await import('../../kernels/pkg/topotopo_kernels.js');
+      const wasm = kernelsWasmVariant === 'simd'
+        ? await import('../../kernels/pkg-simd/topotopo_kernels.js')
+        : await import('../../kernels/pkg/topotopo_kernels.js');
       await wasm.default({ module_or_path: bytes });
       const result: Kernels = Object.freeze({
         erode_droplet: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params: DropletErosionOptions = {}, seed: number | bigint = 0, freeze?: Float32Array | null) =>

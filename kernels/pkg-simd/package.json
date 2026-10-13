@@ -1,0 +1,21 @@
+{
+  "name": "topotopo-kernels",
+  "type": "module",
+  "description": "Deterministic geometry kernels for TopoTopo",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/topotopo-dev/topotopo"
+  },
+  "files": [
+    "topotopo_kernels_bg.wasm",
+    "topotopo_kernels.js",
+    "topotopo_kernels.d.ts"
+  ],
+  "main": "topotopo_kernels.js",
+  "types": "topotopo_kernels.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

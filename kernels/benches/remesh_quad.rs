@@ -1,5 +1,5 @@
-use topotopo_kernels::remesh_quad::{RemeshOptions, remesh_quad};
 use std::{hint::black_box, time::Instant};
+use topotopo_kernels::remesh_quad::{RemeshOptions, remesh_quad};
 
 fn main() {
     // Same 100,000-triangle analytic grid as bench/remeshquad.ts. Native uses
