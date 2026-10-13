@@ -1,0 +1,57 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "direction:float:1",
+        "drainage:float:1",
+        "fill:float:1",
+        "height:float:1",
+        "lake:float:1",
+        "mask:float:1",
+        "uv:float:3"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [21, 4.4397, 10],
+      "min": [-21, -0.059, -10]
+    },
+    "counts": {
+      "points": 51842,
+      "prims": 51200,
+      "vertices": 204800,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "4afdc1c0f6d61746",
+      "attributes": {
+        "point.Cd": "f0d968e4ad259ca2",
+        "point.N": "ae35a777e427d2bd",
+        "point.direction": "81fe154e0dc599b4",
+        "point.drainage": "fafd034b680d4ac5",
+        "point.fill": "cd52816a2daa6244",
+        "point.height": "f56d2b7807c45302",
+        "point.lake": "97f89d29b13cca13",
+        "point.mask": "ad1a2905218b361f",
+        "point.uv": "c6278355ea863e0f"
+      },
+      "topology": "08fef2e233ef51c0"
+    }
+  },
+  "name": "example.drainage",
+  "ok": true,
+  "source": "examples/drainage.json",
+  "warnings": []
+}

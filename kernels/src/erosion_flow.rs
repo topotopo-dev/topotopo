@@ -49,6 +49,40 @@ pub fn flow_accumulation(
     cell: f32,
     method: FlowMethod,
 ) -> Result<FlowResult, String> {
+    flow_on_surface(height, w, h, cell, method, None)
+}
+
+/// Fill pits without changing the caller's terrain, resolving horizontal spill
+/// surfaces with the priority-flood parent forest. Strict downhill D8/D-infinity
+/// receivers are preferred; only their otherwise terminal flats use the forest.
+pub fn flow_accumulation_filled(
+    height: &[f32],
+    w: usize,
+    h: usize,
+    cell: f32,
+    method: FlowMethod,
+) -> Result<FlowResult, String> {
+    let filled = crate::fill_sinks::fill_sinks(
+        height,
+        w,
+        h,
+        &crate::fill_sinks::FillParams {
+            write_direction: true,
+            ..Default::default()
+        },
+        None,
+    )?;
+    flow_on_surface(&filled.height, w, h, cell, method, Some(&filled.direction))
+}
+
+pub(crate) fn flow_on_surface(
+    height: &[f32],
+    w: usize,
+    h: usize,
+    cell: f32,
+    method: FlowMethod,
+    flat_direction: Option<&[u8]>,
+) -> Result<FlowResult, String> {
     let n = validate_grid(height, w, h, cell)?;
     let mut receiver = vec![[usize::MAX; 2]; n];
     let mut fraction = vec![0.0f32; n];
@@ -77,6 +111,14 @@ pub fn flow_accumulation(
                     receiver[i] = [j, usize::MAX];
                     direction[i] = d as u8;
                 }
+            }
+            if best == 0.0
+                && let Some(flat) = flat_direction
+                && flat[i] < 8
+            {
+                let d = flat[i] as usize;
+                receiver[i] = [neighbours[d], usize::MAX];
+                direction[i] = flat[i];
             }
             if method == FlowMethod::D8 {
                 continue;
@@ -120,7 +162,39 @@ pub fn flow_accumulation(
     }
     let mut order: Vec<usize> = (0..n).collect();
     // Explicit index tie-break gives the same addition order on every platform.
-    order.sort_unstable_by(|&a, &b| height[b].total_cmp(&height[a]).then(a.cmp(&b)));
+    if flat_direction.is_some() {
+        // Equal-height flood parents are not necessarily index ordered. Kahn's
+        // traversal preserves every contributor, with an explicit index-ordered
+        // initial queue and fixed receiver order for reproducible f32 sums.
+        let mut incoming = vec![0u8; n];
+        for links in &receiver {
+            for &j in links {
+                if j != usize::MAX {
+                    incoming[j] += 1;
+                }
+            }
+        }
+        order.clear();
+        order.extend((0..n).filter(|&i| incoming[i] == 0));
+        let mut head = 0;
+        while head < order.len() {
+            let i = order[head];
+            head += 1;
+            for &j in &receiver[i] {
+                if j != usize::MAX {
+                    incoming[j] -= 1;
+                    if incoming[j] == 0 {
+                        order.push(j);
+                    }
+                }
+            }
+        }
+        if order.len() != n {
+            return Err("flow: filled drainage graph contains a cycle".into());
+        }
+    } else {
+        order.sort_unstable_by(|&a, &b| height[b].total_cmp(&height[a]).then(a.cmp(&b)));
+    }
     let mut drainage = vec![cell * cell; n];
     for i in order {
         let [a, b] = receiver[i];
@@ -188,6 +262,33 @@ mod tests {
                 );
             }
             assert!((total - (w * w) as f32).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn filled_flats_conserve_area_and_have_only_border_outlets() {
+        let w = 13;
+        for seed in 0..20 {
+            let heights: Vec<f32> = (0..w * w)
+                .map(|i| {
+                    if seed == 0 {
+                        0.0
+                    } else {
+                        ((i * 7919 + seed * 31337) % 47) as f32 - 20.0
+                    }
+                })
+                .collect();
+            for method in [FlowMethod::D8, FlowMethod::Dinf] {
+                let flow = flow_accumulation_filled(&heights, w, w, 1.0, method).unwrap();
+                let mut total = 0.0;
+                for i in 0..w * w {
+                    if flow.direction[i] == 255 {
+                        assert!(i < w || i >= w * (w - 1) || i % w == 0 || i % w == w - 1);
+                        total += flow.drainage[i];
+                    }
+                }
+                assert!((total - (w * w) as f32).abs() < 0.001);
+            }
         }
     }
 

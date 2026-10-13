@@ -1821,3 +1821,137 @@ rule and protocol above supersede them. Existing entries are retained verbatim.
 - Balanced full assertion finished: 11 passed, 0 failed, exit0; maximum auto ratio1.0457. Last command starting: `out/session13/verify-default-pool.ps1`, five node cases at15 workers with three warm-ups/twelve balanced timed rounds each, using the same assertion measurement function (direct elimination has no pool path and is not repeated).
 - Default15-worker follow-up finished: 5 passed, 0 failed, exit0; total16/16 final comparisons pass. Masked auto811ms meets1s target at15 workers; uniform650ms and direct3238ms still miss. Last command starting: `out/session13/verify-gates.ps1` (typecheck, full npm test, build, pack:test, showcase and SHA-256 render comparison); timing runs are finished.
 - Final gates completed, all exit0: typecheck, full npm test, build, pack:test and showcase; 290 goldens unchanged and33/33 render hashes identical, with three relevant renders visually inspected. No process died during session13. Final review and signed-off commit follow; no push.
+
+# Session 14 (K-11): depression filling and drainage (2026-10-14)
+
+Started on clean `codex/kernels` at `3f470aacd6a23eb9f35d47a1dcd86530f0bbf8ce`.
+This session adds `fill_sinks`, `heightfield_fill_sinks`, optional filled routing
+for `heightfield_flow` and stream-power erosion, and `examples/drainage.json`.
+No runtime or Rust dependency was added. All existing geometry outputs remain
+unchanged with the default parameters.
+
+## Algorithm and layer contract
+
+An original eight-neighbour Barnes priority-flood implementation uses a monotone
+radix queue over ordered Float32 bits, with deterministic LIFO equal-priority
+buckets, row-major outlet insertion, and fixed compass-order neighbour visits.
+At epsilon zero a FIFO depression queue bypasses priority operations for cells
+below the current spill level. Positive epsilon uses at least the next Float32
+value above the receiver, so every unrestricted interior cell has a lower
+neighbour. The optional parent directions also resolve epsilon-zero flats.
+Filled D8/D-infinity flow prefers ordinary downhill receivers, then uses those
+parents on flats and accumulates in a deterministic topological order.
+
+`fill` is added terrain thickness. `lake` is standing-water depth in metres over
+unchanged ground: a positive `max_depth` retains a whole connected positive-fill
+depression if its maximum physical spill depth exceeds the threshold. This
+classification precedes epsilon, which cannot inflate lake depths. A mask of one
+preserves a sample and treats it as a terminal outlet; fractional mask values
+below one remain eligible for filling. Retained lakes and protected outlets are
+explicit exceptions to border drainage. Zero `max_depth` means unlimited filling.
+
+Filled flow does not replace the stored ground. Stream power optionally updates
+filled routing each iteration and uses a minimum flat receiver drop of
+`max(1e-4 * cell_size, one Float32 height step)` for incision. The pipe solver still
+transports and deposits sediment, so positive pit wear need not produce the same
+net lowering after deposition. Pipe/stream-power erosion initialize water from
+`lake`; afterwards that layer equals simulated `water` within the original lake
+footprint. Both are depths in metres; legacy droplet water remains its normalized
+resting-water mask. There is no new lake-volume solver, breaching or tile system.
+
+## Node SIMD timings
+
+Intel Core i7-10700K (8 cores / 16 logical processors), Windows x64
+`10.0.26200`, Node `v24.14.0`, ordinary release SIMD package. All session builds,
+tests and rendering had finished before measuring; no repository compute job ran
+alongside the benchmark. A two-second process sample immediately before timing
+recorded 5% total background CPU and about 58 GiB free physical memory (usual
+desktop/MCP services left running). Evidence: `out/session14/idle-before.json`.
+
+`bench/drainage.ts` measures the public adapter call, including input validation,
+allocation, JS-to-WASM copies, the flood, and all three returned Float32 layers.
+Optional directions are disabled. Inputs and output checks are outside the timer;
+two full-size warmups precede five calls, with forced GC before each call. Values
+below are medians, not selected best runs. No worker pool participates.
+
+The massif is a rounded hill with four octaves of deterministic integer-hash
+bilinear value noise (cell wavelengths 128, 32, 8 and 2); the bowl exercises broad
+closed depressions; the rough case adds independent per-cell hash noise to a hill.
+All use identical explicit input generation at both grid sizes.
+
+| Terrain | Epsilon | 1024² median ms | Target ms | 4096² median ms | Target ms |
+|---|---:|---:|---:|---:|---:|
+| Noisy massif | 0 | 70.3 | <150, met | 1605.0 | <2000, met |
+| Closed bowl | 0 | 28.8 | <150, met | 1018.3 | <2000, met |
+| Rough terrain | 0 | 61.3 | <150, met | 1772.5 | <2000, met |
+| Noisy massif, epsilon gradient | 0.00001 | 73.7 | <150, met | 1654.3 | <2000, met |
+
+All eight medians and every measured call meet their targets. The 4096² massif
+actually fills 3,024,546 cells; the rough case fills 6,503,059; the bowl fills
+16,760,836. Peak process RSS across the six epsilon-zero cases was **741.1 MiB**,
+including the warmed WASM heap and JS copies. These timings cover filling,
+not the additional flow accumulation or repeated stream-power solves, and do not
+claim a bound for every possible DEM or positive lake-depth threshold.
+
+```powershell
+$env:TOPOTOPO_WASM = 'simd'
+$env:TOPOTOPO_WORKERS = '0'
+node --expose-gc bench/drainage.ts --runs=5 --output=out/session14/drainage.json
+node --expose-gc bench/drainage.ts --runs=5 --terrain=massif --epsilon=0.00001 --output=out/session14/drainage-epsilon.json
+```
+
+Both commands exited 0. The JSON reports retain all samples, input fill counts,
+fill-depth sums, package identity, target flags and peak RSS.
+
+## Verification and artifacts
+
+| Required gate | Final result |
+|---|---|
+| `cargo test --manifest-path kernels/Cargo.toml` | Exit 0, 121 tests (66 unit + 55 integration) |
+| Same with `--features simd` | Exit 0, 121 tests |
+| `cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings` | Exit 0 |
+| Same clippy command with `--features simd` | Exit 0 |
+| `cargo fmt --manifest-path kernels/Cargo.toml --check` | Exit 0 |
+| `npm run kernels:build` | Exit 0; final rebuild byte-identical to tested packages |
+| `npm run typecheck` | Exit 0 |
+| `npm run test:update` | Exit 0; exactly 2 added, all 290 existing goldens unchanged |
+| `npm run docs` | Exit 0; reference contains 223 node types |
+| `npm test` | Exit 0, full chain (261 seconds) |
+| `npm run build` | Exit 0; 115 modules, one asset |
+| `npm run pack:test` | Exit 0; installed scalar/SIMD filling and retained lakes, plus both README links checked |
+| `npm run showcase` | Exit 0; all 33 existing PNG hashes unchanged, only drainage added |
+
+The full npm chain includes 156 heightfield checks, 2,109 erosion integration
+checks (including real worker dispatch for fill, flow, stream power and lakes),
+and 602 byte-exact scalar/SIMD comparisons across all 22 exports. Rust checks
+include path termination, strict epsilon descent, masks, whole-lake thresholds,
+repeatability, hostile inputs, independent minimax-spill relaxation on irregular
+terrain, and conservation of contributing area after filled D8/D-infinity routing.
+Cross-platform byte identity was not separately exercised on another operating
+system; both shipped variants and pool execution were exercised on this machine.
+
+New goldens are `node.heightfield_fill_sinks.json` and `example.drainage.json`.
+The new `examples/renders/drainage.png` was visually inspected: the unfilled
+massif is left, filled routing is right, tributaries are gold, rivers orange,
+and the retained lake blue. The demo has 220 interior sinks before filling and
+zero in filled routing, 1,764 filled samples and 383 retained lake samples.
+Its water-surface height varies by only one Float32 step. Showcase and example
+tests discover the new graph automatically; no registration code was necessary.
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| Scalar WASM | 777644 | `a0c48ae0ff5664ec38074cbf4ee0bdb25b311e4e7dd3bc4071f0fb60eaa70df0` |
+| SIMD WASM | 771210 | `1739933fd8209664072e3c0d6a864d8c45227fea9d8844927a949697d7ea0619` |
+| Drainage render | — | `e3b7879dbd6b885817eac03dd780ba56d29925271f8d53e868912f822eef774b` |
+
+Combined WASM is 1,548,854 bytes (limit 2,500,000). The source and generated
+package READMEs use absolute repository URLs for BUILD/BENCH, fixing R-19's
+tarball-relative links. Logs and before/after manifests are in `out/session14/`.
+
+Initial targeted checks caught test-fixture assumptions (dry stream power cannot
+incise; deposited sediment can restore bed height) and three Clippy style findings.
+The fixtures and style were corrected, both final native test suites and Clippy
+were rerun, and the final WASM build was byte-identical. An early shell wrapper's
+trailing Windows-glob diagnostic exited 1 after passing native tests; the final
+gate commands' exit codes above were checked individually. No failing acceptance
+gate remains, and no push or unrelated project work was performed.

@@ -181,6 +181,16 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   relaxation, deterministic, mass-conserving with closed borders), so a WASM kernel can replace it. Export writes
   16-bit PNG / RAW heightmaps with a JSON sidecar holding the range and the Unreal import scale (`io/heightmap.ts`),
   and `io/png-decode.ts` is a dependency-free PNG decoder (inflate included) for heightmap and mask import.
+  `heightfield_fill_sinks` calls the Rust priority-flood kernel over eight neighbours; `fill` is added terrain depth
+  and `lake` is retained standing water depth in metres. A positive `max_depth` preserves an entire connected
+  depression if its deepest point exceeds the limit, with no partial clipping of the lake bed. No-fill masks
+  have 0..1 values: samples at 1 are untouched terminal outlets, and lower values remain eligible for filling.
+  Protected outlets and retained lakes are exceptions to border drainage.
+  Zero-epsilon filling retains flats and returns acyclic receiver directions; positive epsilon gives every
+  unrestricted interior cell a lower neighbour. `heightfield_flow.fill_sinks` uses a virtual filled surface,
+  leaving height unchanged. Stream-power erosion can use the same routing; pipe methods seed water from a lake
+  layer and update lake depth within its original footprint to match simulated water. Legacy droplet water is
+  still a normalised resting mask. See `kernels/README.md` and `examples/drainage.json`.
 - **Image volumes** are the third volume kind (`Volume = SdfVolume | HeightfieldVolume | ImageVolume`,
   `core/image.ts`): Substance Designer / Houdini COP textures. A width × height grid of float pixels with named layers
   of 1 (grey) or 4 (RGBA, interleaved) channels; "C" is the image itself, nodes add others ("id" random per cell, "mask"
@@ -896,7 +906,8 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   normalised sediment/debris); the generated Landscape material blends colour/roughness and normalizes only
   its appearance. `layers=0` and `material=0` opt out independently. See the plugin's
   [editor workflow](../integrations/unreal/TopoTopoPCG/EDITOR_WORKFLOW.md) for assets and editor acceptance.
-  Still open: heightfield tiles and depression filling for drainage.
+  Depression filling for drainage is implemented (K-11): `heightfield_fill_sinks`, optional filled routing in
+  `heightfield_flow` and stream-power erosion; heightfield tiles remain open.
 - Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.

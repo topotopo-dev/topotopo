@@ -278,6 +278,75 @@ section('erosion');
   check(ms < 20000, `erosion 512² × 100 finishes (target < 3 s; ${ms.toFixed(0)} ms here)`);
 }
 
+// ---------------------------------------------------------------- depression filling and drainage
+section('depression filling, lakes and drainage');
+{
+  const source: Record<string, NodeSpec> = {
+    hf: { type: 'heightfield', params: { size: [8, 8], resolution: 1 } },
+    bowl: { type: 'heightfield_layer', in: ['hf'], params: { expression: 'min(3, (x*x + z*z) / 8)' } },
+  };
+  const before = await field(source, 'bowl'), saved = before.layer('height')!.slice();
+  const filled = await field({ ...source, out: { type: 'heightfield_fill_sinks', in: ['bowl'] } }, 'out');
+  check(['height', 'fill', 'lake'].every(name => filled.layers.has(name)), 'fill_sinks cooks and writes height, fill and lake');
+  check(filled.layer('fill')!.some(v => v > 0) && filled.layer('fill')!.every(v => v >= 0), 'fill is nonnegative added terrain thickness');
+  check(filled.layer('height')!.every((v, i) => v === Math.fround(saved[i] + filled.layer('fill')![i])), 'fill accounts for the changed terrain height');
+  check(same(before.layer('height')!, saved) && !before.layers.has('fill'), 'fill_sinks preserves its cooked input arrays and layer map');
+  const sloped = await field({ ...source, out: { type: 'heightfield_fill_sinks', in: ['bowl'], params: { epsilon: 0.01 } } }, 'out');
+  const H = sloped.layer('height')!, w = sloped.width, h = sloped.height;
+  let descending = true;
+  for (let z = 1; z < h - 1; z++) for (let x = 1; x < w - 1; x++) {
+    const i = z * w + x;
+    descending &&= [-w - 1, -w, -w + 1, -1, 1, w - 1, w, w + 1].some(d => H[i + d] < H[i]);
+  }
+  check(descending, 'epsilon gives every interior sample a strictly lower neighbour');
+  const omitted = await field({ ...source, out: { type: 'heightfield_fill_sinks', in: ['bowl'], params: { write_fill: false, write_lake: false } } }, 'out');
+  check(!omitted.layers.has('fill') && !omitted.layers.has('lake'), 'optional fill and lake layers can be omitted');
+  const masked = await field({ ...source,
+    rock: { type: 'heightfield_layer', in: ['bowl'], params: { layer: 'rock', expression: 'x == 0 && z == 0 ? 1 : 0' } },
+    out: { type: 'heightfield_fill_sinks', in: ['rock'], params: { mask_layer: 'rock', epsilon: 0.01 } },
+  }, 'out');
+  check(masked.layer('height')![40] === saved[40] && masked.layer('fill')![40] === 0, 'mask_layer keeps protected terrain untouched');
+  check(/no layer/.test(await cookErr({ ...source, out: { type: 'heightfield_fill_sinks', in: ['bowl'], params: { mask_layer: 'missing' } } }, 'out')), 'missing no-fill mask fails clearly');
+  const incision = (fill_sinks: boolean) => field({ ...source, out: { type: 'heightfield_erode', in: ['bowl'], params: {
+    method: 'stream_power', backend: 'kernel', fill_sinks, iterations: 1, rain_amount: 0.03,
+    thermal_rate: 0, erosion_rate: 0, stream_power_k: 0.1, time_step: 0.1,
+  } } }, 'out');
+  const stopped = await incision(false), incised = await incision(true);
+  check(stopped.layer('wear')![40] === 0 && incised.layer('wear')![40] > 0, 'filled stream-power routing enables incision at the closed pit');
+  for (const method of ['d8', 'dinf']) {
+    const route = (fill_sinks: boolean) => field({ ...source, out: { type: 'heightfield_flow', in: ['bowl'], params: { method, fill_sinks, normalise: false, log_scale: false } } }, 'out');
+    const raw = await route(false), routed = await route(true), direction = routed.layer('direction')!;
+    check(raw.layer('direction')![40] === 255 && direction[40] < 8, `${method}: filling routes the closed pit instead of retaining its drainage`);
+    check(same(routed.layer('height')!, saved), `${method}: filled routing preserves actual terrain heights`);
+    let reachesBorder = true;
+    const offsets = [1, w + 1, w, w - 1, -1, -w - 1, -w, -w + 1];
+    for (let start = 0; start < direction.length; start++) {
+      let i = start, steps = 0;
+      while (i % w > 0 && i % w < w - 1 && Math.floor(i / w) > 0 && Math.floor(i / w) < h - 1) {
+        if (direction[i] >= 8 || ++steps > direction.length) { reachesBorder = false; break; }
+        i += offsets[direction[i]];
+      }
+    }
+    check(reachesBorder, `${method}: every filled route reaches the border without a cycle`);
+  }
+  const lakes: Record<string, NodeSpec> = {
+    hf: { type: 'heightfield', params: { size: [8, 6], resolution: 1 } },
+    pits: { type: 'heightfield_layer', in: ['hf'], params: { expression: 'abs(z) <= 1 && abs(x+2) <= 1 ? 2 : (abs(z) <= 1 && abs(x-2) <= 1 ? 0 : 3)' } },
+    filled: { type: 'heightfield_fill_sinks', in: ['pits'], params: { max_depth: 1.5 } },
+  };
+  const lakeField = await field(lakes, 'filled'), lake = lakeField.layer('lake')!, fill = lakeField.layer('fill')!;
+  check(lake.filter(v => v === 3).length === 9 && fill.filter(v => v === 1).length === 9, 'max_depth retains the whole deep lake and fills the separate shallow depression');
+  check(lakeField.layer('height')!.every((v, i) => lake[i] > 0 ? v === 0 && fill[i] === 0 : v === 3), 'retained lake bed stays unchanged; lake records its physical depth');
+  const routedLake = await field({ ...lakes, out: { type: 'heightfield_flow', in: ['filled'], params: { fill_sinks: true } } }, 'out');
+  check(same(routedLake.layer('lake')!, lake), 'flow routing preserves retained lake depths');
+  for (const method of ['pipe', 'stream_power']) {
+    const still = await field({ ...lakes, out: { type: 'heightfield_erode', in: ['filled'], params: { method, backend: 'kernel', iterations: 0, fill_sinks: true } } }, 'out');
+    check(same(still.layer('water')!, lake) && same(still.layer('lake')!, lake), `${method}: retained lake depth becomes initial physical water depth`);
+    const evaporated = await field({ ...lakes, out: { type: 'heightfield_erode', in: ['filled'], params: { method, backend: 'kernel', iterations: 1, rain_amount: 0, gravity: 0.0001, thermal_rate: 0, erosion_rate: 0, stream_power_k: 0, evaporation: 0.5, time_step: 0.1 } } }, 'out');
+    check(evaporated.layer('lake')!.every((v, i) => v === evaporated.layer('water')![i]) && sum(evaporated.layer('lake')!) < sum(lake), `${method}: lake and water remain metre depths as initial lake water evaporates`);
+  }
+}
+
 // ---------------------------------------------------------------- project, path, scatter
 section('project, path, scatter, resample, transform, to_sdf');
 {

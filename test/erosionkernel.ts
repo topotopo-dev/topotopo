@@ -51,6 +51,39 @@ try {
   check(!unavailable.ok && /kernel/i.test(unavailable.errors.map(e => e.message).join('; ')), 'auto pipe without loaded kernel errors clearly');
   const kernels = await loadKernels(fs.readFileSync(kernelsWasmURL));
   check(kernels === getLoadedKernels(), 'loader exposes the initialized module for auto');
+  const basin = Float32Array.from({ length: 81 }, (_, i) => Math.min(3, ((i % 9 - 4) ** 2 + (Math.floor(i / 9) - 4) ** 2) / 8));
+  const basinSaved = basin.slice();
+  const filledBasin = kernels.fill_sinks(basin, 9, 9, { writeDirection: true });
+  check(filledBasin.height.length === 81 && filledBasin.fill.length === 81 && filledBasin.lake.length === 81 && filledBasin.direction.length === 81, 'priority flood returns complete height, fill, lake and requested directions');
+  check(filledBasin.fill.every(v => v >= 0) && filledBasin.fill[40] === 2, 'closed depression receives nonnegative fill up to its lowest border spill');
+  assert.deepEqual(basin, basinSaved); checks++;
+  assert.deepEqual(filledBasin, kernels.fill_sinks(basin, 9, 9, { writeDirection: true })); checks++;
+  check(kernels.fill_sinks(basin, 9, 9).direction.length === 0, 'optional directions are omitted by default');
+  const retained = kernels.fill_sinks(basin, 9, 9, { maxDepth: 1 });
+  assert.deepEqual(retained.height, basin); checks++;
+  check(retained.lake[40] === 2 && retained.fill.every(v => v === 0), 'depth limit preserves the full connected lake with physical water depths');
+  const protectedBasin = kernels.fill_sinks(basin, 9, 9, { epsilon: 0.01 }, new Float32Array(81).fill(1));
+  assert.deepEqual(protectedBasin.height, basin); checks++;
+  for (const fill_sinks of [false, true]) {
+    const routed = kernels.flow_accumulation(basin, 9, 9, 1, 'd8', fill_sinks);
+    check(fill_sinks ? routed.direction[40] < 8 : routed.direction[40] === 255, `flow fill_sinks=${fill_sinks}: pit receiver semantics`);
+  }
+  const floodSource: Record<string, NodeSpec> = {
+    hf: { type: 'heightfield', params: { size: [8, 8], resolution: 1 } },
+    basin: { type: 'heightfield_layer', in: ['hf'], params: { expression: 'min(3, (x*x + z*z) / 8)' } },
+    lakes: { type: 'heightfield_fill_sinks', in: ['basin'], params: { max_depth: 1 } },
+  };
+  for (const [label, node] of [
+    ['filled terrain', { type: 'heightfield_fill_sinks', in: ['basin'], params: { epsilon: 0.001 } }],
+    ['retained lake', { type: 'heightfield_fill_sinks', in: ['basin'], params: { max_depth: 1 } }],
+    ['filled drainage', { type: 'heightfield_flow', in: ['basin'], params: { fill_sinks: true, method: 'dinf' } }],
+    ['stream power over pits', { type: 'heightfield_erode', in: ['basin'], params: { method: 'stream_power', backend: 'kernel', fill_sinks: true, iterations: 3 } }],
+    ['pipe lake water', { type: 'heightfield_erode', in: ['lakes'], params: { method: 'pipe', backend: 'kernel', iterations: 3, rain_amount: 0 } }],
+  ] as Array<[string, NodeSpec]>) {
+    const floodGraph: GraphSpec = { nodes: { ...floodSource, out: node }, output: 'out' };
+    const single = await cook(floodGraph), pooled = await cook(floodGraph, on);
+    assert.deepEqual(heightfieldsOf(pooled)[0].layers, heightfieldsOf(single)[0].layers, `${label}: worker and single-thread layers are exact`); checks++;
+  }
   const loadedAuto = heightfieldsOf(await cook(graph({ backend: 'auto' })))[0];
   check(!!loadedAuto.layer('wear'), 'loading kernels invalidates a previously cached auto JS fallback');
   assert.deepEqual(loadedAuto.layers, heightfieldsOf(await cook(graph({ backend: 'kernel' })))[0].layers); checks++;
@@ -147,6 +180,7 @@ try {
     check(normalized.layer('drainage')!.every(v => v >= 0 && v <= 1), `${method}: normalized log drainage in 0..1`);
   }
   for (const bad of [new Float32Array(5), new Float32Array(9).fill(NaN), new Float32Array(9).fill(Infinity)]) {
+    assert.throws(() => kernels.fill_sinks(bad, 3, 3)); checks++;
     assert.throws(() => kernels.erode_pipe(bad, null, 3, 3, 1)); checks++;
     assert.throws(() => kernels.erode_droplet(bad, null, 3, 3, 1)); checks++;
   }
@@ -158,6 +192,14 @@ try {
   assert.throws(() => kernels.erode_pipe(flat, null, 9, 9, 1, {}, 1, null, new Float32Array(4))); checks++;
   assert.throws(() => kernels.flow_accumulation(flat, 9.1, 9, 1)); checks++;
   assert.throws(() => kernels.thermal_erode(flat, null, 9, 9, 1, 0.5, 0.2, 1.5)); checks++;
+  assert.throws(() => kernels.fill_sinks(flat, 9.5, 9)); checks++;
+  assert.throws(() => kernels.fill_sinks(flat, 9, 9, { epsilon: NaN })); checks++;
+  assert.throws(() => kernels.fill_sinks(flat, 9, 9, { maxDepth: -1 })); checks++;
+  assert.throws(() => kernels.fill_sinks(flat, 9, 9, { epsilon: 1e-50 }), /representable/); checks++;
+  assert.throws(() => kernels.fill_sinks(flat, 9, 9, { maxDepth: 1e-50 }), /representable/); checks++;
+  assert.throws(() => kernels.fill_sinks(flat, 9, 9, {}, new Float32Array(4))); checks++;
+  assert.throws(() => kernels.erode_pipe(flat, null, 9, 9, 1, { initialWater: new Float32Array(4) })); checks++;
+  assert.throws(() => kernels.erode_pipe(flat, null, 9, 9, 1, { initialWater: new Float32Array(81).fill(-1) })); checks++;
   // Check generated WASM directly too: malformed options must return a validation error, never a trap.
   const raw = kernelsWasmVariant === 'simd'
     ? await import('../kernels/pkg-simd/topotopo_kernels.js')
@@ -175,6 +217,12 @@ try {
     () => raw.erode_pipe(flat, empty, empty, new Float32Array(81).fill(-1), 9, 9, 1, {}, 0n),
     () => raw.thermal_erode(flat, empty, 9, 9, 1, Infinity, 0.2, 1),
     () => raw.flow_accumulation(flat, 9, 9, 1, 'other'),
+    () => raw.fill_sinks(flat, 9, 9, { epsilon: -1 }, empty),
+    () => raw.fill_sinks(flat, 9, 9, { max_depth: Infinity }, empty),
+    () => raw.fill_sinks(flat, 9, 9, { epsilon: 1e-50 }, empty),
+    () => raw.fill_sinks(flat, 9, 9, { max_depth: 1e-50 }, empty),
+    () => raw.fill_sinks(flat, 9, 9, {}, new Float32Array(81).fill(NaN)),
+    () => raw.erode_pipe(flat, empty, empty, empty, 9, 9, 1, { initial_water: [0] }, 0n),
   ];
   for (const fn of badRawCalls) {
     assert.throws(fn, error => typeof error === 'string' || (error instanceof Error && error.name !== 'RuntimeError'),

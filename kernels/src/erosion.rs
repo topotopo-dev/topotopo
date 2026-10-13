@@ -42,6 +42,10 @@ pub struct PipeParams {
     pub stream_power_k: f32,
     pub stream_power_m: f32,
     pub stream_power_n: f32,
+    /// Route stream power over a depression-filled surface each step.
+    pub fill_sinks: bool,
+    /// Optional standing-water depth, in the same units as terrain heights.
+    pub initial_water: Vec<f32>,
 }
 
 impl Default for PipeParams {
@@ -61,6 +65,8 @@ impl Default for PipeParams {
             stream_power_k: 0.0,
             stream_power_m: 0.5,
             stream_power_n: 1.0,
+            fill_sinks: false,
+            initial_water: Vec::new(),
         }
     }
 }
@@ -161,6 +167,12 @@ pub fn erode_pipe(
     validate_layer(freeze, n, "freeze", 1.0)?;
     validate_layer(rain, n, "rain map", 1000.0)?;
     validate_params(p)?;
+    validate_layer(
+        (!p.initial_water.is_empty()).then_some(p.initial_water.as_slice()),
+        n,
+        "initial water",
+        1e8,
+    )?;
     if (n as u64) * p.iterations as u64 > 4_000_000_000 {
         return Err(
             "erosion: grid times iteration count exceeds the 4 billion cell-step limit".into(),
@@ -171,7 +183,11 @@ pub fn erode_pipe(
         sediment: vec![0.0; n],
         debris: vec![0.0; n],
         flow: vec![0.0; n],
-        water: vec![0.0; n],
+        water: if p.initial_water.is_empty() {
+            vec![0.0; n]
+        } else {
+            p.initial_water.clone()
+        },
         wear: vec![0.0; n],
     };
     if p.iterations == 0 {
@@ -206,7 +222,7 @@ pub fn erode_pipe(
     let softness: Vec<f32> = (0..n)
         .map(|i| mobility[i] * (1.0 - hardness.map_or(0.0, |a| a[i])))
         .collect();
-    let incision = if p.stream_power_k > 0.0 {
+    let mut incision = if p.stream_power_k > 0.0 && !p.fill_sinks {
         // Reference drainage is intentionally computed on the incoming DEM.
         // Updating it mid-solve can cause discontinuous jumps in the network.
         flow_accumulation(height, w, h, cell, FlowMethod::Dinf)?
@@ -217,8 +233,20 @@ pub fn erode_pipe(
                     as f32
             })
             .collect::<Vec<_>>()
+    } else if p.stream_power_k > 0.0 {
+        vec![0.0; n]
     } else {
         Vec::new()
+    };
+    let fill_mask = if p.fill_sinks && !incision.is_empty() {
+        Some(
+            softness
+                .iter()
+                .map(|&s| if s == 0.0 { 1.0 } else { 0.0 })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
     };
     let inv_cell = 1.0 / cell;
     // Gradients change only when an f32 terrain sample actually changes.
@@ -231,7 +259,7 @@ pub fn erode_pipe(
     let mut gradient_marked = vec![true; n];
     #[cfg(all(feature = "profile", not(target_arch = "wasm32")))]
     let mut gradient_updates = 0u64;
-    let mut max_depth = 0.0f32;
+    let mut max_depth = result.water.iter().copied().fold(0.0f32, f32::max);
     let max_rain_rate = p.rain_amount * rain.map_or(1.0, |a| a.iter().copied().fold(0.0, f32::max));
     let mut max_velocity = 0.0;
     let talus = libm::tanf(p.talus_angle) * cell;
@@ -275,6 +303,52 @@ pub fn erode_pipe(
             gradient_marked[i] = false;
         }
         gradient_dirty.clear();
+        if let Some(mask) = &fill_mask {
+            let filled = crate::fill_sinks::fill_sinks(
+                &result.height,
+                w,
+                h,
+                &crate::fill_sinks::FillParams {
+                    write_direction: true,
+                    ..Default::default()
+                },
+                Some(mask),
+            )?;
+            let flow = crate::erosion_flow::flow_on_surface(
+                &filled.height,
+                w,
+                h,
+                cell,
+                FlowMethod::Dinf,
+                Some(&filled.direction),
+            )?;
+            const DX: [isize; 8] = [1, 1, 0, -1, -1, -1, 0, 1];
+            const DZ: [isize; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
+            for i in 0..n {
+                incision[i] = (p.stream_power_k as f64
+                    * libm::pow(flow.drainage[i] as f64, p.stream_power_m as f64))
+                .min(1e12) as f32;
+                let d = flow.direction[i] as usize;
+                if d < 8 {
+                    let j = (i as isize + DX[d] + DZ[d] * w as isize) as usize;
+                    // Horizontal spill surfaces have no physical slope. Give
+                    // their resolved receiver a small 1e-4 routing slope (or
+                    // one representable height step) so incision can continue.
+                    let drop = (filled.height[i] - filled.height[j])
+                        .max((1e-4 * cell).max(filled.height[i].next_up() - filled.height[i]));
+                    slope_magnitude[i] = drop
+                        * inv_cell
+                        * if d.is_multiple_of(2) {
+                            1.0
+                        } else {
+                            std::f32::consts::FRAC_1_SQRT_2
+                        };
+                    relief[i] = relief[i].max(drop);
+                } else {
+                    slope_magnitude[i] = 0.0;
+                }
+            }
+        }
         profile.mark("terrain gradients");
         // The user time step is an upper bound, never permission to violate CFL.
         let cfl = 0.4 * cell / (max_velocity + (p.gravity * upper(max_depth, cell)).sqrt());
@@ -1570,6 +1644,66 @@ mod tests {
         }
         assert!(r.wear[20 * w + 15] > r.wear[20 * w + 4]);
     }
+    #[test]
+    fn filled_stream_power_incises_pits_without_raising_the_bed() {
+        let w = 9;
+        let input: Vec<f32> = (0..w * w)
+            .map(|i| {
+                if i < w || i >= w * (w - 1) || i % w == 0 || i % w == w - 1 {
+                    3.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let mut p = PipeParams {
+            iterations: 1,
+            thermal_rate: 0.0,
+            erosion_rate: 0.0,
+            deposition_rate: 0.0,
+            stream_power_k: 0.5,
+            ..Default::default()
+        };
+        let unfilled = erode_pipe(&input, None, None, None, w, w, 1.0, &p, 0).unwrap();
+        p.fill_sinks = true;
+        let filled = erode_pipe(&input, None, None, None, w, w, 1.0, &p, 0).unwrap();
+        assert_eq!(unfilled.wear[4 * w + 4], 0.0);
+        assert!(filled.wear[4 * w + 4] > 0.0);
+        // Existing sediment redeposition can raise other cells, but the virtual
+        // three-metre spill surface is never written into the terrain.
+        assert!(filled.height.iter().zip(&input).all(|(a, b)| a - b < 0.001));
+        let mask = vec![1.0; w * w];
+        assert_eq!(
+            erode_pipe(&input, Some(&mask), None, None, w, w, 1.0, &p, 0)
+                .unwrap()
+                .height,
+            input
+        );
+    }
+
+    #[test]
+    fn lake_seed_is_water_depth_and_is_validated() {
+        let input = vec![0.0; 9];
+        let p = PipeParams {
+            iterations: 0,
+            initial_water: vec![2.0; 9],
+            ..Default::default()
+        };
+        assert_eq!(
+            erode_pipe(&input, None, None, None, 3, 3, 1.0, &p, 0)
+                .unwrap()
+                .water,
+            p.initial_water
+        );
+        for initial_water in [vec![1.0; 3], vec![f32::NAN; 9], vec![-1.0; 9]] {
+            let p = PipeParams {
+                initial_water,
+                ..p.clone()
+            };
+            assert!(erode_pipe(&input, None, None, None, 3, 3, 1.0, &p, 0).is_err());
+        }
+    }
+
     #[test]
     fn timestep_accounts_for_incoming_rain() {
         let input = [0.0; 9];

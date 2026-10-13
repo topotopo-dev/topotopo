@@ -12,6 +12,7 @@ pub mod erosion;
 pub mod erosion_droplet;
 pub mod erosion_flow;
 mod erosion_profile;
+pub mod fill_sinks;
 pub mod remesh_quad;
 pub mod scatter;
 pub mod scatter_relax;

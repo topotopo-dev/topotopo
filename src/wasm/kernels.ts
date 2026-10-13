@@ -58,7 +58,9 @@ export interface Kernels {
   erode_pipe(height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params?: PipeErosionOptions, seed?: number | bigint, freeze?: Float32Array | null, rain?: Float32Array | null): ErosionResult;
   /** Talus angle is radians. Returned debris is signed thermal height change. */
   thermal_erode(height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, talusAngle: number, rate: number, iterations: number): ErosionResult;
-  flow_accumulation(height: Float32Array, w: number, h: number, cell: number, method?: 'd8' | 'dinf'): FlowAccumulationResult;
+  /** Priority flood; a 0..1 mask protects outlets with value 1, whose terrain is never raised. */
+  fill_sinks(height: Float32Array, w: number, h: number, options?: FillSinksOptions, mask?: Float32Array | null): FillSinksResult;
+  flow_accumulation(height: Float32Array, w: number, h: number, cell: number, method?: 'd8' | 'dinf', fillSinks?: boolean): FlowAccumulationResult;
   remesh_quad(positions: Float64Array, tris: Uint32Array, options?: QuadRemeshOptions): QuadRemeshResult;
   sdf_from_mesh(positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean): KernelGrid;
   grid_csg(a: GridInput, b: GridInput, op: GridOperation, k?: number): KernelGrid;
@@ -108,6 +110,26 @@ export interface PipeErosionOptions {
   streamPowerK?: number;
   streamPowerM?: number;
   streamPowerN?: number;
+  /** Route stream-power incision across filled depressions without raising the ground. */
+  fillSinks?: boolean;
+  /** Initial standing-water depth in metres; empty/absent starts dry. */
+  initialWater?: Float32Array;
+}
+export interface FillSinksOptions {
+  /** Minimum rise per receiver step, in metres; 0 resolves flats through stable directions. */
+  epsilon?: number;
+  /** Retain entire connected depressions deeper than this many metres; 0 fills all. */
+  maxDepth?: number;
+  writeDirection?: boolean;
+}
+export interface FillSinksResult {
+  height: Float32Array;
+  /** Added terrain thickness in metres, nonnegative. */
+  fill: Float32Array;
+  /** Retained standing-water depth in metres above the unchanged lake bed. */
+  lake: Float32Array;
+  /** Flat-resolved receiver, or an empty array when writeDirection is false. */
+  direction: Uint8Array;
 }
 export interface ErosionResult {
   height: Float32Array;
@@ -303,7 +325,7 @@ function erosionRngState(seed: number): number {
   }
   return hash32(hashed + 0x6d2b79f5);
 }
-function erosionOptions(p: DropletErosionOptions | PipeErosionOptions): Record<string, unknown> {
+function erosionOptions(p: DropletErosionOptions | PipeErosionOptions | FillSinksOptions): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(p)) {
     if (value !== undefined) result[key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)] = value;
@@ -370,6 +392,7 @@ export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
         erode_pipe: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params: PipeErosionOptions = {}, seed: number | bigint = 0, freeze?: Float32Array | null, rain?: Float32Array | null) =>
           call('erode_pipe', () => {
             erosionGrid(height, w, h, cell);
+            if (params.initialWater !== undefined) erosionLayer(params.initialWater, height.length, 'initialWater');
             return wasm.erode_pipe(height, erosionLayer(hardness, height.length, 'hardness'), erosionLayer(freeze, height.length, 'freeze'), erosionLayer(rain, height.length, 'rain'), w, h, cell, erosionOptions(params), erosionSeed(seed)) as ErosionResult;
           }),
         thermal_erode: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, talusAngle: number, rate: number, iterations: number) =>
@@ -378,11 +401,18 @@ export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
             if (!Number.isInteger(iterations) || iterations < 0 || iterations > 0xffffffff) throw new Error('iterations must be a nonnegative integer');
             return wasm.thermal_erode(height, erosionLayer(hardness, height.length, 'hardness'), w, h, cell, talusAngle, rate, iterations) as ErosionResult;
           }),
-        flow_accumulation: (height: Float32Array, w: number, h: number, cell: number, method: 'd8' | 'dinf' = 'dinf') =>
+        fill_sinks: (height: Float32Array, w: number, h: number, options: FillSinksOptions = {}, mask?: Float32Array | null) =>
+          call('fill_sinks', () => {
+            erosionGrid(height, w, h, 1);
+            const result = wasm.fill_sinks(height, w, h, erosionOptions(options), erosionLayer(mask, height.length, 'mask')) as FillSinksResult;
+            result.direction ??= new Uint8Array(0);
+            return result;
+          }),
+        flow_accumulation: (height: Float32Array, w: number, h: number, cell: number, method: 'd8' | 'dinf' = 'dinf', fillSinks = false) =>
           call('flow_accumulation', () => {
             erosionGrid(height, w, h, cell);
             if (method !== 'd8' && method !== 'dinf') throw new Error('method must be d8 or dinf');
-            return wasm.flow_accumulation(height, w, h, cell, method) as FlowAccumulationResult;
+            return wasm.flow_accumulation(height, w, h, cell, method, fillSinks) as FlowAccumulationResult;
           }),
         remesh_quad: (positions: Float64Array, tris: Uint32Array, options: QuadRemeshOptions = {}) =>
           call('remesh_quad', () => {
