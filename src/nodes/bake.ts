@@ -336,6 +336,7 @@ defineBake({
     'uniform maps the largest axis to 0..1 and keeps the proportions (centred), world writes metres as they are (data, ' +
     'beyond 0..1). Feed tex_channel extract (channel g) for a bottom-to-top gradient.',
   aliases: ['position_bake', 'bake_world_position'],
+  inputs: [INPUTS[0]],
   params: {
     ...BAKE_PARAMS('position'),
     mode: { type: 'enum', options: ['bbox', 'uniform', 'world'], default: 'bbox', desc: 'how positions map to colour', aliases: ['normalize'] },
@@ -480,6 +481,7 @@ defineBake({
   summary: 'Bake uv islands as random flat colours (an ID map for masking per island), with the island number in layer "id".',
   description: 'Substance Painter "ID" (by uv island). ' + BAKE_DOC + 'Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).',
   aliases: ['island_id_bake', 'bake_id', 'id_bake', 'bake_uv_islands'],
+  inputs: [INPUTS[0]],
   params: { ...BAKE_PARAMS('island_id'), seed: P.seed() },
   outputs: 'image <name> (default "island_id"): C RGBA, id (island number), mask',
   cook: (ctx) => {
@@ -508,6 +510,7 @@ defineBake({
   summary: 'Bake a mask into uv space from a prim group (1 inside) or a numeric attribute (its value), e.g. to paint per-part materials.',
   description: 'Substance Painter "ID" (by group / attribute). ' + BAKE_DOC + 'mask_group (a prim group pattern) gives 1 on its prims and 0 elsewhere; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.',
   aliases: ['mask_bake', 'bake_group', 'bake_attribute', 'attribute_bake'],
+  inputs: [INPUTS[0]],
   params: {
     ...BAKE_PARAMS('mask'),
     mask_group: { type: 'group', default: '', groupClass: 'prim', desc: 'prims that read 1 (e.g. "planks", "@P.y>0.5")', aliases: ['from_group', 'mask_prims'] },
@@ -540,6 +543,7 @@ defineBake({
   summary: 'Bake a colour attribute (Cd, with Alpha) into uv space as an RGBA image.',
   description: 'Substance Painter "Color Map from Mesh". ' + BAKE_DOC + 'attrib (point, vertex, prim or detail; 1 or 3+ floats) is interpolated across the triangles; alpha_attrib fills A when present. Values are written as they are, the same numbers the renderer shows.',
   aliases: ['vertex_color_bake', 'bake_color', 'bake_cd', 'color_bake'],
+  inputs: [INPUTS[0]],
   params: {
     ...BAKE_PARAMS('vertex_color'),
     attrib: { type: 'string', default: 'Cd', desc: 'colour attribute', aliases: ['attribute', 'color_attrib'] },

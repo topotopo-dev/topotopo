@@ -7729,7 +7729,6 @@ Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
-| 1 | `high` | yes | no | optional high-res source, near the mesh (within cage) |
 
 **Parameters**
 
@@ -7759,7 +7758,6 @@ Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
-| 1 | `high` | yes | no | optional high-res source, near the mesh (within cage) |
 
 **Parameters**
 
@@ -7869,7 +7867,6 @@ Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwra
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
-| 1 | `high` | yes | no | optional high-res source, near the mesh (within cage) |
 
 **Parameters**
 
@@ -7936,7 +7933,6 @@ Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
-| 1 | `high` | yes | no | optional high-res source, near the mesh (within cage) |
 
 **Parameters**
 
