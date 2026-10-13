@@ -385,6 +385,21 @@ The point normals that bound noise_displace are a scatter-add over the vertices,
 the per-polygon Newell vectors on the pool and summing them here (bit-identical) was tried and saved nothing, because
 the sums and the normalisation are most of pointNormals' cost.
 
+### Rust kernels and straight skeletons
+
+`kernels/` is a standalone Rust crate with a committed `wasm-pack --target web` package in `kernels/pkg/`.
+`npm run kernels:build` is the developer rebuild entry point; ordinary users only need Node. The host-agnostic
+`src/wasm/kernels.ts` accepts bytes in `loadKernels`, shares concurrent initialisation, and retries failed loads.
+`loadHostKernels` reads the module-relative WASM through `Host.readFile` once per host on first use. Browser hosts
+can read the same URL with `fetch`; importing the node registry performs no kernel I/O.
+
+`straight_skeleton` takes closed XZ footprints, detects nested holes (also doubled bridges within one primitive),
+and emits skeleton/contour lines, signed polygon offsets, or a pitched roof. Kernel coordinates are 2D f64 pairs;
+roof coordinates add height as their third component. The adapter maps this to Y-up, preserves contour provenance
+with `GeoBuilder`, and writes prim `kind` on arcs or prim `edge` on roof faces. Pitch attributes belong to the
+outgoing edge of a point, or all edges of a primitive. See `kernels/README.md` for the event algorithm, numerical
+limits, array contracts and dependency licences; `kernels/BUILD.md` records the reproducible build commands.
+
 ## What makes it LLM-friendly
 
 These are the decisions that most affect how well an agent can work with it:

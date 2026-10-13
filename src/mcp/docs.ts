@@ -397,6 +397,10 @@ Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatte
 Example: examples/forest.json (30k candidates → pruned packed forest) and examples/pcg_scatter.json (road, lamps, rocks).`,
 
   curves: `CURVES (polylines and Bezier / NURBS spline prims)
+straight_skeleton {mode skeleton|offset|roof, distance, pitch, pitch_attrib, height_cap, group}
+  Closed XZ polygons with contained holes; skeleton outputs lines with prim kind (0 skeleton, 1 contour).
+  offset uses positive distance inward and negative outward; roof uses degrees and prim edge provenance.
+  WASM loads lazily through the host. roof_skeleton is the footprint-input shelf asset with overhang and thickness.
 Polylines are open prims of points; closed curves are polygons (faces). Spline prims are Houdini's Bezier/NURBS curves:
   the prim's points are its CONTROL POINTS (CVs) and the curve is evaluated exactly wherever it is needed.
   bezier {points, order, closed, weights}   segments of order CVs sharing their ends: 7 CVs of order 4 = 2 cubic segments

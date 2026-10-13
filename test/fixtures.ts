@@ -85,7 +85,7 @@ export const SRC: Record<string, NodeSpec> = {
 export const SHELF_INPUTS: Record<string, string[]> = {
   railing: ['SHELF_PATH'], fence: ['SHELF_PATH'], pipe_run: ['SHELF_PIPE'], road_strip: ['SHELF_ROAD'],
   scatter_rocks: ['SHELF_GROUND'], forest_patch: ['SHELF_GROUND'], grass_clumps: ['SHELF_GROUND'],
-  house: ['SHELF_FOOTPRINT'],
+  house: ['SHELF_FOOTPRINT'], roof_skeleton: ['SHELF_FOOTPRINT'],
 };
 
 /** A graph that cooks the shelf asset `name` at its defaults (on its fixture inputs, if it takes any) as node `target`. */
@@ -124,7 +124,7 @@ export const INPUTS: Record<string, string[]> = {
   // PCG (P2-B): masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
-  curve_attribs: ['NURBS'],
+  curve_attribs: ['NURBS'], straight_skeleton: ['SHELF_FOOTPRINT'],
   // textures (P3-T): filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
   tex_blend: ['TEX', 'TEX2', 'TEXSHAPE'], tex_levels: ['TEX'], tex_curves: ['TEX'], tex_blur: ['TEX'], tex_warp: ['TEX2', 'TEX'],
   tex_transform: ['TEX2'], tex_edge_detect: ['TEX2'], tex_invert: ['TEX'], tex_threshold: ['TEX'], tex_histogram_scan: ['TEX'],
