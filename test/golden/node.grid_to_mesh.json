@@ -2,19 +2,19 @@
   "errors": [],
   "fingerprint": {
     "attributes": {
-      "detail": [],
+      "detail": ["adaptive_collapses:int:1", "fallback_cells:int:1"],
       "point": ["P:float:3", "grid_cell:int:1"],
       "prim": [],
       "vertex": []
     },
     "bbox": {
-      "max": [0.5998, 0.5998, 0.5998],
-      "min": [-0.5998, -0.5998, -0.5998]
+      "max": [0.6012, 0.6012, 0.6012],
+      "min": [-0.6003, -0.6003, -0.6003]
     },
     "counts": {
-      "points": 1358,
-      "prims": 2712,
-      "vertices": 8136,
+      "points": 680,
+      "prims": 1353,
+      "vertices": 4062,
       "volumes": 0
     },
     "groups": {
@@ -24,11 +24,13 @@
       "vertex": []
     },
     "hashes": {
-      "P": "9bb027171d66c82d",
+      "P": "0f6fa52f1b49e6f9",
       "attributes": {
-        "point.grid_cell": "b61fe77ddf043277"
+        "detail.adaptive_collapses": "9be171658ea4219f",
+        "detail.fallback_cells": "9be171658ea4219f",
+        "point.grid_cell": "a48f738e6fb05154"
       },
-      "topology": "93de17aceecf130e"
+      "topology": "2ea08bf4a776bd66"
     }
   },
   "name": "node.grid_to_mesh",

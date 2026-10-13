@@ -14,6 +14,9 @@ import type { KernelGrid, Kernels, DualContourResult } from '../wasm/kernels.ts'
 const voxelParam: ParamDef = { type: 'float', default: 0.05, min: 0.000001, desc: 'grid spacing in world units; smaller voxels need more memory' };
 const distanceParam: ParamDef = { type: 'float', default: 0.05, desc: 'distance in world units; positive grows the solid', aliases: ['d', 'amount'] };
 const gridInput = [{ name: 'grid', desc: 'sampled SDF grid(s)' }];
+const methodParam: ParamDef = { type: 'enum', options: ['dual_contouring', 'dual_contouring_conservative', 'marching_cubes'], default: 'dual_contouring', desc: 'dual quads, conservative cell-local triangle fans, or smooth marching cubes' };
+const adaptiveParam: ParamDef = { type: 'float', default: 0, min: 0, desc: 'adaptive error tolerance in voxels; currently retains the uniform surface because octree simplification is not implemented' };
+const sharpThresholdParam: ParamDef = { type: 'float', default: 0.5, min: 0, max: 1, desc: 'normal variation threshold for sharp-feature fitting (0..1)' };
 const fromKernel = (g: KernelGrid, name: string) => new SdfGrid(Array.from(g.dims) as Vec3, Array.from(g.origin) as Vec3, g.voxel, g.values, name);
 function requireGrids(g: Geometry): SdfGrid[] {
   const grids = gridsOf(g);
@@ -32,6 +35,8 @@ function contourGeometry(m: DualContourResult): Geometry {
   g.primClosed = new Uint8Array(m.prim_start.length - 1).fill(1);
   g.prims = new AttribTable(g.numPrims); g.vertices = new AttribTable(g.numVertices);
   (g.points.add('grid_cell', 'int', 1).data as Int32Array).set(m.cell_index);
+  g.detail.add('fallback_cells', 'int', 1).set(0, m.fallback_cells);
+  g.detail.add('adaptive_collapses', 'int', 1).set(0, m.adaptive_collapses);
   return g;
 }
 
@@ -110,24 +115,27 @@ for (const type of ['grid_offset', 'grid_blur', 'grid_dilate', 'grid_erode', 'gr
 }
 
 defineNode({
-  type: 'grid_to_mesh', category: 'sdf', summary: 'Extract sharp dual-contour triangles or smooth marching-cubes triangles from sampled grids.',
-  description: 'No source attributes are transferred. Dual contouring records the lower-corner sample index as point grid_cell. Extraction is uniform: adaptive=true is currently unsupported. Closed surfaces must fit inside the grid with a positive boundary; increase source padding for offsets. Subvoxel features cannot be recovered.',
+  type: 'grid_to_mesh', category: 'sdf', summary: 'Extract sharp dual-contour quads or smooth marching-cubes triangles from sampled grids.',
+  description: 'No source attributes are transferred. Dual contouring records the lower-corner sample index as point grid_cell, with fallback_cells and adaptive_collapses detail counts. Planar dual faces remain quads; nonplanar faces are triangulated consistently. Conservative extraction uses cell-local triangle fans. Closed surfaces must fit inside the grid; increase source padding for offsets. Subvoxel features cannot be recovered.',
   inputs: gridInput,
   params: {
-    method: { type: 'enum', options: ['dual_contouring', 'marching_cubes'], default: 'dual_contouring', desc: 'surface extraction method' },
+    method: methodParam,
     iso: { type: 'float', default: 0, desc: 'iso distance (+ grows)' },
     sharp: { type: 'bool', default: true, desc: 'QEF feature fitting (false uses Hermite intersection centroids)' },
-    adaptive: { type: 'bool', default: false, desc: 'adaptive octree extraction (not implemented; true reports an error)' },
+    adaptive: adaptiveParam,
+    sharp_threshold: sharpThresholdParam,
     qef_tolerance: { type: 'float', default: 0.000001, min: 1e-12, max: 1, desc: 'relative rank tolerance of the QEF solver' },
     clamp_to_cell: { type: 'bool', default: true, desc: 'constrain fitted points to their source cells' },
   },
   example: { type: 'grid_to_mesh', in: ['grid'], params: { method: 'dual_contouring', sharp: true } },
   cook: async ({ input, p, engine }) => {
-    if (p.adaptive) throw new NodeError('grid_to_mesh: adaptive octree extraction is not implemented; use adaptive=false');
     const grids = requireGrids(input(0));
     if (p.method === 'marching_cubes') return Geometry.merge(grids.map(g => gridToMeshMarchingCubes(g, p.iso)));
     const k = await loadHostKernels(engine.host);
-    return Geometry.merge(grids.map(g => contourGeometry(k.dual_contour(g, p.iso, p.qef_tolerance, p.sharp, p.clamp_to_cell))));
+    const meshes = grids.map(g => contourGeometry(k.dual_contour(g, p.iso, p.qef_tolerance, p.sharp, p.clamp_to_cell, p.method === 'dual_contouring_conservative', p.adaptive, p.sharp_threshold)));
+    const out = Geometry.merge(meshes);
+    for (const name of ['fallback_cells', 'adaptive_collapses']) out.detail.add(name, 'int', 1).set(0, meshes.reduce((n, m) => n + Number(m.detail.get(name)!.get(0)), 0));
+    return out;
   },
 });
 
@@ -178,10 +186,13 @@ function transferAttributes(source: Geometry, out: Geometry): void {
 
 defineNode({
   type: 'voxel_remesh', category: 'sdf', summary: 'Mesh to sampled grid to sharp dual contouring in one operation.',
-  description: 'Unions overlapping consistently oriented polygon shells by winding number. Uniform QEF contouring preserves resolved features. With transfer_attributes, Cd is interpolated on the nearest source triangle and material is chosen at each output face centre. Other attributes are dropped; UVs and exact seams are not retained.',
+  description: 'Unions overlapping consistently oriented polygon shells by winding number. Dual QEF contouring preserves resolved features and reports local conservative fallback counts. The conservative and marching-cubes methods are also available. With transfer_attributes, Cd is interpolated on the nearest source triangle and material is chosen at each output face centre. Other attributes are dropped; UVs and exact seams are not retained.',
   inputs: [{ name: 'mesh', desc: 'polygon mesh (open shells use generalized winding-number sign)' }],
   params: {
     voxel_size: voxelParam,
+    method: methodParam,
+    adaptive: adaptiveParam,
+    sharp_threshold: sharpThresholdParam,
     offset: { ...distanceParam, default: 0 },
     smooth_iterations: { type: 'int', default: 0, min: 0, max: 32, desc: 'passes of radius-1 distance-grid blur before contouring' },
     transfer_attributes: { type: 'bool', default: false, desc: 'transfer source Cd and material using nearest source triangles' },
@@ -193,7 +204,8 @@ defineNode({
     let grid = meshGrid(src, k, p.voxel_size, 3, pad, true);
     if (p.offset) grid = fromKernel(k.grid_offset(grid, p.offset), grid.name);
     for (let i = 0; i < p.smooth_iterations; i++) grid = fromKernel(k.grid_blur(grid, 1), grid.name);
-    const out = contourGeometry(k.dual_contour(grid));
+    const out = p.method === 'marching_cubes' ? gridToMeshMarchingCubes(grid)
+      : contourGeometry(k.dual_contour(grid, 0, 1e-6, true, true, p.method === 'dual_contouring_conservative', p.adaptive, p.sharp_threshold));
     if (p.transfer_attributes) transferAttributes(src, out);
     return out;
   },

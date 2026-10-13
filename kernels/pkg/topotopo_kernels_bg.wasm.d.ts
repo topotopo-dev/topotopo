@@ -1,7 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const dual_contour: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const dual_contour: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
 export const erode_droplet: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: bigint) => void;
 export const erode_pipe: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: bigint) => void;
 export const flow_accumulation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
