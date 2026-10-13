@@ -19,6 +19,7 @@ import { readMaterials } from '../src/core/materials.ts';
 import { allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
 import { exportGeometryAsync } from '../src/io/export.ts';
+import { importGeometryAsync } from '../src/io/import.ts';
 import { exportFilesAsync } from '../src/io/files.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { renderGeometry } from '../src/render/raster.ts';
@@ -390,6 +391,13 @@ let tg: Geometry;
   const png = decodePNG(glb.subarray(binStart + (bufView.byteOffset ?? 0), binStart + (bufView.byteOffset ?? 0) + bufView.byteLength));
   const want = imageToBytes(findImage(tg, 'brick_color')!).bytes;
   check(png.width === 64 && png.channels === 4 && Array.from(png.data).every((x, i) => x === want[i]), 'embedded PNG = the image values × 255 (no transfer curve)');
+  // import restores the images (8-bit), so a GLB round trip re-exports the same textures
+  const back = await importGeometryAsync(glb, 'glb');
+  const bi = imagesOf(back).map((i) => i.name).sort().join(',');
+  const err8 = maxDiff(findImage(back, 'brick_color')!.layer('C')!, findImage(tg, 'brick_color')!.layer('C')!);
+  check(bi === 'brick_color,brick_normal,brick_orm' && err8 <= 0.5 / 255 + 1e-6 && readMaterials(back).brick.textures?.orm === 'image:brick_orm', `glb import decodes image textures back into images (${bi}; max error ${err8.toFixed(5)})`);
+  const again = await exportGeometryAsync(back, 'glb', { warn: (m) => warns.push(m) });
+  check(again.byteLength > 10000 && !warns.length, 're-exporting the imported GLB embeds the textures again');
   const gltfText = new TextDecoder().decode(await exportGeometryAsync(tg, 'gltf', {}));
   check((JSON.parse(gltfText).images ?? []).length === 3 && gltfText.includes('data:image/png;base64,'), '.gltf embeds the images as data URIs (stored PNG blocks without deflate)');
 

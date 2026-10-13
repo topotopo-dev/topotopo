@@ -36,7 +36,8 @@
 //   relative to the file. Mesh/node names → prim "name", materials → prim "material" + table, COLOR_0 → Cd/Alpha,
 //   TEXCOORD_0/1 → uv/uv2, custom `_X` → attributes, instance `_X` accessors → anchor attributes. Texture images are
 //   not decoded: their paths (URI resolved against the file, or "embedded:<name>" for images inside a GLB) go into the
-//   material table's textures entries; files written by polyforge restore the original paths from material extras.
+//   material table's textures entries; files written by polyforge restore the original paths from material extras,
+//   and their "image:<name>" textures are decoded back into image volumes (8-bit precision).
 import { Document, GLB_BUFFER, MathUtils, PlatformIO, Primitive } from '@gltf-transform/core';
 import type { Accessor, JSONDocument, Material as GMaterial, Node as GNode, Texture } from '@gltf-transform/core';
 import {
@@ -55,7 +56,10 @@ import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, baseOf, decomposeXfor
 import type { AnchorAttrib, ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked } from '../core/packed.ts';
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
-import { imageTextureData } from './textures.ts';
+import { imageFromPNG, imageTextureData } from './textures.ts';
+import { decodePNG } from './png-decode.ts';
+import { imageRef } from '../core/image.ts';
+import type { Image } from '../core/image.ts';
 
 /** Above this many polylines per material and mesh, curves go into one LINES primitive instead of LINE_STRIPs. */
 const MAX_LINE_STRIPS = 256;
@@ -971,6 +975,21 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
   if (instanced) warn('EXT_mesh_gpu_instancing instances were expanded into geometry');
   const out = Geometry.merge(parts);
   if (Object.keys(table).length) writeMaterials(out, table);
+  // "image:<name>" textures (polyforge files keep the paths in material extras): decode the embedded PNGs back into
+  // image volumes, so a re-export writes them again
+  const images = new Map<string, Image>();
+  for (const [gm, n] of matNames) {
+    const tex = n ? table[n]?.textures : undefined;
+    if (!tex) continue;
+    const slots: [string | undefined, Texture | null][] = [[tex.baseColor, gm.getBaseColorTexture()], [tex.normal, gm.getNormalTexture()], [tex.orm ?? tex.roughness, gm.getMetallicRoughnessTexture()]];
+    for (const [path, t] of slots) {
+      const name = imageRef(path);
+      const bytes = t?.getImage();
+      if (name === null || images.has(name) || !bytes?.length || imageMime(bytes) !== 'image/png') continue;
+      try { images.set(name, imageFromPNG(decodePNG(bytes), name)); } catch (e: any) { warn(`texture "${path}": ${e?.message ?? e}`); }
+    }
+  }
+  out.volumes.push(...images.values());
   return out;
 }
 

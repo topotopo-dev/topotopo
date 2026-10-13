@@ -8,6 +8,7 @@ import { TEXTURE_SLOTS, mergeMaterialTables } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { encodePNG } from '../render/png.ts';
 import { encodeGreyPNG, zlibStored } from './heightmap.ts';
+import type { PngImage } from './png-decode.ts';
 import { baseOf, dirOf, joinPath } from './common.ts';
 
 /**
@@ -18,6 +19,24 @@ export function imagePNG(img: Image, layer = '', deflate?: (d: Uint8Array) => Ui
   const { bytes, channels } = imageToBytes(img, layer, true);
   if (channels === 1) return encodeGreyPNG(bytes, img.width, img.height, 8, deflate);
   return encodePNG(bytes, img.width, img.height, deflate ?? zlibStored);
+}
+
+/** An image volume from a decoded PNG: grey → 1 channel, grey+alpha / RGB / RGBA → RGBA; samples / maxValue. */
+export function imageFromPNG(png: PngImage, name: string): Image {
+  const n = png.width * png.height, ch = png.channels, d = png.data, k = 1 / (png.maxValue || 255);
+  const img = new Image(png.width, png.height, name);
+  if (ch === 1) {
+    const a = new Float32Array(n);
+    for (let i = 0; i < n; i++) a[i] = d[i] * k;
+    return img.set('C', a);
+  }
+  const a = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    const o = i * ch;
+    if (ch === 2) { a[i * 4] = a[i * 4 + 1] = a[i * 4 + 2] = d[o] * k; a[i * 4 + 3] = d[o + 1] * k; }
+    else { a[i * 4] = d[o] * k; a[i * 4 + 1] = d[o + 1] * k; a[i * 4 + 2] = d[o + 2] * k; a[i * 4 + 3] = ch === 4 ? d[o + 3] * k : 1; }
+  }
+  return img.set('C', a);
 }
 
 /** A file-name-safe version of an image name ("" → "image"). */
