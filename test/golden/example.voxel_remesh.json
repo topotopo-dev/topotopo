@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["Cd:float:3", "P:float:3", "grid_cell:int:1"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [4.3022, 1.38, 1.2022],
+      "min": [-4.2384, -0.68, -1.2022]
+    },
+    "counts": {
+      "points": 35327,
+      "prims": 70670,
+      "vertices": 212010,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "05caaea86158c25e",
+      "attributes": {
+        "point.Cd": "c9b3830a0a48d2b4",
+        "point.grid_cell": "9e3bac934d5f8ce1"
+      },
+      "topology": "ba5ea7637d01e2e1"
+    }
+  },
+  "name": "example.voxel_remesh",
+  "ok": true,
+  "source": "examples/voxel_remesh.json",
+  "warnings": []
+}

@@ -21,6 +21,7 @@ import type { Slice } from './section.ts';
 import { LabelPlacer, ambientOcclusion, dotOv, drawLabel, drawLegend, lineOv } from './overlay.ts';
 import type { DepthTol, LegendItem, RGB } from './overlay.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
+import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler } from './texview.ts';
 
 /**
@@ -201,6 +202,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
   if (g.hasPacked() || g.hasSplines()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
   g = withHeightfieldPreview(g); // heightfields draw as their (decimated) grid mesh with layers as attributes
+  g = withSdfGridPreview(g); // sampled SDFs draw through the existing level-set mesher at preview resolution
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   // images and nothing else to draw in 3D: the texture view (render/texview.ts)
   const onlyImages = !g.numPoints && g.volumes.length > 0 && g.volumes.every((v) => v.kind === 'image');

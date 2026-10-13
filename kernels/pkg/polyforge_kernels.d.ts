@@ -1,9 +1,25 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export function dual_contour(g: any, iso: number, qef_tolerance: number, sharp: boolean, clamp_to_cell: boolean): object;
+
+export function grid_blur(g: any, radius: number): object;
+
+export function grid_csg(a: any, b: any, op: string, k: number): object;
+
+export function grid_dilate(g: any, d: number): object;
+
+export function grid_erode(g: any, d: number): object;
+
+export function grid_offset(g: any, d: number): object;
+
+export function grid_resample(g: any, voxel: number): object;
+
 export function offset_polygon(outer: Float64Array, hole_arrays: Array<any>, distance: number): object;
 
 export function roof(outer: Float64Array, hole_arrays: Array<any>, pitch: Float64Array, height_cap?: number | null): object;
+
+export function sdf_from_mesh(positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean): object;
 
 export function straight_skeleton(outer: Float64Array, hole_arrays: Array<any>, weights?: Float64Array | null): object;
 
@@ -11,12 +27,21 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly dual_contour: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly grid_blur: (a: number, b: number, c: number) => void;
+    readonly grid_csg: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly grid_dilate: (a: number, b: number, c: number) => void;
+    readonly grid_erode: (a: number, b: number, c: number) => void;
+    readonly grid_offset: (a: number, b: number, c: number) => void;
+    readonly grid_resample: (a: number, b: number, c: number) => void;
     readonly offset_polygon: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly roof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly sdf_from_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly straight_skeleton: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly __wbindgen_export: (a: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
     readonly __wbindgen_export2: (a: number, b: number) => number;
+    readonly __wbindgen_export3: (a: number, b: number, c: number, d: number) => number;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;

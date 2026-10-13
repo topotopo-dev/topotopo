@@ -85,8 +85,21 @@ export function geoContentHash(g: Geometry): string {
     h.s('edge group ' + name);
     for (const k of [...g.edgeGroups.get(name)!.keyIterator()].sort((x, y) => x - y)) { h.w(k % 4294967296); h.w(Math.floor(k / 4294967296)); }
   }
-  // SDF volumes are functions and cannot be compared: geometry with volumes is only equal to itself
-  if (g.volumes.length) h.w(++unique);
+  // Sampled grids have comparable content. Other volumes retain their existing identity-only semantics.
+  for (const v of g.volumes) if (v.kind === 'grid') {
+    h.s('grid:' + v.name);
+    for (const n of v.dims) h.w(n);
+    for (const x of v.origin) h.q(x, 1e7);
+    h.q(v.voxel, 1e7);
+    for (let i = 0; i < v.values.length; i++) {
+      const value = v.values[i];
+      if (value === Infinity) h.w(0x7f800000);
+      else if (value === -Infinity) h.w(0xff800000);
+      else if (Object.is(value, -0)) h.s('grid:-0'); // retains the sampled mesh's inside sign on exact surfaces
+      else h.q(value, 1e7);
+    }
+  }
+  if (g.volumes.some((v) => v.kind !== 'grid')) h.w(++unique);
   const out = h.hex();
   memo.set(g, out);
   return out;

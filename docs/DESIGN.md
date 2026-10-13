@@ -385,6 +385,25 @@ The point normals that bound noise_displace are a scatter-add over the vertices,
 the per-polygon Newell vectors on the pool and summing them here (bit-identical) was tried and saved nothing, because
 the sums and the normalisation are most of pointNormals' cost.
 
+### Sampled SDF grids
+
+`Volume` also includes `kind: 'grid'` (`core/sdfgrid.ts`): a dense x-fast Float32
+distance grid, dimensions, origin and uniform world-space voxel size. Values are
+negative inside and signed infinities represent the unfilled narrow-band background.
+Trilinear sampling, bounds, copy-on-write cloning, merge/subsets, native JSON and
+quantized fingerprints preserve this volume alongside heightfields and images.
+JSON uses explicit strings for signed infinities and negative zero.
+
+The `sdf_grid`, `grid_combine`, `grid_offset`, `grid_blur`, `grid_dilate`, `grid_erode`,
+`grid_resample`, `grid_to_mesh`, `grid_to_sdf` and `voxel_remesh` nodes call the Rust
+WASM kernels through the existing host-agnostic loader. The renderer's grid preview
+uses the existing manifold level-set path at bounded resolution. Grid-to-mesh drops
+source attributes; voxel remesh can transfer Cd/material using the source triangle
+BVH. Uniform dual contouring uses Hermite gradients and QEF feature placement with
+cell-component separation; adaptive octree extraction is explicitly unsupported.
+Grid CSG keeps A's domain, so sampling padding must include planned unions/offsets.
+See `kernels/README.md` for the algorithm, data contract and limitations.
+
 ### Rust kernels and straight skeletons
 
 `kernels/` is a standalone Rust crate with a committed `wasm-pack --target web` package in `kernels/pkg/`.

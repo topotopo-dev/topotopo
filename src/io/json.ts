@@ -4,6 +4,7 @@ import type { AttribType } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
 import { imageFromJSON, imageToJSON, imagesOf } from '../core/image.ts';
+import { gridFromJSON, gridToJSON, gridsOf } from '../core/sdfgrid.ts';
 
 function tableToJSON(t: AttribTable) {
   const out: Record<string, any> = {};
@@ -80,6 +81,12 @@ export function geoToJSON(g: Geometry) {
   // image volumes (written only when present): size + layers as base64 float32 (core/image.ts)
   const imgs = imagesOf(g);
   if (imgs.length) out.images = imgs.map(imageToJSON);
+  const grids = gridsOf(g);
+  if (grids.length) {
+    out.grids = grids.map(gridToJSON);
+    // Existing files are unchanged. Mixed sampled volumes keep their order; implicit functions are not stored.
+    out.volumeOrder = g.volumes.filter((v) => v.kind !== 'sdf').map((v) => v.kind);
+  }
   return out;
 }
 
@@ -142,5 +149,16 @@ export function geoFromJSON(j: any): Geometry {
     g.volumes.push(hf);
   }
   for (const im of j.images ?? []) g.volumes.push(imageFromJSON(im));
+  for (const grid of j.grids ?? []) g.volumes.push(gridFromJSON(grid));
+  if (j.volumeOrder !== undefined) {
+    if (!Array.isArray(j.volumeOrder) || j.volumeOrder.length !== g.volumes.length) throw new Error('native JSON volumeOrder must list every stored volume');
+    const byKind = new Map<string, typeof g.volumes>();
+    for (const v of g.volumes) { const bucket = byKind.get(v.kind) ?? []; bucket.push(v); byKind.set(v.kind, bucket); }
+    g.volumes = j.volumeOrder.map((kind: unknown) => {
+      const volume = typeof kind === 'string' ? byKind.get(kind)?.shift() : undefined;
+      if (!volume) throw new Error(`native JSON volumeOrder has an unknown or repeated kind: ${String(kind)}`);
+      return volume;
+    });
+  }
   return g;
 }

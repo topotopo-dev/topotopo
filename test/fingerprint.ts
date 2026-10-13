@@ -77,6 +77,7 @@ export interface Fingerprint {
     name: string; kind: string; bounds: { min: number[]; max: number[] }; samples?: string;
     grid?: { width: number; height: number; cellSize: number; origin: number[] }; layers?: Record<string, string>;
     image?: { width: number; height: number };
+    sdfGrid?: { dims: number[]; origin: number[]; voxel: number; values: string };
   }[];
   /** packed instances (only present when there are some): count, per-source fingerprint hashes, per-prim source + xform hash */
   packed?: { instances: number; sources: string[]; hash: string };
@@ -199,6 +200,19 @@ export function fingerprint(g: Geometry): Fingerprint {
 
   if (g.volumes.length) {
     fp.volumes = g.volumes.map((vol) => {
+      if (vol.kind === 'grid') {
+        const h = new Hasher(), { min, max } = vol.bounds;
+        h.int(vol.values.length);
+        for (let i = 0; i < vol.values.length; i++) {
+          if (Object.is(vol.values[i], -0)) h.str('grid:-0');
+          else h.float(vol.values[i], ATTR_Q);
+        }
+        return {
+          name: vol.name, kind: vol.kind,
+          bounds: { min: min.map((v) => round(v, BBOX_Q)), max: max.map((v) => round(v, BBOX_Q)) },
+          sdfGrid: { dims: [...vol.dims], origin: vol.origin.map((v) => round(v, BBOX_Q)), voxel: round(vol.voxel, 1e6), values: h.hex() },
+        };
+      }
       if (vol.kind === 'heightfield') {
         const { min, max } = vol.bounds;
         const layers: Record<string, string> = {};

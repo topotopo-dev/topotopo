@@ -11,6 +11,7 @@ import { rng, rand } from '../core/random.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { primNormals } from '../core/topology.ts';
 import { transformHeightfield } from '../core/heightfield.ts';
+import { transformSdfGrid } from '../core/sdfgrid.ts';
 import { AXES, P, getPointNormals, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
 import { then } from '../graph/parallel.ts';
@@ -67,6 +68,7 @@ export function applyMatrix(src: Geometry, m: Mat4, ptMask: Uint8Array | null = 
     if (ptMask) continue;
     if (v.kind === 'image') continue; // images live in uv space, not in the scene
     if (v.kind === 'heightfield') { g.volumes[k] = transformHeightfield(v, m); continue; } // stays an axis-aligned grid
+    if (v.kind === 'grid') { g.volumes[k] = transformSdfGrid(v, m); continue; }
     const inv = invertAffine(m);
     const sc = Math.cbrt(Math.abs(m4determinant3(m))) || 1;
     const corners: Vec3[] = [];
