@@ -8,8 +8,8 @@
       "vertex": []
     },
     "bbox": {
-      "max": [1.0051, 1.0264, 1.0066],
-      "min": [-1.0401, -1.0244, -1.025]
+      "max": [1.0936, 1.0878, 1.0953],
+      "min": [-1.0951, -1.0937, -1.0853]
     },
     "counts": {
       "points": 162,
@@ -24,11 +24,11 @@
       "vertex": []
     },
     "hashes": {
-      "P": "d4a707c15a9be323",
+      "P": "d6c4ea4fe95c2879",
       "attributes": {
-        "point.N": "b2f093f93dadb983",
+        "point.N": "3e63f3d84708d3da",
         "point.rest_P": "fb64e34a8f266dd8",
-        "point.v": "da9f9a757f6486bb"
+        "point.v": "7074406ae604d444"
       },
       "topology": "36c92a45a2538113"
     }

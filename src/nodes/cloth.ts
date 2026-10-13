@@ -87,6 +87,9 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
   const model = buildCloth(g, {
     density: p.density, stretch: p.stretch_stiffness, shear: p.shear_stiffness, bend: p.bend_stiffness, restScale: p.rest_scale,
     mass: massAttr && massAttr.type === 'float' && massAttr.size === 1 ? (massAttr.data as Float64Array) : null,
+    // inflate solves stretch point by point: exactly solved chains are inextensible hoops that buckle (lumps) when the
+    // volume pushes outwards; the point-wise sweep lets the skin stretch evenly
+    chains: mode !== 'inflate',
   });
   if (mode === 'inflate') {
     if (!model.tris.length) throw new NodeError('inflate: the input has no polygons', 'inflate needs a closed polygon mesh (box, sphere, a closed sack)');
@@ -134,7 +137,7 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
     wind: p.wind, thickness: p.thickness, friction: p.friction, floor: !!p.floor, floorHeight: p.floor_height,
     selfCollision: !!p.self_collision, tethers: !!p.tethers,
   };
-  if (mode === 'inflate') { opts.pressure = p.pressure; opts.pressureStiffness = p.pressure_stiffness; }
+  if (mode === 'inflate') { opts.pressure = p.pressure; opts.pressureStiffness = p.pressure_stiffness; opts.pressureRamp = Math.ceil(p.steps / 2); }
   const sim = new XpbdCloth(model, opts, x0, v0, pinned);
 
   let collider: Collider | null = null;
@@ -227,8 +230,10 @@ defineNode({
     'Simulates the `geo` input as a closed cloth bag whose volume is driven towards `pressure` × its rest volume, against the ' +
     'same stretch, shear and bend constraints as drape (and the same collider, floor, pins and wind). pressure 1 keeps ' +
     'the volume, 1.5 puffs a box into a cushion, < 1 deflates it; pressure_stiffness sets how hard the volume pushes ' +
-    'against the cloth (a stiff cloth caps the volume). Gravity and the floor are off by default (the shape inflates in ' +
-    'place); turn them on to rest a cushion on the ground. Houdini: Vellum Pressure constraint.',
+    'against the cloth (a stiff cloth caps the volume: a sphere needs a soft stretch_stiffness to grow, a box bulges into a ' +
+    'pillow). The pressure rises smoothly over the first half of the steps, and the skin is solved edge by edge so it ' +
+    'stretches evenly. Gravity and the floor are off by default (the shape inflates in place); turn them on to rest a ' +
+    'cushion on the ground. Houdini: Vellum Pressure constraint.',
   aliases: ['vellum_pressure', 'pressure', 'balloon'],
   inputs: [{ ...INPUTS[0], name: 'geo', desc: 'a closed polygon mesh (box, sphere, a sewn sack)' }, INPUTS[1], INPUTS[2]],
   params: {

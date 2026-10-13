@@ -480,8 +480,12 @@ drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solv
   instead of pushing them in, where the contact projection would undo it (a rope over a box kept its edge link 20 %
   long). A sweep runs the point-wise constraints (shear, bend, tethers, volume, self collision) first and the chains
   last before the contacts, so the stiffest constraint has the last word. Measured (60 × 60 cloth, 150 steps, defaults):
-  hanging cloth max strain 0.7 % without tethers, 0.03 % with them; tablecloth over a box mean 0.8 % (the remaining peaks
-  are the one quad that tents over each sharp top corner); over a sphere mean 0.5 %, p99 3.2 % (was 9.2 % / 61 %).
+  hanging cloth max strain 3 % without tethers, 0.00 % with them; tablecloth over a box mean 0.9 % (the remaining peaks
+  are the one quad that tents over each sharp top corner); over a sphere mean 0.5 %, p99 3.1 % (was 9.2 % / 61 %).
+  `inflate` solves stretch point-wise instead: exact chains are inextensible hoops, which buckle into lumps when the
+  volume constraint pushes outwards (a sphere at pressure 1.5 ended 24 % out of round), while the point-wise sweep lets
+  the skin stretch evenly (1 %). Its target volume also rises along a smoothstep over the first half of the steps: the
+  volume constraint is effectively hard, and a jump to the full target threw the skin outwards in one substep.
 - **Collisions** are speculative contact planes found once per step (`collideRange`, kernel `cloth_collide`): a point
   within its query radius (1.5 × thickness plus twice its travel in the step) of a collider triangle gets the plane
   through the closest point with the normal towards its side; the substeps keep it `thickness` in front. On closed,
@@ -498,7 +502,9 @@ drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solv
   distance found at its last query (a miss searches twice the radius) minus its travel exceeds the radius, and the BVH
   search starts from the point's last triangle; on the 100 × 100 drape this halves the query time.
 - **Determinism and threads.** The point-wise constraints are colour-sorted (no two constraints of a colour share a point),
-  chains run in build order, sweeps alternate direction, and the solve runs on the cooking thread. Only the collider
+  chains run in build order, sweeps within a substep alternate direction starting forward (alternating across substeps
+  with one sweep each pumped a period-2 mode: a closed sphere crumpled from a 10⁻³ jitter), and the solve runs on the
+  cooking thread. Only the collider
   queries go through `ctx.parallelMap`; they are pure per point, so a cook is bit-identical with and without the pool
   (test/cloth.ts checks it with a forced pool).
 - **Limits** (against Vellum): static colliders only; per-point collision plus corner contacts (a sharp collider edge
