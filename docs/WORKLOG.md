@@ -15,6 +15,12 @@ before touching the repo during the run.
   finishes) may be driven through their MCP servers.
 - Parallelism: decided per item; typically 2–3 agents at once, split so they touch different files.
 
+## Decisions (2026-10-13, relayed by the setup session)
+- Name is final: **TopoTopo**, package/CLI `topotopo`, CLI alias `topo`. R-4 runs after the in-flight code sessions merge (so the rename does not conflict with them), then the repo goes public and v0.2 is tagged; the user must be present for `npm publish` (2FA by security key) and gives the go for the placeholder publish and the visibility flip.
+- topotopo.dev is registered in the user's Cloudflare account (2026-10-13). Contact address hello@topotopo.dev, forwarded to office@faxcorp.dev (Cloudflare Email Routing): use it in CODE_OF_CONDUCT.md and package.json at the rename.
+- npm: logged in on this machine as `faxcorp`; the free npm org `topotopo` reserves the `@topotopo/*` scope; the package itself publishes unscoped as `topotopo`.
+- GitHub: the org stays `topotopo-dev` (GitHub does not release usernames for inactivity; the bare `topotopo` is a user account). Repo path after the rename: github.com/topotopo-dev/topotopo.
+
 ## Decisions (2026-10-12, from the side discussion)
 1. **Name: TopoTopo** (brand), `topotopo` for the package, CLI, GitHub org and crates; CLI alias `topo`. The code rename
    happens in ONE dedicated commit right before the first tagged release (package name, MCP server name in `.mcp.json`,
