@@ -43,6 +43,19 @@ type Maybe<T> = T | Promise<T>;
 /** f(x) for a value, x.then(f) for a promise (f may return a promise: it is flattened either way). */
 const then = <T, R>(x: Maybe<T>, f: (v: T) => R | Promise<R>): Maybe<R> => (x instanceof Promise ? x.then(f) : f(x));
 
+/**
+ * Loaded-WASM auto policy, calibrated with interleaved medians (BENCH.md session 13).
+ * `workers` is zero for an unavailable/cold pool or a stage below its pool threshold.
+ * Large elimination lists and projection passes benefit from multiple JS workers
+ * despite faster individual Rust loops. Minimum-distance rejection stays in WASM.
+ * Explicit backend choices do not use this policy.
+ */
+export function scatterAutoUsesJs(stage: 'eliminate' | 'relax', count: number, varying: boolean, workers: number): boolean {
+  if (stage === 'relax') return workers >= 3 && count >= 50_000;
+  if (varying) return (workers >= 3 && count >= 200_000) || (workers === 2 && count >= 500_000);
+  return (workers >= 4 && count >= 500_000) || (workers >= 8 && count >= 250_000);
+}
+
 type ArrayCtor<T> = { new (b: ArrayBuffer | SharedArrayBuffer): T; new (n: number): T; BYTES_PER_ELEMENT: number };
 
 /**
@@ -129,7 +142,11 @@ export function candidatesRange(a: CandidateArgs, A: Record<string, any>, start:
 export function surfaceCandidates(
   P: Float64Array, tp: Int32Array, cdf: Float64Array, count: number, state: number, run?: RunKernel,
 ): Maybe<{ candT: Int32Array; candW: Float64Array; pos: Float64Array }> {
-  const candT = new Int32Array(count), candW = new Float64Array(count * 3), pos = new Float64Array(count * 3);
+  // Keep large candidate results in the pool's shared storage: the next whole-stage
+  // selection can consume them directly, and interpolation still owns the arrays.
+  const shared = count >= 65536 ? run : undefined;
+  const candT = poolArray(Int32Array, count, shared), candW = poolArray(Float64Array, count * 3, shared);
+  const pos = poolArray(Float64Array, count * 3, shared);
   const nt = cdf.length, args: CandidateArgs = { state, total: nt ? cdf[nt - 1] : 0, nt };
   const job: ScatterJob = { count, args, inputs: { cdf, tp, P }, results: { candT, candW, pos } };
   return then(runKernel(run, 'scatter_candidates', job, 65536, candidatesRange), () => ({ candT, candW, pos }));
