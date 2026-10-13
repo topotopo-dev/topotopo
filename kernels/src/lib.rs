@@ -11,6 +11,7 @@ pub mod dual_contour;
 pub mod erosion;
 pub mod erosion_droplet;
 pub mod erosion_flow;
+mod erosion_profile;
 pub mod remesh_quad;
 pub mod sdf;
 

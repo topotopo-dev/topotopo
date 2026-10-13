@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 simd = []
+profile = []
 
 [[bench]]
 name = "erosion"
