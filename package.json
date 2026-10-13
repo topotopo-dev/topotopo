@@ -2,8 +2,31 @@
   "name": "polyforge",
   "version": "0.1.0",
   "description": "A procedural geometry engine: Houdini-style node graphs, headless, deterministic, exports to Unreal, Blender and Houdini",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "polyforge": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "shelf/*.json",
+    "assets/fonts",
+    "kernels/pkg",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
+    "build": "node scripts/build.ts",
+    "prepack": "npm run build",
+    "pack:test": "node scripts/pack-test.ts",
     "mcp": "node src/mcp/server.ts",
     "preview": "node scripts/preview.ts --examples",
     "cook": "node src/cli.ts",
