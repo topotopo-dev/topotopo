@@ -7,7 +7,7 @@ before touching the repo during the run.
 ## Decisions (2026-10-12)
 - Scope: roadmap phases 0–2 (foundation, modelling parity, PCG/instancing). Volumes/sim/CAD and the GUI wait.
 - Source control: agents commit on worktree branches; the orchestrator verifies, merges into `main`, pushes to
-  `github.com/faxlab/polyforge` after every merge. No PRs.
+  `github.com/topotopo-dev/polyforge` after every merge. No PRs.
 - Licence: Apache-2.0 since 2026-10-12 (was MIT; decision 2 below). LICENSE + generated NOTICE. Dependencies must be MIT/Apache-2.0/ISC/BSD/MPL-2.0 (file-level). No GPL/AGPL.
   LGPL only as a separately loaded module. `straight-skeleton` on npm wraps CGAL (GPL): do not add it.
 - Toolchains: anything needed may be installed (Rust + wasm-pack, emscripten). Rust 1.94 is present.
