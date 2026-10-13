@@ -661,7 +661,7 @@ export class Engine {
       const deferred = Object.fromEntries(REF_FUNCS.map((f) => [f, () => { throw new DeferredExpr(f); }]));
       for (const [name, spec] of Object.entries(graph.nodes)) {
         const def = this.resolveDef(spec.type)!;
-        const r = resolveParams(def, spec.params, allVars, { fns: deferred });
+        const r = resolveParams(def, spec.params, allVars, { fns: deferred, host: this.host, timeoutMs: this.scriptTimeoutMs });
         for (const e of r.errors) if (!e.startsWith('unknown param')) v.errors.push({ node: name, message: e });
         for (const n of r.notes) notes.push(`${name}: ${n}`);
         if (r.deferred.length) notes.push(`${name}: ${r.deferred.join(', ')} read other nodes (evaluated when cooked)`);
@@ -796,7 +796,7 @@ export class Engine {
     const def = this.resolveDef(spec.type)!;
     const refs = scanNodeRefs(def, spec.params);
     if (!hasRefs(refs)) {
-      const rp = resolveParams(def, spec.params, s.vars, { time: s.time });
+      const rp = resolveParams(def, spec.params, s.vars, { time: s.time, host: this.host, timeoutMs: this.scriptTimeoutMs });
       return { rp, refSig: '', usesTime: rp.usesTime, depsTimeDependent: false };
     }
     const fail = (error: string, upstream = false): NodeParams => ({
@@ -826,7 +826,7 @@ export class Engine {
       const pn = resolveParamName(e.def, c.param);
       parts.push(`${c.node}.${c.param}=${pn ? stableStringify(e.values[pn]) : 'u'}`);
     }
-    const rp = resolveParams(def, spec.params, s.vars, { time: s.time, fns: refFunctions(geo, chp) });
+    const rp = resolveParams(def, spec.params, s.vars, { time: s.time, fns: refFunctions(geo, chp), host: this.host, timeoutMs: this.scriptTimeoutMs });
     return { rp, refSig: parts.join(','), usesTime: usesTime || rp.usesTime, depsTimeDependent: depTime };
   }
 
