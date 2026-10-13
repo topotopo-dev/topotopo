@@ -53,6 +53,28 @@ function runKernel(
   return [range(job.args, A, 0, job.count)];
 }
 
+// ---------------------------------------------------------------- KD tree
+
+/** Build the deferred ranges (lo, hi pairs in A.ranges) [start, end) of a KD tree given as arrays (TP, idx, axis). */
+export function kdBuildRange(_a: unknown, A: Record<string, any>, start: number, end: number): void {
+  const kd = KDTree.fromArrays(A as any), R: Int32Array = A.ranges;
+  for (let e = start; e < end; e++) kd.buildRange(R[e * 2], R[e * 2 + 1]);
+}
+
+/**
+ * new KDTree(P), with the lower levels built in chunks on the pool (kd_build): the top levels here until the ranges
+ * are small enough to give every thread a few, then each range in a worker. The same tree as the serial build.
+ */
+export function buildKDTree(P: Float64Array, run?: RunKernel): Maybe<KDTree> {
+  const n = P.length / 3;
+  if (!run || n < 1024) return new KDTree(P);
+  const kd = new KDTree(P, undefined, Math.ceil(n / 48));
+  const ranges = Int32Array.from(kd.deferred);
+  const job: ScatterJob = { count: ranges.length / 2, inputs: { ranges }, outputs: kd.arrays() };
+  // the job counts ranges, so the size threshold (64k points) is applied here; a forced pool still takes it
+  return then(runKernel(run, 'kd_build', job, n >= 65536 ? 2 : Infinity, kdBuildRange), () => kd);
+}
+
 // ---------------------------------------------------------------- candidates
 
 export interface CandidateArgs {
@@ -185,50 +207,48 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number,
 export function sampleEliminate(pos: Float64Array, target: number, rmax: number, scale?: ArrayLike<number>, run?: RunKernel): Maybe<Int32Array> {
   const n = pos.length / 3;
   if (target >= n) return Int32Array.from({ length: n }, (_, i) => i);
-  const kd = new KDTree(pos), tree = kd.arrays();
-  if (!scale) {
-    const order = kd.idx, labelOf = new Int32Array(n);
-    for (let a = 0; a < n; a++) labelOf[order[a]] = a;
-    const deg = new Int32Array(n), w = new Float64Array(n);
-    const job: ScatterJob = { count: n, args: { r2: 2 * rmax }, inputs: { ...tree, labelOf }, results: { deg, w } };
-    return then(runKernel(run, 'scatter_elim_neighbours', job, 32768, elimNeighboursRange), (chunks: { list: Int32Array; con: Float64Array }[]) => {
-      const start = new Int32Array(n + 1);
-      for (let a = 0; a < n; a++) start[a + 1] = start[a] + deg[a];
-      const { nbr, con } = concatLists(chunks, start[n]);
-      return eliminate(n, target, start, nbr, con, w, labelOf);
-    });
-  }
-  const sc = scale instanceof Float64Array ? scale : Float64Array.from(scale);
-  const pc = new Int32Array(n);
-  const job: ScatterJob = { count: n, args: { rmax }, inputs: { ...tree, pos, scale: sc }, results: { pc } };
-  return then(runKernel(run, 'scatter_elim_pairs', job, 32768, elimPairsRange), (chunks: { pj: Int32Array; pf: Float64Array }[]) => {
-    // weights summed in discovery order (i ascending, each i's pairs in list order), each pair listed at both ends
-    const w = new Float64Array(n), deg = new Int32Array(n);
-    let c = 0, e = 0, pj = chunks.length ? chunks[0].pj : new Int32Array(0), pf = chunks.length ? chunks[0].pf : new Float64Array(0);
-    let total = 0;
-    for (const ch of chunks) total += ch.pj.length;
-    const PI = new Int32Array(total), PJ = new Int32Array(total), PF = new Float64Array(total);
-    let q = 0;
-    for (let i = 0; i < n; i++) {
-      for (let k = 0; k < pc[i]; k++) {
-        while (e >= pj.length) { c++; pj = chunks[c].pj; pf = chunks[c].pf; e = 0; }
-        const j = pj[e], f = pf[e]; e++;
-        w[i] += f; w[j] += f;
-        deg[i]++; deg[j]++;
-        PI[q] = i; PJ[q] = j; PF[q] = f; q++;
+  return then(buildKDTree(pos, run), (kd: KDTree) => {
+    const tree = kd.arrays();
+    if (!scale) {
+      const order = kd.idx, labelOf = new Int32Array(n);
+      for (let a = 0; a < n; a++) labelOf[order[a]] = a;
+      const deg = new Int32Array(n), w = new Float64Array(n);
+      const job: ScatterJob = { count: n, args: { r2: 2 * rmax }, inputs: { ...tree, labelOf }, results: { deg, w } };
+      return then(runKernel(run, 'scatter_elim_neighbours', job, 32768, elimNeighboursRange), (chunks: { list: Int32Array; con: Float64Array }[]) => {
+        const start = new Int32Array(n + 1);
+        for (let a = 0; a < n; a++) start[a + 1] = start[a] + deg[a];
+        const { nbr, con } = concatLists(chunks, start[n]);
+        return eliminate(n, target, start, nbr, con, w, labelOf);
+      });
+    }
+    const sc = scale instanceof Float64Array ? scale : Float64Array.from(scale);
+    const pc = new Int32Array(n);
+    const job: ScatterJob = { count: n, args: { rmax }, inputs: { ...tree, pos, scale: sc }, results: { pc } };
+    return then(runKernel(run, 'scatter_elim_pairs', job, 32768, elimPairsRange), (chunks: { pj: Int32Array; pf: Float64Array }[]) => {
+      // weights summed in discovery order (i ascending, each i's pairs in list order); each pair is listed at both
+      // ends, and its removal weight equals its creation weight (same distance, same summed radius): stored with it
+      const w = new Float64Array(n), deg = new Int32Array(n);
+      for (let i = 0, c = 0, e = 0; i < n; i++) {
+        for (let k = pc[i]; k > 0; k--) {
+          while (e >= chunks[c].pj.length) { c++; e = 0; }
+          const j = chunks[c].pj[e], f = chunks[c].pf[e]; e++;
+          w[i] += f; w[j] += f;
+          deg[i]++; deg[j]++;
+        }
       }
-    }
-    // the removal weight of a pair equals its creation weight (same distance, same summed radius): stored with it
-    const start = new Int32Array(n + 1);
-    for (let i = 0; i < n; i++) start[i + 1] = start[i] + deg[i];
-    const nbr = new Int32Array(start[n]), con = new Float64Array(start[n]);
-    const fill = start.slice(0, n);
-    for (let k = 0; k < total; k++) {
-      const i = PI[k], j = PJ[k], f = PF[k];
-      nbr[fill[i]] = j; con[fill[i]++] = f;
-      nbr[fill[j]] = i; con[fill[j]++] = f;
-    }
-    return eliminate(n, target, start, nbr, con, w, null);
+      const start = new Int32Array(n + 1);
+      for (let i = 0; i < n; i++) start[i + 1] = start[i] + deg[i];
+      const nbr = new Int32Array(start[n]), con = new Float64Array(start[n]), fill = start.slice(0, n);
+      for (let i = 0, c = 0, e = 0; i < n; i++) {
+        for (let k = pc[i]; k > 0; k--) {
+          while (e >= chunks[c].pj.length) { c++; e = 0; }
+          const j = chunks[c].pj[e], f = chunks[c].pf[e]; e++;
+          nbr[fill[i]] = j; con[fill[i]++] = f;
+          nbr[fill[j]] = i; con[fill[j]++] = f;
+        }
+      }
+      return eliminate(n, target, start, nbr, con, w, null);
+    });
   });
 }
 
@@ -245,10 +265,10 @@ function concatLists(chunks: { list: Int32Array; con: Float64Array }[], len: num
  * The elimination itself: remove the heaviest candidate until `target` remain, lowering its neighbours' weights by
  * their pair's contribution. Labels are KD slots (labelOf maps point → slot) or point indices (labelOf null).
  *
- * An indexed binary max-heap (heap[k] = label at position k, hw[k] = its weight, where[label] = its position). Elements
- * sift down through a hole (the children move up, the element is written once), which leaves every element where the
- * swap-by-swap version leaves it (same comparisons, ties to the left child). Weights only decrease, so an updated
- * element only ever sinks.
+ * An indexed binary max-heap (heap[k] = label at position k, hw[k] = its current weight, where[label] = its position,
+ * -1 once removed). Elements sift down through a hole (the children move up, the element is written once), which
+ * leaves every element where the swap-by-swap version leaves it (same comparisons, ties to the left child). Weights
+ * only decrease, so an updated element only ever sinks. The heap holds each weight, so w is only read to fill it.
  */
 function eliminate(
   n: number, target: number, start: Int32Array, nbr: Int32Array, con: Float64Array, w: Float64Array, labelOf: Int32Array | null,
@@ -257,24 +277,20 @@ function eliminate(
   for (let i = 0; i < n; i++) { const a = labelOf ? labelOf[i] : i; heap[i] = a; where[a] = i; hw[i] = w[a]; }
   let size = n;
   for (let k = (size >> 1) - 1; k >= 0; k--) siftDown(heap, hw, where, size, k, heap[k], hw[k]);
-  const removed = new Uint8Array(n);
   while (size > target) {
     const a = heap[0];
-    removed[a] = 1;
+    where[a] = -1;
     // the last element takes the root and sinks
     size--;
     if (size > 0) siftDown(heap, hw, where, size, 0, heap[size], hw[size]);
     for (let e = start[a]; e < start[a + 1]; e++) {
-      const b = nbr[e];
-      if (removed[b]) continue;
-      const wb = (w[b] -= con[e]);
-      siftDown(heap, hw, where, size, where[b], b, wb);
+      const b = nbr[e], k = where[b];
+      if (k < 0) continue;
+      siftDown(heap, hw, where, size, k, b, hw[k] - con[e]);
     }
   }
-  let kept = 0;
-  for (let i = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) kept++;
-  const out = new Int32Array(kept);
-  for (let i = 0, o = 0; i < n; i++) if (!removed[labelOf ? labelOf[i] : i]) out[o++] = i;
+  const out = new Int32Array(size);
+  for (let i = 0, o = 0; i < n; i++) if (where[labelOf ? labelOf[i] : i] >= 0) out[o++] = i;
   return out;
 }
 
@@ -510,12 +526,14 @@ export function relaxOnSurface(
     let smax = 0;
     for (let i = 0; i < n; i++) if (S[i] > smax) smax = S[i];
     if (!(smax > 0)) return;
-    const kd = new KDTree(P), nP = P.slice(), nS = S.slice();
-    const args: RelaxArgs = { ...base, smax };
-    const job: ScatterJob = { count: n, args, inputs: { ...kd.arrays(), P, S }, outputs: { nP, nS, tri, bary }, shared };
-    return then(runKernel(run, 'scatter_relax', job, 2048, (ar, A, s, e) => relaxRange(ar, A, s, e, surf)), () => {
-      P.set(nP); S.set(nS);
-      return pass(it + 1);
+    return then(buildKDTree(P, run), (kd: KDTree) => {
+      const nP = P.slice(), nS = S.slice();
+      const args: RelaxArgs = { ...base, smax };
+      const job: ScatterJob = { count: n, args, inputs: { ...kd.arrays(), P, S }, outputs: { nP, nS, tri, bary }, shared };
+      return then(runKernel(run, 'scatter_relax', job, 2048, (ar, A, s, e) => relaxRange(ar, A, s, e, surf)), () => {
+        P.set(nP); S.set(nS);
+        return pass(it + 1);
+      });
     });
   };
   return pass(0);

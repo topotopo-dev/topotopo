@@ -464,7 +464,9 @@ defineNode({
     }
     const P0 = Float64Array.from(pos);
     const nc = P0.length / 3;
-    let keep = p.relax && count > 0 && nc > count ? await sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6, undefined, parallelMap) : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
+    let keep = p.relax && count > 0 && nc > count
+      ? await sampleEliminate(P0, count, Math.cbrt(vol / count) * 0.6, undefined, parallelMap)
+      : Int32Array.from({ length: Math.min(nc, count) }, (_, i) => i);
     if (md > 0) {
       const inKeep = new Uint8Array(nc), order = new Int32Array(nc);
       let o = 0;
