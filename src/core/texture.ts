@@ -112,12 +112,13 @@ export function genPattern(o: PatternOptions, w: number, h: number): { C: Float3
   const pix = 1 / w; // one pixel in width units: antialiasing of hard edges
   const aa = (d: number) => (b > 0 ? prof(d) : clamp01((d - m) / pix + 0.5));
   const vary = (cx: number, cy: number) => 1 - Math.max(0, Math.min(1, o.variation)) * cellRand(cx, cy, o.seed + 17);
+  const staggered = o.pattern === 'bricks' || o.pattern === 'dots';
   for (let j = 0; j < h; j++) {
     const y = (j + 0.5) / h; // 0 top .. 1 bottom
     for (let i = 0; i < w; i++) {
       const u = (i + 0.5) / w, k = j * w + i;
       const fyAll = y * ny, cy = Math.min(ny - 1, Math.floor(fyAll)), fy = fyAll - cy;
-      const shift = cy & 1 ? o.offset : 0;
+      const shift = staggered && cy & 1 ? o.offset : 0;
       const fxAll = u * nx + shift, cxu = Math.floor(fxAll), fx = fxAll - cxu, cx = wrapI(cxu, nx);
       const dx = Math.min(fx, 1 - fx) * cw, dy = Math.min(fy, 1 - fy) * chh;
       let v = 0, cid = cellRand(cx, cy, o.seed);
@@ -154,12 +155,8 @@ export function genPattern(o: PatternOptions, w: number, h: number): { C: Float3
           v = aa((d2 - d1) / (2 * sep)) * vary(bcx, bcy);
           break;
         }
-        default: // bricks, tiles (tiles: no row offset)
-          if (o.pattern === 'tiles' && shift) {
-            const tx = u * nx, tcx = Math.floor(tx), tf = tx - tcx;
-            cid = cellRand(wrapI(tcx, nx), cy, o.seed);
-            v = aa(Math.min(Math.min(tf, 1 - tf) * cw, dy)) * vary(wrapI(tcx, nx), cy);
-          } else v = aa(Math.min(dx, dy)) * vary(cx, cy);
+        default: // bricks (rows staggered by offset), tiles (a plain grid)
+          v = aa(Math.min(dx, dy)) * vary(cx, cy);
       }
       C[k] = v;
       id[k] = cid;
@@ -507,11 +504,12 @@ function sobel(g: Float32Array, w: number, h: number, i: number, j: number, wrap
 
 /**
  * Tangent-space normal map (RGBA, 0.5 + 0.5 n) from a grey height: Sobel slopes scaled by strength (1 = a height
- * step of 1 over 1/64 of the image width tilts the normal 45°). OpenGL convention (+Y up = +v) unless directx.
+ * rise of 1 over 1/64 of the image width tilts the normal 45°, at any resolution). OpenGL convention (+Y up = +v)
+ * unless directx.
  */
 export function normalFromHeight(g: Float32Array, w: number, h: number, strength: number, directx: boolean, wrap: boolean): Float32Array {
   const out = new Float32Array(w * h * 4);
-  const k = (strength * w) / 64 * 2; // Sobel /8 gives the slope per pixel over two pixels: ×2 → per pixel
+  const k = (strength * w) / 64; // Sobel / 8 is dh per pixel; a rise of 1 over w/64 pixels then gives slope 1 (45°)
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       const [gx, gy] = sobel(g, w, h, i, j, wrap);
@@ -527,7 +525,7 @@ export function normalFromHeight(g: Float32Array, w: number, h: number, strength
 
 /** Edge detection: Sobel gradient magnitude of a grey layer × strength, clamped, grown by `width` pixels (max filter). */
 export function edgeDetect(g: Float32Array, w: number, h: number, strength: number, width: number, wrap: boolean): Float32Array {
-  let out = new Float32Array(w * h);
+  let out: Float32Array = new Float32Array(w * h);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       const [gx, gy] = sobel(g, w, h, i, j, wrap);

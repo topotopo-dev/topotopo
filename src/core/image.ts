@@ -6,8 +6,12 @@
 //   uv            pixel (i, j) covers u in [i/W, (i+1)/W] and v in [1 - (j+1)/H, 1 - j/H]: v points up and row 0 is the
 //                 top, so rows go to PNG in order and glTF's flipped texture coordinate (t = 1 - v) needs no flip
 //   channels      a layer holds 1 (grey) or 4 (RGBA, interleaved) floats per pixel: length W·H or 4·W·H
-//   values        linear floats; maps are 0..1, heights and data may leave that range. Colour is never gamma
-//                 encoded in memory: a base colour texture is sRGB-encoded when it is written to a file
+//   values        floats, written to 8-bit files as round(value × 255) with no transfer curve. Data maps (heights,
+//                 masks, roughness, AO, normals) are linear by nature. Colour layers hold display values, exactly
+//                 like the engine's colour params and Cd ("#a5462e" is 0.65, 0.27, 0.18 and the renderer shows
+//                 those numbers): a base colour image written to PNG then has the same bytes as the colours that
+//                 made it, and glTF / USD read it as sRGB, as both require. So no image needs a colour-space tag,
+//                 and the texture view shows what the files will hold.
 //   layers        "C" is the image itself (Houdini COP plane name); nodes add others: "id" (per-cell random value of
 //                 patterns and cells), "mask" (bake coverage), "convex" / "concave" (curvature bakes), user layers
 //
@@ -18,8 +22,8 @@
 import type { Geometry, ImageVolume, Volume } from './geometry.ts';
 import type { Vec3 } from './math.ts';
 
-/** Largest image a node may create (pixels). */
-export const MAX_PIXELS = 8192 * 8192;
+/** Largest image a node may create (pixels): 4096² (an RGBA layer of it is 256 MB of float32). */
+export const MAX_PIXELS = 4096 * 4096;
 /** The default layer name: the image itself. */
 export const MAIN_LAYER = 'C';
 
@@ -100,21 +104,7 @@ export function channelsOf(a: ArrayLike<number>, count: number): 0 | 1 | 4 {
   return a.length === count ? 1 : a.length === count * 4 ? 4 : 0;
 }
 
-// ---------------------------------------------------------------- colour
-
-/** Linear → sRGB transfer (IEC 61966-2-1), for 8-bit base colour textures. */
-export function linearToSrgb(x: number): number {
-  if (!(x > 0)) return 0;
-  if (x >= 1) return 1;
-  return x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
-}
-
-/** sRGB → linear transfer. */
-export function srgbToLinear(x: number): number {
-  if (!(x > 0)) return 0;
-  if (x >= 1) return 1;
-  return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
-}
+// ---------------------------------------------------------------- channels
 
 /** Rec. 709 luminance weights (grey from RGB). */
 export const LUMA = [0.2126, 0.7152, 0.0722];
@@ -267,28 +257,75 @@ export function imageSummary(g: Geometry): string[] {
   return out;
 }
 
+/** A value 0..1 as a byte (clamped, rounded; NaN → 0). */
+export const toByte = (x: number) => (x > 0 ? (x < 1 ? Math.round(x * 255) : 255) : 0);
+
 /**
- * 8-bit RGBA pixels of an image layer ("" = the main layer): grey → (g, g, g, 255), values clamped to 0..1;
- * srgb encodes RGB with the sRGB transfer (base colour textures), otherwise values are written as they are (data maps).
+ * 8-bit pixels of an image layer ("" = the main layer), values clamped to 0..1 and written as they are (see the
+ * header: no transfer curve). RGBA layers give 4 bytes per pixel; grey layers 1 (grey = true) or (g, g, g, 255).
  */
-export function imageToRGBA8(img: Image, layer = '', srgb = false): Uint8Array {
+export function imageToBytes(img: Image, layer = '', grey = false): { bytes: Uint8Array; channels: 1 | 4 } {
   const name = layer || img.mainLayer;
   const a = img.layers.get(name);
-  const n = img.count, out = new Uint8Array(n * 4);
-  if (!a) { for (let i = 0; i < n; i++) out[i * 4 + 3] = 255; return out; }
-  const ch = channelsOf(a, n);
-  const q = (x: number) => (x > 0 ? (x < 1 ? Math.round(x * 255) : 255) : 0);
-  const enc = srgb ? (x: number) => q(linearToSrgb(x)) : q;
-  // a lookup table for the sRGB curve at 12-bit input precision would be faster; images are written rarely
-  for (let i = 0; i < n; i++) {
-    if (ch === 4) {
-      out[i * 4] = enc(a[i * 4]); out[i * 4 + 1] = enc(a[i * 4 + 1]); out[i * 4 + 2] = enc(a[i * 4 + 2]); out[i * 4 + 3] = q(a[i * 4 + 3]);
-    } else {
-      const v = enc(a[i]);
-      out[i * 4] = v; out[i * 4 + 1] = v; out[i * 4 + 2] = v; out[i * 4 + 3] = 255;
-    }
+  const n = img.count;
+  const ch = a ? channelsOf(a, n) : 1;
+  if (grey && ch !== 4) {
+    const out = new Uint8Array(n);
+    if (a) for (let i = 0; i < n; i++) out[i] = toByte(a[i]);
+    return { bytes: out, channels: 1 };
   }
-  return out;
+  const out = new Uint8Array(n * 4);
+  if (!a) { for (let i = 0; i < n; i++) out[i * 4 + 3] = 255; return { bytes: out, channels: 4 }; }
+  if (ch === 4) for (let i = 0; i < n * 4; i++) out[i] = toByte(a[i]);
+  else for (let i = 0; i < n; i++) { const v = toByte(a[i]); out[i * 4] = v; out[i * 4 + 1] = v; out[i * 4 + 2] = v; out[i * 4 + 3] = 255; }
+  return { bytes: out, channels: 4 };
+}
+
+/** True when every alpha value of an RGBA layer is 1 (the alpha channel carries nothing). */
+export function opaque(a: Float32Array, ch: number): boolean {
+  if (ch !== 4) return true;
+  for (let i = 3; i < a.length; i += 4) if (a[i] !== 1) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------- JSON (io/json.ts)
+
+/** Layers as base64 of their little-endian float32 bytes (compact and exact); grey/RGBA follows from the length. */
+export function imageToJSON(img: Image): Record<string, any> {
+  const layers: Record<string, string> = {};
+  for (const [k, a] of img.layers) layers[k] = f32ToBase64(a);
+  return { name: img.name, width: img.width, height: img.height, layers };
+}
+
+/** An image from imageToJSON output (layers as base64 float32, or plain number arrays). */
+export function imageFromJSON(j: any): Image {
+  const img = new Image(Number(j?.width), Number(j?.height), String(j?.name ?? 'image'));
+  for (const [k, v] of Object.entries(j?.layers ?? {})) {
+    const a = typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);
+    if (!channelsOf(a, img.count)) throw new Error(`image "${img.name}" layer "${k}": ${a.length} values for ${img.width} × ${img.height} pixels`);
+    img.layers.set(k, a);
+  }
+  return img;
+}
+
+const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
+function f32ToBase64(a: Float32Array): string {
+  const c = LITTLE ? a : Float32Array.from(a);
+  const bytes = new Uint8Array(c.buffer, c.byteOffset, c.byteLength);
+  if (!LITTLE) for (let i = 0; i < bytes.length; i += 4) { const t0 = bytes[i], t1 = bytes[i + 1]; bytes[i] = bytes[i + 3]; bytes[i + 1] = bytes[i + 2]; bytes[i + 2] = t1; bytes[i + 3] = t0; }
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+function base64ToF32(s: string): Float32Array {
+  const bin = atob(s);
+  if (bin.length % 4) throw new Error(`image layer: ${bin.length} bytes is not a whole number of float32 values`);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  if (!LITTLE) for (let i = 0; i < bytes.length; i += 4) { const t0 = bytes[i], t1 = bytes[i + 1]; bytes[i] = bytes[i + 3]; bytes[i + 1] = bytes[i + 2]; bytes[i + 2] = t1; bytes[i + 3] = t0; }
+  return new Float32Array(bytes.buffer);
 }
 
 /** The "image:<name>" texture reference → the image name, or null for a file path. */

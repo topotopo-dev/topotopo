@@ -4,8 +4,10 @@
 //               "doubleSided": false, "unlit": false,
 //               "textures": { "baseColor": "tex/brick.png", "normal": "tex/brick_n.png", "roughness": "tex/brick_r.png" } } }
 // Exporters turn the table into glTF / USD materials. Houdini's `shop_materialpath` is accepted on import (basename).
-// Texture entries are file paths (as given to the material node; exporters read or reference them); the key is
-// absent when a material has no texture, so tables without textures are unchanged.
+// Texture entries are file paths (as given to the material node; exporters read or reference them) or
+// "image:<name>", an image volume carried by the geometry (texture nodes, core/image.ts; exporters encode it); the
+// key is absent when a material has no texture, so tables without textures are unchanged. "orm" is a packed
+// occlusion (R) / roughness (G) / metallic (B) map, the glTF and Unreal convention.
 //
 // Geometry.merge keeps the first detail value of each name, so the table of the first input wins there.
 // The `merge` node and the exporters union tables with mergeMaterialTables() instead; other nodes that merge
@@ -20,14 +22,17 @@ export interface Material {
   alpha: number;
   doubleSided: boolean;
   unlit: boolean;
-  /** texture file paths (absent = none): base colour (sRGB), tangent-space normal map, roughness (grey) */
+  /**
+   * texture file paths or "image:<name>" (absent = none): base colour (sRGB), tangent-space normal map, roughness
+   * (grey), orm (occlusion R, roughness G, metallic B)
+   */
   textures?: MaterialTextures;
 }
 
-export interface MaterialTextures { baseColor?: string; normal?: string; roughness?: string }
+export interface MaterialTextures { baseColor?: string; normal?: string; roughness?: string; orm?: string }
 
 /** Texture slots in table order. */
-export const TEXTURE_SLOTS = ['baseColor', 'normal', 'roughness'] as const;
+export const TEXTURE_SLOTS = ['baseColor', 'normal', 'roughness', 'orm'] as const;
 
 export type MaterialTable = Record<string, Material>;
 

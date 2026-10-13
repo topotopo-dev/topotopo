@@ -554,12 +554,13 @@ const fmt = (x: number) => {
   return x.toExponential(1);
 };
 
-/** "1 SDF volume, 1 heightfield" style counts (empty string when there are no volumes). */
+/** "1 SDF volume, 1 heightfield, 2 images" style counts (empty string when there are no volumes). */
 export function volumeCounts(g: Geometry): string {
-  const nh = g.volumes.filter(isHeightfield).length, ns = g.volumes.length - nh;
+  const nh = g.volumes.filter(isHeightfield).length, ni = g.volumes.filter((v) => v.kind === 'image').length, ns = g.volumes.length - nh - ni;
   const parts: string[] = [];
   if (ns) parts.push(`${ns} SDF volume(s)`);
   if (nh) parts.push(`${nh} heightfield(s)`);
+  if (ni) parts.push(`${ni} image(s)`);
   return parts.join(', ');
 }
 

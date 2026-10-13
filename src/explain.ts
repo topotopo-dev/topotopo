@@ -10,6 +10,7 @@ import {
   principalAxes, quantile, rayMeasure, sampleSurface,
 } from './core/analysis.ts';
 import type { PieceReport } from './core/analysis.ts';
+import { volumeCounts } from './core/heightfield.ts';
 
 /** A length with a unit an LLM reads at a glance: "1.2 m", "3 cm", "0.4 mm". */
 export function fmtLen(x: number): string {
@@ -99,6 +100,7 @@ function shapeWord(ext: number[], volume: number, closed: boolean, genus: number
 
 function readsAs(g: Geometry, f: ShapeFacts): string {
   const { pr, mix } = f;
+  if (!g.numPoints && g.volumes.length && g.volumes.every((v) => v.kind === 'image')) return `only ${plural(g.volumes.length, 'image')} (textures: render views "texture" shows them, texture_to_material puts them on a mesh)`;
   if (!g.numPoints) return g.volumes.length ? `only ${plural(g.volumes.length, 'SDF volume')}, no mesh yet (sdf_to_mesh makes one)` : 'empty geometry';
   if (!g.numPrims) return `point cloud of ${n(g.numPoints)} points spanning ${size3(f.size)}`;
   if (!mix.polys) {
@@ -176,7 +178,7 @@ export function explainGeometry(g: Geometry, label = ''): string {
 
   out.push(`${label ? label + ' ' : ''}reads as: ${readsAs(g, facts)}`);
   const edges = g.numPrims ? buildEdges(g) : null;
-  out.push(`geometry: ${n(g.numPoints)} points, ${n(g.numPrims)} prims, ${n(g.numVertices)} vertices${edges ? `, ${n(edges.a.length)} edges` : ''}${pr.loosePoints && g.numPrims ? `, ${n(pr.loosePoints)} loose points` : ''}${g.volumes.length ? `, ${g.volumes.length} SDF volume(s) (not measured)` : ''}`);
+  out.push(`geometry: ${n(g.numPoints)} points, ${n(g.numPrims)} prims, ${n(g.numVertices)} vertices${edges ? `, ${n(edges.a.length)} edges` : ''}${pr.loosePoints && g.numPrims ? `, ${n(pr.loosePoints)} loose points` : ''}${g.volumes.length ? `, ${volumeCounts(g)} (not measured)` : ''}`);
   if (!g.numPoints) return out.join('\n');
   out.push(`bbox: min ${v3(b.min)} max ${v3(b.max)} size ${size3(size)} center ${v3([0, 1, 2].map((i) => (b.min[i] + b.max[i]) / 2))}`);
 
