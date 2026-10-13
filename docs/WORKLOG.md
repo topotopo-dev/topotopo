@@ -18,7 +18,7 @@ before touching the repo during the run.
 ## Decisions (2026-10-13, relayed by the setup session)
 - Name is final: **TopoTopo**, package/CLI `topotopo`, CLI alias `topo`. R-4 runs after the in-flight code sessions merge (so the rename does not conflict with them), then the repo goes public and v0.2 is tagged; the user must be present for `npm publish` (2FA by security key) and gives the go for the placeholder publish and the visibility flip.
 - topotopo.dev is registered in the user's Cloudflare account (2026-10-13). Contact address hello@topotopo.dev, forwarded to office@faxcorp.dev (Cloudflare Email Routing): use it in CODE_OF_CONDUCT.md and package.json at the rename.
-- npm: logged in on this machine as `faxcorp`; the free npm org `topotopo` reserves the `@topotopo/*` scope; the package itself publishes unscoped as `topotopo`.
+- npm: logged in on this machine as `faxcorp`; the free npm org `topotopo` exists (faxcorp owner) and reserves the `@topotopo/*` scope; the package itself publishes unscoped as `topotopo`. hello@topotopo.dev routes via Cloudflare Email Routing (MX route1-3.mx.cloudflare.net, SPF, DKIM cf2024-1._domainkey): when the GitHub Pages CNAME records are added later, leave the mail records alone.
 - GitHub: the org stays `topotopo-dev` (GitHub does not release usernames for inactivity; the bare `topotopo` is a user account). Repo path after the rename: github.com/topotopo-dev/topotopo.
 
 ## Decisions (2026-10-12, from the side discussion)
