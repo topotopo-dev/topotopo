@@ -1,5 +1,5 @@
 {
-  "description": "Nested generators: the house shelf asset (walls from wall_segment per footprint edge + roof_hip) spawned on a grid of lots, each lot varying the house's parameters from its point attributes. Edit shelf/wall_segment.json or shelf/roof_hip.json and every house changes.",
+  "description": "Nested generators: the house shelf asset (walls from wall_segment per footprint edge + roof_skeleton) spawned on a grid of lots, each lot varying the house's parameters from its point attributes. Edit shelf/wall_segment.json or shelf/roof_skeleton.json and every house changes.",
   "vars": { "houses_x": 4, "houses_z": 3, "spacing": 16, "seed": 7 },
   "meta": { "render": { "views": ["persp"], "azimuth": 38, "elevation": 28, "shading": "matcap" } },
   "nodes": {

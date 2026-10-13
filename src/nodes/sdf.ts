@@ -156,6 +156,11 @@ defineNode({
   cook: ({ inputs, p, engine, vars }) => {
     const ins = inputs.map((g) => (g && sdfsOf(g).length ? unionVolumes(g, 'sdf_expr').sample : null));
     const body = /\breturn\b/.test(p.code) ? p.code : `return (${p.code});`;
+    // as a wrangle: the body is parsed on its own first (a complete function body cannot close the wrapper, so
+    // nothing runs while compiling), and the probe call runs under the host's time limit, which also covers async
+    // continuations and reading the message of whatever the code throws
+    const syntax = engine.host.checkSyntax?.(`"use strict";${body}`);
+    if (syntax) throw new NodeError(`sdf_expr syntax error: ${syntax.message}${p.code.includes('\n') ? ` (line ${syntax.line})` : ''}`);
     let make;
     try {
       make = engine.host.compile(`(function(__in, vars){ "use strict"; const sdf = (i, q) => { const f = __in[i]; if (!f) throw new Error('sdf input ' + i + ' has no volume'); return f(q[0], q[1], q[2]); };\nreturn function(x, y, z){ const p = [x, y, z];\n${body}\n}; })`);
@@ -163,8 +168,19 @@ defineNode({
       throw new NodeError(`sdf_expr syntax error: ${e.message}`);
     }
     const f = make(ins, vars);
-    try { const t = f(0, 0, 0); if (typeof t !== 'number') throw new Error(`code returned ${typeof t}, expected a number`); }
-    catch (e: any) { throw new NodeError(`sdf_expr: ${e.message}`); }
+    let t: any, failed: string | undefined;
+    try {
+      engine.host.runGuarded(() => {
+        try { t = f(0, 0, 0); } catch (e: any) {
+          try { const m = e?.message; failed = typeof m === 'string' ? m : String(e); } catch { failed = 'an exception that cannot be described'; }
+        }
+      }, engine.scriptTimeoutMs);
+    } catch (e: any) {
+      if (/timed out/i.test(String(e?.message))) throw new NodeError(`sdf_expr: code exceeded ${engine.scriptTimeoutMs} ms (infinite loop?)`);
+      throw new NodeError(`sdf_expr: ${e?.message ?? e}`);
+    }
+    if (failed !== undefined) throw new NodeError(`sdf_expr: ${failed}`);
+    if (typeof t !== 'number') throw new NodeError(`sdf_expr: code returned ${typeof t}, expected a number`);
     let bounds: Box = { min: p.bounds_min, max: p.bounds_max };
     if (p.auto_bounds) {
       const vs = inputs.flatMap((g) => (g ? sdfsOf(g).map((v) => v.bounds) : []));

@@ -11,9 +11,13 @@
 //   - valid code cooks, passes checkGeo, and is deterministic,
 //   - "=expr" params that reach for process, globalThis, this.constructor.constructor, import(), fetch, require or
 //     the engine realm through any object fail their node with a clear error, and loops (also after an await, in a
-//     getter of the result, in a thrown object, in a regular expression) are stopped by the expression timeout.
+//     getter of the result, in a thrown object, in a regular expression) are stopped by the expression timeout,
+//   - the code params of heightfield_layer and sdf_expr run under the script timeout (loops, also in one sample, after
+//     an await or in a thrown object's message getter, fail the node) and cannot close the wrapper they are compiled
+//     in (syntax error instead of code that runs while compiling).
 import { spawnSync } from 'node:child_process';
 import { rng } from '../src/core/random.ts';
+import { heightfieldsOf } from '../src/core/heightfield.ts';
 import { Engine } from '../src/graph/engine.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
@@ -306,4 +310,65 @@ for (const workers of [0, 2]) {
   for (const p of problems) { exprFail++; console.log(`FAIL expression sandbox, ${p}`); }
 }
 console.log(`expression sandbox: ${EXPR_CASES.length} hostile expressions × pool off/on, ${exprFail} failed (${((performance.now() - te) / 1000).toFixed(1)}s)`);
-process.exit(fail || exprFail ? 1 : 0);
+
+// ------------------------------------------------------------------ code params: heightfield_layer, sdf_expr
+
+/**
+ * Hostile code in the code params that run in the scripting realm outside a wrangle: heightfield_layer's expression
+ * (run once per sample) and sdf_expr's code (probed at the origin). Loops (also in one sample only, after an await, in
+ * the message getter of a thrown object) must be stopped by the script timeout, and code that tries to close the
+ * wrapper it is compiled in (which would run its loop while compiling, outside any time limit) must be a syntax error.
+ */
+const CODE_CASES: { code: string; want: RegExp; loop?: boolean; only?: 'heightfield_layer' | 'sdf_expr' }[] = [
+  { code: 'while (true) {}\nreturn 0;', want: /exceeded \d+ ms/, loop: true },
+  { code: '(() => { for (;;) {} })()', want: /exceeded \d+ ms/, loop: true },
+  { code: 'i == 10 && j == 10 ? (() => { while (true) {} })() : height', want: /exceeded \d+ ms/, loop: true, only: 'heightfield_layer' },
+  { code: 'p[0] == 0 ? (() => { while (true) {} })() : sdSphere(p, 0.5)', want: /exceeded \d+ ms/, loop: true, only: 'sdf_expr' },
+  { code: '(async () => { await 0; while (true) {} })(), 0', want: /exceeded \d+ ms/, loop: true },
+  { code: '(() => { throw { get message() { while (true) {} } } })()', want: /exceeded \d+ ms/, loop: true },
+  { code: '0); } })((() => { while (true) {} })()), (function () { return function () { return (0', want: /syntax error/ },
+  { code: 'return 0; } })((() => { while (true) {} })()), (function () { return function () { return 0;', want: /syntax error/ },
+  { code: 'return 0; }; })((() => { while (true) {} })()), (function () { return function () { return 0;', want: /syntax error/ },
+];
+const codeGraph = (type: 'heightfield_layer' | 'sdf_expr', code: string): GraphSpec => type === 'sdf_expr'
+  ? { nodes: { t: { type: 'sdf_expr', params: { code } } }, output: 't' }
+  : { nodes: { hf: { type: 'heightfield', params: { size: [4, 4], resolution: 0.2 } }, t: { type: 'heightfield_layer', in: ['hf'], params: { layer: 'mask', expression: code } } }, output: 't' };
+let codeFail = 0, codeRuns = 0;
+const tc = performance.now();
+for (const workers of [0, 2]) {
+  const e = new Engine(createNodeHost({ workers, shelf: false }));
+  e.manifold = engine.manifold;
+  e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+  const mode = workers ? 'pool on' : 'pool off';
+  const problems: string[] = [];
+  for (const type of ['heightfield_layer', 'sdf_expr'] as const) {
+    for (const c of CODE_CASES) {
+      if (c.only && c.only !== type) continue;
+      codeRuns++;
+      const t = performance.now();
+      let r;
+      try { r = await e.cook(codeGraph(type, c.code)); } catch (err: any) { problems.push(`${type} ${JSON.stringify(c.code)}: engine.cook threw ${err?.stack ?? err}`); continue; }
+      const ms = performance.now() - t;
+      const err = r.errors.find((x) => x.node === 't');
+      if (r.ok || !err) problems.push(`${type} ${JSON.stringify(c.code)}: cooked`);
+      else if (!c.want.test(err.message) || !err.message.startsWith(`${type}`)) problems.push(`${type} ${JSON.stringify(c.code)}: unclear error: ${err.message}`);
+      if (c.loop && ms > EXPR_TIMEOUT_MS * 3 + 2000) problems.push(`${type} ${JSON.stringify(c.code)}: timeout fired late: ${ms.toFixed(0)} ms for a ${EXPR_TIMEOUT_MS} ms limit`);
+      if (!c.loop && ms > 2000) problems.push(`${type} ${JSON.stringify(c.code)}: took ${ms.toFixed(0)} ms`);
+      if (VERBOSE) console.log(`code ${mode} ${ms.toFixed(0).padStart(5)}ms ${type} ${JSON.stringify(c.code)}: ${err?.message.slice(0, 120)}`);
+    }
+  }
+  await new Promise((res) => setTimeout(res, 20)); // let any stray promise settle
+  // the scripting realm still works: plain code in both nodes and a wrangle
+  e.cache.clear();
+  const layer = await e.cook(codeGraph('heightfield_layer', 'x + 1'));
+  const hf = layer.geo ? heightfieldsOf(layer.geo)[0] : undefined;
+  if (!layer.ok || !hf || Math.abs(hf.read('mask')[hf.width - 1] - (hf.x(hf.width - 1) + 1)) > 1e-6) problems.push(`${mode}: heightfield_layer no longer works after the hostile code: ${layer.errors.map((x) => x.message).join('; ')}`);
+  const sdf = await e.cook({ nodes: { s: { type: 'sdf_expr', params: { code: 'sdSphere(p, 0.5)' } }, m: { type: 'sdf_to_mesh', in: ['s'], params: { divisions: 16 } } }, output: 'm' });
+  if (!sdf.ok || !(sdf.geo!.numPrims > 0)) problems.push(`${mode}: sdf_expr no longer works after the hostile code: ${sdf.errors.map((x) => x.message).join('; ')}`);
+  const wr = await e.cook({ nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P.y += 1;' } } }, output: 'w' });
+  if (!wr.ok || Math.abs(wr.geo!.bbox().max[1] - 1.5) > 1e-9) problems.push(`${mode}: a wrangle no longer works after the hostile code: ${wr.errors.map((x) => x.message).join('; ')}`);
+  await e.host.pool?.close();
+  for (const p of problems) { codeFail++; console.log(`FAIL code params, ${mode}: ${p}`); }
+}
+console.log(`code params: ${codeRuns} hostile heightfield_layer/sdf_expr cooks over pool off/on, ${codeFail} failed (${((performance.now() - tc) / 1000).toFixed(1)}s)`);
+process.exit(fail || exprFail || codeFail ? 1 : 0);

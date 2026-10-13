@@ -298,8 +298,8 @@ defineBake({
   example: {
     nodes: {
       box: { type: 'box' },
-      bevel: { type: 'poly_bevel', in: ['box'], params: { offset: 0.06, divisions: 3 } },
-      uv: { type: 'uv_unwrap', in: ['bevel'] },
+      pocket: { type: 'poly_extrude', in: ['box'], params: { group: '@P.y>0.4', distance: -0.2, inset: 0.15 } },
+      uv: { type: 'uv_unwrap', in: ['pocket'] },
       curv: { type: 'bake_curvature', in: ['uv'], params: { resolution: 512 } },
     },
     output: 'curv',
