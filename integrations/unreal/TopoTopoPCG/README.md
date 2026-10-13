@@ -10,6 +10,16 @@ Generation Framework (PCG)** and **Interchange Framework**, then restart the edi
 installation needs UE 5.8 and Visual Studio's C++ toolchain. A packaged plugin includes the Win64 binaries.
 The `TopoTopoPCG` runtime module contains the parser and PCG nodes; `TopoTopoPCGEditor` contains the Tools command.
 
+The descriptor supports **Win64**. In the project's `.uproject` `Plugins` array, keep this entry consistent
+with `TopoTopoPCG.uplugin` (including when upgrading an existing installation):
+
+```json
+{ "Name": "TopoTopoPCG", "Enabled": true, "SupportedTargetPlatforms": ["Win64"] }
+```
+
+An entry containing only `Name` and `Enabled` triggers UE 5.8's startup warning that the
+`SupportedTargetPlatforms` value differs. This is the plugin reference, not the project's target-platform list.
+
 From the repository root in PowerShell:
 
 ```powershell
@@ -59,6 +69,11 @@ managed resource reuse and cleanup all stay under PCG. The built-in **Static Mes
 the same selector and attribute is equivalent. Change its template descriptor Component Class to HISM if
 needed; PCG can optimize the descriptor (for example for Nanite) when Allow Descriptor Changes is enabled.
 
+This release remains code-only (`CanContainContent: false`); no binary sample graph is shipped. UE's standalone
+BuildPlugin can package content, but a serialized graph has not been created and editor-verified in this
+no-editor build session. The steps above define the sample; `TopoTopo.PCG.GraphSpawns536` builds that same
+two-node graph transiently for automation, without an MCP node registry or saved graph asset.
+
 The sibling `<stream>.meshes.json` sidecar supplies valid source names. A source `pine` maps to
 `<Mesh Folder>/pine.pine`. **Mesh Mapping** provides explicit per-name Static Mesh assets and takes precedence;
 use it for renamed/importer-prefixed assets or without a sidecar. The node resolves paths without importing
@@ -85,13 +100,23 @@ Other columns become metadata. Numeric scalars are double or int64; strings stay
 groups become Vector2/Vector/Vector4 (including RGBA colours). JSON retains declared float/int/string types.
 PCG represents colours as Vector4. **Attribute Include/Exclude** filter metadata by exact, case-sensitive names;
 empty include means all and exclude wins. They do not discard transforms or native point properties.
-The CSV `Name` row key is consumed separately from the real lowercase `name` attribute. CSV has no type
+The CSV `Name` row key is consumed separately from the real `name_attr` attribute. The exporter suffixes
+attributes that differ only by case from canonical `Name`, `Position`, `Rotation`, `Scale`, `Density`, `Color`,
+`Seed` or `Mesh`: for example, `name` becomes `name_attr` and `mesh` becomes `mesh_attr`. Old CSVs with both
+spellings are also accepted: the loader keeps the canonical spelling and renames the other to `<name>_attr`,
+with a warning, before metadata filtering. Canonical columns win regardless of header order. A suffix that
+would itself collide, an exact duplicate, or ambiguous noncanonical duplicates remain errors; no value is overwritten.
+CSV has no type
 schema: known integer names (`id`, `class`, `seed`, `copynum`, `piece`, `variant`, `ptnum`, `primnum`) become
 int64 when all values are integral; other numeric scalars become double. Quoted scalar cells remain strings.
 Tuples of 5..16 components become `name_0`, `name_1`, etc. Select their base name to include all components.
 Invalid or case-colliding metadata names are rejected with a rename instruction, because Unreal metadata
 names are case insensitive and do not allow periods. Additional metadata vectors retain source values;
 coordinate conversion applies to the point transform, not arbitrary vector attributes.
+
+Version 1 format tags accept both current and pre-rename bundles throughout the plugin:
+`topotopo-points` / `polyforge-points`, `topotopo-instance-meshes` / `polyforge-instance-meshes`, and
+`topotopo-unreal-landscape` / `polyforge-unreal-landscape`. Unknown tags and unsupported versions remain errors.
 
 ## Coordinates
 
@@ -127,8 +152,8 @@ For an installed copy of the plugin, provide the CSV explicitly when starting th
 ```
 
 Alternatively set the `TOPOTOPO_DEMO_CSV` environment variable before starting it, or keep the repository's
-`out/unreal_demo/landscape/instances.csv` reachable by walking up from the plugin folder. The demo test fails
-with setup instructions if the file is missing; it never silently passes without the fixture.
+`out/unreal_demo/landscape/instances.csv` reachable by walking up from the plugin folder. Both demo tests fail
+with setup instructions if the CSV is missing; neither silently passes without that fixture.
 
 Open **Session Frontend** from the Tools menu, select **Automation**, refresh and filter `TopoTopo`; run the tests. The
 Output Log console command for the acceptance fixture is:
@@ -138,8 +163,41 @@ Automation RunTests TopoTopo.UnrealDemo.PointStream
 ```
 
 The fixture checks 536 points and the first pine at `(3740.23858,-6233.69197,396.099846)`, rotator
-`(Pitch=0,Yaw=-105.954505,Roll=0)`, uniform scale `2.02927671`, mesh counts, types and PCG metadata.
-Run `Automation RunTests TopoTopo` for the in-memory parser/conversion and spawner-default tests as well.
+`(Pitch=0,Yaw=-105.954505,Roll=0)`, uniform scale `2.02927671`, mesh counts, types and `name_attr` PCG metadata.
+
+After importing the five meshes into `/Game/TopoTopo/PluginDemo/Meshes`, run the actual PCG path:
+
+```text
+Automation RunTests TopoTopo.PCG.GraphSpawns536
+```
+
+The test constructs **Point Stream > Instance Spawner > Output** on a transient component in an isolated
+world, with an offset owner to verify world-space transforms. It uses `GenerateLocalGetTaskId(true)` and
+`UPCGSubsystem::ScheduleGeneric` with that task as a dependency. A latent automation command ticks only that
+world's PCG subsystem while editor frames service asynchronous work. A synchronous spin would block the
+next-frame callbacks used by PCG. Completion or a 60-second timeout cancels pending work, cleans up managed
+resources and destroys the test world. The current level and content assets are not saved or changed.
+
+Expect 536 graph-output points, exactly five ISM/HISM components, counts pine 117 / fir 81 / oak 94 /
+rock_a 119 / rock_b 125, and the first pine world transform above. ISM float storage is checked within
+0.01 cm for position and 0.0001 for rotation degrees and scale. If any required mesh is absent, the test emits
+**SKIPPED TopoTopo.PCG.GraphSpawns536** with the missing paths and import instructions. UE simple automation
+displays this as success with a warning, **not an accepted PCG run**; import the meshes and rerun.
+
+`Automation RunTests TopoTopo` runs all ten tests. Individual names and expected results:
+
+| Test | Expected result |
+|---|---|
+| `TopoTopo.UnrealDemo.PointStream` | 536 fixture points; five mesh totals, transforms, typed metadata including `name_attr`, mapping override. Requires CSV, no mesh assets. |
+| `TopoTopo.PCG.GraphSpawns536` | Real graph generation and component/transform checks above. Requires CSV and five imported meshes; no skip for acceptance. |
+| `TopoTopo.Stream.CSVCollisionCompatibility` | Canonical columns and suffixed attributes preserved, independent of column order; warnings and exact metadata filtering checked. |
+| `TopoTopo.Stream.LegacyFormats` | Legacy points JSON keeps native conversion; both mesh-sidecar tags resolve identical paths and reject version 2. |
+| `TopoTopo.Editor.LandscapeManifestCompatibility` | Both Landscape v1 tags decode the same 8x8 heightmap; unknown/v2/non-exact manifests rejected. Creates only temporary fixture files. |
+| `TopoTopo.Stream.CSVAttributes` | RFC 4180, metadata types/vectors, native properties and filters pass. |
+| `TopoTopo.Stream.JSONTransforms` | Native transform/axis conversion, seed, density, colour and metadata pass. |
+| `TopoTopo.Stream.CSVVariants` | Native, flat PCG and struct PCG CSV variants pass. |
+| `TopoTopo.Stream.RejectMalformed` | Invalid CSV/JSON and unresolved name collisions fail cleanly without partial output. |
+| `TopoTopo.PCG.SpawnerDefaults` | `MeshPath` defaults survive duplication; customized copies retain their selector without changing fresh defaults. |
 
 For visual validation use workflow 2's two-node graph in an empty level; check those five mesh counts and
 the first pine transform. Force-generate twice, then Cleanup: components should be reused/removed by PCG,

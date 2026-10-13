@@ -39,6 +39,11 @@
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
+#endif
+
 #define LOCTEXT_NAMESPACE "TopoTopoPCGEditor"
 DEFINE_LOG_CATEGORY_STATIC(LogTopoTopoImport, Log, All);
 
@@ -110,13 +115,14 @@ static bool ReadLandscape(const FString& Directory, FLandscapeData& Out, FString
     const TSharedPtr<FJsonObject>* Settings = nullptr;
     const TSharedPtr<FJsonObject>* Heightmap = nullptr;
     bool bExact = false;
-    if (!Manifest->TryGetStringField(TEXT("format"), Format) || Format != TEXT("topotopo-unreal-landscape") ||
+    if (!Manifest->TryGetStringField(TEXT("format"), Format) ||
+        (Format != TEXT("topotopo-unreal-landscape") && Format != TEXT("polyforge-unreal-landscape")) ||
         !Manifest->TryGetNumberField(TEXT("version"), Version) || Version != 1 ||
         !Manifest->TryGetObjectField(TEXT("landscape"), Settings) ||
         !Manifest->TryGetObjectField(TEXT("heightmap"), Heightmap) ||
         !(*Settings)->TryGetBoolField(TEXT("exact_fit"), bExact) || !bExact)
     {
-        Error = TEXT("Landscape requires a version 1 topotopo-unreal-landscape manifest with exact_fit=true. Resample non-exact bundles before importing.");
+        Error = TEXT("Landscape requires a version 1 topotopo-unreal-landscape (or legacy polyforge-unreal-landscape) manifest with exact_fit=true. Resample non-exact bundles before importing.");
         return false;
     }
     const TArray<TSharedPtr<FJsonValue>>* Resolution = nullptr;
@@ -486,4 +492,62 @@ private:
 };
 
 IMPLEMENT_MODULE(FTopoTopoPCGEditorModule, TopoTopoPCGEditor)
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoLandscapeManifestCompatibilityTest,
+    "TopoTopo.Editor.LandscapeManifestCompatibility",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTopoTopoLandscapeManifestCompatibilityTest::RunTest(const FString& Parameters)
+{
+    // Exercise the importer's real reader and heightmap decoder without spawning or saving a Landscape.
+    const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() /
+        TEXT("Automation/TopoTopo") / FGuid::NewGuid().ToString(EGuidFormats::Digits));
+    if (!TestTrue(TEXT("Create isolated fixture directory"), IFileManager::Get().MakeDirectory(*Directory, true)))
+    {
+        return false;
+    }
+    ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Directory, false, true); };
+    TArray<uint8> Bytes;
+    Bytes.SetNumZeroed(8 * 8 * 2);
+    for (int32 I = 0; I < 64; ++I) { Bytes[I * 2 + 1] = 128; } // Little-endian uint16 height 32768.
+    if (!TestTrue(TEXT("Write 8x8 r16 fixture"), FFileHelper::SaveArrayToFile(Bytes, *(Directory / TEXT("heightmap.r16")))))
+    {
+        return false;
+    }
+    const auto ReadFixture = [&](const TCHAR* Format, int32 Version, bool bExact, TopoTopoImport::FLandscapeData& Data, FString& Error)
+    {
+        const FString Manifest = FString::Printf(TEXT(R"json({"format":"%s","version":%d,
+"heightmap":{"file":"heightmap.r16"},"landscape":{"exact_fit":%s,"overall_resolution":[8,8],
+"sections_per_component":1,"section_size_quads":7,"actor_location_cm":[-350,-350,42],"scale":[100,100,2]}})json"),
+            Format, Version, bExact ? TEXT("true") : TEXT("false"));
+        if (!FFileHelper::SaveStringToFile(Manifest, *(Directory / TEXT("landscape.json"))))
+        {
+            AddError(TEXT("Could not write Landscape manifest fixture."));
+            return false;
+        }
+        return TopoTopoImport::ReadLandscape(Directory, Data, Error);
+    };
+    for (const TCHAR* Format : {TEXT("topotopo-unreal-landscape"), TEXT("polyforge-unreal-landscape")})
+    {
+        TopoTopoImport::FLandscapeData Data;
+        FString Error;
+        if (TestTrue(FString(Format) + TEXT(" v1 accepted"), ReadFixture(Format, 1, true, Data, Error)))
+        {
+            TestEqual(TEXT("Decoded height count"), Data.Heights.Num(), 64);
+            TestTrue(TEXT("All decoded heights are 32768"), Data.Heights.ContainsByPredicate([](uint16 Height) { return Height != 32768; }) == false);
+            TestTrue(TEXT("Actor corner retained"), Data.Location.Equals(FVector(-350, -350, 42)));
+            TestTrue(TEXT("Actor scale retained"), Data.Scale.Equals(FVector(100, 100, 2)));
+        }
+        else { AddError(Error); }
+        TestFalse(FString(Format) + TEXT(" v2 rejected"), ReadFixture(Format, 2, true, Data, Error));
+        TestFalse(FString(Format) + TEXT(" non-exact layout rejected"), ReadFixture(Format, 1, false, Data, Error));
+    }
+    TopoTopoImport::FLandscapeData Data;
+    FString Error;
+    TestFalse(TEXT("Unknown format rejected"), ReadFixture(TEXT("unknown-landscape"), 1, true, Data, Error));
+    return true;
+}
+#endif
+
 #undef LOCTEXT_NAMESPACE
