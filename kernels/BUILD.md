@@ -13,6 +13,8 @@ cargo fmt --manifest-path kernels/Cargo.toml --check
 cargo bench --manifest-path kernels/Cargo.toml --bench wavefront
 cargo bench --manifest-path kernels/Cargo.toml --bench remesh_quad
 node bench/remeshquad.ts
+cargo bench --manifest-path kernels/Cargo.toml --bench erosion
+node bench/erosion.ts --runs=3
 ```
 
 Toolchain used on 2026-10-13:
@@ -30,7 +32,7 @@ unit, stripped symbols and panic=abort. Invalid geometry is handled by Rust `Res
 errors, not panics. `wasm-pack` runs `wasm-opt -O3 --enable-bulk-memory
 --enable-nontrapping-float-to-int`. The session's budget is strictly below 1,000,000 bytes
 for session 1; session 2's total WASM budget is 1,500,000 bytes and session 3's is
-2,000,000 bytes. The existing Node smoke test also retains its stricter 1,000,000-byte
+2,000,000 bytes; session 4's budget is 2,500,000 bytes. The existing Node smoke test also retains its stricter 1,000,000-byte
 check. See [BENCH.md](BENCH.md)
 for the measured size.
 
@@ -38,6 +40,17 @@ The speed-focused release settings are intentional: sampled-grid BVH traversal a
 dual-contouring loops are CPU-bound, and the combined module remains comfortably
 within the session-2 size budget. No fast-math, relaxed SIMD, or explicit fused
 multiply-add flags are enabled; scalar operation order remains deterministic.
+
+The optional erosion SIMD feature builds separately, leaving `pkg/` portable:
+
+```powershell
+wasm-pack build kernels --target web --release --no-opt --out-dir ../out/session4/pkg-simd -- --features simd
+```
+
+This enables a wasm32 `simd128` evaporation loop. The separate build skips wasm-opt
+so a SIMD-capable module is not passed to the scalar optimizer configuration. To
+optimize that optional artifact manually, enable SIMD in wasm-opt. It is not the
+checked-in default module. Do not enable relaxed SIMD, fast-math or FMA.
 
 Commit `pkg/polyforge_kernels.js`, `polyforge_kernels_bg.wasm`, both `.d.ts` files,
 `package.json`, `README.md` and `LICENSE`. `wasm-pack` writes a `pkg/.gitignore` containing

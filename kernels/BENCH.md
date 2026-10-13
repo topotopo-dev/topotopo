@@ -190,3 +190,115 @@ guarantee of post-fit global integrability or arbitrary-surface intersection fre
 No copied reference source or new dependencies are included. Large-input quality,
 the 3-second target, denser feature constraints and exhaustive platform guarantees
 remain unfinished; repository gate success does not establish those claims.
+
+## Session 4 — heightfield erosion (2026-10-13)
+
+Machine: Intel Core i7-10700K @ 3.80 GHz, Windows `10.0.26200` x64,
+Node **v24.14.0**, Rust **1.94.0 (4a4ef493e 2026-03-02)**,
+Cargo **1.94.0 (85eff7c80 2026-01-15)**. Native release uses opt-level 3,
+LTO and one codegen unit. WASM uses the default **scalar** build, no SIMD,
+threads, fast-math or FMA. Timed commands ran sequentially after repository gates.
+
+Commands from the repository root:
+
+```powershell
+cargo bench --manifest-path kernels/Cargo.toml --bench erosion
+node bench/erosion.ts --runs=3
+node bench/erosion.ts --runs=3 --droplet-only
+```
+
+The pipe case is exactly 1024² samples × 200 iterations, cell 1 m, seed 1,
+closed boundaries, rain 0.01 m/s, thermal rate 0.1, otherwise `PipeParams` defaults.
+Its exact binary-fraction valley is
+`32 + (1023-z)/64 + abs(x-512)/128`. Both native and WASM finish with height sum
+**44032000.007678986**. Allocation, validation and output production are timed;
+Node timings include input/output copies. Native compilation and WASM loading
+are outside the timers. Node gets a small 32² warm-up, not a full-grid warm-up;
+V8 tiering remains visible in the successive pipe runs below.
+
+Droplet acceptance uses the **512² terrain from `test/heightfield.ts`**, rounded
+once to the f32 input ABI for both backends: six-octave seed-1 simplex noise,
+`(noise(x*0.01,0,z*0.01)*0.5+0.5)*5`, cell 0.1 m, 100 iterations,
+`DEFAULT_EROSION`, seed 1. The dedicated `--droplet-only` command records this
+comparison independently of the longer pipe timing. Each method runs three times.
+
+| case | run 1 (ms) | run 2 (ms) | run 3 (ms) | median (ms) | acceptance |
+|---|---:|---:|---:|---:|---|
+| Pipe native, 1024² × 200 | 12994.535 | 12816.003 | 12473.615 | **12816.003** | **missed** <2000 ms |
+| Pipe Node/WASM, 1024² × 200 | 32812.4568 | 21779.2872 | 15597.5653 | **21779.2872** | **missed** <4000 ms |
+| Droplet JS, 512² × 100 | 2020.7966 | 2018.4709 | 2217.0057 | **2020.7966** | reference |
+| Droplet Node/WASM, 512² × 100 | 2030.6863 | 2001.4898 | 2331.7343 | **2030.6863** | **missed** ≥3× JS |
+
+The droplet median ratio is **0.9951298731×**: no measured speedup. The native
+benchmark also times an analytic 512² valley at **1582.699 ms**, but this is a
+different terrain and must not be used to claim a speedup against the noisy JS case.
+These performance targets remain unfinished. Reusable scratch buffers, contiguous
+brush rows, fused water/erosion traversal, hardware square roots and thermal early
+rejection did not meet them; correctness gates do not substitute for performance.
+
+Correctness evidence:
+
+- Small noise-terrain integration: JS/WASM raw flow correlation
+  **1.000000000**, signed sediment correlation **1.000000000**, closed-height
+  relative material error **1.858314400999194e-11**.
+- Full 512² × 100 reference-terrain benchmark: flow/sediment correlations both
+  **approximately 1.0** (raw floating reductions `1.0000000000000695` and
+  `1.0000000000000167`). JS height sum **664053.6035092796**, WASM
+  **664053.6035628319**. Negative/fractional numeric seeds also pass >0.9
+  integration correlations using the exact JS initial RNG state.
+- Rust tests cover closed conservation, deterministic replay, finite layers,
+  hardness/freeze, flat and tilted terrain, rain maps, open water discharge,
+  a monotone stream-power valley, malformed/extreme inputs and the incoming-rain
+  CFL bound. Seeded property sweeps use no new test dependency.
+- Node cooks cover every method, immutable defaults, layer ranges, worker-pool
+  on/off equality, auto availability/cache changes, numeric seeds, radial cone
+  drainage and generated-WASM validation errors without traps.
+- Native and WASM match all six FNV-1a f32-byte digests on the exact 33×25 valley
+  fixture emitted by `kernels/benches/erosion.rs` and asserted in the Node suite:
+  height **fe7a521d**, sediment **cbc320b7**, debris **355aea95**, flow
+  **27155547**, water **831ccee1**, wear **114a9886**. This is one cross-target
+  fixture, not a complete operating-system/hardware/compiler identity matrix.
+
+Final verification, all commands exit **0**:
+
+- `cargo test --manifest-path kernels/Cargo.toml`: **76 passed, 0 failed**
+  (30 library, 6 contour, 9 quad, 10 grid, 21 skeleton; existing tests retained).
+- `cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings`.
+- `cargo clippy --manifest-path kernels/Cargo.toml --lib --target wasm32-unknown-unknown --features simd -- -D warnings`.
+  This extra check exposed one pre-existing range-check lint in `src/wasm.rs`;
+  its equivalent range expression was corrected, with no API/output change.
+- `cargo fmt --manifest-path kernels/Cargo.toml --check`.
+- `npm run kernels:build`: release build + wasm-opt completed. Whole scalar WASM:
+  **558,684 bytes**, below both the requested 2,500,000-byte budget and the
+  unchanged original smoke test's 1,000,000-byte limit. SHA-256:
+  `58607305d2997051ac0dde5b0e4cffc5f4003713511fccc6edc96dafb685c7bf`.
+- `npm run typecheck`.
+- `npm run docs`: `unchanged docs/nodes.md (217 node types + shelf assets, 417694 bytes)`.
+- `npm run test:update`: initially **2 written, 280 unchanged, 0 failed**;
+  final replay **0 written, 282 unchanged, 0 failed**. All **280 pre-existing
+  golden SHA-256 hashes** equal the session-start baseline.
+- `npm test`: full chained command exit 0; **282 passed, 0 failed, 0 skipped**
+  goldens; original kernel **55**, SDF **89**, quad **748**, erosion **2077**
+  integration checks pass, along with every preceding suite and NOTICE check.
+- `npm run showcase`: all **30** graphs rendered; all **29 pre-existing PNG
+  SHA-256 hashes** equal the session-start baseline.
+- Optional SIMD: `wasm-pack build kernels --target web --release --no-opt --out-dir ../out/session4/pkg-simd -- --features simd`,
+  then `node test/erosionsimd.ts`: **30 scalar/SIMD exact comparisons passed**.
+  The separate artifact is ignored; the checked-in module remains scalar.
+- `git diff --check`: no whitespace errors.
+
+Inspect [erosion_models.png](../examples/renders/erosion_models.png): back row
+JS droplet (left), kernel droplet (right); front row pipe (left), pipe + stream
+power (right). The render was inspected: the droplet pair matches visually,
+pipe ridges remain sharper, and no obvious checkerboards, grid-aligned streaks
+or terrain spikes appear at this resolution. Water bounds are checked numerically;
+the shaded terrain image does not itself prove water-simulation stability.
+
+Limits: dense single-threaded simulation; open pipe edges export water but retain
+sediment; pipe calls settle residual suspension and do not resume flux state;
+stream-power drainage is fixed from the incoming DEM; D-infinity reports only its
+dominant direction and does not fill pits. Droplet wear is accumulated net erosion
+per pass, not gross excavation followed by same-pass redeposition. Full cross-platform
+bit identity and all three speed thresholds remain unproven/unmet. No dependencies
+were added; the existing MIT/Apache-2.0/ISC runtime and permitted build-tool licences
+are recorded in `README.md`. Existing default nodes, APIs and tests are retained.

@@ -12,8 +12,9 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   roofs, stairs, props, trees, rocks, PCG helpers) is used like nodes. Every node documents its params and carries an
   example that is cooked in the tests.
 - **Rust/WASM kernels**: a straight skeleton (pitched roofs and polygon offsets from any footprint, holes included),
-  sampled SDF grids with CSG, morphology and sharp dual contouring (`voxel_remesh`), and field-aligned quad remeshing
-  (`remesh_quad`) are compiled from a Rust crate in [kernels/](kernels) to WebAssembly: deterministic, no native build.
+  sampled SDF grids with CSG, morphology and sharp dual contouring (`voxel_remesh`), field-aligned quad remeshing
+  (`remesh_quad`), and heightfield erosion and drainage (virtual-pipe and stream-power models, D8/D-infinity flow) are
+  compiled from a Rust crate in [kernels/](kernels) to WebAssembly: deterministic, no native build.
 - **Time**: every cook happens at a frame. Only time-dependent nodes re-cook when the frame changes, and the `solver`
   node advances a simulation frame by frame from its cached previous state.
 - **Agent and MCP support**: Polyforge ships an MCP server, so LLM agents can build graphs in one call, read text
@@ -32,10 +33,10 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   `EXT_mesh_gpu_instancing` with per-instance attributes, USDA a `PointInstancer` with per-instance primvars, CSV and
   points JSON an instance stream (one row per instance with its transform and a `Mesh` column, plus a sidecar and one
   GLB per source mesh, for Unreal PCG), and the renderer draws them within a triangle budget.
-- **Terrain**: heightfield volumes with noise, masks, droplet erosion, roads and scatter; export as Unreal Landscape
-  heightmaps (16-bit PNG or RAW `.r16` with a JSON sidecar holding the import scale) and 8-bit weight layers, or as one
-  `unreal_landscape` bundle: heightmap, every layer, a manifest with the exact Landscape import settings, the meshes and
-  the instance stream.
+- **Terrain**: heightfield volumes with noise, masks, erosion (droplet, virtual pipes, stream power, thermal), drainage
+  maps, roads and scatter; export as Unreal Landscape heightmaps (16-bit PNG or RAW `.r16` with a JSON sidecar holding
+  the import scale) and 8-bit weight layers, or as one `unreal_landscape` bundle: heightmap, every layer, a manifest
+  with the exact Landscape import settings, the meshes and the instance stream.
 - **Textures**: a Substance-Designer-style image node family (noise, patterns, cells, shapes, blends, levels, warps,
   normal and AO from height, channel packing) and bakes from meshes in uv space (AO, curvature, thickness, normals and
   height from a high-res mesh, island ids, masks, vertex colour). Images travel with the geometry, materials reference
@@ -167,7 +168,7 @@ if (@P.y < 0) removepoint(0, @ptnum);
 | pcg | `mask` (slope, height, curvature, occlusion, distance, direction, noise, attribute, group, inside; combine) `attribute_from_map` (PNG → attribute by uv or planar projection) `orient` (orient/N/up from normals, a surface, curve tangents, a direction or target; random yaw, tilt, scale) `points_along_curve` `cluster` (k-means, radius) `prune` (overlap, density, expression, near geometry) |
 | solid | `convex_hull` `boolean` `clip` `minkowski` `smooth_solid` `voronoi_fracture` `slice` |
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` (implicit, lazily sampled); sampled grids (Rust/WASM): `sdf_grid` `grid_combine` `grid_offset` `grid_blur` `grid_dilate` `grid_erode` `grid_resample` `grid_to_mesh` (sharp dual contouring or marching cubes) `grid_to_sdf` `voxel_remesh` |
-| heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
+| heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_flow` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
 | uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
 | texture | generators `tex_noise` `tex_pattern` `tex_cells` `tex_gradient` `tex_shape` `tex_splatter` `tex_scratches` `tex_text`; filters `tex_blend` `tex_levels` `tex_curves` `tex_blur` `tex_warp` `tex_transform` `tex_edge_detect` `tex_invert` `tex_threshold` `tex_histogram_scan` `tex_normal_from_height` `tex_height_to_ao` `tex_channel` (ORM packing) `tex_colorize` `tex_tile_sampler` `tex_output`; bakes in uv space `bake_ao` `bake_curvature` `bake_thickness` `bake_position` `bake_normal` `bake_world_normal` `bake_height` `bake_island_id` `bake_mask` `bake_vertex_color`; `texture_to_material` `tex_to_heightfield` `heightfield_to_tex` (images are 2D float layers carried on the geometry; glb/usda embed them, export format `textures` writes PNGs) |
 | code | `wrangle` `script` |
@@ -198,7 +199,9 @@ curvature turned into worn paint on its edges and an ORM map, rendered with `tex
 straight-skeleton roofs (an L-shaped house, a courtyard roof around a hole, nested offsets). `deformers` (lattice,
 path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert) and `remesh_lod` (isotropic remesh,
 repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
-sampled SDF grid, and `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube.
+sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube, and
+`erosion_models` erodes one ridged terrain four ways (TypeScript and WASM droplets, virtual pipes, pipes plus stream
+power).
 
 To cook a graph from the command line:
 

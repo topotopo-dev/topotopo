@@ -1,5 +1,7 @@
 // The caller owns I/O; importing this module does not read or instantiate WASM.
 import type { Host } from '../host/types.ts';
+import type { ErosionParams } from '../core/erosion.ts';
+import { hash32 } from '../core/random.ts';
 
 /** Source indices use flattened contour order: outer first, then each hole. */
 export interface KernelProvenance {
@@ -45,6 +47,11 @@ export interface RoofResult extends KernelProvenance {
 }
 
 export interface Kernels {
+  erode_droplet(height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params?: DropletErosionOptions, seed?: number | bigint, freeze?: Float32Array | null): ErosionResult;
+  erode_pipe(height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params?: PipeErosionOptions, seed?: number | bigint, freeze?: Float32Array | null, rain?: Float32Array | null): ErosionResult;
+  /** Talus angle is radians. Returned debris is signed thermal height change. */
+  thermal_erode(height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, talusAngle: number, rate: number, iterations: number): ErosionResult;
+  flow_accumulation(height: Float32Array, w: number, h: number, cell: number, method?: 'd8' | 'dinf'): FlowAccumulationResult;
   remesh_quad(positions: Float64Array, tris: Uint32Array, options?: QuadRemeshOptions): QuadRemeshResult;
   sdf_from_mesh(positions: Float64Array, tris: Uint32Array, voxel: number, band: number, padding: number, fill: boolean): KernelGrid;
   grid_csg(a: GridInput, b: GridInput, op: GridOperation, k?: number): KernelGrid;
@@ -59,6 +66,52 @@ export interface Kernels {
   offset_polygon(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], distance: number): OffsetResult;
   /** Pitches are degrees: one value or one value for each outgoing contour edge. */
   roof(outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], pitch: number | ArrayLike<number>, heightCap?: number): RoofResult;
+}
+
+/** Parameters match core/erosion.ts, except talusAngle is radians at the kernel boundary. */
+export interface DropletErosionOptions extends Partial<Omit<ErosionParams, 'talusAngle'>> {
+  iterations?: number;
+  /** Thermal angle of repose in radians. */
+  talusAngle?: number;
+}
+export interface PipeErosionOptions {
+  iterations?: number;
+  /** Uniform rainfall depth per second; multiplied by the optional rain array. */
+  rainAmount?: number;
+  evaporation?: number;
+  sedimentCapacity?: number;
+  erosionRate?: number;
+  depositionRate?: number;
+  gravity?: number;
+  /** Thermal angle of repose in radians. */
+  talusAngle?: number;
+  thermalRate?: number;
+  /** Maximum timestep in seconds; 0 lets the kernel choose a stable CFL timestep. */
+  timeStep?: number;
+  boundary?: 'closed' | 'open';
+  /** Stream-power incision K * drainage^m * slope^n; 0 disables incision. */
+  streamPowerK?: number;
+  streamPowerM?: number;
+  streamPowerN?: number;
+}
+export interface ErosionResult {
+  height: Float32Array;
+  /** Droplet: signed net hydraulic change. Pipe: cumulative deposited thickness. */
+  sediment: Float32Array;
+  /** Droplet/standalone thermal: signed net thermal change. Pipe: deposited thermal thickness. */
+  debris: Float32Array;
+  /** Droplet: raw water passage. Pipe: normalised integrated velocity, 0..1. */
+  flow: Float32Array;
+  /** Droplet: raw resting water. Pipe: remaining water depth. */
+  water: Float32Array;
+  /** Cumulative eroded depth, nonnegative. */
+  wear: Float32Array;
+}
+export interface FlowAccumulationResult {
+  /** Contributing area in square world units, including each sample's own cell area. */
+  drainage: Float32Array;
+  /** E, SE, S, SW, W, NW, N, NE = 0..7; 255 = sink. D-infinity records the dominant receiver. */
+  direction: Uint8Array;
 }
 
 /** Lengths are world units; feature_angle is radians in the kernel API. */
@@ -136,6 +189,7 @@ function gridArg(g: GridInput): KernelGrid {
 
 export const kernelsWasmURL = new URL('../../kernels/pkg/polyforge_kernels_bg.wasm', import.meta.url);
 let modulePromise: Promise<Kernels> | undefined;
+let loadedKernels: Kernels | undefined;
 const hosts = new WeakMap<Host, Promise<Kernels>>();
 const array = (values: ArrayLike<number>): Float64Array => values instanceof Float64Array ? values : Float64Array.from(values);
 const rings = (values: readonly ArrayLike<number>[]): Float64Array[] => values.map(array);
@@ -145,13 +199,85 @@ function call<T>(name: string, fn: () => T): T {
   catch (error) { throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
+const emptyLayer = new Float32Array(0);
+function erosionGrid(height: Float32Array, w: number, h: number, cell: number): void {
+  if (!(height instanceof Float32Array)) throw new Error('height must be a Float32Array');
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 2 || h < 2 || w > 0xffffffff || h > 0xffffffff)
+    throw new Error('width and height must be integers >= 2');
+  if (!Number.isSafeInteger(w * h) || w * h !== height.length) throw new Error('height length must equal width * height');
+  if (!Number.isFinite(cell) || cell <= 0) throw new Error('cell size must be finite and > 0');
+}
+function erosionLayer(layer: Float32Array | null | undefined, count: number, name: string): Float32Array {
+  if (layer == null) return emptyLayer;
+  if (!(layer instanceof Float32Array) || (layer.length !== 0 && layer.length !== count))
+    throw new Error(`${name} must be a Float32Array with width * height values (or empty)`);
+  return layer;
+}
+function erosionSeed(seed: number | bigint): bigint {
+  if (typeof seed === 'bigint') {
+    if (seed < 0n || seed > 0xffffffffffffffffn) throw new Error('bigint seed must fit an unsigned 64-bit integer');
+    return seed;
+  }
+  if (!Number.isFinite(seed)) throw new Error('seed must be finite');
+  if (Number.isSafeInteger(seed) && seed >= 0) return BigInt(seed);
+  // Node seeds may be fractional or negative; preserve all their bits rather than truncating them.
+  const bytes = new DataView(new ArrayBuffer(8));
+  bytes.setFloat64(0, seed, true);
+  return bytes.getBigUint64(0, true);
+}
+/** Exact core/random.ts initial state for number seeds; explicit byte order also covers big-endian hosts. */
+function erosionRngState(seed: number): number {
+  let hashed: number;
+  if (Number.isInteger(seed) && Math.abs(seed) < 2 ** 31) hashed = hash32(seed ^ 0x9e3779b9);
+  else {
+    const bytes = new DataView(new ArrayBuffer(8));
+    bytes.setFloat64(0, seed, true);
+    hashed = hash32(bytes.getUint32(0, true) ^ hash32(bytes.getUint32(4, true)));
+  }
+  return hash32(hashed + 0x6d2b79f5);
+}
+function erosionOptions(p: DropletErosionOptions | PipeErosionOptions): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(p)) {
+    if (value !== undefined) result[key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)] = value;
+  }
+  return result;
+}
+
+/** Inspect availability without performing I/O or starting a load (used by erosion backend=auto). */
+export function getLoadedKernels(): Kernels | undefined { return loadedKernels; }
+
 /** Initialise the shipped module once, sharing concurrent callers. Failed loads may be retried. */
 export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
   if (!modulePromise) {
     modulePromise = (async () => {
       const wasm = await import('../../kernels/pkg/polyforge_kernels.js');
       await wasm.default({ module_or_path: bytes });
-      return Object.freeze({
+      const result: Kernels = Object.freeze({
+        erode_droplet: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params: DropletErosionOptions = {}, seed: number | bigint = 0, freeze?: Float32Array | null) =>
+          call('erode_droplet', () => {
+            erosionGrid(height, w, h, cell);
+            const seedValue = erosionSeed(seed), options = erosionOptions(params);
+            if (typeof seed === 'number') options.rng_state = erosionRngState(seed);
+            return wasm.erode_droplet(height, erosionLayer(hardness, height.length, 'hardness'), erosionLayer(freeze, height.length, 'freeze'), w, h, cell, options, seedValue) as ErosionResult;
+          }),
+        erode_pipe: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, params: PipeErosionOptions = {}, seed: number | bigint = 0, freeze?: Float32Array | null, rain?: Float32Array | null) =>
+          call('erode_pipe', () => {
+            erosionGrid(height, w, h, cell);
+            return wasm.erode_pipe(height, erosionLayer(hardness, height.length, 'hardness'), erosionLayer(freeze, height.length, 'freeze'), erosionLayer(rain, height.length, 'rain'), w, h, cell, erosionOptions(params), erosionSeed(seed)) as ErosionResult;
+          }),
+        thermal_erode: (height: Float32Array, hardness: Float32Array | null | undefined, w: number, h: number, cell: number, talusAngle: number, rate: number, iterations: number) =>
+          call('thermal_erode', () => {
+            erosionGrid(height, w, h, cell);
+            if (!Number.isInteger(iterations) || iterations < 0 || iterations > 0xffffffff) throw new Error('iterations must be a nonnegative integer');
+            return wasm.thermal_erode(height, erosionLayer(hardness, height.length, 'hardness'), w, h, cell, talusAngle, rate, iterations) as ErosionResult;
+          }),
+        flow_accumulation: (height: Float32Array, w: number, h: number, cell: number, method: 'd8' | 'dinf' = 'dinf') =>
+          call('flow_accumulation', () => {
+            erosionGrid(height, w, h, cell);
+            if (method !== 'd8' && method !== 'dinf') throw new Error('method must be d8 or dinf');
+            return wasm.flow_accumulation(height, w, h, cell, method) as FlowAccumulationResult;
+          }),
         remesh_quad: (positions: Float64Array, tris: Uint32Array, options: QuadRemeshOptions = {}) =>
           call('remesh_quad', () => {
             if (!(positions instanceof Float64Array) || !(tris instanceof Uint32Array))
@@ -179,6 +305,8 @@ export function loadKernels(bytes: Uint8Array): Promise<Kernels> {
         roof: (outer: ArrayLike<number>, holes: readonly ArrayLike<number>[], pitch: number | ArrayLike<number>, heightCap?: number) =>
           call('roof', () => wasm.roof(array(outer), rings(holes), array(typeof pitch === 'number' ? [pitch] : pitch), heightCap) as RoofResult),
       });
+      loadedKernels = result;
+      return result;
     })();
     modulePromise.catch(() => { modulePromise = undefined; });
   }
