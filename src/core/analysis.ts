@@ -12,7 +12,8 @@ import { Geometry } from './geometry.ts';
 import type { Vec3 } from './math.ts';
 import { buildEdges, connectivity, pointNeighbors, triangulate } from './topology.ts';
 import { halfEdges } from './halfedge.ts';
-import { EDGE_BAND, KDTree, TriBVH } from './spatial.ts';
+import { EDGE_BAND, KDTree, TriBVH, invDir } from './spatial.ts';
+import type { TriBVHArrays } from './spatial.ts';
 import { hash32, hashNumber } from './random.ts';
 
 // ---------------------------------------------------------------- small helpers
@@ -258,10 +259,8 @@ export class RayScene {
    * the ray queries and the watertight edge test (crossesTri → neighbours/facing, which need T and triPt) work; the
    * closest-point and attribute lookups that need the source geometry are not available here.
    */
-  static fromArrays(a: { T: Float64Array; nodes: Float64Array; child: Int32Array; order: Int32Array; triPt?: Int32Array }): RayScene {
-    const bvh = Object.create(TriBVH.prototype) as TriBVH;
-    Object.assign(bvh as any, { T: a.T, nodes: a.nodes, child: a.child, order: a.order, triPt: a.triPt ?? new Int32Array(0), nodeCount: a.nodes.length / 6, edgeNbr: null });
-    return new RayScene(bvh);
+  static fromArrays(a: TriBVHArrays): RayScene {
+    return new RayScene(TriBVH.fromArrays(a));
   }
 
   get empty() { return this.bvh.numTris === 0; }
@@ -307,7 +306,7 @@ export class RayScene {
   /** True when the ray hits a triangle at tmin < t < tmax. */
   occluded(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, tmax: number, tmin = 0): boolean {
     if (this.empty) return false;
-    const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+    const ix = invDir(dx), iy = invDir(dy), iz = invDir(dz);
     const st = this.stack, child = this.child, order = this.order;
     let sp = 0;
     st[sp++] = 0;
@@ -330,7 +329,7 @@ export class RayScene {
   nearest(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, tmax = Infinity, tmin = 0): number {
     this.lastTri = -1;
     if (this.empty) return Infinity;
-    const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+    const ix = invDir(dx), iy = invDir(dy), iz = invDir(dz);
     const st = this.stack, ts = this.tstack, child = this.child, order = this.order;
     let best = tmax, sp = 0;
     st[0] = 0; ts[0] = this.enter(0, ox, oy, oz, ix, iy, iz, best); sp = 1;
@@ -363,7 +362,7 @@ export class RayScene {
   /** Number of triangle crossings along the ray (t > 0). */
   countHits(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): number {
     if (this.empty) return 0;
-    const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+    const ix = invDir(dx), iy = invDir(dy), iz = invDir(dz);
     const st = this.stack, child = this.child, order = this.order;
     let sp = 0, hits = 0;
     st[sp++] = 0;

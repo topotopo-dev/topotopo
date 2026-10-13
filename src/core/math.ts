@@ -10,6 +10,27 @@ export type Mat4 = Float64Array;
 
 export const DEG = Math.PI / 180;
 
+/**
+ * Math.hypot(x, y, z) without its per-call allocation, for hot loops. It does V8's operations in V8's order (the
+ * magnitudes scaled by the largest, squares Kahan-summed, sqrt times the largest; Infinity before NaN, 0 when all are
+ * 0), so the result is Math.hypot's bit for bit there (test/property.ts checks this on the running engine).
+ */
+export function hypot3(x: number, y: number, z: number): number {
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  if (ax === Infinity || ay === Infinity || az === Infinity) return Infinity;
+  if (ax !== ax || ay !== ay || az !== az) return NaN;
+  let m = 0;
+  if (ax > m) m = ax;
+  if (ay > m) m = ay;
+  if (az > m) m = az;
+  if (m === 0) return 0;
+  const n0 = ax / m, n1 = ay / m, n2 = az / m;
+  // Kahan: the first step leaves no compensation; the third one's is not needed
+  const s0 = n0 * n0, s1 = n1 * n1, t = s0 + s1;
+  const c = (t - s0) - s1;
+  return Math.sqrt(t + (n2 * n2 - c)) * m;
+}
+
 export const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 export const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 export const scale = (a: Vec3, s: number): Vec3 => [a[0] * s, a[1] * s, a[2] * s];

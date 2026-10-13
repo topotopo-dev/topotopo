@@ -22,6 +22,7 @@ import type { Engine, CookReport } from '../src/graph/engine.ts';
 import type { GraphSpec, NodeDef, NodeSpec, ParamDef } from '../src/graph/types.ts';
 import { INPUTS, PARAMS, SKIP, addFixture, checkGeo, createFixtureEngine } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff } from './fingerprint.ts';
+import { spatialProperties } from './spatial-props.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -311,6 +312,13 @@ let failures = 0, okGraphs = 0, errGraphs = 0, cacheChecks = 0, cacheHitAsserts 
 const errorsByType = new Map<string, Map<string, number>>();
 const internal: string[] = [];
 const typeCoverage = new Map<string, number>();
+
+// spatial structures first: the SAH BVH and its ray / closest-point queries against brute force, hypot3, pointNormals
+if (ONLY === undefined) {
+  const ts = performance.now();
+  spatialProperties(SEED, 90, (cond, msg) => { if (!cond) failures++; console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); });
+  console.log(`(spatial checks ${((performance.now() - ts) / 1000).toFixed(1)}s)\n`);
+}
 
 const indices = ONLY !== undefined ? [ONLY] : Array.from({ length: COUNT }, (_, i) => i);
 for (const i of indices) {
