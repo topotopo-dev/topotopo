@@ -156,7 +156,8 @@ export function elimNeighboursRange(a: { r2: number }, A: Record<string, any>, s
     deg[s] = len - l0;
     w[s] = ws;
   }
-  return { list: list.slice(0, len), con: con.slice(0, len) };
+  // views: in one piece they are used as they are; from a worker the (slightly larger) buffers are cloned
+  return { list: list.subarray(0, len), con: con.subarray(0, len) };
 }
 
 /**
@@ -186,7 +187,7 @@ export function elimPairsRange(a: { rmax: number }, A: Record<string, any>, star
     }
     pc[i] = np - p0;
   }
-  return { pj: pj.slice(0, np), pf: pf.slice(0, np) };
+  return { pj: pj.subarray(0, np), pf: pf.subarray(0, np) };
 }
 
 /**
@@ -225,28 +226,32 @@ export function sampleEliminate(pos: Float64Array, target: number, rmax: number,
     const pc = new Int32Array(n);
     const job: ScatterJob = { count: n, args: { rmax }, inputs: { ...tree, pos, scale: sc }, results: { pc } };
     return then(runKernel(run, 'scatter_elim_pairs', job, 32768, elimPairsRange), (chunks: { pj: Int32Array; pf: Float64Array }[]) => {
-      // weights summed in discovery order (i ascending, each i's pairs in list order); each pair is listed at both
-      // ends, and its removal weight equals its creation weight (same distance, same summed radius): stored with it
+      // the pairs end to end, in discovery order (i ascending, each i's pairs in list order)
+      let PJ = chunks[0].pj, PF = chunks[0].pf;
+      if (chunks.length > 1) {
+        let total = 0, o = 0;
+        for (const ch of chunks) total += ch.pj.length;
+        PJ = new Int32Array(total); PF = new Float64Array(total);
+        for (const ch of chunks) { PJ.set(ch.pj, o); PF.set(ch.pf, o); o += ch.pj.length; }
+      }
+      // weights summed in discovery order; each pair is listed at both ends, and its removal weight equals its
+      // creation weight (same distance, same summed radius): stored with it
       const w = new Float64Array(n), deg = new Int32Array(n);
-      for (let i = 0, c = 0, e = 0; i < n; i++) {
-        for (let k = pc[i]; k > 0; k--) {
-          while (e >= chunks[c].pj.length) { c++; e = 0; }
-          const j = chunks[c].pj[e], f = chunks[c].pf[e]; e++;
+      for (let i = 0, q = 0; i < n; i++)
+        for (let k = pc[i]; k > 0; k--, q++) {
+          const j = PJ[q], f = PF[q];
           w[i] += f; w[j] += f;
           deg[i]++; deg[j]++;
         }
-      }
       const start = new Int32Array(n + 1);
       for (let i = 0; i < n; i++) start[i + 1] = start[i] + deg[i];
       const nbr = new Int32Array(start[n]), con = new Float64Array(start[n]), fill = start.slice(0, n);
-      for (let i = 0, c = 0, e = 0; i < n; i++) {
-        for (let k = pc[i]; k > 0; k--) {
-          while (e >= chunks[c].pj.length) { c++; e = 0; }
-          const j = chunks[c].pj[e], f = chunks[c].pf[e]; e++;
+      for (let i = 0, q = 0; i < n; i++)
+        for (let k = pc[i]; k > 0; k--, q++) {
+          const j = PJ[q], f = PF[q];
           nbr[fill[i]] = j; con[fill[i]++] = f;
           nbr[fill[j]] = i; con[fill[j]++] = f;
         }
-      }
       return eliminate(n, target, start, nbr, con, w, null);
     });
   });
@@ -365,7 +370,7 @@ export function conflictsRange(a: ConflictArgs, A: Record<string, any>, start: n
         }
     cnt[q] = len - l0;
   }
-  return list.slice(0, len);
+  return list.subarray(0, len);
 }
 
 /**
