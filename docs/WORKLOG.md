@@ -23,7 +23,7 @@ before touching the repo during the run.
    GitHub `topotopo` is TAKEN (a user account since 2015); domains: `.com` registered, `.org` registered, `.io`
    registered, `.dev` FREE, `.app` FREE, `.net` FREE; no software, company or trademark found under the full word.
    The user registers handles and domains; trademark filing is deferred until revenue or a grant (reminder item).
-2. **Licence: Apache-2.0** (switched from MIT while the author is sole contributor) with a NOTICE file carrying every
+2. **Licence: Apache-2.0** (reaffirmed 2026-10-13: stays Apache, no open-core split; protection comes from the trademark, the canonical npm/domain/org slots and velocity; history is kept when going public) (switched from MIT while the author is sole contributor) with a NOTICE file carrying every
    third-party licence text, including the bundled DejaVu font and xatlas (its npm tarball ships no licence file).
 3. **Contribution hygiene**: CONTRIBUTING.md (one maintainer, slow reviews, small PRs, issue before large changes, every
    node needs tests and docs), Contributor Covenant code of conduct, DCO sign-off check in CI, issue templates (bug
