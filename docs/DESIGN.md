@@ -522,8 +522,10 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
   `unreal_landscape` bundle). Still open: packed disk references (Houdini packed disk prims), USD variants and
   per-frame layers, and instanced rendering in the rasteriser (it draws expanded copies).
 - PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
-- Heightfields (done in P2-C: 23 nodes, erosion, Unreal heightmap export). Next: a grid (pipe-model) erosion variant
-  and the WASM erosion kernel behind `erodeStep`, heightfield tiles, and Unreal weight-layer import presets.
+- Heightfields (done in P2-C: 23 nodes, erosion, Unreal heightmap export). A grid (pipe-model) erosion variant
+  and the WASM erosion kernel are now available through `heightfield_erode` (explicit kernel backend;
+  droplet/js remains the unchanged default). `heightfield_flow` computes D8/D-infinity drainage. Next:
+  heightfield tiles and Unreal weight-layer import presets.
 - Curve toolkit: Bezier/NURBS prims, fillet, 3D offset, spline fit, projection and curve attributes are in (P2-D).
   Still open: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
