@@ -98,6 +98,17 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | P2-F | Asset shelf: 30+ curated graph assets (fence, rail, stairs, road, roof, window grid, tree, rock, cliff, pipes, cable, crate, barrel, bricks, tiles, hex grid, scaffold, pillar, arch) with golden renders | merged | 2026-10-12. 35 assets in shelf/, `npm run shelf`, goldens + variant sweep (3856 checks). Limits: roof_hip rectangular only (no straight skeleton); thumbnails show view labels; packed PCG assets carry name/material on unpacked prims only |
 | P2-G | Houdini parity tests through the Houdini MCP; Unreal round trip through the Unreal MCP | verified (Blender, Houdini, Unreal) | 2026-10-13, no code change. Blender 5.2: `scene.glb` imports as 536 instances sharing 5 mesh datablocks, 7 materials with the right base colours; `scene.usda` imports 7 meshes + the PointInstancer. Houdini 22.0.466: `scene.geo` loads with 0 errors (63,645 polygons + 536 PackedGeometry prims over 5 embedded sources, every point/prim/vertex/detail attribute present), so the writer's packed layout is confirmed. Unreal 5.8 (project topotopotest, in-editor MCP on port 8964): the 536 rows of `instances.csv` spawned as actors land exactly on the expanded reference geometry (offline: all 39,350 transformed vertices within 0.1 cm using Unreal's rotator convention, negated yaw fails; in-editor: row-0 transform read back equals the CSV, a line trace from above hits the pine apex at the predicted Z, reference-mesh bounds equal the predicted union). Axis convention X=x, Y=z, Z=y confirmed for the OBJ path (export OBJ Z-up: Unreal keeps a Y-up OBJ lying on its side). Landscape: imported through the Landscape mode UI with the manifest values (section 63, 2×2 sections, 2×2 components, location (0, 0, 1169.3223), scale (50, 50, 4.603792)); verified from the editor by line traces: the terrain ends exactly at ±6300 cm, the low corner reads −9.2485 cm (= height_min), and the 292 tree bases sit on the terrain (median 0.16 cm, p90 0.9 cm; the only 6 larger gaps are trees standing inside a half-buried rock's footprint, where the trace hits the rock). Note: Unreal's Landscape is piecewise linear along the (0,0)–(1,1) cell diagonal (engine hits match that model to 0.03 cm) while topotopo scatters on the bilinear surface, so expect up to a few cm on steep cells |
 
+### Phase 3: volumes, simulation-lite, CAD
+| id | item | status | notes |
+|---|---|---|---|
+| P3-T | Procedural textures and bakes | merged | 2026-10-13 (see log) |
+| P3-V | Grid volumes + VDB-like ops + dual contouring; straight-skeleton roofs | merged | Codex K-1, K-2 (external track) |
+| P3-A | `rbd_settle` / `rbd_stack` via Rapier (WASM, Apache-2.0): drop rocks, stack crates, settle packed instances | running (agent) | launched 2026-10-14; new files src/core/rbd.ts, src/nodes/rbd.ts |
+| P3-B | `particles`: seeded emitters, drag/wind/curl noise/attract, mesh and floor collisions, trails as polylines, time-model aware, pool parity | running (agent) | launched 2026-10-14; src/core/particles.ts, src/nodes/particles.ts |
+| P3-C | `drape` (XPBD cloth: stretch/shear/bend compliance, pins, collisions, wind) and `inflate` (pressure) | running (agent) | launched 2026-10-14; src/core/xpbd.ts, src/nodes/cloth.ts |
+| P3-D | Optional OCCT module (CAD fillets, STEP) | queued | separately loaded module; licence LGPL-2.1 with exception: decide before starting |
+| R-12 | Follow-ups: guard `heightfield_layer`/`sdf_expr` expressions, scatter mask path on the pool, weak examples, roof_skeleton wording | running (agent) | launched 2026-10-14 |
+
 ### Release and outreach (after Phase 2)
 | id | item | status | notes |
 |---|---|---|---|
@@ -122,6 +133,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-14: Phase 3 simulation-lite started: P3-A (Rapier RBD), P3-B (particles), P3-C (XPBD cloth) and R-12 (follow-ups) launched as Opus agents in parallel with Codex session 7 (quad remesher). Release steps (repo rename, public, placeholder publish) wait for the user.
 - 2026-10-14: Codex session 6 merged (71c0cd7): SIMD WASM by default with scalar fallback, erosion pipe model 3.2 s native. Session 7 (K-3b quad remesher) launched.
 - 2026-10-14: **R-4 rename done** (8391fc5): the code says TopoTopo everywhere. Awaiting the user: GitHub repo rename to topotopo-dev/topotopo, public flip, npm placeholder publish (user present for 2FA). Codex session 6 (SIMD default) launched from the renamed main.
 - 2026-10-14: after the restart, R-8 and R-11 merged (e5d3c36 and the following merge), DESIGN.md chunking table and roadmap refreshed. Next: R-4 rename, then Codex session 6.
