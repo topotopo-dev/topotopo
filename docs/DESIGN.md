@@ -62,6 +62,8 @@ src/core/      geometry model + algorithms (no I/O)
                  clusters, mask bands and combination, image sampling, instance frames (scatter v2, pcg nodes)
   scatter.ts     scatter kernels for the pool: candidate sampling, blue-noise sample elimination (neighbour lists, pairs,
                  conflicts), surface relaxation, KD build; the same code runs single-threaded (bit-identical)
+  xpbd.ts        XPBD cloth (drape, inflate): constraint model, stretch chains solved exactly, colour-sorted Gauss-Seidel,
+                 tethers, volume, collider contact planes (pseudo-normals; the "cloth_collide" kernel), floor, friction, wind
   analysis.ts    measures: discrete curvature, packet ray casting (occlusion, thickness), closest points on meshes/curves/points,
                  self-intersections, pieces/genus/cavities, PCA, mirror symmetry, Hausdorff sampling (measure nodes, explain, diff)
   manifold.ts    Geometry ⇄ manifold-3d (attributes carried as properties, provenance via reserved IDs)
@@ -411,6 +413,7 @@ What runs in chunks:
 | `bake_curvature` | `bake_curvature`: the edges near each sample | edges and their uniform grid shared |
 | `wrangle` over points | `wrangle` (host kernel in worker.ts) | each worker compiles the same generated kernel source in its own realm (a Node host with the snippet library); only when the snippet binds numeric attributes and groups and calls none of `GEOMETRY_FUNCTIONS` (point(), neighbours(), nearpoints(), addpoint(), setpointattrib(), print() …), `globalThis`/`this`/`eval`, nor writes `vars`; 64k+ points |
 | `scatter`, `heightfield_scatter` | `scatter_candidates`, `scatter_elim_neighbours`, `scatter_elim_pairs`, `scatter_conflicts`, `scatter_relax`, `kd_build` (src/core/scatter.ts) | candidate sampling, sample-elimination neighbour lists, conflict checks and relaxation run in chunks, bit-identical to the single-thread path; the elimination heap, the top KD-tree levels and the serial min-distance pass stay on the main thread |
+| `drape`, `inflate` | `cloth_collide` (src/core/xpbd.ts): each cloth point's contact plane against the collider, once per step | the collider BVH and pseudo-normals are shared as arrays; 4096+ points. The constraint solve (Gauss-Seidel and chain solves, the order is the result) stays on the main thread |
 
 Not in chunks, and why:
 - `heightfield_erode`: droplets run one after another over the terrain the previous ones left; a split would change
@@ -438,6 +441,50 @@ warm-up, two rounds; other jobs shared the machine, so ±10%):
 The point normals that bound noise_displace are a scatter-add over the vertices, memory-bound and not split: computing
 the per-polygon Newell vectors on the pool and summing them here (bit-identical) was tried and saved nothing, because
 the sums and the normalisation are most of pointNormals' cost.
+
+### Cloth (XPBD)
+
+`drape` and `inflate` (category `sim`, `src/nodes/cloth.ts`) run the extended position-based dynamics solver of
+`src/core/xpbd.ts` from the input positions for `steps` steps of 1/fps s and output the last state with the input's
+topology and attributes (P moved, `v`, `rest_P`, `N`, `pinned`). The cook is not time-dependent; a graph animates a
+drape by driving `steps` with `=frame` (each frame re-simulates) or feeds a solver.
+- **Model.** One particle per point, mass from the triangle areas (`density`, kg/m²) or a `mass` attribute, inverse
+  mass 0 when pinned. Polygons are triangulated for the constraints only. Every constraint is in compliance form
+  (α = 1/k, α̃ = α/h²), so stiffnesses are physical and do not change with the step size: stretch on the polygon sides
+  (N/m), shear on both quad diagonals (N/m), dihedral bending across shared edges with the rest angle from the input
+  (bending rigidity N·m scaled by 3|e|²/(A₁+A₂), the discrete-shells weight, so it is resolution independent; Bridson
+  gradients, which are well defined at the flat rest state; a polynomial atan2 so the angle has the same bits
+  everywhere), tethers from every point to its nearest pin (`tethers`), and for `inflate` one volume constraint
+  C = V − pressure·V₀ with compliance V₀²/(k·area).
+- **Stretch chains.** Point-wise Gauss-Seidel moves a correction one edge per sweep, so cloth hanging N edges deep keeps a
+  steady-state stretch that grows like N²·g·h² (a 1 m cloth on 20 rows, pinned at the top, 4 substeps × 2 sweeps: mean
+  strain 6.5 %, max 48 %; a tablecloth over a box: max 100 %+ at the box edges). Over-relaxation made it worse (the PBD
+  velocity update turns the overshoot into energy) and a height-ordered sweep turned unstable with one sweep per substep.
+  The stretch edges are therefore grouped into straight chains (`stretchChains`: the rows and columns of a quad grid,
+  greedy straightest paths on any mesh, each edge in one chain) and every chain is one block whose linearised system is
+  tridiagonal and solved exactly (Thomas algorithm, `solveChains`), the block Gauss-Seidel of direct rod solvers. Points
+  resting on a contact plane get the mobility w·(I − ννᵀ) in that solve: a correction slides them along the surface
+  instead of pushing them in, where the contact projection would undo it (a rope over a box kept its edge link 20 %
+  long). A sweep runs the point-wise constraints (shear, bend, tethers, volume, self collision) first and the chains
+  last before the contacts, so the stiffest constraint has the last word. Measured (60 × 60 cloth, 150 steps, defaults):
+  hanging cloth max strain 0.7 % without tethers, 0.03 % with them; tablecloth over a box mean 0.7 % (the remaining peaks
+  are the one quad that sits on each sharp top corner); over a sphere mean 0.7 %, p99 4.4 % (was 9.2 % / 61 %).
+- **Collisions** are speculative contact planes found once per step (`collideRange`, kernel `cloth_collide`): a point
+  within its query radius (1.5 × thickness plus twice its travel in the step) of a collider triangle gets the plane
+  through the closest point with the normal towards its side; the substeps keep it `thickness` in front. On closed,
+  consistently wound pieces the side comes from angle-weighted pseudo-normals (Bærentzen & Aanæs), so points that end
+  up inside are pushed out; on open pieces a point keeps the side it started the step on (a sheet collides from both
+  sides). The floor is the plane y = floor_height. Coulomb friction removes tangential motion up to friction × the
+  normal correction of the substep. Self collision is point-point with a spatial hash (pairs found per step, minimum
+  distance 2 × thickness or the rest distance). Initial overlaps are pushed out without velocity.
+- **Determinism and threads.** The point-wise constraints are colour-sorted (no two constraints of a colour share a point),
+  chains run in build order, sweeps alternate direction, and the solve runs on the cooking thread. Only the collider
+  queries go through `ctx.parallelMap`; they are pure per point, so a cook is bit-identical with and without the pool
+  (test/cloth.ts checks it with a forced pool).
+- **Limits** (against Vellum): static colliders only; per-point collision (a sharp collider corner can poke between
+  cloth points, and an edge of the cloth can pass a thin collider edge), contacts found once per step; no tearing,
+  plasticity, welds/stitches, attach-to-animated-geometry, cloth-on-cloth friction, or edge-edge self collision;
+  `inflate` uses one global volume constraint (no per-piece pressure).
 
 ### Sampled SDF grids
 

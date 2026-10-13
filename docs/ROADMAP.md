@@ -186,7 +186,7 @@ Names are Houdini's; TopoTopo aliases should accept them.
 |---|---|
 | `rbd` settle/stack via Rapier (drop rocks, stack crates, fill containers) | |
 | `particles` | advect by velocity/noise/curl fields, collide with meshes, trails to curves |
-| `cloth`/`drape` via XPBD (Vellum-lite) | tarps, cables, banners |
+| `cloth`/`drape` via XPBD (Vellum-lite) | shipped (P3-C): `drape` (tarps, banners, strings; colliders, floor, pins, wind, self collision) and `inflate` (cushions, balloons); see DESIGN.md "Cloth (XPBD)" |
 | `solver` | generic frame feedback (growth, reaction-diffusion, erosion steps) |
 
 ### IO and interop

@@ -517,6 +517,10 @@ export interface Collider {
   VN: Float64Array;
   TC: Uint8Array;
   numTris: number;
+  /** sharp convex corners of closed pieces: point ids, positions and outward pseudo-normals (3 per corner) */
+  SV: Int32Array;
+  SP: Float64Array;
+  SN: Float64Array;
 }
 
 /** Collider data of a mesh (its polygons), or null when it has none. */
@@ -604,7 +608,28 @@ export function buildCollider(g: Geometry): Collider | null {
     const l = Math.sqrt(VN[i] * VN[i] + VN[i + 1] * VN[i + 1] + VN[i + 2] * VN[i + 2]);
     if (l > 1e-12) { VN[i] /= l; VN[i + 1] /= l; VN[i + 2] /= l; }
   }
-  return { bvh, FN, EN, VN, TC, numTris: nt };
+  // sharp convex corners of closed pieces (a face normal more than 25° off the pseudo-normal, every neighbour below the
+  // tangent plane): the vertices that can poke between cloth points (XpbdCloth.findCornerContacts)
+  const minDot = new Float64Array(np).fill(2), ok = new Uint8Array(np).fill(1), seen = new Uint8Array(np), pos = new Float64Array(np * 3);
+  for (let t = 0; t < nt; t++)
+    for (let k = 0; k < 3; k++) {
+      const p = tp[t * 3 + k], o = t * 9 + k * 3;
+      seen[p] = 1;
+      pos[p * 3] = T[o]; pos[p * 3 + 1] = T[o + 1]; pos[p * 3 + 2] = T[o + 2];
+      const vx = VN[p * 3], vy = VN[p * 3 + 1], vz = VN[p * 3 + 2];
+      minDot[p] = Math.min(minDot[p], FN[t * 3] * vx + FN[t * 3 + 1] * vy + FN[t * 3 + 2] * vz);
+      if (!TC[t]) ok[p] = 0;
+      for (const j of [(k + 1) % 3, (k + 2) % 3]) {
+        const q = t * 9 + j * 3;
+        if ((T[q] - T[o]) * vx + (T[q + 1] - T[o + 1]) * vy + (T[q + 2] - T[o + 2]) * vz > 1e-9) ok[p] = 0;
+      }
+    }
+  const sv: number[] = [];
+  for (let p = 0; p < np; p++) if (seen[p] && ok[p] && minDot[p] < 0.906) sv.push(p);
+  const SV = Int32Array.from(sv), SP = new Float64Array(sv.length * 3), SN = new Float64Array(sv.length * 3);
+  for (let i = 0; i < sv.length; i++)
+    for (let c = 0; c < 3; c++) { SP[i * 3 + c] = pos[sv[i] * 3 + c]; SN[i * 3 + c] = VN[sv[i] * 3 + c]; }
+  return { bvh, FN, EN, VN, TC, numTris: nt, SV, SP, SN };
 }
 
 /** The arrays of a collider the "cloth_collide" kernel reads (shared with worker threads). */
@@ -616,7 +641,7 @@ export function colliderArrays(c: Collider): Record<string, Float64Array | Int32
 /** A collider over arrays from colliderArrays (in a worker thread): no BVH build. */
 export function colliderFromArrays(A: Record<string, any>): Collider {
   const bvh = TriBVH.fromArrays({ T: A.T, nodes: A.nodes, child: A.child, order: A.order, triPt: A.triPt });
-  return { bvh, FN: A.FN, EN: A.EN, VN: A.VN, TC: A.TC, numTris: A.order.length };
+  return { bvh, FN: A.FN, EN: A.EN, VN: A.VN, TC: A.TC, numTris: A.order.length, SV: new Int32Array(0), SP: new Float64Array(0), SN: new Float64Array(0) };
 }
 
 /**
@@ -710,6 +735,21 @@ export class XpbdCloth {
   sJ = new Int32Array(0);
   sD = new Float64Array(0);
   sCount = 0;
+  /** collider-corner contacts of the current step: cloth triangle, barycentrics, corner position and outward normal */
+  kT = new Int32Array(0);
+  kB = new Float64Array(0);
+  kC = new Float64Array(0);
+  kN = new Float64Array(0);
+  kCount = 0;
+  private kStamp = 0;
+  /** collider query lower bounds (queryRadius / afterQuery): position at the last query and the distance then */
+  private qX: Float64Array | null = null;
+  private qD: Float64Array | null = null;
+  /** corner search data (findCornerContacts): point → triangles, triangle stamps, hashed corners, per-corner scratch */
+  private corners: {
+    col: Collider; start: Int32Array; tri: Int32Array; stamp: Int32Array; cst: Int32Array; cent: Int32Array; mask: number; inv: number;
+    best: Float64Array; finder: Int32Array;
+  } | null = null;
   /** volume constraint */
   vRest = 0;
   vSign = 1;
@@ -830,16 +870,39 @@ export class XpbdCloth {
 
   /**
    * Query radius per point for the next step: thickness plus twice the distance the point can travel in a step at its
-   * current speed under gravity, plus half a thickness of margin. 0 for pinned points.
+   * current speed under gravity, plus half a thickness of margin. 0 (no query) for pinned points and for points that
+   * cannot be that close to the collider: the distance found at a point's last query, less how far it has moved since,
+   * is a lower bound on its distance now (afterQuery keeps it), so skipping them changes nothing.
    */
   queryRadius(R: Float64Array) {
-    const o = this.o, dt = o.dt, v = this.v, w = this.w;
+    const o = this.o, dt = o.dt, v = this.v, w = this.w, x = this.x;
     const g = Math.hypot(o.gravity[0], o.gravity[1], o.gravity[2]);
     const base = 1.5 * o.thickness + 2 * g * dt * dt;
+    const QX = (this.qX ??= Float64Array.from(x)), QD = (this.qD ??= new Float64Array(this.n));
     for (let i = 0; i < this.n; i++) {
       if (w[i] === 0) { R[i] = 0; continue; }
-      const s = Math.sqrt(v[i * 3] * v[i * 3] + v[i * 3 + 1] * v[i * 3 + 1] + v[i * 3 + 2] * v[i * 3 + 2]);
-      R[i] = base + 2 * s * dt;
+      const k = i * 3;
+      const s = Math.sqrt(v[k] * v[k] + v[k + 1] * v[k + 1] + v[k + 2] * v[k + 2]);
+      const r = base + 2 * s * dt;
+      const ex = x[k] - QX[k], ey = x[k + 1] - QX[k + 1], ez = x[k + 2] - QX[k + 2];
+      R[i] = QD[i] - Math.sqrt(ex * ex + ey * ey + ez * ez) > r ? 0 : r;
+    }
+  }
+
+  /**
+   * After the collider query with radii R (queryRadius): every queried point remembers where it was and its distance to
+   * the collider then (the contact distance, or at least the radius when nothing was within it).
+   */
+  afterQuery(R: Float64Array) {
+    const x = this.x, QX = this.qX!, QD = this.qD!, cf = this.cf, cp = this.cp;
+    for (let i = 0; i < this.n; i++) {
+      if (!(R[i] > 0)) continue;
+      const k = i * 3;
+      QX[k] = x[k]; QX[k + 1] = x[k + 1]; QX[k + 2] = x[k + 2];
+      if (cf[i]) {
+        const ex = x[k] - cp[k], ey = x[k + 1] - cp[k + 1], ez = x[k + 2] - cp[k + 2];
+        QD[i] = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      } else QD[i] = R[i];
     }
   }
 
@@ -1078,24 +1141,27 @@ export class XpbdCloth {
       const s = S[k], nl = S[k + 1] - s - 1, lo = s - k;
       // forward: assemble link i (direction, diagonal, right-hand side) and eliminate it (Thomas); IP = 1 / pivot,
       // Rp = eliminated right-hand side, Cp = eliminated super-diagonal (known once link i + 1 is assembled)
+      let px = 0, py = 0, pz = 0;
       for (let i = 0; i < nl; i++) {
         const a = P[s + i], b = P[s + i + 1], cid = K[lo + i], q = i * 3;
-        const ia = a * 3, ib = b * 3;
+        const ia = a * 3, ib = b * 3, wa = w[a], wb = w[b], ga = GK[a];
         const dx = x[ib] - x[ia], dy = x[ib + 1] - x[ia + 1], dz = x[ib + 2] - x[ia + 2];
-        const d2 = dx * dx + dy * dy + dz * dz, ws = w[a] + w[b], at = AT[cid];
+        const d2 = dx * dx + dy * dy + dz * dz, ws = wa + wb, at = AT[cid];
         let dg = 0, rhs = 0, nx = 0, ny = 0, nz = 0;
         if (ws !== 0 && at !== Infinity && d2 >= 1e-24) {
           const il = 1 / Math.sqrt(d2);
           nx = dx * il; ny = dy * il; nz = dz * il;
-          dg = mob(a, nx, ny, nz, nx, ny, nz) + mob(b, nx, ny, nz, nx, ny, nz);
+          // a free point's mobility along the unit direction is just its inverse mass
+          dg = (ga ? mob(a, nx, ny, nz, nx, ny, nz) : wa) + (GK[b] ? mob(b, nx, ny, nz, nx, ny, nz) : wb);
           if (dg > 1e-9 * ws) { dg += at; rhs = lam ? R[cid] - d2 * il - at * L[cid] : R[cid] - d2 * il; }
           else { dg = 0; nx = ny = nz = 0; }
         }
         // inactive link: a decoupled row 1·Δλ = 0
         if (dg === 0) dg = 1;
         N[q] = nx; N[q + 1] = ny; N[q + 2] = nz;
-        if (i === 0) { IP[0] = 1 / dg; Rp[0] = rhs * IP[0]; continue; }
-        const off = -mob(a, N[q - 3], N[q - 2], N[q - 1], nx, ny, nz);
+        if (i === 0) { IP[0] = 1 / dg; Rp[0] = rhs * IP[0]; px = nx; py = ny; pz = nz; continue; }
+        const off = ga ? -mob(a, px, py, pz, nx, ny, nz) : -wa * (px * nx + py * ny + pz * nz);
+        px = nx; py = ny; pz = nz;
         const c = (Cp[i - 1] = off * IP[i - 1]);
         const ip = (IP[i] = 1 / (dg - off * c));
         Rp[i] = (rhs - off * Rp[i - 1]) * ip;
@@ -1147,30 +1213,31 @@ export class XpbdCloth {
       if (!(e2 > 1e-24 && l1 > 1e-24 && l2 > 1e-24)) continue;
       const el = Math.sqrt(e2), iel = 1 / el;
       const cx = n1y * n2z - n1z * n2y, cy = n1z * n2x - n1x * n2z, cz = n1x * n2y - n1y * n2x;
-      const theta = fastAtan2((cx * ex + cy * ey + cz * ez) * iel, n1x * n2x + n1y * n2y + n1z * n2z);
+      const cs = n1x * n2x + n1y * n2y + n1z * n2z;
+      const theta = fastAtan2((cx * ex + cy * ey + cz * ez) * iel, cs);
       let C = theta - R[c];
       if (C > Math.PI) C -= 2 * Math.PI; else if (C < -Math.PI) C += 2 * Math.PI;
       // ∂θ/∂x = -(u1, u2, u3, u4) of Bridson et al. 2003 for this θ (checked against finite differences in test/cloth.ts):
-      // u1 = |E| N1/|N1|², u2 = |E| N2/|N2|², u3 and u4 from the wings' projections on the edge (they sum to zero)
+      // u1 = |E| N1/|N1|², u2 = |E| N2/|N2|², u3 and u4 from the wings' projections on the edge (they sum to zero).
+      // Every gradient is a combination g = α N1 + β N2, so |g|² = α²|N1|² + β²|N2|² + 2αβ N1·N2.
       const il1 = 1 / l1, il2 = 1 / l2;
       const s1 = el * il1, s2 = el * il2, q1 = iel * il1, q2 = iel * il2;
       const e14 = a1x * ex + a1y * ey + a1z * ez, e24 = b2x * ex + b2y * ey + b2z * ez;
       // (x1 - x4)·E = (x1 - x3)·E - |E|², likewise for x2
       const d13 = (e14 - e2) * q1, d23 = (e24 - e2) * q2, d14 = e14 * q1, d24 = e24 * q2;
-      const g1x = -s1 * n1x, g1y = -s1 * n1y, g1z = -s1 * n1z;
-      const g2x = -s2 * n2x, g2y = -s2 * n2y, g2z = -s2 * n2z;
-      const g3x = -d13 * n1x - d23 * n2x, g3y = -d13 * n1y - d23 * n2y, g3z = -d13 * n1z - d23 * n2z;
-      const g4x = d14 * n1x + d24 * n2x, g4y = d14 * n1y + d24 * n2y, g4z = d14 * n1z + d24 * n2z;
       const at = AT[c];
-      const den = w1 * (g1x * g1x + g1y * g1y + g1z * g1z) + w2 * (g2x * g2x + g2y * g2y + g2z * g2z) +
-        w3 * (g3x * g3x + g3y * g3y + g3z * g3z) + w4 * (g4x * g4x + g4y * g4y + g4z * g4z) + at;
+      const den = w1 * e2 * il1 + w2 * e2 * il2 + w3 * (d13 * d13 * l1 + d23 * d23 * l2 + 2 * d13 * d23 * cs) +
+        w4 * (d14 * d14 * l1 + d24 * d24 * l2 + 2 * d14 * d24 * cs) + at;
       if (!(den > 1e-300)) continue;
       let dl: number;
       if (lam) { dl = (-C - at * L[c]) / den; L[c] += dl; } else dl = -C / den;
-      let k = w1 * dl; x[p1] += k * g1x; x[p1 + 1] += k * g1y; x[p1 + 2] += k * g1z;
-      k = w2 * dl; x[p2] += k * g2x; x[p2 + 1] += k * g2y; x[p2 + 2] += k * g2z;
-      k = w3 * dl; x[p3] += k * g3x; x[p3 + 1] += k * g3y; x[p3 + 2] += k * g3z;
-      k = w4 * dl; x[p4] += k * g4x; x[p4 + 1] += k * g4y; x[p4 + 2] += k * g4z;
+      // Δx_i = w_i Δλ g_i with g1 = -s1 N1, g2 = -s2 N2, g3 = -(d13 N1 + d23 N2), g4 = d14 N1 + d24 N2
+      let k = -w1 * dl * s1; x[p1] += k * n1x; x[p1 + 1] += k * n1y; x[p1 + 2] += k * n1z;
+      k = -w2 * dl * s2; x[p2] += k * n2x; x[p2 + 1] += k * n2y; x[p2 + 2] += k * n2z;
+      let k1 = -w3 * dl * d13, k2 = -w3 * dl * d23;
+      x[p3] += k1 * n1x + k2 * n2x; x[p3 + 1] += k1 * n1y + k2 * n2y; x[p3 + 2] += k1 * n1z + k2 * n2z;
+      k1 = w4 * dl * d14; k2 = w4 * dl * d24;
+      x[p4] += k1 * n1x + k2 * n2x; x[p4 + 1] += k1 * n1y + k2 * n2y; x[p4 + 2] += k1 * n1z + k2 * n2z;
     }
   }
 
@@ -1257,6 +1324,148 @@ export class XpbdCloth {
         x[k] = y0;
       }
     }
+    if (this.kCount) this.solveCorners();
+  }
+
+  /**
+   * Collider corners under cloth triangles (findCornerContacts): keep the triangle's point above the corner (at the
+   * stored barycentrics) `thickness` in front of it along the triangle normal turned outwards, moving the three cloth
+   * points by their barycentric share (C = (Σ bᵢ xᵢ - c)·n - thickness, ∇ₓᵢ C = bᵢ n).
+   */
+  private solveCorners() {
+    const x = this.x, w = this.w, tris = this.m.tris, th = this.o.thickness, T = this.kT, B = this.kB, C = this.kC, Nc = this.kN;
+    for (let k = 0; k < this.kCount; k++) {
+      const t = T[k] * 3, a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
+      const b0 = B[k * 3], b1 = B[k * 3 + 1], b2 = B[k * 3 + 2];
+      // triangle normal, turned towards the corner's outward normal
+      const ux = x[b] - x[a], uy = x[b + 1] - x[a + 1], uz = x[b + 2] - x[a + 2];
+      const vx = x[c] - x[a], vy = x[c + 1] - x[a + 1], vz = x[c + 2] - x[a + 2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (!(nl > 1e-300)) continue;
+      const sg = nx * Nc[k * 3] + ny * Nc[k * 3 + 1] + nz * Nc[k * 3 + 2] < 0 ? -1 / nl : 1 / nl;
+      nx *= sg; ny *= sg; nz *= sg;
+      const px = b0 * x[a] + b1 * x[b] + b2 * x[c], py = b0 * x[a + 1] + b1 * x[b + 1] + b2 * x[c + 1], pz = b0 * x[a + 2] + b1 * x[b + 2] + b2 * x[c + 2];
+      const d = (px - C[k * 3]) * nx + (py - C[k * 3 + 1]) * ny + (pz - C[k * 3 + 2]) * nz;
+      if (d >= th) continue;
+      const wa = w[tris[t]], wb = w[tris[t + 1]], wc = w[tris[t + 2]];
+      const den = wa * b0 * b0 + wb * b1 * b1 + wc * b2 * b2;
+      if (!(den > 0)) continue;
+      const s = (th - d) / den;
+      let f = wa * b0 * s; x[a] += f * nx; x[a + 1] += f * ny; x[a + 2] += f * nz;
+      f = wb * b1 * s; x[b] += f * nx; x[b + 1] += f * ny; x[b + 2] += f * nz;
+      f = wc * b2 * s; x[c] += f * nx; x[c + 1] += f * ny; x[c + 2] += f * nz;
+    }
+  }
+
+  /**
+   * Corner contacts for the next step. Point contacts alone let a sharp collider corner poke between cloth points, so
+   * every sharp convex corner (Collider.SV) facing up against gravity (its outward normal within 78° of up; any corner
+   * without gravity) that a cloth point with a collider contact comes within 1.5 edges of looks for the cloth triangle
+   * around that point's 2-ring into which it projects, facing along the corner's normal (within 72°), in front of the
+   * corner and at most 2·thickness + half an edge away; the nearest such triangle becomes a contact for the step's
+   * substeps (solveCorners). The corners are hashed once (they are static); the per-step cost is the contact points.
+   */
+  findCornerContacts(col: Collider) {
+    this.kCount = 0;
+    const ns = col.SV.length, tris = this.m.tris, nt = tris.length / 3, n = this.n;
+    if (!ns || !nt) return;
+    const x = this.x, o = this.o, th = o.thickness, edge = this.m.meanEdge || 0.01, SP = col.SP, SN = col.SN;
+    const gl = Math.hypot(o.gravity[0], o.gravity[1], o.gravity[2]);
+    const upx = gl > 0 ? -o.gravity[0] / gl : 0, upy = gl > 0 ? -o.gravity[1] / gl : 0, upz = gl > 0 ? -o.gravity[2] / gl : 0;
+    const hc = (cx: number, cy: number, cz: number, mask: number) => ((Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663) ^ Math.imul(cz, 83492791)) >>> 0) & mask;
+    if (!this.corners || this.corners.col !== col) {
+      // point → triangles, and a hash of the usable corners (cells 1.5 edges wide)
+      const start = new Int32Array(n + 1);
+      for (let k = 0; k < tris.length; k++) start[tris[k] + 1]++;
+      for (let i = 0; i < n; i++) start[i + 1] += start[i];
+      const tri = new Int32Array(tris.length), fill = start.slice(0, n);
+      for (let k = 0; k < tris.length; k++) tri[fill[tris[k]]++] = (k / 3) | 0;
+      const use: number[] = [];
+      for (let s = 0; s < ns; s++) if (gl === 0 || SN[s * 3] * upx + SN[s * 3 + 1] * upy + SN[s * 3 + 2] * upz > 0.2) use.push(s);
+      let size = 1;
+      while (size < use.length * 2) size <<= 1;
+      const mask = size - 1, inv = 1 / (1.5 * edge), cst = new Int32Array(size + 1), cell = new Int32Array(use.length);
+      for (let k = 0; k < use.length; k++) {
+        const s = use[k];
+        cell[k] = hc(Math.floor(SP[s * 3] * inv), Math.floor(SP[s * 3 + 1] * inv), Math.floor(SP[s * 3 + 2] * inv), mask);
+        cst[cell[k] + 1]++;
+      }
+      for (let k = 0; k < size; k++) cst[k + 1] += cst[k];
+      const cfill = cst.slice(0, size), cent = new Int32Array(use.length);
+      for (let k = 0; k < use.length; k++) cent[cfill[cell[k]]++] = use[k];
+      this.corners = { col, start, tri, stamp: new Int32Array(nt).fill(-1), cst, cent, mask, inv, best: new Float64Array(ns), finder: new Int32Array(ns).fill(-1) };
+    }
+    const K = this.corners, cf = this.cf, cn = this.cn, cp = this.cp;
+    if (!K.cent.length) return;
+    // each corner's nearest cloth point that has a collider contact plane within reach
+    const r = 1.5 * edge, r2 = r * r, found: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (!cf[i] || this.w[i] === 0) continue;
+      const xo = i * 3;
+      if ((x[xo] - cp[xo]) * cn[xo] + (x[xo + 1] - cp[xo + 1]) * cn[xo + 1] + (x[xo + 2] - cp[xo + 2]) * cn[xo + 2] > th + edge) continue;
+      const gx = Math.floor(x[xo] * K.inv), gy = Math.floor(x[xo + 1] * K.inv), gz = Math.floor(x[xo + 2] * K.inv);
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const h = hc(gx + dx, gy + dy, gz + dz, K.mask);
+            for (let e = K.cst[h]; e < K.cst[h + 1]; e++) {
+              const s = K.cent[e];
+              const ex = x[xo] - SP[s * 3], ey = x[xo + 1] - SP[s * 3 + 1], ez = x[xo + 2] - SP[s * 3 + 2];
+              const d2 = ex * ex + ey * ey + ez * ez;
+              if (d2 >= r2) continue;
+              if (K.finder[s] < 0) { found.push(s); K.finder[s] = i; K.best[s] = d2; }
+              else if (d2 < K.best[s]) { K.finder[s] = i; K.best[s] = d2; }
+            }
+          }
+    }
+    found.sort((a, b) => a - b);
+    const { start, tri, stamp } = K, reach = 2 * th + 0.5 * edge;
+    const kt: number[] = [], kb: number[] = [], kc: number[] = [], kn: number[] = [];
+    for (const s of found) {
+      const p0 = K.finder[s];
+      K.finder[s] = -1;
+      const cx = SP[s * 3], cy = SP[s * 3 + 1], cz = SP[s * 3 + 2], nx0 = SN[s * 3], ny0 = SN[s * 3 + 1], nz0 = SN[s * 3 + 2];
+      const sid = ++this.kStamp;
+      let best = -1, bestH = Infinity, b0 = 0, b1 = 0, b2 = 0;
+      // triangles of the 2-ring around the finder point
+      for (let e0 = start[p0]; e0 < start[p0 + 1]; e0++) {
+        const t0 = tri[e0];
+        for (let k0 = 0; k0 < 3; k0++) {
+          const q = tris[t0 * 3 + k0];
+          for (let e = start[q]; e < start[q + 1]; e++) {
+            const t = tri[e];
+            if (stamp[t] === sid) continue;
+            stamp[t] = sid;
+            const a = tris[t * 3] * 3, b = tris[t * 3 + 1] * 3, c = tris[t * 3 + 2] * 3;
+            const ux = x[b] - x[a], uy = x[b + 1] - x[a + 1], uz = x[b + 2] - x[a + 2];
+            const vx = x[c] - x[a], vy = x[c + 1] - x[a + 1], vz = x[c + 2] - x[a + 2];
+            let tx = uy * vz - uz * vy, ty = uz * vx - ux * vz, tz = ux * vy - uy * vx;
+            const tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+            if (!(tl > 1e-300)) continue;
+            tx /= tl; ty /= tl; tz /= tl;
+            const facing = tx * nx0 + ty * ny0 + tz * nz0;
+            if (facing < 0) { tx = -tx; ty = -ty; tz = -tz; }
+            if (Math.abs(facing) < 0.3) continue;
+            // the triangle's plane must lie in front of the corner (along the oriented normal), within reach
+            const wx = cx - x[a], wy = cy - x[a + 1], wz = cz - x[a + 2];
+            const hgt = -(wx * tx + wy * ty + wz * tz);
+            if (hgt < -th || hgt > reach || Math.abs(hgt) >= bestH) continue;
+            // the corner's projection onto the plane, in barycentrics, inside the triangle
+            const d00 = ux * ux + uy * uy + uz * uz, d01 = ux * vx + uy * vy + uz * vz, d11 = vx * vx + vy * vy + vz * vz;
+            const d20 = wx * ux + wy * uy + wz * uz, d21 = wx * vx + wy * vy + wz * vz, den = d00 * d11 - d01 * d01;
+            if (!(den > 0)) continue;
+            const q1 = (d11 * d20 - d01 * d21) / den, q2 = (d00 * d21 - d01 * d20) / den, q0 = 1 - q1 - q2;
+            if (q0 < 0 || q1 < 0 || q2 < 0) continue;
+            best = t; bestH = Math.abs(hgt); b0 = q0; b1 = q1; b2 = q2;
+          }
+        }
+      }
+      if (best < 0) continue;
+      kt.push(best); kb.push(b0, b1, b2); kc.push(cx, cy, cz); kn.push(nx0, ny0, nz0);
+    }
+    this.kT = Int32Array.from(kt); this.kB = Float64Array.from(kb); this.kC = Float64Array.from(kc); this.kN = Float64Array.from(kn);
+    this.kCount = kt.length;
   }
 
   /** Coulomb friction from the contact corrections of this substep (static below friction × depth, else kinetic). */

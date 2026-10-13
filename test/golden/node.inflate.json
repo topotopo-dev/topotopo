@@ -1,0 +1,40 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "rest_P:float:3", "v:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.0051, 1.0264, 1.0066],
+      "min": [-1.0401, -1.0244, -1.025]
+    },
+    "counts": {
+      "points": 162,
+      "prims": 320,
+      "vertices": 960,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "d4a707c15a9be323",
+      "attributes": {
+        "point.N": "b2f093f93dadb983",
+        "point.rest_P": "fb64e34a8f266dd8",
+        "point.v": "da9f9a757f6486bb"
+      },
+      "topology": "36c92a45a2538113"
+    }
+  },
+  "name": "node.inflate",
+  "ok": true,
+  "source": "fixture for node type \"inflate\" (test/fixtures.ts)",
+  "warnings": []
+}
