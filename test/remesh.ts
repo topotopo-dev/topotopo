@@ -292,6 +292,8 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   const rep = report(g);
   check(rep.flipped_faces === 6 && rep.input.prims === 24 && rep.output.closed === true, `repair: report JSON parses (flipped_faces ${rep.flipped_faces}, output closed ${rep.output.closed})`);
   check(r.warnings.some((w) => /faces flipped/.test(w.message)), 'repair: warns with a summary');
+  const quiet = await cookR({ b: box, f: { type: 'reverse', in: ['b'], params: { group: '0-5' } }, m: { type: 'mesh_repair', in: ['f'], params: { warn: false } } }, 'm');
+  check(quiet.ok && !quiet.warnings.length && report(quiet.geo!).flipped_faces === 6 && signedVolume(quiet.geo!) > 0, 'repair: warn false fixes the same and keeps the counts in repair_report only');
   // whole mesh inside out → turned outward
   const inv = await cook({ b: box, f: { type: 'reverse', in: ['b'] }, m: { type: 'mesh_repair', in: ['f'] } }, 'm');
   check(signedVolume(inv) > 0 && report(inv).flipped_pieces === 1, 'repair: an inside-out closed piece is turned outward');
