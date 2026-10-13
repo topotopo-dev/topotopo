@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Polyforge MCP server (stdio). Exposes the geometry engine as tools for LLM agents.
 //   node src/mcp/server.ts [--workspace <dir>] [--viewer]
+//   polyforge mcp [--workspace <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
 // Env: POLYFORGE_WORKSPACE, POLYFORGE_VIEWER=1, POLYFORGE_PORT, POLYFORGE_SCRIPT_TIMEOUT_MS, POLYFORGE_WORKERS
 // stdout carries the MCP protocol — log only to stderr.
 import path from 'node:path';

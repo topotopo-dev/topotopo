@@ -13,8 +13,9 @@ Thanks for your interest. A few things to know before you start.
   `npm run test:update` for its golden, add behavioural checks to the matching `test/*.ts`, and run `npm run docs`.
 - **Keep the core host-agnostic.** `src/core`, `src/graph` and `src/nodes` must not import Node APIs. Cooked geometry
   is immutable: `clone()` before writing. Y-up, metres, degrees, Houdini attribute names.
-- **Licences.** Dependencies that ship must be MIT, Apache-2.0, BSD, ISC or MPL-2.0; build-time-only tooling may use other OSI-approved permissive licences (Unicode-3.0, Zlib, CC0). No GPL or AGPL anywhere in the tree.
-  Run `npm run notice` after adding one so `NOTICE` carries its licence text.
+- **Licences.** Dependencies that ship must be permissive: MIT, Apache-2.0, BSD, ISC, MPL-2.0, Unicode-3.0, Zlib, 0BSD, Unlicense or CC0. No GPL or AGPL anywhere in the tree. LGPL is tolerated only for optional native modules that our code never calls and that load dynamically if present (today: sharp/libvips, an optional dependency of gltf-transform); `npm run notice` lists them and flags anything outside this list.
+  Run `npm run notice` after adding one so `NOTICE` carries its licence text; after a change to the Rust crates of
+  `kernels/` (Cargo.lock) it needs `cargo`. `npm test` checks NOTICE without Rust.
 
 ## Before you open a pull request
 
@@ -26,6 +27,24 @@ npm run showcase     # then look at examples/renders/*.png
 
 `npm test` runs smoke, golden, property, fuzz, docs, examples, io, interop, MCP and the per-feature suites. It fails on
 missing goldens, stale `docs/nodes.md` or a stale `NOTICE`.
+
+Development needs no build: Node runs `src/*.ts` directly. Only the npm package is compiled (`npm run build` writes
+`dist/`, and `npm pack` / `npm publish` run it through `prepack`). Code that finds files relative to its own module
+(the shelf, fonts, kernels, the worker entry, the viewer page) must work from `src/` and from `dist/`, which mirrors it.
+
+## Before a release
+
+```bash
+npm run typecheck
+npm test
+npm run notice       # NOTICE for the current npm and Rust dependencies (Rust needs cargo), then commit it
+npm run pack:test    # builds and packs the tarball, installs it in a temp project, runs the CLI, library and MCP server
+npm pack --dry-run   # the file list that will be published
+```
+
+`npm run pack:test` is not part of `npm test` (it takes about a minute and needs the npm cache or network for the
+install). It fails if the tarball misses a runtime file or carries sources, tests or examples, or if anything that
+works from a clone breaks when installed from the tarball.
 
 ## Sign your commits (DCO)
 

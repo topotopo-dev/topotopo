@@ -17,7 +17,7 @@ export interface NodePoolOptions {
   size: number;
   idleMs?: number;
   minElements?: number;
-  /** worker entry module (default ./worker.ts) */
+  /** worker entry module (default: worker.ts next to this module, worker.js in the built package) */
   workerUrl?: URL;
 }
 
@@ -76,7 +76,8 @@ class NodeWorkerPool implements WorkerPool {
     this.size = Math.max(0, Math.floor(o.size));
     this.idleMs = o.idleMs ?? 30000;
     this.minElements = o.minElements;
-    this.url = o.workerUrl ?? new URL('./worker.ts', import.meta.url);
+    // the sources run as .ts (type stripping), the published package as compiled .js in dist/: pick the sibling entry
+    this.url = o.workerUrl ?? new URL(import.meta.url.endsWith('.ts') ? './worker.ts' : './worker.js', import.meta.url);
   }
 
   run<T = PoolResult>(task: PoolTask): Promise<T> {
