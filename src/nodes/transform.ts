@@ -359,7 +359,7 @@ function weldCompact(g: Geometry, target: Int32Array, acc: Float64Array | null, 
   for (let i = 0; i < np; i++) if (used[i]) remap[i] = nk++;
   const ptIdx = new Int32Array(nk);
   for (let i = 0; i < np; i++) if (used[i]) ptIdx[remap[i]] = i;
-  const out = Object.create(Geometry.prototype) as Geometry;
+  const out = Geometry.blank();
   out.points = g.points.gather(ptIdx);
   if (acc && cnt) {
     const P = out.P;

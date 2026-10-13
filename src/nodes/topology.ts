@@ -578,7 +578,7 @@ function subdivideLevelFast(g: Geometry, smooth: boolean, boundaryMode: 'smooth'
   if (NPi !== NP) throw new Error(`subdivide: made ${NPi} points, expected ${NP}`);
 
   // ---- assemble (the builder's build() followed by removeUnusedPoints(), which keeps every point here)
-  const out = Object.create(Geometry.prototype) as Geometry;
+  const out = Geometry.blank();
   out.points = new AttribTable(NP);
   for (const [name, a, d] of ptAttrs) {
     if (!d) { out.points.map.set(name, a.gather(dom)); continue; }

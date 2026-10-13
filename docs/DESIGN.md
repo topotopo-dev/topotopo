@@ -289,6 +289,14 @@ host (`Host.compile`), which has the snippet library installed. In the Node host
 `DONT_CONTEXTIFY` (an ordinary global object, so global lookups in hot loops stay fast) and
 `microtaskMode: 'afterEvaluate'`: the realm has its own microtask queue, drained at the end of every `runInContext`
 call and inside that call's timeout.
+- The realm is set up once, before any user code, by `SCRIPT_REALM_SETUP` (`src/core/snippet-lib.ts`): it installs the
+  snippet library and declares the realm's control object `__topotopo` as a global `const`, a frozen object of realm
+  functions (`run`, `setJob`, `setCur`). The job of a timed call and the wrangle's geometry API (what `point()`,
+  `addpoint()` … dispatch to) are closure variables behind it. After setup the host never reads or writes a property
+  of the realm's global object, which user code can redefine: until R-18 the job and the API were the globals `__job`
+  and `__cur`, written outside the time limit, and a script that gave them a looping setter hung the process (in a
+  pool worker, the worker). A global `const` can be neither reassigned nor shadowed at the top level, where user code
+  never runs.
 - `runGuarded(fn, ms)` runs synchronous code (wrangles, parametric expressions, `heightfield_layer` expressions over a
   whole layer, the `sdf_expr` probe at the origin) in a timed call. Code pasted into a wrapper function is parsed on
   its own first (`Host.checkSyntax`; the `script` body through the realm's `AsyncFunction` constructor, which rejects
@@ -316,6 +324,14 @@ call and inside that call's timeout.
   awaits also fails the node. After the run, `lib.run` refuses to cook, so a continuation left over from a timed-out
   script dies at its next call. Subscribing to the run's promise also happens in the first timed call: `then` is
   looked up on the realm's `Promise.prototype`, which a script can replace with a loop (R-17).
+- What a script hands back is read after the timed call: its result, and the inputs and params of a `lib.run` of an
+  async node (which cooks on in the main queue). `instanceof Geometry` on a Proxy runs its `getPrototypeOf` trap, so a
+  returned Proxy hung the process (R-17 N2). Geometries now carry a brand (a WeakSet filled by the constructor and
+  `Geometry.blank()`, which replaces `Object.create(Geometry.prototype)` in the fast paths): `isGeometry` runs no
+  code of the value, the script node and the engine accept only branded results (with their original prototype), and
+  `lib.run` refuses unbranded inputs and copies its params with `structuredClone` inside the call (getters run there;
+  a Proxy or a function is refused without running it). A script still holds engine objects (`lib.Geometry`, its
+  inputs) and can change them; that stays in the "not a security boundary" gap.
 - `lib.run` is wrapped in a realm-side async function: a synchronous node's result resolves a realm promise, so
   `await lib.run('box')` continues inside the same timed call with no drain. Only async nodes cost a drain, about
   0.2 ms each (a `vm` timeout starts a watchdog thread per call).

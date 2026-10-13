@@ -1,5 +1,5 @@
 // Code nodes: per-element wrangles and whole-geometry scripts.
-import { GeoBuilder, Geometry } from '../core/geometry.ts';
+import { GeoBuilder, Geometry, isGeometry } from '../core/geometry.ts';
 import { defineNode, getNodeDef } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
@@ -106,8 +106,19 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
     /** Run any node type directly: await lib.run('sphere', {radius: 2}) */
     run: realmAsync((type: string, params: Record<string, any> = {}, ...inputs: Geometry[]) => {
       if (run.stopped) throw new Error(`lib.run(${type}): the script has already finished or timed out`);
+      // an async node reads its inputs after the script's timed call has returned: only real geometries go in
+      for (let i = 0; i < inputs.length; i++) {
+        const bad = inputs[i] === undefined || inputs[i] === null ? '' : notGeometry(inputs[i]);
+        if (bad) throw new Error(`lib.run(${type}): input ${i} is not a Geometry (got ${bad})`);
+      }
       const def = engine.resolveDef(type);
       if (!def) throw new Error(`lib.run: unknown node type "${type}"`);
+      // ... and their params as plain data of this realm: json and graph params (a foreach body) are kept as given and
+      // read later. The copy runs the params' getters now; a Proxy or a function is refused without running it.
+      try { params = structuredClone(params ?? {}); } catch (e: any) {
+        if (e?.name === 'DataCloneError') throw new Error(`lib.run(${type}): params must be plain data (numbers, strings, arrays, objects), not functions or proxies`);
+        throw e;
+      }
       // "=frame" etc. read the script's own time (and mark it time-dependent)
       const rp = resolveParams(def, params, ctx.vars, { time: ctx, host: engine.host, timeoutMs: engine.scriptTimeoutMs });
       if (rp.errors.length) throw new Error(`lib.run(${type}): ${rp.errors.join('; ')}`);
@@ -180,9 +191,27 @@ defineNode({
     } finally {
       run.stopped = true;
     }
-    if (!(res instanceof Geometry)) throw new NodeError(`script must return a Geometry (got ${res === undefined ? 'undefined — add "return geo;"' : typeof res})`);
+    // what the script returned is user code too: `instanceof` (and Object.getPrototypeOf) run a Proxy's
+    // getPrototypeOf trap here, outside the time limit, so only the engine's brand check looks at it (R-18)
+    const bad = notGeometry(res);
+    if (bad) throw new NodeError(`script must return a Geometry (got ${bad})`, 'return geo, a geometry from lib.run, or one built with lib.GeoBuilder / new lib.Geometry()');
     return res;
   },
 });
+
+const getProto = Object.getPrototypeOf;
+
+/**
+ * Why a value user code handed to the engine is not a usable Geometry, or '' when it is one. Runs no code of the value:
+ * the brand check (isGeometry) never touches a Proxy, and the prototype of a branded (hence ordinary) object is read
+ * without traps. A geometry whose prototype was replaced (with a Proxy, say) would run user code at every method call.
+ */
+function notGeometry(x: unknown): string {
+  if (isGeometry(x)) return getProto(x) === Geometry.prototype ? '' : 'a geometry whose prototype was replaced';
+  if (x === undefined) return 'undefined — add "return geo;"';
+  if (x === null) return 'null';
+  if (typeof x === 'object' || typeof x === 'function') return 'an object that is not a Geometry the engine made (a Proxy, a copy or a look-alike)';
+  return typeof x;
+}
 
 export { getNodeDef };
