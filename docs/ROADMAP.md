@@ -3,16 +3,32 @@
 Status as of 2026-10-12: 96 node types, ~12k lines of TypeScript, immutable geometry with provenance-preserving
 `GeoBuilder`, content-hashed lazy cooking, MCP server, software renderer, 10 example graphs, 322 lines of tests.
 
-> **Status 2026-10-13 (end of day).** Phases 0–2 below are done, including the Unreal round trip: verified in Unreal 5.8
-> on 2026-10-13 (instance rows, glTF through Interchange, the Landscape import with the manifest values), with the same
-> scene loading in Blender 5.2 and Houdini 22. Phase 3 has started: procedural textures and bakes shipped (§6a), and
-> four Rust/WASM kernel sessions are merged (straight-skeleton roofs and offsets, sampled SDF grids with dual
-> contouring, field-aligned quad remeshing, heightfield erosion and drainage). Totals: 217 node types (each with a
-> documented example that is cooked in the tests), 37 shelf assets, 282 golden fingerprints, 30 rendered examples,
-> worker pool, exporters for Unreal/Blender/Houdini. Remaining before the first release: the rename to TopoTopo, a
-> tagged v0.2 on npm, and the grant applications (§7). Then Phase 3 continues with volumes beyond the sampled grids,
-> simulation-lite and CAD; on the kernel track an erosion speed pass (running), a quad-remesher speed pass and a
-> dual-contouring quality pass are next. Live item status: [WORKLOG.md](WORKLOG.md).
+> **Status at commit 81895f2 (2026-10-13, after the Phase 3 merges).**
+>
+> - **Phases 0–2: done**, including the Unreal round trip, verified in Unreal 5.8 on 2026-10-13 (instance rows, glTF
+>   through Interchange, the Landscape import with the manifest values), with the same scene loading in Blender 5.2
+>   and Houdini 22.
+> - **Phase 3: done except the optional OCCT module (P3-D).** Procedural textures and bakes (§6a); sampled SDF grids
+>   with CSG, morphology and dual contouring; straight-skeleton roofs; simulation-lite: `rbd_settle` and `rbd_stack` on
+>   Rapier (P3-A), `particles` (P3-B), and XPBD cloth with `drape` and `inflate` (P3-C).
+> - **Rust/WASM kernels: seven sessions merged**: straight skeleton, SDF grids and dual contouring, field-aligned quad
+>   remeshing, erosion and drainage, an erosion speed pass, SIMD builds by default with a scalar fallback (session 6),
+>   and a quad-remesher quality and speed pass (session 7). Session 8 (dual-contouring quality) is running.
+> - **Hardening**: `"=expr"` parameters run in their own sandboxed `vm` realm (R-11), and every known user-code hang
+>   path (wrangles, scripts, parametric nodes, `heightfield_layer`, `sdf_expr` fields wherever they are sampled) now
+>   fails within the script timeout (R-12, R-13). The package builds to `dist/` and installs from its tarball (R-10).
+> - **Totals**: 222 node types in 19 categories (each with a documented example that the tests cook without warnings),
+>   37 shelf assets, 290 golden fingerprints, 33 rendered examples, 37 programs in `npm test`, 95 Rust tests, worker
+>   pool, exporters for Unreal/Blender/Houdini.
+> - **Open performance targets** (kernels/BENCH.md, measured under load): quad remesher 5.1 s for 100k triangles
+>   (target 3 s), pipe erosion 4.6 s in Node for 1024² × 200 (target 4 s), droplet kernel 1.46× TypeScript (target
+>   3×), dual contouring of a 256³ band 1.8 s (target 1.5 s), `drape` 3.3 s for 100 × 100 × 200 steps (target 3 s).
+> - **What remains**: the release steps of §7 (the code rename to TopoTopo is done; the GitHub repository rename, the
+>   public flip, the npm publish and the v0.2 tag wait for the maintainer), CI back on once the repository is public,
+>   the docs site (R-14), the grant application; then the optional OCCT module (P3-D, licence decision first) and
+>   Phase 4, the GUI.
+>
+> Live item status: [WORKLOG.md](WORKLOG.md).
 
 The target is parity with Houdini SOPs, Blender Geometry Nodes and Unreal PCG for **creating geometry**: modelling,
 procedural assembly, scattering and instancing, terrain, curves, volumes, and the export that feeds engines. Rendering,
@@ -144,7 +160,7 @@ Names are Houdini's; TopoTopo aliases should accept them.
 | node | notes |
 |---|---|
 | `heightfield` create, from mesh, from image, noise, remap, blur, terrace, cutout | |
-| `erosion` | hydraulic + thermal, GPU-friendly; the showcase terrain node |
+| `erosion` | hydraulic + thermal, GPU-friendly; the showcase terrain node. Shipped: droplet + thermal (P2-C), virtual-pipe and stream-power models in Rust/WASM plus `heightfield_flow` drainage (K-4) |
 | `heightfield mask` by feature (slope, height, curvature, flow, occlusion) and `mask blur/expand/noise` | |
 | `heightfield project` (stamp meshes/curves), `path` (roads cut along curves with banking) | |
 | `heightfield scatter` (by mask), `heightfield → mesh`, `heightfield → sdf` | |
@@ -162,16 +178,16 @@ Names are Houdini's; TopoTopo aliases should accept them.
 ### Volumes and SDF
 | node | notes |
 |---|---|
-| grid volume ops | blur, dilate/erode, open/close, remap, combine, resample |
+| grid volume ops | blur, dilate/erode, open/close, remap, combine, resample; shipped (K-2): `sdf_grid`, `grid_combine`, `grid_offset`, `grid_blur`, `grid_dilate`, `grid_erode`, `grid_resample`, `grid_to_sdf` (remap still open) |
 | `sdf fillet` (smooth union with radius exists; add surface fillet by SDF remesh) | |
-| `voxel remesh` with dual contouring | sharp edges survive |
-| `sdf from heightfield`, `volume from points` (pscale) | |
+| `voxel remesh` with dual contouring | sharp edges survive; shipped (K-2): `voxel_remesh`, `grid_to_mesh` (sharp dual contouring or marching cubes); quality pass (K-2b, session 8) running |
+| `sdf from heightfield`, `volume from points` (pscale) | `heightfield_to_sdf` shipped (P2-C); volume from points open |
 
 ### Remesh, UV, cleanup, LOD
 | node | notes |
 |---|---|
 | `uv unwrap` (xatlas), `uv layout`/pack, `uv flatten` (LSCM/BFF), `uv autoseam` | |
-| `isotropic remesh` (Botsch–Kobbelt), `quad remesh` (Instant Meshes / QuadriFlow via WASM) | |
+| `isotropic remesh` (Botsch–Kobbelt), `quad remesh` (Instant Meshes / QuadriFlow via WASM) | shipped: `remesh_isotropic` (P1-E); `remesh_quad`, an own Rust/WASM field-aligned implementation (K-3, K-3b) |
 | `polyreduce` with attribute preservation (meshopt `simplifyWithAttributes`) | |
 | `mesh repair` (self-intersections, non-manifold edges, degenerate faces), `lod` (multi-level output) | |
 
@@ -185,9 +201,9 @@ Names are Houdini's; TopoTopo aliases should accept them.
 | node | notes |
 |---|---|
 | `rbd` settle/stack via Rapier (drop rocks, stack crates, fill containers) | shipped (P3-A): `rbd_settle`, `rbd_stack` |
-| `particles` | advect by velocity/noise/curl fields, collide with meshes, trails to curves |
+| `particles` | shipped (P3-B): `particles` (emitters, gravity, drag, wind, curl noise, point/heightfield/SDF fields, attraction, floor and mesh collisions, trails as polylines; per-frame cache, bit-identical on the pool) |
 | `cloth`/`drape` via XPBD (Vellum-lite) | shipped (P3-C): `drape` (tarps, banners, strings; colliders, floor, pins, wind, self collision) and `inflate` (cushions, balloons); see DESIGN.md "Cloth (XPBD)" |
-| `solver` | generic frame feedback (growth, reaction-diffusion, erosion steps) |
+| `solver` | shipped (P0-B): generic frame feedback (growth, reaction-diffusion, erosion steps) with cached frame states |
 
 ### IO and interop
 | item | notes |
@@ -294,13 +310,13 @@ PNGs. A `texture` render view and persp texture sampling let agents look at the 
 
 Each phase ends with golden tests and example renders. Performance work runs alongside every phase.
 
-| phase | content | unlocks |
-|---|---|---|
-| **0. Foundation** | golden + property tests, benchmarks, edge/vertex groups, half-edge, array attributes, `time` + `solver`, expression functions, graph versioning | everything below |
-| **1. Modelling parity** | polybevel, polysplit/knife, bridge, polyfill, loops/rings/dissolve, crease subdiv, soft transform, lattice, path/point deform, xatlas unwrap + layout, isotropic remesh, attribute-preserving decimation, curvature/AO/thickness, `assert` | hard-surface and prop work |
-| **2. PCG and instancing** | packed prims, copy variants, scatter v2, masks, attribute from map, heightfield suite + erosion, spline toolkit, rail/fence/road/roof assets, PCG/USD/gltf-transform export, Houdini `.geo` | environments at engine scale |
-| **3. Volumes, sim-lite, CAD** | grid volumes + VDB-like ops + dual contouring, Rapier RBD, particles, XPBD cloth, straight-skeleton roofs, optional OCCT module | organic shapes, settled scatters, CAD-grade fillets |
-| **4. GUI** | browser node editor + viewport + generated param panels, engine in a Worker, shared workspace with the MCP server | human use without an LLM |
+| phase | content | unlocks | status |
+|---|---|---|---|
+| **0. Foundation** | golden + property tests, benchmarks, edge/vertex groups, half-edge, array attributes, `time` + `solver`, expression functions, graph versioning | everything below | done |
+| **1. Modelling parity** | polybevel, polysplit/knife, bridge, polyfill, loops/rings/dissolve, crease subdiv, soft transform, lattice, path/point deform, xatlas unwrap + layout, isotropic remesh, attribute-preserving decimation, curvature/AO/thickness, `assert` | hard-surface and prop work | done |
+| **2. PCG and instancing** | packed prims, copy variants, scatter v2, masks, attribute from map, heightfield suite + erosion, spline toolkit, rail/fence/road/roof assets, PCG/USD/gltf-transform export, Houdini `.geo` | environments at engine scale | done, Unreal round trip verified |
+| **3. Volumes, sim-lite, CAD** | grid volumes + VDB-like ops + dual contouring, Rapier RBD, particles, XPBD cloth, straight-skeleton roofs, optional OCCT module | organic shapes, settled scatters, CAD-grade fillets | done except the optional OCCT module (P3-D); textures and bakes added (§6a) |
+| **4. GUI** | browser node editor + viewport + generated param panels, engine in a Worker, shared workspace with the MCP server | human use without an LLM | not started |
 
 Suggested first sprint: phase 0 tests and benchmarks, then edge groups + half-edge + `polybevel`. Bevel is the node
 that proves the topology layer and that artists check first.
@@ -321,11 +337,25 @@ Facts checked on 2026-10-13:
   interest and the form requires a disclosure of generative-AI use. This project is largely AI-implemented; any
   application must say so plainly, which makes NLnet a weak fit.
 
-Plan toward a MegaGrants cycle-1-2027 submission:
+Plan toward a MegaGrants cycle-1-2027 submission (status at commit 81895f2):
 1. Unreal 5.8 round trip verified in the editor (landscape bundle, instanced GLB, PCG stream), with screenshots.
    Verified 2026-10-13 (P2-G, see WORKLOG).
 2. Rename to TopoTopo in one commit, tag v0.2, publish to npm, public repository, CI back on.
-3. A 2–3 minute demo video: graph → terrain + instances → Unreal, plus an agent building and verifying a prop.
+   - Done: the code rename (R-4, 8391fc5): package `topotopo` with the commands `topotopo` and `topo`, MCP server
+     `topotopo`, `TOPOTOPO_*` environment variables, crate `topotopo-kernels`; files written as `polyforge-*` still
+     load. The release blockers found while drafting are fixed: the package builds to JavaScript and installs from its
+     tarball (R-10, `npm run pack:test`), and `"=expr"` parameters run sandboxed (R-11).
+   - Pending, with the maintainer present: renaming the GitHub repository from topotopo-dev/polyforge to
+     topotopo-dev/topotopo, the public flip, the npm placeholder publish (2FA by security key), the version bump and
+     the v0.2 tag with `npm publish`. CI comes back once the repository is public (Actions minutes for the private
+     repository are used up); the docs site (R-14) deploys to topotopo.dev once GitHub Pages is enabled.
+   - Open decision before the tag: whether Rapier stays a regular dependency (about 5 MB of the install) or becomes
+     an optional peer dependency (WORKLOG P3-A).
+3. A 2–3 minute demo video: graph → terrain + instances → Unreal, plus an agent building and verifying a prop. Planned
+   in `docs/release/demo-video-plan.md`, now with the simulation nodes; not recorded yet.
 4. Application text drafted from ROADMAP and WORKLOG: problem, what exists (numbers), what the grant funds
-   (milestones with costs), why it helps the Unreal and open-source 3D community, team and track record.
-5. Optional: textures (P3-T) in the demo so assets arrive in Unreal with materials.
+   (milestones with costs), why it helps the Unreal and open-source 3D community, team and track record. Drafted in
+   `docs/release/megagrants-application.md` (R-5); the submission itself is R-9, for cycle 1 of 2027. NLnet was
+   dropped (it declines AI-generated projects).
+5. Optional: textures (P3-T) in the demo so assets arrive in Unreal with materials. Textures shipped and are in the
+   video plan.

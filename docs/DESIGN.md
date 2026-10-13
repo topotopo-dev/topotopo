@@ -785,7 +785,7 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
 
 Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its analysis in [ROADMAP.md](ROADMAP.md).
 
-**Shipped (as of 2026-10-13)**
+**Shipped (as of commit 81895f2, 2026-10-13)**
 - Roadmap phases 0–2: the test layers (smoke, golden, property, fuzz, docs, examples), time and `solver`, expression
   references, graph versioning, edge/vertex groups and the half-edge structure, array attributes, the worker pool;
   modelling parity (bevel, knife/polysplit, bridge, quad fill, loop ops, deformers, xatlas unwrap and LSCM, isotropic
@@ -794,22 +794,37 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   gltf-transform/USD/`.geo`/CSV exporters).
 - The Unreal round trip, verified on 2026-10-13 in Unreal 5.8 (instance rows, Interchange glTF axes, the Landscape
   import with the manifest values), with the same scene loading in Blender 5.2 and Houdini 22.
-- Procedural textures and bakes (37 texture nodes, image volumes, materials referencing `image:<name>`, embedded export,
-  the texture view).
-- Rust/WASM kernels, sessions 1–4: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual
+- Phase 3 except the optional CAD module: procedural textures and bakes (37 texture nodes, image volumes, materials
+  referencing `image:<name>`, embedded export, the texture view); sampled SDF grids; and simulation-lite in the `sim`
+  category: `rbd_settle` and `rbd_stack` on Rapier ([Rigid bodies](#rigid-bodies-rapier)), `particles`
+  ([Particles](#particles)), and XPBD cloth with `drape` and `inflate` ([Cloth](#cloth-xpbd)).
+- Rust/WASM kernels, sessions 1–7: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual
   contouring, field-aligned quad remeshing, heightfield erosion (droplet, virtual-pipe and stream-power models behind
-  `heightfield_erode`; the TypeScript droplet erosion stays the default) and D8/D-infinity drainage (`heightfield_flow`).
+  `heightfield_erode`; the TypeScript droplet erosion stays the default) and D8/D-infinity drainage (`heightfield_flow`);
+  an erosion speed pass (session 5); SIMD and scalar builds side by side, SIMD chosen by feature detection with
+  `TOPOTOPO_WASM` as override and byte-identical results (session 6); quad-remesher regularity (1.83 % irregular
+  vertices on the large sphere, 2.69 % with UV seams) and about a 2× speed-up (session 7).
+- User code under the script timeout: `"=expr"` parameters in their own sandboxed realm (R-11), `heightfield_layer`
+  expressions and `sdf_expr` fields wherever they are sampled (R-12, R-13 and the particles field guard), thrown values
+  read inside the guard (`runUserCode`), script bodies compiled inside it; see
+  [Host and script sandbox](#host-and-script-sandbox).
+- The rename to TopoTopo in the code (R-4) and the publishable package: `dist/` build, `topotopo`/`topo` commands, the
+  `mcp` subcommand, `npm run pack:test` (R-10).
 
 **Before the first release**
-- The rename to TopoTopo in one commit, a tagged v0.2 on npm under the new name, the public repository with CI back on.
+- With the maintainer: the GitHub repository rename to topotopo-dev/topotopo, the public flip, the npm publish and the
+  v0.2 tag; then CI back on and the docs site (R-14) on topotopo.dev. Decide whether Rapier stays a regular dependency.
 - Grant applications (Epic MegaGrants, cycle 1 of 2027) built on an Unreal 5.8 demo video; trademark filing once
   there is revenue or a grant.
 
 **Next for the engine**
-- Kernels: erosion speed (after session 5 the pipe model takes 6.6 s native / 14.3 s in Node for 1024² × 200 steps
-  against 2 s / 4 s targets, the droplet kernel 1.3× TypeScript; next: SIMD build by default); quad remesher speed (100k triangles take 8.4 s against a
-  3 s target), singularity cleanup and quads-only density; a dual-contouring quality pass (edge serration, adaptive
-  extraction, speed).
+- Kernels: a dual-contouring quality pass (session 8, running: edge serration, adaptive extraction, speed). Speed
+  targets still missed, measured under load: pipe erosion 4.6 s in Node and 3.2 s native for 1024² × 200 steps
+  (targets 4 s / 2 s), the droplet kernel 1.46× TypeScript (target 3×), the quad remesher 5.1 s for 100k triangles
+  with the SIMD build (target 3 s).
+- Simulation-lite follow-ups: convex decomposition for concave rigid pieces, moving and animated colliders for
+  particles and cloth, particle–particle interaction, cloth tearing and welds, `drape` speed (3.3 s against a 3 s
+  target for 100 × 100 × 200 steps).
 - Performance follow-ups: done (scatter on the pool, one-pass point normals, SAH BVH with a `-0` ray-direction fix,
   relaxed scatter ≈ 1.2 s per 100k, the density-mask neighbour rebuild since R-12); still open: the AO bake
   (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
@@ -821,9 +836,9 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
 - Houdini interop: `.bgeo.sc` (Blosc) and a USD layer writer with variants.
-- Phase 3: volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points), simulation-lite
-  (Rapier rigid bodies: `rbd_settle` and `rbd_stack` shipped; particles, XPBD cloth), and an optional OpenCascade/replicad
-  CAD module for B-rep fillets and STEP export.
+- Phase 3 remainder: volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points) and an
+  optional OpenCascade/replicad CAD module for B-rep fillets and STEP export (P3-D; its LGPL licence needs a decision
+  first, and it would load as a separate module).
 
 **GUI (makes the app usable without an LLM)**
 - Browser app: a node editor (React Flow or LiteGraph), a three.js viewport, and parameter panels generated from
