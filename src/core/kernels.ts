@@ -188,7 +188,7 @@ const clothCollide: Kernel = {
   minElements: 4096,
   run(_a, A, start, end, ctx) {
     const c = ctx.memo('collider:' + ctx.sharedKey, () => colliderFromArrays(A));
-    collideRange(c, A.X, A.R, A.CP, A.CN, A.CF, start, end);
+    collideRange(c, A.X, A.R, A.CP, A.CN, A.CF, A.CT, A.QD, start, end);
   },
 };
 

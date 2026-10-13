@@ -655,7 +655,7 @@ PARAMS are physical and independent of the step size: stretch_stiffness N/m (1e4
  raise substeps (not iterations) for stiffer cloth and cleaner contacts. thickness keeps points off colliders and the
  floor; self_collision (off by default) works with thickness ≈ half the edge length; max_points guards the cost.
 CHECK: inspect stats (substeps, contacts; inflate: volume_ratio); render views "persp" for the folds.
-LIMITS: collision is per point (a sharp collider corner can poke between cloth points: refine the cloth there),
+LIMITS: collision is per point plus sharp corners (a sharp collider edge can pass between the points of a coarse cloth: refine it),
  colliders are static, contacts are found once per step, no tearing, plasticity or cloth-on-cloth friction.`,
 
   recipes: `RECIPES (copy, then adapt)

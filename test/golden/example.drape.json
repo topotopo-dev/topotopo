@@ -8,8 +8,8 @@
       "vertex": ["Cd:float:3", "uv:float:3"]
     },
     "bbox": {
-      "max": [3.13, 2.2, 1.3153],
-      "min": [-2.5131, 0, -1.0912]
+      "max": [3.13, 2.2, 1.3202],
+      "min": [-2.5174, 0, -1.2212]
     },
     "counts": {
       "points": 6106,
@@ -24,13 +24,13 @@
       "vertex": []
     },
     "hashes": {
-      "P": "5594c0b29dc06e2c",
+      "P": "8526772b2acb95f5",
       "attributes": {
         "detail.materials": "e84a28e1f9fd15e7",
-        "point.N": "ff963570ee4d156a",
+        "point.N": "547eb36331f4e861",
         "point.pinned": "0bbaed84c799f11e",
         "point.rest_P": "9c01baa0c2981f4a",
-        "point.v": "499e9227b1c1089d",
+        "point.v": "2e49acaa32a5e14c",
         "prim.material": "71a3844d2708db57",
         "prim.name": "0f85f12d1e2e49f7",
         "vertex.Cd": "73175c155ac0d62f",
