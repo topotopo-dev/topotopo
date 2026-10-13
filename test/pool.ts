@@ -158,6 +158,25 @@ section('pool basics');
   check(p1.stats().tasks === 3, 'tasks with shared data reuse the worker cache');
   await p1.close();
 
+  // R-17: a worker keeps 8 shared keys, the pool still lists the ones it dropped. A task whose worker no longer holds
+  // its data is retried once, and the retry must carry the data: it can land on another worker that dropped it too
+  // (here: A is free again when B's "missing" reply is handled; B is slow to read the task's 40 MB array), which
+  // failed the task with 'shared data "K" missing in the worker'
+  const p2 = createNodePool({ size: 2, idleMs: 60000 })!;
+  await p2.warm();
+  const stask = (key: string, extra: Record<string, ArrayBufferView> = {}) =>
+    ({ kernel: 'selftest.spin', args: { ms: 0 }, range: [0, 1] as [number, number], arrays: extra, shared: { key, arrays: tri } });
+  const both = (key: string) => Promise.all([p2.run(stask(key)), p2.run(stask(key))]);
+  let retryFailures = 0, rounds = 0;
+  for (let round = 0; round < 3; round++, rounds++) {
+    await both('K');
+    for (let i = 0; i < 8; i++) await both(`k${round}.${i}`); // both workers drop K
+    const [, b] = await Promise.allSettled([p2.run(stask(`x${round}`)), p2.run(stask('K', { big: new Float64Array(5e6) }))]);
+    if (b.status === 'rejected') { retryFailures++; console.log(`   round ${round}: ${b.reason?.message}`); }
+  }
+  check(retryFailures === 0, `a retried task carries its shared data to whichever worker takes it (${retryFailures} of ${rounds} failed)`);
+  await p2.close();
+
   // parallelMap = serial loop, chunked
   const n = 10007, src = Float64Array.from({ length: n }, (_, i) => Math.sin(i));
   const o1 = new Float64Array(n), o2 = new Float64Array(n);

@@ -314,7 +314,8 @@ call and inside that call's timeout.
   calls `wake` when such a promise settles, and a 15 ms poll covers anything else. The whole run, time spent in
   awaited engine calls included, has a wall-clock deadline, so `await new Promise(() => {})` or an endless chain of
   awaits also fails the node. After the run, `lib.run` refuses to cook, so a continuation left over from a timed-out
-  script dies at its next call.
+  script dies at its next call. Subscribing to the run's promise also happens in the first timed call: `then` is
+  looked up on the realm's `Promise.prototype`, which a script can replace with a loop (R-17).
 - `lib.run` is wrapped in a realm-side async function: a synchronous node's result resolves a realm promise, so
   `await lib.run('box')` continues inside the same timed call with no drain. Only async nodes cost a drain, about
   0.2 ms each (a `vm` timeout starts a watchdog thread per call).

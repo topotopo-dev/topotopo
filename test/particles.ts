@@ -304,6 +304,13 @@ section('max_particles');
   check(maxSeen <= 100 && minLate >= 50, `with life 0.5 s the slots free up: never above 100 over 60 frames, still ${minLate}+ alive after frame 30`);
   const zero = await cook(sim(emitter, { steps: 10, max_particles: 0 }));
   check(zero.geo!.numPoints === 0 && zero.geo!.points.has('age'), 'max_particles 0: an empty result with the usual attributes');
+  // R-17: refused births are counted per step and point, not looped over one by one (an emit_rate of 1e12 hung the
+  // cook), and the count does not wrap at 2^31 (it read -1894967306 here)
+  const t0 = performance.now();
+  const flood = await cook(sim({ type: 'points', params: { positions: [[0, 1, 0]] } }, { ...NOG, steps: 2, emit_rate: 1.2e9, max_particles: 10 }));
+  const floodMs = performance.now() - t0;
+  check(flood.geo!.numPoints === 10 && flood.warnings.some((w) => w.message.includes('max_particles (10) reached: 2399999990 births')) && floodMs < 2000,
+    `emit_rate 1.2e9 under max_particles 10: 2,399,999,990 refused births counted in ${floodMs.toFixed(0)} ms`);
 }
 
 // ---------------------------------------------------------------- time
@@ -384,6 +391,11 @@ section('fields and forces');
     { sd: { type: 'sdf_shape', params: { shape: 'sphere', radius: 0.5 } } }, [null as any, 'sd']));
   const sP = sdfF.geo!.P;
   check(sP[0] < 2 && Math.abs(sP[1]) < 1e-6 && sP[5] > -2.5 && Math.abs(sP[3]) < 1e-6, `SDF field: particles accelerate toward the surface along -gradient (${sP[0].toFixed(3)}, ${sP[5].toFixed(3)})`);
+  // R-17: bounds that overflow the sampling grid made its size NaN: the cook succeeded with v = NaN on every particle
+  // (and P reset to 0 by the engine's finite check)
+  const huge = await cook(sim({ type: 'points', params: { positions: [[0, 1, 0]] } }, { ...NOG, steps: 5, emit_all: true, emit_rate: 0 },
+    { sd: { type: 'sdf_shape', params: { shape: 'sphere', radius: 1e308 } } }, [null as any, 'sd']));
+  check(!huge.ok && /SDF volume ".*" cannot be sampled: its bounds .* are too large/.test(huge.errors[0]?.message ?? ''), `an SDF field too large to sample fails the node: ${huge.errors[0]?.message ?? 'cooked'}`);
   const att = await cook(sim(one, { ...NOG, steps: 120, emit_all: true, emit_rate: 0, attract: 4, attract_point: [1, 0, 0], drag: 3 }));
   check(Math.abs(att.geo!.P[0] - 1) < 0.02, `attract to a point with drag settles near it (${att.geo!.P[0].toFixed(3)})`);
   const surf = await cook(sim({ type: 'points', params: { positions: [[0, 2, 0], [0.3, -1.6, 0.2]] } }, { ...NOG, steps: 96, emit_all: true, emit_rate: 0, attract: 6, attract_to: 'surface', drag: 3, collide: 'slide' },
