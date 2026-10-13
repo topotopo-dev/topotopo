@@ -25,7 +25,7 @@ const COMMON: Record<string, ParamDef> = {
   angular_damping: { type: 'float', default: 0.5, min: 0, max: 10, desc: 'angular velocity damping (1/s): stops round pieces rolling forever; 0 = free rolling' },
   rest_damping: { type: 'float', default: 5, min: 0, max: 100, desc: 'extra angular damping (linear: 40 % of it) for a piece that has been nearly at rest (below 4 × sleep_threshold) for 0.5 s, so slow wobbling and creeping end; released when the piece speeds up again. 0 = plain physics' },
   sleep_threshold: { type: 'float', default: 0.05, min: 0.0001, max: 10, aliases: ['settle_threshold'], desc: 'a piece counts as settled below this speed (m/s; spin: angular speed × piece radius); the simulation ends when every piece has stayed below it for 0.5 s. Lower it for small pieces' },
-  ground_plane: { type: 'enum', options: ['auto', 'on', 'off'], default: 'auto', desc: 'infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected' },
+  ground_plane: { type: 'enum', options: ['auto', 'on', 'off'], default: 'auto', desc: 'infinite ground at y = ground: auto = only when input 1 (collision geometry) is not connected (a connected input without polygons or heightfields gives nothing to land on, with a warning); on = also with input 1' },
   ground: { type: 'float', default: 0, aliases: ['ground_height'], desc: 'height of the ground plane' },
   ccd: { type: 'bool', default: true, advanced: true, desc: 'continuous collision detection, so fast pieces do not pass through thin collision geometry' },
   solver_iterations: { type: 'int', default: 4, min: 1, max: 32, advanced: true, desc: 'Rapier solver iterations per step (more = stiffer stacks, slower)' },
@@ -82,7 +82,11 @@ async function cookRbd(ctx: CookContext, stack: boolean): Promise<Geometry> {
   const notes: string[] = [];
   const statics = ctx.hasInput(1) ? staticMesh(ctx.input(1), notes) : null;
   for (const m of notes) ctx.warn(m);
-  const ground = p.ground_plane === 'on' || (p.ground_plane === 'auto' && !statics) ? Number(p.ground) : null;
+  // auto: the ground plane stands in for a collision input that is not connected (R-17 N6: it was also added when the
+  // input was connected but had no triangles, unlike the param says)
+  const ground = p.ground_plane === 'on' || (p.ground_plane === 'auto' && !ctx.hasInput(1)) ? Number(p.ground) : null;
+  if (ctx.hasInput(1) && !statics && ground === null)
+    ctx.warn('the collision input (input 1) has no polygons or heightfields: there is nothing to land on (ground_plane auto adds the ground only when input 1 is not connected; set ground_plane on, or disconnect it)');
   const rate = Math.max(1, Math.round(p.steps_per_second));
   const dt = 1 / rate;
   const dynamic = scene.pieces.filter((x) => !x.fixed).length;
