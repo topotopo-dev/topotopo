@@ -291,7 +291,20 @@ host (`Host.compile`), which has the snippet library installed. In the Node host
 call and inside that call's timeout.
 - `runGuarded(fn, ms)` runs synchronous code (wrangles, parametric expressions, `heightfield_layer` expressions over a
   whole layer, the `sdf_expr` probe at the origin) in a timed call. Code pasted into a wrapper function is parsed on
-  its own first (`Host.checkSyntax`), so it cannot close the wrapper and run while compiling, outside the timeout.
+  its own first (`Host.checkSyntax`; the `script` body through the realm's `AsyncFunction` constructor, which rejects
+  a body that closes its function), so it cannot close the wrapper and run while compiling, outside the timeout.
+- What user code throws is user code too: a `message` or `stack` getter, a `toString`, a realm's
+  `Error.prepareStackTrace`. `runUserCode` (`src/core/usercode.ts`) catches inside the timed call and reads the
+  message and stack there, so the node (and a pool worker running a point wrangle) only ever handles plain strings;
+  it also tells the host's timeout apart from a user error that merely says "timed out". The `script` node reads its
+  rejection reason with another timed call (`describeGuarded`, the rest of the time limit).
+- An `sdf_expr` field is sampled long after its node has cooked, by `sdf_to_mesh` (from inside manifold's WASM
+  level-set mesher) and `sdf_grid`. Volumes whose `sample` runs user code carry `scripted: true` (kept by
+  `transform`, `sdf_modify`, `sdf_combine`), and those nodes run the whole evaluation in one timed call (`evalSdf`);
+  analytic volumes run as before, unlimited and without overhead. The sampler also checks the deadline itself every
+  64 samples and throws an ordinary exception, so a merely slow field stops between samples; the watchdog, armed
+  `min(ms, 2 s)` later, only stops a sample that never returns (it then unwinds through the WASM mesher, whose working
+  memory is not freed; manifold keeps working).
 - `runGuardedAsync(fn, ms)` runs the `script` node. Its synchronous part and every continuation queued inside the
   realm (`await 0`, `await` on a realm promise) run in the first timed call, so `await 0; while (true) {}` is stopped
   like a synchronous loop. With the default shared microtask queue, continuations ran after `runInContext` had
@@ -730,8 +743,9 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
   `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on; since R-11
   they run in the host's vm sandbox with a timeout. Since R-12 the code params of `heightfield_layer` and `sdf_expr`
   run under the script timeout too (loops, also after an await or in a thrown object's message getter, and wrapper
-  escapes are fuzzed with the pool off and on); an `sdf_expr` volume sampled later (`sdf_to_mesh`, the grid nodes)
-  still runs without a time limit.
+  escapes are fuzzed with the pool off and on). Since R-13 so do the parametric nodes, an `sdf_expr` field sampled
+  later by `sdf_to_mesh` and `sdf_grid` (also through transform/modify/combine), and what wrangles and scripts throw
+  (message/stack/toString getters that never return, in workers too); `test/examples.ts` fails on any example warning.
 - **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
 - **Examples**: every `NodeDef` carries an `example` (a node spec or a small graph, shown by `help` and in the node
   reference) and `test/examples.ts` cooks each one: node specs on the node's fixture inputs, graphs as written.

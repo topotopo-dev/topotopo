@@ -9,6 +9,7 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { ParamDef } from '../graph/types.ts';
 import { loadHostKernels } from '../wasm/kernels.ts';
+import { evalSdf } from './sdf.ts';
 import type { KernelGrid, Kernels, DualContourResult } from '../wasm/kernels.ts';
 
 const voxelParam: ParamDef = { type: 'float', default: 0.05, min: 0.000001, desc: 'grid spacing in world units; smaller voxels need more memory' };
@@ -38,7 +39,7 @@ function contourGeometry(m: DualContourResult): Geometry {
 defineNode({
   type: 'sdf_grid', category: 'sdf',
   summary: 'Sample implicit SDF volumes or a polygon mesh into a regular 3D distance grid.',
-  description: 'SDF volumes are unioned before sampling; if none exist, polygons are sampled using a triangle BVH and generalized winding-number sign. Values outside the narrow band are signed infinity unless fill is enabled. Grid bounds include padding in voxels. Mesh attributes are dropped.',
+  description: 'SDF volumes are unioned before sampling; if none exist, polygons are sampled using a triangle BVH and generalized winding-number sign. Values outside the narrow band are signed infinity unless fill is enabled. Grid bounds include padding in voxels. Mesh attributes are dropped. A field that runs user code (an sdf_expr upstream, also through transform, sdf_modify or sdf_combine) is sampled under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s): the whole grid must be sampled within it, else this node fails with "SDF code (sdf_expr) exceeded N ms" (raise voxel_size or the timeout). Implicit analytic volumes and meshes have no limit.',
   inputs: [{ name: 'source', desc: 'implicit SDF volume(s), or a polygon mesh' }],
   params: {
     voxel_size: voxelParam,
@@ -48,17 +49,21 @@ defineNode({
     name: { type: 'string', default: 'grid', desc: 'volume name' },
   },
   example: { type: 'sdf_grid', in: ['shape'], params: { voxel_size: 0.05, band: 3, fill: true } },
-  cook: async ({ input, p, engine }) => {
+  cook: async (ctx) => {
+    const { input, p, engine } = ctx;
     const src = input(0), sdfs = src.volumes.filter((v): v is SdfVolume => v.kind === 'sdf');
     let grid: SdfGrid;
     if (sdfs.length) {
       const bounds = { min: [0, 1, 2].map(a => Math.min(...sdfs.map(v => v.bounds.min[a]))) as Vec3,
         max: [0, 1, 2].map(a => Math.max(...sdfs.map(v => v.bounds.max[a]))) as Vec3 };
-      grid = gridFromImplicit((x, y, z) => {
+      const union = (x: number, y: number, z: number) => {
         let d = Infinity;
         for (const v of sdfs) d = Math.min(d, v.sample(x, y, z));
         return d;
-      }, bounds, p.voxel_size, p.padding * p.voxel_size, p.name);
+      };
+      // user code (sdf_expr) is sampled under the script timeout
+      const field: SdfVolume = { name: p.name, kind: 'sdf', bounds, sample: union, scripted: sdfs.some(v => v.scripted) };
+      grid = evalSdf(ctx, field, (sample) => gridFromImplicit(sample, bounds, p.voxel_size, p.padding * p.voxel_size, p.name));
       if (!p.fill) for (let i = 0; i < grid.values.length; i++) {
         const d = grid.values[i];
         if (Math.abs(d) > p.band * grid.voxel) grid.values[i] = d < 0 ? -Infinity : Infinity;

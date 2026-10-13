@@ -15,7 +15,7 @@ import {
 } from '../core/analysis.ts';
 import type { PieceReport, RayMode } from '../core/analysis.ts';
 import { P, getPointNormals, mask } from './util.ts';
-import { then } from '../graph/parallel.ts';
+import { andThen } from '../graph/parallel.ts';
 
 const hasPolygons = (g: Geometry) => {
   for (let p = 0; p < g.numPrims; p++) if (g.primClosed[p] && g.primSize(p) >= 3) return true;
@@ -154,7 +154,7 @@ defineNode({
       count: g.numPoints, args: opts,
       inputs: { P: g.P, N: getPointNormals(g), sel }, results: { out: v }, shared: scene.toArrays(),
     }, { minElements: Math.ceil(32768 / Math.max(1, p.samples)) });
-    return then(run, () => finish(v));
+    return andThen(run, () => finish(v));
   },
 });
 

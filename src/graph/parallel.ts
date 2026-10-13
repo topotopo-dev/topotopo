@@ -174,7 +174,10 @@ export function parallelMap(
   });
 }
 
-/** `f(x)` when x is a value, `x.then(f)` when it is a promise: keeps a node synchronous when its kernel ran serially. */
-export function then<T, R>(x: T | Promise<T>, f: (v: T) => R): R | Promise<R> {
+/**
+ * `f(x)` when x is a value, `x.then(f)` when it is a promise: keeps a node synchronous when its kernel ran serially.
+ * (Not named `then`: a module exporting `then` is a thenable, so `await import()` of it would call that export.)
+ */
+export function andThen<T, R>(x: T | Promise<T>, f: (v: T) => R): R | Promise<R> {
   return x instanceof Promise ? x.then(f) : f(x);
 }
