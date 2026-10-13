@@ -4,7 +4,7 @@ import { defineNode, getNodeDef } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
 import { runWrangleParallel } from '../core/wrangle.ts';
-import { then } from '../graph/parallel.ts';
+import { andThen } from '../graph/parallel.ts';
 import type { RunOver } from '../core/wrangle.ts';
 import { resolveParams } from '../graph/params.ts';
 import * as math from '../core/math.ts';
@@ -19,6 +19,7 @@ import { EdgeSet } from '../core/edges.ts';
 import { convertSelection } from '../core/groupconvert.ts';
 import { appendElements } from '../core/wrangle.ts';
 import { composePackedXforms, expandPacked, packedInfo } from '../core/packed.ts';
+import { describeGuarded, runUserCode } from '../core/usercode.ts';
 import { mask, wrangleTime } from './util.ts';
 
 /** points below which a wrangle stays on the cooking thread (copying the attributes would cost more than it saves) */
@@ -69,7 +70,7 @@ defineNode({
       // the worker's realm stops the snippet at scriptTimeoutMs; the pool's limit only catches a stuck worker
       timeoutMs: engine.scriptTimeoutMs + 10000,
     }));
-    return then(res, (r) => {
+    return andThen(res, (r) => {
       for (const l of r.log.slice(0, 20)) warn(l.startsWith('warning') || l.startsWith('note') ? l : `print: ${l}`);
       if (r.log.length > 20) warn(`(${r.log.length - 20} more log lines)`);
       return r.geo;
@@ -150,22 +151,32 @@ defineNode({
   },
   async cook(ctx) {
     const { inputs, p, engine } = ctx;
+    const ms = engine.scriptTimeoutMs;
     let fn;
     try {
-      fn = engine.host.compile(`(async function(geo, inputs, lib, vars){ "use strict";\n${p.code}\n})`);
+      // The realm's AsyncFunction constructor parses the body on its own: code that would close the function it is
+      // pasted into (and run while compiling, outside any time limit) is a syntax error. Looked up, called and its
+      // error read under the time limit all the same (earlier code may have changed the realm).
+      fn = runUserCode(engine.host, () => {
+        const AsyncFunction = engine.host.compile('(async function () {}).constructor');
+        return new AsyncFunction('geo', 'inputs', 'lib', 'vars', `"use strict";\n${p.code}`);
+      }, ms);
     } catch (e: any) {
-      throw new NodeError(`script syntax error: ${e.message}`);
+      if (e.timedOut) throw new NodeError(`script exceeded ${ms} ms (infinite loop?)`);
+      throw new NodeError(`script syntax error: ${/single function literal/i.test(e.message) ? 'unbalanced brackets: the code closes the function it runs in' : e.message}`);
     }
     const geo = (inputs[0] ?? new Geometry()).clone();
     let res: any;
     const run = { stopped: false };
+    const t0 = Date.now();
     try {
       // the host limits the whole run, awaited continuations included (an `await` must not escape the timeout)
-      res = await engine.host.runGuardedAsync((wake) => fn(geo, inputs.map((g) => g ?? new Geometry()), scriptLib(ctx, wake, run), ctx.vars), engine.scriptTimeoutMs);
+      res = await engine.host.runGuardedAsync((wake) => fn(geo, inputs.map((g) => g ?? new Geometry()), scriptLib(ctx, wake, run), ctx.vars), ms);
     } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      if (/timed out/i.test(msg)) throw new NodeError(`script exceeded ${engine.scriptTimeoutMs} ms (infinite loop?)`);
-      throw new NodeError(`script error: ${msg}`);
+      // what the script threw is user code too (a message getter, toString): read it within the rest of the time limit
+      const d = describeGuarded(engine.host, e, Math.max(ms - (Date.now() - t0), Math.min(ms, 100)));
+      if (!d || /timed out/i.test(d.message)) throw new NodeError(`script exceeded ${ms} ms (infinite loop?)`);
+      throw new NodeError(`script error: ${d.message}`);
     } finally {
       run.stopped = true;
     }

@@ -42,6 +42,7 @@ let realm: Host | null = null;
 async function wrangleChunk(a: any, arrays: Record<string, any>, start: number, end: number) {
   if (!realm) realm = (await import('./node.ts')).createNodeHost({ workers: 0 });
   const { wrangleRunError } = await import('../core/wrangle.ts');
+  const { runUserCode } = await import('../core/usercode.ts');
   const kernel = realm.compile(a.source);
   const B = Array.from({ length: a.bindings }, (_, i) => ({ data: arrays['b' + i] }));
   const env = {
@@ -52,7 +53,8 @@ async function wrangleChunk(a: any, arrays: Record<string, any>, start: number, 
   const g = realm.compile('globalThis');
   g.__cur = null;
   try {
-    realm.runGuarded(() => kernel(env), a.timeoutMs);
+    // what the snippet throws is read inside the time limit too (a thrown object's message getter is user code)
+    runUserCode(realm, () => kernel(env), a.timeoutMs, true);
   } catch (e: any) {
     throw Object.assign(wrangleRunError(e, a.bodyLine, a.code, a.timeoutMs), { topotopoUser: true });
   }

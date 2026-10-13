@@ -395,6 +395,11 @@ export interface SdfVolume {
   kind: 'sdf';
   bounds: { min: Vec3; max: Vec3 };
   sample: (x: number, y: number, z: number) => number;
+  /**
+   * sample runs user code (an sdf_expr, also through combine/modify/transform): nodes that evaluate the field
+   * (sdf_to_mesh, sdf_grid) run it under the script timeout. Absent for analytic fields, which run unlimited.
+   */
+  scripted?: boolean;
 }
 
 /** A sampled 3D signed distance field; X varies fastest. Implemented by SdfGrid in core/sdfgrid.ts. */

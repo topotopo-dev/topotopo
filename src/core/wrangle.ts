@@ -16,6 +16,8 @@ import { KDTree, TriBVH } from './spatial.ts';
 import { GEOMETRY_FUNCTIONS } from './snippet-lib.ts';
 import type { TypedArray } from './kernels.ts';
 import type { Host } from '../host/types.ts';
+import { runUserCode } from './usercode.ts';
+import type { UserCodeError } from './usercode.ts';
 
 export type RunOver = 'points' | 'prims' | 'vertices' | 'detail';
 
@@ -172,11 +174,13 @@ function wrangleJob(w: WrangleRun, opts: WrangleOptions): WrangleJob | null {
   };
 }
 
-/** The node error for an exception thrown by a wrangle kernel (timeouts, runtime errors with the snippet line). */
-export function wrangleRunError(e: any, bodyLine: number, code: string, timeoutMs: number): Error {
-  const msg = String(e?.message ?? e);
-  if (/timed out/i.test(msg)) return new Error(`wrangle exceeded ${timeoutMs} ms (infinite loop?)`);
-  return new Error(`wrangle error: ${msg}${userLine(e, bodyLine, code)}`);
+/**
+ * The node error for a failed run of a wrangle kernel (runUserCode's UserCodeError: the message and stack were read
+ * inside the time limit, so this runs no user code): timeouts, and runtime errors with the snippet line.
+ */
+export function wrangleRunError(e: UserCodeError, bodyLine: number, code: string, timeoutMs: number): Error {
+  if (e.timedOut) return new Error(`wrangle exceeded ${timeoutMs} ms (infinite loop?)`);
+  return new Error(`wrangle error: ${e.message}${userLine(e, bodyLine, code)}`);
 }
 
 function prepareWrangle(geo: Geometry, opts: WrangleOptions): WrangleRun {
@@ -348,7 +352,8 @@ function execWrangle(w: WrangleRun, opts: WrangleOptions) {
   const realm = opts.host.compile('globalThis');
   realm.__cur = w.api;
   try {
-    opts.host.runGuarded(() => w.kernel(w.env), opts.timeoutMs);
+    // what the snippet throws is read inside the time limit too (a thrown object's message getter is user code)
+    runUserCode(opts.host, () => w.kernel(w.env), opts.timeoutMs, true);
   } catch (e: any) {
     throw wrangleRunError(e, w.bodyLine, opts.code, opts.timeoutMs);
   } finally {
