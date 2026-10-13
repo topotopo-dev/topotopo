@@ -8,7 +8,8 @@ Thanks for your interest. A few things to know before you start.
 - **Open an issue before large changes.** New node families, engine changes, new dependencies or file formats
   need a short discussion first so the work is not wasted. Bug fixes and small nodes can go straight to a PR.
 - **Every node needs tests and docs.** A node is one `defineNode()` whose params have a type, default and
-  description (they generate the docs and drive validation). Add a fixture in `test/fixtures.ts`, run
+  description (they generate the docs and drive validation), plus an `example`: a node spec or a small graph that
+  cooks without errors (`npm test` cooks every example). Add a fixture in `test/fixtures.ts`, run
   `npm run test:update` for its golden, add behavioural checks to the matching `test/*.ts`, and run `npm run docs`.
 - **Keep the core host-agnostic.** `src/core`, `src/graph` and `src/nodes` must not import Node APIs. Cooked geometry
   is immutable: `clone()` before writing. Y-up, metres, degrees, Houdini attribute names.
@@ -23,7 +24,7 @@ npm test
 npm run showcase     # then look at examples/renders/*.png
 ```
 
-`npm test` runs smoke, golden, property, fuzz, docs, io, interop, MCP and the per-feature suites. It fails on
+`npm test` runs smoke, golden, property, fuzz, docs, examples, io, interop, MCP and the per-feature suites. It fails on
 missing goldens, stale `docs/nodes.md` or a stale `NOTICE`.
 
 ## Sign your commits (DCO)

@@ -73,7 +73,7 @@ src/graph/     node system
   engine.ts      validation, lazy pull cooking, content-addressed cache, time, subgraphs/assets, concurrent branches
   parallel.ts    CookContext.parallelMap: a kernel in chunks on the host's worker pool, or in one piece without it
   migrate.ts     graph format versions and migrations
-src/nodes/     ~95 node types, one defineNode() each
+src/nodes/     200+ node types, one defineNode() each (typed params with defaults and descriptions, a cooked example)
 src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision); texview.ts: the texture view and
                base colour sampling of image textures
 src/inspect.ts, src/explain.ts  text views of geometry: summaries, statistics, a "reads as" description, diffs
@@ -482,7 +482,9 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 - **Property**: random chains from the registry check the engine's contracts: errors are per node and never thrown,
   cooks are deterministic, and the content-addressed cache gives the same result after a param is changed and
   restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line.
-- **Docs staleness**: `docs/nodes.md` must match the registry.
+- **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
+- **Examples**: every `NodeDef` carries an `example` (a node spec or a small graph, shown by `help` and in the node
+  reference) and `test/examples.ts` cooks each one: node specs on the node's fixture inputs, graphs as written.
 - **Benchmarks** (`npm run bench`) track the performance targets of the roadmap; they are informational.
 
 ## Sourced libraries
@@ -516,22 +518,44 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
 
 ## Roadmap
 
+Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its analysis in [ROADMAP.md](ROADMAP.md).
+
+**Shipped (as of 2026-10-13)**
+- Roadmap phases 0–2: the test layers (smoke, golden, property, fuzz, docs, examples), time and `solver`, expression
+  references, graph versioning, edge/vertex groups and the half-edge structure, array attributes, the worker pool;
+  modelling parity (bevel, knife/polysplit, bridge, quad fill, loop ops, deformers, xatlas unwrap and LSCM, isotropic
+  remesh, attribute-preserving decimation, LOD, measures and `assert`, render overlays); PCG and instancing (packed
+  prims, copy variants, scatter v2, masks, the heightfield suite with erosion, the spline toolkit, the asset shelf,
+  gltf-transform/USD/`.geo`/CSV exporters).
+- The Unreal round trip, verified on 2026-10-13 in Unreal 5.8 (instance rows, Interchange glTF axes, the Landscape
+  import with the manifest values), with the same scene loading in Blender 5.2 and Houdini 22.
+- Procedural textures and bakes (37 texture nodes, image volumes, materials referencing `image:<name>`, embedded export,
+  the texture view).
+- Rust/WASM kernels, sessions 1–3: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual
+  contouring, field-aligned quad remeshing.
+
+**Before the first release**
+- The rename to TopoTopo in one commit, a tagged v0.2 on npm under the new name, the public repository with CI back on.
+- Grant applications (Epic MegaGrants, cycle 1 of 2027) built on an Unreal 5.8 demo video; trademark filing once
+  there is revenue or a grant.
+
 **Next for the engine**
-- Packed primitives are in (copy_to_points `pack`, `pack`/`unpack`, glTF `EXT_mesh_gpu_instancing` and USD
-  `PointInstancer` with per-instance attributes, Houdini `PackedGeometry`, the instance stream for Unreal PCG, the
-  `unreal_landscape` bundle). Still open: packed disk references (Houdini packed disk prims), USD variants and
-  per-frame layers, and instanced rendering in the rasteriser (it draws expanded copies).
-- PolyBevel (edge chamfer/fillet) and PolySplit/knife, built on the edge groups and the half-edge structure.
-- Heightfields (done in P2-C: 23 nodes, erosion, Unreal heightmap export). Next: a grid (pipe-model) erosion variant
-  and the WASM erosion kernel behind `erodeStep`, heightfield tiles, and Unreal weight-layer import presets.
-- Curve toolkit: Bezier/NURBS prims, fillet, 3D offset, spline fit, projection and curve attributes are in (P2-D).
-  Still open: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
+- Kernels: the Rust erosion kernel behind `heightfield_erode` (in progress); quad remesher speed (100k triangles take
+  8.4 s against a 3 s target), singularity cleanup and quads-only density; a dual-contouring quality pass (edge
+  serration, adaptive extraction, speed).
+- Performance follow-ups: scatter sampling on the pool, faster point normals, a SAH BVH, relaxed scatter, the AO bake
+  (2048² × 16 rays ≈ 6 s); a WebGPU spike.
+- Packed primitives: packed disk references (Houdini packed disk prims), USD variants and per-frame layers, and
+  instanced rendering in the rasteriser (it draws expanded copies within a triangle budget).
+- Heightfields: a grid (pipe-model) erosion variant, heightfield tiles, Unreal weight-layer import presets, and an
+  Unreal-triangulation sampling mode so scattered bases match a Landscape to the millimetre.
+- Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
-- Performance: move hot kernels (sdf sampling, rasteriser, subdivide) to Workers, WebGPU or WASM; add multithreaded cooking of
-  independent branches.
-- Optional CAD context: an OpenCascade/replicad module for B-rep fillets and STEP export.
-- Houdini interop: `.geo` read/write and uncompressed `.bgeo` reading are in; still open are `.bgeo.sc` (Blosc)
-  and a USD layer writer with variants.
+- Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
+- Houdini interop: `.bgeo.sc` (Blosc) and a USD layer writer with variants.
+- Phase 3: volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points), simulation-lite
+  (Rapier rigid bodies, particles, XPBD cloth), and an optional OpenCascade/replicad CAD module for B-rep fillets and
+  STEP export.
 
 **GUI (makes the app usable without an LLM)**
 - Browser app: a node editor (React Flow or LiteGraph), a three.js viewport, and parameter panels generated from
