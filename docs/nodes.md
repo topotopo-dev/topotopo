@@ -2,14 +2,14 @@
 
 # Polyforge node reference
 
-167 node types and 36 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+168 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
 - [generate](#generate-nodes): [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
-- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
+- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
@@ -25,7 +25,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
-- [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
+- [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [roof_skeleton](#roof_skeleton) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
 
 ## generate nodes
 
@@ -1113,6 +1113,91 @@ Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all p
     "tolerance": 0.02,
     "smoothing": 0.5
   }
+}
+```
+
+### straight_skeleton
+
+category: `curve`
+
+Straight skeleton, polygon offsets and pitched roofs from planar footprints, including holes.
+
+Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `footprint` | no | no | Closed planar footprints, with nested contours for holes. |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"skeleton"` |  | `skeleton`, `offset`, `roof` |  | Emit skeleton and contour arcs, offset contours, or roof faces. |
+| `distance` | float | `0.2` |  |  |  | Offset distance in metres: positive inward, negative outward. |
+| `pitch` | float | `30` | 0.01..90 |  |  | Roof pitch in degrees (greater than 0, up to 90 for a gable); overridden by pitch_attrib when set. |
+| `pitch_attrib` | string | `""` |  |  |  | Scalar point or primitive pitch attribute, in degrees; point values belong to outgoing edges. |
+| `height_cap` | float | `0` | 0.. |  |  | Maximum roof height above the footprint; 0 leaves the ridge uncapped. |
+| `group` | group (prim) | `""` |  |  |  | Footprint primitives to process; unselected primitives pass through. |
+
+**Writes:** Skeleton: prim int kind (0 skeleton, 1 contour). Roof: prim int edge (input contour edge; -1 for a height cap). Source attributes and groups follow contour provenance.
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "footprint": {
+      "type": "curve",
+      "params": {
+        "closed": true,
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            6,
+            0,
+            0
+          ],
+          [
+            6,
+            0,
+            2
+          ],
+          [
+            2,
+            0,
+            2
+          ],
+          [
+            2,
+            0,
+            5
+          ],
+          [
+            0,
+            0,
+            5
+          ]
+        ]
+      }
+    },
+    "roof": {
+      "type": "straight_skeleton",
+      "in": [
+        "footprint"
+      ],
+      "params": {
+        "mode": "roof",
+        "pitch": 35
+      }
+    }
+  },
+  "output": "roof"
 }
 ```
 
@@ -7284,6 +7369,32 @@ None (generator).
 | `pitch` | float | `30` | 5..65 |  |  | roof slope (degrees) |
 | `overhang` | float | `0.5` | 0..2 |  |  | eave overhang beyond the footprint (m) |
 | `thickness` | float | `0.2` | 0.03..0.6 |  |  | fascia height measured square to the slope (m) |
+
+### roof_skeleton
+
+category: `shelf`
+
+Straight-skeleton hip roof from an optional XZ footprint, including concave outlines and courtyard holes.
+
+![roof_skeleton](../shelf/thumbs/roof_skeleton.png)
+
+Without input it uses a width by depth rectangle. Negative offset distance adds the overhang before the roof is built; a connected extrusion gives the roof shell thickness along averaged vertex normals. Pivot is the wall-top plane. Every face carries the source contour edge as edge; the roof is one closed shell per connected footprint.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | footprint: closed XZ polygons, optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `8` | 1..40 |  |  | default footprint width along X (m) |
+| `depth` | float | `6` | 1..40 |  |  | default footprint depth along Z (m) |
+| `pitch` | float | `32` | 5..65 |  |  | roof face slope (degrees) |
+| `overhang` | float | `0.4` | 0..2 |  |  | outward footprint offset before roofing (m) |
+| `thickness` | float | `0.16` | 0.03..0.6 |  |  | shell extrusion along averaged vertex normals (m) |
 
 ### sandbag_wall
 

@@ -147,6 +147,11 @@
    "group": "architecture"
   },
   {
+   "name": "roof_skeleton",
+   "file": "roof_skeleton.json",
+   "group": "architecture"
+  },
+  {
    "name": "sandbag_wall",
    "file": "sandbag_wall.json",
    "group": "props"
