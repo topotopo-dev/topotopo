@@ -556,8 +556,11 @@ The adapter in `src/nodes/remeshquad.ts` triangulates selected polygons, records
 indices, and transfers attributes with `GeoBuilder` using final source-triangle barycentrics. Vertex attributes use
 connected wedges on each side of UV seams, while prim attributes follow the source triangle at each face centre.
 Unselected primitives pass through; existing normals are recomputed for the remeshed region. Detail attributes
-include `quad_fraction`, interior irregular-valence count `singularities`, and edge-length/planarity statistics.
-`quads_only` requests conforming refinement and may exceed the requested face count. It is best effort when locked
+include `quad_fraction`, interior irregular-valence count `singularities`, `irregular_fraction` (that count divided
+by all output vertices), and edge-length/planarity statistics. Default `cleanup` repairs local topology defects.
+UV seams retain their geometry for wedge transfer while constraining only the orientation field, leaving lattice
+position origins free. `quads_only` conformingly splits residual non-quads and affected neighbours, and fits suitable
+planar crease-bounded patches with a grid and one ring. Face counts remain approximate; it is best effort when locked
 borders prevent that refinement. Algorithm limits and measured acceptance are recorded in `kernels/README.md`
 and `kernels/BENCH.md`; `examples/quad_remesh.json` exposes every polygon edge for visual review.
 

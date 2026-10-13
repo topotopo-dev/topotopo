@@ -8,9 +8,10 @@ import { createNodeHost } from '../src/host/node.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { NodeSpec, GraphSpec } from '../src/graph/types.ts';
 import { halfEdges } from '../src/core/halfedge.ts';
-import { primArea, topologyReport } from '../src/core/topology.ts';
+import { primArea, topologyReport, triangulate } from '../src/core/topology.ts';
 import { selfIntersections } from '../src/core/analysis.ts';
 import { kernelsWasmURL, kernelsWasmVariant, loadKernels } from '../src/wasm/kernels.ts';
+import type { QuadRemeshResult } from '../src/wasm/kernels.ts';
 import { fingerprint } from './fingerprint.ts';
 
 const off = new Engine(createNodeHost({ workers: 0 }));
@@ -57,6 +58,30 @@ function equalMesh(a: Geometry, b: Geometry, label: string): void {
   checks++;
 }
 
+function meshValence(positions: ArrayLike<number>, starts: ArrayLike<number>, corners: ArrayLike<number>): Uint32Array {
+  const valence = new Uint32Array(positions.length / 3), seen = new Set<number>();
+  for (let p = 0; p + 1 < starts.length; p++) for (let v = starts[p]; v < starts[p + 1]; v++) {
+    const a = corners[v], b = corners[v + 1 < starts[p + 1] ? v + 1 : starts[p]];
+    const key = Math.min(a, b) * valence.length + Math.max(a, b);
+    if (!seen.has(key)) { seen.add(key); valence[a]++; valence[b]++; }
+  }
+  return valence;
+}
+
+/** Compare every returned byte, including provenance, signed zeros and the quality report. */
+function equalKernel(a: QuadRemeshResult, b: QuadRemeshResult, label: string): void {
+  assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), `${label}: result fields`);
+  for (const name of ['positions', 'prim_start', 'vertex_point', 'source_triangle', 'barycentric',
+    'src_point', 'blend_offset', 'blend_index', 'blend_weight', 'src_prim', 'src_vertex'] as const) {
+    const actual = a[name], expected = b[name];
+    assert.equal(actual.constructor, expected.constructor, `${label}.${name}: typed array type`);
+    assert.deepEqual(new Uint8Array(actual.buffer, actual.byteOffset, actual.byteLength),
+      new Uint8Array(expected.buffer, expected.byteOffset, expected.byteLength), `${label}.${name}: identical bytes`);
+  }
+  assert.deepEqual(a.quality, b.quality, `${label}: exact quality values`);
+  checks++;
+}
+
 try {
   const sphereNodes: Record<string, NodeSpec> = {
     sphere: { type: 'sphere', params: { type: 'ico', level: 3 } },
@@ -81,6 +106,8 @@ try {
   check(Math.abs(Number(sphere.detail.get('quad_fraction')?.get(0)) - fraction) < 1e-12, 'quad_fraction detail matches actual faces');
   check(Number.isInteger(Number(sphere.detail.get('singularities')?.get(0))), 'singularities detail is an integer');
   check(Number(sphere.detail.get('singularities')?.get(0)) === valence.filter(n => n !== 4).length, 'singularities detail counts actual irregular vertices');
+  check(Number(sphere.detail.get('irregular_fraction')?.get(0)) === valence.filter(n => n !== 4).length / sphere.numPoints, 'irregular_fraction detail matches actual interior irregular vertices / output points');
+  check(!valence.includes(2), 'cleanup: closed sphere has no valence-2 vertices');
   for (const [name, actual] of [['edge_length_min', edgeMin], ['edge_length_mean', edgeSum / he.numEdges], ['edge_length_max', edgeMax]] as const) {
     check(Math.abs(Number(sphere.detail.get(name)?.get(0)) - actual) < 1e-10, `${name} detail agrees with actual geometry`);
   }
@@ -103,6 +130,12 @@ try {
   off.cache.clear();
   const repeat = await cook({ ...sphereNodes, again: { ...sphereNodes.out } }, 'again');
   equalMesh(sphere, repeat, 'repeat cook');
+  equalMesh(sphere, await cook({ ...sphereNodes, cleanup: { ...sphereNodes.out, params: { ...sphereNodes.out.params, cleanup: true } } }, 'cleanup'), 'cleanup defaults to true');
+  const uncleanedNodes = { ...sphereNodes, out: { ...sphereNodes.out, params: { ...sphereNodes.out.params, cleanup: false } } };
+  const uncleaned = await cook(uncleanedNodes, 'out');
+  check(watertight(uncleaned), 'cleanup=false retains a valid closed mesh');
+  off.cache.clear();
+  equalMesh(uncleaned, await cook(uncleanedNodes, 'out'), 'cleanup=false deterministic');
   await on.host.pool?.warm();
   equalMesh(sphere, await cook(sphereNodes, 'out', on), 'pool off/on');
   check(on.poolStats.parallel > 0, 'pool equality includes an upstream wrangle that actually ran on worker threads');
@@ -231,6 +264,7 @@ try {
 
   const onlyQuads = await cook({ tube: { type: 'tube', params: { cols: 15, rows: 3, caps: true } }, out: { type: 'remesh_quad', in: ['tube'], params: { target_length: 0.2, mode: 'quads_only' } } }, 'out');
   check(watertight(onlyQuads) && Array.from({ length: onlyQuads.numPrims }, (_, p) => onlyQuads.primSize(p)).every(n => n === 4), 'quads_only: odd capped tube is watertight with four-sided faces');
+  check(!meshValence(onlyQuads.P, onlyQuads.primStart, onlyQuads.vertexPoint).includes(2), 'cleanup: odd capped tube has no valence-2 vertices');
   for (let p = 0; p < onlyQuads.numPrims; p++) assert.ok(primArea(onlyQuads, p) > 1e-12);
   checks++;
   for (let seed = 1; seed <= 6; seed++) {
@@ -275,7 +309,8 @@ try {
   for (const options of [
     { target_faces: 1.5 }, { target_faces: NaN }, { target_faces: -1 }, { max_faces: 3.5 },
     { smooth_iterations: 1.5 }, { feature_angle: Infinity }, { quad_only: 'yes' }, { align_boundaries: 1 },
-    { preserve_sharp: null }, { crease_edges: [0, 1] }, { locked_edges: new Float64Array([0, 1]) },
+    { preserve_sharp: null }, { cleanup: 1 }, { crease_edges: [0, 1] }, { locked_edges: new Float64Array([0, 1]) },
+    { direction_edges: [0, 1] }, { direction_edges: new Uint32Array([0]) }, { direction_edges: new Uint32Array([0, 9]) },
     { crease_edges: new Uint32Array([0]) }, { locked_edges: new Uint32Array([0, 9]) },
   ]) { assert.throws(() => raw.remesh_quad(inputPositions, inputTris, options)); checks++; }
   // Native test constructs exactly the same binary-fraction input. Its printed digest can be compared
@@ -305,6 +340,73 @@ try {
     check(watertight(geo), `showcase ${output}: closed manifold nondegenerate mesh`);
     const intersections = selfIntersections(geo);
     check(!intersections.capped && intersections.pairs === 0, `showcase ${output}: no proper triangle crossings`);
+    check(!meshValence(geo.P, geo.primStart, geo.vertexPoint).includes(2), `showcase ${output}: cleanup leaves no valence-2 vertices`);
+    if (output === 'tube_quad') {
+      check(Array.from({ length: geo.numPrims }, (_, p) => geo.primSize(p)).every(n => n === 4), 'showcase tube: all output faces are quads');
+      check(Math.abs(geo.numPrims - 350) <= 350 * 0.15, `showcase tube: quads_only count within target 350 +/-15% (${geo.numPrims})`);
+      // The cap's UVs are affine in x/z, independent of triangulation and the new cap grid.
+      // This catches losing cap/side wedges when resampling their shared crease ring.
+      const uv = geo.vertices.get('uv')!.data as Float64Array;
+      let capFaces = 0, maxCapUVError = 0;
+      for (let p = 0; p < geo.numPrims; p++) {
+        const points = geo.primPoints(p);
+        const top = points.every(i => Math.abs(geo.P[i * 3 + 1] - 0.8) < 1e-8);
+        const bottom = points.every(i => Math.abs(geo.P[i * 3 + 1] + 0.8) < 1e-8);
+        if (!top && !bottom) continue;
+        capFaces++;
+        for (let v = geo.primStart[p]; v < geo.primStart[p + 1]; v++) {
+          const i = geo.vertexPoint[v];
+          maxCapUVError = Math.max(maxCapUVError, Math.abs(uv[v * 3] - (0.5 + geo.P[i * 3] / 1.3)),
+            Math.abs(uv[v * 3 + 1] - (0.5 + (top ? -1 : 1) * geo.P[i * 3 + 2] / 1.3)));
+        }
+      }
+      check(capFaces > 0 && maxCapUVError < 1e-6, `showcase tube: affine cap UVs survive cap/side seams (max error ${maxCapUVError})`);
+      console.log(`quads_only tube: ${geo.numPrims} quads for target 350 (${((geo.numPrims / 350 - 1) * 100).toFixed(2)}%)`);
+    }
+  }
+
+  // These are the session-3 acceptance inputs, rather than the much smaller ico sphere above.
+  // 2 * 250 * (201 - 1) = exactly 100,000 input triangles with a real UV seam.
+  const largeNodes: Record<string, NodeSpec> = {
+    sphere: { type: 'sphere', params: { rows: 201, cols: 250 } },
+    noise: { type: 'wrangle', in: ['sphere'], params: { code: 'const r = 1 + 0.025 * sin(@P.x * 7) * sin(@P.y * 5) * cos(@P.z * 6); @P = mul(@P, r);' } },
+    out: { type: 'remesh_quad', in: ['noise'], params: { target_faces: 25000, smooth_iterations: 8 } },
+  };
+  const largeInput = await cook(largeNodes, 'noise');
+  const largeTris = Uint32Array.from(triangulate(largeInput).tris, v => largeInput.vertexPoint[v]);
+  assert.equal(largeTris.length / 3, 100000, 'large regression fixture has exactly 100k triangles'); checks++;
+  const largeOptions = { target_faces: 25000, smooth_iterations: 8 };
+  const largeRaw = kernels.remesh_quad(largeInput.P, largeTris, largeOptions);
+  const rawValence = meshValence(largeRaw.positions, largeRaw.prim_start, largeRaw.vertex_point);
+  const rawIrregular = rawValence.filter(n => n !== 4).length / rawValence.length;
+  check(rawIrregular < 0.02, `large raw sphere: irregular fraction <2% (${(rawIrregular * 100).toFixed(4)}%)`);
+  check(largeRaw.quality.irregular_fraction === rawIrregular, 'large raw sphere: reported irregular fraction matches topology');
+  check(!rawValence.includes(2), 'large raw sphere: cleanup leaves no valence-2 vertices');
+  equalKernel(largeRaw, kernels.remesh_quad(largeInput.P, largeTris, largeOptions), 'large raw sphere deterministic');
+
+  const largeUV = await cook(largeNodes, 'out');
+  const uvValence = meshValence(largeUV.P, largeUV.primStart, largeUV.vertexPoint);
+  const uvIrregular = uvValence.filter(n => n !== 4).length / uvValence.length;
+  check(watertight(largeUV), 'large UV-constrained sphere remains watertight and manifold');
+  check(uvIrregular < 0.04, `large UV-constrained sphere: irregular fraction <4% (${(uvIrregular * 100).toFixed(4)}%)`);
+  check(Number(largeUV.detail.get('irregular_fraction')?.get(0)) === uvIrregular, 'large UV-constrained sphere: reported irregular fraction matches topology');
+  check(!uvValence.includes(2), 'large UV-constrained sphere: cleanup leaves no valence-2 vertices');
+  console.log(`large sphere regularity: raw ${(rawIrregular * 100).toFixed(4)}%, UV-constrained ${(uvIrregular * 100).toFixed(4)}%`);
+
+  const scalar = await import('../kernels/pkg/topotopo_kernels.js');
+  const simd = await import('../kernels/pkg-simd/topotopo_kernels.js');
+  const scalarBytes = fs.readFileSync(new URL('../kernels/pkg/topotopo_kernels_bg.wasm', import.meta.url));
+  const simdBytes = fs.readFileSync(new URL('../kernels/pkg-simd/topotopo_kernels_bg.wasm', import.meta.url));
+  assert.notDeepEqual(scalarBytes, simdBytes, 'quad parity exercises distinct shipped builds'); checks++;
+  await scalar.default({ module_or_path: scalarBytes });
+  await simd.default({ module_or_path: simdBytes });
+  const other = kernelsWasmVariant === 'simd' ? scalar : simd;
+  equalKernel(largeRaw, other.remesh_quad(largeInput.P, largeTris, largeOptions) as QuadRemeshResult, 'large sphere scalar/SIMD byte-exact parity');
+  for (const cleanup of [false, true]) for (const quad_only of [false, true]) {
+    const options = { target_length: 0.5, cleanup, quad_only, direction_edges: Uint32Array.of(0, 5, 5, 10) };
+    equalKernel(scalar.remesh_quad(Float64Array.from(parityP), Uint32Array.from(parityT), options) as QuadRemeshResult,
+      simd.remesh_quad(Float64Array.from(parityP), Uint32Array.from(parityT), options) as QuadRemeshResult,
+      `direction constraints scalar/SIMD byte-exact parity, cleanup=${cleanup}, quad_only=${quad_only}`);
   }
 } finally {
   await off.host.pool?.close(); await on.host.pool?.close();

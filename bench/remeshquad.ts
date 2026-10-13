@@ -1,13 +1,13 @@
 // Real Node/WASM quad remeshing timing, including returned mesh/provenance buffers and JS/WASM copies.
-// node bench/remeshquad.ts [--faces=25000] [--runs=3]
-import { readFileSync, statSync } from 'node:fs';
+// node bench/remeshquad.ts [--faces=25000] [--runs=3] [--raw-only] [--export-fixtures]
+import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import { performance } from 'node:perf_hooks';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { triangulate } from '../src/core/topology.ts';
-import { kernelsWasmURL, loadKernels } from '../src/wasm/kernels.ts';
+import { kernelsWasmURL, kernelsWasmVariant, loadKernels } from '../src/wasm/kernels.ts';
 import type { QuadRemeshResult } from '../src/wasm/kernels.ts';
 
 function option(name: string, fallback: number): number {
@@ -31,6 +31,11 @@ const cooked = await engine.cook(graph);
 if (!cooked.ok || !cooked.geo) throw new Error(cooked.errors.map(e => e.message).join('; '));
 const source = cooked.geo;
 const tris = Uint32Array.from(triangulate(source).tris, v => source.vertexPoint[v]);
+if (process.argv.includes('--export-fixtures')) {
+  mkdirSync('out/session7', { recursive: true });
+  writeFileSync('out/session7/sphere.positions.f64', Buffer.from(source.P.buffer, source.P.byteOffset, source.P.byteLength));
+  writeFileSync('out/session7/sphere.triangles.u32', Buffer.from(tris.buffer));
+}
 const gridPositions = new Float64Array(201 * 251 * 3), gridTris = new Uint32Array(200 * 250 * 6);
 for (let r = 0; r <= 200; r++) for (let c = 0; c <= 250; c++) {
   const x = -1 + 2 * c / 250, z = 1 - 2 * r / 200, i = (r * 251 + c) * 3;
@@ -39,6 +44,14 @@ for (let r = 0; r <= 200; r++) for (let c = 0; c <= 250; c++) {
 for (let r = 0; r < 200; r++) for (let c = 0; c < 250; c++) {
   const a = r * 251 + c, b = a + 1, d = a + 251, e = d + 1;
   gridTris.set([a, b, e, a, e, d], (r * 250 + c) * 6);
+}
+function cpuTimes(): [number, number] {
+  let total = 0, idle = 0;
+  for (const { times } of os.cpus()) {
+    idle += times.idle;
+    total += times.user + times.nice + times.sys + times.idle + times.irq;
+  }
+  return [total, idle];
 }
 function quality(mesh: QuadRemeshResult) {
   const edges = new Set<string>();
@@ -61,11 +74,12 @@ function quality(mesh: QuadRemeshResult) {
   return { vertices: valence.length, faces: mesh.prim_start.length - 1, quads: quadCount,
     quad_fraction: quadCount / (mesh.prim_start.length - 1), irregular_vertices: irregular,
     irregular_fraction: irregular / valence.length, reported_singularities: mesh.quality.singularities,
+    reported_irregular_fraction: mesh.quality.irregular_fraction,
     target_edge_length: mesh.quality.target_edge_length, edge_length_min: min, edge_length_mean: total / edges.size,
     edge_length_max: max, edges_within_35pct: within / edges.size,
     planarity_mean: mesh.quality.planarity_mean, planarity_max: mesh.quality.planarity_max };
 }
-console.log(JSON.stringify({ benchmark: 'field-aligned quad remesh', node: process.version,
+console.log(JSON.stringify({ benchmark: 'field-aligned quad remesh', variant: kernelsWasmVariant, node: process.version,
   platform: `${os.platform()} ${os.release()} ${os.arch()}`, cpu: os.cpus()[0]?.model,
   logical_cpus: os.availableParallelism(), wasm_bytes: statSync(kernelsWasmURL).size,
   input_triangles: tris.length / 3, requested_faces: faces,
@@ -75,16 +89,22 @@ console.log(JSON.stringify({ benchmark: 'field-aligned quad remesh', node: proce
 // Warm the actual large-input path; the separate warmup result is deliberately excluded from the median.
 for (const [fixture, positions, triangles] of [['sphere', source.P, tris], ['noisy_grid', gridPositions, gridTris]] as const) {
   for (let i = -1; i < runs; i++) {
+    const cpuBefore = cpuTimes();
     const start = performance.now();
     const result = kernels.remesh_quad(positions, triangles, { target_faces: faces, smooth_iterations: 8 });
     const elapsed = performance.now() - start;
-    console.log(JSON.stringify({ fixture, run: i < 0 ? 'warmup' : i + 1, kernel_ms: +elapsed.toFixed(3), below_3000ms: elapsed < 3000, ...quality(result) }));
+    const cpuAfter = cpuTimes();
+    const machineCpu = 100 * (1 - (cpuAfter[1] - cpuBefore[1]) / (cpuAfter[0] - cpuBefore[0]));
+    console.log(JSON.stringify({ fixture, run: i < 0 ? 'warmup' : i + 1, kernel_ms: +elapsed.toFixed(3), machine_cpu_pct: +machineCpu.toFixed(2), below_3000ms: elapsed < 3000, ...quality(result) }));
   }
 }
 // End-to-end node time includes triangulation, wedge transfer, attributes, normals and immutable Geometry rebuild.
+if (!process.argv.includes('--raw-only')) {
 const nodeStart = performance.now();
 const nodeResult = await engine.cook({ ...graph, nodes: { ...graph.nodes, out: { type: 'remesh_quad', in: ['noise'], params: { target_faces: faces, smooth_iterations: 8 } } }, output: 'out' });
 if (!nodeResult.ok || !nodeResult.geo) throw new Error(nodeResult.errors.map(e => e.message).join('; '));
 console.log(JSON.stringify({ node_ms: +(performance.now() - nodeStart).toFixed(3), output_faces: nodeResult.geo.numPrims,
-  output_points: nodeResult.geo.numPoints, quad_fraction: nodeResult.geo.detail.get('quad_fraction')?.get(0), singularities: nodeResult.geo.detail.get('singularities')?.get(0) }));
+  output_points: nodeResult.geo.numPoints, quad_fraction: nodeResult.geo.detail.get('quad_fraction')?.get(0), singularities: nodeResult.geo.detail.get('singularities')?.get(0),
+  irregular_fraction: nodeResult.geo.detail.get('irregular_fraction')?.get(0) }));
+}
 await engine.host.pool?.close();
