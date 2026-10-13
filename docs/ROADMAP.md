@@ -282,7 +282,7 @@ levels, blur, warp, transform, edge detect, normal from height, height to AO, ch
 sampler), and bakes from geometry in UV space (AO, curvature, thickness, position/normal, island ids, masks from
 groups, vertex colour, high-to-low height). Images are 2D float layers carried on the geometry like heightfields and
 referenced by materials as `image:<name>`; glTF embeds them, USD writes them next to the file, `textures` export writes
-PNGs. A `texture` render view and persp texture sampling let agents look at the result. (In progress as P3-T.)
+PNGs. A `texture` render view and persp texture sampling let agents look at the result. (Shipped 2026-10-13 as P3-T: 37 nodes.)
 
 ## 6. Sequencing
 

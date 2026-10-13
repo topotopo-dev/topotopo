@@ -101,7 +101,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 | R-4 | Rename to topotopo in one commit before the first tagged release | queued | decision 1; blocked on the user registering the handles |
 | R-5 | Tagged v0.2 on npm under the new name; demo video plan; grant application drafts (Epic MegaGrants, NLnet NGI Zero) | queued | decision 5; after P2-E2, P2-G |
 | R-6 | Trademark filing reminder: once there is revenue or a grant | queued | decision 1 |
-| P3-T | Procedural textures and bakes (texture node family, UV-space bakes, image volumes, material linkage, embedded export, texture view) | running (agent) | started 2026-10-13; ROADMAP §6a |
+| P3-T | Procedural textures and bakes (texture node family, UV-space bakes, image volumes, material linkage, embedded export, texture view) | merged | 2026-10-13. 37 texture nodes, 204 node types total. Colour stored display-referred (sRGB bytes as typed); AO 2048²×16 rays ≈ 6 s (over target); no MikkTSpace tangents; bakes cover the 0..1 uv square only; no PNG-to-image reader node yet |
 | R-9 | Epic MegaGrants cycle 1 of 2027 (expected January–March 2027): demo video, application text, milestones + budget; see ROADMAP §7 | queued | needs P2-G, R-4, R-5 |
 | R-7 | Docs pass before release: `example` on every NodeDef (P0-A bug 6), refresh the roadmap bullets in docs/DESIGN.md and ROADMAP.md to the shipped state, README node count wording, thumbnails without view labels | queued | |
 | R-8 | Follow-ups from P0-D/P0-F: port scatter sampling to the pool, faster pointNormals, SAH BVH (changes grazing hits), relax scatter | queued | or the Rust kernel track |
@@ -111,6 +111,7 @@ Status: `queued` → `running (agent)` → `review` → `merged` / `dropped`.
 - An outside agent (different vendor) takes `docs/briefs/external-agent.md`: package 1 is the Rust→WASM kernels crate (straight skeleton, isotropic/quad remeshing, erosion, SDF grids + dual contouring, point kernels), package 2 a 2026 landscape audit, package 3 an optional UE 5.8 PCG plugin. Integration of the kernels into nodes stays with this run (P0-F perf, P2-C heightfields, P1-E remesh).
 
 ## Log
+- 2026-10-13: P3-T merged: procedural textures and bakes (also fixed the CLI exiting 13 after pool work). 26 examples, 264 goldens.
 - 2026-10-13: repo transferred to github.com/topotopo-dev/polyforge (private); AGENTS.md added; Codex kernels session 1 launched; texture agent (P3-T) relaunched from the cancelled attempt's WIP commit.
 - 2026-10-13: ROADMAP got a status block, §6a textures, §7 release and grants (MegaGrants 2026 cycles are closed; next expected January 2027; NLnet calls open until 2026-11-03 but NLnet declines AI-generated projects and requires an AI disclosure). P3-T launched. Name: user ~90% on TopoTopo; one domain only, topotopo.dev recommended (.com/.io/.org taken).
 - 2026-10-13: nested-generator demo: shelf asset `house` (wall_segment per footprint edge + roof_hip, optional footprint input) and `examples/house_city.json` (12 houses varied per lot); editing wall_segment/roof_hip re-cooks every house (cache dedups identical walls: 12 houses in ~250 ms).
