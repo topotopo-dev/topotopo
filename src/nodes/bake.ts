@@ -21,8 +21,8 @@ import { then } from '../graph/parallel.ts';
 import { P, mask } from './util.ts';
 import { imageGeo, nameParam, resolutionParam, size2 } from './texture.ts';
 
-/** Most samples a bake may rasterise (output texels × supersample²). */
-const MAX_SAMPLES = 8192 * 8192;
+/** Most samples a bake may rasterise (output texels × supersample²): 4096², about 1 GB of per-sample arrays at full coverage. */
+const MAX_SAMPLES = 4096 * 4096;
 
 // ---------------------------------------------------------------- shared params
 

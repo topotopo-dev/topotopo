@@ -122,6 +122,9 @@ class NodeWorkerPool implements WorkerPool {
       s.retired = true;
       clearTimeout(s.idleTimer);
       if (s.busy) { clearTimeout(s.busy.timer); s.busy.reject(err); s.busy = null; }
+      // an idle (unref'd) worker would not keep the event loop alive until its exit event: the awaited close() would
+      // never settle and a top-level `await pool.close()` ended the process with exit code 13
+      s.worker.ref();
       return s.worker.terminate().catch(() => 0);
     });
     this.slots = [];

@@ -1,0 +1,121 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["chart:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.6, 2, 0.4],
+      "min": [-1.6, 0, -1.05]
+    },
+    "counts": {
+      "points": 296,
+      "prims": 222,
+      "vertices": 888,
+      "volumes": 5
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "2e4506eda5cd76cf",
+      "attributes": {
+        "detail.materials": "58a3958539e89b73",
+        "prim.chart": "e399f705098b82df",
+        "prim.material": "1e6b2155cabe4d0f",
+        "prim.name": "fb9ddf19c50d541b",
+        "vertex.uv": "bf4c3f6587f2df7f"
+      },
+      "topology": "244b84081b91bcfa"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "1fdbcbc3d3bbabc5"
+        },
+        "name": "brick_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "91aad593bb5fa4b5",
+          "id": "3bad228129d6f7fb"
+        },
+        "name": "brick_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "5d3d2e8f98342c7d",
+          "id": "3bad228129d6f7fb"
+        },
+        "name": "brick_rough"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "a615c3e5a6daaf83"
+        },
+        "name": "crate_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "438a3dce155e0ae8"
+        },
+        "name": "crate_orm"
+      }
+    ]
+  },
+  "name": "example.textures",
+  "ok": true,
+  "source": "examples/textures.json",
+  "warnings": []
+}
