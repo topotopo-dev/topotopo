@@ -911,3 +911,116 @@ water/flux/reduction passes, serial droplet trajectories and model-preserving
 arithmetic remain substantial costs. Threads, GPU,
 quad/contour feature work, relaxed arithmetic and new runtime dependencies remain
 outside this session.
+
+# Session 7 measurements - quad remesher quality and speed (K-3b)
+
+The guarded remesher records **1.834229%** irregular vertices on the large raw sphere, **2.686296%** on the UV-constrained node, and **346 quads for a target of 350** on the tube. Final profiled SIMD medians are **4,188.203 ms sphere / 2,888.282 ms grid**. The ordinary SIMD medians are **5,091.995 ms sphere / 4,160.670 ms grid**, missing both 3-second targets, and **the requested idle-machine measurement was not achieved**.
+
+2026-10-13, Windows 10.0.26200 x64, Intel Core i7-10700K @ 3.80 GHz (16 logical CPUs), Node v24.14.0. No new runtime dependencies.
+
+**Changes**
+
+- Retain deterministic pair-clustering hierarchy construction; use CSR adjacency, cached two-dimensional tangent connections, compact position arrays and Gauss-Seidel convergence checks. At eight requested iterations, position budgets are 8/16/32 sweeps from fine to coarse levels. Fields remain f64. Refinement now splits above 0.9h rather than 0.8h; the h trial was rejected because raw-sphere irregularity rose above 4%.
+- Translation-curl repair uses CSR adjacency and compact origins, with transactional rollback if routing cannot complete. Its 128-round refit limit remains: shorter trials missed regularity. Lattice rounding preserves ties-away behavior and is tested against libm at adjacent half-integers and 100,000 finite bit patterns.
+- Persistent source-triangle hints accelerate the existing exact BVH traversal while preserving input-index tie breaks and barycentric results; curve projection still uses the segment BVH. BVH-free parent-link projection and f32 fields were not introduced.
+- Separate UV-seam orientation constraints from lattice position pinning while preserving exact seam geometry for corner attribute transfer. Add only node parameter `cleanup` (default true) and reported detail `irregular_fraction`; provenance and attribute-transfer formats remain unchanged.
+- Cleanup dissolves unconstrained degree-two doublets, attempts valid short-edge collapses below 0.3h, pairs residual triangles and rotates edges to improve valence. **The new guard requires newly created diagonals to remain within 0.3h..2h**, resolving the candidate-2 grid outlier. Existing hard constraints and validity checks still take precedence over removing every short edge.
+- Quads-only conversion splits residual non-quads and propagates conforming cuts only where needed. Eligible convex planar cap patches receive a structured interior and one transition ring joining the preserved crease loop; suitable ruled annuli use projected quad strips while retaining complete longitudinal seams. Initial target length is computed from surface area and requested face count; locked group borders may retain triangles.
+- No opposite-index orientation cancellation pass was added: the observed raw and UV sphere fields each had eight same-sign poles and no opposite-sign pairs to cancel. Translation-curl repair and output-valence cleanup are distinct from orientation singularity cancellation.
+
+**Method and machine state**
+
+The exact Session-3 100k-triangle noisy polar sphere and 250-by-200 noisy grid request 25,000 faces with eight smoothing iterations. Raw calls have no UV seam constraints. Each fixture receives one full-size warmup, excluded, then three measured calls. Timings include hierarchy, fields, extraction, projection, provenance, quality, allocation and JS/WASM copies; module initialization and fixture generation are excluded.
+
+Build profiles with `node scripts/kernels-build.ts --features profile` and select `TOPOTOPO_WASM=simd`. `node out/session7/bench-before.ts --runs=3` loads preserved packages from the session-start implementation (`b8bad0f38bc10cd5007bb64dfb4bce490a2313a1`, rebuilt with profile instrumentation) and forces raw-only mode; `node bench/remeshquad.ts --runs=3` measures the candidate plus one final UV node call. `--raw-only` omits that node call. Rebuild ordinary packages with `npm run kernels:build` before production timings and release gates.
+
+Before timing, `tasklist /FI "IMAGENAME eq node.exe"`, the corresponding Cargo query, and repository command-line audits found no competing repository test/build/benchmark; all timed calls ran serially with our repository gates stopped. They did not establish an idle machine: earlier profile samples were 52.74-89.28% CPU, the final guarded profile samples are **62.82-92.46%**, and earlier production SIMD samples were 99.8-100%; final ordinary SIMD samples remain 97.73-99.81%. The pre-profile snapshot records background ffmpeg/browser activity. Audit files are under ignored `out/session7/`: `tasklist-*`, `repo-processes-*`, `profile-machine-before.json`, and `machine-production-simd.json`. These measurements cannot establish idle performance or an intrinsic scalar/SIMD speed advantage.
+
+Each profile group is assigned to its following fixture record. Stage values are independent medians and need not sum to the median complete call. `fields_total` and `translation` are parent stages; do not add their substages twice. The named projection stage is final polygon relaxation; projection inside contraction/provenance remains charged to those stages.
+
+**Final guarded profile-enabled timings**
+
+| Fixture | Before SIMD median ms | Guarded SIMD measured calls, ms | Guarded median ms | Before/after | Sampled CPU, % |
+|---|---:|---|---:|---:|---|
+| Noisy sphere | 9472.055 | 4054.523, 4379.665, 4188.203 | 4188.203 | 2.261604x | 84.45, 92.46, 81.48 |
+| Noisy grid | 4182.865 | 2768.174, 2888.282, 3183.688 | 2888.282 | 1.448219x | 62.82, 71.70, 81.99 |
+
+| Stage, ms | Sphere before | Sphere guarded | Grid before | Grid guarded |
+|---|---:|---:|---:|---:|
+| Validation/setup | 79.883 | 86.869 | 60.496 | 62.116 |
+| Projector construction | 63.597 | 78.308 | 64.175 | 64.442 |
+| Refinement | 366.982 | 281.521 | 138.225 | 162.042 |
+| Hierarchy | 171.552 | 70.268 | 83.777 | 54.405 |
+| Field prolongation | 42.371 | 14.832 | 21.601 | 11.204 |
+| Orientation field | 1214.233 | 163.728 | 642.553 | 131.392 |
+| Position field | 2845.921 | 521.730 | 1406.305 | 408.176 |
+| Fields subtotal | 4241.488 | 769.500 | 2145.462 | 612.748 |
+| Translation total | 2697.589 | 1101.907 | 606.525 | 546.968 |
+| Translation setup | not timed | 112.351 | not timed | 92.603 |
+| Translation routing | not timed | 62.995 | not timed | 445.746 |
+| Translation refit | not timed | 938.317 | not timed | not timed |
+| Contraction | 1162.008 | 670.087 | 560.780 | 550.451 |
+| Extraction | 89.335 | 72.640 | 72.708 | 50.749 |
+| Cleanup | no separate stage | 416.569 | no separate stage | 454.578 |
+| Quad conversion | 0.004 | 0.003 | 0.004 | 0.003 |
+| Final projection/relaxation | 514.317 | 525.930 | 381.404 | 345.030 |
+| Provenance and quality | 144.310 | 157.649 | 124.829 | 100.314 |
+
+Cleanup is a new separately timed stage; baseline translation substages were not separately timed. The grid has no committed translation refit. Largest remaining sphere costs are translation refit (938.317 ms), contraction (670.088 ms), position smoothing (521.730 ms), final relaxation (525.930 ms), and cleanup (416.569 ms). Grid contraction (550.451 ms), routing (445.746 ms), cleanup (454.578 ms), and position smoothing (408.176 ms) now dominate its smaller field cost.
+
+Source logs: `out/session7/before-final-simd.jsonl` and `final-profile-simd.jsonl`. `profile-summary.json` stores the complete final result under `final_guarded`; its earlier entries are explicitly historical candidate-2 data.
+
+**Ordinary packages and scalar comparison**
+
+| Final ordinary package | Sphere three calls / median ms | Grid three calls / median ms | CPU samples | Bytes / SHA-256 |
+|---|---|---|---|---|
+| SIMD | 5025.734, 5200.447, 5091.995 / **5091.995** | 4160.670, 4361.344, 3977.345 / **4160.670** | 97.73-99.81% | 668,388 / `d25c7fdc65af93bcf551adb20fdacb0e04701270dee05165e7f87a86ea146114` |
+| Scalar | 7037.065, 6767.421, 7108.056 / **7037.065** | 5496.983, 5400.547, 5408.563 / **5408.563** | 98.21-100.00% | 674,084 / `2a9687a8732f6b982deede50aadf7a5cb93a2fb87ecc6b3d2ddf9268dbb7ee41` |
+
+Final ordinary scalar/SIMD time ratios are **1.381986x sphere / 1.299926x grid**, both within 1.5x. Both ordinary SIMD medians exceed 3 seconds. Machine load differs between recordings, so these ratios do not isolate an intrinsic SIMD speedup or establish idle-machine acceptance. Source logs are `final-production-simd.jsonl` and `final-production-scalar.jsonl`.
+
+**Final guarded quality and counts**
+
+| Measurement | Before | Guarded result |
+|---|---|---|
+| Raw sphere interior irregular vertices | 760/27,716 = 2.742098% | 505/27,532 = 1.834229% |
+| Raw sphere quads / faces | 27,625/27,803 | 27,509/27,551 |
+| Raw sphere edges within +/-35% | 98.632851% | 99.072275% |
+| Raw sphere edge min / mean / max | 0.004689564 / 0.021357020 / 0.032927712 | 0.006084961 / 0.021433956 / 0.033778093 |
+| Grid interior irregular vertices | 324/25,600 = 1.265625% | 299/25,687 = 1.164013% |
+| Grid quads / faces | 24,997/25,303 | 25,094/25,379 |
+| Grid edges within +/-35% | 98.990216% | 99.014981% |
+| Grid edge min / mean / max | 0.007426174 / 0.012609103 / 0.016007094 | 0.006315075 / 0.012629009 / 0.017371657 |
+| UV node irregular vertices | Session 3: 9.7318% | 770/28,664 = 2.686296% |
+| Tube quads, target 350 | Session 3: 1,646 | 346 (-1.142857%) |
+
+The new diagonal guard resolves the candidate-2 cleanup regression: the grid maximum fell from .075080565 (5.91955h) to .017371657, with 99.014981% of edges within +/-35% of target. Grid raw valence counts include boundary vertices; use reported interior singularities for interior regularity.
+
+Final profile quality records match across measured repeats. The single profiled UV node call took **4,229.631 ms**, producing **29,208 faces / 28,664 points**, with **96.261298% quads**; it is not a three-run median. The ordinary full UV node call took **6,457.560 ms**, including triangulation, wedge/attribute transfer, normals and Geometry construction. All eleven returned buffers and quality values match exactly between scalar and SIMD for the large sphere and four cleanup/mode/direction-constraint cases, without a tolerance; deterministic replay also passes. The final scalar-override quad suite passes all **780 checks**. The cap UV error assertion passes **<1e-6**; the test does not print the exact error on success.
+
+**Final gates**
+
+| Required gate | Final guarded result |
+|---|---|
+| `cargo test` default and `--features simd` | Both exit 0; 95 passed, 0 failed in each feature set |
+| `cargo clippy --all-targets -- -D warnings`, both feature sets | Both exit 0 |
+| `cargo fmt --check`; additional wasm32 SIMD clippy | Both exit 0 |
+| `npm run kernels:build` | Exit 0; ordinary scalar + SIMD, 1,342,472 combined bytes; no profiling imports |
+| `npm run typecheck`; `npm run docs` | Both exit 0; generated docs cover 217 node types |
+| `npm run test:update` | Exit 0; 2 written, 280 unchanged, 0 failed (282 cases) |
+| `npm test` | Exit 0 for the complete chain: 282 goldens, 780 quad checks, 55 kernel / 89 SDF / 2077 erosion checks, 426 scalar/SIMD comparisons and 23 matching validation errors |
+| `npm run build`; `npm run pack:test` | Both exit 0; 106 built modules and 1 asset; 25 package checks passed |
+| `npm run showcase`; `git diff --check` | Both exit 0; 30 graphs rendered, 29 unchanged render hashes; no whitespace errors |
+
+Rust commands use `--manifest-path kernels/Cargo.toml`. The final native/WASM binary-fraction fixture has digest **`e512d6ca5c6cfb8b`** (25 points, 16 faces), including unquantized positions, topology and source-triangle barycentrics. Scalar/SIMD output comparisons are byte-exact, with exact quality values, as described above. Passing fixtures on this host is not an exhaustive OS/compiler/platform identity matrix. Only goldens `node.remesh_quad`, `example.quad_remesh`, and render `examples/renders/quad_remesh.png` may change: SHA-256 audit confirms all 280 other goldens and all 29 other renders are byte-identical to the session-start baseline.
+
+Inspect `examples/renders/quad_remesh.png` for a regular tube-cap grid with one ring and aligned box edges: visually inspected after the final showcase run; the cap reads as a rectangular interior grid with one transition ring, the body has regular strips, and box feature edges remain aligned.
+
+**Remaining limits**
+
+- Strict idle-machine acceptance remains unmet; both final ordinary SIMD medians miss 3 seconds. The recordings do not prove either fixture meets the requested speed on an idle machine.
+- f64 fields, exact BVH traversal, bounded integer routing and up to 128 translation-refit sweeps remain material costs. No opposite-index orientation cancellation was added because the observed sphere fields had eight same-sign poles.
+- Hard constraints and validity checks can retain short edges or triangles. Target-count/cap-flow acceptance applies to the tested tube; structured caps require convex planar disks with even boundary counts of 8-512; annulus reconstruction requires matching translated loops and complete longitudinal constraints. Unsupported cases retain general extraction/conversion, and holes are preserved. Zero valence-two vertices is verified on the acceptance meshes, not guaranteed for arbitrary constrained input.
+- No runtime dependencies were added. Erosion, dual contouring, new nodes, threads and GPU work remain outside this session.
+
+Work stays on `codex/kernels`; no push or merge.

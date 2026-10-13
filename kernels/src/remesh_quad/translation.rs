@@ -6,9 +6,9 @@
 //! boundaries are barriers. Refit the continuous origins to the corrected offsets,
 //! then select the equivalent origin nearest each surface sample.
 use super::{
-    Edge, Face, NONE, V3, Vertex, add, cross, dot, mul, nearby, norm, pair, sub, tangent, transport,
+    Edge, Face, NONE, Vertex, add, cross, dot, mul, nearby, norm, pair, sub, tangent, transport,
 };
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 
 type I2 = [i32; 2];
 const MAX_LABEL: f64 = (i32::MAX / 32) as f64;
@@ -84,6 +84,7 @@ pub(super) fn repair(
     hard: &BTreeSet<(usize, usize)>,
     h: f64,
 ) -> Result<TranslationRepair, String> {
+    let mut profile = crate::erosion_profile::Profile::new("remesh_quad_translation");
     let state_count = faces
         .len()
         .checked_mul(4)
@@ -144,16 +145,35 @@ pub(super) fn repair(
         defects_before: count_defects(&charge),
         ..TranslationRepair::default()
     };
+    profile.mark("setup");
     if report.defects_before == 0 {
+        profile.finish();
         return Ok(report);
     }
 
+    // Cache dual adjacency and frame turns once instead of resolving the
+    // neighbouring incidence for every state visited by every cancellation.
+    let mut dual = vec![[(NONE, 0usize); 3]; faces.len()];
+    for (f, entries) in incidences.iter().enumerate() {
+        for (k, &Incidence { edge, rotation }) in entries.iter().enumerate() {
+            if !faces[f].alive {
+                continue;
+            }
+            let e = &mesh_edges[edge];
+            if blocked[edge] || e.g == NONE {
+                continue;
+            }
+            let g = if e.f == f { e.g } else { e.f };
+            let turn = (coefficient(&incidences[g], edge)? - rotation + 2).rem_euclid(4) as usize;
+            dual[f][k] = (g, turn);
+        }
+    }
     // Generation stamps avoid clearing O(faces) storage for every routed unit.
     let mut previous = vec![u32::MAX; state_count];
     let mut used_edge = vec![u32::MAX; state_count];
     let mut stamp = vec![0_u32; state_count];
     let mut generation = 0_u32;
-    let mut queue = VecDeque::new();
+    let mut queue = Vec::with_capacity(state_count.min(65536));
     let mut path = Vec::new();
     'sources: for source in 0..faces.len() {
         if sink[source] || !faces[source].alive {
@@ -176,11 +196,14 @@ pub(super) fn repair(
             let start = source * 4 + direction;
             generation = generation.checked_add(1).ok_or_else(overflow)?;
             queue.clear();
-            queue.push_back(start);
+            queue.push(start);
+            let mut head = 0;
             previous[start] = start as u32;
             stamp[start] = generation;
             let mut target = NONE;
-            while let Some(state) = queue.pop_front() {
+            while head < queue.len() {
+                let state = queue[head];
+                head += 1;
                 report.visited_states += 1;
                 if report.visited_states > MAX_VISITS {
                     report.limited = true;
@@ -188,14 +211,12 @@ pub(super) fn repair(
                 }
                 let f = state / 4;
                 let direction = state % 4;
-                for &Incidence { edge, rotation: cf } in &incidences[f] {
-                    let e = &mesh_edges[edge];
-                    if blocked[edge] || e.g == NONE {
+                for (k, &(g, turn)) in dual[f].iter().enumerate() {
+                    if g == NONE {
                         continue;
                     }
-                    let g = if e.f == f { e.g } else { e.f };
-                    let cg = coefficient(&incidences[g], edge)?;
-                    let dir = (direction as i32 + cg - cf + 2).rem_euclid(4) as usize;
+                    let edge = incidences[f][k].edge;
+                    let dir = (direction + turn) & 3;
                     let next = g * 4 + dir;
                     if stamp[next] == generation {
                         continue;
@@ -213,7 +234,7 @@ pub(super) fn repair(
                         target = next;
                         break;
                     }
-                    queue.push_back(next);
+                    queue.push(next);
                 }
                 if target != NONE {
                     break;
@@ -246,6 +267,7 @@ pub(super) fn repair(
             report.routed_units += 1;
         }
     }
+    profile.mark("routing");
     report.defects_after = count_defects(&charge);
     report.limited |= report.defects_after != 0;
     // A partly repaired transition system can move defects onto unrelated
@@ -253,10 +275,20 @@ pub(super) fn repair(
     // entire attempted correction is consistent away from orientation poles.
     // No vertex origins have been modified yet, so this is a transactional no-op.
     if report.routed_units == 0 || report.defects_after != 0 {
+        profile.finish();
         return Ok(report);
     }
 
-    let mut adjacent = vec![Vec::<(usize, V3)>::new(); vertices.len()];
+    let mut offsets = vec![0usize; vertices.len() + 1];
+    for e in mesh_edges {
+        offsets[e.a + 1] += 1;
+        offsets[e.b + 1] += 1;
+    }
+    for i in 1..offsets.len() {
+        offsets[i] += offsets[i - 1];
+    }
+    let mut cursor = offsets.clone();
+    let mut adjacent = vec![(0usize, [0.; 3]); mesh_edges.len() * 2];
     for (i, e) in mesh_edges.iter().enumerate() {
         let a = &vertices[e.a];
         let b = &vertices[e.b];
@@ -271,21 +303,28 @@ pub(super) fn repair(
             mul(cross(b.n, b.u), f64::from(tb[1])),
         );
         let d = mul(add(da, db), h * 0.5);
-        adjacent[e.a].push((e.b, mul(d, -1.0)));
-        adjacent[e.b].push((e.a, d));
+        adjacent[cursor[e.a]] = (e.b, mul(d, -1.0));
+        cursor[e.a] += 1;
+        adjacent[cursor[e.b]] = (e.a, d);
+        cursor[e.b] += 1;
     }
-    let curved: Vec<_> = vertices.iter().map(|v| norm(v.curve) > 0.0).collect();
+    let mut origins: Vec<_> = vertices.iter().map(|v| v.q).collect();
+    let curved: Vec<_> = vertices
+        .iter()
+        .map(|v| v.position_constraint && norm(v.curve) > 0.0)
+        .collect();
     for round in 0..REFIT_ROUNDS {
         let mut max_change: f64 = 0.0;
         for i in 0..vertices.len() {
-            if vertices[i].fixed || adjacent[i].is_empty() {
+            let ns = &adjacent[offsets[i]..offsets[i + 1]];
+            if (vertices[i].fixed && vertices[i].position_constraint) || ns.is_empty() {
                 continue;
             }
             let mut q = [0.0; 3];
-            for &(j, d) in &adjacent[i] {
-                q = add(q, add(vertices[j].q, d));
+            for &(j, d) in ns {
+                q = add(q, add(origins[j], d));
             }
-            q = mul(q, 1.0 / adjacent[i].len() as f64);
+            q = mul(q, 1.0 / ns.len() as f64);
             let v = &vertices[i];
             q = add(v.p, tangent(sub(q, v.p), v.n));
             if curved[i] {
@@ -297,17 +336,21 @@ pub(super) fn repair(
                         .into(),
                 );
             }
-            let change = sub(q, v.q);
+            let change = sub(q, origins[i]);
             max_change = max_change.max(dot(change, change));
-            vertices[i].q = q;
+            origins[i] = q;
         }
-        if round >= 8 && max_change < h * h * 1e-12 {
+        if round >= 8 && max_change < h * h * 1e-10 {
             break;
         }
     }
-    for v in vertices.iter_mut().filter(|v| !v.fixed) {
-        v.q = nearby(v.q, v.p, v.u, v.n, h);
+    for (v, q) in vertices.iter_mut().zip(origins) {
+        if !v.fixed || !v.position_constraint {
+            v.q = nearby(q, v.p, v.u, v.n, h);
+        }
     }
+    profile.mark("refit");
+    profile.finish();
     Ok(report)
 }
 
@@ -329,6 +372,8 @@ mod tests {
             n: [0.0, 1.0, 0.0],
             u: [1.0, 0.0, 0.0],
             curve: [0.0; 3],
+            direction: [0.0; 3],
+            position_constraint: true,
             fixed: false,
             locked: false,
             alive: true,
