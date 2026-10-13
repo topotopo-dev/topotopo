@@ -1,0 +1,52 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "P:float:3",
+        "age:float:1",
+        "curveu:float:1",
+        "id:int:1",
+        "life:float:1",
+        "pscale:float:1",
+        "v:float:3"
+      ],
+      "prim": ["id:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.2387, 3.0292, 0.9855],
+      "min": [-1.3209, -0.4249, -1.1841]
+    },
+    "counts": {
+      "points": 2335,
+      "prims": 482,
+      "vertices": 1853,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "a438d675077c1d6f",
+      "attributes": {
+        "point.age": "4d5449fd31767ce7",
+        "point.curveu": "a7d78b037bd5d481",
+        "point.id": "56fc1bc9a04ab193",
+        "point.life": "587ad920228dad5e",
+        "point.pscale": "27ff7bfecff97a80",
+        "point.v": "d14addd533b39213",
+        "prim.id": "20686c991fb4eb13"
+      },
+      "topology": "367cca863c1e7350"
+    }
+  },
+  "name": "node.particles",
+  "ok": true,
+  "source": "fixture for node type \"particles\" (test/fixtures.ts)",
+  "warnings": []
+}
