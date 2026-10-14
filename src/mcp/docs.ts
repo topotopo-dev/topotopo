@@ -670,7 +670,28 @@ UNREAL LANDSCAPE BUNDLE: export {format:"unreal_landscape", path:"exports/level"
   Unreal's import layout for the heightmap (section size, sections per component, components, overall resolution: exact
   for 127/253/505/1009/2017/4033 samples), scale, new_landscape_location_cm (the centre: the New Landscape panel centres
   on it) and actor_location_cm (the corner, where the actor ends up).
-  Manual import (Unreal 5.8): 1. Landscape mode (Shift+2) > Manage > New > Import from File, heightmap.png. 2. Section
+  Tiled terrain: export {format:"unreal_landscape", path:"exports/level", tile_size:1008}. tile_size is QUADS per
+  tile (0, the default, keeps the existing single-landscape files byte-identical); 1008 gives 1009 samples per tile.
+  The tile size must fit Unreal components exactly. Typical samples: 253 = 63 quads/section, 2×2 sections/component,
+  2×2 components; 1009 = 63, 2×2, 8×8; 2017 = 63, 2×2, 16×16. Sections of 127 quads instead give 2033 samples for
+  2×2 sections and 8×8 components (127 does not divide 1008 or 2016).
+  Version-2 landscape.json adds tile_grid (tile_size_quads, grid, source_resolution, padded_resolution, padding) and
+  tiles[]. Each tile records grid_position, inclusive sample_min/sample_max, relative world_offset_cm, heightmap,
+  layers and instances. Shared landscape.section_size_quads / sections_per_component and tile_grid.tile_components
+  describe each tile's component layout. tiles/<x>_<y>/heightmap.png + heightmap.json and layers/*.png
+  share their last/first row or column exactly; all heights and weight layers use one shared encoding range.
+  Non-fitting source edges are padded by repeating the last column/row; padding.right/bottom records the added
+  samples. Padding extends the terrain at the same cell size, without moving the source or its instances.
+  tiles/<x>_<y>/instances.csv partitions the global instances.csv by anchor X/Z: a seam belongs to the tile on its
+  positive side, the outer boundary and outside anchors clamp to the outer tile. Every row is kept exactly once,
+  with its original world transform; instances.meshes.json and meshes/*.glb are shared across all tiles.
+  TopoTopo.ImportScene reads tiled manifests directly: partitioned levels use Landscape streaming proxies; plain
+  levels use one Landscape with the tile components. Each tile gets its own HISM actor, with shared meshes,
+  LandscapeLayerInfo assets and generated landscape material. npm run export:demo -- --tiles 2 writes a 2×2 demo
+  to out/unreal_demo_tiled/ (126 quads / 127 samples per tile, no padding); in PowerShell, use npm.cmd to pass --tiles.
+  Export keeps the dense source and root/tile file bytes in memory; standard heightfield nodes retain their existing
+  4097×4097 total-sample cap. Unreal imports a full assembled grid before proxy splitting; large-grid memory is not bounded by tile_size.
+  Manual single-landscape import (Unreal 5.8, tile_size:0): 1. Landscape mode (Shift+2) > Manage > New > Import from File, heightmap.png. 2. Section
   Size, Sections Per Component, Number of Components from landscape.json; Overall Resolution must match. 3. Location =
   new_landscape_location_cm, Rotation 0, Scale = landscape.scale. 4. One landscape material layer per layers[] entry;
   assign layers/<name>.png in the import panel (or Paint > Target Layers > Import). 5. Import. 6. objects.glb through the

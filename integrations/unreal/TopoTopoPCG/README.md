@@ -1,5 +1,7 @@
 # TopoTopoPCG for Unreal Engine 5.8
 
+Plugin version **0.1.3** (descriptor version 4) adds tiled Landscape bundles.
+
 Copyright 2026 faxcorp, Apache-2.0. Original plugin code, no third-party code or new npm dependencies.
 Unreal Engine and its plugins remain subject to Epic's licences.
 
@@ -25,9 +27,11 @@ From the repository root in PowerShell:
 ```powershell
 npm run export:demo
 $plugin = (Resolve-Path integrations/unreal/TopoTopoPCG/TopoTopoPCG.uplugin).Path
-$package = Join-Path (Get-Location) 'integrations/unreal/_build/TopoTopoPCG'
-& 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin "-Plugin=$plugin" "-Package=$package" -TargetPlatforms=Win64 -Rocket *> out-topotopo-build.log
-if ($LASTEXITCODE -ne 0) { throw 'BuildPlugin failed; see out-topotopo-build.log' }
+$session = Join-Path (Get-Location) 'integrations/unreal/_build/session16'
+New-Item -ItemType Directory -Force -Path $session | Out-Null
+$package = Join-Path $session 'TopoTopoPCG'
+& 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin "-Plugin=$plugin" "-Package=$package" -TargetPlatforms=Win64 -Rocket *> (Join-Path $session 'BuildPlugin.log')
+if ($LASTEXITCODE -ne 0) { throw 'BuildPlugin failed; see integrations/unreal/_build/session16/BuildPlugin.log' }
 ```
 
 BuildPlugin runs the compiler without opening an editor. The package output, intermediate files and logs are
@@ -78,6 +82,35 @@ This is an editable starter material. Select the Landscape and replace **Landsca
 material or instance. Keep the same layer names to reuse the assigned `LI_*` assets and painted weights;
 use Landscape Paint > Target Layers to assign layer infos for any new names. Save the generated assets and
 level explicitly after review. Full API details and the colour mapping are in [EDITOR_WORKFLOW.md](EDITOR_WORKFLOW.md).
+
+### Tiled Landscapes
+
+Run `npm run export:demo -- --tiles 2` to write a 2 x 2 bundle under `out/unreal_demo_tiled/landscape/`.
+Import it with the same command into an empty level and new content folder:
+
+```text
+TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo_tiled/landscape" /Game/TopoTopo/TiledDemo landscape=1 layers=1 material=1 objects=1
+```
+
+Version 2 adds `tile_grid` and row-major `tiles` entries. The importer reads `tiles/<x>_<y>/heightmap.png`
+and weight PNGs, requires identical shared border samples, and uses one shared height range, material and
+set of layer infos. In a World Partition level, one parent Landscape owns one streaming proxy per tile;
+in a plain level, one Landscape owns all components, with tile boundaries aligned to component edges.
+The importer uses the current level's partition mode; it does not convert the level.
+
+Each tile gets an independent, spatially loaded HISM actor using `tiles/<x>_<y>/instances.csv`, even when
+`landscape=0`. These actors do not attach to or reference the Landscape. Mesh assets and the root
+`instances.meshes.json` are shared; the root CSV is checked against the complete tile stream so missing,
+duplicated or changed instance transforms fail before asset import. Ordinary objects such as the road
+remain on the ordinary scene actor. World Partition decides runtime cells from actor bounds and its
+configured runtime grid; a tile's instance actor and terrain proxy can therefore unload independently.
+
+For example, a 253-sample tile uses 63 quads/section, 2 x 2 sections/component and 2 x 2 components.
+1009/2017-sample tiles use that same 63/2 x 2 layout with 8 x 8/16 x 16 components. A 127-quad section
+does not divide 1008 or 2016 quads exactly. See the [Epic Landscape technical guide](https://dev.epicgames.com/documentation/unreal-engine/landscape-technical-guide-in-unreal-engine).
+Shared edge samples count in both adjacent files; right/bottom padding repeats the source edge and is
+recorded in `tile_grid.padding`. The global heightmap retains its original source resolution for interchange;
+the v2 plugin import consumes the tile files, including the padded area.
 
 ## Workflow 2: generate instances with PCG
 
@@ -232,7 +265,7 @@ The world and generated assets are transient; the current level and Content Brow
 or saved. **SKIPPED TopoTopo.Editor.WeightLayers** is a warning, **not Landscape acceptance**; supply the demo
 bundle and rerun. Shader compilation and visual inspection still belong to the editor verification step.
 
-`Automation RunTests TopoTopo` runs all thirteen tests. Individual names and expected results:
+`Automation RunTests TopoTopo` runs all sixteen tests. Individual names and expected results:
 
 | Test | Expected result |
 |---|---|
@@ -240,7 +273,10 @@ bundle and rerun. Shader compilation and visual inspection still belong to the e
 | `TopoTopo.PCG.GraphSpawns536` | Real graph generation and component/transform checks above. Requires CSV and five imported meshes; no skip for acceptance. |
 | `TopoTopo.Stream.CSVCollisionCompatibility` | Canonical columns and suffixed attributes preserved, independent of column order; warnings and exact metadata filtering checked. |
 | `TopoTopo.Stream.LegacyFormats` | Legacy points JSON keeps native conversion; both mesh-sidecar tags resolve identical paths and reject version 2. |
-| `TopoTopo.Editor.LandscapeManifestCompatibility` | Both Landscape v1 tags decode the same 8x8 heightmap; unknown/v2/non-exact manifests rejected. Creates only temporary fixture files. |
+| `TopoTopo.Editor.LandscapeManifestCompatibility` | Both Landscape v1 tags decode the same 8x8 heightmap; unknown, incomplete v2 and non-exact manifests rejected. Creates only temporary fixture files. |
+| `TopoTopo.Editor.TiledLandscape.Plain` | Generated 2 x 2 fixture: one 15 x 15 Landscape, four components, no proxies, exact height/weight readback and four HISM tile actors with 1/2/3/4 instances (10 total). |
+| `TopoTopo.Editor.TiledLandscape.WorldPartition` | Same generated fixture in an isolated partitioned world: four proxies sharing the Landscape GUID, material and layer info; no parent components; exact seam samples and the same per-tile HISM counts/transforms. |
+| `TopoTopo.Editor.TiledLandscape.Validation` | Inconsistent height ranges, seams, overlap positions, grid coordinates, padding and instance count/global-stream mismatches fail before import. |
 | `TopoTopo.Editor.WeightPNGDecode` | 8-bit greyscale and greyscale-plus-alpha PNG samples decode unchanged; alpha is ignored and unsupported/malformed inputs are rejected. |
 | `TopoTopo.Editor.WeightLayerManifest` | Manifest layer order, names, paths, min/max and encoding retained; invalid layers rejected without partial output. |
 | `TopoTopo.Editor.WeightLayers` | Demo heightmap, ten assigned layer infos, PNG/readback means within 2% and exact bytes, assigned material with all layers and simple surface inputs; independent layer/material switches. Requires bundle; no skip for acceptance. |
@@ -257,16 +293,28 @@ check the generated terrain colours (`mask` green base and dark `road`), the ten
 save/reload the Landscape/material/infos. Do not run both instance workflows in the same level simultaneously.
 Save/reload the graph and copy/paste its spawner node; verify that `MeshPath` remains the mesh selector.
 
+The three tiled tests generate all files themselves and use Unreal's built-in cube mesh. They need no
+exported demo or imported project assets and never skip on missing fixtures. Run
+`Automation RunTests TopoTopo.Editor.TiledLandscape` in the installed plugin's editor. They create isolated
+test worlds and temporary files, leaving the current level unchanged. BuildPlugin compiles these tests;
+the session 16 build handoff does not claim that they have been executed in an editor.
+
 ## Limits
 
 - Only Win64 UE 5.8 is built in this handoff. Float parsing and rotation formulas mirror the exporter;
   cross-platform bit identity of Unreal/libm operations has not been measured.
 - File loading/parsing and editor import are synchronous. Large streams can stall generation; no 100k-point
   performance claim is made. External files are not automatically staged in packaged games.
-- Landscape import supports a single exact-fit heightmap with optional PNG weightmaps, layer infos and a
-  generated demo material. Resampling, tiled/world-partition streaming, runtime virtual textures, Nanite
-  Landscape and foliage are not implemented. `landscape.json`'s `manual_import` list remains useful for
-  importing without this plugin; it is not a list of remaining plugin steps.
+- Landscape v1 supports one exact-fit heightmap up to 8193 samples per side; v2 supports tile files up to
+  8193 samples and an assembled padded grid up to 32769 samples per side. Import assembles the full grid
+  before calling Unreal's import API: it is synchronous and is not bounded-memory streaming. UE 5.8's
+  full-grid normal buffer alone is about 6 GiB for 16K x 16K samples, in addition to heights, masks and
+  textures. Large-grid memory/performance has not been editor-tested. Resampling, runtime virtual textures,
+  Nanite Landscape and foliage are not implemented. Tiled terrain has no single-file reimport source;
+  export and import a fresh bundle into a new destination to regenerate it.
+- The standard TopoTopo heightfield nodes retain their 4097 x 4097 total-sample budget. This change does
+  not lift that generation cap or demonstrate 16K terrain generation; the exporter uses dense source
+  arrays and retains both global and tiled output bytes.
 - `scene.glb` / `objects.glb` use `EXT_mesh_gpu_instancing`. The utility deliberately uses prototype GLBs plus
   the CSV; expanded reference GLBs are for the remaining ordinary objects and comparison.
 - The optional **Cook with TopoTopo** subprocess element is not implemented. Cook/export externally, then

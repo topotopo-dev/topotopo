@@ -907,7 +907,7 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   its appearance. `layers=0` and `material=0` opt out independently. See the plugin's
   [editor workflow](../integrations/unreal/TopoTopoPCG/EDITOR_WORKFLOW.md) for assets and editor acceptance.
   Depression filling for drainage is implemented (K-11): `heightfield_fill_sinks`, optional filled routing in
-  `heightfield_flow` and stream-power erosion; heightfield tiles remain open.
+  `heightfield_flow` and stream-power erosion; `unreal_landscape` export supports overlapping tiles, shared height/weight ranges and per-tile instance streams (K-12), imported as components in plain levels or streaming proxies in World Partition levels with independent spatial HISM actors per tile.
 - Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
