@@ -1955,3 +1955,269 @@ were rerun, and the final WASM build was byte-identical. An early shell wrapper'
 trailing Windows-glob diagnostic exited 1 after passing native tests; the final
 gate commands' exit codes above were checked individually. No failing acceptance
 gate remains, and no push or unrelated project work was performed.
+# Session 15 (K-4d): erosion performance (2026-10-14)
+
+Started from clean `codex/kernels` at `0a93650`. Session-4 inputs, seed,
+iteration counts and small warmups are retained. Baseline source, both shipped
+packages, golden/render hashes and command logs are saved under ignored
+`out/session15/`. No runtime dependencies were added.
+
+Progress/recovery notes:
+- Read sessions 4, 5, 6 and 14 before changes. The default radius-3 droplet
+  brush has 25 active samples, already precomputed; prior full-f32 trajectory
+  and bilinear reassociation experiments failed the required flow correlation.
+- Initial `tasklist` plus Win32 command-line audit found no other repository
+  Node/Cargo/rustc compute job (only this session's Codex launcher). Unrelated
+  desktop/MCP services remain. Build/test jobs and timings will run sequentially;
+  collaborating agents are holding heavy commands during measurement windows.
+- Baseline collection started: ordinary native compilation, then ordinary
+  native/WASM timings and opt-in per-pass profiles before source changes.
+- Ordinary baseline complete (three calls, original small warmups): native pipe
+  2320.240 / 2406.449 / 2685.024 ms; SIMD pipe 5006.340 / 2967.861 / 3008.893 ms;
+  JS droplet median 1831.389 ms, SIMD droplet 1371.629 ms (1.335x). All prior
+  parity digests and full-size droplet correlation/conservation checks pass.
+  Immediate pre-run CPU counter was 0%; process inventory is saved separately.
+- Baseline profile complete, both targets: pipe native/SIMD medians (ms) setup
+  22.732/21.691, gradients 76.383/101.093, rain+flux 547.349/611.049, water
+  722.521/746.980, erosion 342.977/519.458, reductions 272.783/600.687,
+  transport 493.572/701.643, thermal 0.077/0.279, finalize 9.450/7.130.
+  Profiling imports are diagnostic and will be removed by the ordinary rebuild.
+- First pipe candidate pipelines surface row z+2, flux row z+1 and fluid row z,
+  retaining the Jacobi surface snapshots and all operation order. Added optional
+  thermal_interval (default 1; N=4 skips intervening relaxations and always runs
+  the final pass, without multiplying the rate). Filled stream power already
+  performs one fill plus one drainage solve per iteration; no duplicate found.
+- Candidate checks: 2,125 erosion integration checks and 658 exact scalar/SIMD
+  results pass. Delayed pipeline native median 2608.448 ms; adding independent
+  row maxima/evaporation and the strict SSE2 water limiter shortcut gives
+  2449.422 ms. Neither is yet below 2 s; intermediate timings are exploratory.
+- Droplet exact f64x2 brush/deposit plus thermal screening: warmed alternating
+  SIMD before/after medians 1505.642 / 1496.971 ms, a difference within noise.
+  A compact tile-local height cache with lifetime+brush halos preserves all six
+  full-size layers, but paired medians 1490.352 / 1588.974 ms regress by 6.6%.
+  Rejected from live source; source and equality evidence remain in ignored
+  `out/session15/droplet/` and `droplet-ab-candidate2.log`. Tile sorting remains.
+- Native scalar-oracle tests for SSE2 water and independent row maxima pass,
+  covering limiter mixtures, vector tails, unaligned input, signed zeros and
+  subnormals. Testing 256-cell row blocks next, then a three-row surface ring
+  and fused sediment gather/vertical transport; ordinary timing decides what
+  is retained. All builds and measurements remain sequential.
+
+- The three-row surface ring, row-interleaved padded flux SoA, 256-cell spans
+  and fused horizontal gather/vertical sediment transport preserve the original
+  six-layer native hashes. Native exploratory medians improved through 2353.977,
+  2210.236 and (strict SSE2 ordered min/max) 2037.205 ms; final fusion is in trial.
+- Exact f64x2 thermal screening and smoothing reduce paired, fully warmed
+  droplet medians from 1457.499 to 1352.788 ms. A final motion trial pairs
+  independent trajectory/speed square roots without changing scalar arithmetic;
+  30 targeted lifetime/edge/stall/evaporation comparisons were added for it.
+- The final droplet motion/deferred-square-root trial passes 688 scalar/SIMD
+  comparisons and full-size equality, but paired medians 1187.590/1180.118 ms
+  differ only 0.6%; rejected its extra state/complexity and restored candidate 4.
+  The 30 additional boundary/lifetime/stall tests remain.
+- Native plain-pipe water/erosion/evaporation fusion passes the full Rust suite
+  and unchanged parity digests. Its first median 2069.312 ms does not establish
+  a win over separate passes. Whole-row fusion also failed to improve the
+  256-cell blocks (paired medians 2102.069/2040.895 ms); trialling preparation
+  of the horizontal donor flux from the already-live velocity/material next.
+- Native horizontal-donor fusion is retained: alternating before/after medians
+  2070.511/1875.894 ms (all three after calls 1857-1890 ms), below the 2 s
+  target. The expanded 4,320-case donor oracle and 513-wide default-versus-zero-
+  mask comparison pass, including SIMD tails and exact signed-zero boundaries.
+  Final profiles, idle medians and release gates follow on this source.
+
+## Session 15 retained implementation
+
+The pipe remains f32 throughout; flow normalization was already final-only,
+and kernel wear remains accumulated eroded thickness. Persistent flux is a
+row-interleaved padded SoA; the cached old surface
+uses three rows. The delayed sweep prepares surface z+2, flux z+1, and water /
+erosion / transport z without changing the Jacobi update or floating operation
+order. Small spans keep fallback intermediates local. Native plain pipe fuses
+water, capacity, erosion/deposition, sparse material commits, CFL maxima,
+evaporation and horizontal donor flux; masks and stream power retain the exact
+separate helpers. Horizontal sediment gathering feeds vertical transport without
+an intermediate load buffer. SSE2 and WASM SIMD avoid limiter divisions only
+when the original clamp has the same exact result. Native x86_64 SSE2 is baseline
+ISA; other native architectures retain scalar helpers. No relaxed SIMD, fast
+math, FMA, approximate reciprocals or runtime dependencies were added.
+
+Droplets retain the existing tile order, precomputed brush weights, f64 working
+field and serial particle trajectories. The radius-3 default actually has 25
+active samples; its rows use two f64x2 pairs plus a scalar tail, and bilinear
+deposits use pairs. Thermal inactivity screening and deposit smoothing use strict
+SIMD without changing active-cell transfers. The tile-local cache and deferred
+motion-square-root variants were measured and rejected above. There are no f32 /
+f64 conversions within the unmasked trajectory math; f32 inputs are widened once
+and output layers narrowed at the end. Node defaults remain droplet / js.
+
+`thermal_interval` defaults to 1; N>1 omits intermediate relaxations and always
+runs the final iteration, without multiplying the thermal rate. It changes the
+thermal model intentionally and is not used for the session-4 target claim.
+The existing filled stream path was audited: no initial reference drainage is
+computed when filling is enabled; each iteration calls `fill_sinks` once and
+`flow_on_surface` once using its filled surface/directions. No redundant fill or
+drainage pass was introduced. Integration and cadence tests cover the node,
+pooled execution and both WASM variants.
+
+## Session 15 per-pass profiles
+
+Diagnostic profile medians in milliseconds; these instrumented runs do not determine target acceptance. Pipe uses three calls per backend; native droplet is one analytic-valley call, while SIMD droplet is the three-call noisy TypeScript-reference terrain.
+
+| Pipe stage | Native before | Native final | SIMD before | SIMD final |
+|---|---:|---:|---:|---:|
+| setup | 22.732 | 23.822 | 21.691 | 22.952 |
+| terrain gradients | 76.383 | 81.852 | 101.093 | 99.051 |
+| rain/surface/flux | 547.349 | 444.338 | 611.050 | 599.450 |
+| water/velocity | 722.521 | - | 746.980 | 698.377 |
+| erosion/deposition | 342.977 | - | 519.458 | 424.269 |
+| water/erosion/evaporation/donor fused | - | 1014.143 | - | - |
+| reductions/evaporation | 272.783 | 211.573 | 600.687 | 590.090 |
+| transport | 493.572 | 209.704 | 701.643 | 737.927 |
+| thermal | 0.077 | 0.089 | 0.279 | 0.172 |
+| finalize | 9.451 | 9.483 | 7.130 | 6.292 |
+| Water + erosion + reductions + transport (sum within call, then median) | 1831.853 | 1436.647 | 2568.767 | 2450.662 |
+| Profiled outer median | 2489.802 | 1995.147 | 3312.754 | 3183.460 |
+
+The native fused stage absorbs water, erosion, CFL maxima, evaporation and horizontal donor preparation. Its donor work was previously charged to transport; the remaining reductions/evaporation label primarily records sparse terrain invalidation. Compare the combined row for a consistent scope, rather than attributing the transport decrease entirely to faster transport. Final block instrumentation makes 819,200 marks per block stage versus 204,800 row marks before; rain/surface/flux marks also increase from 200 to 205,200.
+
+| Droplet stage | Native before (one call) | Native final (one call) | SIMD before | SIMD final |
+|---|---:|---:|---:|---:|
+| validation_setup | 0.490 | 0.491 | 0.806 | 0.832 |
+| copy_height | 14.103 | 14.416 | 14.501 | 13.650 |
+| rain_rng | 1.805 | 1.908 | 1.878 | 1.879 |
+| rain_tile_sort | 2.736 | 2.769 | 2.979 | 2.784 |
+| droplet_motion_brush_deposit | 877.495 | 878.471 | 883.332 | 868.554 |
+| smooth_deposits_and_layers | 271.235 | 266.822 | 296.640 | 289.513 |
+| thermal_and_wear | 105.910 | 105.299 | 262.007 | 241.778 |
+| output_layers | 3.880 | 3.658 | 3.140 | 4.010 |
+| Profiled outer median / single call | 1278.439 | 1274.217 | 1468.602 | 1425.821 |
+
+Per-pass medians are independent and need not sum to an outer median. Full-size records require pipe terrain gradients.count=200 or droplet copy_height.count=100; warmups and the small parity fixture are excluded. Sampled droplet substeps remain in the JSON summaries, overlap the motion pass, and must not be added or extrapolated.
+
+Machine caveat: profile-final.json records a 2.112-second snapshot at 2026-10-14T03:41:46+03:00 with 2.959% aggregate CPU use. The only repository-matched process was the Codex host (no competing repository build, test or benchmark); unrelated Godot led sampled CPU activity. This supports a lightly loaded observation, not a fully idle-machine claim or a guarantee about the whole timing interval.
+
+Sources: native-profile-before.log, wasm-profile-before.log, native-profile-final.log, wasm-profile-final.log, profile-final.json; parsed summaries are profile-before-summary.json and profile-final-summary.json in out/session15/.
+
+## Session 15 verification progress
+
+- Ordinary `npm run kernels:build` passes after removing profiling imports:
+  scalar 782,513 bytes, SIMD 777,469 bytes, combined 1,559,982 (limit 2,500,000).
+- `cargo fmt --check`, Clippy `--all-targets -- -D warnings` with default and
+  `--features simd`, and Clippy for the actual wasm32 SIMD library pass.
+- Final default-feature `cargo test` passes 130 tests (70 unit + 60 integration).
+- `npm run docs` passes, regenerating the 223-node reference for thermal cadence.
+- `bench/erosion.ts --assert` rejects a profiling WASM before measurements, as
+  required; normal target misses remain informational. Logs are in `out/session15/`.
+- Final Rust tests also pass with `--features simd`: 130 tests in each feature
+  set. Typecheck initially caught the benchmark's undeclared global WebAssembly
+  type (the project intentionally excludes DOM libraries); a narrow host type
+  fixes it, and `npm run typecheck` now exits 0. Full npm gates are running.
+
+## Session 15 final measurements and remaining acceptance
+
+Machine: Windows 10.0.26200 x64, Intel Core i7-10700K at 3.80 GHz, Node
+v24.14.0, Rust 1.94.0. Same session-4 inputs, seed, iteration counts and original
+small warmups; allocations, output copies and every returned layer remain in
+scope. Native and WASM run serially; five ordinary calls per final median.
+
+```text
+cargo bench --manifest-path kernels/Cargo.toml --bench erosion --no-run
+npm run kernels:build
+node bench/erosion.ts --runs=5 --assert --native=out/session15/native-final.exe
+node bench/erosion.ts --runs=3 --pipe-only --thermal-interval=4 --native=out/session15/native-final.exe
+```
+
+`native-final.exe` is a preserved copy of the ordinary release executable printed
+by Cargo (no profile feature); callers can pass that printed path directly.
+The benchmark emits machine-readable medians plus informational PASS/MISS lines.
+A speed miss does not fail the process or test suite; correlation/conservation
+failures still fail. Both native profile metadata and actual WASM clock imports
+prevent `--assert` from accepting instrumented results. Ordinary final exit: 0.
+
+| Session-4 case | This session baseline (3 calls) | Final median (5 calls) | Target | Observed result |
+|---|---:|---:|---:|---|
+| Pipe 1024^2 x 200 native | 2406.449 ms | **1897.934 ms** | <= 2000 ms | PASS |
+| Pipe 1024^2 x 200 SIMD WASM | 3008.893 ms | **2989.010 ms** | <= 4000 ms | PASS |
+| Droplet 512^2 x 100 vs TypeScript | 1.335x | **1.382x** | >= 3x | **MISS** |
+
+Final native samples: 1838.154, 1904.495, 1851.838, 1897.934, 1923.020 ms.
+Final SIMD pipe samples: 4684.404, 2989.010, 2955.507, 2964.164, 2991.572 ms;
+the retained small warmup does not remove the first full-size V8 tiering cost.
+TypeScript droplet median is 1827.416 ms and SIMD droplet 1322.297 ms. Full-size
+flow correlation is 1.0000000000000695, sediment correlation
+1.0000000000000167 (floating Pearson rounding around 1), and relative closed
+material error 8.06482685248169e-11, below 1e-6. Six-layer parity hashes remain
+`13671b26 / b2627087 / 355aea95 / b8715d6e / ac938cfe / 4f1e6002`
+(height / sediment / debris / flow / water / wear).
+
+A separate full-size pipe A/B warms both preserved baseline and final SIMD
+modules, alternates their order for three pairs, and compares all six layers
+byte-for-byte after every call: all exact. Paired medians are 3013.652 / 2899.140
+ms. Earlier full-size droplet A/B checks also establish exact six-layer output
+for the retained candidate. The smaller parity corpus covers every public export.
+
+N=4 diagnostic medians are 1883.075 ms native / 2914.406 ms SIMD (three calls).
+This session-4 terrain already proves thermal transport inactive, so changing
+cadence provides no thermal work reduction here; the differences are ordinary
+run variation, not evidence of a cadence speedup. The checksum remains unchanged.
+Active-thermal tests independently check skipped passes and the final remainder;
+N=4 is never used to claim the N=1 targets.
+
+**Idle-machine limitation:** initial and mid-session audits sampled 0% CPU and
+no competing repository jobs. Final `tasklist` plus Win32 command-line audits
+again found no other repository Node/Cargo/rustc job (only the Codex launcher),
+and all our heavy commands were serialized. However, unrelated Godot work became
+active during the session: pre-final and post-final two-second snapshots sampled
+2.969% and 5.931% aggregate CPU, led by Godot. Final figures are measured under
+that background activity, **not certified fully idle timings**. A strict idle
+confirmation remains outstanding; the older session-6 loaded figures are not
+used as a controlled speedup baseline. Audit JSON/tasklists and all raw timings
+are preserved under ignored `out/session15/`.
+
+The droplet 3x target remains unmet: serial terrain-dependent motion accounts for
+about 869 ms of its final instrumented SIMD run, before smoothing/thermal/output.
+The exact tile cache regressed and SIMD motion/deferred square roots made no
+useful measured gain. Keeping f64 and update order preserves both reference
+statistics and scalar/SIMD bytes; lower-precision trajectory variants previously
+failed correlation. No approximate model, parallel reorder or changed JS default
+was substituted to manufacture a speedup. SIMD brush specialization targets the
+actual radius-3 default; other radii and masked erosion retain scalar fallbacks.
+
+## Session 15 final gates and artifacts
+
+| Gate | Result |
+|---|---|
+| `cargo test --manifest-path kernels/Cargo.toml` | Exit 0; 130 tests (70 unit + 60 integration) |
+| Same with `--features simd` | Exit 0; 130 tests |
+| `cargo clippy --manifest-path kernels/Cargo.toml --all-targets -- -D warnings` | Exit 0 |
+| Same with `--features simd` | Exit 0 |
+| Additional `cargo clippy --target wasm32-unknown-unknown --lib --features simd -- -D warnings` | Exit 0 |
+| `cargo fmt --manifest-path kernels/Cargo.toml --check` | Exit 0 |
+| `npm run kernels:build` | Exit 0; ordinary scalar/SIMD packages, no profile imports |
+| `npm run typecheck` | Exit 0 after the benchmark host-type correction |
+| `npm run docs` | Exit 0; 223 node types |
+| `npm run test:update` | Exit 0; **0 written, 292 unchanged** |
+| `npm test` | Exit 0, complete chain; 2125 erosion checks, 688 exact scalar/SIMD comparisons and 34 matching rejection cases |
+| `npm run build` | Exit 0; 115 modules, one asset |
+| `npm run pack:test` | Exit 0; installed package types, kernels, CLI and MCP checks |
+| `npm run showcase` | Exit 0; **all 34 PNG SHA-256 hashes unchanged** |
+| `bench/erosion.ts --assert` with prebuilt native release | Exit 0; PASS native pipe, PASS SIMD pipe, MISS droplet |
+
+Goldens changed: **none**. Renders changed: **none**. All 326 baseline hashes
+(292 golden JSON + 34 PNG) match. `erosion_models.png` was also visually inspected:
+all four terrain panels render without missing geometry. The new tests cover
+cadence defaults, invalid intervals, final remainders, masked/filled/pooled paths,
+SIMD tails and signed zeros, plus native helper scalar oracles and a multi-block
+513-wide unmasked-versus-zero-mask result comparison. Other operating systems
+and native ISAs were not separately tested.
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| Scalar WASM | 782513 | `21a815c49f64cda999229c571734864ffc006848f7b6c62f5cec084eeedbad7b` |
+| SIMD WASM | 777469 | `5e3ece2c908766d372a1d868405e829e244dbe1245c15feef924684f09e10e09` |
+
+Combined WASM is 1,559,982 bytes (limit 2,500,000). All changes are on
+`codex/kernels`; no dependencies, other kernels or Unreal integration changed,
+and no push or rebase was performed. The remaining acceptance gaps are the
+3x droplet target and fully idle confirmation of the final medians.
