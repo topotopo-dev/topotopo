@@ -151,6 +151,7 @@ pub fn erode_pipe(
         };
     }
     p.iterations = integer(&o, "iterations", p.iterations)?;
+    p.thermal_interval = integer(&o, "thermal_interval", p.thermal_interval)?;
     value!(rain_amount);
     value!(evaporation);
     value!(sediment_capacity);

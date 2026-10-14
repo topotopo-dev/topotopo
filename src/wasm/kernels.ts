@@ -103,6 +103,8 @@ export interface PipeErosionOptions {
   /** Thermal angle of repose in radians. */
   talusAngle?: number;
   thermalRate?: number;
+  /** Thermal pass every N pipe iterations and on the final iteration; 1..10000, default 1. Skipped passes are not accumulated. */
+  thermalInterval?: number;
   /** Maximum timestep in seconds; 0 lets the kernel choose a stable CFL timestep. */
   timeStep?: number;
   boundary?: 'closed' | 'open';

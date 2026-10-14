@@ -227,11 +227,59 @@ fn erode_square5(height: &mut [f64], k: usize, w: usize, weights: &[f64; 25], am
         // The interior check establishes each full brush row is in the field;
         // the one checked slice removes all five individual write checks.
         let row = &mut height[first + z * w..first + z * w + 5];
-        row[0] -= weights[z * 5] * amount;
-        row[1] -= weights[z * 5 + 1] * amount;
-        row[2] -= weights[z * 5 + 2] * amount;
-        row[3] -= weights[z * 5 + 3] * amount;
-        row[4] -= weights[z * 5 + 4] * amount;
+        #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+        {
+            // SAFETY: row has five samples, and the matching weight slice has
+            // five samples. The SIMD helper touches only its first four lanes.
+            unsafe { erode_four(row, &weights[z * 5..z * 5 + 5], amount) };
+            row[4] -= weights[z * 5 + 4] * amount;
+            continue;
+        }
+        #[cfg(not(all(target_arch = "wasm32", feature = "simd")))]
+        {
+            row[0] -= weights[z * 5] * amount;
+            row[1] -= weights[z * 5 + 1] * amount;
+            row[2] -= weights[z * 5 + 2] * amount;
+            row[3] -= weights[z * 5 + 3] * amount;
+            row[4] -= weights[z * 5 + 4] * amount;
+        }
+    }
+}
+
+/// Four independent brush updates retain each scalar multiply/subtract order.
+#[cfg(all(target_arch = "wasm32", feature = "simd"))]
+#[inline]
+#[target_feature(enable = "simd128")]
+unsafe fn erode_four(height: &mut [f64], weights: &[f64], amount: f64) {
+    use std::arch::wasm32::{f64x2_mul, f64x2_splat, f64x2_sub, v128_load, v128_store};
+    assert!(height.len() >= 4 && weights.len() >= 4);
+    let amount = f64x2_splat(amount);
+    for i in [0, 2] {
+        // SAFETY: both checked slices contain at least four elements, and each
+        // unaligned two-lane access starts at zero or two.
+        unsafe {
+            let before = v128_load(height.as_ptr().add(i).cast());
+            let weight = v128_load(weights.as_ptr().add(i).cast());
+            v128_store(
+                height.as_mut_ptr().add(i).cast(),
+                f64x2_sub(before, f64x2_mul(weight, amount)),
+            );
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "simd"))]
+#[inline]
+#[target_feature(enable = "simd128")]
+unsafe fn deposit_pair(row: &mut [f64], fx: f64, z_weight: f64, amount: f64) {
+    use std::arch::wasm32::{f64x2, f64x2_add, f64x2_mul, f64x2_splat, v128_load, v128_store};
+    assert_eq!(row.len(), 2);
+    let weight = f64x2_mul(f64x2(1.0 - fx, fx), f64x2_splat(z_weight));
+    let deposited = f64x2_mul(weight, f64x2_splat(amount));
+    // SAFETY: the checked row contains exactly the two loaded/stored samples.
+    unsafe {
+        let before = v128_load(row.as_ptr().cast());
+        v128_store(row.as_mut_ptr().cast(), f64x2_add(before, deposited));
     }
 }
 
@@ -266,13 +314,25 @@ fn deposit<const MASKED: bool>(
     fallback: usize,
 ) {
     if !MASKED || freeze.is_none() {
-        let top = &mut height[k..k + 2];
-        top[0] += (1.0 - fx) * (1.0 - fz) * amount;
-        top[1] += fx * (1.0 - fz) * amount;
-        let bottom = &mut height[k + w..k + w + 2];
-        bottom[0] += (1.0 - fx) * fz * amount;
-        bottom[1] += fx * fz * amount;
-        return;
+        #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+        {
+            // SAFETY: each checked mutable slice contains exactly two samples.
+            unsafe {
+                deposit_pair(&mut height[k..k + 2], fx, 1.0 - fz, amount);
+                deposit_pair(&mut height[k + w..k + w + 2], fx, fz, amount);
+            }
+            return;
+        }
+        #[cfg(not(all(target_arch = "wasm32", feature = "simd")))]
+        {
+            let top = &mut height[k..k + 2];
+            top[0] += (1.0 - fx) * (1.0 - fz) * amount;
+            top[1] += fx * (1.0 - fz) * amount;
+            let bottom = &mut height[k + w..k + w + 2];
+            bottom[0] += (1.0 - fx) * fz * amount;
+            bottom[1] += fx * fz * amount;
+            return;
+        }
     }
     let q = [k, k + 1, k + w, k + w + 1];
     let mut weights = [
@@ -652,6 +712,82 @@ unsafe fn smooth_interior_row(
     }
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "simd"))]
+#[inline]
+#[target_feature(enable = "simd128")]
+unsafe fn extract_deposits(height: &mut [f64], before: &[f64], deposits: &mut [f64]) -> bool {
+    use std::arch::wasm32::{
+        f64x2_gt, f64x2_splat, f64x2_sub, i64x2_bitmask, v128_bitselect, v128_load, v128_or,
+        v128_store,
+    };
+    let n = height.len();
+    assert_eq!(before.len(), n);
+    assert_eq!(deposits.len(), n);
+    let zero = f64x2_splat(0.0);
+    let mut active = zero;
+    let paired = n & !1;
+    for i in (0..paired).step_by(2) {
+        // SAFETY: all slices have n elements and i + 1 < paired <= n.
+        unsafe {
+            let after = v128_load(height.as_ptr().add(i).cast());
+            let change = f64x2_sub(after, v128_load(before.as_ptr().add(i).cast()));
+            let positive = f64x2_gt(change, zero);
+            active = v128_or(active, positive);
+            v128_store(
+                deposits.as_mut_ptr().add(i).cast(),
+                v128_bitselect(change, zero, positive),
+            );
+            // Preserve the original height - change operation instead of
+            // replacing it with before, and skip nonpositive signed-zero cases.
+            v128_store(
+                height.as_mut_ptr().add(i).cast(),
+                v128_bitselect(f64x2_sub(after, change), after, positive),
+            );
+        }
+    }
+    let mut any = i64x2_bitmask(active) != 0;
+    if paired < n {
+        let change = height[paired] - before[paired];
+        if change > 0.0 {
+            deposits[paired] = change;
+            height[paired] -= change;
+            any = true;
+        } else {
+            deposits[paired] = 0.0;
+        }
+    }
+    any
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "simd"))]
+#[inline]
+#[target_feature(enable = "simd128")]
+unsafe fn smooth_horizontal(source: &[f64], target: &mut [f64]) {
+    use std::arch::wasm32::{f64x2_add, f64x2_mul, f64x2_splat, v128_load, v128_store};
+    let n = target.len();
+    assert_eq!(source.len(), n + 2);
+    let quarter = f64x2_splat(0.25);
+    let half = f64x2_splat(0.5);
+    let paired = n & !1;
+    for i in (0..paired).step_by(2) {
+        // SAFETY: target has n elements, source has n + 2 and i + 1 < n;
+        // the last source load therefore ends at i + 3 < n + 2.
+        unsafe {
+            let left = f64x2_mul(v128_load(source.as_ptr().add(i).cast()), quarter);
+            let center = f64x2_mul(v128_load(source.as_ptr().add(i + 1).cast()), half);
+            let right = f64x2_mul(v128_load(source.as_ptr().add(i + 2).cast()), quarter);
+            v128_store(
+                target.as_mut_ptr().add(i).cast(),
+                f64x2_add(f64x2_add(left, center), right),
+            );
+        }
+    }
+    if paired < n {
+        target[paired] =
+            source[paired] * 0.25 + source[paired + 1] * 0.5 + source[paired + 2] * 0.25;
+    }
+}
+
 #[inline(never)]
 fn smooth_deposits(
     f: &mut Field<'_>,
@@ -665,17 +801,26 @@ fn smooth_deposits(
         hydraulic_layers(&f.height, before, sediment, wear);
         return;
     }
-    let mut any = false;
-    for ((height, before), deposited) in f.height.iter_mut().zip(before).zip(deposits.iter_mut()) {
-        let d = *height - before;
-        if d > 0.0 {
-            *deposited = d;
-            *height -= d;
-            any = true;
-        } else {
-            *deposited = 0.0;
+    #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+    // SAFETY: helper checks the three layer lengths before paired accesses.
+    let any = unsafe { extract_deposits(&mut f.height, before, deposits) };
+    #[cfg(not(all(target_arch = "wasm32", feature = "simd")))]
+    let any = {
+        let mut any = false;
+        for ((height, before), deposited) in
+            f.height.iter_mut().zip(before).zip(deposits.iter_mut())
+        {
+            let d = *height - before;
+            if d > 0.0 {
+                *deposited = d;
+                *height -= d;
+                any = true;
+            } else {
+                *deposited = 0.0;
+            }
         }
-    }
+        any
+    };
     if !any {
         hydraulic_layers(&f.height, before, sediment, wear);
         return;
@@ -693,6 +838,13 @@ fn smooth_deposits(
             } else {
                 target[1] = source[0] / 3.0 + source[1] * 0.5 + source[2] * 0.25;
                 target[w - 2] = source[w - 3] * 0.25 + source[w - 2] * 0.5 + source[w - 1] / 3.0;
+                #[cfg(all(target_arch = "wasm32", feature = "simd"))]
+                // SAFETY: the source slice has exactly two more elements than
+                // the target; helper checks lengths before paired accesses.
+                unsafe {
+                    smooth_horizontal(&source[1..w - 1], &mut target[2..w - 2]);
+                }
+                #[cfg(not(all(target_arch = "wasm32", feature = "simd")))]
                 for (target, source) in target[2..w - 2].iter_mut().zip(source[1..w - 1].windows(3))
                 {
                     *target = source[0] * 0.25 + source[1] * 0.5 + source[2] * 0.25;
@@ -781,7 +933,9 @@ unsafe fn thermal_pair_active(
     talus: f64,
     diagonal: f64,
 ) -> u8 {
-    use std::arch::wasm32::{f64x2_gt, f64x2_splat, f64x2_sub, i64x2_bitmask, v128_load, v128_or};
+    use std::arch::wasm32::{
+        f64x2_gt, f64x2_pmin, f64x2_splat, f64x2_sub, i64x2_bitmask, v128_load, v128_or,
+    };
     // SAFETY: thermal_row checks all row lengths, and calls only for
     // 1 <= i < w - 2. Every two-lane load at i - 1, i, or i + 1 is in bounds.
     unsafe {
@@ -789,22 +943,35 @@ unsafe fn thermal_pair_active(
         let cardinal = f64x2_splat(talus);
         let diagonal = f64x2_splat(diagonal);
         let zero = f64x2_splat(0.0);
-        let mut active = zero;
-        for (row, offset, threshold) in [
-            (current, i + 1, cardinal),
-            (current, i - 1, cardinal),
-            (next, i, cardinal),
-            (previous, i, cardinal),
-            (next, i + 1, diagonal),
-            (previous, i + 1, diagonal),
-            (next, i - 1, diagonal),
-            (previous, i - 1, diagonal),
-        ] {
-            let neighbor = v128_load(row.as_ptr().add(offset).cast());
-            let excess = f64x2_sub(f64x2_sub(center, neighbor), threshold);
-            active = v128_or(active, f64x2_gt(excess, zero));
-        }
-        i64x2_bitmask(active)
+        // Subtraction is monotonic for finite inputs: the smallest neighbor
+        // yields the largest excess. Selecting first preserves the exact active
+        // flag while removing six threshold subtractions/comparisons per pair.
+        let cardinal_low = f64x2_pmin(
+            f64x2_pmin(
+                v128_load(current.as_ptr().add(i + 1).cast()),
+                v128_load(current.as_ptr().add(i - 1).cast()),
+            ),
+            f64x2_pmin(
+                v128_load(next.as_ptr().add(i).cast()),
+                v128_load(previous.as_ptr().add(i).cast()),
+            ),
+        );
+        let diagonal_low = f64x2_pmin(
+            f64x2_pmin(
+                v128_load(next.as_ptr().add(i + 1).cast()),
+                v128_load(previous.as_ptr().add(i + 1).cast()),
+            ),
+            f64x2_pmin(
+                v128_load(next.as_ptr().add(i - 1).cast()),
+                v128_load(previous.as_ptr().add(i - 1).cast()),
+            ),
+        );
+        let cardinal_excess = f64x2_sub(f64x2_sub(center, cardinal_low), cardinal);
+        let diagonal_excess = f64x2_sub(f64x2_sub(center, diagonal_low), diagonal);
+        i64x2_bitmask(v128_or(
+            f64x2_gt(cardinal_excess, zero),
+            f64x2_gt(diagonal_excess, zero),
+        ))
     }
 }
 

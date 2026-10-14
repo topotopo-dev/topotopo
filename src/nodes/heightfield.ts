@@ -982,7 +982,7 @@ defineNode({
   params: {
     method: { type: 'enum', options: ['droplet', 'pipe', 'stream_power'], default: 'droplet', desc: 'droplet = seeded particles; pipe = shallow-water grid; stream_power = pipe plus drainage-driven incision' },
     backend: { type: 'enum', options: ['auto', 'kernel', 'js'], default: 'js', desc: 'js preserves the original droplet result; kernel loads WASM; auto uses WASM only if already loaded, otherwise js (pipe methods require WASM)' },
-    iterations: { type: 'int', default: 50, min: 0, max: 5000, desc: 'rain passes (each followed by a thermal pass)', aliases: ['iter', 'steps'] },
+    iterations: { type: 'int', default: 50, min: 0, max: 5000, desc: 'rain passes; pipe methods use thermal_interval to schedule thermal passes', aliases: ['iter', 'steps'] },
     seed: P.seed(),
     erosion_rate: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'fraction of free capacity picked up per droplet step, or erosion rate per second for pipe', aliases: ['erodability', 'erode_rate', 'erosion'] },
     deposition_rate: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'fraction of excess sediment deposited per droplet step, or deposition rate per second for pipe', aliases: ['deposit_rate', 'deposition'] },
@@ -996,7 +996,8 @@ defineNode({
     erosion_radius: { type: 'int', default: 3, min: 1, max: 8, desc: 'droplet only: erosion footprint radius (samples)', aliases: ['brush_radius'] },
     max_lifetime: { type: 'int', default: 30, min: 1, max: 256, desc: 'droplet only: maximum steps per particle', aliases: ['lifetime', 'max_steps'] },
     thermal_talus_angle: { type: 'float', default: 40, min: 0, max: 89, desc: 'thermal: angle of repose in degrees (steeper slopes shed material)', aliases: ['talus_angle', 'repose_angle', 'cut_angle'] },
-    thermal_rate: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'thermal: fraction of the excess moved per iteration (0 = no thermal erosion)', aliases: ['thermal'] },
+    thermal_rate: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'thermal: fraction of the excess moved per thermal pass (0 = no thermal erosion)', aliases: ['thermal'] },
+    thermal_interval: { type: 'int', default: 1, min: 1, max: 10000, desc: 'pipe/stream_power only: thermal pass every N iterations and on the final iteration; skips intervening relaxations without multiplying thermal_rate (1 preserves the default result)' },
     hardness_layer: { type: 'string', default: '', desc: 'optional 0..1 layer: 1 = rock that does not erode' },
     freeze_layer: { type: 'string', default: '', desc: 'optional 0..1 layer: 1 = frozen (unchanged), e.g. under buildings or roads' },
     rain_layer: { type: 'string', default: '', desc: 'pipe only: optional nonnegative layer multiplying uniform rain_amount (0 = dry)' },
@@ -1045,7 +1046,7 @@ defineNode({
             fn: 'erode_pipe', ...grid, params: {
               iterations: p.iterations, rainAmount: p.rain_amount, evaporation: p.evaporation,
               sedimentCapacity: p.sediment_capacity, erosionRate: p.erosion_rate, depositionRate: p.deposition_rate,
-              gravity: p.gravity, talusAngle: p.thermal_talus_angle * Math.PI / 180, thermalRate: p.thermal_rate,
+              gravity: p.gravity, talusAngle: p.thermal_talus_angle * Math.PI / 180, thermalRate: p.thermal_rate, thermalInterval: p.thermal_interval,
               timeStep: p.time_step, boundary: p.boundary, streamPowerK: p.method === 'stream_power' ? p.stream_power_k : 0,
               streamPowerM: p.stream_power_m, streamPowerN: p.stream_power_n, fillSinks: p.method === 'stream_power' && p.fill_sinks,
             },
