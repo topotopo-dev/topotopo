@@ -23,6 +23,8 @@ export interface ExportFile { path: string; bytes: Uint8Array }
 export type FileExportOptions = ExportOptions & HeightmapOptions & {
   /** instance streams: also write one GLB per packed source next to the stream (default true) */
   meshes?: boolean;
+  /** unreal_landscape: quads per tile; 0 (default) keeps the single-landscape bundle. */
+  tile_size?: number;
 };
 
 /** Path without its extension (".points.json" counts as one). */

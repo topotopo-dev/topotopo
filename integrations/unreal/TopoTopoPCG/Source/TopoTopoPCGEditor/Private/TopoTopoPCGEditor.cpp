@@ -29,6 +29,7 @@
 #include "ToolMenus.h"
 #include "TopoTopoStream.h"
 #include "TopoTopoLandscapeImport.h"
+#include "TopoTopoTileInstances.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -168,8 +169,18 @@ static bool Run(FOptions Options, FString& Message)
     }
     FTopoTopoStreamOptions StreamOptions;
     StreamOptions.MeshFolder = Options.Destination / TEXT("Meshes");
+    bool bTiledBundle = false;
+    bool bHasInstances = true;
+    const FString ManifestPath = Options.Directory / TEXT("landscape.json");
+    if (FPaths::FileExists(ManifestPath))
+    {
+        TSharedPtr<FJsonObject> Manifest;
+        if (!ReadJSON(ManifestPath, Manifest, Message)) { return false; }
+        bTiledBundle = Manifest->HasField(TEXT("tiles"));
+        bHasInstances = !Manifest->HasTypedField<EJson::Null>(TEXT("instances"));
+    }
     FTopoTopoStream Stream;
-    if (!TopoTopoStream::LoadFile(Options.Directory / TEXT("instances.csv"), StreamOptions, Stream, Message)) { return false; }
+    if (bHasInstances && !TopoTopoStream::LoadFile(Options.Directory / TEXT("instances.csv"), StreamOptions, Stream, Message)) { return false; }
     for (const FString& Warning : Stream.Warnings) { UE_LOG(LogTopoTopoImport, Warning, TEXT("%s"), *Warning); }
     TMap<FString, TArray<FTransform>> Transforms;
     for (const FTopoTopoStreamRow& Row : Stream.Rows)
@@ -213,7 +224,15 @@ static bool Run(FOptions Options, FString& Message)
         if (!PrototypeFiles.Contains(Pair.Key)) { Message = TEXT("No prototype GLB for Mesh '") + Pair.Key + TEXT("'."); return false; }
     }
     FLandscapeData LandscapeData;
-    if (Options.bLandscape && !ReadLandscape(Options.Directory, LandscapeData, Message, Options.bLayers)) { return false; }
+    if ((Options.bLandscape || bTiledBundle) &&
+        !ReadLandscape(Options.Directory, LandscapeData, Message, Options.bLayers, Options.bLandscape)) { return false; }
+    for (const TPair<FString, FString>& Pair : PrototypeFiles)
+    {
+        const FString Name = ObjectTools::SanitizeObjectName(Pair.Key);
+        StreamOptions.MeshMapping.Add(Pair.Key, FSoftObjectPath(StreamOptions.MeshFolder / Name + TEXT(".") + Name));
+    }
+    TArray<FTileInstances> TileInstances;
+    if (bTiledBundle && !ReadTileInstances(LandscapeData, StreamOptions, Stream, TileInstances, Message)) { return false; }
     TArray<FString> Names;
     PrototypeFiles.GetKeys(Names);
     Names.Sort();
@@ -269,12 +288,29 @@ static bool Run(FOptions Options, FString& Message)
     Root->SetMobility(EComponentMobility::Static);
     Root->RegisterComponent();
     int32 InstanceCount = 0;
-    for (const FString& Name : Names)
+    int32 InstanceGroupCount = 0;
+    if (bTiledBundle)
     {
-        if (const TArray<FTransform>* Instances = Transforms.Find(Name))
+        for (const FTileInstances& Tile : TileInstances)
         {
-            AddInstances(Actor, Prototypes[Name], Name, *Instances);
-            InstanceCount += Instances->Num();
+            AActor* TileActor = SpawnTileInstances(World, Tile, Prototypes, Actor->GetActorLabel(), false, Message);
+            if (!TileActor) { return false; }
+            InstanceCount += Tile.Stream.Rows.Num();
+            TArray<UHierarchicalInstancedStaticMeshComponent*> Components;
+            TileActor->GetComponents(Components);
+            InstanceGroupCount += Components.Num();
+        }
+    }
+    else
+    {
+        for (const FString& Name : Names)
+        {
+            if (const TArray<FTransform>* Instances = Transforms.Find(Name))
+            {
+                AddInstances(Actor, Prototypes[Name], Name, *Instances);
+                InstanceCount += Instances->Num();
+                ++InstanceGroupCount;
+            }
         }
     }
     int32 ObjectCount = 0;
@@ -298,7 +334,12 @@ static bool Run(FOptions Options, FString& Message)
     GEditor->SelectActor(Actor, true, true);
     GEditor->RedrawLevelEditingViewports();
     Message = FString::Printf(TEXT("Imported %d instances in %d mesh groups, %d ordinary objects%s into %s. Assets and level are unsaved."),
-        InstanceCount, Transforms.Num(), ObjectCount, Options.bLandscape ? TEXT(" and one Landscape") : TEXT(""), *Options.Destination);
+        InstanceCount, InstanceGroupCount, ObjectCount, Options.bLandscape ? TEXT(" and one Landscape") : TEXT(""), *Options.Destination);
+    if (bTiledBundle)
+    {
+        Message += FString::Printf(TEXT(" Tiles: %d independent instance actors%s."), TileInstances.Num(),
+            Options.bLandscape && World->IsPartitionedWorld() ? TEXT(" and one streaming proxy per tile") : TEXT(""));
+    }
     if (Options.bLandscape)
     {
         Message += FString::Printf(TEXT(" Landscape: %d weight layers; generated material %s."),
@@ -449,7 +490,7 @@ bool FTopoTopoLandscapeManifestCompatibilityTest::RunTest(const FString& Paramet
             TestTrue(TEXT("Actor scale retained"), Data.Scale.Equals(FVector(100, 100, 2)));
         }
         else { AddError(Error); }
-        TestFalse(FString(Format) + TEXT(" v2 rejected"), ReadFixture(Format, 2, true, Data, Error));
+        TestFalse(FString(Format) + TEXT(" incomplete v2 without tiles rejected"), ReadFixture(Format, 2, true, Data, Error));
         TestFalse(FString(Format) + TEXT(" non-exact layout rejected"), ReadFixture(Format, 1, false, Data, Error));
     }
     TopoTopoImport::FLandscapeData Data;

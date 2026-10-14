@@ -83,7 +83,7 @@ export async function writeExport(geo: Geometry, format: ExportFormat, p: string
     upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
     materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct,
     precision: a.precision, instancing: a.instancing, instances: a.instances, meshes: a.meshes,
-    layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield,
+    layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield, tile_size: a.tile_size,
     deflate: (d) => zlib.deflateSync(d, { level: 6 }),
     readFile: (t) => host.readFile(t),
     texturePath: (t) => {
@@ -338,6 +338,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png); textures: extra image layers to write as <image>_<layer>.png ("*" = all)' },
           height_min: { type: 'number', description: 'png16/r16: fixed range start (default: the layer minimum), e.g. shared by tiles' },
           height_max: { type: 'number', description: 'png16/r16: fixed range end (default: the layer maximum)' },
+          tile_size: { type: 'integer', minimum: 0, maximum: 8160, description: 'unreal_landscape: quads per tile, 0 keeps the single landscape (default); e.g. 252, 1008 or 2016. Exact Unreal section fit required; edge padding to the tile grid, shared height range and per-tile instance streams.' },
           heightfield: { type: 'number', description: 'heightmaps: which heightfield when there are several (index, default 0)' },
           up_axis: { type: 'string', enum: ['y', 'z'] },
           scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres; pcg csv defaults to 100)' },
