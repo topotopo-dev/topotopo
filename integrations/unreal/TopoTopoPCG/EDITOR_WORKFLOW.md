@@ -52,7 +52,60 @@ The imports and level changes remain **unsaved**. Review them, then save explici
 
 ## Landscape support and limits
 
-Landscape import uses the exported UE 5.8 C++ APIs `FLandscapeImportHelper::GetHeightmapImportDescriptor`, `GetHeightmapImportData`, and `ALandscape::Import`, linked against `LandscapeEditor` and `Landscape`. The importer accepts version 1 `topotopo-unreal-landscape` and legacy `polyforge-unreal-landscape` bundles whose `exact_fit` is true, whose heightmap matches the component layout, and whose dimensions are at most 8193 samples per side. It imports one heightfield; tiled/streaming proxy setup is not implemented.
+Landscape import uses the exported UE 5.8 C++ APIs `FLandscapeImportHelper::GetHeightmapImportDescriptor`, `GetHeightmapImportData`, and `ALandscape::Import`, linked against `LandscapeEditor` and `Landscape`. Version 1 `topotopo-unreal-landscape` and legacy `polyforge-unreal-landscape` bundles require `exact_fit=true`, a matching component layout, and at most 8193 samples per side. Tiled version 2 adds the path below; single-heightmap import is unchanged.
+
+### Tiled version 2 bundles
+
+Generate the demo with `npm run export:demo -- --tiles 2` and import its bundle:
+
+```text
+TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo_tiled/landscape" /Game/TopoTopo/TiledDemo landscape=1 layers=1 material=1 objects=1
+```
+
+The exporter option `tile_size` is **quads per tile**, with zero retaining v1. Each tile file has
+`tile_size + 1` samples in each direction, including the shared border. The manifest's `tile_grid` contains
+`tile_size_quads`, `grid`, `source_resolution`, `padded_resolution`, and `padding:{right,bottom,mode:"edge"}`.
+The row-major `tiles` array records `grid_position`, inclusive `sample_min`/`sample_max`,
+`world_offset_cm` relative to `landscape.actor_location_cm`, a `heightmap` object with the shared height
+range, weight `layers`, and `instances:{csv,count,meshes}` (or null). All paths are bundle-root-relative;
+the mesh sidecar is shared at `instances.meshes.json`. Padding extends only right/bottom by repeating the
+source edge. Root `landscape.overall_resolution` is the padded grid; the retained root PNG is the original
+source-sized heightmap and is not used by the tiled importer.
+
+Before creating assets, the importer validates tile-grid coverage, component alignment, ranges, offsets,
+padding and layer order/encoding, then checks every shared height and weight sample for exact equality.
+It assembles one full height/weight grid and calls `ALandscape::Import` with all components. In a World
+Partition level it then calls `ULandscapeSubsystem::ChangeGridSize` with the number of components per
+tile, following the native New Landscape panel's import route. This moves each tile's components to one
+`ALandscapeStreamingProxy`, sharing the parent Landscape's GUID, layer infos and generated material. A
+plain level keeps all components on its single Landscape; no streaming proxies or sublevels are added.
+This command does not change the level's partition setting. Epic documents
+[tiled heightmap import](https://dev.epicgames.com/documentation/unreal-engine/importing-and-exporting-landscape-heightmaps-in-unreal-engine)
+and the underlying [Landscape import API](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Landscape/ALandscapeProxy/Import).
+
+For tiles of 253/1009/2017 samples, use 63 quads per section and 2 x 2 sections per component, giving
+2 x 2/8 x 8/16 x 16 components respectively. 127 quads per section cannot exact-fit 1009/2017 samples;
+see Epic's [recommended sizes table](https://dev.epicgames.com/documentation/unreal-engine/landscape-technical-guide-in-unreal-engine).
+The tiled importer supports individual files up to 8193 samples and an assembled padded grid up to
+32769 samples per side. It holds full arrays during native import. At 16K x 16K, UE 5.8 allocates roughly
+6 GiB for its normal buffer alone, plus masks, heights and textures; tiling does not guarantee a small
+peak import memory footprint. Large terrains have not been performance-tested in this handoff.
+The standard TopoTopo heightfield nodes still enforce a 4097 x 4097 total-sample budget; this work does
+not raise that generation limit or establish 16K generation. The exporter uses dense source arrays and
+keeps both global and tiled output bytes in memory.
+
+Each tile has an independent `TopoTopo_<set>_Tile_<x>_<y>` actor, with a HISM component per used prototype.
+It reads that tile's CSV using the shared mesh mapping and preserves world transforms. The tile streams
+must contain the exact global stream's mesh/transform multiset and the declared per-tile counts. Actors
+are spatially loaded, with no Landscape references or parent attachment: they can stream independently
+under the level's configured runtime grid. Instance bounds may span multiple runtime cells; one tile
+actor does not force the same unload moment as its terrain proxy. The ordinary scene actor still holds
+unpartitioned road/ordinary objects. Tile splitting applies even with `landscape=0`.
+
+Layer-info assets and the material are created once for the whole Landscape. Because there is no single
+padded height/weight source file, tiled imports leave one-file reimport paths empty instead of recording
+the first tile as the full Landscape source. Regenerate with a fresh bundle and new content destination.
+Assets and level changes remain unsaved for review, including World Partition's external actor packages.
 
 Weightmaps are decoded as 8-bit greyscale PNGs (with or without alpha; alpha is ignored) and passed in manifest
 order as `FLandscapeImportLayerInfo::LayerData` to the same `ALandscape::Import` call as the heightmap, using
@@ -89,10 +142,9 @@ Landscape, replace **Landscape Material** in Details
 with your own material or instance, and retain the imported names to reuse the existing target-layer
 assignments and weights. New names need their own infos under Landscape Paint > Target Layers. You can
 also edit the generated material directly. Review shader compilation and appearance, then explicitly save
-the material, layer infos and level. Streaming proxies, world partition, runtime virtual textures, Nanite
-Landscape and foliage remain out of scope.
+the material, layer infos and level. Runtime virtual textures, Nanite Landscape and foliage remain out of scope.
 
-For manual heightmap import, use Landscape mode > Manage > New > Import from File, select `heightmap.png`, and copy `landscape.section_size_quads`, `sections_per_component`, `components`, `scale`, and **new_landscape_location_cm** from `landscape.json`. The editor centers the terrain on that location; its actor subsequently resides at **actor_location_cm**.
+For a v1 manual heightmap import, use Landscape mode > Manage > New > Import from File, select `heightmap.png`, and copy `landscape.section_size_quads`, `sections_per_component`, `components`, `scale`, and **new_landscape_location_cm** from `landscape.json`. The editor centers the terrain on that location; its actor subsequently resides at **actor_location_cm**. V2's nested tile directories are consumed by this plugin; do not import only the original root PNG using the padded grid settings.
 
 ## PCG after import
 
@@ -112,5 +164,14 @@ only the bundle, not previously imported meshes. Locate it with the same CSV opt
 or `-TopoTopoDemoBundle="<absolute bundle directory>"` / `TOPOTOPO_DEMO_BUNDLE`. An absent manifest gives an
 explicit **SKIPPED** warning; rerun with the bundle for acceptance. A malformed or incomplete present
 bundle fails. The test creates no persistent assets and does not change or save the current level.
+
+`Automation RunTests TopoTopo.Editor.TiledLandscape` runs three self-contained tests with synthetic
+2 x 2 tiles of 8 x 8 samples (15 x 15 assembled), known height/weight functions and 1/2/3/4 cube instances
+per tile. `Plain` expects four parent components and no proxies; `WorldPartition` expects four proxies,
+no parent components, one shared Landscape GUID/material/layer info, exact vertex heights/weights at all
+seams, and four independent spatial HISM actors with ten unchanged world transforms in total.
+`Validation` rejects malformed seams, shared ranges, tile positions, padding and stream counts. Fixtures
+are generated during the tests; they need no demo import and never skip. Run these in the editor after
+installing the package; BuildPlugin compilation alone is not an editor pass or runtime-streaming proof.
 
 This utility supports this exported bundle layout, not an arbitrary glTF scene: it deliberately uses `objects_expanded.glb` and does not depend on `EXT_mesh_gpu_instancing` support. Each prototype must contain one named mesh (multiple material slots are fine). Mesh paths may be overridden in the PCG node for existing project assets. Imported assets retain Interchange's glTF material interpretation; runtime visual acceptance still requires checking the result in the editor.

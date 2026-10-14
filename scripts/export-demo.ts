@@ -9,9 +9,14 @@
 //   scene.geo          the same as Houdini JSON geometry (fpreal32): PackedGeometry prims with shared embedded geometry
 //   instances.csv      node "instances" as Unreal PCG rows (+ instances.meshes.json + instances_meshes/*.glb)
 //   demo.json          the list of files with sizes and the scene counts
-//   node scripts/export-demo.ts [out dir]   (default out/unreal_demo)
+//   node scripts/export-demo.ts [out dir] [--tiles N]   (default out/unreal_demo)
+//   npm run export:demo -- --tiles 2
+//   PowerShell: npm.cmd run export:demo -- --tiles 2 (passes --tiles through the npm command shim).
+//     writes out/unreal_demo_tiled/: the same 253×253 field split into 2×2 tiles of 126 quads / 127 samples,
+//     with shared edge samples and per-tile CSVs in landscape/tiles/<x>_<y>/. Meshes and instance positions stay shared.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
@@ -20,9 +25,21 @@ import { exportFilesAsync } from '../src/io/files.ts';
 import type { FileExportOptions } from '../src/io/files.ts';
 import type { ExportFormat } from '../src/io/export.ts';
 import type { Geometry } from '../src/core/geometry.ts';
+import { heightfieldsOf } from '../src/core/heightfield.ts';
+import { unrealComponents } from '../src/io/unreal.ts';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const out = path.resolve(process.argv[2] ?? path.join(root, 'out', 'unreal_demo'));
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+let outArg: string | undefined, tiles = 0;
+for (let i = 2; i < process.argv.length; i++) {
+  const arg = process.argv[i];
+  if (arg === '--tiles') {
+    const value = process.argv[++i];
+    tiles = Number(value);
+    if (!value || !Number.isSafeInteger(tiles) || tiles < 1) throw new Error('--tiles needs a positive integer (for example --tiles 2)');
+  } else if (arg.startsWith('--') || outArg !== undefined) throw new Error(`unexpected argument: ${arg}; usage: export-demo.ts [out dir] [--tiles N]`);
+  else outArg = arg;
+}
+const out = path.resolve(outArg ?? path.join(root, 'out', tiles ? 'unreal_demo_tiled' : 'unreal_demo'));
 const examples = path.join(root, 'examples');
 const graph = JSON.parse(fs.readFileSync(path.join(examples, 'unreal_demo.json'), 'utf8'));
 const host = createNodeHost({ baseDir: examples });
@@ -37,7 +54,24 @@ const cook = async (target: string): Promise<Geometry> => {
 };
 const scene = await cook('scene'), landscape = await cook('landscape'), instances = await cook('instances');
 const cookMs = performance.now() - t0;
+let tileSize = 0;
+if (tiles) {
+  const hf = heightfieldsOf(landscape)[0];
+  tileSize = (hf.width - 1) / tiles;
+  if (hf.width !== hf.height || !Number.isInteger(tileSize) || !unrealComponents(tileSize + 1, tileSize + 1).exact) {
+    throw new Error(`--tiles ${tiles} cannot split this ${hf.width}×${hf.height} field into exact Unreal components; use --tiles 2 for the demo`);
+  }
+}
 
+// Only replace the explicitly resolved export directory, never the workspace or one of its ancestors.
+const rootFromOut = path.relative(out, root);
+if (out === path.parse(out).root || rootFromOut === '' || (!rootFromOut.startsWith('..' + path.sep) && rootFromOut !== '..' && !path.isAbsolute(rootFromOut))) {
+  throw new Error(`refusing to replace a workspace ancestor: ${out}`);
+}
+if (fs.existsSync(out)) {
+  if (fs.lstatSync(out).isSymbolicLink()) throw new Error(`refusing to replace a linked output directory: ${out}`);
+  if (fs.readdirSync(out).length && !fs.existsSync(path.join(out, 'demo.json'))) throw new Error(`refusing to replace a non-demo directory: ${out}`);
+}
 fs.rmSync(out, { recursive: true, force: true });
 const warnings: string[] = [];
 const written: { path: string; bytes: number }[] = [];
@@ -59,7 +93,7 @@ const write = async (g: Geometry, format: ExportFormat, rel: string, o: FileExpo
   console.log(`${rel}: ${summary}`);
 };
 
-await write(landscape, 'unreal_landscape', 'landscape');
+await write(landscape, 'unreal_landscape', 'landscape', tiles ? { tile_size: tileSize } : {});
 await write(scene, 'glb', 'scene.glb');
 await write(scene, 'glb', 'scene_expanded.glb', { instancing: 'expand' });
 await write(scene, 'usda', 'scene.usda');

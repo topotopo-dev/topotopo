@@ -56,7 +56,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
     '                         [--instances rows|expand] [--no-meshes] (csv/points.json of packed instances: one row per instance + meshes sidecar + GLBs)',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json; heightfields .png (png16) .r16,',
-    '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle for Unreal Landscape);',
+    '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle; --tile-size 1008 for tiled Landscape);',
     '                       images: --format textures --export out/maps (one PNG per image; --layers a,b or * for extra layers)',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type>`,
@@ -160,6 +160,7 @@ async function cook() {
       const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
       if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
       const up = opt('--up-axis');
+      if (argv.includes('--tile-size') && opt('--tile-size') === undefined) fail('--tile-size requires a number of quads (e.g. 1008)');
       const outDir = fmt === 'unreal_landscape' && !/\.json$/i.test(p) ? path.resolve(p) : path.dirname(path.resolve(p));
       const host = engine.host;
       const { files, summary } = await exportFilesAsync(geo, fmt, p, {
@@ -175,6 +176,7 @@ async function cook() {
         instances: opt('--instances') === 'expand' ? 'expand' : undefined,
         meshes: argv.includes('--no-meshes') ? false : undefined,
         layer: opt('--layer'), layers: opt('--layers')?.split(','),
+        tile_size: opt('--tile-size') !== undefined ? Number(opt('--tile-size')) : undefined,
         deflate: (d) => zlib.deflateSync(d),
         readFile: (t) => host.readFile(t),
         texturePath: (t) => { const abs = host.resolvePath(t); return /^[a-z][a-z0-9+.-]*:\/\//i.test(abs) ? abs : path.relative(outDir, abs).split(path.sep).join('/'); },
