@@ -155,25 +155,45 @@ deposits, `water` actual depth and `flow` normalised integrated speed. Closed ed
 keep water/material; open pipe edges lose water **only**, keeping rock in-grid.
 Droplet open edges retain their original behaviour of losing the carried load.
 Pipe thermal transport is a separate conservative eight-neighbour talus pass.
+`thermal_interval` (`thermalInterval` in the TypeScript adapter) controls its
+cadence for pipe and stream power: a pass runs every N iterations and on the
+final iteration. The default is 1, preserving the original result. Larger values
+omit intervening relaxations without multiplying `thermal_rate`; they change the
+thermal result and do not affect droplet erosion. The supported range is 1..10000.
 Optional stream power is `K * A^m * S^n`; by default reference contributing area
 is calculated from the incoming terrain, so the drainage network does not jump
 during a solve. Opt-in sink filling refreshes it each iteration, as described below.
 
-The pipe implementation reuses padded, separate flux arrays and row
-scratch buffers. Rain/flux and water/erosion/transport form two fluid sweeps;
-sediment gathering streams through a three-row transfer ring instead of storing
-full-grid velocities or scattering into shared destinations. Four-cell SIMD
-water updates skip the limiter division and second square root when no lane
-requires limiting. All arithmetic retains scalar operation order;
-terrain slopes are refreshed only around actual height changes. A conservative
+The pipe implementation stores four padded, contiguous direction planes per row
+in one flux allocation and retains only three rows of surface heights.
+One delayed row sweep prepares rain/surface for row z+2,
+updates flux for row z+1, then updates water/erosion/transport for row z.
+Cached surfaces keep flux dependent on the original iteration state, while
+incoming flux is consumed while its neighbouring rows are still hot in cache.
+Water, erosion and reductions use small row spans to keep their temporary data
+in cache. Sediment gathering streams through a three-row transfer ring instead
+of storing full-grid velocities or scattering into shared destinations. The
+horizontal gather feeds vertical transport immediately, without a horizontal
+load buffer. Native SSE2 fuses water, erosion/deposition, material updates,
+evaporation, CFL reductions and horizontal donor flux for cells without masks or stream
+power; masked and stream-power cases use the separate row helpers. Native SSE2
+and WASM SIMD skip the flux-budget division only when every lane's ratio clamps
+to exactly one, and skip the velocity limiter's division and second square root
+when no lane requires limiting. Row maxima use independent accumulators.
+Arithmetic retains scalar operation order; terrain slopes are refreshed only
+around actual height changes. A conservative
 talus margin can prove thermal transport inactive; once that proof expires the
-ordinary thermal stencil runs every iteration. The droplet implementation
-keeps f64 arithmetic and RNG order: f32 and reassociated interpolation experiments
-failed the full-reference flow-correlation threshold. Row bounds are validated
-before the small unchecked stencil/scatter loops; no work buffers allocate inside
-either iteration loop. SIMD droplet smoothing retains the original addition order,
-and paired thermal inactivity checks preserve scalar transfers for active cells.
-See the session-6 measurements and limits in [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).
+ordinary thermal stencil follows the requested cadence. Droplet motion remains
+serial over shared f64 terrain, preserving arithmetic and RNG order: f32 and
+reassociated interpolation experiments failed the flow-correlation threshold.
+Precomputed brush rows, deposit smoothing and paired thermal activity screening
+use f64x2 SIMD while preserving scalar arithmetic and active thermal transfer
+order. Row bounds are validated
+before the small unchecked stencil/scatter loops; ordinary pipe and droplet work
+buffers are allocated before iteration. Filled routing allocates its flood and
+drainage buffers when refreshed. See the session 6 and session 15 measurements,
+rejected experiments and remaining limits in
+[BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).
 
 `flow_accumulation` offers D8 and triangular-facet D-infinity routing. Accumulation
 includes each sample's own cell area. Stable height/index ordering fixes the sum
@@ -260,7 +280,9 @@ consume lake depth. Converting either depth layer to a mask is an explicit
 `heightfield_flow` with `fill_sinks: true` computes contributing area over a
 drainable surface without adding material to the saved ground. The same opt-in
 option on `heightfield_erode` with `method: stream_power` recomputes drainage each
-iteration so it does not stop in pits. On resolved flats, incision uses a minimum
+iteration so it does not stop in pits. Each iteration performs one priority flood
+followed by one drainage computation on that filled surface; the initial unfilled
+drainage computation is skipped. On resolved flats, incision uses a minimum
 receiver drop of `max(1e-4 * cell_size, one Float32 height step)`, divided by the
 cardinal or diagonal receiver distance. This small artificial routing gradient
 lets stream incision advance over horizontal spill surfaces; it does not raise

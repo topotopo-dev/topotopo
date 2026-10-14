@@ -8,8 +8,13 @@
 
 use crate::erosion_flow::{FlowMethod, flow_accumulation, validate_grid};
 
+#[path = "erosion_reduce.rs"]
+mod reduce;
 #[cfg(all(target_arch = "wasm32", feature = "simd"))]
 #[path = "erosion_simd.rs"]
+mod simd;
+#[cfg(target_arch = "x86_64")]
+#[path = "erosion_sse2.rs"]
 mod simd;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +41,8 @@ pub struct PipeParams {
     /// Radians.
     pub talus_angle: f32,
     pub thermal_rate: f32,
+    /// Run thermal relaxation every N iterations and on the final iteration.
+    pub thermal_interval: u32,
     /// Maximum step in seconds; zero selects the internal CFL step.
     pub time_step: f32,
     pub open_boundary: bool,
@@ -60,6 +67,7 @@ impl Default for PipeParams {
             gravity: 4.0,
             talus_angle: 40.0 * std::f32::consts::PI / 180.0,
             thermal_rate: 0.1,
+            thermal_interval: 1,
             time_step: 0.0,
             open_boundary: false,
             stream_power_k: 0.0,
@@ -110,6 +118,7 @@ fn validate_params(p: &PipeParams) -> Result<(), String> {
         || !(1e-4..=1000.0).contains(&p.gravity)
         || p.talus_angle >= std::f32::consts::FRAC_PI_2
         || p.thermal_rate > 1.0
+        || !(1..=10_000).contains(&p.thermal_interval)
         || p.time_step > 1000.0
         || p.stream_power_k > 1000.0
         || p.stream_power_m > 4.0
@@ -193,25 +202,24 @@ pub fn erode_pipe(
     if p.iterations == 0 {
         return Ok(result);
     }
-    // All work buffers are allocated once; the hot loops never allocate.
+    // Ordinary work buffers are allocated once; opt-in filled drainage allocates
+    // its flood/routing buffers when refreshed inside the iteration loop.
     let stride = w + 2;
     let padded_n = stride * (h + 2);
     // Zero ghost fluxes encode the external incoming boundary condition.
-    let mut flux_west = vec![0.0f32; padded_n];
-    let mut flux_east = vec![0.0f32; padded_n];
-    let mut flux_north = vec![0.0f32; padded_n];
-    let mut flux_south = vec![0.0f32; padded_n];
+    // Row-interleaved SoA: four contiguous direction planes per padded row.
+    // The delayed sweep touches only three adjacent rows of this allocation.
+    let mut flux = vec![0.0f32; 4 * padded_n];
     let mut suspended = vec![0.0f32; n];
     let mut remapped = vec![0.0f32; n];
     let mut velocity = vec![[0.0f32; 2]; w];
     let mut transport_flux = vec![0.0f32; 3 * w];
     let mut horizontal_flux = vec![0.0f32; w];
-    let mut horizontal_load = vec![0.0f32; w];
     let mut row_speed = vec![0.0f32; w];
     let mut row_limited_speed = vec![0.0f32; w];
     let mut row_change = vec![0.0f32; w];
     let mut row_after = vec![0.0f32; w];
-    let mut surface = vec![0.0f32; padded_n];
+    let mut surface = vec![0.0f32; 3 * stride];
     let mut thermal_delta = if p.thermal_rate > 0.0 {
         vec![0.0f32; n]
     } else {
@@ -269,7 +277,7 @@ pub fn erode_pipe(
         f64::NEG_INFINITY
     };
     profile.mark("setup");
-    for _ in 0..p.iterations {
+    for iteration in 0..p.iterations {
         #[cfg(all(feature = "profile", not(target_arch = "wasm32")))]
         {
             gradient_updates += gradient_dirty.len() as u64;
@@ -367,12 +375,23 @@ pub fn erode_pipe(
         let rainfall = p.rain_amount * dt;
         let acceleration = dt * p.gravity;
         let budget_scale = cell / dt;
-        // Prepare one row ahead, then consume its north neighbor's flux.
-        // Rain/surface and flux form one streaming sweep over the grid.
-        for next in 0..=h {
+        max_depth = 0.0;
+        max_velocity = 0.0;
+        let mut max_height_change = 0.0f32;
+        let flow_dt = dt * inv_cell;
+        let velocity_limit = 0.45 * cell / dt;
+        let erosion_dt = lower(p.erosion_rate * dt, 1.0);
+        let deposition_dt = lower(p.deposition_rate * dt, 1.0);
+        let evaporation_factor = upper(1.0 - p.evaporation * dt, 0.0);
+        // Delayed Jacobi pipeline: prepare surface row next, compute flux
+        // next-1, then consume all incoming flux for water/erosion row next-2.
+        // Cached surfaces preserve the pre-erosion terrain and pre-update water;
+        // no later flux reads a row that hydraulic erosion has already changed.
+        // The final two turns drain the flux and water stages at the south edge.
+        for next in 0..h + 2 {
             if next < h {
                 let start = next * w;
-                let base = (next + 1) * stride;
+                let base = ((next + 1) % 3) * stride;
                 let water = &mut result.water[start..start + w];
                 let height = &result.height[start..start + w];
                 let out = &mut surface[base..base + stride];
@@ -395,87 +414,90 @@ pub fn erode_pipe(
                         surface.copy_within(stride + 1..stride + w + 1, 1);
                     }
                 }
-                if next + 1 == h {
-                    let destination = (h + 1) * stride + 1;
-                    if p.open_boundary {
-                        surface[destination..destination + w].copy_from_slice(height);
-                    } else {
-                        surface.copy_within(h * stride + 1..h * stride + w + 1, destination);
-                    }
+            }
+            if next == h {
+                // Only now is row h-3 dead. Earlier ghost preparation would
+                // overwrite the north surface needed by the penultimate flux.
+                let destination = ((h + 1) % 3) * stride + 1;
+                if p.open_boundary {
+                    surface[destination..destination + w]
+                        .copy_from_slice(&result.height[(h - 1) * w..h * w]);
+                } else {
+                    let source = (h % 3) * stride + 1;
+                    surface.copy_within(source..source + w, destination);
                 }
             }
-            if next == 0 {
+            if next > 0 && next <= h {
+                let z = next - 1;
+                let start = z * w;
+                let base = (z + 1) * 4 * stride;
+                let row = ((z + 1) % 3) * stride + 1;
+                let north_row = (z % 3) * stride + 1;
+                let south_row = ((z + 2) % 3) * stride + 1;
+                let center = &surface[row..row + w];
+                let west = &surface[row - 1..row - 1 + w];
+                let east = &surface[row + 1..row + 1 + w];
+                let north = &surface[north_row..north_row + w];
+                let south = &surface[south_row..south_row + w];
+                let water = &result.water[start..start + w];
+                let (west_flux, rest) = flux[base..base + 4 * stride].split_at_mut(stride);
+                let (east_flux, rest) = rest.split_at_mut(stride);
+                let (north_flux, south_flux) = rest.split_at_mut(stride);
+                let qw = &mut west_flux[1..w + 1];
+                let qe = &mut east_flux[1..w + 1];
+                let qn = &mut north_flux[1..w + 1];
+                let qs = &mut south_flux[1..w + 1];
+                if p.open_boundary {
+                    update_flux_row::<true>(
+                        qw,
+                        qe,
+                        qn,
+                        qs,
+                        center,
+                        west,
+                        east,
+                        north,
+                        south,
+                        water,
+                        acceleration,
+                        budget_scale,
+                        z == 0,
+                        z + 1 == h,
+                    );
+                } else {
+                    update_flux_row::<false>(
+                        qw,
+                        qe,
+                        qn,
+                        qs,
+                        center,
+                        west,
+                        east,
+                        north,
+                        south,
+                        water,
+                        acceleration,
+                        budget_scale,
+                        false,
+                        false,
+                    );
+                }
+            }
+            profile.mark("rain/surface/flux");
+            if next < 2 {
                 continue;
             }
-            let z = next - 1;
+            let z = next - 2;
             let start = z * w;
-            let base = (z + 1) * stride + 1;
-            let center = &surface[base..base + w];
-            let west = &surface[base - 1..base - 1 + w];
-            let east = &surface[base + 1..base + 1 + w];
-            let north = &surface[base - stride..base - stride + w];
-            let south = &surface[base + stride..base + stride + w];
-            let water = &result.water[start..start + w];
-            let qw = &mut flux_west[base..base + w];
-            let qe = &mut flux_east[base..base + w];
-            let qn = &mut flux_north[base..base + w];
-            let qs = &mut flux_south[base..base + w];
-            if p.open_boundary {
-                update_flux_row::<true>(
-                    qw,
-                    qe,
-                    qn,
-                    qs,
-                    center,
-                    west,
-                    east,
-                    north,
-                    south,
-                    water,
-                    acceleration,
-                    budget_scale,
-                    z == 0,
-                    z + 1 == h,
-                );
-            } else {
-                update_flux_row::<false>(
-                    qw,
-                    qe,
-                    qn,
-                    qs,
-                    center,
-                    west,
-                    east,
-                    north,
-                    south,
-                    water,
-                    acceleration,
-                    budget_scale,
-                    false,
-                    false,
-                );
-            }
-        }
-        profile.mark("rain/surface/flux");
-        max_depth = 0.0;
-        max_velocity = 0.0;
-        let mut max_height_change = 0.0f32;
-        let flow_dt = dt * inv_cell;
-        let velocity_limit = 0.45 * cell / dt;
-        let erosion_dt = lower(p.erosion_rate * dt, 1.0);
-        let deposition_dt = lower(p.deposition_rate * dt, 1.0);
-        let evaporation_factor = upper(1.0 - p.evaporation * dt, 0.0);
-        for z in 0..h {
-            let start = z * w;
-            let base = (z + 1) * stride + 1;
-            let qw = &flux_west[base..base + w];
-            let qe = &flux_east[base..base + w];
-            let qn = &flux_north[base..base + w];
-            let qs = &flux_south[base..base + w];
-            let iw = &flux_east[base - 1..base - 1 + w];
-            let ie = &flux_west[base + 1..base + 1 + w];
-            let it = &flux_south[base - stride..base - stride + w];
-            let ib = &flux_north[base + stride..base + stride + w];
+            let base = (z + 1) * 4 * stride + 1;
+            let qw = &flux[base..base + w];
+            let qe = &flux[base + stride..base + stride + w];
+            let qn = &flux[base + 2 * stride..base + 2 * stride + w];
+            let qs = &flux[base + 3 * stride..base + 3 * stride + w];
+            let iw = &flux[base + stride - 1..base + stride - 1 + w];
+            let ie = &flux[base + 1..base + 1 + w];
+            let it = &flux[base - stride..base - stride + w];
+            let ib = &flux[base + 6 * stride..base + 6 * stride + w];
             let capacity_slope = &slope_factor[start..start + w];
             let relief = &relief[start..start + w];
             let height = &mut result.height[start..start + w];
@@ -487,104 +509,208 @@ pub fn erode_pipe(
             let velocity = &mut velocity[..];
             let row_mobility = &mobility[start..start + w];
             let softness = &softness[start..start + w];
-            update_water_row(
-                qw,
-                qe,
-                qn,
-                qs,
-                iw,
-                ie,
-                it,
-                ib,
-                water,
-                flow,
-                velocity,
-                &mut row_speed,
-                &mut row_limited_speed,
-                dt,
-                flow_dt,
-                velocity_limit,
-            );
-            profile.mark("water/velocity");
-            if incision.is_empty() {
-                erode_row::<false>(
-                    height,
-                    suspended,
-                    &mut row_after,
-                    &mut row_change,
-                    water,
-                    &row_speed,
-                    capacity_slope,
-                    relief,
-                    row_mobility,
-                    softness,
-                    &[],
-                    &[],
-                    p,
-                    dt,
-                    erosion_dt,
-                    deposition_dt,
-                );
-            } else {
-                erode_row::<true>(
-                    height,
-                    suspended,
-                    &mut row_after,
-                    &mut row_change,
-                    water,
-                    &row_speed,
-                    capacity_slope,
-                    relief,
-                    row_mobility,
-                    softness,
-                    &incision[start..start + w],
-                    &slope_magnitude[start..start + w],
-                    p,
-                    dt,
-                    erosion_dt,
-                    deposition_dt,
-                );
-            }
-            profile.mark("erosion/deposition");
-            for x in 0..w {
-                max_depth = upper(max_depth, water[x]);
-                #[cfg(not(all(target_arch = "wasm32", feature = "simd")))]
-                {
-                    water[x] *= evaporation_factor;
+            // Keep water, capacity and sparse terrain application in an L1-sized
+            // span. The transport stencil waits for the complete row; every
+            // earlier stage is cell-local once the cached slopes/flux exist.
+            const PIPE_BLOCK: usize = 256;
+            // Native four-lane donor prefixes must concatenate without gaps.
+            const _: () = assert!(PIPE_BLOCK.is_multiple_of(4));
+            #[cfg(target_arch = "x86_64")]
+            let mut horizontal_prepared = 0;
+            #[cfg(not(target_arch = "x86_64"))]
+            let horizontal_prepared = 0;
+            let block_size = PIPE_BLOCK;
+            for block_start in (0..w).step_by(block_size) {
+                let block_end = (block_start + block_size).min(w);
+                #[cfg(not(target_arch = "x86_64"))]
+                let fused = 0;
+                #[cfg(target_arch = "x86_64")]
+                let fused = if incision.is_empty() && hardness.is_none() && freeze.is_none() {
+                    let span = block_start..block_end;
+                    // SAFETY: SSE2 is guaranteed on x86_64; each slice covers
+                    // the same block and all mutable layers are disjoint.
+                    let (count, depth, speed) = unsafe {
+                        simd::update_plain_prefix(
+                            &qw[span.clone()],
+                            &qe[span.clone()],
+                            &qn[span.clone()],
+                            &qs[span.clone()],
+                            &iw[span.clone()],
+                            &ie[span.clone()],
+                            &it[span.clone()],
+                            &ib[span.clone()],
+                            &mut water[span.clone()],
+                            &mut flow[span.clone()],
+                            &mut velocity[span.clone()],
+                            &mut height[span.clone()],
+                            &mut suspended[span.clone()],
+                            &mut sediment[span.clone()],
+                            &mut wear[span.clone()],
+                            &capacity_slope[span.clone()],
+                            &relief[span.clone()],
+                            &mut row_change[span.clone()],
+                            &mut horizontal_flux[span],
+                            block_start,
+                            w,
+                            dt,
+                            flow_dt,
+                            velocity_limit,
+                            erosion_dt,
+                            deposition_dt,
+                            evaporation_factor,
+                            p.sediment_capacity,
+                        )
+                    };
+                    if count > 0 {
+                        horizontal_prepared = block_start + count;
+                    }
+                    max_depth = upper(max_depth, depth);
+                    max_velocity = upper(max_velocity, speed);
+                    profile.mark("water/erosion/evaporation/donor fused");
+                    count
+                } else {
+                    0
+                };
+                let unfused_start = block_start + fused;
+                if unfused_start < block_end {
+                    let span = unfused_start..block_end;
+                    update_water_row(
+                        &qw[span.clone()],
+                        &qe[span.clone()],
+                        &qn[span.clone()],
+                        &qs[span.clone()],
+                        &iw[span.clone()],
+                        &ie[span.clone()],
+                        &it[span.clone()],
+                        &ib[span.clone()],
+                        &mut water[span.clone()],
+                        &mut flow[span.clone()],
+                        &mut velocity[span.clone()],
+                        &mut row_speed[span.clone()],
+                        &mut row_limited_speed[span.clone()],
+                        dt,
+                        flow_dt,
+                        velocity_limit,
+                    );
+                    profile.mark("water/velocity");
+                    if incision.is_empty() {
+                        if hardness.is_none() && freeze.is_none() {
+                            erode_row::<false, false>(
+                                &height[span.clone()],
+                                &suspended[span.clone()],
+                                &mut row_after[span.clone()],
+                                &mut row_change[span.clone()],
+                                &water[span.clone()],
+                                &row_speed[span.clone()],
+                                &capacity_slope[span.clone()],
+                                &relief[span.clone()],
+                                &row_mobility[span.clone()],
+                                &softness[span.clone()],
+                                &[],
+                                &[],
+                                p,
+                                dt,
+                                erosion_dt,
+                                deposition_dt,
+                            );
+                        } else {
+                            erode_row::<false, true>(
+                                &height[span.clone()],
+                                &suspended[span.clone()],
+                                &mut row_after[span.clone()],
+                                &mut row_change[span.clone()],
+                                &water[span.clone()],
+                                &row_speed[span.clone()],
+                                &capacity_slope[span.clone()],
+                                &relief[span.clone()],
+                                &row_mobility[span.clone()],
+                                &softness[span.clone()],
+                                &[],
+                                &[],
+                                p,
+                                dt,
+                                erosion_dt,
+                                deposition_dt,
+                            );
+                        }
+                    } else if hardness.is_none() && freeze.is_none() {
+                        erode_row::<true, false>(
+                            &height[span.clone()],
+                            &suspended[span.clone()],
+                            &mut row_after[span.clone()],
+                            &mut row_change[span.clone()],
+                            &water[span.clone()],
+                            &row_speed[span.clone()],
+                            &capacity_slope[span.clone()],
+                            &relief[span.clone()],
+                            &row_mobility[span.clone()],
+                            &softness[span.clone()],
+                            &incision[start + unfused_start..start + block_end],
+                            &slope_magnitude[start + unfused_start..start + block_end],
+                            p,
+                            dt,
+                            erosion_dt,
+                            deposition_dt,
+                        );
+                    } else {
+                        erode_row::<true, true>(
+                            &height[span.clone()],
+                            &suspended[span.clone()],
+                            &mut row_after[span.clone()],
+                            &mut row_change[span.clone()],
+                            &water[span.clone()],
+                            &row_speed[span.clone()],
+                            &capacity_slope[span.clone()],
+                            &relief[span.clone()],
+                            &row_mobility[span.clone()],
+                            &softness[span.clone()],
+                            &incision[start + unfused_start..start + block_end],
+                            &slope_magnitude[start + unfused_start..start + block_end],
+                            p,
+                            dt,
+                            erosion_dt,
+                            deposition_dt,
+                        );
+                    }
+                    profile.mark("erosion/deposition");
+                    let (block_depth, block_velocity) = reduce::reduce_evaporate(
+                        &mut water[span.clone()],
+                        &row_limited_speed[span],
+                        evaporation_factor,
+                    );
+                    max_depth = upper(max_depth, block_depth);
+                    max_velocity = upper(max_velocity, block_velocity);
                 }
-                max_velocity = upper(max_velocity, row_limited_speed[x]);
-                if row_change[x] != 0.0 {
-                    // Preserve the computed f32 height, rather than rebuilding
-                    // it from its rounded difference. Only changed cells need
-                    // material/layer stores or gradient invalidation.
-                    height[x] = row_after[x];
-                    let deposited = lower(upper(row_change[x], 0.0), suspended[x]);
-                    let eroded = upper(-row_change[x], 0.0);
-                    suspended[x] = suspended[x] - deposited + eroded;
-                    sediment[x] += deposited;
-                    wear[x] += eroded;
-                    max_height_change = upper(max_height_change, row_change[x].abs());
-                    let i = start + x;
-                    for j in [
-                        i,
-                        if x > 0 { i - 1 } else { i },
-                        if x + 1 < w { i + 1 } else { i },
-                        if z > 0 { i - w } else { i },
-                        if z + 1 < h { i + w } else { i },
-                    ] {
-                        if !gradient_marked[j] {
-                            gradient_marked[j] = true;
-                            gradient_dirty.push(j);
+                for x in block_start..block_end {
+                    if row_change[x] != 0.0 {
+                        // Keep row-major edit/invalidation order, including the
+                        // original row_after rounding and neighbour marks.
+                        if x >= unfused_start {
+                            height[x] = row_after[x];
+                            let deposited = lower(upper(row_change[x], 0.0), suspended[x]);
+                            let eroded = upper(-row_change[x], 0.0);
+                            suspended[x] = suspended[x] - deposited + eroded;
+                            sediment[x] += deposited;
+                            wear[x] += eroded;
+                        }
+                        max_height_change = upper(max_height_change, row_change[x].abs());
+                        let i = start + x;
+                        for j in [
+                            i,
+                            if x > 0 { i - 1 } else { i },
+                            if x + 1 < w { i + 1 } else { i },
+                            if z > 0 { i - w } else { i },
+                            if z + 1 < h { i + w } else { i },
+                        ] {
+                            if !gradient_marked[j] {
+                                gradient_marked[j] = true;
+                                gradient_dirty.push(j);
+                            }
                         }
                     }
                 }
+                profile.mark("reductions/evaporation");
             }
-            #[cfg(all(target_arch = "wasm32", feature = "simd"))]
-            // The optional SIMD build preserves the same lane multiplication.
-            unsafe {
-                evaporate_simd(water, evaporation_factor);
-            }
-            profile.mark("reductions/evaporation");
             let above = &mobility[z.saturating_sub(1) * w..z.saturating_sub(1) * w + w];
             let below = &mobility[(z + 1).min(h - 1) * w..(z + 1).min(h - 1) * w + w];
             let flux = &mut transport_flux[(z % 3) * w..(z % 3 + 1) * w];
@@ -597,7 +723,7 @@ pub fn erode_pipe(
                     above,
                     below,
                     &mut horizontal_flux,
-                    &mut horizontal_load,
+                    horizontal_prepared,
                     flux,
                     output,
                     z,
@@ -612,7 +738,7 @@ pub fn erode_pipe(
                     above,
                     below,
                     &mut horizontal_flux,
-                    &mut horizontal_load,
+                    horizontal_prepared,
                     flux,
                     output,
                     z,
@@ -643,7 +769,10 @@ pub fn erode_pipe(
             thermal_margin =
                 (thermal_margin - 2.0 * f64::from(max_height_change.next_up())).next_down();
         }
-        if p.thermal_rate > 0.0 && thermal_margin < 0.0 {
+        if p.thermal_rate > 0.0
+            && thermal_margin < 0.0
+            && ((iteration + 1).is_multiple_of(p.thermal_interval) || iteration + 1 == p.iterations)
+        {
             thermal_pass(
                 &mut result,
                 &mut thermal_delta,
@@ -665,13 +794,7 @@ pub fn erode_pipe(
     #[cfg(all(feature = "profile", not(target_arch = "wasm32")))]
     println!(
         "pipe gradient updates={gradient_updates}; subnormal samples at final step: flux={} water={} suspended={}",
-        flux_west
-            .iter()
-            .chain(&flux_east)
-            .chain(&flux_north)
-            .chain(&flux_south)
-            .filter(|v| v.is_subnormal())
-            .count(),
+        flux.iter().filter(|v| v.is_subnormal()).count(),
         result.water.iter().filter(|v| v.is_subnormal()).count(),
         suspended.iter().filter(|v| v.is_subnormal()).count(),
     );
@@ -756,7 +879,30 @@ fn update_flux_row<const OPEN: bool>(
             && north.len() == n
             && south.len() == n
     );
-    for x in 0..n {
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", feature = "simd")))]
+    // SAFETY: SSE2 is guaranteed on x86_64; the selected WASM SIMD package
+    // requires simd128. All slice lengths are checked by the helper.
+    let start = unsafe {
+        simd::update_flux_prefix::<OPEN>(
+            qw,
+            qe,
+            qn,
+            qs,
+            center,
+            west,
+            east,
+            north,
+            south,
+            water,
+            acceleration,
+            budget_scale,
+            top,
+            bottom,
+        )
+    };
+    #[cfg(not(any(target_arch = "x86_64", all(target_arch = "wasm32", feature = "simd"))))]
+    let start = 0;
+    for x in start..n {
         let s = center[x];
         let dw = if OPEN && x == 0 {
             water[x]
@@ -821,8 +967,9 @@ fn update_water_row(
             && capacity_speed.len() == n
             && limited_speed.len() == n
     );
-    #[cfg(all(target_arch = "wasm32", feature = "simd"))]
-    // Slice bounds are checked in the helper; selection requires simd128.
+    #[cfg(any(target_arch = "x86_64", all(target_arch = "wasm32", feature = "simd")))]
+    // Slice bounds are checked in the helper; SSE2 is baseline on x86_64 and
+    // simd128 is required only by the selected WASM SIMD package.
     let start = unsafe {
         simd::update_water_prefix(
             qw,
@@ -843,7 +990,7 @@ fn update_water_row(
             velocity_limit,
         )
     };
-    #[cfg(not(all(target_arch = "wasm32", feature = "simd")))]
+    #[cfg(not(any(target_arch = "x86_64", all(target_arch = "wasm32", feature = "simd"))))]
     let start = 0;
     for x in start..n {
         let old = water[x];
@@ -878,7 +1025,7 @@ fn update_water_row(
 
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn erode_row<const STREAM: bool>(
+fn erode_row<const STREAM: bool, const MASKED: bool>(
     height: &[f32],
     suspended: &[f32],
     after_height: &mut [f32],
@@ -914,7 +1061,12 @@ fn erode_row<const STREAM: bool>(
         let material = suspended[x];
         let cap = lower(p.sediment_capacity * speed[x] * slope[x] * water[x], 1e8);
         let delta = cap - material;
-        let deposition = upper(-delta, 0.0) * deposition_dt * mobility[x];
+        let deposition = upper(-delta, 0.0) * deposition_dt;
+        let deposition = if MASKED {
+            deposition * mobility[x]
+        } else {
+            deposition
+        };
         let hydraulic = upper(delta, 0.0) * erosion_dt;
         let stream = if STREAM && delta >= 0.0 && water[x] > 1e-12 {
             lower(
@@ -924,7 +1076,12 @@ fn erode_row<const STREAM: bool>(
         } else {
             0.0
         };
-        let erosion = lower(hydraulic + stream, relief[x] * 0.25) * softness[x];
+        let erosion = lower(hydraulic + stream, relief[x] * 0.25);
+        let erosion = if MASKED {
+            erosion * softness[x]
+        } else {
+            erosion
+        };
         let after = before + (deposition - erosion);
         after_height[x] = after;
         change[x] = after - before;
@@ -946,7 +1103,7 @@ fn transport_prepare_row<const FROZEN: bool>(
     above_mobility: &[f32],
     below_mobility: &[f32],
     horizontal_flux: &mut [f32],
-    horizontal_load: &mut [f32],
+    horizontal_prepared: usize,
     vertical_flux: &mut [f32],
     output: &mut [f32],
     z: usize,
@@ -963,11 +1120,12 @@ fn transport_prepare_row<const FROZEN: bool>(
             && above_mobility.len() == w
             && below_mobility.len() == w
             && horizontal_flux.len() == w
-            && horizontal_load.len() == w
+            && horizontal_prepared <= w
+            && (!FROZEN || horizontal_prepared == 0)
             && vertical_flux.len() == w
             && output.len() == w
     );
-    for x in 0..w {
+    for x in horizontal_prepared..w {
         let d = velocity[x][0] * flow_dt;
         let allowed = if d < 0.0 {
             x > 0 && (!FROZEN || mobility[x - 1] > 0.0)
@@ -976,31 +1134,71 @@ fn transport_prepare_row<const FROZEN: bool>(
         };
         let transfer = if allowed { source[x] * d.abs() } else { 0.0 };
         horizontal_flux[x] = transfer.copysign(d);
-        horizontal_load[x] = source[x] - transfer;
     }
-    // Separate interior from borders so the stencil has no lane-dependent bounds.
-    horizontal_load[0] += upper(-horizontal_flux[1], 0.0);
+    // Decode exactly the outgoing magnitude, gather in the original order,
+    // and consume the horizontal load immediately. No load scratch is needed.
+    // Border cells retain their single-addition sequence; interiors have no
+    // lane-dependent boundary branches and can vectorize as one fused loop.
+    let first = source[0] - horizontal_flux[0].abs() + upper(-horizontal_flux[1], 0.0);
+    let (flux, retained) = transport_vertical::<FROZEN>(
+        first,
+        velocity[0][1],
+        above_mobility[0],
+        below_mobility[0],
+        z,
+        h,
+        flow_dt,
+    );
+    vertical_flux[0] = flux;
+    output[0] = retained;
     for x in 1..w - 1 {
-        horizontal_load[x] = horizontal_load[x]
+        let load = source[x] - horizontal_flux[x].abs()
             + upper(horizontal_flux[x - 1], 0.0)
             + upper(-horizontal_flux[x + 1], 0.0);
+        let (flux, retained) = transport_vertical::<FROZEN>(
+            load,
+            velocity[x][1],
+            above_mobility[x],
+            below_mobility[x],
+            z,
+            h,
+            flow_dt,
+        );
+        vertical_flux[x] = flux;
+        output[x] = retained;
     }
-    horizontal_load[w - 1] += upper(horizontal_flux[w - 2], 0.0);
-    for x in 0..w {
-        let d = velocity[x][1] * flow_dt;
-        let allowed = if d < 0.0 {
-            z > 0 && (!FROZEN || above_mobility[x] > 0.0)
-        } else {
-            z + 1 < h && (!FROZEN || below_mobility[x] > 0.0)
-        };
-        let transfer = if allowed {
-            horizontal_load[x] * d.abs()
-        } else {
-            0.0
-        };
-        vertical_flux[x] = transfer.copysign(d);
-        output[x] = horizontal_load[x] - transfer;
-    }
+    let last = source[w - 1] - horizontal_flux[w - 1].abs() + upper(horizontal_flux[w - 2], 0.0);
+    let (flux, retained) = transport_vertical::<FROZEN>(
+        last,
+        velocity[w - 1][1],
+        above_mobility[w - 1],
+        below_mobility[w - 1],
+        z,
+        h,
+        flow_dt,
+    );
+    vertical_flux[w - 1] = flux;
+    output[w - 1] = retained;
+}
+
+#[inline(always)]
+fn transport_vertical<const FROZEN: bool>(
+    load: f32,
+    velocity: f32,
+    above_mobility: f32,
+    below_mobility: f32,
+    z: usize,
+    h: usize,
+    flow_dt: f32,
+) -> (f32, f32) {
+    let d = velocity * flow_dt;
+    let allowed = if d < 0.0 {
+        z > 0 && (!FROZEN || above_mobility > 0.0)
+    } else {
+        z + 1 < h && (!FROZEN || below_mobility > 0.0)
+    };
+    let transfer = if allowed { load * d.abs() } else { 0.0 };
+    (transfer.copysign(d), load - transfer)
 }
 
 #[inline(never)]
@@ -1040,7 +1238,6 @@ fn transport_gather<const FROZEN: bool>(
         material.len() == n && scratch.len() == n && velocity.len() == n && mobility.len() == n
     );
     let mut horizontal_flux = vec![0.0; w];
-    let mut horizontal_load = vec![0.0; w];
     let mut flux = vec![0.0; w * 3];
     for z in 0..h {
         let start = z * w;
@@ -1053,7 +1250,7 @@ fn transport_gather<const FROZEN: bool>(
             above,
             below,
             &mut horizontal_flux,
-            &mut horizontal_load,
+            0,
             &mut flux[(z % 3) * w..(z % 3 + 1) * w],
             &mut scratch[start..start + w],
             z,
@@ -1101,25 +1298,6 @@ fn inactive_thermal_margin(height: &[f32], w: usize, h: usize, talus: f32) -> f6
         }
     }
     margin.next_down()
-}
-
-#[cfg(all(target_arch = "wasm32", feature = "simd"))]
-#[target_feature(enable = "simd128")]
-unsafe fn evaporate_simd(water: &mut [f32], factor: f32) {
-    use std::arch::wasm32::{f32x4_mul, f32x4_splat, v128_load, v128_store};
-    let factor4 = f32x4_splat(factor);
-    let mut chunks = water.chunks_exact_mut(4);
-    for chunk in &mut chunks {
-        // Each chunk contains exactly four valid f32 lanes; unaligned v128
-        // access is supported and the operation matches scalar multiplication.
-        unsafe {
-            let value = v128_load(chunk.as_ptr().cast());
-            v128_store(chunk.as_mut_ptr().cast(), f32x4_mul(value, factor4));
-        }
-    }
-    for value in chunks.into_remainder() {
-        *value *= factor;
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
