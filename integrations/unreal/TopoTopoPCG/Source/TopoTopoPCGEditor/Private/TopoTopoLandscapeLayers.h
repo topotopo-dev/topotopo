@@ -25,5 +25,5 @@ bool DecodeWeightPNG(const TArray<uint8>& Bytes, int32 Width, int32 Height, TArr
  * AssetName includes the LI_ prefix; Filename is absolute. Failure leaves Out empty.
  */
 bool ReadWeightLayers(const TSharedPtr<FJsonObject>& Manifest, const FString& Directory, int32 Width,
-    int32 Height, TArray<FWeightLayer>& Out, FString& Error);
+    int32 Height, TArray<FWeightLayer>& Out, FString& Error, const FString& LayerSubdirectory = TEXT("layers"));
 }

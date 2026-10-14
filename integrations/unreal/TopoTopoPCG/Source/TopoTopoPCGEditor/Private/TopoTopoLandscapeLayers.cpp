@@ -79,7 +79,7 @@ bool DecodeWeightPNG(const TArray<uint8>& Bytes, int32 Width, int32 Height, TArr
 }
 
 bool ReadWeightLayers(const TSharedPtr<FJsonObject>& Manifest, const FString& Directory, int32 Width,
-    int32 Height, TArray<FWeightLayer>& Out, FString& Error)
+    int32 Height, TArray<FWeightLayer>& Out, FString& Error, const FString& LayerSubdirectory)
 {
     Out.Reset();
     Error.Reset();
@@ -96,7 +96,7 @@ bool ReadWeightLayers(const TSharedPtr<FJsonObject>& Manifest, const FString& Di
         return false;
     }
 
-    FString LayerDirectory = FPaths::ConvertRelativePathToFull(Directory / TEXT("layers"));
+    FString LayerDirectory = FPaths::ConvertRelativePathToFull(Directory / LayerSubdirectory);
     FPaths::NormalizeDirectoryName(LayerDirectory);
     FPaths::CollapseRelativeDirectories(LayerDirectory);
     TArray<FWeightLayer> Parsed;
@@ -153,7 +153,7 @@ bool ReadWeightLayers(const TSharedPtr<FJsonObject>& Manifest, const FString& Di
         FPaths::NormalizeFilename(Layer.Filename);
         FPaths::CollapseRelativeDirectories(Layer.Filename);
         if (!FPaths::IsRelative(RelativeFile) || RelativeFile.Contains(TEXT(":")) ||
-            !RelativeFile.StartsWith(TEXT("layers/")) ||
+            !RelativeFile.StartsWith(LayerSubdirectory + TEXT("/")) ||
             !FPaths::IsUnderDirectory(Layer.Filename, LayerDirectory) ||
             !FPaths::GetExtension(Layer.Filename).Equals(TEXT("png"), ESearchCase::IgnoreCase) ||
             !FPaths::FileExists(Layer.Filename))
