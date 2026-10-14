@@ -228,6 +228,57 @@ for (const [width, heightCount] of [[2, 2], [3, 5], [4, 4], [7, 6], [8, 9], [17,
   }
 }
 
+// Row streaming must preserve active thermal updates and the final partial cadence.
+// Sharp alternating ridges invalidate cached gradients, including beside masked cells.
+for (const [width, heightCount] of [[7, 8], [8, 7], [33, 25], [64, 65]]) {
+  const count = width * heightCount;
+  const terrain = Float32Array.from({ length: count }, (_, i) => 4 + (i % width % 3 === 0 ? 2 : 0)
+    + Math.abs(Math.floor(i / width) - (heightCount - 1) / 2) / 4);
+  const hardness = Float32Array.from({ length: count }, (_, i) => i % 13 === 0 ? 1 : i % 5 === 0 ? 0.5 : 0);
+  const freeze = Float32Array.from({ length: count }, (_, i) => i % 17 === 0 ? 1 : 0);
+  const rain = Float32Array.from({ length: count }, (_, i) => (i % 3) / 2);
+  for (const thermal_interval of [1, 4]) for (const boundary of ['closed', 'open']) for (const fill_sinks of [false, true]) {
+    const label = `${width}x${heightCount}, active thermal interval ${thermal_interval}, ${boundary}, fill ${fill_sinks}`;
+    compare('erode_pipe', label, k => k.erode_pipe(terrain, hardness, freeze, rain, width, heightCount, 0.5,
+      { iterations: 9, thermal_interval, thermal_rate: 0.1, talus_angle: 0, boundary,
+        rain_amount: 0.03, fill_sinks, stream_power_k: fill_sinks ? 0.03 : 0 }, 19n));
+  }
+}
+
+// Default radius 3 has a 5x5 active brush. Also cover wider SIMD rows and droplets
+// crossing the 32-cell sorting tiles, plus clipped brushes on small domains.
+for (const [width, heightCount] of [[5, 7], [17, 19], [35, 33]]) {
+  const count = width * heightCount;
+  const terrain = Float32Array.from({ length: count }, (_, i) => 4 + (heightCount - 1 - Math.floor(i / width)) / 8
+    + Math.abs(i % width - width / 2) / 16 + (i % 11) / 32);
+  const hardness = Float32Array.from({ length: count }, (_, i) => i % 7 === 0 ? 1 : 0);
+  const freeze = Float32Array.from({ length: count }, (_, i) => i % 13 === 0 ? 0.5 : 0);
+  for (const erosion_radius of [1, 3, 4, 8]) for (const masked of [false, true])
+    compare('erode_droplet', `${width}x${heightCount}, brush radius ${erosion_radius}, masked ${masked}`, k =>
+      k.erode_droplet(terrain, masked ? hardness : empty, masked ? freeze : empty, width, heightCount, 0.5,
+        { iterations: 5, rain_density: 0.2, max_lifetime: 20, erosion_radius, thermal_rate: 0 }, 23n));
+}
+
+// Brush/deposit optimizations must preserve final speed and material on every
+// exit: lifetime exhaustion, an immediate stall, and an open/closed edge.
+for (const flat of [false, true]) {
+  const width = 7, heightCount = 5;
+  const terrain = Float32Array.from({ length: width * heightCount }, (_, i) => flat ? 3
+    : 1 + (width - 1 - i % width) / 2 + (heightCount - 1 - Math.floor(i / width)) / 8);
+  for (const max_lifetime of [1, 2, 3]) for (const boundary of ['closed', 'open']) for (const evaporation of [0, 1])
+    compare('erode_droplet', `${flat ? 'stalled flat' : 'edge slope'}, lifetime ${max_lifetime}, ${boundary}, evaporation ${evaporation}`, k =>
+      k.erode_droplet(terrain, empty, empty, width, heightCount, 0.5,
+        { iterations: 3, rain_density: 1, max_lifetime, boundary, evaporation, erosion_radius: 3, thermal_rate: 0 }, 7n));
+}
+{
+  const width = 9, heightCount = 5;
+  const plateau = Float32Array.from({ length: width * heightCount }, (_, i) => Math.max(1, 4 - i % width));
+  for (const max_lifetime of [1, 2, 3]) for (const evaporation of [0, 1])
+    compare('erode_droplet', `slope enters stalled plateau, lifetime ${max_lifetime}, evaporation ${evaporation}`, k =>
+      k.erode_droplet(plateau, empty, empty, width, heightCount, 0.5,
+        { iterations: 2, rain_density: 1, max_lifetime, evaporation, inertia: 0, erosion_rate: 0, thermal_rate: 0 }, 7n));
+}
+
 // Priority flood: flat receivers, epsilon slopes, protected outlets and retained lake water.
 for (const [width, heightCount] of [[2, 2], [7, 9], [16, 16], [33, 25]]) {
   const count = width * heightCount;

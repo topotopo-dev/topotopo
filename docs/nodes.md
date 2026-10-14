@@ -6963,7 +6963,7 @@ Houdini: HeightField Erode. The default droplet/js path retains the original see
 |---|---|---|---|---|---|---|
 | `method` | enum | `"droplet"` |  | `droplet`, `pipe`, `stream_power` |  | droplet = seeded particles; pipe = shallow-water grid; stream_power = pipe plus drainage-driven incision |
 | `backend` | enum | `"js"` |  | `auto`, `kernel`, `js` |  | js preserves the original droplet result; kernel loads WASM; auto uses WASM only if already loaded, otherwise js (pipe methods require WASM) |
-| `iterations` | int | `50` | 0..5000 |  | `iter`, `steps` | rain passes (each followed by a thermal pass) |
+| `iterations` | int | `50` | 0..5000 |  | `iter`, `steps` | rain passes; pipe methods use thermal_interval to schedule thermal passes |
 | `seed` | float | `0` |  |  |  | random seed |
 | `erosion_rate` | float | `0.3` | 0..1 |  | `erodability`, `erode_rate`, `erosion` | fraction of free capacity picked up per droplet step, or erosion rate per second for pipe |
 | `deposition_rate` | float | `0.3` | 0..1 |  | `deposit_rate`, `deposition` | fraction of excess sediment deposited per droplet step, or deposition rate per second for pipe |
@@ -6977,7 +6977,8 @@ Houdini: HeightField Erode. The default droplet/js path retains the original see
 | `erosion_radius` | int | `3` | 1..8 |  | `brush_radius` | droplet only: erosion footprint radius (samples) |
 | `max_lifetime` | int | `30` | 1..256 |  | `lifetime`, `max_steps` | droplet only: maximum steps per particle |
 | `thermal_talus_angle` | float | `40` | 0..89 |  | `talus_angle`, `repose_angle`, `cut_angle` | thermal: angle of repose in degrees (steeper slopes shed material) |
-| `thermal_rate` | float | `0.1` | 0..1 |  | `thermal` | thermal: fraction of the excess moved per iteration (0 = no thermal erosion) |
+| `thermal_rate` | float | `0.1` | 0..1 |  | `thermal` | thermal: fraction of the excess moved per thermal pass (0 = no thermal erosion) |
+| `thermal_interval` | int | `1` | 1..10000 |  |  | pipe/stream_power only: thermal pass every N iterations and on the final iteration; skips intervening relaxations without multiplying thermal_rate (1 preserves the default result) |
 | `hardness_layer` | string | `""` |  |  |  | optional 0..1 layer: 1 = rock that does not erode |
 | `freeze_layer` | string | `""` |  |  |  | optional 0..1 layer: 1 = frozen (unchanged), e.g. under buildings or roads |
 | `rain_layer` | string | `""` |  |  |  | pipe only: optional nonnegative layer multiplying uniform rain_amount (0 = dry) |

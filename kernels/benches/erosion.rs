@@ -9,8 +9,18 @@ fn main() {
         .find_map(|a| a.strip_prefix("--runs="))
         .map_or(3, |value| value.parse().expect("--runs must be an integer"));
     assert!((1..=10).contains(&runs));
+    let thermal_interval: u32 = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--thermal-interval="))
+        .map_or(1, |value| {
+            value
+                .parse()
+                .expect("--thermal-interval must be an integer")
+        });
+    assert!((1..=10_000).contains(&thermal_interval));
     let pipe_only = args.iter().any(|a| a == "--pipe-only");
     let droplet_only = args.iter().any(|a| a == "--droplet-only");
+    assert!(!(pipe_only && droplet_only));
     let w = 1024usize;
     let height: Vec<f32> = (0..w * w)
         .map(|i| 32.0 + (w - 1 - i / w) as f32 / 64.0 + (i % w).abs_diff(w / 2) as f32 / 128.0)
@@ -19,6 +29,7 @@ fn main() {
         iterations: 200,
         rain_amount: 0.01,
         thermal_rate: 0.1,
+        thermal_interval,
         ..Default::default()
     };
     let mut times = Vec::new();
@@ -28,16 +39,20 @@ fn main() {
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         let checksum: f64 = r.height.iter().map(|&v| v as f64).sum();
         println!(
-            "pipe native 1024^2 x 200 closed rain=.01 thermal=.1 run {run}: {ms:.3} ms, height sum {checksum:.9}"
+            "pipe native 1024^2 x 200 closed rain=.01 thermal=.1 interval={thermal_interval} run {run}: {ms:.3} ms, height sum {checksum:.9}"
         );
         times.push(ms);
         black_box(r);
     }
-    times.sort_by(f64::total_cmp);
     if !times.is_empty() {
+        let mut sorted = times.clone();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted[sorted.len() / 2];
+        println!("pipe native release median: {median:.3} ms; target 2000 ms");
+        // Consumed by bench/erosion.ts --native; Debug's finite f64 list is valid JSON.
         println!(
-            "pipe native release median: {:.3} ms; target 2000 ms",
-            times[times.len() / 2]
+            "{{\"name\":\"pipe native\",\"milliseconds\":{times:?},\"median\":{median},\"thermalInterval\":{thermal_interval},\"profile\":{}}}",
+            cfg!(feature = "profile")
         );
     }
     if pipe_only {

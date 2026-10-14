@@ -46,6 +46,7 @@ try {
   check(!getLoadedKernels(), 'import and engine init leave kernels unloaded');
   const original = await cook(graph());
   check(!heightfieldsOf(original)[0].layer('wear'), 'default JS preserves the historical layer schema');
+  assert.deepEqual(fingerprint(await cook(graph({ thermal_interval: 4 }))), fingerprint(original), 'droplet keeps its thermal cadence'); checks++;
   assert.deepEqual(fingerprint(await cook(graph({ backend: 'auto' }))), fingerprint(original)); checks++;
   const unavailable = await off.cook(graph({ method: 'pipe', backend: 'auto' }));
   check(!unavailable.ok && /kernel/i.test(unavailable.errors.map(e => e.message).join('; ')), 'auto pipe without loaded kernel errors clearly');
@@ -79,6 +80,8 @@ try {
     ['filled drainage', { type: 'heightfield_flow', in: ['basin'], params: { fill_sinks: true, method: 'dinf' } }],
     ['stream power over pits', { type: 'heightfield_erode', in: ['basin'], params: { method: 'stream_power', backend: 'kernel', fill_sinks: true, iterations: 3 } }],
     ['pipe lake water', { type: 'heightfield_erode', in: ['lakes'], params: { method: 'pipe', backend: 'kernel', iterations: 3, rain_amount: 0 } }],
+    ['pipe sparse thermal passes', { type: 'heightfield_erode', in: ['basin'], params: { method: 'pipe', backend: 'kernel', iterations: 9, thermal_interval: 4, thermal_talus_angle: 0 } }],
+    ['filled stream power sparse thermal passes', { type: 'heightfield_erode', in: ['basin'], params: { method: 'stream_power', backend: 'kernel', fill_sinks: true, iterations: 9, thermal_interval: 4, thermal_talus_angle: 0 } }],
   ] as Array<[string, NodeSpec]>) {
     const floodGraph: GraphSpec = { nodes: { ...floodSource, out: node }, output: 'out' };
     const single = await cook(floodGraph), pooled = await cook(floodGraph, on);
@@ -87,6 +90,22 @@ try {
   const loadedAuto = heightfieldsOf(await cook(graph({ backend: 'auto' })))[0];
   check(!!loadedAuto.layer('wear'), 'loading kernels invalidates a previously cached auto JS fallback');
   assert.deepEqual(loadedAuto.layers, heightfieldsOf(await cook(graph({ backend: 'kernel' })))[0].layers); checks++;
+  // With hydraulic changes disabled, cadence selects exactly the same sequence
+  // of thermal relaxations; a partial final interval still performs one pass.
+  const thermalOnly = { rainAmount: 0, erosionRate: 0, depositionRate: 0, talusAngle: 0, thermalRate: 0.1 };
+  const scheduled = kernels.erode_pipe(basin, null, 9, 9, 1, { ...thermalOnly, iterations: 9, thermalInterval: 4 });
+  const threePasses = kernels.erode_pipe(basin, null, 9, 9, 1, { ...thermalOnly, iterations: 3 });
+  assert.deepEqual(scheduled, threePasses, 'iterations 4, 8 and 9 perform exactly three thermal passes'); checks++;
+  const onePass = kernels.erode_pipe(basin, null, 9, 9, 1, { ...thermalOnly, iterations: 1 });
+  assert.deepEqual(kernels.erode_pipe(basin, null, 9, 9, 1, { ...thermalOnly, iterations: 3, thermalInterval: 4 }), onePass,
+    'final iteration performs thermal work even before the first full interval'); checks++;
+  check(scheduled.height.some((v, i) => v !== onePass.height[i]), 'active thermal fixture distinguishes one and three passes');
+  assert.deepEqual(kernels.erode_pipe(basin, null, 9, 9, 1, { ...thermalOnly, iterations: 3, thermalInterval: 1 }), threePasses,
+    'explicit interval one preserves the default result'); checks++;
+  const nodeThermal = { method: 'pipe', backend: 'kernel', rain_amount: 0, erosion_rate: 0, deposition_rate: 0, thermal_talus_angle: 0 };
+  const scheduledNode = heightfieldsOf(await cook(graph({ ...nodeThermal, iterations: 9, thermal_interval: 4 })))[0];
+  const threePassNode = heightfieldsOf(await cook(graph({ ...nodeThermal, iterations: 3 })))[0];
+  assert.deepEqual(scheduledNode.layers, threePassNode.layers, 'node forwards thermal_interval to the kernel'); checks++;
   const w = 65, h = 49, n = w * h, cell = 0.15, iterations = 30;
   const noise = fractal(makeNoise('simplex', 1), { octaves: 6 });
   const heights = Float32Array.from({ length: n }, (_, i) => 4 + 1.4 * noise((i % w) * 0.045, 0, Math.floor(i / w) * 0.045));
@@ -200,6 +219,9 @@ try {
   assert.throws(() => kernels.fill_sinks(flat, 9, 9, {}, new Float32Array(4))); checks++;
   assert.throws(() => kernels.erode_pipe(flat, null, 9, 9, 1, { initialWater: new Float32Array(4) })); checks++;
   assert.throws(() => kernels.erode_pipe(flat, null, 9, 9, 1, { initialWater: new Float32Array(81).fill(-1) })); checks++;
+  for (const thermalInterval of [0, -1, 1.5, 10001, Infinity, NaN]) {
+    assert.throws(() => kernels.erode_pipe(flat, null, 9, 9, 1, { thermalInterval }), /thermal_interval|pipe parameters/); checks++;
+  }
   // Check generated WASM directly too: malformed options must return a validation error, never a trap.
   const raw = kernelsWasmVariant === 'simd'
     ? await import('../kernels/pkg-simd/topotopo_kernels.js')
@@ -213,6 +235,8 @@ try {
     () => raw.erode_droplet(flat, empty, empty, 9, 9, 1, { boundary: 'sideways' }, 0n),
     () => raw.erode_pipe(flat, empty, empty, empty, 9, 9, 1, { rain_amount: 1e40 }, 0n),
     () => raw.erode_pipe(flat, empty, empty, empty, 9, 9, 1, { iterations: -1 }, 0n),
+    () => raw.erode_pipe(flat, empty, empty, empty, 9, 9, 1, { thermal_interval: 0 }, 0n),
+    () => raw.erode_pipe(flat, empty, empty, empty, 9, 9, 1, { thermal_interval: 1.5 }, 0n),
     () => raw.erode_pipe(flat, empty, empty, empty, -1, 9, 1, {}, 0n),
     () => raw.erode_pipe(flat, empty, empty, new Float32Array(81).fill(-1), 9, 9, 1, {}, 0n),
     () => raw.thermal_erode(flat, empty, 9, 9, 1, Infinity, 0.2, 1),
