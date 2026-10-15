@@ -1144,8 +1144,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   drawText(out, outW, outH, 6 * ui, fy, (o.title ? o.title.toUpperCase() + '  ' : '') + stats, [0.85, 0.85, 0.85], 2 * ui, false);
   if (legend) {
     const lx = outW - textWidth(legend, 2 * ui) - 8 * ui;
+    // drawn when it fits; the note below reports it either way (once)
     if (lx > textWidth(stats, 2 * ui) + 30 * ui) drawText(out, outW, outH, lx, fy, legend, [1, 0.85, 0.4], 2 * ui, false);
-    else notes.push(legend.toLowerCase());
   }
   if (labelsSkipped) notes.push(`labels: ${labelsSkipped} not drawn to avoid overlaps (raise size, zoom in, or lower max_labels)`);
   if (annotate) {

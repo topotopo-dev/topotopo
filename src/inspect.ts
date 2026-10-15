@@ -98,7 +98,11 @@ export function summarize(g: Geometry): string {
     const t = g.table(cls);
     if (!t.map.size) continue;
     const items = [...t.map].map(([k, a]) => {
-      if (cls === 'detail') return `${k} ${typeCode(a)} = ${fmtAttr(a, 0)}`;
+      if (cls === 'detail') {
+        // the summary stays readable: long values (e.g. the materials JSON) are cut; detail "attributes" shows them whole
+        const v = fmtAttr(a, 0);
+        return `${k} ${typeCode(a)} = ${v.length > 120 ? `${v.slice(0, 100)}… (${v.length} chars)` : v}`;
+      }
       if (a.isArray) return `${k} ${a.type} (${arrayLens(a, t.count)})`;
       if (a.type === 'string') { const u = new Set(a.data as string[]); return `${k} s (${u.size} unique)`; }
       return `${k} ${typeCode(a)}`;
