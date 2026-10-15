@@ -343,7 +343,7 @@ ${p.abs ? '' : `<link rel="canonical" href="${esc(canonical)}">
 ${body.trim()}
 </main>
 <footer class="site-footer"><div class="wrap">
-<p>TopoTopo is open source under the ${esc(pkg.license ?? 'Apache-2.0')} licence. <a href="${esc(REPO)}">Source on GitHub</a>${CONTACT ? ` · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>` : ''}</p>
+<p>TopoTopo is open source under the ${esc(pkg.license ?? 'Apache-2.0')} licence. <a href="${esc(REPO)}">Source on GitHub</a> · <a href="https://github.com/sponsors/faxlab">Sponsor</a>${CONTACT ? ` · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>` : ''}</p>
 <p>Generated from ${sha} by <code>scripts/gen-site.ts</code>: every page is built from the files in the repository.</p>
 </div></footer>
 </body>
