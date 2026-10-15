@@ -175,7 +175,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   };
 
   const resolveNodeGeo = async (a: any) => {
-    const name = a.graph ?? 'main';
+    const name = a.graph ?? a.name ?? 'main'; // `name` is what build/edit call it; accept both
     const g = ws.getGraph(name);
     const target = a.node || undefined;
     const r = await engine.cook(g, { target, frame: a.frame });
@@ -302,7 +302,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       inputSchema: {
         type: 'object',
         properties: {
-          graph: { type: 'string' }, node: { type: 'string' },
+          graph: { type: 'string', description: 'graph name (default "main")' }, node: { type: 'string', description: 'node to look at (default: the graph output)' },
           ...RENDER_PROPS,
           save_to: { type: 'string', description: 'also write the PNG to this path (relative to the workspace)' },
           ...FRAME_PROP,
@@ -331,7 +331,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         type: 'object',
         required: ['path'],
         properties: {
-          graph: { type: 'string' }, node: { type: 'string' },
+          graph: { type: 'string', description: 'graph name (default "main")' }, node: { type: 'string', description: 'node to look at (default: the graph output)' },
           path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap), "exports/level" (unreal_landscape: a directory), "exports/maps" (textures: a directory)' },
           format: { type: 'string', enum: EXPORT_FORMATS, description: 'default: from the extension (.points.json = pointsjson)' },
           layer: { type: 'string', description: 'heightmaps: layer to write (png16/r16 default "height", mask_png default "mask")' },
