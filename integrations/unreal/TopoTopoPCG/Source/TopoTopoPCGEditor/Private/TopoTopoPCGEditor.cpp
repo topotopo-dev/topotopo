@@ -28,6 +28,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "ToolMenus.h"
 #include "TopoTopoStream.h"
+#include "TopoTopoAssetFolderPipeline.h"
 #include "TopoTopoLandscapeImport.h"
 #include "TopoTopoTileInstances.h"
 #include "UObject/StrongObjectPtr.h"
@@ -83,7 +84,7 @@ static bool BundleFile(const FString& Directory, const FString& Relative, FStrin
     return true;
 }
 
-static bool ImportGLB(const FString& File, const FString& Folder, const FString& PrototypeName,
+bool ImportGLB(const FString& File, const FString& Folder, const FString& PrototypeName,
     TArray<UStaticMesh*>& OutMeshes, FString& Error)
 {
     UInterchangeGenericAssetsPipeline* Template = LoadObject<UInterchangeGenericAssetsPipeline>(nullptr,
@@ -108,6 +109,9 @@ static bool ImportGLB(const FString& File, const FString& Folder, const FString&
     Parameters.OverridePipelines.Add(FSoftObjectPath(Pipeline.Get()));
     // The second native glTF pipeline maps glTF materials to the engine's material templates.
     Parameters.OverridePipelines.Add(FSoftObjectPath(TEXT("/Interchange/Pipelines/DefaultGLTFPipeline.DefaultGLTFPipeline")));
+    // Last: materials and textures into sub-folders, so none can take a prototype mesh's name.
+    TStrongObjectPtr<UTopoTopoAssetFolderPipeline> Folders(NewObject<UTopoTopoAssetFolderPipeline>(GetTransientPackage()));
+    Parameters.OverridePipelines.Add(FSoftObjectPath(Folders.Get()));
     TStrongObjectPtr<UInterchangeSourceData> Source(UInterchangeManager::CreateSourceData(File));
     TArray<UObject*> Imported;
     if (!UInterchangeManager::GetInterchangeManager().ImportAsset(Folder, Source.Get(), Parameters, Imported))

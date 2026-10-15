@@ -42,4 +42,9 @@ bool ReadLandscape(const FString& Directory, FLandscapeData& Out, FString& Error
 // Shared by the scene command and the isolated editor acceptance test. Transient mode registers/saves no assets.
 ALandscape* ImportLandscape(UWorld* World, const FLandscapeData& Data, const FString& Destination,
     bool bMaterial, bool bTransient, FString& Error);
+
+// Imports one glTF/GLB through Interchange into Folder. With PrototypeName, the static mesh is named after it and
+// stays at Folder/<PrototypeName>; materials and textures go to Folder/Materials and Folder/Textures.
+bool ImportGLB(const FString& File, const FString& Folder, const FString& PrototypeName,
+    TArray<class UStaticMesh*>& OutMeshes, FString& Error);
 }

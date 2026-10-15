@@ -1,6 +1,8 @@
 # TopoTopoPCG for Unreal Engine 5.8
 
-Plugin version **0.1.3** (descriptor version 4) adds tiled Landscape bundles.
+Plugin version **0.1.4** (descriptor version 5) keeps prototype meshes at `<set>/Meshes/<name>` even when a glTF
+material has the same name (materials and textures now go to `Meshes/Materials` and `Meshes/Textures`); 0.1.3 added
+tiled Landscape bundles.
 
 Copyright 2026 faxcorp, Apache-2.0. Original plugin code, no third-party code or new npm dependencies.
 Unreal Engine and its plugins remain subject to Epic's licences.
@@ -27,11 +29,11 @@ From the repository root in PowerShell:
 ```powershell
 npm run export:demo
 $plugin = (Resolve-Path integrations/unreal/TopoTopoPCG/TopoTopoPCG.uplugin).Path
-$session = Join-Path (Get-Location) 'integrations/unreal/_build/session16'
+$session = Join-Path (Get-Location) 'integrations/unreal/_build/session17'
 New-Item -ItemType Directory -Force -Path $session | Out-Null
 $package = Join-Path $session 'TopoTopoPCG'
 & 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin "-Plugin=$plugin" "-Package=$package" -TargetPlatforms=Win64 -Rocket *> (Join-Path $session 'BuildPlugin.log')
-if ($LASTEXITCODE -ne 0) { throw 'BuildPlugin failed; see integrations/unreal/_build/session16/BuildPlugin.log' }
+if ($LASTEXITCODE -ne 0) { throw 'BuildPlugin failed; see integrations/unreal/_build/session17/BuildPlugin.log' }
 ```
 
 BuildPlugin runs the compiler without opening an editor. The package output, intermediate files and logs are
@@ -55,8 +57,9 @@ assignment. With `layers=0 material=1`, the generated material is a simple grass
 no effect when `landscape=0` (the default); the dialog enables their controls when Landscape import is selected.
 
 See [the editor command and detailed import limits](EDITOR_WORKFLOW.md). The command uses native Interchange
-GLB pipelines, keeps the mesh split by name and imports materials. Prototypes go into `<set>/Meshes`, expanded
-reference meshes into `<set>/Objects`. Only ordinary objects absent from the prototype list are placed from the
+GLB pipelines, keeps the mesh split by name and imports materials. Prototypes go into `<set>/Meshes` (their
+materials and textures into `Meshes/Materials` and `Meshes/Textures`, so a material never takes a mesh's name),
+expanded reference meshes into `<set>/Objects`. Only ordinary objects absent from the prototype list are placed from the
 expanded file; placing its tree/rock reference meshes too would duplicate the CSV instances. Assets and level
 changes remain unsaved for review. Repeated imports require a fresh destination folder.
 
