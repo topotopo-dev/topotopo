@@ -26,6 +26,12 @@ export interface ExportOptions {
   quantize?: boolean;
   /** glTF: write materials from the prim "material" attribute and the detail table (default true) */
   materials?: boolean;
+  /**
+   * glTF: a named material's base colour is the factor even where Cd varies (COLOR_0 is still written). For engines
+   * whose default materials ignore vertex colours (Unreal Interchange), where glTF's white factor × COLOR_0 imports
+   * white; spec viewers then show factor × COLOR_0. The unreal_landscape bundle sets it. Default false.
+   */
+  materialColorWins?: boolean;
   /** glTF: polylines as one LINE_STRIP per curve ('strip', default) or one LINES primitive ('lines') */
   lineMode?: 'strip' | 'lines';
   /** csv / points JSON: point attributes to write (names or a comma/space separated list; default all) */

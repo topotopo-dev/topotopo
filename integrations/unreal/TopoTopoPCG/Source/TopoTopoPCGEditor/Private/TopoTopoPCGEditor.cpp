@@ -262,10 +262,15 @@ static bool Run(FOptions Options, FString& Message)
         UE_LOG(LogTopoTopoImport, Display, TEXT("Mesh mapping: %s -> %s"), *Name, *Meshes[0]->GetPathName());
     }
     TArray<UStaticMesh*> ExpandedMeshes;
+    // Ordinary objects (buildings, roads): objects_static.glb holds only them (exporter 0.2+, written at any instance
+    // count); older bundles carry them inside objects_expanded.glb next to reference copies of the prototypes, which
+    // that file omits above its size limit.
+    const FString Static = Options.Directory / TEXT("objects_static.glb");
     const FString Expanded = Options.Directory / TEXT("objects_expanded.glb");
-    if (Options.bExpandedObjects && FPaths::FileExists(Expanded) &&
-        !ImportGLB(Expanded, Options.Destination / TEXT("Objects"), FString(), ExpandedMeshes, Message)) { return false; }
-    if (!ExpandedMeshes.IsEmpty())
+    const bool bStaticObjects = FPaths::FileExists(Static);
+    if (Options.bExpandedObjects && (bStaticObjects || FPaths::FileExists(Expanded)) &&
+        !ImportGLB(bStaticObjects ? Static : Expanded, Options.Destination / TEXT("Objects"), FString(), ExpandedMeshes, Message)) { return false; }
+    if (!ExpandedMeshes.IsEmpty() && !bStaticObjects)
     {
         TSet<FName> ExpandedNames;
         for (const UStaticMesh* Mesh : ExpandedMeshes) { ExpandedNames.Add(Mesh->GetFName()); }
@@ -320,8 +325,9 @@ static bool Run(FOptions Options, FString& Message)
     int32 ObjectCount = 0;
     for (UStaticMesh* Mesh : ExpandedMeshes)
     {
-        // Expanded per-name trees/rocks are reference meshes. Only place names absent from the stream (e.g. road).
-        if (!SanitizedNames.Contains(Mesh->GetFName()))
+        // objects_static.glb has only ordinary meshes: place them all. Expanded per-name trees/rocks are reference
+        // meshes: from that file only names absent from the stream (e.g. road) are placed.
+        if (bStaticObjects || !SanitizedNames.Contains(Mesh->GetFName()))
         {
             AddInstances(Actor, Mesh, Mesh->GetName(), {FTransform::Identity});
             ++ObjectCount;

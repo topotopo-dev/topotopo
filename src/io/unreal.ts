@@ -9,7 +9,9 @@
 //   objects.glb              the geometry's meshes and packed instances (EXT_mesh_gpu_instancing), when it has prims
 //   objects_expanded.glb     the same with the instances as real geometry (for importers without the extension;
 //                            written up to EXPANDED_TRIANGLE_LIMIT triangles)
-//   instances.csv            the instance stream as Unreal PCG rows (one row per packed instance, Mesh column)
+//   objects_static.glb       only the ordinary (non-instanced) meshes, at any instance count: what the Unreal plugin
+//                            places as level geometry next to the instance stream (buildings, roads)
+//   instances.csv           the instance stream as Unreal PCG rows (one row per packed instance, Mesh column)
 //   instances.meshes.json    Mesh → meshes/<Mesh>.glb, one GLB per packed source (metres, Y-up, at the origin)
 //   tiles/<x>_<y>/          opt-in tile_size (quads): overlapping heightmaps, weight layers and instance CSVs;
 //                            version 2 adds tiles and tile_grid; root source files and shared meshes are retained
@@ -27,7 +29,7 @@ import { exportGLB } from './gltf.ts';
 import { exportCSV, instanceMeshesJSON } from './points.ts';
 import { safeName } from './common.ts';
 import type { ExportOptions } from './common.ts';
-import { expandedTriangles, flattenSource } from '../core/packed.ts';
+import { expandedTriangles, flattenSource, stripPacked } from '../core/packed.ts';
 import { packedPrims, packedSourceNames } from './common.ts';
 
 export interface BundleFile { path: string; bytes: Uint8Array }
@@ -139,14 +141,22 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
     });
   }
   // meshes and instances of the same geometry
-  let objects: string | null = null, expanded: string | null = null, instances: Record<string, any> | null = null;
-  const glbOpts: ExportOptions = { materials: o.materials, readFile: o.readFile, warn: o.warn, custom: o.custom };
+  let objects: string | null = null, expanded: string | null = null, statics: string | null = null, instances: Record<string, any> | null = null;
+  // Unreal's default glTF materials ignore vertex colours: the material colour must be the factor
+  const glbOpts: ExportOptions = { materials: o.materials, readFile: o.readFile, warn: o.warn, custom: o.custom, materialColorWins: true };
   if (g.numPrims > 0) {
     files.push({ path: 'objects.glb', bytes: await exportGLB(g, glbOpts) });
     objects = 'objects.glb';
     if (g.hasPacked() && expandedTriangles(g) <= EXPANDED_TRIANGLE_LIMIT) {
       files.push({ path: 'objects_expanded.glb', bytes: await exportGLB(g, { ...glbOpts, instancing: 'expand' }) });
       expanded = 'objects_expanded.glb';
+    }
+    // the ordinary meshes alone (buildings, roads): small at any instance count, so an importer can place them as
+    // level geometry next to the instance stream even when objects_expanded.glb is skipped for size
+    const plain = stripPacked(g);
+    if (plain.numPrims > 0) {
+      files.push({ path: 'objects_static.glb', bytes: await exportGLB(plain, glbOpts) });
+      statics = 'objects_static.glb';
     }
   }
   if (g.hasPacked()) {
@@ -181,6 +191,7 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
     layers,
     objects,
     objects_expanded: expanded,
+    objects_static: statics,
     instances,
     manual_import: LANDSCAPE_IMPORT_STEPS,
   };

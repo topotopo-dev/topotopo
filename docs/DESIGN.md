@@ -202,7 +202,9 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   **Values are written as they are** (round(v × 255) in 8-bit files; no transfer curve). Data maps are linear by
   nature; colour layers hold display values exactly as colour params and Cd do (`"#a5462e"` → 0.65, 0.27, 0.18, and the
   renderer shows those numbers), so a base colour PNG has the bytes of the colours that made it and glTF/USD read it
-  as sRGB as they require. The alternative, linear colour in memory with sRGB encoding on export, would need a
+  as sRGB as they require. Colour *values* are different: glTF's baseColorFactor, emissiveFactor and COLOR_0 and USD's
+  colour inputs and displayColor are linear, so those exporters decode display values to linear on the way out (the
+  glTF importer encodes them back, losslessly); `.geo` keeps Houdini's raw Cd for now (dogfood log, colour space). The alternative, linear colour in memory with sRGB encoding on export, would need a
   colour-space tag per image (is this RGBA a colour or a normal map?) and would make texture colours disagree with the
   same hex in a material or a Cd attribute everywhere the engine shows them; blending in display space is also what
   Substance Designer and image editors do by default.

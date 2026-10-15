@@ -134,6 +134,9 @@ export function exportPLY(g: Geometry, o: ExportOptions = {}): Uint8Array {
 const usdName = (s: string) => (s.replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1') || 'mesh');
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, '').replace(/\.$/, ''));
 const tup = (a: ArrayLike<number>, k: number, n: number) => '(' + Array.from({ length: n }, (_, c) => fmt(a[k * n + c])).join(', ') + ')';
+/** A colour tuple for USD: TopoTopo colours are display values, USD colour inputs and primvars are linear. */
+const linear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const tupColor = (a: ArrayLike<number>, k: number, n: number) => '(' + Array.from({ length: n }, (_, c) => fmt(linear(a[k * n + c]))).join(', ') + ')';
 
 /**
  * USDA stage: meshes, curves and points under /root, split by prim name. Packed instances (instancing 'packed', the
@@ -187,9 +190,9 @@ function usdaMaterials(table: MaterialTable, o: ExportOptions, out: string[]): M
     const I = '            ';
     out.push(`        def Material "${id}"`, '        {', `            token outputs:surface.connect = <${mp}/surface.outputs:surface>`, '');
     out.push(`${I}def Shader "surface"`, `${I}{`, `${I}    uniform token info:id = "UsdPreviewSurface"`);
-    out.push(`${I}    color3f inputs:diffuseColor = ${tup(m.baseColor, 0, 3)}`);
+    out.push(`${I}    color3f inputs:diffuseColor = ${tupColor(m.baseColor, 0, 3)}`);
     if (tex.baseColor) out.push(`${I}    color3f inputs:diffuseColor.connect = <${mp}/base_color_map.outputs:rgb>`);
-    out.push(`${I}    color3f inputs:emissiveColor = ${tup(m.emissive, 0, 3)}`);
+    out.push(`${I}    color3f inputs:emissiveColor = ${tupColor(m.emissive, 0, 3)}`);
     out.push(`${I}    float inputs:metallic = ${fmt(m.metallic)}`);
     if (tex.orm) out.push(`${I}    float inputs:metallic.connect = <${mp}/orm_map.outputs:b>`);
     out.push(`${I}    float inputs:roughness = ${fmt(m.roughness)}`);
@@ -284,7 +287,7 @@ function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => strin
     }
     // display colour / opacity only when they say something (merged geometry gives anchors Houdini's white default)
     if ((a.name === 'Cd' || a.name === 'Alpha') && t === 'float' && num.every((v) => v.every((x) => x === 1))) continue;
-    if (a.name === 'Cd' && t === 'float' && sz >= 3) { out.push(`        color3f[] primvars:displayColor = [${num.map((v) => tup(v, 0, 3)).join(', ')}] (`, ...vertex); continue; }
+    if (a.name === 'Cd' && t === 'float' && sz >= 3) { out.push(`        color3f[] primvars:displayColor = [${num.map((v) => tupColor(v, 0, 3)).join(', ')}] (`, ...vertex); continue; }
     if (a.name === 'Alpha' && t === 'float' && sz === 1) { out.push(`        float[] primvars:displayOpacity = [${num.map((v) => fmt(v[0])).join(', ')}] (`, ...vertex); continue; }
     if (o.custom === false) continue;
     const ut = usdArrayType(t, sz);
@@ -342,7 +345,7 @@ function usdaPrims(g: Geometry, o: ExportOptions, uniq: (n: string) => string, o
           const c = cd.attr.get(i);
           return Array.isArray(c) ? c.slice(0, 3) : [c as number, c as number, c as number];
         });
-        out.push(`        color3f[] primvars:displayColor = [${Array.from({ length: cols.length / 3 }, (_, k) => tup(cols, k, 3)).join(', ')}] (`, '            interpolation = "faceVarying"', '        )');
+        out.push(`        color3f[] primvars:displayColor = [${Array.from({ length: cols.length / 3 }, (_, k) => tupColor(cols, k, 3)).join(', ')}] (`, '            interpolation = "faceVarying"', '        )');
       }
       if (o.custom) for (const [n, a] of geo.points.map) {
         if (SKIP_CUSTOM.has(n) || a.type !== 'float' || (a.size !== 1 && a.size !== 3)) continue;

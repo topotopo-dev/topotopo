@@ -740,6 +740,80 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
   let nohf = '';
   try { await exportFilesAsync(await cook({ nodes: { b: { type: 'box' } } }), 'unreal_landscape', 'y', {}); } catch (e: any) { nohf = e.message; }
   check(/no heightfield/.test(nohf), 'unreal_landscape without a heightfield: clear error');
+  // dogfood 2026-10-15: 12.9k trees pushed objects_expanded.glb over its size limit and the houses never reached
+  // Unreal; the ordinary meshes now travel on their own
+  const village = await cook({
+    nodes: {
+      hf: { type: 'heightfield', params: { size: [20, 20], resolution: 0.5 } },
+      s: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.5 } },
+      sn: { type: 'attrib_create', in: ['s'], params: { name: 'name', class: 'prim', value: 'bush' } },
+      pts: { type: 'heightfield_scatter', in: ['hf'], params: { count: 5, mask_layer: '' } },
+      inst: { type: 'copy_to_points', in: ['sn', 'pts'], params: { pack: true } },
+      b: { type: 'box' },
+      bn: { type: 'attrib_create', in: ['b'], params: { name: 'name', class: 'prim', value: 'house' } },
+      out: { type: 'merge', in: ['hf', 'inst', 'bn'] },
+    },
+    output: 'out',
+  });
+  const vb = await exportFilesAsync(village, 'unreal_landscape', 'v', {});
+  const vMan = JSON.parse(new TextDecoder().decode(vb.files.find((f) => f.path === 'v/landscape.json')!.bytes));
+  const vStatic = vb.files.find((f) => f.path === 'v/objects_static.glb');
+  const so = vStatic ? await importGeometryAsync(vStatic.bytes, 'glb') : null;
+  const soNames = so ? new Set(so.prims.get('name')?.data as string[]) : new Set();
+  check(vMan.objects_static === 'objects_static.glb' && !!so && !so.hasPacked() && so.numPrims === 12 && soNames.size === 1 && soNames.has('house'),
+    `bundle objects_static.glb: only the ordinary meshes (${so?.numPrims} prims, names ${[...soNames].join(',')})`);
+  check(man.objects_static === null, 'bundle without ordinary meshes: objects_static is null');
+}
+
+// ---------------------------------------------------------------- glTF: constant vertex colour folds into the base colour
+{
+  // dogfood 2026-10-15: the shelf trees write Cd = material colour; glTF then got a white factor × COLOR_0, which
+  // Unreal's Interchange materials ignore, so every tree imported white
+  const leaf = await cook({
+    nodes: {
+      b: { type: 'box' },
+      m: { type: 'material', in: ['b'], params: { name: 'foliage', base_color: [0.35, 0.54, 0.24] } },
+      c: { type: 'color', in: ['m'], params: { color: [0.35, 0.54, 0.24] } },
+    },
+    output: 'c',
+  });
+  // glTF factors are linear: the display value 0.54 is written as its sRGB-decoded linear value
+  const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const gj = (bytes: Uint8Array) => { const n = new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true); return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + n))); };
+  const lb = await exportGeometryAsync(leaf, 'glb');
+  const lj = gj(lb);
+  const prim = lj.meshes[0].primitives[0];
+  const factor = lj.materials[prim.material].pbrMetallicRoughness.baseColorFactor;
+  check(!('COLOR_0' in prim.attributes) && Math.abs(factor[1] - lin(0.54)) < 1e-6 && prim.extras?.topotopo?.Cd?.length === 3,
+    `constant Cd: no COLOR_0, factor carries it, linear (${factor.map((x: number) => x.toFixed(3))})`);
+  const lback = await importGeometryAsync(lb, 'glb');
+  const cd = lback.points.get('Cd');
+  check(!!cd && Math.abs((cd.data as Float64Array)[1] - 0.54) < 1e-6 && readMaterials(lback).foliage?.baseColor[1] === 0.54, 'constant Cd and the material survive a re-import');
+  const varied = await cook({
+    nodes: { b: { type: 'box' }, c: { type: 'attrib_randomize', in: ['b'], params: { name: 'Cd', min: [0, 0, 0], max: [1, 1, 1], seed: 1 } } },
+    output: 'c',
+  });
+  const vj = gj(await exportGeometryAsync(varied, 'glb'));
+  check('COLOR_0' in vj.meshes[0].primitives[0].attributes, 'varying Cd still writes COLOR_0');
+  const vb2 = await importGeometryAsync(await exportGeometryAsync(varied, 'glb'), 'glb');
+  const src = varied.points.get('Cd') ?? varied.vertices.get('Cd') ?? varied.prims.get('Cd');
+  const back = vb2.points.get('Cd');
+  check(!!src && !!back && Math.abs(Math.max(...(back.data as Float64Array)) - Math.max(...(src.data as Float64Array))) < 1e-5,
+    'COLOR_0 is written linear and read back as the display values');
+  // engines that ignore vertex colours (the unreal_landscape bundle): the material colour is the factor, COLOR_0 stays
+  const tinted = await cook({
+    nodes: {
+      b: { type: 'box' },
+      m: { type: 'material', in: ['b'], params: { name: 'foliage', base_color: [0.35, 0.54, 0.24] } },
+      c: { type: 'attrib_randomize', in: ['m'], params: { name: 'Cd', min: [0.3, 0.5, 0.2], max: [0.4, 0.6, 0.3], seed: 2 } },
+    },
+    output: 'c',
+  });
+  const plainJ = gj(await exportGeometryAsync(tinted, 'glb'));
+  const engJ = gj(await exportGeometryAsync(tinted, 'glb', { materialColorWins: true }));
+  const fOf = (j: any) => j.materials[j.meshes[0].primitives[0].material].pbrMetallicRoughness.baseColorFactor ?? [1, 1, 1, 1];
+  check(fOf(plainJ)[1] === 1 && Math.abs(fOf(engJ)[1] - lin(0.54)) < 1e-6 && 'COLOR_0' in engJ.meshes[0].primitives[0].attributes,
+    `materialColorWins: factor ${fOf(engJ).slice(0, 3).map((x: number) => x.toFixed(2))} with COLOR_0 kept (default stays white × COLOR_0)`);
 }
 
 // ---------------------------------------------------------------- export:demo in a temp dir

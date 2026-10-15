@@ -1,8 +1,9 @@
 # TopoTopoPCG for Unreal Engine 5.8
 
 Plugin version **0.1.4** (descriptor version 5) keeps prototype meshes at `<set>/Meshes/<name>` even when a glTF
-material has the same name (materials and textures now go to `Meshes/Materials` and `Meshes/Textures`); 0.1.3 added
-tiled Landscape bundles.
+material has the same name (materials and textures now go to `Meshes/Materials` and `Meshes/Textures`) and places
+ordinary objects from `objects_static.glb`, which the exporter writes at any instance count; 0.1.3 added tiled
+Landscape bundles.
 
 Copyright 2026 faxcorp, Apache-2.0. Original plugin code, no third-party code or new npm dependencies.
 Unreal Engine and its plugins remain subject to Epic's licences.
