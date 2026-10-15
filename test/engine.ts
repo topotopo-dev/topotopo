@@ -586,5 +586,21 @@ section('CLI --frames');
   check(badRange.status !== 0 && /before start/.test(badRange.stderr), 'invalid range is rejected');
 }
 
+section('CLI arguments');
+{
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8' });
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const v = cli('--version');
+  check(v.status === 0 && v.stdout.trim() === `topotopo ${pkg.version}`, `--version prints the package version (${v.stdout.trim()})`);
+  check(cli('-v').stdout.trim() === `topotopo ${pkg.version}`, '-v is the short form');
+  const unknown = cli('--no-such-flag');
+  check(unknown.status === 1 && /unknown option "--no-such-flag"/.test(unknown.stderr) && !/at .*cli\.ts/.test(unknown.stderr), 'an unknown leading option fails without a stack trace');
+  const missing = cli(path.join(tmp, 'nope.json'));
+  check(missing.status === 1 && /no such graph file/.test(missing.stderr) && !/ENOENT/.test(missing.stderr), 'a missing graph file is reported plainly');
+  const bad = path.join(tmp, 'bad.json'); fs.writeFileSync(bad, '{ nodes: ');
+  const badJson = cli(bad);
+  check(badJson.status === 1 && /not valid JSON/.test(badJson.stderr), 'invalid JSON is reported plainly');
+}
+
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);
