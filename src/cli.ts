@@ -15,7 +15,7 @@
 //                 instance stream).
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
-//   node src/cli.ts --catalog | --help-node scatter
+//   node src/cli.ts --catalog | --help-node scatter | --version
 //   node src/cli.ts mcp [--workspace dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
@@ -43,6 +43,12 @@ const fail = (msg: string): never => { console.error(msg); process.exit(1); };
 // the command as the user typed it: the sources from a clone, or the package's bin (dist/cli.js)
 const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo';
 
+if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
+  // package.json sits one level above both src/cli.ts and dist/cli.js
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  console.log(`topotopo ${pkg.version}`);
+  process.exit(0);
+}
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]`,
@@ -59,7 +65,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle; --tile-size 1008 for tiled Landscape);',
     '                       images: --format textures --export out/maps (one PNG per image; --layers a,b or * for extra layers)',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
-    `       ${prog} --catalog | --help-node <type>`,
+    `       ${prog} --catalog | --help-node <type> | --version`,
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
   ].join('\n'));
   process.exit(0);
@@ -108,7 +114,11 @@ async function cook() {
   }
 
   const file = argv[0];
-  const graph = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (file.startsWith('-')) fail(`${prog}: unknown option "${file}" (the first argument is the graph file; see --help)`);
+  if (!fs.existsSync(file)) fail(`${prog}: no such graph file "${file}"`);
+  let graph;
+  try { graph = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (e) { fail(`${prog}: ${file} is not valid JSON: ${(e as Error).message}`); }
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
   await engine.init();
   const target = opt('--node');
