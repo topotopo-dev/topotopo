@@ -19,6 +19,7 @@ import { NodeError } from '../graph/types.ts';
 import type { CookContext, ParamDef } from '../graph/types.ts';
 import { evalRamp } from '../graph/params.ts';
 import { sampleEliminate } from './copy.ts';
+import { connectivity } from '../core/topology.ts';
 import { P, simBudget } from './util.ts';
 import { wasmCallUnderBudget } from './wasmcall.ts';
 import { getLoadedKernels, loadHostKernels } from '../wasm/kernels.ts';
@@ -1166,7 +1167,7 @@ defineNode({
   type: 'heightfield_project',
   category: 'heightfield',
   summary: 'Stamp meshes or curves onto a heightfield: replace, raise (max), lower (min), add or subtract, blended over a radius.',
-  description: 'Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample; open curves stamp their own height within width/2 of the curve. Outside the stamp the effect fades over radius metres towards the terrain (the nearest stamped height is used). mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).',
+  description: 'Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample; open curves stamp their own height within width/2 of the curve. Outside the stamp the effect fades over radius metres towards the terrain (the nearest stamped height is used). level mean sets each connected polygon piece to the average terrain height under it instead of its own Y: building pads, plazas and car parks sit where cut and fill balance, so slopes get the smallest embankments. mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).',
   aliases: ['hf_project', 'heightfield_stamp'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }, { name: 'stamp', desc: 'polygons (plateaus, platforms, rocks) and/or curves (ridges, dykes)' }],
   params: {
@@ -1176,6 +1177,7 @@ defineNode({
     offset: { type: 'float', default: 0, desc: 'added to the stamped height (metres)' },
     width: { type: 'float', default: 1, min: 0, desc: 'curves: stamp width (metres)' },
     direction: { type: 'enum', options: ['down', 'up'], default: 'down', desc: 'polygons: stamp the highest (down) or lowest (up) surface' },
+    level: { type: 'enum', options: ['stamp', 'mean'], default: 'stamp', desc: 'polygons: stamp height = the polygon surface (stamp), or the mean terrain height under each connected piece (mean: building pads that balance cut and fill; offset still applies)', aliases: ['pad', 'flatten_to'] },
     mask_layer: { type: 'string', default: '', desc: 'store the stamp weight in this layer ("" = no)' },
   },
   outputs: 'the layer (and mask_layer)',
@@ -1190,7 +1192,18 @@ defineNode({
     return eachField(ctx, (hf) => {
       const n = hf.count, up = p.direction === 'up';
       const SH = new Float64Array(n).fill(NaN), sites = new Uint8Array(n);
-      if (closed) rasterizeMesh(hf, st, (k, y) => { if (!sites[k] || (up ? y < SH[k] : y > SH[k])) SH[k] = y; sites[k] = 1; });
+      const levelMean = p.level === 'mean' && closed > 0;
+      const primPiece = levelMean ? connectivity(st).primClass : null, pieceOf = levelMean ? new Int32Array(n).fill(-1) : null;
+      if (closed) rasterizeMesh(hf, st, (k, y, prim) => {
+        if (!sites[k] || (up ? y < SH[k] : y > SH[k])) { SH[k] = y; if (pieceOf) pieceOf[k] = primPiece![prim]; }
+        sites[k] = 1;
+      });
+      if (pieceOf) {
+        // each piece at the mean of the terrain it covers (the layer before this stamp)
+        const cur = hf.read(p.layer), sum = new Map<number, number>(), cnt = new Map<number, number>();
+        for (let k = 0; k < n; k++) { const c = pieceOf[k]; if (c >= 0) { sum.set(c, (sum.get(c) ?? 0) + cur[k]); cnt.set(c, (cnt.get(c) ?? 0) + 1); } }
+        for (let k = 0; k < n; k++) { const c = pieceOf[k]; if (c >= 0) SH[k] = sum.get(c)! / cnt.get(c)!; }
+      }
       const best = new Float64Array(n).fill(Infinity);
       for (const c of curvesOf(st)) {
         if (c.closed) continue;
