@@ -4,7 +4,7 @@
 //                            component count, scale, location for the New Landscape panel and for the actor), the
 //                            files below and the manual import steps
 //   heightmap.png / .json    16-bit heightmap and its sidecar (io/heightmap.ts; the manifest repeats its numbers)
-//   layers/<layer>.png       every other heightfield layer as an 8-bit weight map (0..1 layers as they are, other
+//   layers/<layer>.png       every other heightfield layer (or only `layers` when given) as an 8-bit weight map (0..1 layers as they are, other
 //                            ranges normalised, the range recorded in the manifest)
 //   objects.glb              the geometry's meshes and packed instances (EXT_mesh_gpu_instancing), when it has prims
 //   objects_expanded.glb     the same with the instances as real geometry (for importers without the extension;
@@ -118,8 +118,10 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
   const layers: Record<string, any>[] = [];
   const usedNames = new Set<string>();
   const weightBytes = new Map<string, Uint8Array>();
+  if (o.layers) for (const want of o.layers) if (!hf.layers.has(want)) throw new Error(`export unreal_landscape: layer "${want}" not found (layers: ${[...hf.layers.keys()].join(', ')})`);
   for (const [name, a] of hf.layers) {
     if (name === heightLayer) continue;
+    if (o.layers && !o.layers.includes(name)) continue; // --layers a,b: only these weight maps
     const st = layerStats(a);
     if (!st) continue;
     const unit = st.min >= 0 && st.max <= 1;

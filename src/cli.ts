@@ -70,10 +70,16 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   ].join('\n'));
   process.exit(0);
 }
-if (argv.includes('--catalog')) { console.log(catalogText(allNodeDefs())); process.exit(0); }
-if (opt('--help-node')) {
-  const d = allNodeDefs().find((x) => x.type === opt('--help-node'));
-  console.log(d ? nodeDoc(d) : 'unknown node');
+if (argv.includes('--catalog') || opt('--help-node')) {
+  // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts
+  const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
+  await engine.init();
+  const defs = [...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)];
+  if (argv.includes('--catalog')) console.log(catalogText(defs));
+  else {
+    const d = defs.find((x) => x.type === opt('--help-node'));
+    console.log(d ? nodeDoc(d) : `unknown node "${opt('--help-node')}" (see --catalog)`);
+  }
   process.exit(0);
 }
 

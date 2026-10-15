@@ -16,7 +16,7 @@ export type HeightmapFormat = 'png16' | 'r16' | 'mask_png';
 export const HEIGHTMAP_FORMATS: HeightmapFormat[] = ['png16', 'r16', 'mask_png'];
 
 export interface HeightmapOptions {
-  /** png16/r16: the layer to write (default "height"); mask_png: the layer when `layers` is not given (default "mask") */
+  /** png16/r16: the layer to write (default "height"); mask_png: the layer when `layers` is not given (default "mask"); unreal_landscape: the height layer */
   layer?: string;
   /** mask_png: layers to write, one 8-bit PNG each */
   layers?: string[];

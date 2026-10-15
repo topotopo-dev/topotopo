@@ -727,7 +727,11 @@ defineNode({
         if (/timed out/i.test(String(e?.message))) throw new NodeError(`${ctx.type}: expression exceeded ${engine.scriptTimeoutMs} ms (infinite loop?)`);
         throw new NodeError(`${ctx.type}: ${e?.message ?? e}`);
       }
-      if (failed !== undefined) throw new NodeError(`${ctx.type}: ${failed}`);
+      if (failed !== undefined) {
+        const missing = /^(\w+) is not defined$/.exec(failed);
+        if (missing) throw new NodeError(`${ctx.type}: "${missing[1]}" is not a layer of this heightfield (layers: ${[...hf.layers.keys()].join(', ')}) and not an expression variable`, 'Compute the layer upstream, or connect the heightfield that has it as input 1 and read it as b_' + missing[1] + '.');
+        throw new NodeError(`${ctx.type}: ${failed}`);
+      }
       if (bad) ctx.warn(`${bad} sample(s) gave NaN or infinity; written as 0`);
       writeLayer(hf, p.layer, mask, (k) => res[k]);
     });
