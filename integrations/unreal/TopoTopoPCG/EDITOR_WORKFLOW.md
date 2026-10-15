@@ -21,7 +21,8 @@ TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo/landscape" /Game/TopoTop
 `layers=0` skips weightmap decoding and layer-info creation, while `material=0` leaves the Landscape without
 an assigned material. `layers=1 material=0` imports the weights for your own material; `layers=0 material=1`
 creates a plain grass fallback. Layer/material options do nothing when `landscape=0`. `objects=0` skips
-`objects_expanded.glb`; `objects=1` is the default. Unknown options and values other than `0`/`1` are errors.
+the ordinary objects (`objects_static.glb`, or `objects_expanded.glb` in bundles from before it existed);
+`objects=1` is the default. Unknown options and values other than `0`/`1` are errors.
 The destination must be below `/Game/TopoTopo/` and contain no existing assets, including subfolders. To repeat
 an import, choose another set name; the utility does not overwrite assets or clear an earlier level import.
 
@@ -174,4 +175,4 @@ seams, and four independent spatial HISM actors with ten unchanged world transfo
 are generated during the tests; they need no demo import and never skip. Run these in the editor after
 installing the package; BuildPlugin compilation alone is not an editor pass or runtime-streaming proof.
 
-This utility supports this exported bundle layout, not an arbitrary glTF scene: it deliberately uses `objects_expanded.glb` and does not depend on `EXT_mesh_gpu_instancing` support. Each prototype must contain one named mesh (multiple material slots are fine). Mesh paths may be overridden in the PCG node for existing project assets. Imported assets retain Interchange's glTF material interpretation; runtime visual acceptance still requires checking the result in the editor.
+This utility supports this exported bundle layout, not an arbitrary glTF scene: it places ordinary objects from `objects_static.glb` (all of its meshes) or, in older bundles, from `objects_expanded.glb` (only names absent from the instance stream), and does not depend on `EXT_mesh_gpu_instancing` support. Each prototype must contain one named mesh (multiple material slots are fine). Mesh paths may be overridden in the PCG node for existing project assets. Imported assets retain Interchange's glTF material interpretation; runtime visual acceptance still requires checking the result in the editor.

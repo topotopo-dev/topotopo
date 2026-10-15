@@ -9,8 +9,13 @@
 //   or the smallest integer type that holds an int attribute). The original names and types are kept in mesh
 //   extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale as `_PSCALE`.
 //   Materials: the prim "material" attribute names a material of the detail table "materials" (core/materials.ts).
+//   Colour space: TopoTopo colours (Cd, material base/emissive colours) are display values; glTF defines
+//   baseColorFactor, emissiveFactor and COLOR_0 as linear, so they are converted on export and back on import.
 //   Vertex colours win: a primitive with Cd gets baseColorFactor white × COLOR_0, the material supplies the PBR
 //   scalars; the original material is kept in material extras (topotopo.material) for lossless re-import.
+//   A primitive whose Cd is one constant colour writes it as the baseColorFactor instead of COLOR_0 (the same
+//   colour under glTF's factor × COLOR_0, and visible in engines whose default materials ignore vertex colours,
+//   such as Unreal's Interchange); primitive extras (topotopo.Cd) restore it as point Cd on import.
 //   Options: quantize (KHR_mesh_quantization), compress 'meshopt' (EXT_meshopt_compression, implies quantize),
 //   compress 'draco' (KHR_draco_mesh_compression, only when the optional draco3dgltf package is installed).
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
@@ -147,6 +152,8 @@ interface PrimOut {
   count: number;
   indices: number[] | null;
   material: GMaterial | null;
+  /** a constant vertex colour moved into the material's base colour factor (kept in primitive extras for re-import) */
+  foldedColor?: number[];
 }
 
 /** Reader for a numeric attribute with Houdini lookup precedence; elements without that class read the default. */
@@ -283,8 +290,8 @@ function textureFor(st: MatState, path: string): Texture | null {
   return t;
 }
 
-function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: boolean): GMaterial {
-  const key = `${name}\u0000${vertexColors ? 1 : 0}${blend ? 1 : 0}`;
+function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: boolean, tint?: number[]): GMaterial {
+  const key = `${name}\u0000${vertexColors ? 1 : 0}${blend ? 1 : 0}${tint ? `\u0000${tint.join(',')}` : ''}`;
   let m = st.cache.get(key);
   if (m) return m;
   const isDefault = !name;
@@ -297,9 +304,10 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   if (ormTex && mat.textures?.roughness) st.warn?.(`glTF: material "${name}" has an orm and a roughness map; the orm map's green channel is used`);
   // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map,
   // metallic 1 under an ORM map
-  const rgb = vertexColors || baseTex ? [1, 1, 1] : mat.baseColor;
+  // a folded constant vertex colour multiplies a base colour map exactly as COLOR_0 would have
+  const rgb = tint ?? (vertexColors || baseTex ? [1, 1, 1] : mat.baseColor);
   m = st.doc.createMaterial(isDefault ? 'default' : name)
-    .setBaseColorFactor([rgb[0], rgb[1], rgb[2], mat.alpha])
+    .setBaseColorFactor([toLinear(rgb[0]), toLinear(rgb[1]), toLinear(rgb[2]), mat.alpha]) // glTF factors are linear
     .setMetallicFactor(ormTex ? 1 : mat.metallic)
     .setRoughnessFactor(roughTex ? 1 : mat.roughness)
     .setDoubleSided(mat.doubleSided);
@@ -309,16 +317,27 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   if (ormTex) m.setOcclusionTexture(ormTex);
   const emax = Math.max(...mat.emissive);
   if (emax > 1) {
-    m.setEmissiveFactor([mat.emissive[0] / emax, mat.emissive[1] / emax, mat.emissive[2] / emax]);
+    m.setEmissiveFactor([toLinear(mat.emissive[0] / emax), toLinear(mat.emissive[1] / emax), toLinear(mat.emissive[2] / emax)]);
     const ext = st.doc.createExtension(KHRMaterialsEmissiveStrength);
     m.setExtension('KHR_materials_emissive_strength', ext.createEmissiveStrength().setEmissiveStrength(emax));
-  } else m.setEmissiveFactor([mat.emissive[0], mat.emissive[1], mat.emissive[2]]);
+  } else m.setEmissiveFactor([toLinear(mat.emissive[0]), toLinear(mat.emissive[1]), toLinear(mat.emissive[2])]);
   if (mat.alpha < 1 || blend) m.setAlphaMode('BLEND');
   if (mat.unlit) m.setExtension('KHR_materials_unlit', st.doc.createExtension(KHRMaterialsUnlit).createUnlit());
   m.setExtras({ topotopo: isDefault ? { default: true } : { material: mat } });
   st.cache.set(key, m);
   return m;
 }
+
+/** Display (sRGB-encoded) value to linear and back: glTF's factors and COLOR_0 are linear, TopoTopo colours are display
+ *  values (docs/DESIGN.md, colour). */
+const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const toDisplay = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
+
+/** True when every element of a colour stream has the same rgb. */
+const constantRGB = (d: number[], size: number) => {
+  for (let i = size; i < d.length; i += size) if (d[i] !== d[0] || d[i + 1] !== d[1] || d[i + 2] !== d[2]) return false;
+  return true;
+};
 
 /** True when every rgb component of a colour stream is 1 (Houdini's default Cd). */
 const rgbAllOnes = (d: number[], size: number) => {
@@ -379,15 +398,22 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     const finishColor = (out: PrimOut, mat: string) => {
       // vertex colours win where they are set; all-white Cd lets the material colour through
       const ci = color ? out.channels.indexOf(color) : -1;
-      let vc = false, blend = false;
+      let vc = false, blend = false, tint: number[] | undefined;
       if (ci >= 0) {
         const ch = out.channels[ci], d = out.data[ci];
         const rgbSet = !!geo.findAttrib('Cd') && !rgbAllOnes(d, ch.size);
         blend = ch.size === 4 && d.some((x, i) => i % 4 === 3 && x < 1);
         vc = rgbSet;
-        if (!rgbSet && !blend) { out.channels.splice(ci, 1); out.data.splice(ci, 1); }
+        // one colour over the whole primitive: the factor carries it (identical under glTF's factor × COLOR_0), so
+        // engines that ignore vertex colours in their default materials (Unreal Interchange) still show it
+        if (rgbSet && !blend && d.length >= ch.size && constantRGB(d, ch.size)) {
+          tint = [d[0], d[1], d[2]].map((x) => Math.max(0, Math.min(1, x)));
+          out.foldedColor = tint;
+          vc = false;
+        } else if (rgbSet && o.materialColorWins && mat && st.table[mat]) vc = false; // keeps COLOR_0, factor = material colour
+        if ((!rgbSet || tint) && !blend) { out.channels.splice(ci, 1); out.data.splice(ci, 1); }
       }
-      out.material = getMaterial(st, mat, vc, blend);
+      out.material = getMaterial(st, mat, vc, blend, tint);
       if (out.material.getBaseColorTexture() || out.material.getNormalTexture() || out.material.getMetallicRoughnessTexture()) {
         if (!out.channels.some((c) => c.semantic === 'TEXCOORD_0')) noUV++;
       }
@@ -637,6 +663,7 @@ function writeMesh(doc: Document, buffer: ReturnType<Document['createBuffer']>, 
     doc.createAccessor().setArray(arr).setType(TYPES[size - 1]).setBuffer(buffer).setNormalized(normalized);
   for (const out of outs) {
     const prim = doc.createPrimitive().setMode(out.mode as any);
+    if (out.foldedColor) prim.setExtras({ topotopo: { Cd: out.foldedColor } });
     out.channels.forEach((ch, ci) => {
       const d = out.data[ci];
       let a: Accessor;
@@ -649,9 +676,10 @@ function writeMesh(doc: Document, buffer: ReturnType<Document['createBuffer']>, 
       } else if (ch.semantic.startsWith('TEXCOORD_') && quantize && d.every((x) => x >= 0 && x <= 1)) {
         a = acc(Uint16Array.from(d, (x) => Math.round(x * 65535)), 2, true);
       } else if (ch.semantic === 'COLOR_0' && quantize && d.every((x) => x >= 0 && x <= 1)) {
-        a = acc(Uint16Array.from(d, (x) => Math.round(x * 65535)), ch.size, true);
+        // COLOR_0 is linear: rgb from display values, alpha as it is
+        a = acc(Uint16Array.from(d, (x, i) => Math.round((i % ch.size < 3 ? toLinear(x) : x) * 65535)), ch.size, true);
       } else if (ch.semantic === 'COLOR_0') {
-        a = acc(Float32Array.from(d, (x) => Math.max(0, Math.min(1, x))), ch.size);
+        a = acc(Float32Array.from(d, (x, i) => { const c = Math.max(0, Math.min(1, x)); return i % ch.size < 3 ? toLinear(c) : c; }), ch.size);
       } else if (ch.int) {
         let mn = Infinity, mx = -Infinity;
         for (const x of d) { if (x < mn) mn = x; if (x > mx) mx = x; }
@@ -796,9 +824,10 @@ function materialEntry(m: GMaterial, base = '', index: (t: Texture) => number = 
   if (ex) return normalizeMaterial(ex);
   const bc = m.getBaseColorFactor(), em = m.getEmissiveFactor();
   const strength = (m.getExtension('KHR_materials_emissive_strength') as EmissiveStrength | null)?.getEmissiveStrength() ?? 1;
+  // glTF factors are linear; the material table holds display values
   return normalizeMaterial({
-    baseColor: [bc[0], bc[1], bc[2]], metallic: m.getMetallicFactor(), roughness: m.getRoughnessFactor(),
-    emissive: [em[0] * strength, em[1] * strength, em[2] * strength], alpha: bc[3],
+    baseColor: [toDisplay(bc[0]), toDisplay(bc[1]), toDisplay(bc[2])], metallic: m.getMetallicFactor(), roughness: m.getRoughnessFactor(),
+    emissive: [toDisplay(em[0]) * strength, toDisplay(em[1]) * strength, toDisplay(em[2]) * strength], alpha: bc[3],
     doubleSided: m.getDoubleSided(), unlit: !!m.getExtension('KHR_materials_unlit'),
     textures: {
       baseColor: texturePathOf(m.getBaseColorTexture(), base, index),
@@ -857,7 +886,8 @@ function primitiveGeometry(prim: Primitive, attrInfo: Record<string, CustomInfo>
     if (sem === 'NORMAL') setPt('N', a, 3, 'float');
     else if (sem === 'TEXCOORD_0' || sem === 'TEXCOORD_1') setPt(sem === 'TEXCOORD_0' ? 'uv' : 'uv2', a, 3, 'float', (s, i, out) => { out[i * 3] = s[i * es]; out[i * 3 + 1] = 1 - s[i * es + 1]; out[i * 3 + 2] = 0; });
     else if (sem === 'COLOR_0') {
-      setPt('Cd', a, 3, 'float', (s, i, out) => { out[i * 3] = s[i * es]; out[i * 3 + 1] = s[i * es + 1]; out[i * 3 + 2] = s[i * es + 2]; });
+      // COLOR_0 is linear; Cd holds display values
+      setPt('Cd', a, 3, 'float', (s, i, out) => { out[i * 3] = toDisplay(s[i * es]); out[i * 3 + 1] = toDisplay(s[i * es + 1]); out[i * 3 + 2] = toDisplay(s[i * es + 2]); });
       if (es === 4) setPt('Alpha', a, 1, 'float', (s, i, out) => { out[i] = s[i * 4 + 3]; });
     } else if (sem.startsWith('_') && es <= 16) {
       const inf = attrInfo[sem];
@@ -865,6 +895,14 @@ function primitiveGeometry(prim: Primitive, attrInfo: Record<string, CustomInfo>
       setPt(name, a, es, inf?.type === 'int' ? 'int' : 'float');
     }
     // TANGENT, JOINTS_n, WEIGHTS_n, TEXCOORD_2+, COLOR_1+ are not imported
+  }
+  // a constant Cd that the exporter folded into the material factor comes back as the point colour it was
+  const folded = (prim.getExtras() as any)?.topotopo?.Cd;
+  if (!prim.getAttribute('COLOR_0') && Array.isArray(folded) && folded.length === 3 && folded.every((x: unknown) => typeof x === 'number')) {
+    const cd = new Attribute('float', 3, new Float64Array(n * 3), defaultValueFor('Cd', 3, 'float'));
+    const d = cd.data as Float64Array;
+    for (let i = 0; i < n; i++) { d[i * 3] = folded[0]; d[i * 3 + 1] = folded[1]; d[i * 3 + 2] = folded[2]; }
+    g.points.set('Cd', cd);
   }
   return g;
 }
