@@ -39,8 +39,7 @@ Unreal, Blender and Houdini shots use the full frame or a left/right split betwe
 
 ### Shot 1: title (0:00–0:10)
 
-- On screen: "TopoTopo" and the line "A procedural geometry engine: Houdini-style node graphs, headless, deterministic,
-  exports to Unreal, Blender and Houdini." Background: `examples/renders/unreal_demo.png` (persp tile, cropped), dimmed.
+- On screen: "TopoTopo" and the line "An open-source procedural geometry engine. Node graphs in JSON, cooked headless, exported to Unreal, Blender and Houdini." Background: `examples/renders/unreal_demo.png` (persp tile, cropped), dimmed.
 - Narration: "TopoTopo is an open-source procedural geometry engine: JSON node graphs in, geometry out, with no editor
   and no GPU."
 

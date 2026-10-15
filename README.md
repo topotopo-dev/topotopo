@@ -2,9 +2,10 @@
 
 *Formerly Polyforge; renamed before the first tagged release. Files written as `polyforge-*` still load.*
 
-A procedural geometry engine: Houdini-style node graphs, headless, deterministic, exports to Unreal, Blender and
-Houdini. You build JSON node graphs; the engine cooks them into geometry. It runs on Node and WebAssembly with no
-GPU, every cook is reproducible from the graph and its seeds, and the core is browser-ready.
+TopoTopo is an open-source procedural geometry engine. You describe geometry as a node graph in JSON; the engine
+cooks it headless and deterministic, and exports it to Unreal, Blender and Houdini. Built for LLM agents through MCP,
+and for people through the CLI. It runs on Node and WebAssembly with no GPU, every cook is reproducible from the
+graph and its seeds, and the core is browser-ready.
 
 - **200+ node types**: generators, curves and splines (Bezier/NURBS), sweeps, deformers, attributes and groups, polygon
   modelling (bevel, knife, bridge, quad fill), UVs (xatlas unwrap, LSCM), remeshing (isotropic, quad, voxel) and LOD,
@@ -13,6 +14,8 @@ GPU, every cook is reproducible from the graph and its seeds, and the core is br
   cloth draping and inflation (XPBD), L-systems, text, loops, a frame solver, in-graph checks, and code nodes. A shelf of ready-made graph assets (walls,
   roofs, stairs, props, trees, rocks, PCG helpers) is used like nodes. Every node documents its params and carries an
   example that is cooked in the tests.
+- **Familiar to Houdini users**: SOP-style nodes, attributes, groups and `.geo` export; Houdini node names work as
+  aliases. Blender Geometry Nodes and Unreal PCG users will recognise the rest.
 - **Rust/WASM kernels**: a straight skeleton (pitched roofs and polygon offsets from any footprint, holes included),
   sampled SDF grids with CSG, morphology and sharp dual contouring (`voxel_remesh`), field-aligned quad remeshing
   (`remesh_quad`), and heightfield erosion and drainage (virtual-pipe and stream-power models, D8/D-infinity flow) are

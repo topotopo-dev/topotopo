@@ -21,7 +21,7 @@ verification code, a payment method, accepting new terms, or anything not listed
 - Description (paste exactly):
 
 ```
-TopoTopo is an open-source procedural geometry engine: Houdini-style node graphs written as JSON, cooked headless and deterministic, exported to Unreal, Blender and Houdini. Built to be driven by LLM agents through MCP, and by people through the CLI.
+TopoTopo is an open-source procedural geometry engine. You describe geometry as a node graph in JSON; the engine cooks it headless and deterministic, and exports it to Unreal, Blender and Houdini. Built for LLM agents through MCP, and for people through the CLI.
 
 On this channel: terrain and environment builds, node-graph walkthroughs, Unreal PCG and Landscape imports, release notes.
 

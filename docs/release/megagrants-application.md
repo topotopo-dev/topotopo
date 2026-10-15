@@ -27,9 +27,9 @@ TopoTopo
 
 ## One-line summary
 
-An open-source procedural geometry engine: Houdini-style node graphs in JSON, headless and deterministic, with exports
-built for Unreal Engine (PCG instance streams, Landscape heightmaps and weight layers, glTF for Interchange) as well as
-Blender and Houdini.
+An open-source procedural geometry engine: node graphs in JSON, cooked headless and deterministic, with exports built
+for Unreal Engine (PCG instance streams, Landscape heightmaps and weight layers, glTF for Interchange) as well as
+Blender and Houdini. Built for LLM agents through MCP, and for people through the CLI.
 
 ## Category
 
