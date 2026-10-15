@@ -169,6 +169,14 @@ const viaManifest = JSON.parse(text(viaFiles.files.find((f) => f.path === 'bundl
 check(viaManifest.tiles.length === 4 && viaManifest.tiles.every((t: Record<string, any>) => t.instances === null)
   && viaFiles.files.some((f) => f.path === 'bundle/tiles/1_1/heightmap.png'),
   'tiled export: file dispatcher forwards tile_size and custom manifest names, including terrain-only bundles');
+{
+  const only = await unrealLandscapeBundle(terrain, { layers: ['grass'] });
+  const weight = only.files.filter((f) => f.path.startsWith('layers/')).map((f) => f.path);
+  check(weight.length === 1 && weight[0] === 'layers/grass.png' && JSON.parse(text(only.files.find((f) => f.path === 'landscape.json')!.bytes)).layers.length === 1, `unreal_landscape layers option keeps only the named weight maps (${weight.join(', ')})`);
+  let unknown = '';
+  try { await unrealLandscapeBundle(terrain, { layers: ['nope'] }); } catch (e: any) { unknown = e.message; }
+  check(/layer "nope" not found/.test(unknown), 'unreal_landscape rejects an unknown layer name');
+}
 const repeated = await unrealLandscapeBundle(scene, { tile_size: 7 });
 check(bundle.files.length === repeated.files.length && bundle.files.every((f, i) => f.path === repeated.files[i].path && same(f.bytes, repeated.files[i].bytes)),
   'tiled export: repeated exports are byte-identical');

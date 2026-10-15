@@ -588,7 +588,7 @@ section('CLI --frames');
 
 section('CLI arguments');
 {
-  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8' });
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   const v = cli('--version');
   check(v.status === 0 && v.stdout.trim() === `topotopo ${pkg.version}`, `--version prints the package version (${v.stdout.trim()})`);
@@ -600,6 +600,11 @@ section('CLI arguments');
   const bad = path.join(tmp, 'bad.json'); fs.writeFileSync(bad, '{ nodes: ');
   const badJson = cli(bad);
   check(badJson.status === 1 && /not valid JSON/.test(badJson.stderr), 'invalid JSON is reported plainly');
+  const cat = cli('--catalog');
+  check(cat.status === 0 && /\[shelf\]/.test(cat.stdout) && /^\s+house /m.test(cat.stdout), `--catalog lists the shelf assets (status ${cat.status}, ${cat.stdout.length} chars)`);
+  const hn = cli('--help-node', 'house');
+  check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout), '--help-node documents a shelf asset');
+  check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
