@@ -415,6 +415,12 @@ the node library. The renderer is in `src/render`, import/export in `src/io`, an
 described in [docs/DESIGN.md](docs/DESIGN.md). `dist/` (not in git) is the compiled package: `npm run build` mirrors
 `src/` there one to one, so the shelf, fonts, kernels and worker entry are found relative to either.
 
+## Support
+
+TopoTopo is free and stays free. If it saves you time, you can sponsor its maintenance through
+[GitHub Sponsors](https://github.com/sponsors/faxlab). Sponsorship funds maintainer time and comes with no
+obligations either way.
+
 ## Licence
 
 Apache-2.0 (see [LICENSE](LICENSE)). Third-party components and their licence texts are listed in [NOTICE](NOTICE).

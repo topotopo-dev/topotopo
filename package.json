@@ -124,5 +124,9 @@
   "bugs": {
     "url": "https://github.com/topotopo-dev/topotopo/issues"
   },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/faxlab"
+  },
   "author": "faxcorp <hello@topotopo.dev>"
 }
