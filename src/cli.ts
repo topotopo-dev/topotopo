@@ -17,6 +17,7 @@
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter | --version
 //   node src/cli.ts mcp [--workspace dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
+//   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -67,6 +68,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type> | --version`,
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
+    `       ${prog} view <graph.json> [--port 7341]   (live 3D viewer in the browser; re-cooks when the file is saved)`,
   ].join('\n'));
   process.exit(0);
 }
@@ -83,7 +85,34 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   process.exit(0);
 }
 
-if (argv[0] === 'mcp') {
+if (argv[0] === 'view') {
+  // `topotopo view <graph.json> [--port 7341]`: cook the file, serve the live 3D viewer, re-cook on every save
+  const file = argv[1];
+  if (!file || file.startsWith('-')) fail(`usage: ${prog} view <graph.json> [--port 7341]`);
+  if (!fs.existsSync(file)) fail(`${prog}: no such graph file "${file}"`);
+  const os = await import('node:os');
+  const { Workspace } = await import('./workspace.ts');
+  const { startViewer } = await import('./viewer/server.ts');
+  const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
+  await engine.init();
+  // a scratch workspace: the graph file stays the only source, nothing is written next to it
+  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine);
+  ws.load();
+  const name = path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
+  const load = async () => {
+    let spec;
+    try { spec = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { console.error(`${file}: ${(e as Error).message} (keeping the last good version)`); return; }
+    ws.setGraph(name, spec);
+    const r = await ws.cook(name);
+    console.log(`${r.ok ? 'cooked' : 'FAILED'} ${name} in ${r.ms.toFixed(0)} ms${r.ok ? '' : ': ' + r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
+    ws.bump(name);
+  };
+  await load();
+  const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined);
+  console.log(`view: ${v.url}  (watching ${file}; Ctrl+C to stop)`);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  fs.watch(file, () => { clearTimeout(timer); timer = setTimeout(() => { load().catch((e) => console.error(String(e))); }, 150); });
+} else if (argv[0] === 'mcp') {
   // `topotopo mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin
   process.argv.splice(2, 1);

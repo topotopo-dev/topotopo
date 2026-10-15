@@ -360,6 +360,21 @@ section('project, path, scatter, resample, transform, to_sdf');
   check(same(lo.layer('height')!, n.layer('height')!), 'project max never lowers');
   const ridge = await field({ ...nodes, c: { type: 'curve', params: { points: [[-1, 1, 0], [1, 1, 0]] } }, p: { type: 'heightfield_project', in: ['n', 'c'], params: { width: 0.4, radius: 0 } } }, 'p');
   check(Math.abs(ridge.layer('height')![k0] - 1) < 1e-6, 'project stamps curves at their own height');
+  // level mean (dogfood 2026-10-15: house pads at their centre height cut deep banks on slopes): each piece sits at
+  // the mean of the terrain it covers, whatever its own Y
+  const tilt = { hf: HF, t: { type: 'heightfield_layer', in: ['hf'], params: { expression: '0.5 * x' } } } as Record<string, NodeSpec>;
+  const pads = await field({
+    ...tilt,
+    a: { type: 'box', params: { size: [0.6, 0.2, 0.6], center: [-0.6, 9, 0] } },
+    b: { type: 'box', params: { size: [0.6, 0.2, 0.6], center: [0.6, -9, 0] } },
+    ab: { type: 'merge', in: ['a', 'b'] },
+    p: { type: 'heightfield_project', in: ['t', 'ab'], params: { level: 'mean', radius: 0, mask_layer: 'pad' } },
+  }, 'p');
+  const hp = pads.layer('height')!, pad = pads.layer('pad')!;
+  const padHeights = (side: number) => { const v: number[] = []; for (let j = 0; j < pads.height; j++) for (let i = 0; i < pads.width; i++) { const k = j * pads.width + i; if (pad[k] === 1 && Math.sign(pads.x(i)) === side) v.push(hp[k]); } return v; };
+  const left = padHeights(-1), right = padHeights(1);
+  check(left.length > 4 && right.length > 4 && Math.max(...left) - Math.min(...left) < 1e-9 && Math.abs(left[0] - 0.5 * -0.6) < 0.02 && Math.abs(right[0] - 0.5 * 0.6) < 0.02,
+    `project level mean: each pad is flat at the terrain mean under it (${left[0]?.toFixed(3)}, ${right[0]?.toFixed(3)}), not at the boxes' tops (±9)`);
 
   const road = await field({ ...nodes, c: { type: 'curve', params: { points: [[-1.5, 1, 0], [1.5, 1, 0]] } }, r: { type: 'heightfield_path', in: ['n', 'c'], params: { height_mode: 'curve', width: 0.6, shoulder: 0.3, smooth: 0 } } }, 'r');
   let flat = 0, inPath = 0;

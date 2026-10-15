@@ -7816,7 +7816,7 @@ category: `heightfield` · aliases: `hf_project`, `heightfield_stamp`
 
 Stamp meshes or curves onto a heightfield: replace, raise (max), lower (min), add or subtract, blended over a radius.
 
-Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample; open curves stamp their own height within width/2 of the curve. Outside the stamp the effect fades over radius metres towards the terrain (the nearest stamped height is used). mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).
+Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample; open curves stamp their own height within width/2 of the curve. Outside the stamp the effect fades over radius metres towards the terrain (the nearest stamped height is used). level mean sets each connected polygon piece to the average terrain height under it instead of its own Y: building pads, plazas and car parks sit where cut and fill balance, so slopes get the smallest embankments. mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).
 
 **Inputs**
 
@@ -7835,6 +7835,7 @@ Houdini: HeightField Project. Polygons stamp the Y of their surface straight abo
 | `offset` | float | `0` |  |  |  | added to the stamped height (metres) |
 | `width` | float | `1` | 0.. |  |  | curves: stamp width (metres) |
 | `direction` | enum | `"down"` |  | `down`, `up` |  | polygons: stamp the highest (down) or lowest (up) surface |
+| `level` | enum | `"stamp"` |  | `stamp`, `mean` | `pad`, `flatten_to` | polygons: stamp height = the polygon surface (stamp), or the mean terrain height under each connected piece (mean: building pads that balance cut and fill; offset still applies) |
 | `mask_layer` | string | `""` |  |  |  | store the stamp weight in this layer ("" = no) |
 
 **Writes:** the layer (and mask_layer)
