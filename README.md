@@ -1,4 +1,4 @@
-# TopoTopo
+# <img src="docs/brand/mark.svg" alt="" width="44" height="44" align="top"> TopoTopo
 
 *Formerly Polyforge; renamed before the first tagged release. Files written as `polyforge-*` still load.*
 

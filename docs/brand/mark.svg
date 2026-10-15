@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<!-- TopoTopo mark: three stepped isometric terraces (terrain, quantised and built up). Palette #f4a26c / #d9622b / #a8461a. -->
+<polygon points="128,62 235.39,124 128,186 20.61,124" fill="#f4a26c"/><polygon points="20.61,124 128,186 128,212 20.61,150" fill="#d9622b"/><polygon points="235.39,124 128,186 128,212 235.39,150" fill="#a8461a"/><polygon points="128,54 204.21,98 128,142 51.79,98" fill="#f4a26c"/><polygon points="51.79,98 128,142 128,168 51.79,124" fill="#d9622b"/><polygon points="204.21,98 128,142 128,168 204.21,124" fill="#a8461a"/><polygon points="128,46 173.03,72 128,98 82.97,72" fill="#f4a26c"/><polygon points="82.97,72 128,98 128,124 82.97,98" fill="#d9622b"/><polygon points="173.03,72 128,98 128,124 173.03,98" fill="#a8461a"/>
+</svg>

@@ -8,7 +8,7 @@
 //   shelf/               shelf/*.json grouped by meta.shelf_group, thumbnails from shelf/thumbs
 //   examples/            every examples/*.json with its render, its description and the graph JSON itself
 //   design/, releases/   docs/DESIGN.md and docs/release/v*-release-notes.md converted from Markdown
-//   404.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg
+//   404.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg (docs/brand/mark.svg)
 // Links are relative, so the site works at the domain root, under a sub-path and from the file system; only 404.html,
 // which GitHub Pages serves for a missing path at any depth, uses root-absolute links. Only files a page uses are
 // copied. .github/workflows/pages.yml builds, checks and deploys the site on every push to main.
@@ -330,7 +330,7 @@ ${p.abs ? '' : `<link rel="canonical" href="${esc(canonical)}">
 <meta property="og:description" content="${esc(p.description)}">
 <meta property="og:image" content="${esc(`${SITE_URL}/${useFile(OG_IMAGE)}`)}">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="${u(useFile('scripts/site/favicon.svg', 'favicon.svg'))}" type="image/svg+xml">
+<link rel="icon" href="${u('favicon.svg')}" type="image/svg+xml">
 <link rel="stylesheet" href="${u(useFile('scripts/site/style.css', 'style.css'))}">
 </head>
 <body>
@@ -695,6 +695,8 @@ const write = (rel: string, data: string | Uint8Array) => {
 };
 for (const p of pages) write(p.out, p.html!);
 for (const [site, repo] of copies) write(site, fs.readFileSync(path.join(ROOT, repo)));
+// the favicon is the brand mark (docs/brand/mark.svg) cropped to its bounds so it fills a 16 px tab icon
+write('favicon.svg', fs.readFileSync(path.join(ROOT, 'docs/brand/mark.svg'), 'utf8').replace(/viewBox="0 0 256 256" width="256" height="256"/, 'viewBox="16 17 224 224" width="224" height="224"'));
 write('CNAME', DOMAIN + '\n');
 write('.nojekyll', '');
 write('robots.txt', `User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n`);
