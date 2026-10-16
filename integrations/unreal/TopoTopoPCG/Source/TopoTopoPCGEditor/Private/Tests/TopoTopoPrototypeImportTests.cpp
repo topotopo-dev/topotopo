@@ -3,6 +3,7 @@
 
 #include "TopoTopoLandscapeImport.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "CoreGlobals.h"
 #include "Engine/StaticMesh.h"
 #include "HAL/FileManager.h"
 #include "Materials/MaterialInterface.h"
@@ -29,6 +30,57 @@ static const TCHAR* GLTF = TEXT(R"json({
  "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [1, 0, 1]},
                {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}]
 })json");
+
+// The same triangle as a prototype named Mesh whose material is named Material.
+static FString Named(const FString& Mesh, const FString& Material)
+{
+    FString Out = GLTF;
+    Out.ReplaceInline(TEXT("\"mesh\": 0, \"name\": \"rock\""), *FString::Printf(TEXT("\"mesh\": 0, \"name\": \"%s\""), *Mesh));
+    Out.ReplaceInline(TEXT("{\"name\": \"rock\", \"primitives\""), *FString::Printf(TEXT("{\"name\": \"%s\", \"primitives\""), *Mesh));
+    Out.ReplaceInline(TEXT("[{\"name\": \"rock\", \"pbrMetallicRoughness\""), *FString::Printf(TEXT("[{\"name\": \"%s\", \"pbrMetallicRoughness\""), *Material));
+    return Out;
+}
+}
+
+// Found 2026-10-16 in the demo bundle: fir, oak and pine all use a material named "bark". With one shared Materials
+// folder the second prototype's import asked, in a modal dialog, whether to override the first one's material, and
+// the automated import stalled. Each prototype now has Materials/<prototype>.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoPrototypeSharedMaterialTest, "TopoTopo.Editor.PrototypesShareMaterialName",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTopoTopoPrototypeSharedMaterialTest::RunTest(const FString& Parameters)
+{
+    const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectIntermediateDir() / TEXT("Automation/TopoTopo/Shared") / Id);
+    const FString Folder = TEXT("/Game/TopoTopo/Automation_") + Id + TEXT("/Meshes");
+    ON_SCOPE_EXIT
+    {
+        IFileManager::Get().DeleteDirectory(*Directory, false, true);
+        TArray<FAssetData> Assets;
+        FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get()
+            .GetAssetsByPath(FName(*FPaths::GetPath(Folder)), Assets, true);
+        TArray<UObject*> Objects;
+        for (const FAssetData& Asset : Assets) { if (UObject* Object = Asset.GetAsset()) { Objects.Add(Object); } }
+        if (!Objects.IsEmpty()) { ObjectTools::ForceDeleteObjects(Objects, false); }
+    };
+    // a regression must fail here, not wait for someone to click a dialog
+    TGuardValue<bool> Unattended(GIsRunningUnattendedScript, true);
+    for (const TCHAR* Name : {TEXT("fir"), TEXT("oak")})
+    {
+        const FString File = Directory / FString(Name) + TEXT(".gltf");
+        if (!TestTrue(TEXT("Write fixture"), FFileHelper::SaveStringToFile(TopoTopoPrototypeImportTests::Named(Name, TEXT("bark")), *File))) { return false; }
+        TArray<UStaticMesh*> Meshes;
+        FString Error;
+        if (!TestTrue(FString::Printf(TEXT("Import %s: %s"), Name, *Error), TopoTopoImport::ImportGLB(File, Folder, Name, Meshes, Error)) || !TestEqual(TEXT("One mesh"), Meshes.Num(), 1)) { return false; }
+        TestEqual(TEXT("Mesh keeps its prototype name"), Meshes[0]->GetPathName(), Folder / FString(Name) + TEXT(".") + Name);
+        const TArray<FStaticMaterial>& Slots = Meshes[0]->GetStaticMaterials();
+        if (TestEqual(TEXT("One material slot"), Slots.Num(), 1) && TestNotNull(TEXT("Material assigned"), Slots[0].MaterialInterface.Get()))
+        {
+            TestEqual(TEXT("Material in the prototype's own folder"), Slots[0].MaterialInterface->GetPathName(),
+                Folder / TEXT("Materials") / FString(Name) / TEXT("bark.bark"));
+        }
+    }
+    return !HasAnyErrors();
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoPrototypeNameCollisionTest, "TopoTopo.Editor.PrototypeMaterialNameCollision",

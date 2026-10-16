@@ -22,7 +22,8 @@ TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo/landscape" /Game/TopoTop
 an assigned material. `layers=1 material=0` imports the weights for your own material; `layers=0 material=1`
 creates a plain grass fallback. Layer/material options do nothing when `landscape=0`. `objects=0` skips
 the ordinary objects (`objects_static.glb`, or `objects_expanded.glb` in bundles from before it existed);
-`objects=1` is the default. Unknown options and values other than `0`/`1` are errors.
+`objects=1` is the default. `lighting=1` adds a sun, sky atmosphere, real-time sky light and height fog where the level
+has none (default `lighting=0`). Unknown options and values other than `0`/`1` are errors.
 The destination must be below `/Game/TopoTopo/` and contain no existing assets, including subfolders. To repeat
 an import, choose another set name; the utility does not overwrite assets or clear an earlier level import.
 

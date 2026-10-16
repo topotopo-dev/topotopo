@@ -16,6 +16,15 @@ class UTopoTopoAssetFolderPipeline : public UInterchangePipelineBase
 {
     GENERATED_BODY()
 
+public:
+    /**
+     * Per-prototype sub-folder under Materials/ and Textures/ (the prototype name). Prototypes share material names
+     * (fir, oak and pine all use "bark"); one shared folder made the second import ask whether to override the first
+     * prototype's material in a modal dialog, which stalls an automated import (found 2026-10-16).
+     */
+    UPROPERTY()
+    FString SubFolder;
+
 protected:
     virtual void ExecutePipeline(UInterchangeBaseNodeContainer* BaseNodeContainer,
         const TArray<UInterchangeSourceData*>& SourceDatas, const FString& ContentBasePath) override;
