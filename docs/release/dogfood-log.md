@@ -34,4 +34,10 @@ Status: **fixed** (commit), **filed** (issue), **deferred** (reason), **open**.
 | 27 | 2026-10-15 | CLI | There was no way to look at a graph in 3D from the package: the live viewer was reachable only through the MCP server or a repo script. | fixed: `topotopo view <graph.json>` serves the viewer and re-cooks on every save (errors shown inline, last good result kept) |
 | 28 | 2026-10-15 | viewer | At 1 km scale, zoom is slow and does not move toward the cursor; the info text covers the lower third of the view. | open |
 
-The environment graph lives outside the repository while it grows (`C:/WORK/topotopo-dogfood/environment.json`); it moves to `examples/` once it rebuilds end to end with no manual step.
+The environment graph is [dogfood/environment.json](dogfood/environment.json) (copied from the working folder `C:/WORK/topotopo-dogfood/`, where it is edited with `topotopo view`). Rebuild and export it with:
+
+```bash
+node src/cli.ts docs/release/dogfood/environment.json --node landscape --format unreal_landscape --export out/level --tile-size 252 --layers path,river,forest,rocky,lots
+```
+
+then `TopoTopo.ImportScene "<absolute path>/out/level" /Game/TopoTopo/<NewFolder> landscape=1 objects=1 layers=1 material=1` in a fresh Unreal level. It stays out of `examples/` (and the golden tests) until the open findings are settled.

@@ -1,0 +1,686 @@
+{
+  "description": "Dogfood environment: 1 km\u00b2 eroded valley with a road and a river, a village of varied houses on flattened lots along the road.",
+  "vars": {
+    "seed": 7,
+    "houses": 26
+  },
+  "nodes": {
+    "hf": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          1000,
+          1000
+        ],
+        "samples": [
+          505,
+          505
+        ],
+        "name": "valley"
+      }
+    },
+    "mtn": {
+      "type": "heightfield_noise",
+      "in": [
+        "hf"
+      ],
+      "params": {
+        "fractal": "ridged",
+        "amplitude": 90,
+        "element_size": 420,
+        "octaves": 7,
+        "roughness": 0.48,
+        "range": "positive",
+        "seed": "=seed"
+      }
+    },
+    "hills": {
+      "type": "heightfield_noise",
+      "in": [
+        "mtn"
+      ],
+      "params": {
+        "fractal": "fbm",
+        "amplitude": 18,
+        "element_size": 90,
+        "octaves": 5,
+        "seed": "=seed+1"
+      }
+    },
+    "erode": {
+      "type": "heightfield_erode",
+      "in": [
+        "shape"
+      ],
+      "params": {
+        "method": "pipe",
+        "backend": "kernel",
+        "iterations": 150,
+        "thermal_talus_angle": 38
+      }
+    },
+    "fill": {
+      "type": "heightfield_fill_sinks",
+      "in": [
+        "erode"
+      ],
+      "params": {
+        "epsilon": 0.001,
+        "max_depth": 6
+      }
+    },
+    "flow": {
+      "type": "heightfield_flow",
+      "in": [
+        "fill"
+      ],
+      "params": {
+        "fill_sinks": true
+      }
+    },
+    "river": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "flow"
+      ],
+      "params": {
+        "feature": "flow",
+        "flow_layer": "drainage",
+        "min_flow": 0.62,
+        "flow_falloff": 0.1,
+        "layer": "river",
+        "blur": 4
+      }
+    },
+    "road_curve": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            -480,
+            0,
+            -420
+          ],
+          [
+            -300,
+            0,
+            -200
+          ],
+          [
+            -120,
+            0,
+            -60
+          ],
+          [
+            40,
+            0,
+            20
+          ],
+          [
+            220,
+            0,
+            160
+          ],
+          [
+            380,
+            0,
+            340
+          ],
+          [
+            470,
+            0,
+            460
+          ]
+        ],
+        "smooth": true
+      }
+    },
+    "road": {
+      "type": "heightfield_path",
+      "in": [
+        "river",
+        "road_curve"
+      ],
+      "params": {
+        "width": 7,
+        "shoulder": 6,
+        "smooth": 30,
+        "bank": 4
+      }
+    },
+    "shape": {
+      "type": "heightfield_layer",
+      "in": [
+        "hills"
+      ],
+      "params": {
+        "layer": "height",
+        "expression": "height * (0.55 + 0.45 * smoothstep(0, 1, abs((x + z) / 700))) + 0.03 * (x - z) + 20"
+      }
+    },
+    "lots_near": {
+      "type": "heightfield_mask_by_object",
+      "in": [
+        "road",
+        "road_curve"
+      ],
+      "params": {
+        "distance": 34,
+        "falloff": 12,
+        "layer": "lots"
+      }
+    },
+    "lots_not_road": {
+      "type": "heightfield_mask_by_object",
+      "in": [
+        "lots_near",
+        "road_curve"
+      ],
+      "params": {
+        "distance": 11,
+        "falloff": 3,
+        "layer": "lots",
+        "mode": "subtract"
+      }
+    },
+    "flat": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "blur_h"
+      ],
+      "params": {
+        "feature": "slope",
+        "min_angle": 0,
+        "max_angle": 10,
+        "angle_falloff": 4,
+        "layer": "flat"
+      }
+    },
+    "lots": {
+      "type": "heightfield_layer",
+      "in": [
+        "restore_h"
+      ],
+      "params": {
+        "layer": "lots",
+        "expression": "clamp(lots, 0, 1) * flat * (1 - river) * (1 - smoothstep(120, 170, sqrt((x - 40) * (x - 40) + (z - 20) * (z - 20))))"
+      }
+    },
+    "lot_pts": {
+      "type": "heightfield_scatter",
+      "in": [
+        "lots"
+      ],
+      "params": {
+        "mask_layer": "lots",
+        "count": "=houses + 10",
+        "relax": true,
+        "seed": "=seed"
+      }
+    },
+    "w": {
+      "type": "attrib_randomize",
+      "in": [
+        "lot_prune"
+      ],
+      "params": {
+        "name": "w",
+        "min": 6,
+        "max": 12,
+        "seed": "=seed"
+      }
+    },
+    "d": {
+      "type": "attrib_randomize",
+      "in": [
+        "w"
+      ],
+      "params": {
+        "name": "d",
+        "min": 5,
+        "max": 9,
+        "seed": "=seed+1"
+      }
+    },
+    "fl": {
+      "type": "attrib_randomize",
+      "in": [
+        "d"
+      ],
+      "params": {
+        "name": "floors",
+        "min": 1,
+        "max": 2.99,
+        "seed": "=seed+2"
+      }
+    },
+    "pit": {
+      "type": "attrib_randomize",
+      "in": [
+        "fl"
+      ],
+      "params": {
+        "name": "pitch",
+        "min": 28,
+        "max": 42,
+        "seed": "=seed+3"
+      }
+    },
+    "yaw": {
+      "type": "attrib_randomize",
+      "in": [
+        "pit"
+      ],
+      "params": {
+        "name": "yaw",
+        "min": 0,
+        "max": 360,
+        "seed": "=seed+4"
+      }
+    },
+    "lots_flat": {
+      "type": "heightfield_project",
+      "in": [
+        "lots",
+        "pads"
+      ],
+      "params": {
+        "mode": "replace",
+        "level": "mean",
+        "radius": 14,
+        "mask_layer": "lot_stamp"
+      }
+    },
+    "houses": {
+      "type": "foreach",
+      "in": [
+        "lot_on_pad"
+      ],
+      "params": {
+        "mode": "points",
+        "body": {
+          "nodes": {
+            "pt": {
+              "type": "input",
+              "params": {
+                "index": 0
+              }
+            },
+            "h": {
+              "type": "house",
+              "params": {
+                "width": "=point('pt', 0, 'w')",
+                "depth": "=point('pt', 0, 'd')",
+                "floors": "=floor(point('pt', 0, 'floors'))",
+                "pitch": "=point('pt', 0, 'pitch')"
+              }
+            },
+            "pl": {
+              "type": "transform",
+              "in": [
+                "h"
+              ],
+              "params": {
+                "rotate": [
+                  0,
+                  "=point('pt', 0, 'yaw')",
+                  0
+                ],
+                "translate": [
+                  "=point('pt', 0, 'P', 0)",
+                  "=point('pt', 0, 'P', 1)",
+                  "=point('pt', 0, 'P', 2)"
+                ]
+              }
+            }
+          },
+          "output": "pl"
+        }
+      }
+    },
+    "ground": {
+      "type": "heightfield_to_mesh",
+      "in": [
+        "lots_flat"
+      ],
+      "params": {
+        "color": "terrain",
+        "step": 2
+      }
+    },
+    "village": {
+      "type": "merge",
+      "in": [
+        "ground",
+        "houses"
+      ]
+    },
+    "veg_slope": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "lots_flat"
+      ],
+      "params": {
+        "feature": "slope",
+        "min_angle": 0,
+        "max_angle": 28,
+        "angle_falloff": 6,
+        "layer": "forest"
+      }
+    },
+    "veg_noise": {
+      "type": "heightfield_mask_noise",
+      "in": [
+        "veg_slope"
+      ],
+      "params": {
+        "layer": "forest",
+        "mode": "multiply",
+        "element_size": 140,
+        "seed": "=seed+5"
+      }
+    },
+    "veg_mask": {
+      "type": "heightfield_layer",
+      "in": [
+        "veg_noise"
+      ],
+      "params": {
+        "layer": "forest",
+        "expression": "forest * (1 - path) * (1 - river) * (1 - lot_stamp) * (1 - clamp(lots * 2, 0, 1)) * (1 - smoothstep(60, 75, height))"
+      }
+    },
+    "rock_slope": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "veg_mask"
+      ],
+      "params": {
+        "feature": "slope",
+        "min_angle": 24,
+        "max_angle": 50,
+        "angle_falloff": 5,
+        "layer": "rocky"
+      }
+    },
+    "rock_mask": {
+      "type": "heightfield_layer",
+      "in": [
+        "rock_slope"
+      ],
+      "params": {
+        "layer": "rocky",
+        "expression": "rocky * (1 - path) * (1 - lot_stamp)"
+      }
+    },
+    "tree_pts": {
+      "type": "heightfield_scatter",
+      "in": [
+        "rock_mask"
+      ],
+      "params": {
+        "mask_layer": "forest",
+        "count": 12000,
+        "seed": "=seed+6"
+      }
+    },
+    "tree": {
+      "type": "tree_lowpoly"
+    },
+    "bush": {
+      "type": "bush"
+    },
+    "tree_named": {
+      "type": "attrib_create",
+      "in": [
+        "tree"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "tree"
+      }
+    },
+    "bush_named": {
+      "type": "attrib_create",
+      "in": [
+        "bush"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "bush"
+      }
+    },
+    "flora": {
+      "type": "merge",
+      "in": [
+        "tree_named",
+        "bush_named"
+      ]
+    },
+    "trees": {
+      "type": "copy_to_points",
+      "in": [
+        "flora",
+        "tree_orient"
+      ],
+      "params": {
+        "pack": true,
+        "variants": "name",
+        "variant_weights": [
+          1,
+          3
+        ],
+        "seed": "=seed"
+      }
+    },
+    "rock_pts": {
+      "type": "heightfield_scatter",
+      "in": [
+        "rock_mask"
+      ],
+      "params": {
+        "mask_layer": "rocky",
+        "count": 900,
+        "seed": "=seed+9"
+      }
+    },
+    "rock_scale": {
+      "type": "orient",
+      "in": [
+        "rock_pts"
+      ],
+      "params": {
+        "mode": "normal_up",
+        "random_yaw": [
+          0,
+          360
+        ],
+        "scale_min": 0.6,
+        "scale_max": 2.2,
+        "seed": "=seed+10"
+      }
+    },
+    "rock": {
+      "type": "rock"
+    },
+    "rocks": {
+      "type": "copy_to_points",
+      "in": [
+        "rock",
+        "rock_scale"
+      ],
+      "params": {
+        "pack": true
+      }
+    },
+    "scene": {
+      "type": "merge",
+      "in": [
+        "ground",
+        "houses",
+        "trees",
+        "rocks"
+      ]
+    },
+    "lot_prune": {
+      "type": "prune",
+      "in": [
+        "lot_pts"
+      ],
+      "params": {
+        "mode": "overlap",
+        "radius": 12,
+        "use_pscale": false,
+        "priority": "random",
+        "seed": "=seed"
+      }
+    },
+    "instances": {
+      "type": "merge",
+      "in": [
+        "trees",
+        "rocks"
+      ]
+    },
+    "landscape": {
+      "type": "merge",
+      "in": [
+        "rock_mask",
+        "houses",
+        "instances"
+      ]
+    },
+    "tree_orient": {
+      "type": "orient",
+      "in": [
+        "tree_clear"
+      ],
+      "params": {
+        "mode": "direction",
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "random_yaw": [
+          0,
+          360
+        ],
+        "tilt": [
+          0,
+          4
+        ],
+        "scale_min": 0.8,
+        "scale_max": 1.6,
+        "seed": "=seed+7"
+      }
+    },
+    "keep_h": {
+      "type": "heightfield_layer",
+      "in": [
+        "lots_not_road"
+      ],
+      "params": {
+        "operation": "copy",
+        "layer": "h_orig",
+        "source": "height"
+      }
+    },
+    "blur_h": {
+      "type": "heightfield_blur",
+      "in": [
+        "keep_h"
+      ],
+      "params": {
+        "layer": "height",
+        "radius": 12
+      }
+    },
+    "restore_h": {
+      "type": "heightfield_layer",
+      "in": [
+        "flat"
+      ],
+      "params": {
+        "operation": "copy",
+        "layer": "height",
+        "source": "h_orig"
+      }
+    },
+    "pads": {
+      "type": "foreach",
+      "in": [
+        "yaw"
+      ],
+      "params": {
+        "mode": "points",
+        "body": {
+          "nodes": {
+            "pt": {
+              "type": "input",
+              "params": {
+                "index": 0
+              }
+            },
+            "r": {
+              "type": "grid",
+              "params": {
+                "size": [
+                  "=point('pt', 0, 'w') + 6",
+                  "=point('pt', 0, 'd') + 6"
+                ],
+                "divisions": [
+                  1,
+                  1
+                ]
+              }
+            },
+            "pl": {
+              "type": "transform",
+              "in": [
+                "r"
+              ],
+              "params": {
+                "rotate": [
+                  0,
+                  "=point('pt', 0, 'yaw')",
+                  0
+                ],
+                "translate": [
+                  "=point('pt', 0, 'P', 0)",
+                  "=point('pt', 0, 'P', 1)",
+                  "=point('pt', 0, 'P', 2)"
+                ]
+              }
+            }
+          },
+          "output": "pl"
+        }
+      }
+    },
+    "lot_on_pad": {
+      "type": "project_curve",
+      "in": [
+        "yaw",
+        "lots_flat"
+      ],
+      "params": {
+        "normals": false
+      }
+    },
+    "tree_clear": {
+      "type": "prune",
+      "in": [
+        "tree_pts",
+        "houses"
+      ],
+      "params": {
+        "mode": "near_geometry",
+        "distance": 4
+      }
+    }
+  },
+  "output": "scene"
+}

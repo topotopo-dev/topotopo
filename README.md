@@ -65,11 +65,12 @@ Requires Node ≥ 22.18.
 npx topotopo --catalog                                      # node types by category
 npx topotopo --help-node scatter                            # one node's params, defaults and example
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
+npx topotopo view graph.json                                # live 3D viewer in the browser, re-cooks on save
 npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
 
-The package is not on npm yet. Until it is, build the tarball from a clone and install that:
-`npm pack`, then `npm install -g ./topotopo-0.1.0.tgz` (or into a project), and run `topotopo …`.
+`topotopo@0.1.0` on npm is an early preview; v0.2 is the first tagged release. To try unreleased changes, build the
+tarball from a clone: `npm pack`, then `npm install -g ./topotopo-<version>.tgz` (or into a project).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations.
 
 **From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for
@@ -266,6 +267,7 @@ node src/cli.ts examples/csg_bracket.json --render out/bracket.png --section x:0
 node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
 node src/cli.ts examples/unreal_demo.json --node landscape --format unreal_landscape --export out/level   # Landscape bundle
 node src/cli.ts examples/forest.json --node forest --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
+node src/cli.ts view examples/unreal_demo.json   # live viewer at http://127.0.0.1:7341: node list, per-node geometry, re-cook on save
 ```
 
 Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`, output paths may contain `{frame}` or

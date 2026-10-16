@@ -3,6 +3,13 @@
 Status as of 2026-10-12: 96 node types, ~12k lines of TypeScript, immutable geometry with provenance-preserving
 `GeoBuilder`, content-hashed lazy cooking, MCP server, software renderer, 10 example graphs, 322 lines of tests.
 
+> **Update 2026-10-16.** Public since 2026-10-15: github.com/topotopo-dev/topotopo, `topotopo@0.1.0` on npm, the site at
+> topotopo.dev, GitHub Sponsors. Codex sessions 8–16 merged (kernels, Unreal plugin 0.1.4 with tiled Landscapes).
+> The testing week is under way: one environment (1 km² valley, village, 12.9k instances) builds from one graph and
+> imports into Unreal 5.8 in one command; findings and fixes in [release/dogfood-log.md](release/dogfood-log.md).
+> Next: the remaining dogfood fixes, the v0.2 tag, the demo video, then Phase 4 (GUI), which has not started.
+> The block below is the 2026-10-13 snapshot.
+>
 > **Status at commit 81895f2 (2026-10-13, after the Phase 3 merges).**
 >
 > - **Phases 0–2: done**, including the Unreal round trip, verified in Unreal 5.8 on 2026-10-13 (instance rows, glTF
