@@ -203,7 +203,7 @@
       ],
       "params": {
         "layer": "lots",
-        "expression": "clamp(lots, 0, 1) * flat * (1 - river) * (1 - smoothstep(120, 170, sqrt((x - 40) * (x - 40) + (z - 20) * (z - 20))))"
+        "expression": "clamp(lots, 0, 1) * flat * (1 - river) * (1 - smoothstep(190, 240, sqrt((x - 40) * (x - 40) + (z - 20) * (z - 20))))"
       }
     },
     "lot_pts": {
@@ -213,15 +213,16 @@
       ],
       "params": {
         "mask_layer": "lots",
-        "count": "=houses + 10",
+        "count": "=houses",
         "relax": true,
-        "seed": "=seed"
+        "seed": "=seed",
+        "min_distance": 18
       }
     },
     "w": {
       "type": "attrib_randomize",
       "in": [
-        "lot_prune"
+        "lot_pts"
       ],
       "params": {
         "name": "w",
@@ -421,7 +422,8 @@
       "params": {
         "mask_layer": "forest",
         "count": 12000,
-        "seed": "=seed+6"
+        "seed": "=seed+6",
+        "align": "upright"
       }
     },
     "tree": {
@@ -463,16 +465,17 @@
       "type": "copy_to_points",
       "in": [
         "flora",
-        "tree_orient"
+        "tree_yaw"
       ],
       "params": {
         "pack": true,
         "variants": "name",
-        "variant_weights": [
-          1,
-          3
-        ],
-        "seed": "=seed"
+        "variant_weights": {
+          "tree": 3,
+          "bush": 1
+        },
+        "seed": "=seed",
+        "rotate_attrib": "yaw"
       }
     },
     "rock_pts": {
@@ -483,22 +486,19 @@
       "params": {
         "mask_layer": "rocky",
         "count": 900,
-        "seed": "=seed+9"
+        "seed": "=seed+9",
+        "align": "slope"
       }
     },
     "rock_scale": {
-      "type": "orient",
+      "type": "attrib_randomize",
       "in": [
         "rock_pts"
       ],
       "params": {
-        "mode": "normal_up",
-        "random_yaw": [
-          0,
-          360
-        ],
-        "scale_min": 0.6,
-        "scale_max": 2.2,
+        "name": "pscale",
+        "min": 0.6,
+        "max": 2.2,
         "seed": "=seed+10"
       }
     },
@@ -509,10 +509,11 @@
       "type": "copy_to_points",
       "in": [
         "rock",
-        "rock_scale"
+        "rock_yaw"
       ],
       "params": {
-        "pack": true
+        "pack": true,
+        "rotate_attrib": "yaw"
       }
     },
     "scene": {
@@ -523,19 +524,6 @@
         "trees",
         "rocks"
       ]
-    },
-    "lot_prune": {
-      "type": "prune",
-      "in": [
-        "lot_pts"
-      ],
-      "params": {
-        "mode": "overlap",
-        "radius": 12,
-        "use_pscale": false,
-        "priority": "random",
-        "seed": "=seed"
-      }
     },
     "instances": {
       "type": "merge",
@@ -551,31 +539,6 @@
         "houses",
         "instances"
       ]
-    },
-    "tree_orient": {
-      "type": "orient",
-      "in": [
-        "tree_clear"
-      ],
-      "params": {
-        "mode": "direction",
-        "direction": [
-          0,
-          0,
-          1
-        ],
-        "random_yaw": [
-          0,
-          360
-        ],
-        "tilt": [
-          0,
-          4
-        ],
-        "scale_min": 0.8,
-        "scale_max": 1.6,
-        "seed": "=seed+7"
-      }
     },
     "keep_h": {
       "type": "heightfield_layer",
@@ -679,6 +642,42 @@
       "params": {
         "mode": "near_geometry",
         "distance": 4
+      }
+    },
+    "tree_scale": {
+      "type": "attrib_randomize",
+      "in": [
+        "tree_clear"
+      ],
+      "params": {
+        "name": "pscale",
+        "min": 0.8,
+        "max": 1.6,
+        "seed": "=seed+7"
+      }
+    },
+    "tree_yaw": {
+      "type": "attrib_randomize",
+      "in": [
+        "tree_scale"
+      ],
+      "params": {
+        "name": "yaw",
+        "min": 0,
+        "max": 360,
+        "seed": "=seed+8"
+      }
+    },
+    "rock_yaw": {
+      "type": "attrib_randomize",
+      "in": [
+        "rock_scale"
+      ],
+      "params": {
+        "name": "yaw",
+        "min": 0,
+        "max": 360,
+        "seed": "=seed+11"
       }
     }
   },

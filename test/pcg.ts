@@ -640,6 +640,11 @@ section('copy_to_points variants');
   const warnAttr = await run({ ...TREES, v: { type: 'attrib_create', in: ['pts'], params: { name: 'variant', value: 1 } }, cp: { type: 'copy_to_points', in: ['trees', 'v'], params: { pack: true, variants: 'name', variant_weights: [1, 1, 1] } } }, 'cp');
   check(warnAttr.ok && warnAttr.warnings.some((x) => /variant_weights ignored/.test(x.message)), 'variant_weights with a variant attribute: the attribute wins (warning)');
   check(/all 0/.test(await cookErr({ ...TREES, cp: { type: 'copy_to_points', in: ['trees', 'pts'], params: { variants: 'name', variant_weights: [0, 0] } } }, 'cp')), 'variant_weights all 0: clear error');
+  // by name (dogfood 2026-10-15: a list follows the sorted piece order): {c: 1, a: 6, b: 3} = [6, 3, 1]
+  const byName = await geo({ ...TREES, cp: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_weights: { c: 1, a: 6, b: 3 }, seed: 5 } } }, 'cp');
+  check(fpEq(byName, w), 'variant_weights by name {c: 1, a: 6, b: 3} = the list [6, 3, 1] (same picks)');
+  const typo = await run({ ...TREES, cp: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_weights: { a: 1, tree: 2 } } } }, 'cp');
+  check(typo.ok && typo.warnings.some((x) => /no variant named "tree" \(variants: a, b, c\)/.test(x.message)), 'variant_weights by name: an unknown name warns and lists the variants');
 
   // scale_attrib / rotate_attrib = pscale / rot; packed = real
   const PT: Record<string, NodeSpec> = {

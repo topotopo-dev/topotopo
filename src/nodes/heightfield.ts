@@ -20,6 +20,7 @@ import type { CookContext, ParamDef } from '../graph/types.ts';
 import { evalRamp } from '../graph/params.ts';
 import { sampleEliminate } from './copy.ts';
 import { connectivity } from '../core/topology.ts';
+import { minDistanceSelect } from '../core/pcg.ts';
 import { P, simBudget } from './util.ts';
 import { wasmCallUnderBudget } from './wasmcall.ts';
 import { getLoadedKernels, loadHostKernels } from '../wasm/kernels.ts';
@@ -1365,8 +1366,8 @@ defineNode({
 defineNode({
   type: 'heightfield_scatter',
   category: 'heightfield',
-  summary: 'Scatter points on a heightfield by a mask layer\'s density: P on the surface, N from the slope, height/slope/mask attributes. Feed copy_to_points.',
-  description: 'Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field\'s surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field\'s heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point).',
+  summary: 'Scatter points on a heightfield by a mask layer\'s density: P on the surface, N from the slope (or straight up), height/slope/mask attributes, optional minimum distance. Feed copy_to_points.',
+  description: 'Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field\'s surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field\'s heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point). N is the surface normal, and copy_to_points aims a copy\'s +Z along N (Houdini convention), which lays a Y-up tree down: align upright writes orient = identity so trees, houses and posts stand as modelled, align slope writes an orient that turns +Y onto the normal so rocks and shrubs lean with the terrain (orient wins over N in copy_to_points; random yaw goes on top with copy_to_points rotate_attrib). min_distance keeps every pair of points at least that far apart in XZ (exact dart throwing over the drawn candidates, replacing relax): building lots that never overlap; the count can come out lower when the masked area is full.',
   aliases: ['hf_scatter', 'heightfield_scatter_points'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1376,12 +1377,14 @@ defineNode({
     relax: { type: 'bool', default: true, desc: 'even (blue-noise) spacing' },
     seed: P.seed(),
     keep_heightfield: { type: 'bool', default: false, desc: 'also keep the heightfield (default: points only)' },
+    align: { type: 'enum', options: ['none', 'upright', 'slope'], default: 'none', desc: 'instance orientation for copy_to_points: none = only N (the surface normal; copy_to_points then aims a copy\'s +Z along it, the Houdini convention, which lays Y-up models down); upright = orient identity, models stand as authored (trees, buildings, posts); slope = orient turns a model\'s +Y onto the surface normal (rocks, shrubs leaning with the terrain). N stays the surface normal', aliases: ['orientation', 'upright'] },
+    min_distance: { type: 'float', default: 0, min: 0, desc: 'exact minimum distance between points in XZ (metres; 0 = off), e.g. lot spacing so buildings never overlap; replaces relax, and the count can come out lower', aliases: ['mindist', 'min_dist', 'spacing'] },
     sample: {
       type: 'enum', options: ['bilinear', 'unreal_triangles'], default: 'bilinear', aliases: ['sampling', 'sample_mode'],
       desc: 'surface between samples: bilinear, or unreal_triangles = Unreal Landscape\'s triangles (each cell cut along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z), so points land exactly on a Landscape imported from this field\'s png16/r16 export',
     },
   },
-  outputs: 'points: N, height, slope, mask',
+  outputs: 'points: N, height, slope, mask; orient with align upright or slope',
   example: { nodes: { hf: { type: 'heightfield' }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3 } }, m: { type: 'heightfield_mask_by_feature', in: ['n'], params: { feature: 'slope', min_angle: 20 } }, s: { type: 'heightfield_scatter', in: ['m'], params: { density: 0.3 } } }, output: 's' },
   cook: async (ctx) => {
     const { p, input } = ctx;
@@ -1405,7 +1408,8 @@ defineNode({
       const count = p.count > 0 ? Math.round(p.count / hfs.length) : Math.round(p.density * total);
       if (!(total > 0) || count <= 0) { if (!(total > 0)) ctx.warn(`mask "${p.mask_layer}" is 0 everywhere on "${hf.name}"`); continue; }
       if (count > 2e6) throw new NodeError(`${ctx.type}: ${count.toLocaleString('en-US')} points is too many (max 2,000,000); lower density`);
-      const ncand = p.relax ? Math.min(count * 4, 8e6) : count;
+      const md = Math.max(0, p.min_distance || 0);
+      const ncand = md > 0 ? Math.min(Math.max(count * 8, 64), 8e6) : p.relax ? Math.min(count * 4, 8e6) : count;
       const pos = new Float64Array(ncand * 3);
       const x0 = hf.origin[0], z0 = hf.origin[1], x1 = x0 + hf.sizeX, z1 = z0 + hf.sizeZ;
       for (let q = 0; q < ncand; q++) {
@@ -1416,9 +1420,13 @@ defineNode({
         pos[q * 3] = Math.min(x1, Math.max(x0, hf.x(i) + (r() - 0.5) * c));
         pos[q * 3 + 2] = Math.min(z1, Math.max(z0, hf.z(j) + (r() - 0.5) * c));
       }
-      const keep = p.relax && ncand > count
+      // candidates are drawn in mask-weighted random order, so greedy dart throwing over them keeps the density
+      const keep = md > 0
+        ? minDistanceSelect(pos, Int32Array.from({ length: ncand }, (_, i) => i), md, count)
+        : p.relax && ncand > count
         ? await sampleEliminate(pos, count, Math.sqrt(total / (2 * Math.sqrt(3) * count)), undefined, ctx.parallelMap)
         : Int32Array.from({ length: Math.min(ncand, count) }, (_, i) => i);
+      if (md > 0 && keep.length < count) ctx.warn(`min_distance ${md} m fits ${keep.length} of ${count} points on "${hf.name}"`);
       const np = keep.length;
       const out = new Geometry({ positions: new Float64Array(np * 3) });
       const Pd = out.P;
@@ -1426,6 +1434,7 @@ defineNode({
       const ha = out.points.add('height', 'float', 1).data as Float64Array;
       const sa = out.points.add('slope', 'float', 1).data as Float64Array;
       const ma = out.points.add('mask', 'float', 1).data as Float64Array;
+      const OR = p.align === 'upright' || p.align === 'slope' ? (out.points.add('orient', 'float', 4).data as Float64Array) : null;
       // height, N and slope from the chosen surface (bilinear or Unreal's triangles); the mask always bilinear
       const H = hf.read('height'), e = c * 0.5, s = p.sample === 'unreal_triangles' ? 'unreal_triangles' : 'bilinear';
       keep.forEach((q, o) => {
@@ -1435,6 +1444,14 @@ defineNode({
         const gz = (hf.sampleArray(H, x, z + e, s) - hf.sampleArray(H, x, z - e, s)) / (2 * e);
         const l = Math.hypot(gx, 1, gz);
         N[o * 3] = -gx / l; N[o * 3 + 1] = 1 / l; N[o * 3 + 2] = -gz / l;
+        if (OR) {
+          // upright: identity; slope: the shortest rotation taking +Y onto N, q = normalise((Y × N), 1 + Y·N)
+          if (p.align === 'upright') { OR[o * 4] = 0; OR[o * 4 + 1] = 0; OR[o * 4 + 2] = 0; OR[o * 4 + 3] = 1; }
+          else {
+            const nx = N[o * 3], ny = N[o * 3 + 1], nz = N[o * 3 + 2], ql = Math.hypot(nz, nx, 1 + ny);
+            OR[o * 4] = nz / ql; OR[o * 4 + 1] = 0; OR[o * 4 + 2] = -nx / ql; OR[o * 4 + 3] = (1 + ny) / ql;
+          }
+        }
         ha[o] = y;
         sa[o] = (Math.atan(Math.hypot(gx, gz)) * 180) / Math.PI;
         ma[o] = mask ? hf.sampleArray(mask, x, z) : 1;

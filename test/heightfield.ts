@@ -412,6 +412,31 @@ section('project, path, scatter, resample, transform, to_sdf');
   check(unit && pts.points.has('slope') && pts.points.has('height') && pts.points.has('mask'), 'scatter writes unit up-facing N, height, slope, mask');
   const cnt = await geo({ ...half, s: { type: 'heightfield_scatter', in: ['m'], params: { count: 25, relax: false } } }, 's');
   check(cnt.numPoints === 25, 'scatter count overrides density');
+  // dogfood 2026-10-15: copied trees lay down on slopes (copy_to_points aims +Z along N) and building lots overlapped.
+  // Where does each copy's +Y (a tree's trunk) end up after copy_to_points?
+  const { pointTransform } = await import('../src/nodes/copy.ts');
+  const trunkDirs = async (align: string) => {
+    const g = await geo({ ...half, s: { type: 'heightfield_scatter', in: ['m'], params: { density: 6, seed: 3, align } } }, 's');
+    const N = g.points.get('N')!.data as Float64Array;
+    let minUp = 1, maxErrN = 0;
+    for (let i = 0; i < g.numPoints; i++) {
+      const M = pointTransform(g, i), y = [M[4], M[5], M[6]], l = Math.hypot(y[0], y[1], y[2]);
+      minUp = Math.min(minUp, y[1] / l);
+      maxErrN = Math.max(maxErrN, Math.hypot(y[0] / l - N[i * 3], y[1] / l - N[i * 3 + 1], y[2] / l - N[i * 3 + 2]));
+    }
+    return { g, minUp, maxErrN };
+  };
+  const none = await trunkDirs('none'), upright = await trunkDirs('upright'), slope = await trunkDirs('slope');
+  check(none.minUp < 0.5 && !none.g.points.has('orient'), `align none (default, Houdini convention): no orient, trunks lie far from vertical (min up ${none.minUp.toFixed(2)})`);
+  check(upright.minUp > 1 - 1e-12 && upright.g.numPoints === pts.numPoints, `align upright: every trunk vertical (min up ${upright.minUp.toFixed(6)}), same points`);
+  check(slope.maxErrN < 1e-9 && slope.minUp < 1 && slope.minUp > 0.3, `align slope: every trunk along the surface normal (max error ${slope.maxErrN.toExponential(1)}, min up ${slope.minUp.toFixed(2)})`);
+  const spaced = await geo({ ...half, s: { type: 'heightfield_scatter', in: ['m'], params: { count: 10, min_distance: 0.6, seed: 5 } } }, 's');
+  const SP = spaced.P;
+  let minD = Infinity;
+  for (let i = 0; i < spaced.numPoints; i++) for (let j = i + 1; j < spaced.numPoints; j++) minD = Math.min(minD, Math.hypot(SP[i * 3] - SP[j * 3], SP[i * 3 + 2] - SP[j * 3 + 2]));
+  check(spaced.numPoints === 10 && minD >= 0.6, `scatter min_distance: 10 points, closest pair ${minD.toFixed(3)} m ≥ 0.6 in XZ`);
+  const full = await engine.cook({ nodes: { ...half, s: { type: 'heightfield_scatter', in: ['m'], params: { count: 500, min_distance: 0.6, seed: 5 } } }, output: 's' });
+  check(full.ok && full.geo!.numPoints < 500 && full.warnings.some((w) => /min_distance 0\.6 m fits \d+ of 500/.test(w.message)), `scatter min_distance on a full mask: fewer points and a warning (${full.geo?.numPoints})`);
 
   const rs = await field({ ...nodes, r: { type: 'heightfield_resample', in: ['n'], params: { factor: 2 } } }, 'r');
   let rsErr = 0;

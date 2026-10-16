@@ -727,7 +727,7 @@ defineNode({
     variants: { type: 'enum', options: ['none', 'name', 'piece'], default: 'none', desc: 'split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set)' },
     piece_attrib: { type: 'string', default: '', desc: 'variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class")' },
     variant_attrib: { type: 'string', default: 'variant', desc: 'variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value)' },
-    variant_weights: { type: 'json', default: [], desc: 'variants: weights per piece (in piece order) for a seeded weighted random pick when the template has no variant_attrib attribute, e.g. [3, 1, 1]; missing weights are 0', aliases: ['weights', 'variant_probabilities'] },
+    variant_weights: { type: 'json', default: [], desc: 'variants: weights for a seeded weighted random pick when the template has no variant_attrib attribute: by piece value, e.g. {"tree": 3, "bush": 1}, or a list in piece order (names sorted alphabetically, connectivity pieces in prim order), e.g. [3, 1, 1]; missing weights are 0', aliases: ['weights', 'variant_probabilities'] },
     seed: { type: 'float', default: 0, desc: 'variant_weights: random seed' },
     scale_attrib: { type: 'string', default: '', desc: 'template point attribute multiplying the copy scale (float = uniform, vec3 = per axis), on top of pscale and scale', aliases: ['scale_by'] },
     rotate_attrib: { type: 'string', default: '', desc: 'template point attribute adding a local rotation after orient/N/rot: float = degrees about +Y (yaw), vec3 = Euler degrees (XYZ), vec4 = quaternion', aliases: ['rotate_by'] },
@@ -775,11 +775,20 @@ defineNode({
         for (const v of values) subsets.set(v, src.subsetPrims(Uint8Array.from({ length: src.numPrims }, (_, i) => (pa.get(i) === v ? 1 : 0))));
       }
       const va = p.variant_attrib ? t.points.get(p.variant_attrib) : undefined;
-      const wts = Array.isArray(p.variant_weights) ? p.variant_weights.map((x: any) => Math.max(0, Number(x) || 0)) : [];
+      const wv = p.variant_weights;
+      // {piece value: weight} (dogfood 2026-10-15: a list follows the sorted piece order, which surprised a user) or a list
+      const byValue = wv && typeof wv === 'object' && !Array.isArray(wv) ? (wv as Record<string, unknown>) : null;
+      const wts: number[] = byValue
+        ? values.map((v) => Math.max(0, Number(byValue[String(v)]) || 0))
+        : Array.isArray(wv) ? wv.map((x: any) => Math.max(0, Number(x) || 0)) : [];
+      if (byValue) {
+        const unknown = Object.keys(byValue).filter((k) => !values.some((v) => String(v) === k));
+        if (unknown.length) warn(`variant_weights: no variant named ${unknown.map((k) => `"${k}"`).join(', ')} (variants: ${values.join(', ')})`);
+      }
       let wcdf: Float64Array | null = null;
       if (wts.length && va) warn(`variant_weights ignored: the template points have "${p.variant_attrib}", which picks the variants`);
       else if (wts.length && values.length) {
-        if (wts.length !== values.length) warn(`variant_weights has ${wts.length} weight(s) for ${values.length} variant(s) (${values.join(', ')}); missing weights are 0`);
+        if (!byValue && wts.length !== values.length) warn(`variant_weights has ${wts.length} weight(s) for ${values.length} variant(s) (${values.join(', ')}); missing weights are 0`);
         wcdf = new Float64Array(values.length);
         let acc = 0;
         for (let k = 0; k < values.length; k++) { acc += wts[k] ?? 0; wcdf[k] = acc; }
@@ -800,7 +809,7 @@ defineNode({
         return undefined;
       };
       pieceOf = (i) => subsets!.get(pieceKey!(i)) ?? new Geometry();
-    } else if (Array.isArray(p.variant_weights) && p.variant_weights.length) warn('variant_weights needs variants ("name" or "piece") or piece_attrib to split the source into variants');
+    } else if (p.variant_weights && typeof p.variant_weights === 'object' && Object.keys(p.variant_weights).length) warn('variant_weights needs variants ("name" or "piece") or piece_attrib to split the source into variants');
     const copyNames = new Set<string>();
     const pats = String(p.copy_attribs).split(/[\s,]+/).filter(Boolean);
     const matches = (n: string) => pats.some((pt) => !pt.startsWith('^') && new RegExp('^' + pt.replace(/\*/g, '.*') + '$').test(n)) && !pats.some((pt) => pt.startsWith('^') && new RegExp('^' + pt.slice(1).replace(/\*/g, '.*') + '$').test(n));

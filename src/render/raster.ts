@@ -59,6 +59,8 @@ export interface RenderOptions {
   /** look-at point (default bbox centre) */
   target?: Vec3 | null;
   ssaa?: number;
+  /** packed instances: triangles to draw at most (default RENDER_TRIANGLE_BUDGET, 600k; up to 50M); above it an evenly spread subset */
+  maxTriangles?: number;
   title?: string;
   /** shade 3D views with an 8×8 procedural checker from uv (stretch and flips become visible) */
   checker?: boolean;
@@ -202,7 +204,11 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
 /** Render the geometry; returns RGBA pixels. */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
-  if (g.hasPacked() || g.hasSplines()) { const x = expandForRender(g, o); const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r; }
+  if (g.hasPacked() || g.hasSplines()) {
+    const budget = o.maxTriangles !== undefined && o.maxTriangles > 0 ? Math.min(o.maxTriangles, 50_000_000) : undefined;
+    const x = expandForRender(g, o, budget);
+    const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r;
+  }
   g = withHeightfieldPreview(g); // heightfields draw as their (decimated) grid mesh with layers as attributes
   g = withSdfGridPreview(g); // sampled SDFs draw through the existing level-set mesher at preview resolution
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;

@@ -607,6 +607,30 @@ section('CLI arguments');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
 }
 
+section('CLI several renders per cook, triangle budget');
+{
+  // dogfood 2026-10-15: three layers cost three cooks; dense instancing previewed as a 10% subset
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const g = path.join(tmp, 'many.json');
+  fs.writeFileSync(g, JSON.stringify({ nodes: {
+    s: { type: 'sphere', params: { type: 'ico', level: 2 } },
+    pts: { type: 'point_grid', params: { counts: [60, 1, 60], size: [60, 0, 60] } },
+    h: { type: 'wrangle', in: ['pts'], params: { code: '@height = @P.x;' } },
+    c: { type: 'copy_to_points', in: ['s', 'h'], params: { pack: true } },
+  }, output: 'c' }));
+  const a = path.join(tmp, 'r_a.png'), b = path.join(tmp, 'r_b.png');
+  const two = cli(g, '--views', 'top', '--size', '200', '--render', a, '--color-by', 'height', '--render', b, '--size', '160');
+  const sizeOf = (f: string) => { const d = fs.readFileSync(f); return [d.readUInt32BE(16), d.readUInt32BE(20)]; };
+  check(two.status === 0 && (two.stdout.match(/^cooked /gm) ?? []).length === 1 && fs.existsSync(a) && fs.existsSync(b),
+    `two --render flags: one cook, two files (${(two.stdout.match(/^cooked /gm) ?? []).length} cook line)`);
+  check(/rendered .*r_a\.png.*color by height/.test(two.stdout) && !/rendered .*r_b\.png.*color by/.test(two.stdout) && sizeOf(a)[0] === 200 && sizeOf(b)[0] === 160,
+    `per-render options: colour only on the first, size 200 / 160 (${sizeOf(a)[0]} / ${sizeOf(b)[0]}); shared --views top on both`);
+  const capped = cli(g, '--views', 'top', '--size', '120', '--render', a);
+  const lifted = cli(g, '--views', 'top', '--size', '120', '--render', a, '--max-triangles', '2000000');
+  check(/rendering .* of 3\.6k instances/.test(capped.stdout) && lifted.status === 0 && !/rendering .* of/.test(lifted.stdout),
+    '--max-triangles: 1.15M instance triangles draw as a subset by default and in full with a 2M budget');
+}
+
 section('CLI view');
 {
   // `topotopo view <graph.json>`: serves the viewer and re-cooks when the file changes
