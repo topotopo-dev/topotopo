@@ -46,6 +46,7 @@
       <button id="follow" class="on" title="show the graph output; otherwise the selected node">follow output</button>
       <button id="wire">wireframe</button>
       <button id="frame">frame</button>
+      <button id="infobtn" title="show the whole geometry summary">info</button>
     </div>
     <div id="err"></div>
     <div id="info"></div>
@@ -58,7 +59,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const $ = (id) => document.getElementById(id);
 const main = $('main');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// logarithmic depth: a 1 km terrain and a door handle in one view without near-plane clipping or z-fighting
+const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
 renderer.setPixelRatio(devicePixelRatio);
 main.prepend(renderer.domElement);
 const scene = new THREE.Scene();
@@ -67,6 +69,18 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
 camera.position.set(4, 3, 5);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+controls.zoomToCursor = true; // wheel zooms towards what is under the cursor, not the scene centre
+controls.zoomSpeed = 2;
+// double-click: orbit around the surface point under the cursor
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+renderer.domElement.addEventListener('dblclick', (e) => {
+  if (!current) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObject(current, true).find((h) => h.object.isMesh);
+  if (hit) { camera.position.add(hit.point.clone().sub(controls.target)); controls.target.copy(hit.point); }
+});
 scene.add(new THREE.HemisphereLight(0xdfe6f0, 0x3b342c, 1.6));
 const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(-3, 6, 4); scene.add(key);
 const fill = new THREE.DirectionalLight(0xbcd0ff, 0.6); fill.position.set(5, 2, -3); scene.add(fill);
@@ -92,7 +106,7 @@ function frame(obj) {
   const dir = camera.position.clone().sub(controls.target).normalize();
   if (!Number.isFinite(dir.x) || dir.length() < 0.5) dir.set(0.6, 0.45, 0.7).normalize();
   camera.position.copy(c).addScaledVector(dir, r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.1);
-  camera.near = r / 100; camera.far = r * 100; camera.updateProjectionMatrix();
+  camera.near = r / 100000; camera.far = r * 100; camera.updateProjectionMatrix();
   controls.target.copy(c);
   scene.remove(grid);
   const step = Math.pow(10, Math.floor(Math.log10(r)));
@@ -128,7 +142,15 @@ async function loadGeo() {
     if (!state.framed) { frame(current); state.framed = true; }
   }, (e) => { $('err').textContent = String(e); });
   const info = await (await fetch('/api/info?' + q)).json().catch(() => null);
-  $('info').textContent = info?.summary ? `${state.graph}/${info.target}  (${info.ms.toFixed(0)} ms)\n${info.summary}` : '';
+  state.infoText = info?.summary ? `${state.graph}/${info.target}  (${info.ms.toFixed(0)} ms)\n${info.summary}` : '';
+  showInfo();
+}
+
+// the summary is long for big scenes: two lines unless expanded (the "info" button)
+function showInfo() {
+  const t = state.infoText ?? '';
+  $('info').textContent = state.infoOpen ? t : t.split('\n').slice(0, 2).join('\n');
+  $('infobtn').classList.toggle('on', !!state.infoOpen);
 }
 
 function renderNodes() {
@@ -167,6 +189,7 @@ $('graph').onchange = (e) => {
 $('follow').onclick = () => { state.follow = true; $('follow').classList.add('on'); renderNodes(); loadGeo(); };
 $('wire').onclick = () => { state.wire = !state.wire; $('wire').classList.toggle('on', state.wire); if (current) applyWire(current); };
 $('frame').onclick = () => current && frame(current);
+$('infobtn').onclick = () => { state.infoOpen = !state.infoOpen; showInfo(); };
 
 const es = new EventSource('/api/events');
 es.onopen = () => { $('status').textContent = 'live — updates on every build/edit'; };

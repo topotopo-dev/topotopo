@@ -5439,7 +5439,7 @@ pack:false (default) makes real copies. pack:true makes one packed prim per temp
 | `variants` | enum | `"none"` |  | `none`, `name`, `piece` |  | split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set) |
 | `piece_attrib` | string | `""` |  |  |  | variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class") |
 | `variant_attrib` | string | `"variant"` |  |  |  | variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value) |
-| `variant_weights` | json | `[]` |  |  | `weights`, `variant_probabilities` | variants: weights per piece (in piece order) for a seeded weighted random pick when the template has no variant_attrib attribute, e.g. [3, 1, 1]; missing weights are 0 |
+| `variant_weights` | json | `[]` |  |  | `weights`, `variant_probabilities` | variants: weights for a seeded weighted random pick when the template has no variant_attrib attribute: by piece value, e.g. {"tree": 3, "bush": 1}, or a list in piece order (names sorted alphabetically, connectivity pieces in prim order), e.g. [3, 1, 1]; missing weights are 0 |
 | `seed` | float | `0` |  |  |  | variant_weights: random seed |
 | `scale_attrib` | string | `""` |  |  | `scale_by` | template point attribute multiplying the copy scale (float = uniform, vec3 = per axis), on top of pscale and scale |
 | `rotate_attrib` | string | `""` |  |  | `rotate_by` | template point attribute adding a local rotation after orient/N/rot: float = degrees about +Y (yaw), vec3 = Euler degrees (XYZ), vec4 = quaternion |
@@ -8024,9 +8024,9 @@ Houdini: HeightField Resample. Give the new cell size (resolution), exact sample
 
 category: `heightfield` · aliases: `hf_scatter`, `heightfield_scatter_points`
 
-Scatter points on a heightfield by a mask layer's density: P on the surface, N from the slope, height/slope/mask attributes. Feed copy_to_points.
+Scatter points on a heightfield by a mask layer's density: P on the surface, N from the slope (or straight up), height/slope/mask attributes, optional minimum distance. Feed copy_to_points.
 
-Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field's surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field's heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point).
+Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field's surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field's heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point). N is the surface normal, and copy_to_points aims a copy's +Z along N (Houdini convention), which lays a Y-up tree down: align upright writes orient = identity so trees, houses and posts stand as modelled, align slope writes an orient that turns +Y onto the normal so rocks and shrubs lean with the terrain (orient wins over N in copy_to_points; random yaw goes on top with copy_to_points rotate_attrib). min_distance keeps every pair of points at least that far apart in XZ (exact dart throwing over the drawn candidates, replacing relax): building lots that never overlap; the count can come out lower when the masked area is full.
 
 **Inputs**
 
@@ -8044,9 +8044,11 @@ Houdini: HeightField Scatter. Count = density × area weighted by the mask (or c
 | `relax` | bool | `true` |  |  |  | even (blue-noise) spacing |
 | `seed` | float | `0` |  |  |  | random seed |
 | `keep_heightfield` | bool | `false` |  |  |  | also keep the heightfield (default: points only) |
+| `align` | enum | `"none"` |  | `none`, `upright`, `slope` | `orientation`, `upright` | instance orientation for copy_to_points: none = only N (the surface normal; copy_to_points then aims a copy's +Z along it, the Houdini convention, which lays Y-up models down); upright = orient identity, models stand as authored (trees, buildings, posts); slope = orient turns a model's +Y onto the surface normal (rocks, shrubs leaning with the terrain). N stays the surface normal |
+| `min_distance` | float | `0` | 0.. |  | `mindist`, `min_dist`, `spacing` | exact minimum distance between points in XZ (metres; 0 = off), e.g. lot spacing so buildings never overlap; replaces relax, and the count can come out lower |
 | `sample` | enum | `"bilinear"` |  | `bilinear`, `unreal_triangles` | `sampling`, `sample_mode` | surface between samples: bilinear, or unreal_triangles = Unreal Landscape's triangles (each cell cut along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z), so points land exactly on a Landscape imported from this field's png16/r16 export |
 
-**Writes:** points: N, height, slope, mask
+**Writes:** points: N, height, slope, mask; orient with align upright or slope
 
 **Example**
 

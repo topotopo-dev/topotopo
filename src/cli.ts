@@ -58,6 +58,9 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
     '                          [--textures] (base colour maps on meshes) [--texture name|image/layer|material] (adds the texture view)',
+    '                          [--max-triangles 600000] (packed instances drawn; above it an evenly spread subset)',
+    '         several renders per cook: repeat --render; options after a --render apply to it, options before the first apply to all',
+    '           e.g. --views top --render h.png --color-by height --render r.png --color-by river',
     '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails)',
     '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
@@ -170,29 +173,39 @@ async function cook() {
   }
 
   /** Render overlay flags → render tool arguments → RenderOptions (src/render/options.ts). */
-  function renderFlags(): RenderOptions {
+  function renderFlags(get: (f: string) => string | undefined, has: (f: string) => boolean): RenderOptions {
     const a: Record<string, unknown> = {};
     for (const [f, k] of [['--wireframe', 'wireframe'], ['--hard-angle', 'hard_angle'], ['--section', 'section'], ['--clip', 'clip'], ['--glyphs', 'glyphs'],
       ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
       ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
-      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture']]) if (opt(f) !== undefined) a[k] = opt(f);
-    for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures']]) if (argv.includes(f)) a[k] = true;
-    if (argv.includes('--no-view-labels')) a.view_labels = false;
+      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles']]) if (get(f) !== undefined) a[k] = get(f);
+    for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures']]) if (has(f)) a[k] = true;
+    if (has('--no-view-labels')) a.view_labels = false;
     try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
   }
 
+  // Several renders per run (one cook): every --render takes the render options that follow it, up to the next
+  // --render; options before the first --render apply to all of them. With one --render this is the old behaviour.
+  const renderAt = argv.flatMap((x, i) => (x === '--render' ? [i] : []));
+  const sharedArgs = argv.slice(0, renderAt.length ? renderAt[0] : argv.length);
+  const renders = renderAt.map((start, n) => {
+    const seg = argv.slice(start, n + 1 < renderAt.length ? renderAt[n + 1] : argv.length);
+    if (!seg[1] || seg[1].startsWith('--')) fail('--render needs an output path (e.g. --render out.png)');
+    const from = (args: string[], f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
+    return { out: seg[1], get: (f: string) => from(seg, f) ?? from(sharedArgs, f), has: (f: string) => seg.includes(f) || sharedArgs.includes(f) };
+  });
+
   async function writeOutputs(r: CookReport, frame?: number) {
     const geo = r.geo!;
-    const out = opt('--render');
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
-    if (out) {
-      const ro = renderFlags();
-      const v = opt('--views');
+    for (const { out, get, has } of renders) {
+      const ro = renderFlags(get, has);
+      const v = get('--views');
       let views = v === undefined || v === 'quad' ? undefined : parseViews(v);
-      if (opt('--section') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('section') ? views : [...(views ?? parseViews('quad')!), 'section'];
-      if (opt('--texture') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('texture') ? views : [...(views ?? parseViews('quad')!), 'texture'];
+      if (get('--section') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('section') ? views : [...(views ?? parseViews('quad')!), 'section'];
+      if (get('--texture') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('texture') ? views : [...(views ?? parseViews('quad')!), 'texture'];
       const title = path.basename(file, '.json') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
-      const img = renderGeometry(geo, { ...ro, views, colorBy: opt('--color-by') ?? null, checker: argv.includes('--checker'), title });
+      const img = renderGeometry(geo, { ...ro, views, colorBy: get('--color-by') ?? null, checker: has('--checker'), title });
       const p = at(out);
       fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
       fs.writeFileSync(p, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));

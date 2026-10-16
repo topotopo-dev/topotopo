@@ -29,7 +29,8 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   const pick = (snake: string, camel = snake) => (has(snake) ? a[snake] : has(camel) ? a[camel] : undefined);
   if (has('views')) o.views = parseViews(a.views);
   for (const [s, c] of [['size', 'size'], ['azimuth', 'azimuth'], ['elevation', 'elevation'], ['zoom', 'zoom'], ['hard_angle', 'hardAngle'], ['max_labels', 'maxLabels'],
-    ['glyph_scale', 'glyphScale'], ['max_glyphs', 'maxGlyphs'], ['ao_radius', 'aoRadius'], ['ortho_scale', 'orthoScale'], ['scale', 'scale'], ['ssaa', 'ssaa']] as const) {
+    ['glyph_scale', 'glyphScale'], ['max_glyphs', 'maxGlyphs'], ['ao_radius', 'aoRadius'], ['ortho_scale', 'orthoScale'], ['scale', 'scale'], ['ssaa', 'ssaa'],
+    ['max_triangles', 'maxTriangles']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = num(v, s);
   }

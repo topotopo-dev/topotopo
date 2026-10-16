@@ -254,6 +254,9 @@ WORKFLOW
   → heightfield_erode {iterations: 60} (gullies and sediment fans; writes flow, sediment, debris, water)
   → heightfield_path (road along a curve, writes "path") · heightfield_project (stamp meshes/curves: plateaus, ridges)
   → heightfield_mask_by_feature (slope/height/curvature/direction/flow/occlusion) → heightfield_scatter → copy_to_points
+    (heightfield_scatter {align: "upright"} for trees and buildings, {align: "slope"} for rocks that follow the ground;
+    without align, copy_to_points aims each copy's +Z along N, which lays Y-up models down;
+    {min_distance: 12} for lots that never overlap; heightfield_project {level: "mean"} levels the pads under them)
   → heightfield_to_mesh {color: "terrain"} for polygons (layers become point attributes), or export png16.
   Other sources: heightfield_from_mesh (project polygons along Y), heightfield_from_image (8/16-bit PNG).
   Layer tools: heightfield_layer (expression over layers "height * mask + 2", or copy/rename/delete/fill), remap, blur,
