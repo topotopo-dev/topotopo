@@ -58,6 +58,7 @@ struct FOptions
     bool bLayers = true;
     bool bMaterial = true;
     bool bExpandedObjects = true;
+    bool bLighting = false;
 };
 
 static bool ReadJSON(const FString& File, TSharedPtr<FJsonObject>& Out, FString& Error)
@@ -111,6 +112,7 @@ bool ImportGLB(const FString& File, const FString& Folder, const FString& Protot
     Parameters.OverridePipelines.Add(FSoftObjectPath(TEXT("/Interchange/Pipelines/DefaultGLTFPipeline.DefaultGLTFPipeline")));
     // Last: materials and textures into sub-folders, so none can take a prototype mesh's name.
     TStrongObjectPtr<UTopoTopoAssetFolderPipeline> Folders(NewObject<UTopoTopoAssetFolderPipeline>(GetTransientPackage()));
+    Folders->SubFolder = PrototypeName; // Materials/<prototype>: prototypes share material names (bark)
     Parameters.OverridePipelines.Add(FSoftObjectPath(Folders.Get()));
     TStrongObjectPtr<UInterchangeSourceData> Source(UInterchangeManager::CreateSourceData(File));
     TArray<UObject*> Imported;
@@ -339,6 +341,7 @@ static bool Run(FOptions Options, FString& Message)
         if (!Landscape) { return false; }
         Landscape->SetActorLabel(Actor->GetActorLabel() + TEXT("_Landscape"));
     }
+    const int32 LightCount = Options.bLighting ? AddPreviewLighting(World) : 0;
     Actor->MarkPackageDirty();
     GEditor->SelectNone(false, true);
     GEditor->SelectActor(Actor, true, true);
@@ -355,6 +358,11 @@ static bool Run(FOptions Options, FString& Message)
         Message += FString::Printf(TEXT(" Landscape: %d weight layers; generated material %s."),
             LandscapeData.WeightLayers.Num(), Options.bMaterial ? TEXT("assigned") : TEXT("disabled"));
     }
+    if (Options.bLighting)
+    {
+        Message += LightCount ? FString::Printf(TEXT(" Preview lighting: %d actors added (sun, sky, sky light, fog as missing)."), LightCount)
+                              : FString(TEXT(" Preview lighting: the level already has a sun, sky, sky light and fog; nothing added."));
+    }
     UE_LOG(LogTopoTopoImport, Display, TEXT("%s"), *Message);
     return true;
 }
@@ -364,7 +372,7 @@ static void OpenDialog()
     TSharedRef<FOptions> Options = MakeShared<FOptions>();
     Options->Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("TopoTopo/landscape"));
     TSharedRef<SWindow> Window = SNew(SWindow).Title(LOCTEXT("Title", "Import TopoTopo scene"))
-        .ClientSize(FVector2D(650, 400)).SupportsMaximize(false).SupportsMinimize(false);
+        .ClientSize(FVector2D(650, 440)).SupportsMaximize(false).SupportsMinimize(false);
     TSharedPtr<STextBlock> Status;
     Window->SetContent(SNew(SBox).Padding(16)
         [SNew(SVerticalBox)
@@ -388,6 +396,9 @@ static void OpenDialog()
             .IsEnabled_Lambda([Options]() { return Options->bLandscape; })
             .OnCheckStateChanged_Lambda([Options](ECheckBoxState State) { Options->bMaterial = State == ECheckBoxState::Checked; })
             [SNew(STextBlock).Text(LOCTEXT("Material", "Generate and assign a Landscape material"))]]
+        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SCheckBox)
+            .OnCheckStateChanged_Lambda([Options](ECheckBoxState State) { Options->bLighting = State == ECheckBoxState::Checked; })
+            [SNew(STextBlock).Text(LOCTEXT("Lighting", "Add preview lighting (sun, sky, sky light, fog) where the level has none"))]]
         + SVerticalBox::Slot().AutoHeight()[SAssignNew(Status, STextBlock).AutoWrapText(true).Text(LOCTEXT("Unsaved", "Imports assets and creates HISM components in the current level. Nothing is saved automatically."))]
         + SVerticalBox::Slot().AutoHeight().Padding(0, 12, 0, 0)[SNew(SButton).Text(LOCTEXT("Import", "Import"))
             .OnClicked_Lambda([Options, Status]()
@@ -408,10 +419,10 @@ public:
     {
         UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FTopoTopoPCGEditorModule::RegisterMenus));
         Command = MakeUnique<FAutoConsoleCommand>(TEXT("TopoTopo.ImportScene"),
-            TEXT("TopoTopo.ImportScene \"absolute bundle directory\" /Game/TopoTopo/NewSet [landscape=0|1] [objects=0|1] [layers=0|1] [material=0|1]. Imports into the current editor level, without saving."),
+            TEXT("TopoTopo.ImportScene \"absolute bundle directory\" /Game/TopoTopo/NewSet [landscape=0|1] [objects=0|1] [layers=0|1] [material=0|1] [lighting=0|1]. Imports into the current editor level, without saving."),
             FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
             {
-                if (Args.Num() < 2) { UE_LOG(LogTopoTopoImport, Error, TEXT("Usage: TopoTopo.ImportScene \"bundle directory\" /Game/TopoTopo/NewSet [landscape=1] [objects=1] [layers=1] [material=1]")); return; }
+                if (Args.Num() < 2) { UE_LOG(LogTopoTopoImport, Error, TEXT("Usage: TopoTopo.ImportScene \"bundle directory\" /Game/TopoTopo/NewSet [landscape=1] [objects=1] [layers=1] [material=1] [lighting=1]")); return; }
                 TopoTopoImport::FOptions Options;
                 Options.Directory = Args[0];
                 Options.Destination = Args[1];
@@ -425,6 +436,8 @@ public:
                     else if (Args[I] == TEXT("material=1")) { Options.bMaterial = true; }
                     else if (Args[I] == TEXT("objects=0")) { Options.bExpandedObjects = false; }
                     else if (Args[I] == TEXT("objects=1")) { Options.bExpandedObjects = true; }
+                    else if (Args[I] == TEXT("lighting=0")) { Options.bLighting = false; }
+                    else if (Args[I] == TEXT("lighting=1")) { Options.bLighting = true; }
                     else { UE_LOG(LogTopoTopoImport, Error, TEXT("Unknown argument: %s"), *Args[I]); return; }
                 }
                 FString Message;

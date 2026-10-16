@@ -47,4 +47,8 @@ ALandscape* ImportLandscape(UWorld* World, const FLandscapeData& Data, const FSt
 // stays at Folder/<PrototypeName>; materials and textures go to Folder/Materials and Folder/Textures.
 bool ImportGLB(const FString& File, const FString& Folder, const FString& PrototypeName,
     TArray<class UStaticMesh*>& OutMeshes, FString& Error);
+
+// Sun (atmosphere sun light), sky atmosphere, real-time sky light and height fog, each only when the level has none of
+// that kind (the "lighting=1" import option). Returns how many actors were added.
+int32 AddPreviewLighting(UWorld* World, bool bTransient = false);
 }

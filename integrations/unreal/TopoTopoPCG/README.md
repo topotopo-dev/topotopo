@@ -1,7 +1,9 @@
 # TopoTopoPCG for Unreal Engine 5.8
 
-Plugin version **0.1.4** (descriptor version 5) keeps prototype meshes at `<set>/Meshes/<name>` even when a glTF
-material has the same name (materials and textures now go to `Meshes/Materials` and `Meshes/Textures`) and places
+Plugin version **0.1.5** (descriptor version 6) adds `lighting=1`: a sun, sky atmosphere, real-time sky light and
+height fog for previewing, each only where the level has none, and gives every prototype its own material folder
+(`Meshes/Materials/<prototype>`), because prototypes share material names such as `bark`. 0.1.4 keeps prototype
+meshes at `<set>/Meshes/<name>` even when a glTF material has the same name, and places
 ordinary objects from `objects_static.glb`, which the exporter writes at any instance count; 0.1.3 added tiled
 Landscape bundles.
 
@@ -50,8 +52,11 @@ folder, for example `/Game/TopoTopo/PluginDemo`. Enable Landscape import for the
 and a generated terrain material default on. The console equivalent is:
 
 ```text
-TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo/landscape" /Game/TopoTopo/PluginDemo landscape=1 layers=1 material=1 objects=1
+TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo/landscape" /Game/TopoTopo/PluginDemo landscape=1 layers=1 material=1 objects=1 lighting=1
 ```
+
+`lighting=1` (off by default) adds the four actors of Unreal's Basic level (directional sun as the atmosphere sun light, sky
+atmosphere, real-time sky light, exponential height fog), each only when the level has none of that kind.
 
 `layers=0` skips the weight PNGs and layer-info assets. `material=0` skips generated material creation and
 assignment. With `layers=0 material=1`, the generated material is a simple grass fallback. These options have
@@ -59,7 +64,8 @@ no effect when `landscape=0` (the default); the dialog enables their controls wh
 
 See [the editor command and detailed import limits](EDITOR_WORKFLOW.md). The command uses native Interchange
 GLB pipelines, keeps the mesh split by name and imports materials. Prototypes go into `<set>/Meshes` (their
-materials and textures into `Meshes/Materials` and `Meshes/Textures`, so a material never takes a mesh's name),
+materials and textures into `Meshes/Materials/<prototype>` and `Meshes/Textures/<prototype>`, so a material never
+takes a mesh's name and prototypes sharing a material name do not collide),
 expanded reference meshes into `<set>/Objects`. Only ordinary objects absent from the prototype list are placed from the
 expanded file; placing its tree/rock reference meshes too would duplicate the CSV instances. Assets and level
 changes remain unsaved for review. Repeated imports require a fresh destination folder.

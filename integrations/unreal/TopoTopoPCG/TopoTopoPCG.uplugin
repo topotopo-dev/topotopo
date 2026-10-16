@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 5,
-  "VersionName": "0.1.4",
+  "Version": 6,
+  "VersionName": "0.1.5",
   "FriendlyName": "TopoTopo PCG",
   "Description": "TopoTopo point streams, PCG instances and Unreal scene import.",
   "Category": "Procedural",
