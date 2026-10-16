@@ -607,5 +607,34 @@ section('CLI arguments');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
 }
 
+section('CLI view');
+{
+  // `topotopo view <graph.json>`: serves the viewer and re-cooks when the file changes
+  const { spawn } = await import('node:child_process');
+  const gfile = path.join(tmp, 'view_graph.json');
+  fs.writeFileSync(gfile, JSON.stringify({ nodes: { b: { type: 'box' } } }));
+  const proc = spawn(process.execPath, [path.join(root, 'src', 'cli.ts'), 'view', gfile, '--port', '0'], { cwd: root });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += d; });
+  proc.stderr.on('data', (d) => { out += d; });
+  const until = async (pred: () => boolean, ms: number) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 100)); return pred(); };
+  try {
+    const up = await until(() => /view: http:\/\/127\.0\.0\.1:\d+\//.test(out), 30000);
+    check(up, `view prints its URL (${out.trim().split('\n').pop()})`);
+    if (up) {
+      const url = /view: (http:\/\/127\.0\.0\.1:\d+)\//.exec(out)![1];
+      const graphs = async () => (await (await fetch(url + '/api/graphs')).json()) as { name: string; version: number }[];
+      const g1 = await graphs();
+      check(g1.length === 1 && g1[0].name === 'view_graph' && g1[0].version >= 1, `view serves the graph file (${JSON.stringify(g1.map((g) => [g.name, g.version]))})`);
+      const info1 = await (await fetch(`${url}/api/info?graph=view_graph`)).json() as any;
+      check(/8 points/.test(JSON.stringify(info1)), 'view cooks it (a box: 8 points)');
+      fs.writeFileSync(gfile, JSON.stringify({ nodes: { s: { type: 'sphere', params: { type: 'ico', level: 1 } } } }));
+      const bumped = await until(() => /cooked view_graph.*\n.*cooked view_graph/s.test(out), 15000);
+      const info2 = await (await fetch(`${url}/api/info?graph=view_graph`)).json() as any;
+      check(bumped && /42 points/.test(JSON.stringify(info2)), 'view re-cooks when the file is saved (an ico sphere: 42 points)');
+    }
+  } finally { proc.kill(); }
+}
+
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);
