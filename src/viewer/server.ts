@@ -20,6 +20,8 @@ import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { withImagePreview } from '../render/texview.ts';
 import { wiringOf } from '../graph/engine.ts';
+// the page's guide rules, shared so the page and this server check a marker list the same way
+import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList } from './app/markers.js';
 
 // index.html sits next to this module (the build copies it to dist/viewer/)
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -63,7 +65,7 @@ export function inputFileName(raw: string): string {
 // area empty" (zone, volume). The page sends the editable list; the server stores it and writes the geometry agents
 // read as inputs/markers.json, in the conventions of help topic "inputs" (string attributes name and role).
 
-export const MARKER_KINDS = ['site', 'path', 'zone', 'volume'] as const;
+export const MARKER_KINDS = KINDS as readonly ['site', 'path', 'zone', 'volume'];
 export type MarkerKind = (typeof MARKER_KINDS)[number];
 /** One marker, in metres, Y-up, world space. */
 export interface Marker {
@@ -77,54 +79,13 @@ export interface Marker {
   /** volume: extent upward from the lower corner's y, default 10 */
   height?: number;
 }
-const MARKER_POINTS: Record<MarkerKind, [number, number]> = { site: [1, 1], path: [2, Infinity], zone: [3, Infinity], volume: [2, 2] };
-
 /**
- * A marker list (the POST /api/markers body, or the stored list) checked and normalised: names trimmed and unique
- * (ignoring case), the defaults filled in, ids given to markers without one. Throws HttpError 400 naming the problem.
+ * A marker list (the POST /api/markers body, or the stored list) checked and normalised by the page's own rules
+ * (app/markers.js): names trimmed and unique (ignoring case), the defaults filled in, ids given to markers without
+ * one. Throws HttpError 400 naming the problem.
  */
 export function parseMarkers(body: unknown): Marker[] {
-  const list = (body as any)?.markers;
-  if (!Array.isArray(list)) throw new HttpError(400, 'the body must be {"markers": [{id, kind, name, points, radius?, height?}, ...]}');
-  const bad = (i: number, msg: string) => new HttpError(400, `markers[${i}]: ${msg}`);
-  const names = new Map<string, number>(), ids = new Set<string>();
-  const out = list.map((m: any, i: number): Marker => {
-    if (!m || typeof m !== 'object' || Array.isArray(m)) throw bad(i, 'must be an object {id, kind, name, points}');
-    const kind = m.kind as MarkerKind;
-    if (!MARKER_KINDS.includes(kind)) throw bad(i, `kind ${JSON.stringify(m.kind)}: use ${MARKER_KINDS.join(', ')}`);
-    const name = typeof m.name === 'string' ? m.name.normalize('NFC').trim() : '';
-    if (!name || name.length > 100 || /[\u0000-\u001f\u007f]/.test(name)) throw bad(i, `${m.name === undefined ? 'no name' : `name ${JSON.stringify(m.name)}`}: give 1 to 100 printable characters`);
-    const key = name.toLowerCase();
-    if (names.has(key)) throw bad(i, `name "${name}" is taken by markers[${names.get(key)}]: names must be unique`);
-    names.set(key, i);
-    if (m.id !== undefined) {
-      if (typeof m.id !== 'string' || !m.id || m.id.length > 64) throw bad(i, 'id must be a string of 1 to 64 characters');
-      if (ids.has(m.id)) throw bad(i, `id "${m.id}" is used twice`);
-      ids.add(m.id);
-    }
-    const [lo, hi] = MARKER_POINTS[kind];
-    if (!Array.isArray(m.points) || m.points.length < lo || m.points.length > hi)
-      throw bad(i, `a ${kind} needs ${lo === hi ? lo : `${lo} or more`} point${lo === 1 ? '' : 's'} [x, y, z] (got ${Array.isArray(m.points) ? m.points.length : JSON.stringify(m.points)})`);
-    const points = m.points.map((p: any, k: number): [number, number, number] => {
-      if (!Array.isArray(p) || p.length !== 3 || !p.every((x) => typeof x === 'number' && Number.isFinite(x))) throw bad(i, `points[${k}] must be [x, y, z] in metres (got ${JSON.stringify(p)})`);
-      return [p[0], p[1], p[2]];
-    });
-    const size = (v: any, what: string, def: number) => {
-      if (v === undefined || v === null) return def;
-      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) throw bad(i, `${what} must be a number of metres above 0 (got ${JSON.stringify(v)})`);
-      return v;
-    };
-    const r: Marker = { id: m.id, kind, name, points };
-    if (kind === 'site') r.radius = size(m.radius, 'radius', 5);
-    if (kind === 'volume') {
-      r.height = size(m.height, 'height', 10);
-      if (points[0][0] === points[1][0] || points[0][2] === points[1][2]) throw bad(i, 'a volume\'s two corners must differ in x and in z');
-    }
-    return r;
-  });
-  let n = 0;
-  for (const m of out) if (m.id === undefined) { do m.id = `m${++n}`; while (ids.has(m.id)); ids.add(m.id); }
-  return out;
+  try { return parseMarkerList(body); } catch (e: any) { throw e instanceof MarkerError ? new HttpError(400, e.message) : e; }
 }
 
 /**
