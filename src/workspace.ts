@@ -26,6 +26,9 @@ export interface EditOp {
 
 const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 
+// stand-in: session A implements this; the orchestrator keeps A's version at merge
+export interface InputFile { path: string; kind: 'geometry' | 'image' | 'other'; ext: string; size: number; mtime: number }
+
 export class Workspace {
   dir: string;
   engine: Engine;
@@ -43,6 +46,30 @@ export class Workspace {
   get graphDir() { return path.join(this.dir, 'graphs'); }
   get assetDir() { return path.join(this.dir, 'assets'); }
   get exportDir() { return path.join(this.dir, 'exports'); }
+  // stand-in: session A implements this; the orchestrator keeps A's version at merge
+  get inputDir(): string { return path.join(this.dir, 'inputs'); }
+
+  // stand-in: session A implements this; the orchestrator keeps A's version at merge
+  listInputs(): InputFile[] {
+    const out: InputFile[] = [];
+    const walk = (dir: string, rel: string) => {
+      let entries: fs.Dirent[];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (e.name.startsWith('.')) continue;
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) { walk(path.join(dir, e.name), r); continue; }
+        if (!e.isFile()) continue;
+        const s = fs.statSync(path.join(dir, e.name));
+        const lower = e.name.toLowerCase();
+        const ext = lower.endsWith('.points.json') ? 'points.json' : lower.includes('.') ? lower.slice(lower.lastIndexOf('.') + 1) : '';
+        const kind = ['obj', 'stl', 'ply', 'glb', 'gltf', 'geo', 'bgeo', 'blend', 'csv', 'json', 'points.json'].includes(ext) ? 'geometry' : ext === 'png' ? 'image' : 'other';
+        out.push({ path: r, kind, ext, size: s.size, mtime: Math.round(s.mtimeMs) });
+      }
+    };
+    walk(this.inputDir, '');
+    return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
 
   load() {
     for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir]) fs.mkdirSync(d, { recursive: true });
@@ -228,6 +255,17 @@ export class Workspace {
       }
     }
     return { graph: g, notes };
+  }
+
+  // stand-in: session A implements this; the orchestrator keeps A's version at merge
+  async edit(name: string, ops: EditOp[], opts?: { frame?: number }): Promise<{ graph: GraphSpec; notes: string[]; report: CookReport }> {
+    const { graph, notes } = this.applyEdits(name, ops);
+    const v = this.engine.validate(graph);
+    if (v.errors.length) throw Object.assign(new Error(`✗ edits rejected (graph unchanged) — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}`).join('\n')), { errors: v.errors });
+    this.setGraph(name, graph);
+    let report: CookReport;
+    try { report = await this.cook(name, undefined, opts?.frame); } finally { this.bump(name); }
+    return { graph: this.getGraph(name), notes, report };
   }
 
   async cook(name: string, target?: string, frame?: number) {
