@@ -94,8 +94,9 @@ src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts
 src/mcp/       MCP server, tool implementations, LLM docs; inputs.ts: the inputs tool (what people dropped into inputs/)
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
 src/workspace.ts  the workspace folder: graphs/ (named graphs as JSON), assets/, inputs/ (files people drop in: meshes,
-               guide curves and points, PNG masks; listInputs), exports/; edit operations and edit() (apply, validate,
-               store, cook, notify: the one path for the MCP edit tool and the viewer's controls)
+               guide curves and points, PNG masks; listInputs; `topotopo view` passes the inputs/ beside the graph
+               file, made by the first drop), exports/; edit operations and edit() (apply, validate, store, cook,
+               notify: the one path for the MCP edit tool and the viewer's controls)
 shelf/        shipped graph assets (one GraphSpec per file + index.json + thumbs/), registered as category "shelf"
 ```
 
@@ -947,6 +948,9 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
 - Order, decided 2026-10-17: the live viewer grows into the GUI in the order a person working with an agent needs it.
   Done: a Controls panel generated from the graph's `params` (`POST /api/vars`, bursts coalesced), a drop zone
   that stores files in `inputs/` and shows them as ghosted reference layers (`GET/POST /api/inputs`, `GET /api/input`).
+  Under `topotopo view <graph.json>` that is the `inputs/` folder beside the graph file, made by the first drop (the
+  scratch workspace keeps only graphs, assets and exports), so the graph reads drops as `inputs/<name>` and they
+  outlive the viewer; the page names the folder (`GET /api/inputs_dir`).
   Next: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`), then a chat
   panel, then the node editor.
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
