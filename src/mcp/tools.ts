@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { Workspace } from '../workspace.ts';
+import { Workspace, EditRejected, guardLockedOps, keepLockedVars } from '../workspace.ts';
 import type { EditOp } from '../workspace.ts';
 import type { CookReport } from '../graph/engine.ts';
 import type { GraphSpec } from '../graph/types.ts';
@@ -22,6 +22,7 @@ import type { Host } from '../host/types.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 import { verifyTools } from './verify.ts';
+import { inputsTool } from './inputs.ts';
 
 export type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export interface ToolResult { content: Content[]; isError?: boolean }
@@ -159,13 +160,15 @@ const RENDER_PROPS = {
   texture: { type: 'string', description: 'adds the "texture" view and picks what it shows: an image name, "image/layer", or a material name (its maps as a labelled strip); "" = every image. A geometry holding only images renders as the texture view by default' },
 };
 
+/** Lines appended to a build/edit result when locked vars kept the human's values. */
+const lockText = (warnings: string[]) => warnings.map((w) => `\nwarning: ${w}`).join('');
+
 export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<string> } = {}): ToolDef[] {
   const engine = ws.engine;
 
-  const cookAndReport = async (name: string, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
-    const r = await ws.cook(name, undefined, a.frame);
-    ws.bump(name);
-    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) }];
+  /** The text (+ optional render) of a cook report; `locks` are the locked-var warnings of the build/edit. */
+  const reportResult = (name: string, r: CookReport, a: any, extraNotes: string[] = [], locks: string[] = []): ToolResult => {
+    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) + lockText(locks) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
       const { img, notes } = pngContent(r.geo, ro);
@@ -173,6 +176,12 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       if (notes.length) content.push({ type: 'text', text: 'render: ' + notes.join('; ') });
     }
     return { content, isError: !r.ok };
+  };
+
+  const cookAndReport = async (name: string, a: any, extraNotes: string[] = [], locks: string[] = []): Promise<ToolResult> => {
+    const r = await ws.cook(name, undefined, a.frame);
+    ws.bump(name);
+    return reportResult(name, r, a, extraNotes, locks);
   };
 
   const resolveNodeGeo = async (a: any) => {
@@ -187,7 +196,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets). Optional filter by category or search text.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the workspace.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -196,7 +205,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           include_deprecated: { type: 'boolean', description: 'also list deprecated node types (hidden by default)' },
         },
       },
-      run: async (a) => text(catalogText([...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)], { category: a.category, search: a.search, deprecated: a.include_deprecated })),
+      run: async (a) => {
+        const cat = catalogText([...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)], { category: a.category, search: a.search, deprecated: a.include_deprecated });
+        const nIn = ws.listInputs().length;
+        return text(`${cat}\nHUMAN INPUT: ${nIn ? `${nIn} file${nIn === 1 ? '' : 's'} in` : 'nothing yet in'} the workspace inputs/ folder (meshes, guide curves and points, blockouts, PNG masks people drop in). Building a landscape or scene: inputs {action:"list"} first, then read them with file nodes (help topic "inputs").`);
+      },
     },
     {
       name: 'help',
@@ -220,12 +233,12 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'build',
-      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph. dry_run validates and resolves params without cooking. render:true (or render options) also returns an image.',
+      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph. dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value; vars they locked in the viewer (meta.locked) keep their values here, with a warning.',
       inputSchema: {
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "vars": {...}}' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}' },
           name: { type: 'string', description: 'graph name (default "main")' },
           mode: { type: 'string', enum: ['replace', 'merge'] },
           dry_run: { type: 'boolean' },
@@ -239,21 +252,25 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         if (typeof spec === 'string') spec = JSON.parse(spec);
         spec = migrateGraph(spec);
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
+        // over an existing graph: vars a human locked in the viewer keep their values, the lock list carries over
+        const prev = ws.graphs.get(name);
+        const kept = prev ? keepLockedVars(prev, spec) : { graph: spec, warnings: [] };
+        spec = kept.graph;
         if (a.dry_run) {
           const d = engine.dryRun(spec);
-          return text(d.errors.length
+          return text((d.errors.length
             ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n')
-            : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : ''), d.errors.length > 0);
+            : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : '')) + lockText(kept.warnings), d.errors.length > 0);
         }
         const v = engine.validate(spec);
         if (v.errors.length) return text(`✗ graph not saved — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n'), true);
         ws.setGraph(name, spec);
-        return cookAndReport(name, a);
+        return cookAndReport(name, a, [], kept.warnings);
       },
     },
     {
       name: 'edit',
-      description: 'Incrementally edit a graph, then re-cook (only affected nodes recompute). ops: {op:"set",node,params} (null removes a param) · {op:"add",node,type,in,params} · {op:"insert",node,type,params,after} (splice after a node) · {op:"remove",node} (rewires consumers) · {op:"connect",node,in:[...]} or {op:"connect",node,input:1,from:"x"} · {op:"rename",node,to} · {op:"replace",node,type?,params?,in?} · {op:"output",node} · {op:"vars",vars:{k:v}} · {op:"bypass",node,value}.',
+      description: 'Incrementally edit a graph, then re-cook (only affected nodes recompute). ops: {op:"set",node,params} (null removes a param) · {op:"add",node,type,in,params} · {op:"insert",node,type,params,after} (splice after a node) · {op:"remove",node} (rewires consumers) · {op:"connect",node,in:[...]} or {op:"connect",node,input:1,from:"x"} · {op:"rename",node,to} · {op:"replace",node,type?,params?,in?} · {op:"output",node} · {op:"vars",vars:{k:v}} (vars a human locked in the viewer keep their values, with a warning) · {op:"bypass",node,value}.',
       inputSchema: {
         type: 'object',
         required: ['ops'],
@@ -266,11 +283,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
       run: async (a) => {
         const name = a.name ?? 'main';
-        const { graph, notes } = ws.applyEdits(name, a.ops as EditOp[]);
-        const v = engine.validate(graph);
-        if (v.errors.length) return text(`✗ edits rejected (graph unchanged) — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}`).join('\n'), true);
-        ws.setGraph(name, graph);
-        return cookAndReport(name, a, notes);
+        const { ops, warnings } = guardLockedOps(ws.getGraph(name), a.ops as EditOp[]);
+        let res: Awaited<ReturnType<Workspace['edit']>>;
+        try { res = await ws.edit(name, ops, { frame: a.frame }); }
+        catch (e) { if (e instanceof EditRejected) return text(e.message, true); throw e; }
+        return reportResult(name, res.report, a, res.notes, warnings);
       },
     },
     {
@@ -463,7 +480,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
     },
   ];
-  tools.push(...verifyTools(ws)); // explain, diff
+  tools.push(...verifyTools(ws), inputsTool(ws)); // explain, diff; the human's input files
   if (opts.onPreview) {
     tools.push({
       name: 'preview',
