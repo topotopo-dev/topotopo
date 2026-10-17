@@ -55,7 +55,7 @@ graph and its seeds, and the core is browser-ready.
   them as `image:<name>`, and glTF/USD exports carry them, so assets ship with textures whose licence is the graph's.
 - **Live preview and controls**: a local three.js page that refreshes whenever a graph changes. Click any node to
   see its result. A graph's exposed `params` appear as sliders, checkboxes, selects and colour pickers; dragging one
-  re-cooks only the nodes that read it, and a lock keeps the value when an agent edits the graph. Drop your own files
+  re-cooks only the nodes that read it. Drop your own files
   anywhere on the page: they land in the workspace `inputs/` folder, show as grey reference layers, and `file` nodes
   read them.
 
@@ -161,7 +161,7 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 | `catalog` | node types by category (filter/search) |
 | `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, uv, render, export, verify, cloth, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
-| `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass; vars a person locked in the viewer (`meta.locked`) keep their values, here and in `build`, with a warning |
+| `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inputs` | `list` the files in the workspace `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus), element listings, images (size and per-layer ranges) |
 | `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the shelf thumbnails); a footer line names what is shown (help topic `render`) |

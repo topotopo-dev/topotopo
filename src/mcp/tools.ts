@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { Workspace, EditRejected, guardLockedOps, keepLockedVars } from '../workspace.ts';
+import { Workspace, EditRejected } from '../workspace.ts';
 import type { EditOp } from '../workspace.ts';
 import type { CookReport } from '../graph/engine.ts';
 import type { GraphSpec } from '../graph/types.ts';
@@ -160,15 +160,12 @@ const RENDER_PROPS = {
   texture: { type: 'string', description: 'adds the "texture" view and picks what it shows: an image name, "image/layer", or a material name (its maps as a labelled strip); "" = every image. A geometry holding only images renders as the texture view by default' },
 };
 
-/** Lines appended to a build/edit result when locked vars kept the human's values. */
-const lockText = (warnings: string[]) => warnings.map((w) => `\nwarning: ${w}`).join('');
-
 export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<string> } = {}): ToolDef[] {
   const engine = ws.engine;
 
-  /** The text (+ optional render) of a cook report; `locks` are the locked-var warnings of the build/edit. */
-  const reportResult = (name: string, r: CookReport, a: any, extraNotes: string[] = [], locks: string[] = []): ToolResult => {
-    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) + lockText(locks) }];
+  /** The text (+ optional render) of a cook report. */
+  const reportResult = (name: string, r: CookReport, a: any, extraNotes: string[] = []): ToolResult => {
+    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
       const { img, notes } = pngContent(r.geo, ro);
@@ -178,10 +175,10 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     return { content, isError: !r.ok };
   };
 
-  const cookAndReport = async (name: string, a: any, extraNotes: string[] = [], locks: string[] = []): Promise<ToolResult> => {
+  const cookAndReport = async (name: string, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
     const r = await ws.cook(name, undefined, a.frame);
     ws.bump(name);
-    return reportResult(name, r, a, extraNotes, locks);
+    return reportResult(name, r, a, extraNotes);
   };
 
   const resolveNodeGeo = async (a: any) => {
@@ -233,7 +230,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'build',
-      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph. dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value; vars they locked in the viewer (meta.locked) keep their values here, with a warning.',
+      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph. dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value.',
       inputSchema: {
         type: 'object',
         required: ['graph'],
@@ -252,25 +249,21 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         if (typeof spec === 'string') spec = JSON.parse(spec);
         spec = migrateGraph(spec);
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
-        // over an existing graph: vars a human locked in the viewer keep their values, the lock list carries over
-        const prev = ws.graphs.get(name);
-        const kept = prev ? keepLockedVars(prev, spec) : { graph: spec, warnings: [] };
-        spec = kept.graph;
         if (a.dry_run) {
           const d = engine.dryRun(spec);
-          return text((d.errors.length
+          return text(d.errors.length
             ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n')
-            : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : '')) + lockText(kept.warnings), d.errors.length > 0);
+            : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : ''), d.errors.length > 0);
         }
         const v = engine.validate(spec);
         if (v.errors.length) return text(`✗ graph not saved — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n'), true);
         ws.setGraph(name, spec);
-        return cookAndReport(name, a, [], kept.warnings);
+        return cookAndReport(name, a);
       },
     },
     {
       name: 'edit',
-      description: 'Incrementally edit a graph, then re-cook (only affected nodes recompute). ops: {op:"set",node,params} (null removes a param) · {op:"add",node,type,in,params} · {op:"insert",node,type,params,after} (splice after a node) · {op:"remove",node} (rewires consumers) · {op:"connect",node,in:[...]} or {op:"connect",node,input:1,from:"x"} · {op:"rename",node,to} · {op:"replace",node,type?,params?,in?} · {op:"output",node} · {op:"vars",vars:{k:v}} (vars a human locked in the viewer keep their values, with a warning) · {op:"bypass",node,value}.',
+      description: 'Incrementally edit a graph, then re-cook (only affected nodes recompute). ops: {op:"set",node,params} (null removes a param) · {op:"add",node,type,in,params} · {op:"insert",node,type,params,after} (splice after a node) · {op:"remove",node} (rewires consumers) · {op:"connect",node,in:[...]} or {op:"connect",node,input:1,from:"x"} · {op:"rename",node,to} · {op:"replace",node,type?,params?,in?} · {op:"output",node} · {op:"vars",vars:{k:v}} · {op:"bypass",node,value}.',
       inputSchema: {
         type: 'object',
         required: ['ops'],
@@ -283,11 +276,10 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
       run: async (a) => {
         const name = a.name ?? 'main';
-        const { ops, warnings } = guardLockedOps(ws.getGraph(name), a.ops as EditOp[]);
         let res: Awaited<ReturnType<Workspace['edit']>>;
-        try { res = await ws.edit(name, ops, { frame: a.frame }); }
+        try { res = await ws.edit(name, a.ops as EditOp[], { frame: a.frame }); }
         catch (e) { if (e instanceof EditRejected) return text(e.message, true); throw e; }
-        return reportResult(name, res.report, a, res.notes, warnings);
+        return reportResult(name, res.report, a, res.notes);
       },
     },
     {

@@ -95,7 +95,7 @@ src/mcp/       MCP server, tool implementations, LLM docs; inputs.ts: the inputs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
 src/workspace.ts  the workspace folder: graphs/ (named graphs as JSON), assets/, inputs/ (files people drop in: meshes,
                guide curves and points, PNG masks; listInputs), exports/; edit operations and edit() (apply, validate,
-               store, cook, notify: the one path for the MCP edit tool and the viewer's controls); locked vars
+               store, cook, notify: the one path for the MCP edit tool and the viewer's controls)
 shelf/        shipped graph assets (one GraphSpec per file + index.json + thumbs/), registered as category "shelf"
 ```
 
@@ -945,7 +945,7 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
 
 **GUI (makes the app usable without an LLM)**
 - Order, decided 2026-10-17: the live viewer grows into the GUI in the order a person working with an agent needs it.
-  Done: a Controls panel generated from the graph's `params` (`POST /api/vars`, bursts coalesced, locks), a drop zone
+  Done: a Controls panel generated from the graph's `params` (`POST /api/vars`, bursts coalesced), a drop zone
   that stores files in `inputs/` and shows them as ghosted reference layers (`GET/POST /api/inputs`, `GET /api/input`).
   Next: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`), then a chat
   panel, then the node editor.
@@ -957,7 +957,8 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   blockouts, PNG masks); the `inputs` tool lists and describes them for the agent, and help topic `inputs` sets the
   conventions (plain `name` / `role` attributes, name prefixes such as `path.` and `zone.`). A graph's `params`
   (`VarDef`: type, desc, min, max, options, label, step) are the controls the viewer draws; people change vars through
-  `Workspace.edit` and lock them (`meta.locked`), and the agent's build and edit keep locked values with a warning.
+  `Workspace.edit`, and an agent reads the graph before assuming a var's value. There is no lock: a person who wants
+  a value kept says so (a lock was built and removed on 2026-10-17 as unneeded).
 - The MCP server and the GUI share one workspace. The live viewer (`preview` tool) already streams updates over SSE, so
   you can watch an agent build while you inspect intermediate nodes.
 - Later: a GUI chat panel that calls the same tool layer, so an LLM can co-edit the open graph.

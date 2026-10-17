@@ -66,62 +66,6 @@ export class EditRejected extends Error {
   }
 }
 
-// ---------------------------------------------------------------- locked vars
-// A human locks vars in the live viewer (graph meta.locked). The agent-facing tools keep those values: an edit "vars"
-// op or a build over the graph that would change one keeps the human's value and warns. The viewer's own changes go
-// through Workspace.edit unguarded: the lock is the human's.
-
-/** Var names a human locked in the viewer (meta.locked). */
-export function lockedVars(g: GraphSpec | undefined): string[] {
-  const l = g?.meta?.locked;
-  return Array.isArray(l) ? l.filter((x): x is string => typeof x === 'string') : [];
-}
-
-const sameValue = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
-const lockWarning = (k: string, kept: any, wanted: any) =>
-  `var "${k}" kept at ${JSON.stringify(kept)} (asked for ${wanted === undefined || wanted === null ? 'its removal' : JSON.stringify(wanted)}): a human locked it in the viewer. Ask them to unlock it, or tune something else.`;
-
-/**
- * Drop what edit ops would change in locked vars of `g` (only "vars" ops set vars). Returns the ops to apply and one
- * warning per var whose change was dropped.
- */
-export function guardLockedOps(g: GraphSpec, ops: EditOp[]): { ops: EditOp[]; warnings: string[] } {
-  const locked = lockedVars(g).filter((k) => Object.hasOwn(g.vars ?? {}, k));
-  if (!locked.length || !Array.isArray(ops)) return { ops, warnings: [] };
-  const warned = new Map<string, string>();
-  const out = ops.map((op) => {
-    if (op?.op !== 'vars' || !op.vars || typeof op.vars !== 'object') return op;
-    const vars = { ...op.vars };
-    for (const k of locked) {
-      if (!Object.hasOwn(vars, k) || sameValue(vars[k], g.vars![k])) continue;
-      warned.set(k, lockWarning(k, g.vars![k], vars[k]));
-      delete vars[k];
-    }
-    return { ...op, vars };
-  });
-  return { ops: out, warnings: [...warned.values()] };
-}
-
-/**
- * A build over an existing graph: locked vars that `next` still defines keep `prev`'s values, and `prev`'s meta (the
- * lock list included) carries over under `next`'s own meta keys. Returns the graph to store and one warning per var
- * whose value was kept.
- */
-export function keepLockedVars(prev: GraphSpec, next: GraphSpec): { graph: GraphSpec; warnings: string[] } {
-  if (!prev.meta || !next || typeof next !== 'object') return { graph: next, warnings: [] };
-  const graph: GraphSpec = { ...next, meta: { ...prev.meta, ...(next.meta ?? {}) } };
-  if (prev.meta.locked !== undefined) graph.meta!.locked = prev.meta.locked;
-  const warnings: string[] = [];
-  const vars = { ...(next.vars ?? {}) };
-  for (const k of lockedVars(prev)) {
-    if (!Object.hasOwn(prev.vars ?? {}, k) || !Object.hasOwn(vars, k) || sameValue(vars[k], prev.vars![k])) continue;
-    warnings.push(lockWarning(k, prev.vars![k], vars[k]));
-    vars[k] = structuredClone(prev.vars![k]);
-  }
-  if (warnings.length) graph.vars = vars;
-  return { graph, warnings };
-}
-
 export class Workspace {
   dir: string;
   engine: Engine;

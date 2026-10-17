@@ -66,16 +66,12 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       const box = async () => sizeOf((await getJSON('/api/info?graph=boxes')).j.summary);
 
       const g = (await getJSON('/api/graphs')).j[0];
-      check(g.params?.s?.max === 10 && g.params.s.desc === 'box size' && g.vars?.s === 1 && g.vars.extra === 'x' && Array.isArray(g.locked) && g.locked.length === 0,
-        `/api/graphs carries params, vars and locked (${JSON.stringify({ params: g.params, vars: g.vars, locked: g.locked })})`);
+      check(g.params?.s?.max === 10 && g.params.s.desc === 'box size' && g.vars?.s === 1 && g.vars.extra === 'x',
+        `/api/graphs carries params and vars (${JSON.stringify({ params: g.params, vars: g.vars })})`);
 
       const r1 = await postVars({ vars: { s: 2 } });
       check(r1.status === 200 && r1.j.ok === true && typeof r1.j.ms === 'number' && Array.isArray(r1.j.errors) && !r1.j.errors.length, `POST /api/vars answers { ok, ms, errors } (${JSON.stringify(r1.j)})`);
       check((await box()).join() === '2,2,2', 'the "=s" param reads the new var: GET /api/info shows a 2 m box');
-
-      const lk = await postVars({ vars: {}, locked: ['s', 's'] });
-      const g2 = (await getJSON('/api/graphs')).j[0];
-      check(lk.j.ok && JSON.stringify(g2.locked) === '["s"]' && g2.vars.s === 2, `"locked" replaces meta.locked (deduplicated) and leaves the vars alone (${JSON.stringify(g2.locked)})`);
 
       const burst = await Promise.all([3, 4, 5].map((s) => postVars({ vars: { s } })));
       check(burst.every((r) => r.status === 200 && r.j.ok), `a burst of three POSTs: all answered ok (${burst.map((r) => r.j.vars?.s).join(', ')})`);
@@ -151,14 +147,14 @@ section('POST /api/vars: a burst during a cook is applied by one more cook');
   try {
     const first = post({ vars: { s: 2 } });
     await sleep(100);
-    const replies = await Promise.all([first, post({ vars: { s: 3 } }), post({ vars: { s: 4, t: 1 }, locked: ['s'] }), post({ vars: { s: 5 } })]);
+    const replies = await Promise.all([first, post({ vars: { s: 3 } }), post({ vars: { s: 4, t: 1 } }), post({ vars: { s: 5 } })]);
     check(edits.length === 2 && edits[0].s === 2 && edits[1].s === 5 && edits[1].t === 1, `four requests, two edits: the first, then the merged rest (${JSON.stringify(edits)})`);
     check(replies.every((r) => r.ok) && replies[0].vars.s === 2 && replies.slice(1).every((r) => r.vars.s === 5 && r.vars.t === 1),
       `every request is answered after its values are applied (${replies.map((r) => r.vars.s).join(', ')})`);
     const g = ws.getGraph('g');
-    check(g.vars?.s === 5 && JSON.stringify(g.meta?.locked) === '["s"]', 'the latest values and the locked set are stored');
+    check(g.vars?.s === 5 && g.vars?.t === 1, 'the latest values are stored');
     const stored = JSON.parse(fs.readFileSync(path.join(ws.graphDir, 'g.json'), 'utf8'));
-    check(stored.vars.s === 5 && JSON.stringify(stored.meta?.locked) === '["s"]', 'and persisted in the workspace');
+    check(stored.vars.s === 5 && stored.vars.t === 1, 'and persisted in the workspace');
   } finally { v.close(); }
 }
 

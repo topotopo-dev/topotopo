@@ -206,18 +206,13 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const lg = JSON.parse((await call('graphs', { action: 'get', name: 'land' })).txt);
   check(lg.params?.relief?.label === 'Hill height (m)' && lg.params?.tree_density?.step === 0.005, 'exposed params keep label and step');
 
-  // vars a human locked in the viewer (meta.locked) survive the agent's edit and build replace, with a warning
+  // an edit "vars" op changes the stored vars; an invalid edit is rejected with the graph unchanged
   const box = { b: { type: 'box', params: { size: '=s' } }, t: { type: 'transform', in: ['b'], params: { translate: [0, '=t', 0] } } };
-  const lb = await call('build', { name: 'locked', graph: { nodes: box, vars: { s: 2, t: 1 }, meta: { locked: ['s'] } } });
-  const le = await call('edit', { name: 'locked', ops: [{ op: 'vars', vars: { s: 5, t: 3 } }] });
-  const g1 = JSON.parse((await call('graphs', { action: 'get', name: 'locked' })).txt);
-  check(!lb.isError && !le.isError && /✓ graph "locked"/.test(le.txt) && /\nwarning: var "s" kept at 2 \(asked for 5\): a human locked it in the viewer/.test(le.txt)
-    && g1.vars.s === 2 && g1.vars.t === 3, `edit keeps a locked var: ${le.txt.split('\n').find((l: string) => l.startsWith('warning')) ?? le.txt.slice(0, 120)}`);
-  const lr = await call('build', { name: 'locked', graph: { nodes: box, vars: { s: 9, t: 4 } } });
-  const g2 = JSON.parse((await call('graphs', { action: 'get', name: 'locked' })).txt);
-  check(!lr.isError && /\nwarning: var "s" kept at 2 \(asked for 9\): a human locked it in the viewer/.test(lr.txt) && g2.vars.s === 2 && g2.vars.t === 4 && g2.meta?.locked?.join() === 's',
-    'build replace keeps the locked value and meta.locked');
-  const rej = await call('edit', { name: 'locked', ops: [{ op: 'set', node: 'b', params: { sise: 3 } }] });
+  const vb = await call('build', { name: 'varsed', graph: { nodes: box, vars: { s: 2, t: 1 } } });
+  const ve = await call('edit', { name: 'varsed', ops: [{ op: 'vars', vars: { s: 5, t: 3 } }] });
+  const g1 = JSON.parse((await call('graphs', { action: 'get', name: 'varsed' })).txt);
+  check(!vb.isError && !ve.isError && g1.vars.s === 5 && g1.vars.t === 3, 'edit vars stores the new values');
+  const rej = await call('edit', { name: 'varsed', ops: [{ op: 'set', node: 'b', params: { sise: 3 } }] });
   check(rej.isError && rej.txt.startsWith('✗ edits rejected (graph unchanged) — 1 error(s):\n  [b] unknown param "sise"'), 'edit rejects invalid edits with the same text');
 }
 
