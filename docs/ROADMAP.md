@@ -7,7 +7,11 @@ Status as of 2026-10-12: 96 node types, ~12k lines of TypeScript, immutable geom
 > topotopo.dev, GitHub Sponsors. Codex sessions 8–16 merged (kernels, Unreal plugin 0.1.4 with tiled Landscapes).
 > The testing week is under way: one environment (1 km² valley, village, 12.9k instances) builds from one graph and
 > imports into Unreal 5.8 in one command; findings and fixes in [release/dogfood-log.md](release/dogfood-log.md).
-> Next: the remaining dogfood fixes, the v0.2 tag, the demo video, then Phase 4 (GUI), which has not started.
+> Next: the remaining dogfood fixes, the v0.2 tag, the demo video. Phase 4 (GUI) started on 2026-10-17 in a
+> different order from the table below: first the pieces a person working with an agent needs (a Controls panel
+> generated from `params`, a drop zone with reference layers, an `inputs` tool so the agent sees dropped files, scene
+> and `.blend` import), then markers (sites, paths, zones, volumes placed in the viewer), a chat panel, and the node
+> editor last. Status in [WORKLOG.md](WORKLOG.md).
 > The block below is the 2026-10-13 snapshot.
 >
 > **Status at commit 81895f2 (2026-10-13, after the Phase 3 merges).**
@@ -323,7 +327,7 @@ Each phase ends with golden tests and example renders. Performance work runs alo
 | **1. Modelling parity** | polybevel, polysplit/knife, bridge, polyfill, loops/rings/dissolve, crease subdiv, soft transform, lattice, path/point deform, xatlas unwrap + layout, isotropic remesh, attribute-preserving decimation, curvature/AO/thickness, `assert` | hard-surface and prop work | done |
 | **2. PCG and instancing** | packed prims, copy variants, scatter v2, masks, attribute from map, heightfield suite + erosion, spline toolkit, rail/fence/road/roof assets, PCG/USD/gltf-transform export, Houdini `.geo` | environments at engine scale | done, Unreal round trip verified |
 | **3. Volumes, sim-lite, CAD** | grid volumes + VDB-like ops + dual contouring, Rapier RBD, particles, XPBD cloth, straight-skeleton roofs, optional OCCT module | organic shapes, settled scatters, CAD-grade fillets | done except the optional OCCT module (P3-D); textures and bakes added (§6a) |
-| **4. GUI** | browser node editor + viewport + generated param panels, engine in a Worker, shared workspace with the MCP server | human use without an LLM | not started |
+| **4. GUI** | browser node editor + viewport + generated param panels, engine in a Worker, shared workspace with the MCP server | human use without an LLM | started 2026-10-17: Controls panel from `params`, drop zone + reference layers, `inputs` tool, scene/`.blend`/folder import; markers in flight; chat panel and node editor later |
 
 Suggested first sprint: phase 0 tests and benchmarks, then edge groups + half-edge + `polybevel`. Bevel is the node
 that proves the topology layer and that artists check first.

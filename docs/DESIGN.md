@@ -22,7 +22,7 @@ no Node APIs. Then run that core under several hosts:
 |---|---|---|
 | Node process + MCP (stdio) | LLM agents: Claude Code, Claude Desktop, any MCP client | **done** |
 | Node CLI | batch cooking, CI, pipelines | **done** |
-| Browser (engine in a Web Worker) | the future human GUI: node editor, viewport, parameter panels; cannot convert `.blend` (export GLB first) | live viewer done; editor not built yet |
+| Browser (engine in a Web Worker) | the future human GUI: node editor, viewport, parameter panels; cannot convert `.blend` (export GLB first) | live viewer with a Controls panel, drop zone and reference layers done (served by the Node process); engine in a Worker and the node editor not built yet |
 | Desktop wrapper (Tauri/Electron) | optional, if you want native files, bigger memory, a local GPU | later, same web GUI |
 
 MCP needs a local process anyway, because stdio servers are processes. That means the LLM side runs in Node today, and
@@ -944,8 +944,13 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   first, and it would load as a separate module).
 
 **GUI (makes the app usable without an LLM)**
-- Browser app: a node editor (React Flow or LiteGraph), a three.js viewport, and parameter panels generated from
-  `ParamDef`s. Every param already carries type, default, range, enum options and a description.
+- Order, decided 2026-10-17: the live viewer grows into the GUI in the order a person working with an agent needs it.
+  Done: a Controls panel generated from the graph's `params` (`POST /api/vars`, bursts coalesced, locks), a drop zone
+  that stores files in `inputs/` and shows them as ghosted reference layers (`GET/POST /api/inputs`, `GET /api/input`).
+  Next: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`), then a chat
+  panel, then the node editor.
+- Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
+  from `ParamDef`s. Every param already carries type, default, range, enum options and a description.
 - The engine runs in a Web Worker. Graph JSON is the file format and is identical for humans and LLMs, and `ui: {x, y}`
   is already reserved in node specs.
 - Human input: people drop their own files into the workspace's `inputs/` folder (guide curves, sites, zones,

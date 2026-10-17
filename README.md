@@ -53,7 +53,11 @@ graph and its seeds, and the core is browser-ready.
   normal and AO from height, channel packing) and bakes from meshes in uv space (AO, curvature, thickness, normals and
   height from a high-res mesh, island ids, masks, vertex colour). Images travel with the geometry, materials reference
   them as `image:<name>`, and glTF/USD exports carry them, so assets ship with textures whose licence is the graph's.
-- **Live preview**: a local three.js page that refreshes whenever a graph changes. Click any node to see its result.
+- **Live preview and controls**: a local three.js page that refreshes whenever a graph changes. Click any node to
+  see its result. A graph's exposed `params` appear as sliders, checkboxes, selects and colour pickers; dragging one
+  re-cooks only the nodes that read it, and a lock keeps the value when an agent edits the graph. Drop your own files
+  anywhere on the page: they land in the workspace `inputs/` folder, show as grey reference layers, and `file` nodes
+  read them.
 
 **Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, the shelf and example galleries, the
 design notes and the release notes, generated from this repository (`npm run site`).
