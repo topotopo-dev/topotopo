@@ -93,7 +93,8 @@ src/wasm/      loaders: kernels.ts (the Rust kernels, read through Host.readFile
 src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts), optional convertFile
                (.blend -> cached GLB through headless Blender), isDirectory/listDir for file-node folder imports
 src/mcp/       MCP server, tool implementations, LLM docs; inputs.ts: the inputs tool (what people dropped into inputs/)
-src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
+src/viewer/    live preview: tiny HTTP + SSE server and the editor page (index.html, a shell loading the ES modules of
+               app/; built to design/viewer.md)
 src/workspace.ts  the workspace folder: graphs/ (named graphs as JSON), assets/, inputs/ (files people drop in: meshes,
                guide curves and points, PNG masks; listInputs; `topotopo view` passes the inputs/ beside the graph
                file, made by the first drop), exports/; edit operations and edit() (apply, validate, store, cook,
@@ -848,7 +849,7 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 | d3-delaunay | ISC | 2D Delaunay / Voronoi |
 | simplex-noise | MIT | simplex noise |
 | opentype.js | MIT | TrueType/OpenType outlines for `text` |
-| three | MIT | the live viewer (GLTFLoader, OrbitControls) |
+| three | MIT | the live viewer (GLTFLoader, fat lines) |
 | @modelcontextprotocol/sdk | MIT | MCP transport |
 | DejaVu Sans (assets/fonts) | Bitstream Vera licence (redistributable) | bundled default font for `text`, so output is identical on every machine; system fonts are used only when named |
 
