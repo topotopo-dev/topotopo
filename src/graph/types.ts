@@ -84,6 +84,7 @@ export interface NodeSpec {
   ui?: any;
 }
 
+/** An exposed var: asset parameter docs and range, and the control the live viewer draws for it. */
 export interface VarDef {
   type?: string;
   default?: any;
@@ -91,6 +92,17 @@ export interface VarDef {
   min?: number;
   max?: number;
   options?: string[];
+  /** control label for humans (default: the var name) */
+  label?: string;
+  /** slider step (default: 1 for ints, else derived from the range) */
+  step?: number;
+}
+
+/** Free-form graph metadata; the fields below have a meaning. */
+export interface GraphMeta {
+  /** var names a human locked in the viewer: agents' build and edit keep their values and warn */
+  locked?: string[];
+  [key: string]: any;
 }
 
 export interface GraphSpec {
@@ -99,10 +111,10 @@ export interface GraphSpec {
   nodes: Record<string, NodeSpec>;
   output?: string;
   vars?: Record<string, any>;
-  /** metadata for exposed vars when the graph is used as an asset */
+  /** metadata for exposed vars: asset parameters, and the controls the live viewer shows for them */
   params?: Record<string, VarDef>;
   description?: string;
-  meta?: any;
+  meta?: GraphMeta;
 }
 
 export interface CookContext {

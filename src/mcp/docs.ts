@@ -1,10 +1,11 @@
 // LLM-facing documentation: operating guide, topic pages, and generated node references.
-import type { NodeDef, ParamDef } from '../graph/types.ts';
+import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
 WORKFLOW
+0. inputs {action:"list"} → the person's own files in the workspace inputs/ folder (guide curves, sites, zones, blockouts, PNG masks). Building a landscape or scene: look there first and build on them (help topic "inputs").
 1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…).
 2. help {nodes:[...]} for exact params before using unfamiliar nodes; help {topic:"wrangle"|"graph"|"recipes"…} for concepts.
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
@@ -19,25 +20,74 @@ CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
+HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value; vars they locked in the viewer (meta.locked) keep their values and build/edit warn. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".`;
 
+/**
+ * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
+ * areas mask a tree scatter; the vars a person tunes are exposed as params. test/mcp.ts cooks it on a real guides.glb.
+ */
+export const INPUTS_EXAMPLE: GraphSpec = {
+  nodes: {
+    guides: { type: 'file', params: { path: 'inputs/guides.glb' } },
+    roles: { type: 'wrangle', in: ['guides'], params: { run_over: 'prims', code: "s@role = s@role || @name.split('.')[0].toLowerCase();" } },
+    paths: { type: 'delete', in: ['roles'], params: { group: '@role=path', keep: true } },
+    zones: { type: 'delete', in: ['roles'], params: { group: '@role=zone', keep: true } },
+    areas: { type: 'ends', in: ['zones'], params: { mode: 'close' } },
+    ground: { type: 'heightfield', params: { size: '=extent', resolution: 1 } },
+    hills: { type: 'heightfield_noise', in: ['ground'], params: { amplitude: '=relief', element_size: 60 } },
+    road: { type: 'heightfield_path', in: ['hills', 'paths'], params: { width: '=road_width' } },
+    zone_mask: { type: 'heightfield_mask_by_object', in: ['road', 'areas'], params: { by: 'footprint', distance: 0, falloff: 3 } },
+    off_road: { type: 'heightfield_layer', in: ['zone_mask'], params: { layer: 'mask', expression: 'mask * (1 - path)' } },
+    spots: { type: 'heightfield_scatter', in: ['off_road'], params: { density: '=tree_density', align: 'upright', seed: 3 } },
+    tree: { type: 'tree_lowpoly', params: { height: 7 } },
+    trees: { type: 'copy_to_points', in: ['tree', 'spots'], params: { pack: true } },
+    land: { type: 'heightfield_to_mesh', in: ['off_road'], params: { color: 'terrain' } },
+    out: { type: 'merge', in: ['land', 'trees'] },
+  },
+  output: 'out',
+  vars: { extent: 200, relief: 6, road_width: 5, tree_density: 0.02 },
+  params: {
+    relief: { type: 'float', min: 0, max: 30, step: 0.5, label: 'Hill height (m)', desc: 'terrain relief in metres' },
+    road_width: { type: 'float', min: 2, max: 12, label: 'Road width (m)', desc: 'flat width of the roads drawn as path.*' },
+    tree_density: { type: 'float', min: 0, max: 0.1, step: 0.005, label: 'Trees per m²', desc: 'tree density inside the zone.* areas' },
+  },
+};
+
+/** A graph as JSON with one node (and one param) per line: readable in a topic page, and JSON.parse gives it back. */
+export function graphLines(g: GraphSpec): string {
+  const rows = (o: Record<string, any>) => Object.entries(o).map(([k, v]) => `   ${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(',\n');
+  const parts = Object.entries(g).map(([k, v]) =>
+    (k === 'nodes' || k === 'params') && v && typeof v === 'object' ? `${JSON.stringify(k)}: {\n${rows(v)}\n }` : `${JSON.stringify(k)}: ${JSON.stringify(v)}`);
+  return `{${parts.join(',\n ')}}`;
+}
+
 export const TOPICS: Record<string, string> = {
   graph: `GRAPH FORMAT
 {
   "nodes": {
     "ground": {"type": "grid", "params": {"size": [10, 10], "divisions": [20, 20]}},
-    "pts":    {"type": "scatter", "in": ["ground"], "params": {"count": 200, "seed": 1}},
+    "pts":    {"type": "scatter", "in": ["ground"], "params": {"count": "=rock_count", "seed": 1}},
     "rock":   {"type": "sphere", "params": {"type": "ico", "level": 2, "radius": 0.2}},
     "rocks":  {"type": "copy_to_points", "in": ["rock", "pts"]},
     "out":    {"type": "merge", "in": ["ground", "rocks"]}
   },
   "output": "out",
-  "vars": {"density": 200}
+  "vars": {"rock_count": 200},
+  "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks"}}
 }
+- "vars": graph constants that "=expr" params read. "params": one entry per var a person would tune (3–8 of them):
+  {type (float int bool string enum), desc, min, max, options (enum), label (control name), step (slider step)}.
+  The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
+  for bools. They are also the parameters when the graph is saved as an asset.
+- People change vars at any time (the viewer's controls edit the stored graph): read it with graphs {action:"get"}
+  before assuming a var's value, and edit {op:"vars"} rather than rebuilding to change one. "meta": {"locked": [...]}
+  lists vars a person locked in the viewer: edit vars and build keep their values and the result warns; ask them
+  to unlock it instead of working around it.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
 - Output node: "output", else a node named out/OUT, else the last unconnected node.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
@@ -45,6 +95,61 @@ export const TOPICS: Record<string, string> = {
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
 - build mode "merge" upserts nodes into the existing graph; edit ops: set, add, remove (auto-rewires), connect, rename, output, vars, bypass, replace, insert (after a node, rewiring its consumers).
 - Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the workspace.`,
+
+  inputs: `HUMAN INPUT (guides, blockouts and masks in the workspace inputs/ folder)
+People feed in their own material by dropping files into <workspace>/inputs/ (or onto the live viewer): meshes, guide
+curves and points drawn in Blender, Houdini or Unreal, placeholder blockouts, PNG masks and heightmaps. Before building a
+landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path} tells what one holds (polygons, open
+polylines, loose points, packed prims; bbox in metres; attributes; every name and role value; materials). Read a file
+with a file node, the path relative to the workspace: {"type":"file","params":{"path":"inputs/guides.glb"}}.
+FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"), obj/stl/ply (no up axis:
+  Unreal exports and Blender exports with Up = Z are Z-up, so add "up_axis":"z"), geo/bgeo (Houdini), csv and
+  points.json (one point per row; columns such as name, role, pscale become point attributes), blend (needs Blender
+  installed; it converts the file headlessly). Images: png (8/16-bit grey or colour).
+CONVENTIONS: only Houdini attributes and groups, all optional, no add-on to install.
+  name  string: the object name (the glTF importer writes it on prims; csv/points.json name columns land on points)
+  role  string on points or prims: what a guide means: site, path, zone, volume, blockout (below)
+  People mark roles with a name prefix on their objects: site.well, path.river, zone.park, volume.no_trees,
+  blockout.house (Blender's .001 suffixes do no harm), or with a custom property "role" on the object (it arrives as an
+  attribute once the importer keeps glTF extras).
+  Derive role from the prefix, keeping a role the file brought (run_over "points" for point guides):
+    {"type":"wrangle","in":["guides"],"params":{"run_over":"prims","code":"s@role = s@role || @name.split('.')[0].toLowerCase();"}}
+  Select with group patterns: "@role=path", or straight by name prefix "@name=path.*" (a glob; space-separated tokens
+  are a union: "@name=path.* @name=zone.*"), e.g. {"type":"delete","in":["guides"],"params":{"group":"@name=path.*","keep":true}}.
+ROLES AND RECIPES
+  site      a point marks a location (a well, a lone tree, a house spot); pscale = radius in metres, orient or N = heading.
+            copy_to_points(asset, sites) {pack:true} puts a copy on every site (scaled by pscale, turned by orient/N);
+            foreach {mode:"points"} builds one per site ("=attr.pscale", "=attr.name" in the body). A site drawn as a
+            small mesh: pack {by:"name", pivot:"bbox_center_bottom"} gives one anchor point per object.
+  path      an open polyline: road, river, wall, fence line. project_curve(paths, terrain mesh) {spacing:1} drapes it on
+            a mesh; heightfield_path(terrain, paths) {width, shoulder} cuts a road into a heightfield (layer "path");
+            points_along_curve {spacing, side_offset, both_sides} for posts, lamps or trees along it; sweep
+            {shape:"ribbon", radius} for a road surface or a wall; heightfield_mask_by_object {by:"distance"} for a river bed.
+  zone      a closed polyline or a filled polygon is an area: a park, a field, a no-build zone. Loops drawn as edges
+            arrive as polylines ending on their first point: ends {mode:"close"} makes them polygons.
+            On a heightfield, heightfield_mask_by_object(terrain, zones) {by:"footprint", falloff} rasterises the polygons
+            into the mask layer (mode add / max / subtract / multiply combines several): heightfield_scatter reads it, and
+            heightfield_noise, heightfield_remap, heightfield_blur, heightfield_terrace and heightfield_layer blend their
+            effect by it (mask_layer:"mask").
+            Points inside a zone (top view), as point group in_zone:
+            {"type":"wrangle","in":["pts","zones"],"params":{"run_over":"points","code":"@group_in_zone = intersect(1, [@P.x, 1e6, @P.z], [0, -1, 0]).prim >= 0 ? 1 : 0;"}}
+            then delete {group:"in_zone"} or {group:"in_zone", keep:true}.
+  volume    a closed mesh or box: a region where scatter thins out or thickens. prune(pts, volumes) {mode:"near_geometry",
+            distance:0} removes the points inside; mask(ground mesh, volumes) {by:"inside", falloff} → scatter
+            {density_mask:"mask"} scatters there (invert:true for a hole); group {class:"point", pattern:"@mask>0.5"} groups
+            them. Let volumes reach below the ground. On a heightfield use heightfield_mask_by_object {by:"footprint"}.
+  blockout  a placeholder mesh to replace: bound {per_piece:true} gives each piece's box; foreach {mode:"pieces",
+            piece_attrib:"name"} runs a body per object, where a shelf asset takes its size from the piece
+            ("width": "=bbox('piece').size.x", piece = the body's input node) and match_size(asset, piece) moves it in
+            place. A footprint polygon feeds the house asset directly (its input 0).
+IMAGES: PNG masks and heightmaps. heightfield_from_image {path:"inputs/height.png", size:[x, z], height_min, height_max}
+  makes a terrain (16-bit greys keep the detail); with a heightfield connected it writes into layer (e.g. "mask",
+  height_min 0, height_max 1). attribute_from_map {path, projection:"xz", size, center, name:"mask"} samples it onto
+  points (scatter density_mask, prune {mode:"density"}).
+EXAMPLE: inputs/guides.glb holds path.* curves and zone.* areas: roads cut into hills, trees in the zones off the road,
+the vars a person would tune exposed as params:
+${graphLines(INPUTS_EXAMPLE)}
+Afterwards render it, and tell the person which of their guides you used for what.`,
 
   expressions: `PARAM EXPRESSIONS
 Any non-code param can be a string starting with "=": a JS expression evaluated with graph vars.
