@@ -2,7 +2,7 @@
   "version": 1,
   "description": "Brick wall from x = 0 to x = length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core. One wythe deep (headers are drawn as half bricks). Pivot at the start of the wall, on the ground, centred in thickness. Pieces: brick_wall_bricks (brick), brick_wall_mortar (mortar). Every piece is a closed box.",
   "params": {
-    "length": { "type": "float", "default": 3, "min": 0.3, "max": 12, "desc": "length along X (m)" },
+    "length": { "type": "float", "default": 3, "min": 0.3, "max": 40, "desc": "length along X (m)" },
     "height": { "type": "float", "default": 1.8, "min": 0.1, "max": 5, "desc": "height (m)" },
     "brick_length": {
       "type": "float",
