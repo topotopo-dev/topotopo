@@ -1,7 +1,8 @@
 // Live preview web server: serves a three.js viewer that shows any graph/node of the
 // workspace and refreshes over Server-Sent Events whenever a graph is rebuilt/edited.
-// It is also the human's control surface: files dropped on the page are stored in the workspace's inputs/ and shown
-// as reference layers, and the graph's exposed vars are set from generated controls (POST /api/vars).
+// It is also the human's control surface: files dropped on the page are stored in the workspace's inputs/ (under
+// `topotopo view`, the inputs/ beside the graph file) and shown as reference layers, and the graph's exposed vars are
+// set from generated controls (POST /api/vars).
 // Bound to 127.0.0.1 only; requests must name this server as their Host, and writes must come from its own page.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -57,7 +58,15 @@ export function inputFileName(raw: string): string {
 interface VarsReply { status: number; body: { ok: boolean; ms: number; errors: string[]; vars?: Record<string, any> } }
 interface VarsBatch { vars: Record<string, any>; waiters: ((r: VarsReply) => void)[] }
 
-export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341)): Promise<{ url: string; close: () => void }> {
+export interface ViewerOptions {
+  /**
+   * Where the inputs folder is, in words that follow "inputs/" on the page: `topotopo view` passes "beside house.json".
+   * Default: "in the workspace" (or the folder that holds it, when the workspace was given another inputs folder).
+   */
+  inputsWhere?: string;
+}
+
+export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341), opts: ViewerOptions = {}): Promise<{ url: string; close: () => void }> {
   const clients = new Set<http.ServerResponse>();
   const broadcast = (ev: object) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
@@ -69,18 +78,30 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   let inputsVersion = 0;
   const inputsChanged = () => broadcast({ inputs: ++inputsVersion });
   const listInputs = () => ws.listInputs().filter((f) => !PART_RE.test(f.path));
-  // files copied into inputs/ by other means (file manager, an agent) show up too
-  let watcher: fs.FSWatcher | null = null, watchTimer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    fs.mkdirSync(ws.inputDir, { recursive: true });
-    watcher = fs.watch(ws.inputDir, { recursive: true }, (_ev, f) => {
-      if (f && PART_RE.test(String(f).split(path.sep).join('/'))) return;
-      clearTimeout(watchTimer);
-      watchTimer = setTimeout(inputsChanged, 250);
-    });
-    watcher.on('error', () => { /* the folder went away: uploads through the viewer still notify */ });
-    watcher.unref();
-  } catch { watcher = null; }
+  const inputsWhere = opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? 'in the workspace' : `in ${path.dirname(ws.inputDir)}`);
+  // Files copied into inputs/ by other means (file manager, an agent) show up too, once the folder exists. The viewer
+  // does not make it just to watch it (`topotopo view`'s inputs/ beside the graph file appears with the first drop):
+  // uploads and listings start the watch when the folder is there by then.
+  let watcher: fs.FSWatcher | null = null, watchTimer: ReturnType<typeof setTimeout> | undefined, closed = false;
+  const changed = () => { clearTimeout(watchTimer); watchTimer = setTimeout(inputsChanged, 250); };
+  const unwatch = (w = watcher) => { w?.close(); if (watcher === w) watcher = null; };
+  const watchInputs = () => {
+    if (watcher || closed) return;
+    try {
+      if (!fs.statSync(ws.inputDir, { throwIfNoEntry: false })?.isDirectory()) return;
+      const w = fs.watch(ws.inputDir, { recursive: true }, (_ev, f) => {
+        const rel = f ? String(f) : '';
+        // The folder itself went away. Windows says so with no error but a stream of events naming it by absolute path,
+        // which goes on after the folder is made again. Stop; the listing this change prompts watches a new folder.
+        if (path.isAbsolute(rel) || !fs.existsSync(ws.inputDir)) { unwatch(w); changed(); return; }
+        if (!PART_RE.test(rel.split(path.sep).join('/'))) changed();
+      });
+      w.on('error', () => { unwatch(w); changed(); });
+      w.unref();
+      watcher = w;
+    } catch { /* no watch: uploads through the viewer still notify */ }
+  };
+  watchInputs();
 
   /** `path` query of /api/input*: a file below inputs/ (posix, relative). */
   const inputPath = (raw: string | null): { rel: string; abs: string } => {
@@ -96,8 +117,9 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   };
   /** The one-node graph that loads an input. */
   const inputGraph = (rel: string, abs: string): GraphSpec => {
-    // "inputs/<rel>" resolves against the host's base directory, which is the workspace under the MCP server;
-    // `topotopo view` keeps a scratch workspace away from the graph file's folder, so it gets the absolute path
+    // "inputs/<rel>", the path a graph's file node uses, resolves against the host's base directory: the folder that
+    // holds inputs/ under the MCP server (the workspace) and under `topotopo view` (the graph file's folder). A
+    // workspace whose engine resolves paths elsewhere (an embedding app, a test) gets the absolute path.
     const ref = `inputs/${rel}`;
     const p = path.resolve(ws.engine.host.resolvePath(ref)) === abs ? ref : abs;
     return { nodes: { f: { type: 'file', params: { path: p } } }, output: 'f' };
@@ -114,7 +136,8 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     const exists = () => fs.existsSync(dest);
     const conflict = { status: 409, body: { ok: false, exists: true, path: name, error: `inputs/${name} exists (overwrite=1 replaces it)` } };
     if (!overwrite && exists()) return conflict;
-    fs.mkdirSync(root, { recursive: true });
+    // the first drop makes the folder (again, after it was deleted): a watch from before is on a folder that is gone
+    if (fs.mkdirSync(root, { recursive: true }) !== undefined) unwatch();
     const part = path.join(root, `.${name}.${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.part`);
     let n = 0;
     const limit = new Transform({
@@ -128,6 +151,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       fs.rmSync(part, { force: true });
       throw e;
     }
+    watchInputs();
     inputsChanged();
     return { status: 200, body: { ok: true, path: name, size: n } };
   };
@@ -234,8 +258,11 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       }
       if (u.pathname === '/api/inputs') {
         if (req.method === 'POST') { const r = await upload(req, u); return json(r.status, r.body); }
+        watchInputs();
         return json(200, listInputs());
       }
+      // where dropped files go: the absolute folder, and in words for the page ("beside house.json")
+      if (u.pathname === '/api/inputs_dir') return json(200, { dir: ws.inputDir, where: inputsWhere });
       if (u.pathname === '/api/input' || u.pathname === '/api/input_info') {
         const { rel, abs } = inputPath(u.searchParams.get('path'));
         const r = await ws.engine.cook(inputGraph(rel, abs));
@@ -277,9 +304,10 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   return {
     url: `http://127.0.0.1:${actual}/`,
     close: () => {
+      closed = true;
       clearInterval(keepAlive);
       clearTimeout(watchTimer);
-      watcher?.close();
+      unwatch();
       ws.listeners.delete(broadcast);
       for (const c of clients) c.end();
       server.close();

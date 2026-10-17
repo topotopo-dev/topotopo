@@ -1,6 +1,6 @@
 // Live viewer tests (src/viewer/server.ts): the routes behind the human's control surface. Exposed vars in
-// /api/graphs, POST /api/vars (and how it coalesces bursts), the inputs/ drop target, reference-layer GLBs, and the
-// Host/Origin checks.
+// /api/graphs, POST /api/vars (and how it coalesces bursts), the inputs/ drop target (under `topotopo view`, beside the
+// graph file), reference-layer GLBs, and the Host/Origin checks.
 //   node test/viewer.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -125,6 +125,115 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       await stream;
     }
   } finally { proc.kill(); }
+}
+
+section('topotopo view: drops go to inputs/ beside the graph file');
+{
+  // the graph file's folder gets inputs/ with the first drop, and the graph reads the file as "inputs/<name>"
+  const site = path.join(tmp, 'site');
+  fs.mkdirSync(site);
+  const gfile = path.join(site, 'house.json'), inputs = path.join(site, 'inputs');
+  fs.writeFileSync(gfile, JSON.stringify({ nodes: { b: { type: 'box' } } }));
+  const proc = spawn(process.execPath, [path.join(root, 'src', 'cli.ts'), 'view', gfile, '--port', '0'], { cwd: root });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += d; });
+  proc.stderr.on('data', (d) => { out += d; });
+  try {
+    const up = await until(() => /view: http:\/\/127\.0\.0\.1:\d+\//.test(out), 30000);
+    check(up && out.includes(`go to ${inputs}${path.sep}`), `view says where dropped files go (${out.trim().split('\n').pop()})`);
+    if (up) {
+      const url = /view: (http:\/\/127\.0\.0\.1:\d+)\//.exec(out)![1];
+      const getJSON = async (p: string) => { const r = await fetch(url + p); return { status: r.status, j: await r.json() as any }; };
+      const where = (await getJSON('/api/inputs_dir')).j, listed = (await getJSON('/api/inputs')).j;
+      check(where.dir === inputs && where.where === 'beside house.json' && Array.isArray(listed) && !listed.length && !fs.existsSync(inputs),
+        `GET /api/inputs_dir names inputs/ beside the graph file, not made before a drop (${JSON.stringify(where)})`);
+      const r = await fetch(`${url}/api/inputs?name=tri.obj`, { method: 'POST', body: TRI_OBJ });
+      const j = await r.json() as any;
+      check(r.status === 200 && j.path === 'tri.obj' && fs.readFileSync(path.join(inputs, 'tri.obj'), 'utf8') === TRI_OBJ,
+        `the first drop makes the folder and stores the file at <graph folder>/inputs/tri.obj (${JSON.stringify(j)})`);
+      // the viewer re-cooks when the graph file is saved
+      fs.writeFileSync(gfile, JSON.stringify({ nodes: { f: { type: 'file', params: { path: 'inputs/tri.obj' } } } }));
+      const recooked = await until(() => (out.match(/cooked house/g) ?? []).length >= 2, 15000);
+      const info = (await getJSON('/api/info?graph=house')).j;
+      check(recooked && /3 points, 1 prims/.test(info.summary ?? ''), `a file node reading "inputs/tri.obj" cooks the dropped file (${String(info.summary ?? info.error).split('\n')[0]})`);
+    }
+  } finally { proc.kill(); }
+}
+
+section('GET /api/input: "inputs/<rel>" through the host, the path a graph uses');
+{
+  // the engine's base folder holds inputs/ under the MCP server and under `topotopo view`; an engine that resolves paths
+  // elsewhere (an embedding app) gets the absolute path
+  const cookedPath = async (wsDir: string, baseDir: string, inputs?: string) => {
+    const engine = new Engine(createNodeHost({ baseDir }));
+    await engine.init();
+    const ws = new Workspace(wsDir, engine, { inputs });
+    ws.load();
+    const seen: unknown[] = [];
+    const cook = engine.cook.bind(engine);
+    engine.cook = ((g: any, o?: any) => { seen.push(g.nodes?.f?.params?.path); return cook(g, o); }) as typeof engine.cook;
+    const v = await startViewer(ws, 0);
+    try {
+      const where = ((await (await fetch(`${v.url}api/inputs_dir`)).json()) as any).where;
+      await fetch(`${v.url}api/inputs?name=tri.obj`, { method: 'POST', body: TRI_OBJ });
+      const r = await fetch(`${v.url}api/input_info?path=tri.obj`);
+      const ok = r.status === 200 && /3 points, 1 prims/.test(((await r.json()) as any).summary);
+      return { ok, path: seen[seen.length - 1], where };
+    } finally { v.close(); }
+  };
+  const graphDir = path.join(tmp, 'graphs_here');
+  const view = await cookedPath(path.join(tmp, 'scratch'), graphDir, path.join(graphDir, 'inputs'));
+  const mcp = await cookedPath(path.join(tmp, 'mcp_ws'), path.join(tmp, 'mcp_ws'));
+  const other = await cookedPath(path.join(tmp, 'embedded_ws'), path.join(tmp, 'elsewhere'));
+  check(view.ok && view.path === 'inputs/tri.obj' && mcp.ok && mcp.path === 'inputs/tri.obj',
+    `inputs/ beside the graph file (view) and in an MCP workspace: cooked as "inputs/tri.obj" (${view.path}, ${mcp.path})`);
+  check(other.ok && other.path === path.join(tmp, 'embedded_ws', 'inputs', 'tri.obj'), `an engine based elsewhere: the absolute path (${other.path})`);
+  check(mcp.where === 'in the workspace' && view.where === `in ${graphDir}`,
+    `the page's default words for the folder: "${mcp.where}", or the folder holding a given one ("${view.where}")`);
+}
+
+section('inputs/ watch: files copied in by hand, also after the folder was deleted and a drop made it again');
+{
+  const base = path.join(tmp, 'watched'), inputs = path.join(base, 'inputs');
+  const engine = new Engine(createNodeHost({ baseDir: base }));
+  await engine.init();
+  const ws = new Workspace(path.join(tmp, 'watched_scratch'), engine, { inputs });
+  ws.load();
+  const v = await startViewer(ws, 0);
+  const ac = new AbortController();
+  let hello = false, events = 0;
+  const stream = fetch(`${v.url}api/events`, { signal: ac.signal }).then(async (r) => {
+    const rd = r.body!.getReader(), dec = new TextDecoder();
+    for (;;) {
+      const { value, done } = await rd.read();
+      if (done) break;
+      const s = dec.decode(value);
+      hello ||= s.includes(': hello');
+      events += (s.match(/"inputs":\d+/g) ?? []).length;
+    }
+  }).catch(() => { /* aborted */ });
+  const drop = (name: string) => fetch(`${v.url}api/inputs?name=${name}`, { method: 'POST', body: TRI_OBJ }).then((r) => r.status);
+  /** a file copied into inputs/ by hand once the viewer is quiet: true when an {inputs} event follows */
+  const byHand = async (name: string) => {
+    await sleep(600);
+    const before = events;
+    fs.writeFileSync(path.join(inputs, name), TRI_OBJ);
+    return until(() => events > before, 5000);
+  };
+  try {
+    await until(() => hello, 5000);
+    const first = await drop('a.obj') === 200 && await byHand('b.obj');
+    // Windows reports a watched folder's deletion with a stream of events and no error, and the stream outlives a new
+    // folder of the same name: the old watch must go, or files copied into the new folder pass unseen
+    fs.rmSync(inputs, { recursive: true });
+    await sleep(600);
+    const again = await drop('c.obj') === 200 && await byHand('d.obj');
+    check(first && again, `a file copied into inputs/ is announced, also after the folder was deleted and a drop made it again (${first}, ${again})`);
+  } finally {
+    ac.abort();
+    await stream;
+    v.close();
+  }
 }
 
 section('POST /api/vars: a burst during a cook is applied by one more cook');

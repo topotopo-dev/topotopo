@@ -1,7 +1,8 @@
 // A workspace: named graphs (persisted as JSON files), saved assets, the human's input files, and the engine
 // that cooks them. Shared by the MCP server, the live viewer and the CLI.
 //   <dir>/graphs/<name>.json   graphs        <dir>/assets/<name>.json   saved assets
-//   <dir>/inputs/…             files people drop in (meshes, guide curves, PNG masks), read with file nodes
+//   <dir>/inputs/…             files people drop in (meshes, guide curves, PNG masks), read with file nodes; or a
+//                              folder given to the constructor (`topotopo view`: inputs/ beside the graph file)
 //   <dir>/exports/…            export output
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,6 +57,16 @@ export function inputKind(ext: string): InputFile['kind'] {
   return GEOMETRY_EXTS.has(ext) ? 'geometry' : IMAGE_EXTS.has(ext) ? 'image' : 'other';
 }
 
+export interface WorkspaceOptions {
+  /**
+   * The inputs folder when it is not <dir>/inputs. `topotopo view` keeps its workspace in a scratch folder but puts
+   * inputs/ beside the graph file, where the graph's file nodes read "inputs/<name>" and the files outlive the viewer.
+   * load() does not create a folder given here: the first file written into it does (the viewer's upload route), so a
+   * graph that never gets a drop leaves no empty inputs/ beside it.
+   */
+  inputs?: string;
+}
+
 /** Thrown by Workspace.edit when the edited graph does not validate; the stored graph is unchanged. */
 export class EditRejected extends Error {
   errors: Issue[];
@@ -73,21 +84,29 @@ export class Workspace {
   versions = new Map<string, number>();
   lastReport = new Map<string, CookReport>();
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
+  /** the inputs folder given to the constructor (WorkspaceOptions.inputs), if any */
+  private inputsAt: string | undefined;
 
-  constructor(dir: string, engine: Engine) {
+  constructor(dir: string, engine: Engine, opts: WorkspaceOptions = {}) {
     this.dir = path.resolve(dir);
     this.engine = engine;
+    this.inputsAt = opts.inputs === undefined ? undefined : path.resolve(opts.inputs);
     (engine as any).graphResolver = (n: string) => this.graphs.get(n);
   }
 
   get graphDir() { return path.join(this.dir, 'graphs'); }
   get assetDir() { return path.join(this.dir, 'assets'); }
   get exportDir() { return path.join(this.dir, 'exports'); }
-  /** files people drop in: meshes, guide curves and points, PNG masks and heightmaps (read as "inputs/<path>") */
-  get inputDir() { return path.join(this.dir, 'inputs'); }
+  /**
+   * files people drop in: meshes, guide curves and points, PNG masks and heightmaps (read as "inputs/<path>");
+   * <dir>/inputs unless the constructor was given another folder
+   */
+  get inputDir() { return this.inputsAt ?? path.join(this.dir, 'inputs'); }
 
   load() {
-    for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir, this.inputDir]) fs.mkdirSync(d, { recursive: true });
+    // the workspace's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
+    // is made by the first file written into it
+    for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir, ...(this.inputsAt ? [] : [this.inputDir])]) fs.mkdirSync(d, { recursive: true });
     const assetErrors: string[] = [];
     for (const f of fs.readdirSync(this.assetDir).filter((f) => f.endsWith('.json'))) {
       try {
