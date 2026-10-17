@@ -15,7 +15,7 @@ export { importCSV, importPointsJSON } from './points.ts';
 
 const td = new TextDecoder();
 
-export const IMPORT_FORMATS = ['obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'bgeo', 'csv', 'pointsjson'];
+export const IMPORT_FORMATS = ['obj', 'stl', 'ply', 'glb', 'gltf', 'blend', 'json', 'geo', 'bgeo', 'csv', 'pointsjson'];
 
 export interface ImportOptions {
   /** reads other files by path (glTF external buffers); usually Host.readFile */
@@ -24,7 +24,7 @@ export interface ImportOptions {
   path?: string;
   /** receives non-fatal problems (skipped primitives or attributes) */
   warn?: (msg: string) => void;
-  /** glTF EXT_mesh_gpu_instancing: 'packed' (default) = packed prims sharing one source per mesh; 'expand' = real geometry */
+  /** glTF shared meshes / EXT_mesh_gpu_instancing: 'packed' (default) = packed prims; 'expand' = real geometry */
   instancing?: 'packed' | 'expand';
 }
 
