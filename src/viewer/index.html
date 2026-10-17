@@ -30,8 +30,9 @@
   details.sec > summary::before { content: '▸'; width: 10px; }
   details.sec[open] > summary::before { content: '▾'; }
   details.sec > summary .count { margin-left: auto; letter-spacing: 0; }
-  .none, .hint { padding: 0 6px 6px; color: var(--dim); font-size: 12px; }
-  .hint { font-size: 11px; padding-top: 4px; }
+  .none, .hint, .where { padding: 0 6px 6px; color: var(--dim); font-size: 12px; }
+  .hint, .where { font-size: 11px; padding-top: 4px; }
+  .where { overflow-wrap: anywhere; }
   .sub { padding: 8px 4px 2px; color: var(--dim); font-size: 11px; }
   #controls, #inputs, #nodes { padding: 0 6px 8px; }
   .ctl { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 6px; }
@@ -66,6 +67,19 @@
   .node .t { color: var(--dim); font-size: 11px; }
   .node.out .n::before { content: '● '; color: var(--accent); }
   .node.err .n { color: var(--err); }
+  #markers { padding: 0 6px 8px; }
+  #mk-modes { display: flex; gap: 4px; padding: 0 0 6px; }
+  #mk-modes button { flex: 1 1 auto; min-width: 0; padding: 4px 0; font-size: 11px; white-space: nowrap; cursor: pointer; }
+  #mk-modes button[data-kind]::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--c); margin-right: 3px; vertical-align: 1px; }
+  .mk { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 4px; border-radius: 6px; cursor: pointer; }
+  .mk:hover { background: var(--hover); }
+  .mk.sel { background: var(--sel); }
+  .mk .dot { flex: 0 0 8px; height: 8px; border-radius: 50%; }
+  .mk input { flex: 1; width: 0; min-width: 0; padding: 2px 5px; border-color: transparent; background: none; }
+  .mk input:hover, .mk input:focus { border-color: var(--line); background: #2d3137; }
+  .mk input.bad { border-color: var(--err); }
+  .mk .mt { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  #mk-fields .ctl > .cl { flex-basis: 150px; }
   #main { flex: 1; position: relative; }
   canvas { display: block; }
   #bar { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; }
@@ -88,6 +102,19 @@
     </header>
     <div id="scroll">
       <details class="sec" id="controls-sec" open><summary>Controls<span class="count" id="controls-count"></span></summary><div id="controls"></div></details>
+      <details class="sec" id="markers-sec" open><summary>Markers<span class="count" id="markers-count"></span></summary>
+        <div id="markers">
+          <div id="mk-modes">
+            <button data-mode="site" data-kind style="--c:#ffb454" title="click in the view to place a site (a point with a radius)">Site</button>
+            <button data-mode="path" data-kind style="--c:#59d0ff" title="click points along a path; Enter or double-click finishes">Path</button>
+            <button data-mode="zone" data-kind style="--c:#9be36b" title="click the corners of an area; Enter or double-click closes it">Zone</button>
+            <button data-mode="volume" data-kind style="--c:#ff7ab8" title="drag a rectangle; the box rises by the height field">Volume</button>
+            <button data-mode="select" title="click a marker in the view to select it">Select</button>
+          </div>
+          <div id="mk-list"></div>
+          <div id="mk-fields"></div>
+        </div>
+      </details>
       <details class="sec" id="inputs-sec" open><summary>Inputs<span class="count" id="inputs-count"></span></summary><div id="inputs"></div></details>
       <details class="sec" id="nodes-sec" open><summary>Nodes<span class="count" id="nodes-count"></span></summary><div id="nodes"></div></details>
     </div>
@@ -103,11 +130,16 @@
     <div id="info"></div>
   </main>
 </div>
-<div id="drop">drop files to add them to inputs/<br>they show here as grey reference layers</div>
+<div id="drop">drop files to add them to <span id="drop-where">inputs/</span><br>they show here as grey reference layers</div>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -132,6 +164,7 @@ scene.add(refs);
 // double-click: orbit around the surface point under the cursor
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 renderer.domElement.addEventListener('dblclick', (e) => {
+  if (mk.mode) return; // a marker mode uses double-clicks (finishing a path or zone)
   const targets = [current, ...refs.children].filter(Boolean);
   if (!targets.length) return;
   const r = renderer.domElement.getBoundingClientRect();
@@ -175,7 +208,7 @@ function frame(...objs) {
   grid.position.set(Math.round(c.x / step) * step, 0, Math.round(c.z / step) * step);
   scene.add(grid);
 }
-const frameAll = () => frame(current, ...refs.children);
+const frameAll = () => frame(current, ...refs.children, ...markerGroup.children);
 function inView(obj) {
   const box = new THREE.Box3().setFromObject(obj);
   if (box.isEmpty()) return true;
@@ -248,11 +281,15 @@ const loadGeo = coalesce(async () => {
 });
 
 // the summary is long for big scenes: two lines unless expanded (the "info" button); a hovered or selected input
-// file shows its own summary instead
+// file shows its own summary instead, and a selected marker how agents will read it
 function showInfo() {
   const p = inp.hover ?? inp.selected;
   let t = state.infoText ?? '';
-  if (p) {
+  const m = !inp.hover && markerById(mk.selected);
+  if (m) {
+    const lines = markerInfo(m);
+    $('info').textContent = (state.infoOpen ? lines : lines.slice(0, 3)).join('\n');
+  } else if (p) {
     const f = inp.list.find((x) => x.path === p), i = inp.info.get(p);
     const head = `inputs/${p}${f ? `  ${fmtSize(f.size)}` : ''}${inp.layers.get(p)?.obj ? '  (reference layer)' : ''}`;
     if (!i || i.pending) t = `${head}\n…`;
@@ -279,7 +316,7 @@ function renderNodes() {
     d.innerHTML = `<span class="n"></span><span class="t"></span>`;
     d.querySelector('.n').textContent = n.name;
     d.querySelector('.t').textContent = n.type + (n.ms != null ? ` · ${n.ms.toFixed(0)}ms` : '');
-    d.onclick = () => { state.follow = false; state.node = n.name; inp.selected = null; $('follow').classList.remove('on'); renderNodes(); loadGeo(); };
+    d.onclick = () => { state.follow = false; state.node = n.name; inp.selected = null; selectMarker(null); $('follow').classList.remove('on'); renderNodes(); loadGeo(); };
     box.appendChild(d);
   }
 }
@@ -584,7 +621,7 @@ const ghost = {
   line: new THREE.LineBasicMaterial({ color: 0xc4cad4, transparent: true, opacity: 0.6, depthWrite: false }),
   point: new THREE.PointsMaterial({ color: 0xc4cad4, size: 3, sizeAttenuation: false, transparent: true, opacity: 0.75, depthWrite: false }),
 };
-const inp = { list: [], rows: new Map(), layers: new Map(), info: new Map(), errors: new Map(), checked: new Set(), hover: null, selected: null, restored: false };
+const inp = { list: [], rows: new Map(), layers: new Map(), info: new Map(), errors: new Map(), checked: new Set(), hover: null, selected: null, restored: false, where: '' };
 const stampOf = (f) => `${f.mtime}:${f.size}`;
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
 const errText = (e) => String(e?.message ?? e).replace(/^\[f\] /gm, '');
@@ -685,7 +722,7 @@ function inputRow(p) {
   lab.append(cb, el('span', 'nm', p), mt);
   row.append(lab, er);
   cb.onchange = () => {
-    if (cb.checked) { inp.checked.add(p); inp.selected = p; loadLayer(p); fetchInfo(p); }
+    if (cb.checked) { inp.checked.add(p); inp.selected = p; selectMarker(null); loadLayer(p); fetchInfo(p); }
     else { inp.checked.delete(p); dropLayer(p); if (inp.selected === p) inp.selected = null; }
     remember(); renderInputs(); showInfo();
   };
@@ -706,17 +743,30 @@ function inputRow(p) {
     },
   };
 }
+// where dropped files go (GET /api/inputs_dir): "in the workspace", or "beside house.json" under `topotopo view`
+const whereLine = el('div', 'where');
+whereLine.hidden = true;
+async function loadWhere() {
+  const j = await fetch('/api/inputs_dir').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!j?.where) return;
+  inp.where = String(j.where);
+  whereLine.textContent = `files go to inputs/ ${inp.where}; a file node reads them as inputs/<name>`;
+  whereLine.title = String(j.dir ?? '');
+  whereLine.hidden = false;
+  $('drop-where').textContent = `inputs/ ${inp.where}`;
+}
 function renderInputs() {
   const box = $('inputs');
   $('inputs-count').textContent = inp.list.length || '';
   if (!inp.list.length) {
     inp.rows.clear();
-    box.replaceChildren(el('div', 'none', 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON, PNG)'));
+    box.replaceChildren(el('div', 'none', 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON, PNG)'), whereLine);
     return;
   }
   box.querySelector('.none')?.remove();
   let hint = box.querySelector('.hint');
   if (!hint) { hint = el('div', 'hint', 'checked files show as grey reference layers (PNGs as pictures beside them); drop more files anywhere'); box.append(hint); }
+  if (hint.nextSibling !== whereLine) hint.after(whereLine);
   // rows are kept and updated in place, in list order
   const seen = new Set();
   let prev = null;
@@ -801,7 +851,7 @@ function upload(files, folders) {
       } else if (r.kept) kept.push(r.kept);
       else if (r.error) errors.push(r.error);
     }
-    const msg = [added.length ? `added ${added.map((p) => 'inputs/' + p).join(', ')}` : '', kept.length ? `kept the existing ${kept.map((p) => 'inputs/' + p).join(', ')}` : '', ...errors].filter(Boolean).join(' · ');
+    const msg = [added.length ? `added ${added.map((p) => 'inputs/' + p).join(', ')}${inp.where ? ' ' + inp.where : ''}` : '', kept.length ? `kept the existing ${kept.map((p) => 'inputs/' + p).join(', ')}` : '', ...errors].filter(Boolean).join(' · ');
     if (msg) setStatus(msg, errors.length ? 'err' : added.length ? 'ok' : '');
   });
 }
@@ -827,6 +877,576 @@ addEventListener('drop', (e) => {
   upload(files, folders);
 });
 
+// ------------------------------------------------------------ markers: sites, paths, zones and volumes clicked into the view
+// "Village here", "road along here", "keep this area empty". The page keeps the list and POSTs all of it after every
+// change (one request at a time, the latest list wins); the server writes inputs/markers.json, which agents read like
+// any input file (help topic "inputs": name and role on points or prims, pscale = a site's radius).
+const KINDS = { site: { color: 0xffb454 }, path: { color: 0x59d0ff }, zone: { color: 0x9be36b }, volume: { color: 0xff7ab8 } };
+const mk = {
+  list: [], rows: new Map(), objs: new Map(), mode: null, selected: null,
+  // being drawn: {kind, points} for a path or zone, {kind: 'volume', y, a, b} while a box is dragged
+  draft: null, cursor: null, down: null, lastClick: null,
+  // sizes of new markers: the last ones set
+  defaults: { radius: 5, height: 10 },
+  saved: null, // the body of the last successful POST
+};
+const markerGroup = new THREE.Group(), draftGroup = new THREE.Group();
+markerGroup.name = 'markers';
+scene.add(markerGroup, draftGroup);
+const cv = renderer.domElement;
+const markerById = (id) => (id ? mk.list.find((m) => m.id === id) ?? null : null);
+const V3 = (p) => new THREE.Vector3(p[0], p[1], p[2]);
+const mm = (x) => Math.round(x * 1000) / 1000; // coordinates are kept to the millimetre
+const num = (x, d = 2) => String(+x.toFixed(d));
+const hex = (c) => '#' + c.toString(16).padStart(6, '0');
+const newId = () => 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+/** The list as POST /api/markers takes it (the same key order the server stores). */
+const markersBody = () => JSON.stringify({ markers: mk.list.map(({ id, kind, name, points, radius, height }) =>
+  ({ id, kind, name, points, ...(kind === 'site' ? { radius } : {}), ...(kind === 'volume' ? { height } : {}) })) });
+function nextName(kind) {
+  let n = 0;
+  for (const m of mk.list) { const r = new RegExp(`^${kind} (\\d+)$`, 'i').exec(m.name); if (r) n = Math.max(n, Number(r[1])); }
+  let name;
+  do name = `${kind} ${++n}`; while (mk.list.some((m) => m.name.toLowerCase() === name));
+  return name;
+}
+
+// shapes, as the server builds them (src/viewer/server.ts markersGeometry)
+function boxOf(m) {
+  const [a, b] = m.points;
+  const lo = new THREE.Vector3(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]));
+  return { lo, hi: new THREE.Vector3(Math.max(a[0], b[0]), lo.y + m.height, Math.max(a[2], b[2])) };
+}
+function boxEdges(lo, hi) {
+  const out = [];
+  for (let ax = 0; ax < 3; ax++) for (let s = 0; s < 4; s++) {
+    const a = [0, 0, 0], u = (ax + 1) % 3, v = (ax + 2) % 3;
+    a[u] = s & 1; a[v] = s >> 1;
+    const b = a.slice(); b[ax] = 1;
+    out.push([a, b].map(([i, j, k]) => new THREE.Vector3(i ? hi.x : lo.x, j ? hi.y : lo.y, k ? hi.z : lo.z)));
+  }
+  return out;
+}
+const boxGeometry = (lo, hi) => new THREE.BoxGeometry(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z).translate((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2);
+const circle = (c, r, n = 64) => Array.from({ length: n + 1 }, (_, k) => { const a = (k / n) * Math.PI * 2; return new THREE.Vector3(c.x + Math.cos(a) * r, c.y, c.z + Math.sin(a) * r); });
+/** The lines a marker is drawn with, as segments. */
+function outline(m) {
+  if (m.kind === 'volume') { const { lo, hi } = boxOf(m); return boxEdges(lo, hi); }
+  const P = m.kind === 'site' ? circle(V3(m.points[0]), m.radius, 48) : m.points.map(V3);
+  if (m.kind === 'zone') P.push(P[0]);
+  return P.slice(1).map((p, k) => [P[k], p]);
+}
+const pathLength = (pts) => pts.slice(1).reduce((s, p, k) => s + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1], p[2] - pts[k][2]), 0);
+const topArea = (pts) => Math.abs(pts.reduce((s, p, k) => { const q = pts[(k + 1) % pts.length]; return s + p[0] * q[2] - q[0] * p[2]; }, 0)) / 2;
+function insideTop(x, z, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, , zi] = pts[i], [xj, , zj] = pts[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function halfway(P) {
+  let left = P.slice(1).reduce((s, p, k) => s + p.distanceTo(P[k]), 0) / 2;
+  for (let k = 1; k < P.length; k++) {
+    const d = P[k].distanceTo(P[k - 1]);
+    if (d > 0 && d >= left) return P[k - 1].clone().lerp(P[k], left / d);
+    left -= d;
+  }
+  return P[P.length - 1].clone();
+}
+
+// drawing: markers sit on top of everything (no depth test), in their own group apart from the reference layers
+const viewSize = () => new THREE.Vector2(main.clientWidth, main.clientHeight);
+const pxToWorld = (dist) => (dist * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / Math.max(1, main.clientHeight);
+function lineMaterial(color, width, opacity) {
+  const m = new LineMaterial({ color, linewidth: width, transparent: true, opacity, depthTest: false, depthWrite: false });
+  m.resolution.copy(viewSize());
+  return m;
+}
+function fatLine(points, color, width = 2, opacity = 1) {
+  const g = new LineGeometry();
+  g.setPositions(points.flatMap((p) => [p.x, p.y, p.z]));
+  const l = new Line2(g, lineMaterial(color, width, opacity));
+  l.renderOrder = 22;
+  return l;
+}
+function fatSegments(pairs, color, width = 2, opacity = 1) {
+  const g = new LineSegmentsGeometry();
+  g.setPositions(pairs.flatMap(([a, b]) => [a.x, a.y, a.z, b.x, b.y, b.z]));
+  const l = new LineSegments2(g, lineMaterial(color, width, opacity));
+  l.renderOrder = 22;
+  return l;
+}
+function fillMesh(geometry, color, opacity) {
+  const f = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+  f.renderOrder = 21;
+  return f;
+}
+function polygonGeometry(P) {
+  const g = new THREE.BufferGeometry().setFromPoints(P);
+  g.setIndex(THREE.ShapeUtils.triangulateShape(P.map((p) => new THREE.Vector2(p.x, p.z)), []).flat());
+  return g;
+}
+const dotTexture = (() => {
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  c.width = c.height = 32;
+  x.beginPath(); x.arc(16, 16, 12, 0, Math.PI * 2);
+  x.fillStyle = '#fff'; x.fill(); x.lineWidth = 4; x.strokeStyle = 'rgba(0, 0, 0, 0.75)'; x.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+function dots(points, color, size = 8) {
+  const d = new THREE.Points(new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.PointsMaterial({ color, size, sizeAttenuation: false, map: dotTexture, transparent: true, alphaTest: 0.2, depthTest: false, depthWrite: false }));
+  d.renderOrder = 23;
+  return d;
+}
+/** A small sphere that keeps `px` pixels of radius at any distance. */
+function handle(p, color, px = 5) {
+  const h = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.5, depthTest: false, depthWrite: false, transparent: true }));
+  h.position.copy(p);
+  h.renderOrder = 24;
+  h.onBeforeRender = (r, s, cam) => { h.scale.setScalar(pxToWorld(Math.max(1e-6, h.position.distanceTo(cam.position))) * px); h.updateMatrixWorld(); };
+  return h;
+}
+function sizeLabel(s) { const k = pxToWorld(1); s.scale.set(s.userData.px[0] * k, s.userData.px[1] * k, 1); }
+/** The name above a point, at a fixed size on screen. */
+function label(text, color, sel, at) {
+  const dpr = Math.min(2, devicePixelRatio || 1), size = 12 * dpr, pad = 4 * dpr;
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  const font = `600 ${size}px system-ui, -apple-system, Segoe UI, sans-serif`;
+  x.font = font;
+  c.width = Math.ceil(x.measureText(text).width + 2 * pad); c.height = Math.ceil(size * 1.3 + 2 * pad);
+  x.font = font;
+  x.fillStyle = sel ? hex(color) : 'rgba(24, 26, 30, 0.82)';
+  x.beginPath(); x.roundRect(0, 0, c.width, c.height, 4 * dpr); x.fill();
+  x.fillStyle = sel ? '#16181b' : hex(color);
+  x.textBaseline = 'middle';
+  x.fillText(text, pad, c.height / 2 + dpr / 2);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, sizeAttenuation: false, depthTest: false, depthWrite: false, transparent: true }));
+  s.center.set(0.5, -0.4);
+  s.position.copy(at);
+  s.renderOrder = 25;
+  s.userData.px = [c.width / dpr, c.height / dpr];
+  sizeLabel(s);
+  return s;
+}
+function disposeMarker(obj) {
+  obj.traverse((o) => {
+    o.geometry?.dispose();
+    if (o.material) { if (o.material.map && o.material.map !== dotTexture) o.material.map.dispose(); o.material.dispose(); }
+  });
+}
+function markerObject(m, sel) {
+  const color = KINDS[m.kind].color, g = new THREE.Group(), w = sel ? 4 : 2.2, a = sel ? 1 : 0.9, P = m.points.map(V3);
+  g.name = `marker ${m.name}`;
+  if (m.kind === 'site') {
+    g.add(fillMesh(new THREE.CircleGeometry(m.radius, 64).rotateX(-Math.PI / 2).translate(P[0].x, P[0].y, P[0].z), color, sel ? 0.3 : 0.16));
+    g.add(fatLine(circle(P[0], m.radius), color, w, a), handle(P[0], color), label(m.name, color, sel, P[0]));
+  } else if (m.kind === 'volume') {
+    const { lo, hi } = boxOf(m);
+    g.add(fillMesh(boxGeometry(lo, hi), color, sel ? 0.14 : 0.07), fatSegments(boxEdges(lo, hi), color, w, a));
+    g.add(label(m.name, color, sel, new THREE.Vector3((lo.x + hi.x) / 2, hi.y, (lo.z + hi.z) / 2)));
+  } else {
+    const zone = m.kind === 'zone';
+    if (zone) g.add(fillMesh(polygonGeometry(P), color, sel ? 0.3 : 0.16));
+    g.add(fatLine(zone ? [...P, P[0]] : P, color, w, a), dots(P, color, sel ? 9 : 7));
+    g.add(label(m.name, color, sel, zone ? P.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(P.length) : halfway(P)));
+  }
+  return g;
+}
+/** Marker objects are rebuilt only when their marker (or whether it is selected) changed. */
+function drawMarkers() {
+  const seen = new Set();
+  for (const m of mk.list) {
+    const sel = m.id === mk.selected, sig = JSON.stringify([m, sel]), o = mk.objs.get(m.id);
+    seen.add(m.id);
+    if (o?.sig === sig) continue;
+    if (o) { markerGroup.remove(o.obj); disposeMarker(o.obj); }
+    const obj = markerObject(m, sel);
+    markerGroup.add(obj);
+    mk.objs.set(m.id, { sig, obj });
+  }
+  for (const [id, o] of mk.objs) if (!seen.has(id)) { markerGroup.remove(o.obj); disposeMarker(o.obj); mk.objs.delete(id); }
+}
+function drawDraft() {
+  for (const o of [...draftGroup.children]) { draftGroup.remove(o); disposeMarker(o); }
+  const d = mk.draft;
+  if (!d) return;
+  const color = KINDS[d.kind].color;
+  if (d.kind === 'volume') {
+    const { lo, hi } = boxOf({ points: [[d.a.x, d.y, d.a.z], [d.b.x, d.y, d.b.z]], height: mk.defaults.height });
+    if (hi.x > lo.x && hi.z > lo.z) draftGroup.add(fillMesh(boxGeometry(lo, hi), color, 0.12), fatSegments(boxEdges(lo, hi), color, 2.5));
+    return;
+  }
+  const P = d.points.map(V3), live = mk.cursor ? [...P, mk.cursor] : P;
+  if (live.length >= 2) draftGroup.add(fatLine(live, color, 2.5));
+  if (d.kind === 'zone' && live.length >= 3) draftGroup.add(fatLine([live[live.length - 1], live[0]], color, 1.5, 0.5));
+  if (P.length) draftGroup.add(dots(P, color, 9));
+  if (d.kind === 'zone' && P.length >= 3) draftGroup.add(dots([P[0]], color, 14)); // clicking it closes the zone
+}
+let draftQueued = false;
+const queueDraft = () => { if (!draftQueued) { draftQueued = true; requestAnimationFrame(() => { draftQueued = false; drawDraft(); }); } };
+addEventListener('resize', () => {
+  for (const g of [markerGroup, draftGroup]) g.traverse((o) => { if (o.material?.isLineMaterial) o.material.resolution.copy(viewSize()); if (o.isSprite) sizeLabel(o); });
+});
+
+// placing: a marker mode takes clicks (a drag still turns the view), Volume takes left drags
+const MODE_TEXT = {
+  site: () => 'Site mode — click the ground or the geometry to place a site · drag turns the view · Esc leaves',
+  path: () => (mk.draft ? `Path mode — ${mk.draft.points.length} point${mk.draft.points.length === 1 ? '' : 's'} · click adds one · Enter or double-click finishes · Backspace removes the last · Esc cancels`
+    : 'Path mode — click points along the path · Enter or double-click finishes · Esc leaves'),
+  zone: () => (mk.draft ? `Zone mode — ${mk.draft.points.length} corner${mk.draft.points.length === 1 ? '' : 's'} · click adds one · Enter, double-click or a click on the first corner closes it · Backspace removes the last · Esc cancels`
+    : 'Zone mode — click the corners of the area; it closes itself (Enter or double-click) · Esc leaves'),
+  volume: () => {
+    const d = mk.draft;
+    if (d) return `Volume mode — ${num(Math.abs(d.b.x - d.a.x), 1)} × ${num(Math.abs(d.b.z - d.a.z), 1)} m, ${num(mk.defaults.height, 1)} m high from y ${num(d.y, 1)}`;
+    return 'Volume mode — drag a rectangle on the ground (or on the geometry under the first click); the box rises by the height field · right-drag pans · Esc leaves';
+  },
+  select: () => 'Select mode — click a marker to select it · drag turns the view · Esc leaves',
+};
+function modeStatus(extra = '') { if (mk.mode) setStatus(MODE_TEXT[mk.mode]() + extra, 'busy'); }
+/** A note about a marker edit, after the mode's text while a mode is active. */
+function markerNote(text, kind = '') { if (mk.mode && kind !== 'err') modeStatus(` · ${text}`); else setStatus(text, kind); }
+function setMode(mode) {
+  if (mk.mode === mode) mode = null;
+  mk.draft = null; mk.cursor = null; mk.down = null;
+  drawDraft();
+  mk.mode = mode;
+  // Volume drags with the left button; the view still pans (right button) and zooms
+  controls.mouseButtons.LEFT = mode === 'volume' ? -1 : THREE.MOUSE.ROTATE;
+  cv.style.cursor = mode && mode !== 'select' ? 'crosshair' : '';
+  for (const b of document.querySelectorAll('#mk-modes button')) b.classList.toggle('on', b.dataset.mode === mode);
+  if (mode) modeStatus();
+  else if (cookFailed) setStatus('cook failed — the error is shown in the view', 'err');
+  else setStatus(LIVE);
+  renderFields();
+}
+function eventRay(e) {
+  const r = cv.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+}
+const rayAtHeight = (y) => ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), new THREE.Vector3());
+/** The surface under the pointer: the shown geometry or a reference layer (not the markers' own file), else the ground y = 0. */
+function pickPoint(e) {
+  eventRay(e);
+  // pictures (PNG layers) only stand beside the scene for viewing: markers land on the scene and its other layers
+  const targets = [current, ...refs.children.filter((o) => o.name !== 'inputs/markers.json' && !o.userData.picture)].filter(Boolean);
+  const hit = ray.intersectObjects(targets, true).find((h) => h.object.isMesh);
+  if (hit) return { p: hit.point.clone(), surface: true };
+  const p = rayAtHeight(0);
+  return p ? { p, surface: false } : null;
+}
+function onPlane(e, y) { eventRay(e); return rayAtHeight(y); }
+/** Screen position (px in the canvas) of a world point, or null behind the camera. */
+function toScreen(p) {
+  const v = p.clone().project(camera);
+  return v.z > 1 ? null : [((v.x + 1) / 2) * cv.clientWidth, ((1 - v.y) / 2) * cv.clientHeight];
+}
+function pickMarker(e) {
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  camera.updateMatrixWorld();
+  const segDist = (a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((mx - a[0]) * dx + (my - a[1]) * dy) / l2)) : 0;
+    return Math.hypot(a[0] + t * dx - mx, a[1] + t * dy - my);
+  };
+  // near a line or a site's point (8 px): the nearest
+  let best = null, bestD = 8;
+  for (const m of mk.list) {
+    for (const [a, b] of outline(m)) { const A = toScreen(a), B = toScreen(b); if (A && B) { const d = segDist(A, B); if (d < bestD) { bestD = d; best = m; } } }
+    const c = m.kind === 'site' && toScreen(V3(m.points[0]));
+    if (c && Math.hypot(c[0] - mx, c[1] - my) < bestD) { bestD = Math.hypot(c[0] - mx, c[1] - my); best = m; }
+  }
+  if (best) return best;
+  // inside a site's disc, a zone (seen from above) or a volume's box: the smallest
+  eventRay(e);
+  let area = Infinity;
+  for (const m of mk.list) {
+    let a = Infinity;
+    if (m.kind === 'site') { const p = rayAtHeight(m.points[0][1]); if (p && Math.hypot(p.x - m.points[0][0], p.z - m.points[0][2]) <= m.radius) a = Math.PI * m.radius ** 2; }
+    else if (m.kind === 'zone') { const p = rayAtHeight(m.points.reduce((s, q) => s + q[1], 0) / m.points.length); if (p && insideTop(p.x, p.z, m.points)) a = topArea(m.points); }
+    else if (m.kind === 'volume') { const { lo, hi } = boxOf(m); if (ray.ray.intersectsBox(new THREE.Box3(lo, hi))) a = (hi.x - lo.x) * (hi.z - lo.z); }
+    if (a < area) { area = a; best = m; }
+  }
+  return best;
+}
+function clickAt(e) {
+  // the second click of a double-click lands where the first did: not a new point; it finishes a path or zone
+  const now = performance.now(), last = mk.lastClick;
+  mk.lastClick = { x: e.clientX, y: e.clientY, t: now };
+  if (last && now - last.t < 400 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 6) {
+    mk.lastClick = null;
+    if (mk.draft?.points) finishDraft();
+    return;
+  }
+  if (mk.mode === 'select') return selectMarker(pickMarker(e)?.id ?? null);
+  if (mk.mode === 'zone' && mk.draft?.points.length >= 3) {
+    const f = toScreen(V3(mk.draft.points[0])), r = cv.getBoundingClientRect();
+    if (f && Math.hypot(f[0] - (e.clientX - r.left), f[1] - (e.clientY - r.top)) < 10) return finishDraft();
+  }
+  const hit = pickPoint(e);
+  if (!hit) return modeStatus(' · nothing under the pointer');
+  const p = [mm(hit.p.x), mm(hit.p.y), mm(hit.p.z)];
+  if (mk.mode === 'site') return addMarker({ kind: 'site', points: [p], radius: mk.defaults.radius });
+  if (!mk.draft) mk.draft = { kind: mk.mode, points: [] };
+  mk.draft.points.push(p);
+  drawDraft(); modeStatus();
+}
+function finishDraft() {
+  const d = mk.draft;
+  if (!d?.points) return;
+  const need = d.kind === 'zone' ? 3 : 2;
+  if (d.points.length < need) return modeStatus(` · a ${d.kind} needs ${need} points`);
+  mk.draft = null; mk.cursor = null; drawDraft();
+  addMarker({ kind: d.kind, points: d.points });
+}
+function finishBox(moved) {
+  const d = mk.draft;
+  mk.draft = null; drawDraft();
+  if (!d || d.kind !== 'volume') return modeStatus();
+  if (moved < 5 || Math.abs(d.b.x - d.a.x) < 0.01 || Math.abs(d.b.z - d.a.z) < 0.01) return modeStatus(' · drag to draw the box');
+  addMarker({ kind: 'volume', points: [[mm(d.a.x), mm(d.y), mm(d.a.z)], [mm(d.b.x), mm(d.y), mm(d.b.z)]], height: mk.defaults.height });
+}
+cv.addEventListener('pointerdown', (e) => {
+  if (!mk.mode || e.button !== 0) return;
+  mk.down = { x: e.clientX, y: e.clientY };
+  if (mk.mode !== 'volume') return;
+  const hit = pickPoint(e);
+  if (hit) { mk.draft = { kind: 'volume', y: hit.p.y, a: hit.p.clone(), b: hit.p.clone() }; drawDraft(); }
+});
+cv.addEventListener('pointermove', (e) => {
+  if (!mk.mode) return;
+  if (mk.draft?.kind === 'volume') {
+    if (!mk.down) return;
+    const p = onPlane(e, mk.draft.y);
+    if (p) { mk.draft.b = p; queueDraft(); modeStatus(); }
+  } else if (mk.draft?.points.length) {
+    // the rubber band to the pointer, on the last point's level (a cheap stand-in for the surface under it)
+    mk.cursor = onPlane(e, mk.draft.points[mk.draft.points.length - 1][1]);
+    queueDraft();
+  }
+});
+cv.addEventListener('pointerup', (e) => {
+  if (!mk.mode || e.button !== 0 || !mk.down) return;
+  const moved = Math.hypot(e.clientX - mk.down.x, e.clientY - mk.down.y);
+  mk.down = null;
+  if (mk.mode === 'volume') finishBox(moved);
+  else if (moved <= 5) clickAt(e); // a longer move turned the view
+});
+cv.addEventListener('pointercancel', () => { mk.down = null; if (mk.draft?.kind === 'volume') { mk.draft = null; drawDraft(); } });
+// a double-click slower than the click test above: drop the point its second click added, then finish
+cv.addEventListener('dblclick', () => {
+  const P = mk.draft?.points;
+  if (!P) return;
+  const [a, b] = P.slice(-2).map((p) => toScreen(V3(p)));
+  if (P.length >= 2 && a && b && Math.hypot(a[0] - b[0], a[1] - b[1]) < 6) P.pop();
+  finishDraft();
+});
+cv.addEventListener('pointerleave', () => { if (mk.cursor) { mk.cursor = null; queueDraft(); } });
+addEventListener('keydown', (e) => {
+  if (!mk.mode) return;
+  const t = e.target;
+  if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return;
+  if (e.key === 'Escape') { if (mk.draft) { mk.draft = null; mk.cursor = null; drawDraft(); modeStatus(' · cancelled'); } else setMode(null); }
+  else if (e.key === 'Enter' && mk.draft?.points) finishDraft();
+  else if (e.key === 'Backspace' && mk.draft?.points) { mk.draft.points.pop(); if (!mk.draft.points.length) { mk.draft = null; mk.cursor = null; } drawDraft(); modeStatus(); }
+  else return;
+  e.preventDefault(); // a focused button must not click on Enter
+});
+
+// the list, the selected marker's fields and the info panel
+function addMarker(m) {
+  const marker = { id: newId(), kind: m.kind, name: nextName(m.kind), points: m.points, ...(m.kind === 'site' ? { radius: m.radius } : {}), ...(m.kind === 'volume' ? { height: m.height } : {}) };
+  mk.list.push(marker);
+  mk.selected = marker.id;
+  if (inp.selected) { inp.selected = null; renderInputs(); }
+  markersChanged();
+  modeStatus(` · added ${marker.name}`);
+}
+function selectMarker(id) {
+  mk.selected = markerById(id) ? id : null;
+  if (mk.selected && inp.selected) { inp.selected = null; renderInputs(); }
+  renderMarkers(); showInfo();
+}
+function deleteMarker(id) {
+  const m = markerById(id);
+  if (!m) return;
+  mk.list = mk.list.filter((o) => o !== m);
+  if (mk.selected === id) mk.selected = null;
+  markersChanged();
+  markerNote(`deleted ${m.name}`);
+}
+function renameMarker(id, input) {
+  const m = markerById(id);
+  if (!m) return;
+  const name = input.value.normalize('NFC').trim();
+  const clash = mk.list.find((o) => o !== m && o.name.toLowerCase() === name.toLowerCase());
+  if (!name || clash) {
+    markerNote(name ? `"${name}" is taken by another marker: names must be unique` : 'a marker needs a name', 'err');
+    input.value = m.name; input.classList.add('bad');
+    setTimeout(() => input.classList.remove('bad'), 1500);
+    return;
+  }
+  input.value = name;
+  if (name === m.name) return;
+  markerNote(`renamed "${m.name}" to "${name}"`);
+  m.name = name;
+  markersChanged();
+}
+/** Frame one marker, keeping the view direction and the far plane of the whole scene. */
+function focusMarker(m) {
+  if (!m) return;
+  const box = new THREE.Box3();
+  for (const [a, b] of outline(m)) box.expandByPoint(a).expandByPoint(b);
+  if (m.kind === 'site') box.expandByPoint(V3(m.points[0]));
+  const c = box.getCenter(new THREE.Vector3()), r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  if (!Number.isFinite(dir.x) || dir.length() < 0.5) dir.set(0.6, 0.45, 0.7).normalize();
+  camera.position.copy(c).addScaledVector(dir, (r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.4);
+  camera.near = Math.min(camera.near, r / 100000); camera.far = Math.max(camera.far, r * 100); camera.updateProjectionMatrix();
+  controls.target.copy(c);
+}
+function markerRow(id) {
+  const row = el('div', 'mk'), dot = el('span', 'dot'), name = el('input'), kind = el('span', 'mt'), del = el('button', 'ib', '×');
+  name.type = 'text'; name.spellcheck = false; name.maxLength = 100;
+  del.title = 'delete this marker';
+  row.append(dot, name, kind, del);
+  row.onclick = (e) => { if (e.target === name || e.target === del) return; selectMarker(id); focusMarker(markerById(id)); };
+  name.onfocus = () => { if (mk.selected !== id) selectMarker(id); };
+  name.onkeydown = (e) => {
+    if (e.key === 'Enter') name.blur();
+    else if (e.key === 'Escape') { name.value = markerById(id)?.name ?? ''; name.classList.remove('bad'); name.blur(); }
+  };
+  name.onchange = () => renameMarker(id, name);
+  del.onclick = () => deleteMarker(id);
+  return {
+    el: row,
+    update(m) {
+      dot.style.background = hex(KINDS[m.kind].color);
+      if (document.activeElement !== name) name.value = m.name;
+      kind.textContent = m.kind;
+      row.title = `${m.kind} "${m.name}" — click to frame it; the name is editable`;
+      row.classList.toggle('sel', m.id === mk.selected);
+    },
+  };
+}
+function renderMarkerList() {
+  const box = $('mk-list');
+  $('markers-count').textContent = mk.list.length || '';
+  if (!mk.list.length) {
+    mk.rows.clear();
+    box.replaceChildren(el('div', 'none', 'none yet — pick Site, Path, Zone or Volume, then click in the view; agents read them as inputs/markers.json'));
+    return;
+  }
+  box.querySelector('.none')?.remove();
+  // rows are kept (a name being typed stays) and updated in list order
+  const seen = new Set();
+  let prev = null;
+  for (const m of mk.list) {
+    seen.add(m.id);
+    let r = mk.rows.get(m.id);
+    if (!r) { r = markerRow(m.id); mk.rows.set(m.id, r); }
+    r.update(m);
+    const want = prev ? prev.nextSibling : box.firstChild;
+    if (r.el !== want) box.insertBefore(r.el, want);
+    prev = r.el;
+  }
+  for (const [id, r] of mk.rows) if (!seen.has(id)) { r.el.remove(); mk.rows.delete(id); }
+}
+/** The size field of the selected marker (a site's radius, a volume's height), or of new ones in Site and Volume mode. */
+function renderFields() {
+  const box = $('mk-fields'), sel = markerById(mk.selected), placing = mk.mode !== 'select' ? mk.mode : null;
+  const m = sel && (!placing || sel.kind === placing) ? sel : null;
+  const kind = m ? m.kind : placing, key = kind === 'site' ? 'radius' : kind === 'volume' ? 'height' : null;
+  const sig = `${m?.id ?? ''}|${kind ?? ''}`;
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    box.replaceChildren();
+    if (key) {
+      const row = el('div', 'ctl'), cw = el('div', 'cw'), f = el('input');
+      f.type = 'number'; f.min = '0.1'; f.step = 'any'; f.id = 'mk-size';
+      f.oninput = () => { const v = Number(f.value); if (f.value.trim() !== '' && Number.isFinite(v) && v > 0) setSize(key, v); };
+      f.onchange = () => { const cur = markerById(m?.id); f.value = fmt(cur ? cur[key] : mk.defaults[key]); };
+      row.title = (key === 'radius' ? 'the site\'s radius: its pscale in inputs/markers.json' : 'how far the box rises above its lower corner') + (m ? '' : ` (for the next ${kind}s)`);
+      cw.append(f);
+      row.append(el('span', 'cl', m ? `${key} (m)` : `new ${kind}s: ${key} (m)`), cw);
+      box.append(row);
+    }
+    if (m && !key) box.append(el('div', 'hint', ''));
+  }
+  const f = $('mk-size');
+  if (f && document.activeElement !== f) f.value = fmt(m ? m[key] : mk.defaults[key]);
+  const hint = box.querySelector('.hint');
+  if (hint && m) hint.textContent = m.kind === 'path' ? `${m.points.length} points · ${num(pathLength(m.points), 1)} m long` : `${m.points.length} corners · ${num(topArea(m.points), 1)} m² seen from above`;
+}
+function setSize(key, v) {
+  mk.defaults[key] = v;
+  const m = markerById(mk.selected);
+  if (m && key in m && m[key] !== v) { m[key] = v; markersChanged(); }
+  else if (mk.draft?.kind === 'volume') drawDraft();
+}
+function renderMarkers() { drawMarkers(); renderMarkerList(); renderFields(); }
+/** How agents will read the marker: its elements and attributes in inputs/markers.json, and how to pick it out. */
+function markerInfo(m) {
+  const n = { site: 0, path: 0, zone: 0, volume: 0 };
+  let points = 0, prims = 0;
+  for (const o of mk.list) {
+    n[o.kind]++;
+    points += o.kind === 'volume' ? 8 : o.points.length;
+    prims += o.kind === 'site' ? 0 : o.kind === 'volume' ? 6 : 1;
+  }
+  const P = m.points, attrs = (cls) => `${cls} name "${m.name}" · role "${m.kind}"`;
+  const lines = [`inputs/markers.json · ${m.kind} "${m.name}"${markersBody() === mk.saved ? '' : '  (saving…)'}`];
+  if (m.kind === 'site') lines.push(`1 point · ${attrs('point')} · pscale ${num(m.radius)} (the radius, m) · orient [0, 0, 0, 1] · P (${P[0].map((x) => num(x)).join(', ')})`);
+  else if (m.kind === 'path') lines.push(`1 open polyline, ${P.length} points, ${num(pathLength(P), 1)} m long · ${attrs('prim')}`);
+  else if (m.kind === 'zone') lines.push(`1 closed polygon facing up, ${P.length} points, ${num(topArea(P), 1)} m² seen from above · ${attrs('prim')}`);
+  else { const { lo, hi } = boxOf(m); lines.push(`1 closed box: 6 quads facing out, 8 points, ${num(hi.x - lo.x, 1)} × ${num(hi.y - lo.y, 1)} × ${num(hi.z - lo.z, 1)} m from y ${num(lo.y, 1)} · ${attrs('prim')}`); }
+  const many = (c, w) => `${c} ${w}${c === 1 ? '' : 's'}`;
+  lines.push(`the file: ${many(points, 'point')}, ${many(prims, 'prim')} (${Object.entries(n).filter(([, c]) => c).map(([k, c]) => many(c, k)).join(', ')})`);
+  lines.push('read it with {"type":"file","params":{"path":"inputs/markers.json"}}');
+  // group patterns split on spaces: "?" matches the space in a glob
+  const group = JSON.stringify(`@name=${m.name.replace(/\s/g, '?')}`);
+  lines.push(`this one: {"type":"delete","params":{${m.kind === 'site' ? '"class":"point",' : ''}"group":${group},"keep":true}} · every ${m.kind}: "@role=${m.kind}"`);
+  return lines;
+}
+
+// saving: the whole list, one POST at a time, the latest list wins
+const saveMarkers = coalesce(async () => {
+  const body = markersBody();
+  if (body === mk.saved) return;
+  let status = 0, j;
+  try {
+    const res = await fetch('/api/markers', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    status = res.status;
+    j = await res.json().catch(() => ({}));
+  } catch { j = { error: 'the viewer server is not answering' }; }
+  if (status === 200 && j.ok) {
+    mk.saved = body;
+    const file = `inputs/markers.json${inp.where ? ' ' + inp.where : ''}`;
+    if (!mk.mode && markersBody() === body) setStatus(j.count ? `${j.count} marker${j.count === 1 ? '' : 's'} saved to ${file} (${j.points} points, ${j.prims} prims)` : `no markers: ${file} removed`, 'ok');
+  } else setStatus(`markers not saved — ${j.error ?? `${status}`}`, 'err');
+  showInfo();
+});
+function markersChanged() { renderMarkers(); saveMarkers(); showInfo(); }
+async function loadMarkers() {
+  const res = await fetch('/api/markers').catch(() => null);
+  if (!res?.ok) return;
+  const j = await res.json().catch(() => ({}));
+  mk.list = Array.isArray(j.markers) ? j.markers : [];
+  mk.saved = markersBody();
+  if (!markerById(mk.selected)) mk.selected = null;
+  for (const k of ['radius', 'height']) { const last = mk.list.findLast((m) => m[k] > 0); if (last) mk.defaults[k] = last[k]; }
+  if (j.error) setStatus(j.error, 'err');
+  renderMarkers(); showInfo();
+}
+for (const b of document.querySelectorAll('#mk-modes button')) b.onclick = () => { setMode(b.dataset.mode); b.blur(); };
+
 // ------------------------------------------------------------ wiring
 $('graph').onchange = (e) => {
   state.graph = e.target.value; state.framed = false;
@@ -842,8 +1462,9 @@ const es = new EventSource('/api/events');
 let opened = false;
 es.onopen = () => {
   setStatus(LIVE);
+  modeStatus();
   // after a reconnect the server may have restarted: fetch everything again
-  if (opened) { refreshGraphs().then(loadGeo); refreshInputs(); }
+  if (opened) { refreshGraphs().then(loadGeo); refreshInputs(); loadWhere(); loadMarkers(); }
   opened = true;
 };
 es.onerror = () => { setStatus('disconnected (server stopped?)', 'err'); };
@@ -854,9 +1475,12 @@ es.onmessage = async (m) => {
   await refreshGraphs();
   if (ev.graph === state.graph) loadGeo();
 };
+renderMarkers();
 await refreshGraphs();
 loadGeo();
 refreshInputs();
+loadWhere();
+loadMarkers();
 </script>
 </body>
 </html>

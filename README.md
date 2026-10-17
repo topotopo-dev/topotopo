@@ -57,8 +57,9 @@ graph and its seeds, and the core is browser-ready.
 - **Live preview and controls**: a local three.js page that refreshes whenever a graph changes. Click any node to
   see its result. A graph's exposed `params` appear as sliders, checkboxes, selects and colour pickers; dragging one
   re-cooks only the nodes that read it. Drop your own files
-  anywhere on the page: they land in the workspace `inputs/` folder, show as grey reference layers (a PNG as a flat
-  picture), and `file` nodes read them.
+  anywhere on the page: they land in the workspace `inputs/` folder (with `topotopo view`, the `inputs/` folder beside
+  the graph file), show as grey reference layers (a PNG as a flat picture), and `file` nodes read them as
+  `inputs/<name>`.
 
 **Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, the shelf and example galleries, the
 design notes and the release notes, generated from this repository (`npm run site`).
@@ -77,7 +78,7 @@ Requires Node ≥ 22.18.
 npx topotopo --catalog                                      # node types by category
 npx topotopo --help-node scatter                            # one node's params, defaults and example
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
-npx topotopo view graph.json                                # live 3D viewer in the browser, re-cooks on save
+npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
 npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
 

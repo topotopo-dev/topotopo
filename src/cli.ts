@@ -17,7 +17,8 @@
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter | --version
 //   node src/cli.ts mcp [--workspace dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
-//   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save
+//   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
+//                                                         files dropped on the page go to inputs/ beside the graph file
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -71,7 +72,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type> | --version`,
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
-    `       ${prog} view <graph.json> [--port 7341]   (live 3D viewer in the browser; re-cooks when the file is saved)`,
+    `       ${prog} view <graph.json> [--port 7341]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
   ].join('\n'));
   process.exit(0);
 }
@@ -96,10 +97,13 @@ if (argv[0] === 'view') {
   const os = await import('node:os');
   const { Workspace } = await import('./workspace.ts');
   const { startViewer } = await import('./viewer/server.ts');
-  const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
+  const dir = path.dirname(path.resolve(file));
+  const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
-  // a scratch workspace: the graph file stays the only source, nothing is written next to it
-  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine);
+  // A scratch workspace holds the graph, assets and exports: the graph file stays the only source. Files dropped on the
+  // page go to inputs/ beside the graph file instead, made on the first drop: its file nodes read them as
+  // "inputs/<name>" (the path an MCP workspace uses too), and they outlive the viewer.
+  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs') });
   ws.load();
   const name = path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
   const load = async () => {
@@ -111,8 +115,8 @@ if (argv[0] === 'view') {
     ws.bump(name);
   };
   await load();
-  const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined);
-  console.log(`view: ${v.url}  (watching ${file}; Ctrl+C to stop)`);
+  const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined, { inputsWhere: `beside ${path.basename(file)}` });
+  console.log(`view: ${v.url}  (watching ${file}; files dropped on the page go to ${path.join(path.dirname(file), 'inputs') + path.sep}; Ctrl+C to stop)`);
   let timer: ReturnType<typeof setTimeout> | undefined;
   fs.watch(file, () => { clearTimeout(timer); timer = setTimeout(() => { load().catch((e) => console.error(String(e))); }, 150); });
 } else if (argv[0] === 'mcp') {
