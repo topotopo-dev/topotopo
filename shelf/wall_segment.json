@@ -2,10 +2,10 @@
   "version": 1,
   "description": "Straight wall from x = 0 to x = length with window (and an optional door) openings cut by a boolean, filled with the window_frame and door_frame shelf assets. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
   "params": {
-    "length": { "type": "float", "default": 4, "min": 0.5, "max": 20, "desc": "length along X (m)" },
+    "length": { "type": "float", "default": 4, "min": 0.5, "max": 60, "desc": "length along X (m)" },
     "height": { "type": "float", "default": 3, "min": 1, "max": 10, "desc": "height (m)" },
     "thickness": { "type": "float", "default": 0.25, "min": 0.05, "max": 1, "desc": "thickness along Z (m)" },
-    "windows": { "type": "int", "default": 2, "min": 0, "max": 10, "desc": "number of window openings" },
+    "windows": { "type": "int", "default": 2, "min": 0, "max": 24, "desc": "number of window openings" },
     "window_width": {
       "type": "float",
       "default": 1,
