@@ -9707,7 +9707,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `3` | 0.3..12 |  |  | length along X (m) |
+| `length` | float | `3` | 0.3..40 |  |  | length along X (m) |
 | `height` | float | `1.8` | 0.1..5 |  |  | height (m) |
 | `brick_length` | float | `0.215` | 0.1..0.5 |  |  | brick length (m); depth is half of it |
 | `brick_height` | float | `0.065` | 0.03..0.3 |  |  | brick height (m) |
