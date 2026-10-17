@@ -5,19 +5,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TopoTopo Preview</title>
 <style>
-  :root { --bg: #1b1d21; --panel: #23262b; --line: #34383f; --text: #d9dde3; --dim: #8b929c; --accent: #f0a23b; --err: #ff6b6b; }
+  :root { --bg: #1b1d21; --panel: #23262b; --line: #34383f; --text: #d9dde3; --dim: #8b929c; --accent: #f0a23b; --err: #ff6b6b; --ok: #7bc47f; --hover: #2c3036; --sel: #3a3f47; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
   #app { display: flex; height: 100%; }
-  #side { width: 260px; min-width: 200px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  #side { width: 300px; min-width: 220px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   #side header { padding: 12px; border-bottom: 1px solid var(--line); }
   #side h1 { font-size: 14px; margin: 0 0 8px; letter-spacing: .04em; }
-  select, button { background: #2d3137; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  select, button, input { background: #2d3137; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
   select { width: 100%; }
-  #nodes { overflow: auto; flex: 1; padding: 6px; }
+  #status { font-size: 11px; color: var(--dim); margin-top: 6px; overflow-wrap: anywhere; }
+  #status.err { color: var(--err); }
+  #status.ok { color: var(--ok); }
+  #status.busy { color: var(--accent); }
+  #ask { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+  #ask[hidden] { display: none; }
+  #ask span { flex-basis: 100%; overflow-wrap: anywhere; }
+  #ask button { padding: 2px 10px; }
+  #ask .yes { border-color: var(--accent); color: var(--accent); }
+  #scroll { overflow: auto; flex: 1; }
+  details.sec { border-bottom: 1px solid var(--line); }
+  details.sec > summary { display: flex; gap: 6px; padding: 8px 12px; cursor: pointer; list-style: none; user-select: none; color: var(--dim); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  details.sec > summary::-webkit-details-marker { display: none; }
+  details.sec > summary::before { content: '▸'; width: 10px; }
+  details.sec[open] > summary::before { content: '▾'; }
+  details.sec > summary .count { margin-left: auto; letter-spacing: 0; }
+  .none, .hint { padding: 0 6px 6px; color: var(--dim); font-size: 12px; }
+  .hint { font-size: 11px; padding-top: 4px; }
+  .sub { padding: 8px 4px 2px; color: var(--dim); font-size: 11px; }
+  #controls, #inputs, #nodes { padding: 0 6px 8px; }
+  .ctl { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 6px; }
+  .ctl:hover { background: var(--hover); }
+  .ctl > .cl { flex: 0 0 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctl.locked > .cl { color: var(--accent); }
+  .ctl > .cw { flex: 1; display: flex; gap: 4px; align-items: center; min-width: 0; }
+  .cw input { padding: 3px 5px; }
+  .cw input[type=range] { flex: 1; min-width: 40px; padding: 0; border: 0; background: none; accent-color: var(--accent); }
+  .cw input[type=number] { width: 60px; }
+  .cw input.vec { flex: 1; width: 0; min-width: 0; }
+  .cw input[type=text] { flex: 1; width: 0; min-width: 0; }
+  .cw input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+  .cw input[type=color] { width: 44px; height: 24px; padding: 1px 2px; }
+  .cw select { flex: 1; width: 0; min-width: 0; padding: 3px 4px; }
+  .cw .bad { border-color: var(--err); }
+  .ib { flex: 0 0 22px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--dim); cursor: pointer; display: grid; place-items: center; font-size: 14px; line-height: 1; }
+  .ib:hover:not(:disabled) { background: var(--sel); color: var(--text); }
+  .ib:disabled { opacity: .25; cursor: default; }
+  .ib.on { color: var(--accent); }
+  .ib.gone { visibility: hidden; }
+  .inp { padding: 3px 4px; border-radius: 6px; }
+  .inp:hover { background: var(--hover); }
+  .inp.sel { background: var(--sel); }
+  .inp label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .inp input { accent-color: var(--accent); margin: 0; }
+  .inp .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .inp .mt { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  .inp .er { color: var(--err); font-size: 11px; padding: 2px 0 2px 19px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .node { padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; }
-  .node:hover { background: #2c3036; }
-  .node.sel { background: #3a3f47; }
+  .node:hover { background: var(--hover); }
+  .node.sel { background: var(--sel); }
   .node .t { color: var(--dim); font-size: 11px; }
   .node.out .n::before { content: '● '; color: var(--accent); }
   .node.err .n { color: var(--err); }
@@ -26,8 +72,9 @@
   #bar { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; }
   #info { position: absolute; bottom: 10px; left: 10px; right: 10px; white-space: pre-wrap; font: 12px/1.35 ui-monospace, Consolas, monospace; color: var(--dim); pointer-events: none; text-shadow: 0 1px 2px #000; }
   #err { position: absolute; top: 50px; left: 10px; right: 10px; color: var(--err); white-space: pre-wrap; font: 12px ui-monospace, Consolas, monospace; }
-  #status { font-size: 11px; color: var(--dim); margin-top: 6px; }
   button.on { border-color: var(--accent); color: var(--accent); }
+  #drop { position: fixed; inset: 8px; z-index: 10; display: none; align-items: center; justify-content: center; text-align: center; border: 2px dashed var(--accent); border-radius: 12px; background: rgba(240, 162, 59, .08); color: var(--accent); font-size: 16px; pointer-events: none; }
+  body.dropping #drop { display: flex; }
 </style>
 <script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
 </head>
@@ -38,26 +85,35 @@
       <h1>TOPOTOPO · PREVIEW</h1>
       <select id="graph"></select>
       <div id="status">connecting…</div>
+      <div id="ask" hidden><span id="ask-text"></span><button id="ask-yes" class="yes">Yes</button><button id="ask-no">No</button></div>
     </header>
-    <div id="nodes"></div>
+    <div id="scroll">
+      <details class="sec" id="controls-sec" open><summary>Controls<span class="count" id="controls-count"></span></summary><div id="controls"></div></details>
+      <details class="sec" id="inputs-sec" open><summary>Inputs<span class="count" id="inputs-count"></span></summary><div id="inputs"></div></details>
+      <details class="sec" id="nodes-sec" open><summary>Nodes<span class="count" id="nodes-count"></span></summary><div id="nodes"></div></details>
+    </div>
   </aside>
   <main id="main">
     <div id="bar">
       <button id="follow" class="on" title="show the graph output; otherwise the selected node">follow output</button>
       <button id="wire">wireframe</button>
-      <button id="frame">frame</button>
+      <button id="frame" title="frame the output and the reference layers">frame</button>
       <button id="infobtn" title="show the whole geometry summary">info</button>
     </div>
     <div id="err"></div>
     <div id="info"></div>
   </main>
 </div>
+<div id="drop">drop files to add them to inputs/<br>they show here as grey reference layers</div>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const MAX_UPLOAD = 512 * 1024 * 1024; // POST /api/inputs limit (src/viewer/server.ts)
+const LIVE = 'live — updates on every build/edit';
 const main = $('main');
 // logarithmic depth: a 1 km terrain and a door handle in one view without near-plane clipping or z-fighting
 const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
@@ -71,14 +127,18 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.zoomToCursor = true; // wheel zooms towards what is under the cursor, not the scene centre
 controls.zoomSpeed = 2;
+// reference layers: the human's input files, ghosted, kept while the graph output refreshes
+const refs = new THREE.Group();
+scene.add(refs);
 // double-click: orbit around the surface point under the cursor
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 renderer.domElement.addEventListener('dblclick', (e) => {
-  if (!current) return;
+  const targets = [current, ...refs.children].filter(Boolean);
+  if (!targets.length) return;
   const r = renderer.domElement.getBoundingClientRect();
   ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
-  const hit = ray.intersectObject(current, true).find((h) => h.object.isMesh);
+  const hit = ray.intersectObjects(targets, true).find((h) => h.object.isMesh);
   if (hit) { camera.position.add(hit.point.clone().sub(controls.target)); controls.target.copy(hit.point); }
 });
 scene.add(new THREE.HemisphereLight(0xdfe6f0, 0x3b342c, 1.6));
@@ -98,8 +158,9 @@ function resize() {
 addEventListener('resize', resize); resize();
 (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
 
-function frame(obj) {
-  const box = new THREE.Box3().setFromObject(obj);
+function frame(...objs) {
+  const box = new THREE.Box3();
+  for (const o of objs) if (o) box.expandByObject(o);
   if (box.isEmpty()) return;
   const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
   const r = Math.max(size.length() / 2, 1e-3);
@@ -115,48 +176,93 @@ function frame(obj) {
   grid.position.set(Math.round(c.x / step) * step, 0, Math.round(c.z / step) * step);
   scene.add(grid);
 }
+const frameAll = () => frame(current, ...refs.children);
+function inView(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  if (box.isEmpty()) return true;
+  camera.updateMatrixWorld();
+  return new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)).intersectsBox(box);
+}
 
 function applyWire(obj) {
   obj.traverse((o) => { if (o.isMesh) { o.material.wireframe = state.wire; o.material.side = THREE.DoubleSide; } });
 }
+function dispose(obj, materials = true) {
+  obj.traverse((o) => { o.geometry?.dispose(); if (materials) o.material?.dispose?.(); });
+}
 
-async function loadGeo() {
+function setStatus(text, kind = '') { const s = $('status'); s.textContent = text; s.className = kind; s.title = text; }
+
+/** At most one run of fn at a time; calls during a run ask for one more run after it, and wait for that. */
+function coalesce(fn) {
+  let busy = null, again = false;
+  return () => {
+    if (busy) { again = true; return busy; }
+    busy = (async () => { try { do { again = false; await fn(); } while (again); } finally { busy = null; } })();
+    return busy;
+  };
+}
+
+let cookFailed = false;
+const loadGeo = coalesce(async () => {
   if (!state.graph) return;
   const g = state.graphs.find((x) => x.name === state.graph);
   if (!state.follow && !g?.nodes.some((n) => n.name === state.node)) { state.follow = true; state.node = null; $('follow').classList.add('on'); }
   const node = state.follow ? '' : state.node ?? '';
   const q = `graph=${encodeURIComponent(state.graph)}&node=${encodeURIComponent(node)}`;
+  const res = await fetch('/api/geo?' + q).catch(() => null);
+  if (!res) return; // the server went away; the event stream says so
+  if (!res.ok) {
+    // the last good geometry stays
+    const j = await res.json().catch(() => ({}));
+    $('err').textContent = j.error ?? res.statusText;
+    cookFailed = true;
+    setStatus(`cook failed — ${String(j.error ?? res.statusText).split('\n')[0]}`, 'err');
+    return;
+  }
   $('err').textContent = '';
-  const res = await fetch('/api/geo?' + q);
-  if (!res.ok) { const j = await res.json().catch(() => ({})); $('err').textContent = j.error ?? res.statusText; return; }
+  if (cookFailed) { cookFailed = false; if ($('status').className === 'err') setStatus(LIVE); }
   const buf = await res.arrayBuffer();
-  loader.parse(buf, '', (gltf) => {
-    if (current) { scene.remove(current); current.traverse((o) => { o.geometry?.dispose(); o.material?.dispose?.(); }); }
-    current = gltf.scene;
-    current.traverse((o) => {
-      if (o.isPoints) o.material.size = 4, o.material.sizeAttenuation = false;
-      if (o.isLineSegments) o.material.color?.set(0x4aa3ff);
-    });
-    applyWire(current);
-    scene.add(current);
-    if (!state.framed) { frame(current); state.framed = true; }
-  }, (e) => { $('err').textContent = String(e); });
+  const gltf = await new Promise((resolve) => loader.parse(buf, '', resolve, (e) => { $('err').textContent = String(e); resolve(null); }));
+  if (!gltf) return;
+  if (current) { scene.remove(current); dispose(current); }
+  current = gltf.scene;
+  current.traverse((o) => {
+    if (o.isPoints) o.material.size = 4, o.material.sizeAttenuation = false;
+    if (o.isLineSegments) o.material.color?.set(0x4aa3ff);
+  });
+  applyWire(current);
+  scene.add(current);
+  if (!state.framed) { frame(current); state.framed = true; }
   const info = await (await fetch('/api/info?' + q)).json().catch(() => null);
   state.infoText = info?.summary ? `${state.graph}/${info.target}  (${info.ms.toFixed(0)} ms)\n${info.summary}` : '';
   showInfo();
-}
+});
 
-// the summary is long for big scenes: two lines unless expanded (the "info" button)
+// the summary is long for big scenes: two lines unless expanded (the "info" button); a hovered or selected input
+// file shows its own summary instead
 function showInfo() {
-  const t = state.infoText ?? '';
-  $('info').textContent = state.infoOpen ? t : t.split('\n').slice(0, 2).join('\n');
+  const p = inp.hover ?? inp.selected;
+  let t = state.infoText ?? '';
+  if (p) {
+    const f = inp.list.find((x) => x.path === p), i = inp.info.get(p);
+    const head = `inputs/${p}${f ? `  ${fmtSize(f.size)}` : ''}${inp.layers.get(p)?.obj ? '  (reference layer)' : ''}`;
+    if (!i || i.pending) t = `${head}\n…`;
+    else if (i.error) t = `${head}\n${i.error}`;
+    else {
+      const lines = i.summary.split('\n');
+      t = state.infoOpen ? `${head}\n${i.summary}` : [head, lines.find((l) => l.startsWith('geometry:')), lines.find((l) => l.startsWith('bbox:'))].filter(Boolean).join('\n');
+    }
+    $('info').textContent = t;
+  } else $('info').textContent = state.infoOpen ? t : t.split('\n').slice(0, 2).join('\n');
   $('infobtn').classList.toggle('on', !!state.infoOpen);
 }
 
 function renderNodes() {
   const g = state.graphs.find((x) => x.name === state.graph);
-  const el = $('nodes');
-  el.innerHTML = '';
+  const box = $('nodes');
+  box.innerHTML = '';
+  $('nodes-count').textContent = g?.nodes.length || '';
   if (!g) return;
   for (const n of g.nodes) {
     const d = document.createElement('div');
@@ -165,43 +271,584 @@ function renderNodes() {
     d.innerHTML = `<span class="n"></span><span class="t"></span>`;
     d.querySelector('.n').textContent = n.name;
     d.querySelector('.t').textContent = n.type + (n.ms != null ? ` · ${n.ms.toFixed(0)}ms` : '');
-    d.onclick = () => { state.follow = false; state.node = n.name; $('follow').classList.remove('on'); renderNodes(); loadGeo(); };
-    el.appendChild(d);
+    d.onclick = () => { state.follow = false; state.node = n.name; inp.selected = null; $('follow').classList.remove('on'); renderNodes(); loadGeo(); };
+    box.appendChild(d);
   }
 }
 
-async function refreshGraphs() {
-  state.graphs = await (await fetch('/api/graphs')).json();
+const refreshGraphs = coalesce(async () => {
+  const issued = performance.now();
+  const res = await fetch('/api/graphs').catch(() => null);
+  if (!res?.ok) return;
+  state.graphs = await res.json();
   const sel = $('graph');
   const prev = state.graph;
-  sel.innerHTML = state.graphs.map((g) => `<option>${g.name}</option>`).join('');
-  if (!state.graphs.length) { $('status').textContent = 'no graphs yet — build one via MCP'; return; }
-  state.graph = state.graphs.some((g) => g.name === prev) ? prev : state.graphs[0].name;
+  const names = state.graphs.map((g) => g.name);
+  // the options are rebuilt only when the graphs change, so an open list stays open
+  if (names.join('\n') !== [...sel.options].map((o) => o.value).join('\n')) sel.replaceChildren(...names.map((n) => new Option(n, n)));
+  if (!state.graphs.length) { setStatus('no graphs yet — build one via MCP'); renderControls(null); return; }
+  state.graph = names.includes(prev) ? prev : names[0];
   sel.value = state.graph;
   renderNodes();
+  renderControls(state.graphs.find((g) => g.name === state.graph), issued);
+});
+
+// ------------------------------------------------------------ controls: the graph's exposed vars
+// One control per declared param (graph.params), then the undeclared vars. Values are POSTed to /api/vars (sliders at
+// most every 100 ms, plus once on release); the locked set rides along. Updates from the server set values in place;
+// the panel is rebuilt only when the set of params changes.
+const ctl = {
+  graph: null, sig: null, rows: new Map(), locked: new Set(), active: null, deferred: null,
+  pending: {}, lockPending: false, timer: 0, lastSend: -1e9, seq: 0,
+  // var → id of its newest POST not answered yet / time its newest POST was answered: older server state is ignored
+  unacked: new Map(), ackAt: new Map(), lockUnacked: 0, lockAckAt: -1e9,
+};
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const HEX = /^#[0-9a-f]{6}$/i, HEX3 = /^#[0-9a-f]{3}$/i;
+const LOCK = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.6 0v2"/></svg>';
+const UNLOCK = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.5-.8"/></svg>';
+const decimals = (x) => { const s = String(x); return s.includes('e-') ? Number(s.split('e-')[1]) : (s.split('.')[1] ?? '').length; };
+const fmt = (v) => (isNum(v) ? String(+v.toPrecision(10)) : String(v));
+const short = (v) => { const s = typeof v === 'string' ? v : JSON.stringify(v) ?? String(v); return s.length > 24 ? s.slice(0, 23) + '…' : s; };
+addEventListener('pointerup', () => endDrag(), true);
+addEventListener('pointercancel', () => endDrag(), true);
+function endDrag() {
+  ctl.active = null;
+  // after the slider's own change event (its final value) has been sent
+  if (ctl.deferred) setTimeout(() => { if (!ctl.deferred || ctl.active) return; const [g, t] = ctl.deferred; ctl.deferred = null; renderControls(g, t); });
 }
 
+function jsonKind(v) {
+  if (typeof v === 'boolean') return 'bool';
+  if (isNum(v)) return 'number';
+  if (typeof v === 'string') return HEX.test(v) ? 'color' : 'text';
+  if (Array.isArray(v) && v.length >= 2 && v.length <= 4 && v.every(isNum)) return 'vector';
+  return 'json';
+}
+/** The widget for a var: the declared type when the value fits it, else the value's JSON type. */
+function kindOf(vd, v) {
+  const t = vd?.type, k = jsonKind(v);
+  if (Array.isArray(vd?.options) && vd.options.length && (k === 'text' || k === 'number' || k === 'color')) return 'select';
+  if (t === 'color' && (k === 'color' || (k === 'text' && HEX3.test(v)) || (k === 'vector' && v.length >= 3))) return 'color';
+  if (t === 'bool' && k === 'number') return 'bool';
+  return k;
+}
+/** A value to show for a declared param that has neither a var nor a default. */
+function blank(vd) {
+  const t = vd?.type ?? '';
+  if (t === 'bool') return false;
+  if (t === 'color') return '#ffffff';
+  if (/vec(\d)$/.test(t)) return new Array(Number(/vec(\d)$/.exec(t)[1])).fill(0);
+  if (t === 'string' || t === 'enum' || vd?.options?.length) return vd?.options?.[0] ?? '';
+  return 0;
+}
+/** Slider range: the VarDef's min/max, else derived from the default (0..4×default, −1..1 for 0); derived ends widen. */
+function rangeOf(vd, v, int) {
+  let lo = isNum(vd.min) ? vd.min : undefined, hi = isNum(vd.max) ? vd.max : undefined;
+  const fixLo = lo !== undefined, fixHi = hi !== undefined;
+  const base = isNum(vd.default) ? vd.default : v;
+  if (lo === undefined && hi === undefined) [lo, hi] = base === 0 ? [-1, 1] : base > 0 ? [0, 4 * base] : [4 * base, -4 * base];
+  else if (lo === undefined) lo = hi > 0 && base >= 0 ? 0 : Math.min(base, hi) - Math.max(1, 4 * Math.abs(base));
+  else if (hi === undefined) hi = base > lo ? lo + 4 * (base - lo) : lo + Math.max(1, 4 * Math.abs(lo));
+  if (int) { lo = Math.floor(lo); hi = Math.ceil(hi); }
+  if (!(hi > lo)) hi = lo + 1;
+  const fixStep = isNum(vd.step) && vd.step > 0;
+  const r = { lo, hi, fixLo, fixHi, fixStep, int, step: 1 };
+  r.step = fixStep ? vd.step : autoStep(r);
+  return r;
+}
+function autoStep(r) {
+  const s = 10 ** Math.floor(Math.log10((r.hi - r.lo) / 100));
+  return r.int ? Math.max(1, s) : s;
+}
+
+const WIDGETS = {
+  number(name, vd, value, cw) {
+    // declared int: integer values; an undeclared whole number gets integer slider steps but takes any typed value
+    const int = vd.type === 'int', intSteps = int || (vd.type === undefined && Number.isInteger(value));
+    let cur = value;
+    const r = rangeOf(vd, cur, intSteps);
+    const slider = el('input'), box = el('input');
+    slider.type = 'range'; box.type = 'number'; box.step = int ? String(r.step) : 'any';
+    const fit = () => { slider.min = r.lo; slider.max = r.hi; slider.step = r.step; if (r.fixLo) box.min = r.lo; if (r.fixHi) box.max = r.hi; };
+    const widen = (v) => {
+      const lo = !r.fixLo && v < r.lo, hi = !r.fixHi && v > r.hi;
+      if (lo) r.lo = v;
+      if (hi) r.hi = v;
+      if ((lo || hi) && !r.fixStep) r.step = autoStep(r);
+      if (lo || hi) fit();
+    };
+    const show = () => { slider.value = cur; box.value = fmt(cur); };
+    const snap = (v) => +(r.lo + Math.round((v - r.lo) / r.step) * r.step).toFixed(Math.min(12, Math.max(decimals(r.step), decimals(r.lo))));
+    slider.addEventListener('pointerdown', () => { ctl.active = name; });
+    slider.addEventListener('input', () => { cur = snap(Number(slider.value)); box.value = fmt(cur); queueVar(name, cur); });
+    slider.addEventListener('change', () => queueVar(name, cur, true));
+    box.addEventListener('change', () => {
+      let v = Number(box.value);
+      if (box.value.trim() === '' || !Number.isFinite(v)) return show();
+      if (int) v = Math.round(v);
+      if (r.fixLo) v = Math.max(v, r.lo);
+      if (r.fixHi) v = Math.min(v, r.hi);
+      widen(v); cur = v; show(); queueVar(name, v, true);
+    });
+    cw.append(slider, box);
+    fit(); widen(cur); show();
+    return { set(v) { if (!isNum(v)) return; cur = v; widen(v); show(); }, get: () => cur, typing: () => document.activeElement === box };
+  },
+  bool(name, vd, value, cw) {
+    const asNum = isNum(value), box = el('input');
+    box.type = 'checkbox';
+    const get = () => (asNum ? (box.checked ? 1 : 0) : box.checked);
+    box.onchange = () => queueVar(name, get(), true);
+    cw.append(box);
+    const set = (v) => { box.checked = !!v; };
+    set(value);
+    return { set, get };
+  },
+  select(name, vd, value, cw) {
+    const opts = vd.options.map(String);
+    // a number var with string options holds the option's index
+    const byIndex = isNum(value) && !opts.includes(String(value));
+    const s = el('select');
+    for (const o of opts) s.append(new Option(o, o));
+    const get = () => (byIndex ? opts.indexOf(s.value) : s.value);
+    const set = (v) => {
+      const k = byIndex ? opts[v] : String(v);
+      if (k === undefined) return;
+      // a value outside the options (set by an agent or by hand) is shown as an extra entry while it holds
+      for (const o of [...s.options]) if (!opts.includes(o.value) && o.value !== k) o.remove();
+      if (![...s.options].some((o) => o.value === k)) s.append(new Option(k, k));
+      s.value = k;
+    };
+    s.onchange = () => queueVar(name, get(), true);
+    cw.append(s); set(value);
+    return { set, get };
+  },
+  text(name, vd, value, cw) {
+    const t = el('input');
+    t.type = 'text'; t.spellcheck = false;
+    t.onchange = () => queueVar(name, t.value, true);
+    cw.append(t);
+    const set = (v) => { t.value = v == null ? '' : String(v); };
+    set(value);
+    return { set, get: () => t.value, typing: () => document.activeElement === t };
+  },
+  vector(name, vd, value, cw) {
+    const int = /^ivec/.test(vd.type ?? '');
+    let cur = value.slice();
+    const fields = cur.map((_, i) => {
+      const f = el('input', 'vec');
+      f.type = 'number'; f.step = int ? '1' : 'any'; f.title = `${name}.${'xyzw'[i]}`;
+      f.onchange = () => {
+        let v = Number(f.value);
+        if (f.value.trim() === '' || !Number.isFinite(v)) { f.value = fmt(cur[i]); return; }
+        if (int) v = Math.round(v);
+        cur = cur.slice(); cur[i] = v; f.value = fmt(v);
+        queueVar(name, cur, true);
+      };
+      return f;
+    });
+    cw.append(...fields);
+    const set = (v) => { if (!Array.isArray(v)) return; cur = v.slice(); fields.forEach((f, i) => { f.value = fmt(cur[i] ?? 0); }); };
+    set(cur);
+    return { set, get: () => cur, typing: () => fields.includes(document.activeElement) };
+  },
+  color(name, vd, value, cw) {
+    // "#rrggbb" strings, or [r, g, b(, a)] in 0..1
+    const arr = Array.isArray(value), c = el('input');
+    c.type = 'color';
+    let cur = value;
+    const hex = (v) => (arr ? '#' + v.slice(0, 3).map((x) => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join('')
+      : HEX3.test(v) ? '#' + [...v.slice(1)].map((ch) => ch + ch).join('') : v);
+    const parse = (h) => (arr ? [1, 3, 5].map((i) => +(parseInt(h.slice(i, i + 2), 16) / 255).toFixed(4)).concat(cur.slice(3)) : h);
+    c.addEventListener('input', () => { cur = parse(c.value); queueVar(name, cur); });
+    c.addEventListener('change', () => { cur = parse(c.value); queueVar(name, cur, true); });
+    cw.append(c);
+    const set = (v) => { if (arr ? !Array.isArray(v) : typeof v !== 'string') return; cur = v; c.value = hex(v); };
+    set(value);
+    return { set, get: () => cur };
+  },
+  json(name, vd, value, cw) {
+    const t = el('input');
+    t.type = 'text'; t.spellcheck = false; t.title = 'JSON value';
+    let cur = value;
+    t.onchange = () => {
+      try { cur = JSON.parse(t.value); } catch { t.classList.add('bad'); return; }
+      t.classList.remove('bad');
+      queueVar(name, cur, true);
+    };
+    cw.append(t);
+    const set = (v) => { cur = v; t.value = JSON.stringify(v) ?? ''; t.classList.remove('bad'); };
+    set(value);
+    return { set, get: () => cur, typing: () => document.activeElement === t };
+  },
+};
+
+function controlRow(name, vd, value) {
+  const declared = !!vd;
+  vd = vd ?? {};
+  const def = declared ? vd.default : undefined;
+  if (value === undefined) value = def !== undefined ? def : blank(vd);
+  const label = (typeof vd.label === 'string' && vd.label) || name;
+  const wrap = el('div', 'ctl'), cw = el('div', 'cw');
+  wrap.title = [label !== name ? name : '', declared ? vd.desc : 'not declared in the graph\'s "params"'].filter(Boolean).join(' — ');
+  const w = WIDGETS[kindOf(declared ? vd : null, value)](name, vd, value, cw);
+  const reset = el('button', 'ib' + (def === undefined ? ' gone' : ''), '↺');
+  if (def !== undefined) reset.title = `reset ${name} to ${short(def)}`;
+  reset.onclick = () => { w.set(def); queueVar(name, def, true); };
+  const lock = el('button', 'ib');
+  lock.onclick = () => {
+    if (ctl.locked.has(name)) ctl.locked.delete(name); else ctl.locked.add(name);
+    row.lock(ctl.locked.has(name));
+    ctl.lockPending = true;
+    flushVars();
+  };
+  wrap.append(el('span', 'cl', label), cw, reset, lock);
+  const row = {
+    def,
+    set(v) { w.set(v); row.sync(); },
+    typing: () => w.typing?.() ?? false,
+    sync() { reset.disabled = def === undefined || same(w.get(), def); },
+    lock(on) {
+      wrap.classList.toggle('locked', on);
+      lock.classList.toggle('on', on);
+      lock.innerHTML = on ? LOCK : UNLOCK;
+      lock.title = on ? `${name} is locked: agents leave its value alone (you can still change it). Click to unlock.` : `lock ${name}: agents then leave its value alone`;
+      lock.setAttribute('aria-pressed', String(on));
+    },
+  };
+  row.lock(ctl.locked.has(name));
+  row.sync();
+  ctl.rows.set(name, row);
+  return wrap;
+}
+
+function renderControls(g, issued = performance.now()) {
+  const params = g?.params ?? {}, vars = g?.vars ?? {};
+  const other = Object.keys(vars).filter((k) => !(k in params));
+  const sig = g ? JSON.stringify([g.name, params, other.map((k) => [k, jsonKind(vars[k]), Array.isArray(vars[k]) ? vars[k].length : 0])]) : '';
+  if (sig === ctl.sig) return applyValues(vars, g?.locked, issued);
+  // the set of params changed: rebuild, but not under a slider being dragged
+  if (ctl.active && g?.name === ctl.graph) { ctl.deferred = [g, issued]; return; }
+  if (ctl.graph !== (g?.name ?? null)) {
+    if (ctl.graph) flushVars();
+    ctl.pending = {}; ctl.lockPending = false; ctl.unacked.clear(); ctl.ackAt.clear();
+  }
+  ctl.graph = g?.name ?? null; ctl.sig = sig; ctl.rows.clear();
+  ctl.locked = new Set(g?.locked ?? []);
+  const box = $('controls');
+  box.replaceChildren();
+  const declared = Object.keys(params);
+  $('controls-count').textContent = declared.length + other.length || '';
+  if (!declared.length && !other.length) { box.append(el('div', 'none', g ? 'none — this graph exposes no vars' : 'none')); return; }
+  for (const k of declared) box.append(controlRow(k, params[k] ?? {}, vars[k]));
+  if (other.length) {
+    box.append(el('div', 'sub', declared.length ? 'other vars' : 'vars (none declared in "params")'));
+    for (const k of other) box.append(controlRow(k, null, vars[k]));
+  }
+}
+
+/** Server state into the controls, except where the user has edits on the way or is dragging/typing. */
+function applyValues(vars, locked, issued) {
+  for (const [k, row] of ctl.rows) {
+    if (k in ctl.pending || ctl.unacked.has(k) || (ctl.ackAt.get(k) ?? -1e9) > issued || ctl.active === k || row.typing()) continue;
+    row.set(k in vars ? vars[k] : row.def);
+  }
+  if (Array.isArray(locked) && !ctl.lockPending && !ctl.lockUnacked && ctl.lockAckAt <= issued) {
+    ctl.locked = new Set(locked);
+    for (const [k, row] of ctl.rows) row.lock(ctl.locked.has(k));
+  }
+}
+
+function queueVar(name, value, final = false) {
+  ctl.pending[name] = value;
+  ctl.rows.get(name)?.sync();
+  if (final) return flushVars();
+  const wait = 100 - (performance.now() - ctl.lastSend);
+  if (wait <= 0) flushVars();
+  else if (!ctl.timer) ctl.timer = setTimeout(flushVars, wait);
+}
+
+async function flushVars() {
+  clearTimeout(ctl.timer); ctl.timer = 0;
+  const vars = ctl.pending, lock = ctl.lockPending, graph = ctl.graph;
+  if (!graph || (!Object.keys(vars).length && !lock)) return;
+  ctl.pending = {}; ctl.lockPending = false;
+  const id = ++ctl.seq;
+  ctl.lastSend = performance.now();
+  for (const k in vars) ctl.unacked.set(k, id);
+  if (lock) ctl.lockUnacked++;
+  const body = lock ? { vars, locked: [...ctl.locked] } : { vars };
+  let j;
+  try {
+    const res = await fetch(`/api/vars?graph=${encodeURIComponent(graph)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    j = await res.json().catch(() => ({ ok: false, errors: [`${res.status} ${res.statusText}`] }));
+  } catch { j = { ok: false, errors: ['the viewer server is not answering'] }; }
+  const now = performance.now();
+  for (const k in vars) if (ctl.unacked.get(k) === id) { ctl.unacked.delete(k); ctl.ackAt.set(k, now); }
+  if (lock) { ctl.lockUnacked--; ctl.lockAckAt = now; }
+  if (graph !== ctl.graph) return;
+  const what = Object.entries(vars).map(([k, v]) => `${k} = ${short(v)}`).join(', ') || 'locks';
+  if (j.ok) setStatus(`${what} · cooked in ${Math.round(j.ms)} ms`, 'ok');
+  else setStatus(`${j.vars ? `${what} applied, cook failed` : `${what} not applied`} — ${(j.errors ?? []).join('; ') || 'unknown error'}`, 'err');
+  if (j.vars) applyValues(j.vars, j.locked, now);
+}
+
+// ------------------------------------------------------------ inputs: the human's files as reference layers
+const ghost = {
+  mesh: new THREE.MeshStandardMaterial({ color: 0xaab0ba, roughness: 0.85, metalness: 0, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }),
+  line: new THREE.LineBasicMaterial({ color: 0xc4cad4, transparent: true, opacity: 0.6, depthWrite: false }),
+  point: new THREE.PointsMaterial({ color: 0xc4cad4, size: 3, sizeAttenuation: false, transparent: true, opacity: 0.75, depthWrite: false }),
+};
+const inp = { list: [], rows: new Map(), layers: new Map(), info: new Map(), errors: new Map(), checked: new Set(), hover: null, selected: null, restored: false };
+const stampOf = (f) => `${f.mtime}:${f.size}`;
+const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
+const errText = (e) => String(e?.message ?? e).replace(/^\[f\] /gm, '');
+// the checked files are remembered per viewer address (a convenience: a reload shows the same layers)
+const MEMO = `topotopo.viewer.refs.${location.host}`;
+const remember = () => { try { localStorage.setItem(MEMO, JSON.stringify([...inp.checked])); } catch { /* storage blocked */ } };
+const recall = () => { try { const v = JSON.parse(localStorage.getItem(MEMO) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+
+function ghostify(root) {
+  root.traverse((o) => {
+    if (!o.material) return;
+    for (const m of [o.material].flat()) { for (const v of Object.values(m)) if (v?.isTexture) v.dispose(); m.dispose(); }
+    o.material = o.isPoints ? ghost.point : o.isLine ? ghost.line : ghost.mesh;
+    if (o.isInstancedMesh) o.instanceColor = null;
+  });
+}
+function dropLayer(p) {
+  const l = inp.layers.get(p);
+  if (!l) return;
+  inp.layers.delete(p);
+  if (l.obj) { refs.remove(l.obj); dispose(l.obj, false); }
+}
+async function loadLayer(p) {
+  const f = inp.list.find((x) => x.path === p);
+  if (!f) return;
+  dropLayer(p);
+  const entry = { stamp: stampOf(f), obj: null };
+  inp.layers.set(p, entry);
+  inp.errors.delete(p);
+  renderInputs();
+  try {
+    const res = await fetch('/api/input?path=' + encodeURIComponent(p));
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `${res.status} ${res.statusText}`);
+    const buf = await res.arrayBuffer();
+    const gltf = await new Promise((resolve, reject) => loader.parse(buf, '', resolve, reject));
+    if (inp.layers.get(p) !== entry) { dispose(gltf.scene); return; } // unchecked or replaced meanwhile
+    ghostify(gltf.scene);
+    gltf.scene.name = `inputs/${p}`;
+    entry.obj = gltf.scene;
+    refs.add(gltf.scene);
+    if (!current || !inView(gltf.scene)) frameAll();
+    if (inp.selected === p || inp.hover === p) fetchInfo(p);
+  } catch (e) {
+    if (inp.layers.get(p) === entry) {
+      inp.layers.delete(p); inp.checked.delete(p); remember();
+      inp.errors.set(p, { stamp: entry.stamp, msg: errText(e) });
+    }
+  }
+  renderInputs(); showInfo();
+}
+async function fetchInfo(p) {
+  const f = inp.list.find((x) => x.path === p);
+  if (!f) return;
+  const stamp = stampOf(f), have = inp.info.get(p);
+  if (have && have.stamp === stamp) return;
+  inp.info.set(p, { stamp, pending: true });
+  try {
+    const res = await fetch('/api/input_info?path=' + encodeURIComponent(p));
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error ?? `${res.status} ${res.statusText}`);
+    inp.info.set(p, { stamp, summary: String(j.summary ?? '') });
+  } catch (e) {
+    inp.info.set(p, { stamp, error: errText(e) });
+    inp.errors.set(p, { stamp, msg: errText(e) });
+    renderInputs();
+  }
+  showInfo();
+}
+
+function inputRow(p) {
+  const row = el('div', 'inp'), lab = el('label'), cb = el('input'), mt = el('span', 'mt'), er = el('div', 'er');
+  cb.type = 'checkbox';
+  lab.append(cb, el('span', 'nm', p), mt);
+  row.append(lab, er);
+  cb.onchange = () => {
+    if (cb.checked) { inp.checked.add(p); inp.selected = p; loadLayer(p); fetchInfo(p); }
+    else { inp.checked.delete(p); dropLayer(p); if (inp.selected === p) inp.selected = null; }
+    remember(); renderInputs(); showInfo();
+  };
+  let timer = 0;
+  row.onmouseenter = () => { inp.hover = p; showInfo(); clearTimeout(timer); timer = setTimeout(() => fetchInfo(p), 150); };
+  row.onmouseleave = () => { clearTimeout(timer); if (inp.hover === p) inp.hover = null; showInfo(); };
+  return {
+    el: row,
+    update(f) {
+      cb.checked = inp.checked.has(p);
+      const l = inp.layers.get(p);
+      mt.textContent = l && !l.obj ? 'loading…' : fmtSize(f.size);
+      row.title = `inputs/${p} · ${f.kind}${f.ext ? ` (.${f.ext})` : ''} · ${fmtSize(f.size)} · ${new Date(f.mtime).toLocaleString()}`;
+      row.classList.toggle('sel', inp.selected === p);
+      const e = inp.errors.get(p);
+      er.textContent = e?.msg ?? '';
+      er.hidden = !e;
+    },
+  };
+}
+function renderInputs() {
+  const box = $('inputs');
+  $('inputs-count').textContent = inp.list.length || '';
+  if (!inp.list.length) {
+    inp.rows.clear();
+    box.replaceChildren(el('div', 'none', 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON)'));
+    return;
+  }
+  box.querySelector('.none')?.remove();
+  let hint = box.querySelector('.hint');
+  if (!hint) { hint = el('div', 'hint', 'checked files show as grey reference layers; drop more files anywhere'); box.append(hint); }
+  // rows are kept and updated in place, in list order
+  const seen = new Set();
+  let prev = null;
+  for (const f of inp.list) {
+    seen.add(f.path);
+    let r = inp.rows.get(f.path);
+    if (!r) { r = inputRow(f.path); inp.rows.set(f.path, r); }
+    r.update(f);
+    const want = prev ? prev.nextSibling : box.firstChild;
+    if (r.el !== want) box.insertBefore(r.el, want);
+    prev = r.el;
+  }
+  for (const [p, r] of inp.rows) if (!seen.has(p)) { r.el.remove(); inp.rows.delete(p); }
+}
+const refreshInputs = coalesce(async () => {
+  const res = await fetch('/api/inputs').catch(() => null);
+  if (!res?.ok) return;
+  inp.list = await res.json();
+  const byPath = new Map(inp.list.map((f) => [f.path, f]));
+  if (!inp.restored) { inp.restored = true; for (const p of recall()) if (byPath.has(p)) inp.checked.add(p); }
+  // a replaced file reloads its layer and summary; a removed one goes away
+  for (const p of [...inp.checked]) {
+    const f = byPath.get(p);
+    if (!f) { inp.checked.delete(p); dropLayer(p); continue; }
+    const l = inp.layers.get(p);
+    if (!l || l.stamp !== stampOf(f)) loadLayer(p);
+  }
+  for (const m of [inp.info, inp.errors]) for (const [p, v] of m) if (!byPath.has(p) || v.stamp !== stampOf(byPath.get(p))) m.delete(p);
+  if (inp.selected && !byPath.has(inp.selected)) inp.selected = null;
+  if (inp.hover && !byPath.has(inp.hover)) inp.hover = null;
+  remember(); renderInputs(); showInfo();
+});
+
+// ------------------------------------------------------------ drop zone: files go to inputs/
+/** A small question under the status line; resolves to the user's answer. */
+function ask(text, yes = 'Yes', no = 'No') {
+  return new Promise((resolve) => {
+    $('ask-text').textContent = text; $('ask-yes').textContent = yes; $('ask-no').textContent = no;
+    $('ask').hidden = false;
+    const done = (v) => { $('ask').hidden = true; $('ask-yes').onclick = $('ask-no').onclick = null; resolve(v); };
+    $('ask-yes').onclick = () => done(true);
+    $('ask-no').onclick = () => done(false);
+    $('ask-yes').focus();
+  });
+}
+async function uploadOne(f, tag) {
+  if (f.size > MAX_UPLOAD) return { error: `${f.name}: ${fmtSize(f.size)} is over the ${MAX_UPLOAD / 1024 ** 2} MB limit` };
+  const put = async (overwrite) => {
+    const t0 = performance.now();
+    const tick = () => setStatus(`uploading ${f.name}${tag} · ${fmtSize(f.size)} · ${((performance.now() - t0) / 1000).toFixed(0)} s`, 'busy');
+    tick();
+    const timer = setInterval(tick, 500);
+    try {
+      const res = await fetch(`/api/inputs?name=${encodeURIComponent(f.name)}&overwrite=${overwrite ? 1 : 0}`, { method: 'POST', body: f });
+      return { status: res.status, j: await res.json().catch(() => ({})) };
+    } catch (e) { return { status: 0, j: { error: `upload failed: ${e?.message ?? e}` } }; }
+    finally { clearInterval(timer); }
+  };
+  let r = await put(false);
+  if (r.status === 409) {
+    setStatus(`${f.name}${tag}: inputs/ already has this file`);
+    if (!await ask(`inputs/${r.j.path ?? f.name} exists — replace it?`, 'Replace', 'Keep')) return { kept: r.j.path ?? f.name };
+    r = await put(true);
+  }
+  if (r.status !== 200 || !r.j.ok) return { error: `${f.name}: ${r.j.error ?? `upload failed (${r.status})`}` };
+  return { path: r.j.path };
+}
+let uploads = Promise.resolve();
+function upload(files, folders) {
+  uploads = uploads.then(async () => {
+    const added = [], kept = [], errors = [];
+    if (folders.length) errors.push(`folders are not supported, drop the files inside instead (skipped ${folders.map((f) => f + '/').join(', ')})`);
+    for (const [i, f] of files.entries()) {
+      const r = await uploadOne(f, files.length > 1 ? ` (${i + 1}/${files.length})` : '');
+      if (r.path) {
+        added.push(r.path);
+        // show it at once
+        inp.checked.add(r.path); inp.selected = r.path;
+        for (const m of [inp.info, inp.errors]) m.delete(r.path);
+        remember();
+        await refreshInputs();
+      } else if (r.kept) kept.push(r.kept);
+      else if (r.error) errors.push(r.error);
+    }
+    const msg = [added.length ? `added ${added.map((p) => 'inputs/' + p).join(', ')}` : '', kept.length ? `kept the existing ${kept.map((p) => 'inputs/' + p).join(', ')}` : '', ...errors].filter(Boolean).join(' · ');
+    if (msg) setStatus(msg, errors.length ? 'err' : added.length ? 'ok' : '');
+  });
+}
+let dragDepth = 0;
+const fileDrag = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+addEventListener('dragenter', (e) => { if (!fileDrag(e)) return; e.preventDefault(); if (++dragDepth === 1) document.body.classList.add('dropping'); });
+addEventListener('dragover', (e) => { if (!fileDrag(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+addEventListener('dragleave', (e) => { if (!fileDrag(e)) return; if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); } });
+addEventListener('drop', (e) => {
+  if (!fileDrag(e)) return;
+  e.preventDefault();
+  dragDepth = 0; document.body.classList.remove('dropping');
+  // read the items now: the browser empties the DataTransfer after this event
+  const files = [], folders = [];
+  for (const it of Array.from(e.dataTransfer.items ?? [])) {
+    if (it.kind !== 'file') continue;
+    const entry = it.webkitGetAsEntry?.();
+    if (entry?.isDirectory) { folders.push(entry.name); continue; }
+    const f = it.getAsFile();
+    if (f) files.push(f);
+  }
+  if (!e.dataTransfer.items) files.push(...e.dataTransfer.files);
+  upload(files, folders);
+});
+
+// ------------------------------------------------------------ wiring
 $('graph').onchange = (e) => {
   state.graph = e.target.value; state.framed = false;
   state.follow = true; state.node = null; $('follow').classList.add('on');
-  renderNodes(); loadGeo();
+  renderNodes(); renderControls(state.graphs.find((g) => g.name === state.graph)); loadGeo();
 };
 $('follow').onclick = () => { state.follow = true; $('follow').classList.add('on'); renderNodes(); loadGeo(); };
 $('wire').onclick = () => { state.wire = !state.wire; $('wire').classList.toggle('on', state.wire); if (current) applyWire(current); };
-$('frame').onclick = () => current && frame(current);
+$('frame').onclick = frameAll;
 $('infobtn').onclick = () => { state.infoOpen = !state.infoOpen; showInfo(); };
 
 const es = new EventSource('/api/events');
-es.onopen = () => { $('status').textContent = 'live — updates on every build/edit'; };
-es.onerror = () => { $('status').textContent = 'disconnected (server stopped?)'; };
+let opened = false;
+es.onopen = () => {
+  setStatus(LIVE);
+  // after a reconnect the server may have restarted: fetch everything again
+  if (opened) { refreshGraphs().then(loadGeo); refreshInputs(); }
+  opened = true;
+};
+es.onerror = () => { setStatus('disconnected (server stopped?)', 'err'); };
 es.onmessage = async (m) => {
   const ev = JSON.parse(m.data);
+  if (ev.inputs !== undefined) { refreshInputs(); return; }
   if (!state.graph) state.graph = ev.graph;
   await refreshGraphs();
   if (ev.graph === state.graph) loadGeo();
 };
 await refreshGraphs();
 loadGeo();
+refreshInputs();
 </script>
 </body>
 </html>
