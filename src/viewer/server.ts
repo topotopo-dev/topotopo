@@ -1,5 +1,6 @@
-// Live preview web server: serves a three.js viewer that shows any graph/node of the
-// workspace and refreshes over Server-Sent Events whenever a graph is rebuilt/edited.
+// Live preview web server: serves the viewer page (index.html, a shell loading the ES modules of app/ and three.js
+// from /vendor/three/; docs/design/viewer.md) that shows any graph/node of the workspace and refreshes over
+// Server-Sent Events whenever a graph is rebuilt/edited.
 // It is also the human's control surface: files dropped on the page are stored in the workspace's inputs/ (under
 // `topotopo view`, the inputs/ beside the graph file) and shown as reference layers, the graph's exposed vars are set
 // from generated controls (POST /api/vars), and markers clicked into the view (sites, paths, zones, volumes) become
@@ -23,8 +24,9 @@ import { wiringOf } from '../graph/engine.ts';
 // the page's guide rules, shared so the page and this server check a marker list the same way
 import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList } from './app/markers.js';
 
-// index.html sits next to this module (the build copies it to dist/viewer/)
+// index.html and app/ sit next to this module (the build copies them to dist/viewer/)
 const here = path.dirname(fileURLToPath(import.meta.url));
+const appDir = path.join(here, 'app');
 // three.js where Node resolves it: this checkout's node_modules, or the hoisted copy next to an installed package
 const threeDir = (() => {
   try { return path.resolve(path.dirname(fileURLToPath(import.meta.resolve('three'))), '..'); }
@@ -334,6 +336,12 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       const u = new URL(req.url ?? '/', 'http://localhost');
       route = u.pathname;
       if (u.pathname === '/' || u.pathname === '/index.html') return send(200, fs.readFileSync(path.join(here, 'index.html')), MIME['.html']);
+      // the page's modules and style sheet
+      if (u.pathname.startsWith('/app/')) {
+        const p = path.resolve(appDir, decodeURIComponent(u.pathname.slice('/app/'.length)));
+        if (!p.startsWith(appDir + path.sep) || !fs.statSync(p, { throwIfNoEntry: false })?.isFile()) return send(404, 'not found');
+        return send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream');
+      }
       if (u.pathname.startsWith('/vendor/three/')) {
         const rel = decodeURIComponent(u.pathname.slice('/vendor/three/'.length));
         const p = path.resolve(threeDir, rel);
@@ -361,6 +369,14 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
           };
         });
         return json(200, out);
+      }
+      // the last cook of a graph, for the page's status bar: cook time, errors and warnings
+      if (u.pathname === '/api/report') {
+        const name = u.searchParams.get('graph') ?? 'main';
+        if (!ws.graphs.has(name)) return json(404, { error: `no graph ${name}` });
+        const r = ws.lastReport.get(name), version = ws.versions.get(name) ?? 0;
+        if (!r) return json(200, { graph: name, version, cooked: false });
+        return json(200, { graph: name, version, cooked: true, target: r.target, ok: r.ok, ms: r.ms, errors: r.errors.map(issueText), warnings: r.warnings.map(issueText) });
       }
       if (u.pathname === '/api/vars') {
         if (req.method !== 'POST') return json(405, { ok: false, ms: 0, errors: ['POST {"vars": {...}}'] });

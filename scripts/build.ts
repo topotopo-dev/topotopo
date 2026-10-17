@@ -3,8 +3,8 @@
 //
 // Development and tests run src/*.ts directly (Node type stripping); only the npm package uses dist/, because Node
 // refuses to strip types from files under node_modules. Steps: remove dist/, compile, copy the non-TypeScript files of
-// src/ (the viewer page), mark the bin entry executable, then check the output: no relative import may still name a
-// .ts file, and every file the code finds relative to its own module must exist relative to dist/ as well.
+// src/ (the viewer page and its modules), mark the bin entry executable, then check the output: no relative import may
+// still name a .ts file, and every file the code finds relative to its own module must exist relative to dist/ as well.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -30,7 +30,7 @@ try {
   process.exit(1);
 }
 
-// assets that live next to the modules that read them (src/viewer/index.html)
+// assets that live next to the modules that read them (src/viewer/index.html, the page's src/viewer/app/ modules)
 let copied = 0;
 for (const f of walk(SRC)) {
   if (f.endsWith('.ts')) continue;
@@ -72,6 +72,9 @@ for (const [from, target] of [
   ['wasm/kernels.js', '../../kernels/pkg-simd/topotopo_kernels.js'],
   ['host/pool.js', './worker.js'],
   ['viewer/server.js', './index.html'],
+  ['viewer/server.js', './app/main.js'],
+  ['viewer/server.js', './app/style.css'],
+  ['viewer/server.js', './app/markers.js'],
   ['index.js', './index.d.ts'],
 ]) {
   const p = path.resolve(path.dirname(path.join(DIST, from)), target);

@@ -1,7 +1,11 @@
 // The viewer page's browser-free logic (src/viewer/app/*.js, docs/design/viewer.md section 10): the keymap presets,
 // guide (marker) rules shared with the server, the grid step, selection set operations, the undo stack, mesh
-// topology (welding, pieces, the render tool's edge classes) and the Controls rules.
+// topology (welding, pieces, the render tool's edge classes) and the Controls rules. Also checks that the page's
+// modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
 import * as km from '../src/viewer/app/keymap.js';
@@ -12,6 +16,7 @@ import { createUndo } from '../src/viewer/app/undo.js';
 import * as mesh from '../src/viewer/app/mesh.js';
 import * as vars from '../src/viewer/app/vars.js';
 
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0, passes = 0;
 const check = (cond: any, msg: string) => {
   if (cond) passes++;
@@ -230,6 +235,27 @@ section('Controls rules (section 8)');
     'slider ranges: declared, 0..4×default, −1..1 around 0');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
+}
+
+section('the page\'s modules');
+{
+  const app = path.join(root, 'src', 'viewer', 'app');
+  const files = fs.readdirSync(app);
+  const problems: string[] = [];
+  for (const f of files.filter((x) => x.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(app, f), 'utf8');
+    for (const m of src.matchAll(/^\s*import\s+(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/gm)) {
+      const spec = m[1];
+      if (spec.startsWith('./')) { if (!files.includes(spec.slice(2))) problems.push(`${f} imports missing ${spec}`); }
+      else if (spec !== 'three' && !spec.startsWith('three/addons/')) problems.push(`${f} imports ${spec}`);
+      else if (spec.startsWith('three/addons/') && !fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.resolve('three'))), '..', 'examples', 'jsm', spec.slice('three/addons/'.length))))
+        problems.push(`${f} imports ${spec}, which three does not ship`);
+    }
+    if (/OrbitControls\.js|new\s+OrbitControls/.test(src)) problems.push(`${f} uses OrbitControls (section 3: our own camera controller)`);
+  }
+  const shell = fs.readFileSync(path.join(root, 'src', 'viewer', 'index.html'), 'utf8');
+  check(!problems.length && files.includes('style.css') && /src="\/app\/main\.js"/.test(shell) && /href="\/app\/style\.css"/.test(shell) && !/<script(?![^>]*src)[^>]*>[^<]{200,}/.test(shell),
+    `index.html is a shell loading /app/main.js and /app/style.css; modules import only each other and three (${problems.join('; ') || `${files.length} files`})`);
 }
 
 console.log(`\n${passes} passed, ${failures} failed`);
