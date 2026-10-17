@@ -37,7 +37,6 @@
   .ctl { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 6px; }
   .ctl:hover { background: var(--hover); }
   .ctl > .cl { flex: 0 0 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ctl.locked > .cl { color: var(--accent); }
   .ctl > .cw { flex: 1; display: flex; gap: 4px; align-items: center; min-width: 0; }
   .cw input { padding: 3px 5px; }
   .cw input[type=range] { flex: 1; min-width: 40px; padding: 0; border: 0; background: none; accent-color: var(--accent); }
@@ -295,19 +294,17 @@ const refreshGraphs = coalesce(async () => {
 
 // ------------------------------------------------------------ controls: the graph's exposed vars
 // One control per declared param (graph.params), then the undeclared vars. Values are POSTed to /api/vars (sliders at
-// most every 100 ms, plus once on release); the locked set rides along. Updates from the server set values in place;
-// the panel is rebuilt only when the set of params changes.
+// most every 100 ms, plus once on release). Updates from the server set values in place; the panel is rebuilt only
+// when the set of params changes.
 const ctl = {
-  graph: null, sig: null, rows: new Map(), locked: new Set(), active: null, deferred: null,
-  pending: {}, lockPending: false, timer: 0, lastSend: -1e9, seq: 0,
+  graph: null, sig: null, rows: new Map(), active: null, deferred: null,
+  pending: {}, timer: 0, lastSend: -1e9, seq: 0,
   // var → id of its newest POST not answered yet / time its newest POST was answered: older server state is ignored
-  unacked: new Map(), ackAt: new Map(), lockUnacked: 0, lockAckAt: -1e9,
+  unacked: new Map(), ackAt: new Map(),
 };
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const HEX = /^#[0-9a-f]{6}$/i, HEX3 = /^#[0-9a-f]{3}$/i;
-const LOCK = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.6 0v2"/></svg>';
-const UNLOCK = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.5-.8"/></svg>';
 const decimals = (x) => { const s = String(x); return s.includes('e-') ? Number(s.split('e-')[1]) : (s.split('.')[1] ?? '').length; };
 const fmt = (v) => (isNum(v) ? String(+v.toPrecision(10)) : String(v));
 const short = (v) => { const s = typeof v === 'string' ? v : JSON.stringify(v) ?? String(v); return s.length > 24 ? s.slice(0, 23) + '…' : s; };
@@ -497,28 +494,13 @@ function controlRow(name, vd, value) {
   const reset = el('button', 'ib' + (def === undefined ? ' gone' : ''), '↺');
   if (def !== undefined) reset.title = `reset ${name} to ${short(def)}`;
   reset.onclick = () => { w.set(def); queueVar(name, def, true); };
-  const lock = el('button', 'ib');
-  lock.onclick = () => {
-    if (ctl.locked.has(name)) ctl.locked.delete(name); else ctl.locked.add(name);
-    row.lock(ctl.locked.has(name));
-    ctl.lockPending = true;
-    flushVars();
-  };
-  wrap.append(el('span', 'cl', label), cw, reset, lock);
+  wrap.append(el('span', 'cl', label), cw, reset);
   const row = {
     def,
     set(v) { w.set(v); row.sync(); },
     typing: () => w.typing?.() ?? false,
     sync() { reset.disabled = def === undefined || same(w.get(), def); },
-    lock(on) {
-      wrap.classList.toggle('locked', on);
-      lock.classList.toggle('on', on);
-      lock.innerHTML = on ? LOCK : UNLOCK;
-      lock.title = on ? `${name} is locked: agents leave its value alone (you can still change it). Click to unlock.` : `lock ${name}: agents then leave its value alone`;
-      lock.setAttribute('aria-pressed', String(on));
-    },
   };
-  row.lock(ctl.locked.has(name));
   row.sync();
   ctl.rows.set(name, row);
   return wrap;
@@ -528,15 +510,14 @@ function renderControls(g, issued = performance.now()) {
   const params = g?.params ?? {}, vars = g?.vars ?? {};
   const other = Object.keys(vars).filter((k) => !(k in params));
   const sig = g ? JSON.stringify([g.name, params, other.map((k) => [k, jsonKind(vars[k]), Array.isArray(vars[k]) ? vars[k].length : 0])]) : '';
-  if (sig === ctl.sig) return applyValues(vars, g?.locked, issued);
+  if (sig === ctl.sig) return applyValues(vars, issued);
   // the set of params changed: rebuild, but not under a slider being dragged
   if (ctl.active && g?.name === ctl.graph) { ctl.deferred = [g, issued]; return; }
   if (ctl.graph !== (g?.name ?? null)) {
     if (ctl.graph) flushVars();
-    ctl.pending = {}; ctl.lockPending = false; ctl.unacked.clear(); ctl.ackAt.clear();
+    ctl.pending = {}; ctl.unacked.clear(); ctl.ackAt.clear();
   }
   ctl.graph = g?.name ?? null; ctl.sig = sig; ctl.rows.clear();
-  ctl.locked = new Set(g?.locked ?? []);
   const box = $('controls');
   box.replaceChildren();
   const declared = Object.keys(params);
@@ -550,14 +531,10 @@ function renderControls(g, issued = performance.now()) {
 }
 
 /** Server state into the controls, except where the user has edits on the way or is dragging/typing. */
-function applyValues(vars, locked, issued) {
+function applyValues(vars, issued) {
   for (const [k, row] of ctl.rows) {
     if (k in ctl.pending || ctl.unacked.has(k) || (ctl.ackAt.get(k) ?? -1e9) > issued || ctl.active === k || row.typing()) continue;
     row.set(k in vars ? vars[k] : row.def);
-  }
-  if (Array.isArray(locked) && !ctl.lockPending && !ctl.lockUnacked && ctl.lockAckAt <= issued) {
-    ctl.locked = new Set(locked);
-    for (const [k, row] of ctl.rows) row.lock(ctl.locked.has(k));
   }
 }
 
@@ -572,27 +549,24 @@ function queueVar(name, value, final = false) {
 
 async function flushVars() {
   clearTimeout(ctl.timer); ctl.timer = 0;
-  const vars = ctl.pending, lock = ctl.lockPending, graph = ctl.graph;
-  if (!graph || (!Object.keys(vars).length && !lock)) return;
-  ctl.pending = {}; ctl.lockPending = false;
+  const vars = ctl.pending, graph = ctl.graph;
+  if (!graph || !Object.keys(vars).length) return;
+  ctl.pending = {};
   const id = ++ctl.seq;
   ctl.lastSend = performance.now();
   for (const k in vars) ctl.unacked.set(k, id);
-  if (lock) ctl.lockUnacked++;
-  const body = lock ? { vars, locked: [...ctl.locked] } : { vars };
   let j;
   try {
-    const res = await fetch(`/api/vars?graph=${encodeURIComponent(graph)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await fetch(`/api/vars?graph=${encodeURIComponent(graph)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vars }) });
     j = await res.json().catch(() => ({ ok: false, errors: [`${res.status} ${res.statusText}`] }));
   } catch { j = { ok: false, errors: ['the viewer server is not answering'] }; }
   const now = performance.now();
   for (const k in vars) if (ctl.unacked.get(k) === id) { ctl.unacked.delete(k); ctl.ackAt.set(k, now); }
-  if (lock) { ctl.lockUnacked--; ctl.lockAckAt = now; }
   if (graph !== ctl.graph) return;
-  const what = Object.entries(vars).map(([k, v]) => `${k} = ${short(v)}`).join(', ') || 'locks';
+  const what = Object.entries(vars).map(([k, v]) => `${k} = ${short(v)}`).join(', ');
   if (j.ok) setStatus(`${what} · cooked in ${Math.round(j.ms)} ms`, 'ok');
   else setStatus(`${j.vars ? `${what} applied, cook failed` : `${what} not applied`} — ${(j.errors ?? []).join('; ') || 'unknown error'}`, 'err');
-  if (j.vars) applyValues(j.vars, j.locked, now);
+  if (j.vars) applyValues(j.vars, now);
 }
 
 // ------------------------------------------------------------ inputs: the human's files as reference layers

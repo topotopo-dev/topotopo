@@ -20,7 +20,7 @@ CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
-HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value; vars they locked in the viewer (meta.locked) keep their values and build/edit warn. See help topic "graph".
+HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
@@ -85,9 +85,8 @@ export const TOPICS: Record<string, string> = {
   The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
   for bools. They are also the parameters when the graph is saved as an asset.
 - People change vars at any time (the viewer's controls edit the stored graph): read it with graphs {action:"get"}
-  before assuming a var's value, and edit {op:"vars"} rather than rebuilding to change one. "meta": {"locked": [...]}
-  lists vars a person locked in the viewer: edit vars and build keep their values and the result warns; ask them
-  to unlock it instead of working around it.
+  before assuming a var's value, and edit {op:"vars"} rather than rebuilding to change one. When a person asks to
+  keep a value, keep it.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
 - Output node: "output", else a node named out/OUT, else the last unconnected node.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.

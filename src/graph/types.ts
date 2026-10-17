@@ -98,10 +98,8 @@ export interface VarDef {
   step?: number;
 }
 
-/** Free-form graph metadata; the fields below have a meaning. */
+/** Free-form graph metadata (showcase render presets, editor layout, …). */
 export interface GraphMeta {
-  /** var names a human locked in the viewer: agents' build and edit keep their values and warn */
-  locked?: string[];
   [key: string]: any;
 }
 

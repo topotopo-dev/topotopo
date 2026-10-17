@@ -39,7 +39,6 @@ class HttpError extends Error {
 /** The shape every geometry route serves: the same GLB options as /api/geo. */
 const toGLB = (g: Geometry) => exportGeometryAsync(withHeightfieldPreview(g), 'glb', { splitByName: false, lineMode: 'lines', custom: false });
 const issueText = (e: { node: string; message: string }) => `[${e.node}] ${e.message}`;
-const lockedOf = (g: GraphSpec): string[] => (Array.isArray(g.meta?.locked) ? g.meta.locked.filter((s: unknown) => typeof s === 'string') : []);
 
 /**
  * A dropped file's name as stored in inputs/: a plain basename with its extension. Path separators and ".." are
@@ -55,8 +54,8 @@ export function inputFileName(raw: string): string {
   return n;
 }
 
-interface VarsReply { status: number; body: { ok: boolean; ms: number; errors: string[]; vars?: Record<string, any>; locked?: string[] } }
-interface VarsBatch { vars: Record<string, any>; locked?: string[]; waiters: ((r: VarsReply) => void)[] }
+interface VarsReply { status: number; body: { ok: boolean; ms: number; errors: string[]; vars?: Record<string, any> } }
+interface VarsBatch { vars: Record<string, any>; waiters: ((r: VarsReply) => void)[] }
 
 export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341)): Promise<{ url: string; close: () => void }> {
   const clients = new Set<http.ServerResponse>();
@@ -140,22 +139,19 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   const applyBatch = async (name: string, b: VarsBatch): Promise<VarsReply> => {
     const prev = ws.graphs.get(name);
     if (!prev) return { status: 404, body: { ok: false, ms: 0, errors: [`no graph ${name}`] } };
-    // the locked set rides along with the vars edit: set on the stored graph, persisted by the edit
-    if (b.locked) ws.graphs.set(name, { ...prev, meta: { ...(prev.meta ?? {}), locked: b.locked } });
     try {
       const { graph, report } = await ws.edit(name, [{ op: 'vars', vars: b.vars }]);
-      return { status: 200, body: { ok: report.ok, ms: report.ms, errors: report.errors.map(issueText), vars: graph.vars ?? {}, locked: lockedOf(graph) } };
+      return { status: 200, body: { ok: report.ok, ms: report.ms, errors: report.errors.map(issueText), vars: graph.vars ?? {} } };
     } catch (e: any) {
-      if (b.locked && ws.graphs.get(name)?.meta?.locked === b.locked) ws.graphs.set(name, prev); // rejected: graph unchanged
       // rejected edits carry their issues (one string each); op errors are plain messages
       return { status: 400, body: { ok: false, ms: 0, errors: Array.isArray(e?.errors) ? e.errors.map(issueText) : [String(e?.message ?? e)] } };
     }
   };
-  const applyVars = (name: string, vars: Record<string, any>, locked?: string[]) => new Promise<VarsReply>((resolve) => {
+  const applyVars = (name: string, vars: Record<string, any>) => new Promise<VarsReply>((resolve) => {
     let q = varQueues.get(name);
     if (!q) varQueues.set(name, q = { busy: false, next: null });
-    if (q.next) { Object.assign(q.next.vars, vars); if (locked) q.next.locked = locked; q.next.waiters.push(resolve); }
-    else q.next = { vars: { ...vars }, locked, waiters: [resolve] };
+    if (q.next) { Object.assign(q.next.vars, vars); q.next.waiters.push(resolve); }
+    else q.next = { vars: { ...vars }, waiters: [resolve] };
     if (q.busy) return;
     q.busy = true;
     (async () => {
@@ -216,7 +212,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
           const last = ws.lastReport.get(name);
           return {
             name, output: last?.target ?? g.output ?? null, version: ws.versions.get(name) ?? 0,
-            vars: g.vars ?? {}, params: g.params ?? {}, locked: lockedOf(g),
+            vars: g.vars ?? {}, params: g.params ?? {},
             nodes: Object.entries(g.nodes).map(([n, spec]) => {
               const def = ws.engine.resolveDef(spec.type);
               const r = last?.results.get(n);
@@ -227,18 +223,13 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         return json(200, out);
       }
       if (u.pathname === '/api/vars') {
-        if (req.method !== 'POST') return json(405, { ok: false, ms: 0, errors: ['POST {"vars": {...}, "locked": [...]}'] });
+        if (req.method !== 'POST') return json(405, { ok: false, ms: 0, errors: ['POST {"vars": {...}}'] });
         const name = u.searchParams.get('graph') ?? 'main';
         const body = await readJSON(req);
         const vars = body?.vars ?? {};
         if (!vars || typeof vars !== 'object' || Array.isArray(vars)) throw new HttpError(400, '"vars" must be an object {name: value}');
-        let locked: string[] | undefined;
-        if (body?.locked !== undefined) {
-          if (!Array.isArray(body.locked) || body.locked.some((s: unknown) => typeof s !== 'string')) throw new HttpError(400, '"locked" must be a list of var names');
-          locked = [...new Set<string>(body.locked)];
-        }
         if (!ws.graphs.has(name)) return json(404, { ok: false, ms: 0, errors: [`no graph ${name}`] });
-        const r = await applyVars(name, vars, locked);
+        const r = await applyVars(name, vars);
         return json(r.status, r.body);
       }
       if (u.pathname === '/api/inputs') {
