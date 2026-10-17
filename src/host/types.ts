@@ -89,6 +89,11 @@ export interface Host {
   /** A string that changes when the file changes (mtime+size), for cache keys. */
   fileStamp(path: string): string;
   resolvePath(path: string): string;
+  /** Optional local-directory support. listDir returns immediate file names only (no subdirectories). */
+  isDirectory?(path: string): boolean;
+  listDir?(path: string): string[];
+  /** Convert a local source file to GLB (Node: .blend through headless Blender). Absent in browser/kernel hosts. */
+  convertFile?(path: string, target: 'glb'): Promise<Uint8Array>;
   /**
    * Compile JS source inside the scripting realm (which has the snippet library
    * installed) and return the resulting value (usually a function). The realm is set up with

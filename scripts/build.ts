@@ -39,6 +39,8 @@ for (const f of walk(SRC)) {
   fs.copyFileSync(f, to);
   copied++;
 }
+fs.copyFileSync(path.join(ROOT, 'integrations/blender/export_scene.py'), path.join(DIST, 'host/export_scene.py'));
+copied++;
 
 // bin entries (package.json "bin") must start with a shebang; npm makes them executable on install, this covers npm link
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -63,6 +65,7 @@ for (const f of js) {
 for (const [from, target] of [
   ['host/node.js', '../../shelf/index.json'],
   ['host/node.js', '../../assets/fonts/DejaVuSans.ttf'],
+  ['host/node.js', './export_scene.py'],
   ['wasm/kernels.js', '../../kernels/pkg/topotopo_kernels_bg.wasm'],
   ['wasm/kernels.js', '../../kernels/pkg/topotopo_kernels.js'],
   ['wasm/kernels.js', '../../kernels/pkg-simd/topotopo_kernels_bg.wasm'],

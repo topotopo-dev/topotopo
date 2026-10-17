@@ -22,7 +22,7 @@ no Node APIs. Then run that core under several hosts:
 |---|---|---|
 | Node process + MCP (stdio) | LLM agents: Claude Code, Claude Desktop, any MCP client | **done** |
 | Node CLI | batch cooking, CI, pipelines | **done** |
-| Browser (engine in a Web Worker) | the future human GUI: node editor, viewport, parameter panels | live viewer done; editor not built yet |
+| Browser (engine in a Web Worker) | the future human GUI: node editor, viewport, parameter panels; cannot convert `.blend` (export GLB first) | live viewer done; editor not built yet |
 | Desktop wrapper (Tauri/Electron) | optional, if you want native files, bigger memory, a local GPU | later, same web GUI |
 
 MCP needs a local process anyway, because stdio servers are processes. That means the LLM side runs in Node today, and
@@ -89,7 +89,8 @@ src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.b
                heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts) ·
                image volumes as PNG files (textures.ts: glTF/USD texture data, the "textures" format)
 src/wasm/      loaders: kernels.ts (the Rust kernels, read through Host.readFile), rapier.ts (Rapier, a lazy import)
-src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts)
+src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts), optional convertFile
+               (.blend -> cached GLB through headless Blender), isDirectory/listDir for file-node folder imports
 src/mcp/       MCP server, tool implementations, LLM docs
 src/viewer/    live preview: tiny HTTP + SSE server and a three.js page
 src/workspace.ts  named graphs persisted as JSON, edit operations, assets
@@ -845,6 +846,28 @@ rotation-minimising frames, L-systems, Voronoi fracture (manifold half-space tri
 sweeping, scatter with blue-noise sample elimination, BVH/KD-tree, renderer, exporters/importers (OBJ/STL/PLY/USDA,
 Houdini `.geo` JSON and binary JSON, CSV/points JSON; glTF builds on gltf-transform). Tests validate every GLB with the
 Khronos `gltf-validator` (Apache-2.0, dev dependency only).
+
+**Scene import.** The `file` node reads `.blend` through optional `Host.convertFile(path, 'glb')`: the Node host
+finds Blender (`TOPOTOPO_BLENDER`, PATH, then standard installations), runs the shipped `integrations/blender/export_scene.py`
+headlessly with a timeout (`TOPOTOPO_BLENDER_TIMEOUT`, seconds, default 300), and caches GLBs under `.cache/blend/`
+by resolved path and file stamp. The script uses static copies/evaluated geometry, preserves linked meshes and
+collections, applies scene units once at the exported GLB roots (so collection instances do not double-scale),
+and never saves the source. The browser has no converter; export a GLB there instead.
+
+glTF import walks the default/first scene in traversal order. Empties become points with world `P`, unit quaternion
+`orient`, `scale`, `pscale`, `name` and ancestor `path`; cameras/lights are skipped with one count. Shared meshes
+without the GPU extension use one unnamed local source and one packed prim per referencing node: `name`, `path`
+and object extras belong to that prim, so unpack can transfer each instance's label. Existing GPU-extension sources
+retain their source labels and per-instance metadata. Single-use meshes and `instancing: 'expand'` stay expanded.
+When empty-point attributes share a packed-prim key, import mirrors that value onto the instance's anchor before
+merging: existing unpack/export point precedence then keeps the value (unpacked names can be point attributes).
+
+Node extras override mesh extras; scalar numbers, booleans, strings and numeric vectors of length 2–4 become
+attributes. Reserved geometry names warn once, nested values and `topotopo` are ignored, and sorted extras keys
+feed the existing `Geometry.merge` schema/default/type rules. Folder imports use sorted immediate files and stamp
+the listing plus every file. Each file's `name` becomes its stem, or `<stem>/<name>` if it already has multiple
+distinct names across prims and isolated points; packed prims participate too. This is the variant input for
+`copy_to_points {variants: 'name'}`.
 
 **Material data.** A prim string attribute `material` names a material; the detail string attribute `materials` holds
 a JSON table `{name: {baseColor, metallic, roughness, emissive, alpha, doubleSided, unlit, textures?}}`

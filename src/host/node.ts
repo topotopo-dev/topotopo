@@ -3,6 +3,8 @@ import vm from 'node:vm';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { ExprSandbox, Host, WorkerPool } from './types.ts';
 import { createNodePool, poolOptionsFromEnv } from './pool.ts';
@@ -37,6 +39,45 @@ function filterRealmRejections() {
  */
 export const SHELF_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../shelf');
 
+/** No shell: executable paths and file names are passed as separate arguments on every platform. */
+function runBlender(executable: string, args: string[], timeout: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(executable, args, { timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024, killSignal: 'SIGKILL' }, (error, stdout, stderr) => {
+      const output = `${stdout}\n${stderr}`.trim();
+      if (error) {
+        const tail = output.split(/\r?\n/).slice(-40).join('\n');
+        const reason = error.message.split(/\r?\n/)[0]; // execFile's message may itself contain all of stderr
+        reject(new Error(`Blender failed (exit code ${error.code ?? 'none'}${error.signal ? `, signal ${error.signal}` : ''}${error.killed ? ', timed out or killed' : ''}): ${reason}\n${tail}`));
+      } else resolve(output);
+    });
+  });
+}
+
+/** Executable lookup shared by conversion and integration tests. An unavailable installation returns null. */
+export async function findBlender(): Promise<string | null> {
+  const candidates = [process.env.TOPOTOPO_BLENDER, 'blender'].filter((p): p is string => !!p);
+  const foundation = path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Blender Foundation');
+  try {
+    const versions = fs.readdirSync(foundation, { withFileTypes: true }).filter((e) => e.isDirectory() && /^Blender /i.test(e.name));
+    versions.sort((a, b) => b.name.localeCompare(a.name, 'en', { numeric: true }));
+    candidates.push(...versions.map((e) => path.join(foundation, e.name, 'blender.exe')));
+  } catch { /* normal on non-Windows hosts, or without a Foundation install */ }
+  candidates.push('C:\\Program Files (x86)\\Steam\\steamapps\\common\\Blender\\blender.exe',
+    '/Applications/Blender.app/Contents/MacOS/Blender', '/usr/bin/blender', '/snap/bin/blender');
+  for (const candidate of new Set(candidates)) {
+    try { await runBlender(candidate, ['--version'], 10_000); return candidate; } catch { /* try the next installation */ }
+  }
+  return null;
+}
+
+function blenderScript(): string {
+  for (const relative of ['./export_scene.py', '../../integrations/blender/export_scene.py']) {
+    const file = fileURLToPath(new URL(relative, import.meta.url));
+    if (fs.existsSync(file)) return file;
+  }
+  throw new Error('Blender conversion script export_scene.py is missing from this TopoTopo installation');
+}
+
 /** opts.shelf: shelf directory (default SHELF_DIR), or false for an engine without the shelf. */
 /** The process-wide pool of hosts created with the environment's settings (created lazily: no thread until used). */
 let envPool: WorkerPool | undefined | null = null;
@@ -52,10 +93,13 @@ export interface NodeHostOptions {
   workers?: number;
   /** further pool settings for a host with its own pool (idleMs, minElements) */
   pool?: Partial<NodePoolOptions>;
+  /** Optional diagnostics for actual Blender conversions (not version probes or cache hits). */
+  onBlenderRun?: (result: { executable: string; durationMs: number; output: string }) => void;
 }
 
 export function createNodeHost(opts: NodeHostOptions = {}): Host {
   const baseDir = opts.baseDir ?? process.cwd();
+  const conversions = new Map<string, Promise<Uint8Array>>();
   let pool: WorkerPool | undefined;
   if (opts.workers === undefined && !opts.pool) {
     if (envPool === null) envPool = createNodePool(poolOptionsFromEnv());
@@ -191,6 +235,49 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
       const rp = this.resolvePath(p);
       if (/^https?:\/\//.test(rp)) return rp;
       try { const s = fs.statSync(rp); return `${s.mtimeMs}:${s.size}`; } catch { return 'missing'; }
+    },
+    isDirectory(p) {
+      try { return fs.statSync(this.resolvePath(p)).isDirectory(); } catch { return false; }
+    },
+    listDir(p) {
+      const dir = this.resolvePath(p);
+      return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() || (e.isSymbolicLink() && fs.statSync(path.join(dir, e.name)).isFile()))
+        .map((e) => e.name).sort((a, b) => a.localeCompare(b, 'en'));
+    },
+    async convertFile(p, target) {
+      if (target !== 'glb') throw new Error(`unsupported conversion target "${target}"`);
+      const absolute = this.resolvePath(p);
+      if (/^https?:\/\//.test(absolute)) throw new Error('.blend conversion needs a local file path');
+      const stamp = this.fileStamp(absolute);
+      if (stamp === 'missing') throw new Error(`cannot read "${absolute}": file is missing`);
+      const key = createHash('sha256').update(JSON.stringify([absolute, stamp])).digest('hex');
+      const cacheDir = path.resolve(baseDir, '.cache', 'blend');
+      const cached = path.join(cacheDir, `${key}.glb`);
+      // In-flight conversions of the same source share a process, including concurrent file nodes.
+      let job = conversions.get(key);
+      if (!job) {
+        job = (async () => {
+          try { return new Uint8Array(await fs.promises.readFile(cached)); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+          const executable = await findBlender();
+          if (!executable) throw new Error('Blender was not found. Set TOPOTOPO_BLENDER to its executable, or install Blender from https://www.blender.org/download/');
+          const seconds = Number(process.env.TOPOTOPO_BLENDER_TIMEOUT ?? 300);
+          if (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647) throw new Error('TOPOTOPO_BLENDER_TIMEOUT must be a positive number of seconds (default 300)');
+          await fs.promises.mkdir(cacheDir, { recursive: true });
+          const tempDir = await fs.promises.mkdtemp(path.join(cacheDir, 'convert-'));
+          try {
+            const outputFile = path.join(tempDir, 'scene.glb');
+            const start = performance.now();
+            // Factory settings keep user add-ons/startup handlers out of deterministic batch conversions.
+            const output = await runBlender(executable, ['--factory-startup', '--disable-autoexec', '-b', absolute, '--python', blenderScript(), '--', outputFile], Math.ceil(seconds * 1000));
+            opts.onBlenderRun?.({ executable, durationMs: performance.now() - start, output });
+            const bytes = new Uint8Array(await fs.promises.readFile(outputFile));
+            await fs.promises.rename(outputFile, cached);
+            return bytes;
+          } finally { await fs.promises.rm(tempDir, { recursive: true, force: true }); }
+        })();
+        conversions.set(key, job);
+      }
+      try { return await job; } finally { if (conversions.get(key) === job) conversions.delete(key); }
     },
     compile(source) {
       if (source === 'globalThis') return realmGlobal;

@@ -59,7 +59,7 @@ import { m4apply, m4applyDir, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4tran
 import type { Mat4 } from '../core/math.ts';
 import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, baseOf, decomposeXform, isolatedMask, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { AnchorAttrib, ExportOptions } from './common.ts';
-import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked } from '../core/packed.ts';
+import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked, xform3 } from '../core/packed.ts';
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
 import { imageFromPNG, imageTextureData } from './textures.ts';
 import { decodePNG } from './png-decode.ts';
@@ -938,7 +938,30 @@ function instanceMatrices(inst: InstancedMesh): Mat4[] {
   return out;
 }
 
-/** Geometry from a gltf-transform Document (all scenes' nodes flattened into world space). */
+const RESERVED_EXTRAS = new Set('P N uv uv2 Cd Alpha material name path orient scale pscale'.split(' '));
+
+function constantAttribute(table: AttribTable, name: string, type: AttribType, size: number, value: number | string | number[]) {
+  const a = table.add(name, type, size);
+  for (let i = 0; i < table.count; i++) a.set(i, value);
+}
+
+/** Object extras only; topotopo's private round-trip metadata keeps its existing readers. */
+function objectExtras(table: AttribTable, extras: Record<string, unknown>, collisions: Set<string>) {
+  // Explicit key order keeps schemas stable even when producers serialize extras in a different order.
+  for (const key of Object.keys(extras).sort()) {
+    if (key === 'topotopo') continue;
+    if (RESERVED_EXTRAS.has(key)) { collisions.add(key); continue; }
+    const value = extras[key];
+    if (typeof value === 'string') constantAttribute(table, key, 'string', 1, value);
+    else if (typeof value === 'boolean') constantAttribute(table, key, 'int', 1, value ? 1 : 0);
+    else if (typeof value === 'number' && Number.isFinite(value)) constantAttribute(table, key, Number.isInteger(value) ? 'int' : 'float', 1, value);
+    else if (Array.isArray(value) && value.length >= 2 && value.length <= 4 && value.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      constantAttribute(table, key, 'float', value.length, value);
+    }
+  }
+}
+
+/** Geometry from the default (or first) scene, traversed in scene order with world transforms. */
 export function documentToGeometry(doc: Document, warn: (m: string) => void = () => {}, instancing: 'packed' | 'expand' = 'packed', base = ''): Geometry {
   const root = doc.getRoot();
   const texIndex = (t: Texture) => root.listTextures().indexOf(t);
@@ -959,20 +982,50 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
   const parts: Geometry[] = [];
   const localCache = new Map<object, Geometry | null>();
   const sourceCache = new Map<object, Map<string, Geometry>>();
+  const sharedSources = new Map<object, Geometry>();
+  const nodes: GNode[] = [];
+  const scene = root.getDefaultScene() ?? root.listScenes()[0] ?? null;
+  if (scene) scene.traverse((n) => { nodes.push(n); });
+  else for (const n of root.listNodes()) if (!n.getParentNode()) n.traverse((n) => { nodes.push(n); });
+  const meshRefs = new Map<object, number>();
+  for (const node of nodes) {
+    const mesh = node.getMesh();
+    if (mesh && !node.getExtension('EXT_mesh_gpu_instancing') && !node.getCamera() && !node.getExtension('KHR_lights_punctual')) meshRefs.set(mesh, (meshRefs.get(mesh) ?? 0) + 1);
+  }
+  const collisions = new Set<string>();
+  let skipped = 0;
   let instanced = false;
   const visitNode = (node: GNode) => {
+    if (node.getCamera() || node.getExtension('KHR_lights_punctual')) { skipped++; return; }
     const mesh = node.getMesh();
-    if (!mesh) return;
     const world = Float64Array.from(node.getWorldMatrix()) as unknown as Mat4;
+    const ancestors: string[] = [];
+    for (let p = node.getParentNode(); p; p = p.getParentNode()) ancestors.push(p.getName());
+    const path = ancestors.reverse().join('/');
+    const extras = { ...mesh?.getExtras(), ...node.getExtras() };
+    if (!mesh) {
+      const g = new Geometry({ positions: [world[12], world[13], world[14]] });
+      const { q, s } = decomposeXform(xform3(world));
+      constantAttribute(g.points, 'name', 'string', 1, node.getName());
+      constantAttribute(g.points, 'path', 'string', 1, path);
+      constantAttribute(g.points, 'orient', 'float', 4, q);
+      constantAttribute(g.points, 'scale', 'float', 3, s);
+      constantAttribute(g.points, 'pscale', 'float', 1, 1);
+      objectExtras(g.points, extras, collisions);
+      parts.push(g);
+      return;
+    }
     const inst = node.getExtension('EXT_mesh_gpu_instancing') as InstancedMesh | null;
     const mats = inst ? instanceMatrices(inst).map((m) => m4mul(world, m)) : [world];
     const info = ((mesh.getExtras() as any)?.topotopo?.attributes ?? {}) as Record<string, CustomInfo>;
     const label = node.getName() || mesh.getName();
-    if (inst && instancing === 'packed') {
-      // one packed source per mesh (and node name): the mesh in its local space, the instances as packed prims
+    const shared = !inst && (meshRefs.get(mesh) ?? 0) > 1;
+    if ((inst || shared) && instancing === 'packed') {
+      // Shared-node sources omit name: the packed prim owns it, so unpack's normal transfer keeps each label.
+      // Existing EXT sources retain their labels for round trips and source naming in instance-stream exports.
       let byLabel = sourceCache.get(mesh);
       if (!byLabel) { byLabel = new Map(); sourceCache.set(mesh, byLabel); }
-      let src = byLabel.get(label);
+      let src = shared ? sharedSources.get(mesh) : byLabel.get(label);
       if (!src) {
         const ps: Geometry[] = [];
         for (const prim of mesh.listPrimitives()) {
@@ -981,15 +1034,24 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
           if (!local) continue;
           const g = local.clone();
           const mname = matName(prim.getMaterial());
-          if (label) { const a = g.prims.add('name', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, label); }
+          if (!shared && label) { const a = g.prims.add('name', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, label); }
           if (mname) { const a = g.prims.add('material', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, mname); }
           ps.push(g);
         }
         src = Geometry.merge(ps);
-        byLabel.set(label, src);
+        if (shared) sharedSources.set(mesh, src);
+        else byLabel.set(label, src);
       }
       const part = packedFromMatrices(src, mats);
-      applyInstanceAttribs(part, inst, ((node.getExtras() as any)?.topotopo?.instanceAttributes ?? {}) as Record<string, InstanceAttribInfo>, warn);
+      constantAttribute(part.prims, 'name', 'string', 1, label);
+      constantAttribute(part.prims, 'path', 'string', 1, path);
+      objectExtras(part.prims, extras, collisions);
+      if (inst) applyInstanceAttribs(part, inst, ((node.getExtras() as any)?.topotopo?.instanceAttributes ?? {}) as Record<string, InstanceAttribInfo>, warn);
+      // Native instance metadata can carry these in point class; expose the effective label on the prim too.
+      for (const key of ['name', 'path']) {
+        const a = part.points.get(key);
+        if (a?.type === 'string') part.prims.set(key, a.clone());
+      }
       parts.push(part);
       return;
     }
@@ -1003,14 +1065,23 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
         const g = transformGeo(local, m);
         if (label) { const a = g.prims.add('name', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, label); }
         if (mname) { const a = g.prims.add('material', 'string', 1); for (let k = 0; k < g.numPrims; k++) a.set(k, mname); }
+        constantAttribute(g.prims, 'path', 'string', 1, path);
+        objectExtras(g.prims, extras, collisions);
         parts.push(g);
       }
     }
   };
-  const scene = root.getDefaultScene() ?? root.listScenes()[0] ?? null;
-  if (scene) scene.traverse(visitNode);
-  else for (const n of root.listNodes()) if (!n.getParentNode()) n.traverse(visitNode);
+  for (const node of nodes) visitNode(node);
+  if (skipped) warn(`skipped ${skipped} cameras/lights`);
+  if (collisions.size) warn(`glTF extras skipped reserved attributes: ${[...collisions].sort().join(', ')}`);
   if (instanced) warn('EXT_mesh_gpu_instancing instances were expanded into geometry');
+  // Existing unpack/export rules prefer point attributes over prim attributes. Empty-point schemas must not
+  // hide an instance's values with merge defaults. Mirror only colliding keys onto its anchor, before the normal
+  // Geometry.merge handles type promotion/defaults. Explicit native instance point metadata still wins.
+  const pointKeys = new Set(parts.flatMap((g) => g.points.names()));
+  for (const part of parts) if (part.hasPacked()) {
+    for (const [key, a] of part.prims.map) if (pointKeys.has(key) && !part.points.has(key)) part.points.set(key, a.clone());
+  }
   const out = Geometry.merge(parts);
   if (Object.keys(table).length) writeMaterials(out, table);
   // "image:<name>" textures (topotopo files keep the paths in material extras): decode the embedded PNGs back into
