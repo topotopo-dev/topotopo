@@ -6,7 +6,8 @@ import { connectivity } from '../core/topology.ts';
 import { stableStringify } from '../graph/engine.ts';
 import type { CookReport } from '../graph/engine.ts';
 import { hashString } from '../core/random.ts';
-import { importFormatFromPath, importGeometryAsync } from '../io/import.ts';
+import { IMPORT_FORMATS, importFormatFromPath, importGeometryAsync } from '../io/import.ts';
+import type { Host } from '../host/types.ts';
 import { mergeMaterialTables, writeMaterials } from '../core/materials.ts';
 import { fusePoints } from './transform.ts';
 import { DEFAULT_TRANSFER, composePackedXforms, expandPacked } from '../core/packed.ts';
@@ -377,49 +378,109 @@ defineNode({
   },
 });
 
+const folderError = 'folder import needs a host with isDirectory/listDir support (use the Node host)';
+const childPath = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, '')}/${name}`;
+
+/** null = a file; a directory listing includes unsupported files too, for signature invalidation. */
+function directoryFiles(path: string, host: Host): string[] | null {
+  if (/^https?:\/\//i.test(path)) return null;
+  if (!host.isDirectory) {
+    if (/[\\/]$/.test(path)) throw new NodeError(folderError);
+    return null;
+  }
+  if (!host.isDirectory(path)) return null;
+  if (!host.listDir) throw new NodeError(folderError);
+  return host.listDir(path).sort((a, b) => a.localeCompare(b, 'en'));
+}
+
+/** One folder member is a variant, unless it already contains multiple named objects. */
+function folderNames(input: Geometry, file: string): Geometry {
+  const g = input.clone();
+  const stem = file.replace(/(?:\.points\.json|\.[^.]+)$/i, '');
+  const used = new Uint8Array(g.numPoints);
+  for (const pt of g.vertexPoint) used[pt] = 1;
+  const primName = g.prims.get('name'), pointName = g.points.get('name');
+  const names = new Set<string>();
+  if (primName) for (let i = 0; i < g.numPrims; i++) names.add(String(primName.get(i)));
+  if (pointName) for (let i = 0; i < g.numPoints; i++) if (!used[i]) names.add(String(pointName.get(i)));
+  const label = (name: string) => names.size > 1 ? `${stem}/${name}` : stem;
+  const prims = g.prims.add('name', 'string', 1);
+  for (let i = 0; i < g.numPrims; i++) prims.set(i, label(String(primName?.get(i) ?? '')));
+  if (used.some((v) => !v)) {
+    const points = g.points.add('name', 'string', 1);
+    for (let i = 0; i < g.numPoints; i++) if (!used[i]) points.set(i, label(String(pointName?.get(i) ?? '')));
+  }
+  // Mixed scenes also carry names on anchors (point attributes take precedence during unpack/export).
+  const anchors = g.hasPacked() ? g.points.add('name', 'string', 1) : g.points.get('name');
+  if (anchors) for (let p = 0; p < g.numPrims; p++) if (g.primKind?.[p] === 1) anchors.set(g.vertexPoint[g.primStart[p]], prims.get(p));
+  return g;
+}
+
 defineNode({
   type: 'file',
   category: 'io',
   packed: 'keep',
-  summary: 'Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON. Z-up files can be converted.',
+  summary: 'Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON. .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively: name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points). copy_to_points {variants: \'name\'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.',
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {
-    path: { type: 'path', default: '', desc: 'file path (relative to the workspace) or URL', aliases: ['file', 'filename'] },
-    format: { type: 'enum', options: ['auto', 'obj', 'stl', 'ply', 'glb', 'gltf', 'json', 'geo', 'bgeo', 'csv', 'pointsjson'], default: 'auto', desc: 'file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc)' },
+    path: { type: 'path', default: '', desc: 'file or folder path (relative to the workspace) or file URL; folder mode needs directory support in the host', aliases: ['file', 'filename'] },
+    format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
     weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances)' },
-    instancing: { type: 'enum', options: ['packed', 'expand'], default: 'packed', desc: 'glTF EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry' },
+    instancing: { type: 'enum', options: ['packed', 'expand'], default: 'packed', desc: 'glTF shared meshes and EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry' },
   },
-  signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
+  signatureExtra: (p, engine) => {
+    const host = engine.host, files = directoryFiles(p.path, host);
+    return files === null ? host.fileStamp(p.path) : JSON.stringify([host.fileStamp(p.path), files.map((f) => [f, host.fileStamp(childPath(p.path, f))])]);
+  },
   example: { type: 'file', params: { path: 'props/chair.obj', up_axis: 'z', weld: true } },
   async cook({ p, engine, warn }) {
     if (!p.path) throw new NodeError('path is empty');
-    const bytes = await engine.host.readFile(p.path).catch((e: any) => { throw new NodeError(`cannot read "${p.path}": ${e.message}`); });
-    const fmt = p.format === 'auto' ? importFormatFromPath(p.path) : p.format;
-    let g = await importGeometryAsync(bytes, fmt, { path: p.path, readFile: (f) => engine.host.readFile(f), warn, instancing: p.instancing });
-    if (p.up_axis === 'z' || p.scale !== 1) {
-      // packed instances: anchors convert like points, the conversion composes into their transforms (sources stay)
-      if (g.primKind) composePackedXforms(g, p.up_axis === 'z' ? Float64Array.from([p.scale, 0, 0, 0, 0, 0, -p.scale, 0, 0, p.scale, 0, 0, 0, 0, 0, 1]) : Float64Array.from([p.scale, 0, 0, 0, 0, p.scale, 0, 0, 0, 0, p.scale, 0, 0, 0, 0, 1]));
-      const P = g.P;
-      for (let i = 0; i < P.length; i += 3) {
-        let x = P[i], y = P[i + 1], z = P[i + 2];
-        if (p.up_axis === 'z') [x, y, z] = [x, z, -y];
-        P[i] = x * p.scale; P[i + 1] = y * p.scale; P[i + 2] = z * p.scale;
+    const host = engine.host, files = directoryFiles(p.path, host);
+    const read = async (file: string, format: string) => {
+      let fmt = format;
+      let bytes: Uint8Array;
+      if (fmt === 'blend') {
+        if (!host.convertFile) throw new NodeError('.blend needs the Node host with Blender installed (set TOPOTOPO_BLENDER); export a .glb instead');
+        bytes = await host.convertFile(host.resolvePath(file), 'glb');
+        fmt = 'glb';
+      } else bytes = await host.readFile(file).catch((e: any) => { throw new NodeError(`cannot read "${file}": ${e.message}${!host.isDirectory || !host.listDir ? `; ${folderError}` : ''}`); });
+      let g = await importGeometryAsync(bytes, fmt, { path: file, readFile: (f) => host.readFile(f), warn, instancing: p.instancing });
+      if (p.up_axis === 'z' || p.scale !== 1) {
+        // packed instances: anchors convert like points, the conversion composes into their transforms (sources stay)
+        if (g.primKind) composePackedXforms(g, p.up_axis === 'z' ? Float64Array.from([p.scale, 0, 0, 0, 0, 0, -p.scale, 0, 0, p.scale, 0, 0, 0, 0, 0, 1]) : Float64Array.from([p.scale, 0, 0, 0, 0, p.scale, 0, 0, 0, 0, p.scale, 0, 0, 0, 0, 1]));
+        const P = g.P;
+        for (let i = 0; i < P.length; i += 3) {
+          let x = P[i], y = P[i + 1], z = P[i + 2];
+          if (p.up_axis === 'z') [x, y, z] = [x, z, -y];
+          P[i] = x * p.scale; P[i + 1] = y * p.scale; P[i + 2] = z * p.scale;
+        }
+        const N = g.points.get('N') ?? g.vertices.get('N');
+        if (N && p.up_axis === 'z') {
+          const d = N.data as Float64Array;
+          for (let i = 0; i < d.length; i += 3) { const y = d[i + 1]; d[i + 1] = d[i + 2]; d[i + 2] = -y; }
+        }
       }
-      const N = g.points.get('N') ?? g.vertices.get('N');
-      if (N && p.up_axis === 'z') {
-        const d = N.data as Float64Array;
-        for (let i = 0; i < d.length; i += 3) { const y = d[i + 1]; d[i + 1] = d[i + 2]; d[i + 2] = -y; }
+      if (p.weld) {
+        if (g.hasPacked()) g = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
+        const b = g.bbox();
+        const diag = Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1;
+        return fusePoints(g, diag * 1e-7);
       }
+      return g;
+    };
+    if (files === null) return read(p.path, p.format === 'auto' ? importFormatFromPath(p.path) : p.format);
+    const parts: Geometry[] = [];
+    for (const file of files) {
+      const fmt = importFormatFromPath(file);
+      if (!IMPORT_FORMATS.includes(fmt) || (fmt === 'blend' && !host.convertFile)) continue;
+      parts.push(folderNames(await read(childPath(p.path, file), fmt), file));
     }
-    if (p.weld) {
-      if (g.hasPacked()) g = expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo;
-      const b = g.bbox();
-      const diag = Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1;
-      return fusePoints(g, diag * 1e-7);
-    }
+    const g = Geometry.merge(parts);
+    const materials = mergeMaterialTables(parts);
+    if (Object.keys(materials).length) writeMaterials(g, materials);
     return g;
   },
 });
