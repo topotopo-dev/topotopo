@@ -9059,7 +9059,7 @@ Pass through one of several inputs by index (use "=expr" to drive it from vars).
 
 category: `io` · aliases: `import`, `load`, `read`
 
-Load geometry from disk/URL: OBJ, STL, PLY, glTF/GLB, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON. Z-up files can be converted.
+Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON. .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively: name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points). copy_to_points {variants: 'name'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.
 
 **Inputs**
 
@@ -9069,12 +9069,12 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | file path (relative to the workspace) or URL |
-| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `json`, `geo`, `bgeo`, `csv`, `pointsjson` |  | file format (auto = by extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc) |
+| `path` | path | `""` |  |  | `file`, `filename` | file or folder path (relative to the workspace) or file URL; folder mode needs directory support in the host |
+| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
 | `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances) |
-| `instancing` | enum | `"packed"` |  | `packed`, `expand` |  | glTF EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry |
+| `instancing` | enum | `"packed"` |  | `packed`, `expand` |  | glTF shared meshes and EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry |
 
 **Example**
 
