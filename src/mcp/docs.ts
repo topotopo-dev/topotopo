@@ -101,6 +101,9 @@ curves and points drawn in Blender, Houdini or Unreal, placeholder blockouts, PN
 landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path} tells what one holds (polygons, open
 polylines, loose points, packed prims; bbox in metres; attributes; every name and role value; materials). Read a file
 with a file node, the path relative to the workspace: {"type":"file","params":{"path":"inputs/guides.glb"}}.
+MARKERS: what a person places by clicking in the live viewer (Site / Path / Zone / Volume modes) is written as
+  inputs/markers.json with the same name and role attributes (sites: points with pscale and orient; paths open and
+  zones closed polylines; volumes closed boxes), so describe it and read it like any other input.
 FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"), obj/stl/ply (no up axis:
   Unreal exports and Blender exports with Up = Z are Z-up, so add "up_axis":"z"), geo/bgeo (Houdini), csv and
   points.json (one point per row; columns such as name, role, pscale become point attributes), blend (needs Blender
