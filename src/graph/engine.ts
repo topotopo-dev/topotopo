@@ -669,6 +669,7 @@ export class Engine {
         const def = this.resolveDef(spec.type)!;
         const r = resolveParams(def, spec.params, allVars, { fns: deferred, host: this.host, timeoutMs: this.scriptTimeoutMs });
         for (const e of r.errors) if (!e.startsWith('unknown param')) v.errors.push({ node: name, message: e });
+        for (const w of r.warnings) v.warnings.push({ node: name, message: w });
         for (const n of r.notes) notes.push(`${name}: ${n}`);
         if (r.deferred.length) notes.push(`${name}: ${r.deferred.join(', ')} read other nodes (evaluated when cooked)`);
         if (def.deprecated) notes.push(`${name}: "${def.type}" is deprecated — ${def.deprecated}`);
@@ -806,7 +807,7 @@ export class Engine {
       return { rp, refSig: '', usesTime: rp.usesTime, depsTimeDependent: false };
     }
     const fail = (error: string, upstream = false): NodeParams => ({
-      rp: { values: {}, errors: [], notes: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
+      rp: { values: {}, errors: [], notes: [], warnings: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
     });
     const geo = new Map<string, Geometry>();
     const parts: string[] = [];
@@ -897,6 +898,7 @@ export class Engine {
       result.error = { node: name, message: rp.errors.join('; ') };
       return result;
     }
+    result.warnings.push(...rp.warnings); // values clamped to a param range: said every cook, cache hits included
     depTime ||= np.depsTimeDependent;
 
     if (spec.bypass) {

@@ -10482,10 +10482,10 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `4` | 0.5..20 |  |  | length along X (m) |
+| `length` | float | `4` | 0.5..60 |  |  | length along X (m) |
 | `height` | float | `3` | 1..10 |  |  | height (m) |
 | `thickness` | float | `0.25` | 0.05..1 |  |  | thickness along Z (m) |
-| `windows` | int | `2` | 0..10 |  |  | number of window openings |
+| `windows` | int | `2` | 0..24 |  |  | number of window openings |
 | `window_width` | float | `1` | 0.3..4 |  |  | window opening width (m), clamped to fit the bay |
 | `window_height` | float | `1.3` | 0.3..4 |  |  | window opening height (m), clamped to fit under the top |
 | `sill_height` | float | `0.9` | 0..3 |  |  | height of the window openings above the ground (m) |

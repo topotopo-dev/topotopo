@@ -565,6 +565,20 @@ section('deprecation');
   check(engine.dryRun({ nodes: { old: { type: 'test_old_box' } } }).notes.some((n) => /deprecated/.test(n)), 'dryRun notes deprecated nodes');
 }
 
+section('param ranges');
+{
+  // a value outside a param's min/max is clamped, and the cook says so (a silent clamp hid a wall asset whose range
+  // was narrower than the house that drives it)
+  const g = { nodes: { s: { type: 'sphere', params: { type: 'ico', level: 9 } } } };
+  const r = await engine.cook(g);
+  check(r.ok && r.warnings.some((w) => w.node === 's' && /^param "level" 9 clamped to 7 \(range 0\.\.7\)$/.test(w.message)), `clamping warns: ${r.warnings.map((w) => w.message).join('; ')}`);
+  const again = await engine.cook(g);
+  check(res(again, 's').cached && again.warnings.some((w) => /clamped to 7/.test(w.message)), 'the clamp warning repeats on cache hits');
+  check(engine.dryRun(g).warnings.some((w) => w.node === 's' && /clamped to 7/.test(w.message)), 'dryRun reports the clamp');
+  const vec = await engine.cook({ nodes: { b: { type: 'box', params: { divisions: [1, 600, 1] } } } });
+  check(vec.ok && vec.warnings.some((w) => /^param "divisions"\[1\] 600 clamped to 512/.test(w.message)), 'vector components clamp with the index');
+}
+
 // ------------------------------------------------------------------ CLI
 section('CLI --frames');
 {

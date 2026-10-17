@@ -204,17 +204,22 @@ function toNum(v: any): number | null {
 
 export class ParamError extends Error {}
 
-export function coerce(name: string, pd: ParamDef, v: any): any {
+/**
+ * Coerce a raw value to the param's type. Numbers outside the declared min/max are clamped, and `note` (when given)
+ * is told, so a cook can warn: a silent clamp hides mistakes such as an asset range narrower than its caller's.
+ */
+export function coerce(name: string, pd: ParamDef, v: any, note?: (msg: string) => void): any {
   const bad = (expect: string) =>
     new ParamError(`param "${name}" expects ${expect}, got ${JSON.stringify(v)?.slice(0, 80)}`);
+  const range = () => `${pd.min ?? '…'}..${pd.max ?? '…'}`;
   switch (pd.type) {
     case 'float':
     case 'int': {
       const n = toNum(v);
       if (n === null) throw bad(pd.type === 'int' ? 'an integer' : 'a number');
       let x = pd.type === 'int' ? Math.round(n) : n;
-      if (pd.min !== undefined && x < pd.min) x = pd.min;
-      if (pd.max !== undefined && x > pd.max) x = pd.max;
+      if (pd.min !== undefined && x < pd.min) { note?.(`param "${name}" ${x} clamped to ${pd.min} (range ${range()})`); x = pd.min; }
+      if (pd.max !== undefined && x > pd.max) { note?.(`param "${name}" ${x} clamped to ${pd.max} (range ${range()})`); x = pd.max; }
       return x;
     }
     case 'bool': {
@@ -265,8 +270,8 @@ export function coerce(name: string, pd: ParamDef, v: any): any {
         const nn = toNum(x);
         if (nn === null) throw new ParamError(`param "${name}"[${i}] is not a number: ${JSON.stringify(x)}`);
         let r = isInt ? Math.round(nn) : nn;
-        if (pd.min !== undefined && r < pd.min) r = pd.min;
-        if (pd.max !== undefined && r > pd.max) r = pd.max;
+        if (pd.min !== undefined && r < pd.min) { note?.(`param "${name}"[${i}] ${r} clamped to ${pd.min} (range ${range()})`); r = pd.min; }
+        if (pd.max !== undefined && r > pd.max) { note?.(`param "${name}"[${i}] ${r} clamped to ${pd.max} (range ${range()})`); r = pd.max; }
         return r;
       });
     }
@@ -295,6 +300,8 @@ export interface ResolvedParams {
   values: Record<string, any>;
   errors: string[];
   notes: string[];
+  /** values changed on the way in (clamped to the param range); a cook reports them as node warnings */
+  warnings: string[];
   /** an expression read frame, time, fps or timeInc */
   usesTime: boolean;
   /** params whose value is only known at cook time (dry run with reference functions) */
@@ -304,7 +311,7 @@ export interface ResolvedParams {
 /** Validate names, evaluate expressions and coerce types. */
 export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined, vars: Record<string, any>, env: ExprEnv = {}): ResolvedParams {
   const values: Record<string, any> = {};
-  const errors: string[] = [], notes: string[] = [], deferred: string[] = [];
+  const errors: string[] = [], notes: string[] = [], warnings: string[] = [], deferred: string[] = [];
   let usesTime = false;
   const ev: ExprEnv = { ...env, onTime: () => { usesTime = true; env.onTime?.(); } };
   let scope: ExprScope | undefined;
@@ -335,14 +342,14 @@ export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined
     let v = name in given ? given[name] : pd.default;
     try {
       if (pd.type !== 'code' && pd.type !== 'graph') v = evalValue(v, getScope, `"${name}"`);
-      values[name] = v === undefined ? undefined : coerce(name, pd, v);
+      values[name] = v === undefined ? undefined : coerce(name, pd, v, (m) => warnings.push(m));
     } catch (e: any) {
       if (e instanceof DeferredExpr) deferred.push(name);
       else errors.push(e.message);
       values[name] = pd.default;
     }
   }
-  return { values, errors, notes, usesTime, deferred };
+  return { values, errors, notes, warnings, usesTime, deferred };
 }
 
 /** Evaluate a ramp at t. Values may be numbers or arrays. */

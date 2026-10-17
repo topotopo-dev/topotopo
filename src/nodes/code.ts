@@ -122,6 +122,7 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
       // "=frame" etc. read the script's own time (and mark it time-dependent)
       const rp = resolveParams(def, params, ctx.vars, { time: ctx, host: engine.host, timeoutMs: engine.scriptTimeoutMs });
       if (rp.errors.length) throw new Error(`lib.run(${type}): ${rp.errors.join('; ')}`);
+      for (const w of rp.warnings) ctx.warn(`lib.run(${type}): ${w}`);
       // inherit from ctx through the prototype so its time getters stay lazy
       const sub: CookContext = Object.assign(Object.create(ctx), {
         node: `${ctx.node}/${type}`, type: def.type, p: rp.values, inputs,
