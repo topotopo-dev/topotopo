@@ -1,7 +1,8 @@
-// Live viewer tests (src/viewer/server.ts): the routes behind the human's control surface. Exposed vars in
-// /api/graphs, POST /api/vars (and how it coalesces bursts), the inputs/ drop target (under `topotopo view`, beside the
-// graph file), reference-layer GLBs (a PNG as a textured quad), markers (POST /api/markers → inputs/markers.json, read
-// back through a file node), and the Host/Origin checks.
+// Live viewer tests (src/viewer/server.ts): the routes behind the human's control surface. The page (a shell and its
+// ES modules under /app/), exposed vars in /api/graphs, POST /api/vars (and how it coalesces bursts), the last cook in
+// /api/report, the inputs/ drop target (under `topotopo view`, beside the graph file), reference-layer GLBs (a PNG as
+// a textured quad), markers (POST /api/markers → inputs/markers.json, read back through a file node), and the
+// Host/Origin checks. The page's browser-free logic is tested in test/viewer-logic.ts.
 //   node test/viewer.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -69,9 +70,27 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       };
       const box = async () => sizeOf((await getJSON('/api/info?graph=boxes')).j.summary);
 
+      // the page: a shell that loads ES modules from /app/ and three.js from /vendor/three/
+      const page = await fetch(url + '/');
+      const shell = await page.text();
+      check(page.status === 200 && /text\/html/.test(page.headers.get('content-type') ?? '') && /<script type="module" src="\/app\/main\.js">/.test(shell) && /href="\/app\/style\.css"/.test(shell),
+        'GET / serves the shell, which loads /app/main.js and /app/style.css');
+      const appFiles = fs.readdirSync(path.join(root, 'src', 'viewer', 'app'));
+      const served = await Promise.all(appFiles.map(async (f) => { const r = await fetch(`${url}/app/${f}`); return { f, status: r.status, type: r.headers.get('content-type') ?? '', len: (await r.arrayBuffer()).byteLength }; }));
+      const wrong = served.filter((x) => x.status !== 200 || !x.len || !(x.f.endsWith('.js') ? /^text\/javascript/ : x.f.endsWith('.css') ? /^text\/css/ : /./).test(x.type));
+      check(appFiles.includes('main.js') && !wrong.length, `every file of src/viewer/app is served under /app/ with its MIME type (${served.length} files${wrong.length ? `; wrong: ${JSON.stringify(wrong)}` : ''})`);
+      const three = await fetch(url + '/vendor/three/build/three.module.js');
+      const addon = await fetch(url + '/vendor/three/examples/jsm/lines/LineMaterial.js');
+      check(three.status === 200 && addon.status === 200 && /javascript/.test(three.headers.get('content-type') ?? ''), 'three.js and its addons are served from /vendor/three/');
+      const escapes = await Promise.all(['/app/../server.ts', '/app/%2e%2e/server.ts', '/app/', '/app/nope.js', '/app/..%5cserver.ts'].map(async (p) => (await fetch(url + p)).status));
+      check(escapes.every((s) => s === 404), `/app/ serves nothing outside src/viewer/app, nor folders or missing files (${escapes.join(', ')})`);
+
       const g = (await getJSON('/api/graphs')).j[0];
       check(g.params?.s?.max === 10 && g.params.s.desc === 'box size' && g.vars?.s === 1 && g.vars.extra === 'x',
         `/api/graphs carries params and vars (${JSON.stringify({ params: g.params, vars: g.vars })})`);
+      const rep0 = (await getJSON('/api/report?graph=boxes')).j, noRep = await getJSON('/api/report?graph=nope');
+      check(rep0.cooked === true && rep0.ok === true && rep0.graph === 'boxes' && rep0.target === 'b' && typeof rep0.ms === 'number' && Array.isArray(rep0.errors) && !rep0.errors.length && noRep.status === 404,
+        `GET /api/report gives the last cook of a graph: target, ok, ms, errors (${JSON.stringify(rep0)}); an unknown graph is 404`);
 
       const r1 = await postVars({ vars: { s: 2 } });
       check(r1.status === 200 && r1.j.ok === true && typeof r1.j.ms === 'number' && Array.isArray(r1.j.errors) && !r1.j.errors.length, `POST /api/vars answers { ok, ms, errors } (${JSON.stringify(r1.j)})`);
@@ -80,6 +99,9 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       const burst = await Promise.all([3, 4, 5].map((s) => postVars({ vars: { s } })));
       check(burst.every((r) => r.status === 200 && r.j.ok), `a burst of three POSTs: all answered ok (${burst.map((r) => r.j.vars?.s).join(', ')})`);
       check((await box()).join() === '5,5,5' && (await getJSON('/api/graphs')).j[0].vars.s === 5, 'the burst ends with the last value applied (a 5 m box)');
+
+      const rep1 = (await getJSON('/api/report?graph=boxes')).j;
+      check(rep1.version > rep0.version && rep1.ok, `the report follows the edits (version ${rep0.version} → ${rep1.version})`);
 
       const bad = await postVars({ vars: [1] });
       const noGraph = await postVars({ vars: { s: 1 } }, 'nope');
