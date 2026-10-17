@@ -46,7 +46,11 @@ discs, no inertia, no saturated fills.
   Below it, the graph's exposed vars as the Controls panel.
 - **Node editor**: a second pane (tab or split under the viewport) in a later phase, editing the same graph JSON.
 
-## 3. Navigation (Maya)
+## 3. Navigation
+
+Three keymap presets, chosen in the top bar and remembered per browser: **Maya** (the default), **Houdini** and
+**Blender**. A preset binds every action of section 9; the actions themselves are the same. Navigation in the Maya
+preset:
 
 | action | input |
 |---|---|
@@ -59,10 +63,10 @@ discs, no inertia, no saturated fills.
 | perspective / top / front / right | view menu, or Alt+1 / Alt+2 / Alt+3 / Alt+4 |
 | orthographic toggle of the current view | O |
 
-No inertia, no damping, no auto-framing: the camera moves only when the person moves it or presses F / A. Loading
-a layer, placing a guide, saving or re-cooking never moves the camera. Orbit pivot: the selection centre when
-something is selected, else the last frame target. Tumble is disabled in orthographic views (track and dolly only).
-Near and far planes follow the scene size (logarithmic depth stays on) so a 1 km terrain and a 2 cm bolt both work.
+No inertia, no damping, no auto-framing: the camera moves only when the person moves it or frames. Loading a layer,
+placing a guide, saving or re-cooking never moves the camera. Orbit pivot: the selection centre when something is
+selected, else the last frame target. Tumble is disabled in orthographic views (track and dolly only). Near and far
+planes follow the scene size (logarithmic depth stays on) so a 1 km terrain and a 2 cm bolt both work.
 
 ## 4. Grid, units, readouts
 
@@ -117,24 +121,41 @@ Unchanged in purpose: the graph's `params` draw as sliders, number fields, check
 colour pickers in the properties column; drags post at most every 100 ms and re-cook only what depends on the var;
 reset per control. Undeclared vars appear under "other vars".
 
-## 9. Keymap (complete)
+## 9. Keymap presets (complete)
 
-| key | action |
-|---|---|
-| Alt + L / M / R drag, wheel | tumble / track / dolly |
-| F, A | frame selection, frame all |
-| Space | single / quad view |
-| Alt+1..4 | persp / top / front / right |
-| O | orthographic toggle |
-| W, E, R | move, rotate, scale gizmo |
-| X, C, V (held) | snap to grid, surface or curve, point |
-| 4, 5, 6 | wire, shaded, shaded + wire |
-| Q | select mode (leaves any placement mode) |
-| N, P, Z, B | place a null, draw a curve (path), draw an area (zone), drag a volume |
-| Enter, Backspace, Esc | finish a curve, remove its last point, cancel |
-| Delete | delete the selection |
-| Ctrl+Z, Ctrl+Y | undo, redo (guides and vars) |
-| H | hide the selection; Shift+H show all |
+One table of actions, three bindings. The page holds this as data (`app/keymap.js`), the top bar selects the
+preset, `?` shows the active table as an overlay. Mouse buttons are L / M / R; "held" means the key acts while down.
+
+| action | Maya (default) | Houdini | Blender |
+|---|---|---|---|
+| tumble | Alt + L drag | Space + L drag | M drag |
+| track | Alt + M drag | Space + M drag | Shift + M drag |
+| dolly | Alt + R drag, wheel | Space + R drag, wheel | Ctrl + M drag, wheel |
+| frame selection | F | Space+G | Numpad . |
+| frame all | A | Space+H | Home |
+| single / quad view | Space (tap) | Space+B | Ctrl+Alt+Q |
+| perspective | Alt+1 | Space+1 | Numpad 5 (toggles with ortho) |
+| top / front / right | Alt+2 / Alt+3 / Alt+4 | Space+2 / Space+3 / Space+4 | Numpad 7 / 1 / 3 |
+| orthographic toggle | O | O | Numpad 5 |
+| select mode | Q | S | W |
+| move / rotate / scale | W / E / R | T / R / E | G / R / S |
+| snap to grid (held) | X | X | Ctrl (held, with the snap target set to grid) |
+| snap to surface or curve (held) | C | C | Ctrl (target: surface) |
+| snap to point (held) | V | V | Ctrl (target: point) |
+| snapping on / off | toolbar | toolbar | Shift+Tab |
+| wire / shaded / shaded + wire | 4 / 5 / 6 | W (cycles) | Shift+Z (wire toggle), Z (cycles) |
+| place a null / curve / area / volume | Shift+1 / 2 / 3 / 4 | Shift+1 / 2 / 3 / 4 | Shift+1 / 2 / 3 / 4 |
+| finish a curve / remove its last point / cancel | Enter / Backspace / Esc | Enter / Backspace / Esc | Enter / Backspace / Esc |
+| delete the selection | Delete | Delete | X, Delete |
+| undo / redo (guides and vars) | Ctrl+Z / Ctrl+Y (also Z / Shift+Z) | Ctrl+Z / Ctrl+Y | Ctrl+Z / Ctrl+Shift+Z |
+| hide the selection / show all | H / Shift+H | H / Shift+H | H / Alt+H |
+| keymap overlay | ? | ? | ? |
+
+Placement keys are the same everywhere because no application has a convention for them; Z was avoided (undo in
+Maya). In the Houdini preset a tap of Space does nothing and Space is only a modifier. In the Blender preset the
+snap target (grid, surface, point) is a top-bar choice and Ctrl applies it while dragging, as in Blender. Transform
+and snapping bindings belong to phase 2 and stay unbound until then; the tables ship complete so a preset never
+changes shape later.
 
 ## 10. Structure
 
@@ -142,7 +163,8 @@ reset per control. Undeclared vars appear under "other vars".
 `src/viewer/app/`, no build step, three.js from the served `/vendor/three/`:
 
 ```
-app/main.js        boot, layout, keymap, undo stack
+app/main.js        boot, layout, undo stack
+app/keymap.js      the action table and the Maya / Houdini / Blender presets, the overlay
 app/api.js         the server routes (graphs, geo, vars, inputs, markers, events)
 app/camera.js      Maya navigation, views, quad layout, framing (no OrbitControls)
 app/grid.js        adaptive grid, axes, axis gizmo, readouts
