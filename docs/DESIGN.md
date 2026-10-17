@@ -961,10 +961,12 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   Under `topotopo view <graph.json>` that is the `inputs/` folder beside the graph file, made by the first drop (the
   scratch workspace keeps only graphs, assets and exports), so the graph reads drops as `inputs/<name>` and they
   outlive the viewer; the page names the folder (`GET /api/inputs_dir`).
-  Done too: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`). Next: a
-  transform gizmo to move, rotate and scale placed markers and reference layers, then the node editor. No chat panel
-  in the viewer: Claude Code is the conversation, the viewer is where the person looks and points (decided
-  2026-10-17).
+  Done too: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`). That first
+  page was judged toy-like (damped camera, no orthographic views, no snapping, invented icons), so the viewer is now
+  built to a standard, [design/viewer.md](design/viewer.md): a production editor viewport with Maya navigation,
+  quad and orthographic views with a metre grid, selection, outliner and properties, guides drawn as nulls, curves,
+  areas and volumes, then a gizmo with snapping and typed values, then the node editor (full editor direction). No
+  chat panel in the viewer: Claude Code is the conversation (decided 2026-10-17).
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
   from `ParamDef`s. Every param already carries type, default, range, enum options and a description.
 - The engine runs in a Web Worker. Graph JSON is the file format and is identical for humans and LLMs, and `ui: {x, y}`
