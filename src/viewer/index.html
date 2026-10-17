@@ -30,8 +30,9 @@
   details.sec > summary::before { content: '▸'; width: 10px; }
   details.sec[open] > summary::before { content: '▾'; }
   details.sec > summary .count { margin-left: auto; letter-spacing: 0; }
-  .none, .hint { padding: 0 6px 6px; color: var(--dim); font-size: 12px; }
-  .hint { font-size: 11px; padding-top: 4px; }
+  .none, .hint, .where { padding: 0 6px 6px; color: var(--dim); font-size: 12px; }
+  .hint, .where { font-size: 11px; padding-top: 4px; }
+  .where { overflow-wrap: anywhere; }
   .sub { padding: 8px 4px 2px; color: var(--dim); font-size: 11px; }
   #controls, #inputs, #nodes { padding: 0 6px 8px; }
   .ctl { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 6px; }
@@ -129,7 +130,7 @@
     <div id="info"></div>
   </main>
 </div>
-<div id="drop">drop files to add them to inputs/<br>they show here as grey reference layers</div>
+<div id="drop">drop files to add them to <span id="drop-where">inputs/</span><br>they show here as grey reference layers</div>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -611,7 +612,7 @@ const ghost = {
   line: new THREE.LineBasicMaterial({ color: 0xc4cad4, transparent: true, opacity: 0.6, depthWrite: false }),
   point: new THREE.PointsMaterial({ color: 0xc4cad4, size: 3, sizeAttenuation: false, transparent: true, opacity: 0.75, depthWrite: false }),
 };
-const inp = { list: [], rows: new Map(), layers: new Map(), info: new Map(), errors: new Map(), checked: new Set(), hover: null, selected: null, restored: false };
+const inp = { list: [], rows: new Map(), layers: new Map(), info: new Map(), errors: new Map(), checked: new Set(), hover: null, selected: null, restored: false, where: '' };
 const stampOf = (f) => `${f.mtime}:${f.size}`;
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
 const errText = (e) => String(e?.message ?? e).replace(/^\[f\] /gm, '');
@@ -708,17 +709,30 @@ function inputRow(p) {
     },
   };
 }
+// where dropped files go (GET /api/inputs_dir): "in the workspace", or "beside house.json" under `topotopo view`
+const whereLine = el('div', 'where');
+whereLine.hidden = true;
+async function loadWhere() {
+  const j = await fetch('/api/inputs_dir').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!j?.where) return;
+  inp.where = String(j.where);
+  whereLine.textContent = `files go to inputs/ ${inp.where}; a file node reads them as inputs/<name>`;
+  whereLine.title = String(j.dir ?? '');
+  whereLine.hidden = false;
+  $('drop-where').textContent = `inputs/ ${inp.where}`;
+}
 function renderInputs() {
   const box = $('inputs');
   $('inputs-count').textContent = inp.list.length || '';
   if (!inp.list.length) {
     inp.rows.clear();
-    box.replaceChildren(el('div', 'none', 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON)'));
+    box.replaceChildren(el('div', 'none', 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON)'), whereLine);
     return;
   }
   box.querySelector('.none')?.remove();
   let hint = box.querySelector('.hint');
   if (!hint) { hint = el('div', 'hint', 'checked files show as grey reference layers; drop more files anywhere'); box.append(hint); }
+  if (hint.nextSibling !== whereLine) hint.after(whereLine);
   // rows are kept and updated in place, in list order
   const seen = new Set();
   let prev = null;
@@ -803,7 +817,7 @@ function upload(files, folders) {
       } else if (r.kept) kept.push(r.kept);
       else if (r.error) errors.push(r.error);
     }
-    const msg = [added.length ? `added ${added.map((p) => 'inputs/' + p).join(', ')}` : '', kept.length ? `kept the existing ${kept.map((p) => 'inputs/' + p).join(', ')}` : '', ...errors].filter(Boolean).join(' · ');
+    const msg = [added.length ? `added ${added.map((p) => 'inputs/' + p).join(', ')}${inp.where ? ' ' + inp.where : ''}` : '', kept.length ? `kept the existing ${kept.map((p) => 'inputs/' + p).join(', ')}` : '', ...errors].filter(Boolean).join(' · ');
     if (msg) setStatus(msg, errors.length ? 'err' : added.length ? 'ok' : '');
   });
 }
@@ -1379,7 +1393,8 @@ const saveMarkers = coalesce(async () => {
   } catch { j = { error: 'the viewer server is not answering' }; }
   if (status === 200 && j.ok) {
     mk.saved = body;
-    if (!mk.mode && markersBody() === body) setStatus(j.count ? `${j.count} marker${j.count === 1 ? '' : 's'} saved to inputs/markers.json (${j.points} points, ${j.prims} prims)` : 'no markers: inputs/markers.json removed', 'ok');
+    const file = `inputs/markers.json${inp.where ? ' ' + inp.where : ''}`;
+    if (!mk.mode && markersBody() === body) setStatus(j.count ? `${j.count} marker${j.count === 1 ? '' : 's'} saved to ${file} (${j.points} points, ${j.prims} prims)` : `no markers: ${file} removed`, 'ok');
   } else setStatus(`markers not saved — ${j.error ?? `${status}`}`, 'err');
   showInfo();
 });
@@ -1414,7 +1429,7 @@ es.onopen = () => {
   setStatus(LIVE);
   modeStatus();
   // after a reconnect the server may have restarted: fetch everything again
-  if (opened) { refreshGraphs().then(loadGeo); refreshInputs(); loadMarkers(); }
+  if (opened) { refreshGraphs().then(loadGeo); refreshInputs(); loadWhere(); loadMarkers(); }
   opened = true;
 };
 es.onerror = () => { setStatus('disconnected (server stopped?)', 'err'); };
@@ -1429,6 +1444,7 @@ renderMarkers();
 await refreshGraphs();
 loadGeo();
 refreshInputs();
+loadWhere();
 loadMarkers();
 </script>
 </body>

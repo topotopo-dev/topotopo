@@ -670,6 +670,9 @@ section('CLI view');
       const bumped = await until(() => /cooked view_graph.*\n.*cooked view_graph/s.test(out), 15000);
       const info2 = await (await fetch(`${url}/api/info?graph=view_graph`)).json() as any;
       check(bumped && /42 points/.test(JSON.stringify(info2)), 'view re-cooks when the file is saved (an ico sphere: 42 points)');
+      // dropped files would go to inputs/ beside the graph file (test/viewer.ts drops one); the folder waits for a drop
+      const listed = await (await fetch(`${url}/api/inputs`)).json() as any;
+      check(Array.isArray(listed) && !listed.length && !fs.existsSync(path.join(tmp, 'inputs')), 'a view run without drops makes no inputs/ folder beside the graph');
     }
   } finally { proc.kill(); }
 }
