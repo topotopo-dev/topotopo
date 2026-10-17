@@ -961,8 +961,10 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   Under `topotopo view <graph.json>` that is the `inputs/` folder beside the graph file, made by the first drop (the
   scratch workspace keeps only graphs, assets and exports), so the graph reads drops as `inputs/<name>` and they
   outlive the viewer; the page names the folder (`GET /api/inputs_dir`).
-  Next: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`), then a chat
-  panel, then the node editor.
+  Done too: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`). Next: a
+  transform gizmo to move, rotate and scale placed markers and reference layers, then the node editor. No chat panel
+  in the viewer: Claude Code is the conversation, the viewer is where the person looks and points (decided
+  2026-10-17).
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
   from `ParamDef`s. Every param already carries type, default, range, enum options and a description.
 - The engine runs in a Web Worker. Graph JSON is the file format and is identical for humans and LLMs, and `ui: {x, y}`
@@ -975,4 +977,4 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   a value kept says so (a lock was built and removed on 2026-10-17 as unneeded).
 - The MCP server and the GUI share one workspace. The live viewer (`preview` tool) already streams updates over SSE, so
   you can watch an agent build while you inspect intermediate nodes.
-- Later: a GUI chat panel that calls the same tool layer, so an LLM can co-edit the open graph.
+- The LLM side stays in Claude Code (or any MCP client) talking to the same workspace; the viewer gets no chat panel.
