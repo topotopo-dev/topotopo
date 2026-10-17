@@ -200,7 +200,7 @@ export const PARAMS: Record<string, any> = {
   mesh_repair: { self_intersections: 'report' },
   lod: { levels: 3 },
   mask: { by: 'slope', min: 0, max: 45, falloff: 15 },
-  // attribute_from_map: { path } is filled in by createFixtureEngine() (an RGBA PNG written to the temp dir)
+  // attribute_from_map and image_file: { path } is filled in by createFixtureEngine() (an RGBA PNG written to the temp dir)
   orient: { random_yaw: [0, 360], tilt: [0, 10], scale_min: 0.8, scale_max: 1.2 },
   points_along_curve: { spacing: 0.3, start_offset: 0.1 },
   cluster: { count: 5, center: true, color: true },
@@ -378,6 +378,8 @@ export async function createFixtureEngine(): Promise<{ engine: Engine; tmp: stri
   const mapPath = path.join(tmp, 'colormap.png');
   fs.writeFileSync(mapPath, encodePNG(rgba, MW, MH, (d) => zlib.deflateSync(d)));
   PARAMS.attribute_from_map = { path: mapPath, channel: 'rgb' };
+  // image_file: the same colour map as an image volume (named after the file: "colormap")
+  PARAMS.image_file = { path: mapPath };
   return { engine, tmp, objPath };
 }
 

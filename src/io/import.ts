@@ -1,5 +1,5 @@
 // Importers: OBJ, STL, PLY, glTF/GLB (gltf-transform, src/io/gltf.ts), native JSON, Houdini .geo (src/io/hgeo.ts),
-// CSV and points JSON (src/io/points.ts).
+// CSV and points JSON (src/io/points.ts), and PNG as a geometry holding one image volume (src/io/textures.ts).
 //
 // importGeometry() is synchronous and covers every format except glTF, whose reader (gltf-transform) is
 // asynchronous: use importGeometryAsync() for glb/gltf (it handles every format, and reads external .bin files).
@@ -8,6 +8,7 @@ import { geoFromJSON } from './json.ts';
 import { importGLTFAsync } from './gltf.ts';
 import { importHoudiniBgeo, importHoudiniGeo, isBinaryJSON } from './hgeo.ts';
 import { importCSV, importPointsJSON, isPointsJSON } from './points.ts';
+import { imageFromPNGFile } from './textures.ts';
 
 export { importGLTFAsync } from './gltf.ts';
 export { importHoudiniBgeo, importHoudiniGeo } from './hgeo.ts';
@@ -15,7 +16,7 @@ export { importCSV, importPointsJSON } from './points.ts';
 
 const td = new TextDecoder();
 
-export const IMPORT_FORMATS = ['obj', 'stl', 'ply', 'glb', 'gltf', 'blend', 'json', 'geo', 'bgeo', 'csv', 'pointsjson'];
+export const IMPORT_FORMATS = ['obj', 'stl', 'ply', 'glb', 'gltf', 'blend', 'json', 'geo', 'bgeo', 'csv', 'pointsjson', 'png'];
 
 export interface ImportOptions {
   /** reads other files by path (glTF external buffers); usually Host.readFile */
@@ -28,7 +29,7 @@ export interface ImportOptions {
   instancing?: 'packed' | 'expand';
 }
 
-/** Format from a file name: the extension, with ".points.json" → pointsjson. */
+/** Format from a file name: the extension, with ".points.json" → pointsjson (".png" → png: an image). */
 export function importFormatFromPath(path: string): string {
   const p = String(path).split('?')[0].toLowerCase();
   if (p.endsWith('.points.json')) return 'pointsjson';
@@ -53,6 +54,12 @@ export function importGeometry(bytes: Uint8Array, fmt: string, opts: ImportOptio
     case 'geo': case 'hgeo': case 'bgeo': return isBinaryJSON(bytes) ? importHoudiniBgeo(bytes, opts.warn) : importHoudiniGeo(td.decode(bytes), opts.warn);
     case 'csv': return importCSV(td.decode(bytes));
     case 'pointsjson': return importPointsJSON(JSON.parse(td.decode(bytes)));
+    case 'png': {
+      // an image volume named after the file, as the image_file node reads it with its defaults
+      const g = new Geometry();
+      g.volumes = [imageFromPNGFile(bytes, opts.path ?? 'image.png')];
+      return g;
+    }
     case 'glb': case 'gltf': throw new Error(`${fmt} import is asynchronous (gltf-transform): use importGeometryAsync`);
     case 'bgeo.sc': throw new Error('compressed Houdini geometry (.bgeo.sc / .gz) is not supported: save as .geo or uncompressed .bgeo');
     default: throw new Error(`unsupported import format "${fmt}" (${IMPORT_FORMATS.join(', ')})`);

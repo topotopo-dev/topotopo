@@ -1,10 +1,12 @@
 // Textures in the renderer: the "texture" view (images drawn flat, labelled, several as a grid: every image, one image's
 // layers, or a material's maps as a strip) and the sampler persp/ortho views use with `textures: true` to show base
 // colour maps on meshes with uv. Pixels are drawn with the numbers they hold (as the PNG export writes them); RGBA
-// layers sit over a checkerboard where alpha < 1.
-import type { Geometry } from '../core/geometry.ts';
-import { Image, channelsOf, imageRef, referenceableImages, resizeLayer } from '../core/image.ts';
-import { primMaterials, readMaterials } from '../core/materials.ts';
+// layers sit over a checkerboard where alpha < 1. For 3D viewers (the live viewer's GLB), withImagePreview turns a
+// geometry holding only images into flat textured quads laid out like the texture view.
+import { Geometry } from '../core/geometry.ts';
+import { Image, channelsOf, imageRef, isImage, referenceableImages, resizeLayer } from '../core/image.ts';
+import { MATERIAL_ATTRIB, normalizeMaterial, primMaterials, readMaterials, writeMaterials } from '../core/materials.ts';
+import type { MaterialTable } from '../core/materials.ts';
 import { drawText, textWidth } from './font.ts';
 
 interface Entry { label: string; img: Image; layer: string }
@@ -99,6 +101,41 @@ export function drawTextureView(g: Geometry, col: Float32Array, W: number, H: nu
   });
   if (ranges.length) notes.push(`texture view: values outside 0..1 are shown clamped (${ranges.slice(0, 4).join(', ')})`);
   return n === 1 ? `TEXTURE  ${entries[0].label.toUpperCase()}` : `TEXTURES  ${n} MAPS`;
+}
+
+/**
+ * For 3D viewers (the live viewer's GLB): a geometry holding only images (a dropped PNG, a texture graph) draws nothing,
+ * so each image (at most 16, as in the texture view) becomes a flat quad 1 m wide and height / width tall, standing on
+ * y = 0 in the XY plane and facing +Z, in reading order on a grid. Each quad has an unlit, double-sided material named
+ * "image:<name>" whose base colour map is the image (the GLB embeds it as a PNG), so it shows the stored values as the
+ * texture view does. Anything else (points, prims, other volumes) is returned as it is.
+ */
+export function withImagePreview(g: Geometry, max = 16): Geometry {
+  if (g.numPoints || !g.volumes.length || !g.volumes.every(isImage)) return g;
+  const imgs = [...referenceableImages(g).values()].slice(0, max);
+  const n = imgs.length, cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols), gap = 0.1;
+  const cellH = Math.max(...imgs.map((im) => im.height / im.width));
+  const P: number[] = [], prims: number[][] = [], uv: number[] = [];
+  imgs.forEach((im, k) => {
+    const h = im.height / im.width, c = k % cols, r = Math.floor(k / cols);
+    const x = c * (1 + gap) - (cols * (1 + gap) - gap) / 2, y = (rows - 1 - r) * (cellH + gap) + (cellH - h) / 2;
+    const b = P.length / 3;
+    P.push(x, y, 0, x + 1, y, 0, x + 1, y + h, 0, x, y + h, 0);
+    uv.push(0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0);
+    prims.push([b, b + 1, b + 2, b + 3]);
+  });
+  const out = new Geometry({ positions: P, prims });
+  (out.points.add('uv', 'float', 3).data as Float64Array).set(uv);
+  const mat = out.prims.add(MATERIAL_ATTRIB, 'string', 1);
+  const table: MaterialTable = {};
+  imgs.forEach((im, k) => {
+    const name = `image:${im.name}`;
+    mat.set(k, name);
+    table[name] = normalizeMaterial({ baseColor: [1, 1, 1], roughness: 1, metallic: 0, unlit: true, doubleSided: true, textures: { baseColor: name } });
+  });
+  writeMaterials(out, table);
+  out.volumes = imgs;
+  return out;
 }
 
 // ---------------------------------------------------------------- base colour maps on meshes

@@ -1,7 +1,8 @@
 // Behavioural tests for procedural textures and bakes (P3-T): image volumes, generators (deterministic, tileable),
 // filters (blend modes, blur, normals), bakes (AO, curvature, padding, islands, normals from a high mesh), material
-// linkage, exports (glTF embeds PNGs and validates, USD writes files, the textures format), the texture view and
-// texture sampling in the renderer, JSON round trips, fingerprints, and pool on/off equality.
+// linkage, exports (glTF embeds PNGs and validates, USD writes files, the textures format), PNG files read as images
+// (image_file, the file node, the live viewer's quads), the texture view and texture sampling in the renderer, JSON
+// round trips, fingerprints, and pool on/off equality.
 //   node test/textures.ts
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,17 +13,19 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
-import { Image, findImage, imageToBytes, imagesOf, resizeLayer } from '../src/core/image.ts';
+import { Image, findImage, imageToBytes, imagesOf, resizeLayer, toGrey } from '../src/core/image.ts';
 import { texNoise } from '../src/core/texnoise.ts';
 import { blendLayers, blurLayer, genPattern } from '../src/core/texture.ts';
 import { readMaterials } from '../src/core/materials.ts';
 import { allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
 import { exportGeometryAsync } from '../src/io/export.ts';
-import { importGeometryAsync } from '../src/io/import.ts';
+import { importGeometry, importGeometryAsync } from '../src/io/import.ts';
 import { exportFilesAsync } from '../src/io/files.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
+import { imagePNG } from '../src/io/textures.ts';
 import { renderGeometry } from '../src/render/raster.ts';
+import { withImagePreview } from '../src/render/texview.ts';
 import { renderArgs } from '../src/render/options.ts';
 import { summarize } from '../src/inspect.ts';
 import { explainGeometry } from '../src/explain.ts';
@@ -87,7 +90,7 @@ function seamRatio(a: Float32Array, w: number, h: number): number {
 section('registry: texture nodes');
 const TEX_TYPES = allNodeDefs().filter((d) => d.category === 'texture').map((d) => d.type);
 check(TEX_TYPES.length >= 35, `${TEX_TYPES.length} nodes in category texture`);
-for (const t of ['tex_noise', 'tex_pattern', 'tex_gradient', 'tex_shape', 'tex_cells', 'tex_splatter', 'tex_scratches', 'tex_text', 'tex_blend', 'tex_levels', 'tex_curves', 'tex_blur', 'tex_warp', 'tex_transform', 'tex_edge_detect', 'tex_invert', 'tex_threshold', 'tex_histogram_scan', 'tex_normal_from_height', 'tex_height_to_ao', 'tex_channel', 'tex_colorize', 'tex_tile_sampler', 'tex_output', 'texture_to_material', 'tex_to_heightfield', 'heightfield_to_tex', 'bake_ao', 'bake_curvature', 'bake_thickness', 'bake_position', 'bake_normal', 'bake_world_normal', 'bake_island_id', 'bake_mask', 'bake_vertex_color', 'bake_height'])
+for (const t of ['tex_noise', 'tex_pattern', 'tex_gradient', 'tex_shape', 'tex_cells', 'tex_splatter', 'tex_scratches', 'tex_text', 'image_file', 'tex_blend', 'tex_levels', 'tex_curves', 'tex_blur', 'tex_warp', 'tex_transform', 'tex_edge_detect', 'tex_invert', 'tex_threshold', 'tex_histogram_scan', 'tex_normal_from_height', 'tex_height_to_ao', 'tex_channel', 'tex_colorize', 'tex_tile_sampler', 'tex_output', 'texture_to_material', 'tex_to_heightfield', 'heightfield_to_tex', 'bake_ao', 'bake_curvature', 'bake_thickness', 'bake_position', 'bake_normal', 'bake_world_normal', 'bake_island_id', 'bake_mask', 'bake_vertex_color', 'bake_height'])
   if (!TEX_TYPES.includes(t)) check(false, `missing node ${t}`);
 check(getNodeDef('tilesampler')?.type === 'tex_tile_sampler' && getNodeDef('histogram_scan')?.type === 'tex_histogram_scan' && getNodeDef('gradient_map')?.type === 'tex_colorize', 'Substance / COP names resolve as aliases');
 {
@@ -110,12 +113,18 @@ check(getNodeDef('tilesampler')?.type === 'tex_tile_sampler' && getNodeDef('hist
   check(!bad.length, `aliases and params are unambiguous${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);
 }
 {
-  // every node's example cooks
+  // every node's example cooks (an example that reads a PNG, image_file's, gets one at the path it names)
   const failed: string[] = [];
+  const png = imagePNG(new Image(8, 4, 'fixture').set('C', new Float32Array(8 * 4 * 4).fill(0.5)));
   for (const t of TEX_TYPES) {
     const ex: any = getNodeDef(t)!.example;
     if (!ex) continue;
     const graph = ex.nodes ? ex : { nodes: { x: ex }, output: 'x' };
+    for (const s of Object.values(graph.nodes) as NodeSpec[]) {
+      if (getNodeDef(s.type)?.type !== 'image_file' || !s.params?.path) continue;
+      fs.mkdirSync(path.dirname(path.join(tmp, s.params.path)), { recursive: true });
+      fs.writeFileSync(path.join(tmp, s.params.path), png);
+    }
     const r = await engine.cook(structuredClone(graph));
     if (!r.ok) failed.push(`${t}: ${r.errors.map((e) => e.message).join('; ')}`);
   }
@@ -428,6 +437,161 @@ let tg: Geometry;
   await exportFilesAsync(tg, 'geo', path.join(tmp, 'x.geo'), { warn: (m) => geoWarn.push(m) });
   check(geoWarn.some((w) => w.includes('3 image(s) not written')), '.geo skips images with a note');
   check(await exportFilesAsync(await geo({ b: { type: 'box' } }), 'textures', path.join(tmp, 'none')).then(() => false, (e) => String(e.message).includes('no image')), 'textures export of a geometry without images fails readably');
+}
+
+// ---------------------------------------------------------------- PNG files
+
+section('image_file and the file node: PNG files as images');
+{
+  /** PNG bytes of interleaved samples: 1 grey, 2 grey + alpha, 3 RGB or 4 RGBA channels at 8 or 16 bits. */
+  const pngOf = (w: number, h: number, ch: 1 | 2 | 3 | 4, depth: 8 | 16, s: ArrayLike<number>, idat?: Uint8Array): Uint8Array => {
+    const rows = () => {
+      const bps = depth / 8, stride = w * ch * bps, raw = new Uint8Array((stride + 1) * h);
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w * ch; x++) {
+          const v = s[y * w * ch + x], o = y * (stride + 1) + 1 + x * bps;
+          if (depth === 16) { raw[o] = v >>> 8; raw[o + 1] = v & 255; } else raw[o] = v;
+        }
+      return zlib.deflateSync(raw);
+    };
+    const chunk = (type: string, data: Uint8Array) => {
+      const c = Buffer.alloc(12 + data.length);
+      c.writeUInt32BE(data.length, 0); c.write(type, 4, 'latin1'); c.set(data, 8);
+      c.writeUInt32BE(zlib.crc32(c.subarray(4, 8 + data.length)), 8 + data.length);
+      return c;
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = depth; ihdr[9] = [0, 0, 4, 2, 6][ch];
+    return new Uint8Array(Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', idat ?? rows()), chunk('IEND', new Uint8Array(0))]));
+  };
+  const put = (rel: string, bytes: Uint8Array | string) => { const f = path.join(tmp, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, bytes); return rel; };
+  const W = 6, H = 4, N = W * H, EPS = 1e-7;
+  const seq = (ch: number, max: number, f: (i: number, c: number) => number) => Array.from({ length: N * ch }, (_, k) => Math.min(max, Math.max(0, Math.round(f(Math.floor(k / ch), k % ch)))));
+  const g8 = seq(1, 255, (i) => i * 11), g16 = seq(1, 65535, (i) => i * 2711 + 7);
+  const ga8 = seq(2, 255, (i, c) => (c ? 255 - i * 9 : i * 10)), rgb8 = seq(3, 255, (i, c) => [i * 10, 255 - i * 7, 40 + c * 50][c]);
+  const rgba8 = seq(4, 255, (i, c) => [i * 10, 255 - i * 7, 90, 30 + i * 9][c]), rgba16 = seq(4, 65535, (i, c) => [i * 2711 + 1, 65535 - i * 1999, 12345, 30000 + i * 1000][c]);
+  put('inputs/grey8.png', pngOf(W, H, 1, 8, g8)); put('inputs/grey16.png', pngOf(W, H, 1, 16, g16)); put('inputs/greyalpha.png', pngOf(W, H, 2, 8, ga8));
+  put('inputs/rgb8.png', pngOf(W, H, 3, 8, rgb8)); put('inputs/rgba8.png', pngOf(W, H, 4, 8, rgba8)); put('inputs/rgba16.png', pngOf(W, H, 4, 16, rgba16));
+  /** Largest |layer − want(pixel, channel)| over a W × H layer of ch channels (Infinity for another size or none). */
+  const dev = (a: Float32Array | undefined, ch: number, want: (i: number, c: number) => number) => {
+    if (!a || a.length !== N * ch) return Infinity;
+    let m = 0;
+    for (let i = 0; i < N; i++) for (let c = 0; c < ch; c++) m = Math.max(m, Math.abs(a[i * ch + c] - want(i, c)));
+    return m;
+  };
+  const load = async (params: Record<string, any>, nodes: Record<string, NodeSpec> = {}, input?: string) => {
+    const r = await cookOn(engine, { ...nodes, f: { type: 'image_file', ...(input ? { in: [input] } : {}), params } }, 'f');
+    return { g: r.geo, img: imagesOf(r.geo).at(-1)!, warnings: r.warnings };
+  };
+  const layersOf = (img: Image) => [...img.layers.keys()].map((k) => `${k}:${img.channels(k)}`).join(' ');
+
+  let { img } = await load({ path: 'inputs/grey8.png' });
+  check(img.name === 'grey8' && layersOf(img) === 'C:1' && dev(img.layer('C'), 1, (i) => g8[i] / 255) < EPS, '8-bit grey: one grey layer C = samples / 255, named after the file');
+  ({ img } = await load({ path: 'inputs/grey16.png' }));
+  const q8 = Math.max(...Array.from(img.layer('C')!, (v) => Math.abs(v * 255 - Math.round(v * 255))));
+  check(layersOf(img) === 'C:1' && dev(img.layer('C'), 1, (i) => g16[i] / 65535) < EPS && q8 > 0.2, `16-bit grey keeps its precision: samples / 65535 (up to ${q8.toFixed(2)} of an 8-bit step off the 8-bit levels)`);
+  ({ img } = await load({ path: 'inputs/rgba8.png' }));
+  check(layersOf(img) === 'C:4' && dev(img.layer('C'), 4, (i, c) => rgba8[i * 4 + c] / 255) < EPS, '8-bit RGBA: one RGBA layer C, alpha included');
+  ({ img } = await load({ path: 'inputs/rgba16.png' }));
+  check(layersOf(img) === 'C:4' && dev(img.layer('C'), 4, (i, c) => rgba16[i * 4 + c] / 65535) < EPS, '16-bit RGBA keeps its precision');
+  ({ img } = await load({ path: 'inputs/rgb8.png' }));
+  check(layersOf(img) === 'C:4' && dev(img.layer('C'), 4, (i, c) => (c === 3 ? 1 : rgb8[i * 3 + c] / 255)) < EPS, 'RGB: an RGBA layer C with alpha 1');
+  ({ img } = await load({ path: 'inputs/greyalpha.png' }));
+  check(layersOf(img) === 'C:1 A:1' && dev(img.layer('C'), 1, (i) => ga8[i * 2] / 255) < EPS && dev(img.layer('A'), 1, (i) => ga8[i * 2 + 1] / 255) < EPS, 'grey + alpha, layers auto: a grey C and the alpha in grey layer A');
+  ({ img } = await load({ path: 'inputs/greyalpha.png', layers: 'rgba' }));
+  check(layersOf(img) === 'C:4' && dev(img.layer('C'), 4, (i, c) => ga8[i * 2 + (c === 3 ? 1 : 0)] / 255) < EPS, 'grey + alpha, layers rgba: one RGBA layer (g, g, g, a)');
+  ({ img } = await load({ path: 'inputs/grey8.png', layers: 'rgba' }));
+  check(layersOf(img) === 'C:4' && dev(img.layer('C'), 4, (i, c) => (c === 3 ? 1 : g8[i] / 255)) < EPS, 'grey, layers rgba: (g, g, g, 1)');
+  const rgbaImg = (await load({ path: 'inputs/rgba8.png' })).img;
+  ({ img } = await load({ path: 'inputs/rgba8.png', layers: 'grey' }));
+  check(layersOf(img) === 'C:1 A:1' && maxDiff(img.layer('C')!, toGrey(rgbaImg.layer('C')!, 4)) === 0 && dev(img.layer('A'), 1, (i) => rgba8[i * 4 + 3] / 255) < EPS,
+    'RGBA, layers grey: C = the Rec. 709 luminance (the same bits as toGrey), A = the alpha');
+
+  // naming: the file name without folders and extension, or the name param
+  put('inputs/Brick Color.v2.png', pngOf(W, H, 4, 8, rgba8));
+  check((await load({ path: 'inputs/Brick Color.v2.png' })).img.name === 'Brick Color.v2' && (await load({ path: 'inputs/rgba8.png', name: 'albedo' })).img.name === 'albedo',
+    'the image is named after the file ("Brick Color.v2") unless name is set');
+
+  // colour space: srgb (default) keeps the stored numbers; off encodes linear light to display values, never alpha
+  const enc = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
+  ({ img } = await load({ path: 'inputs/greyalpha.png', srgb: false }));
+  check(dev(img.layer('C'), 1, (i) => enc(ga8[i * 2] / 255)) < 1e-6 && dev(img.layer('C'), 1, (i) => ga8[i * 2] / 255) > 0.05 && dev(img.layer('A'), 1, (i) => ga8[i * 2 + 1] / 255) < EPS,
+    'srgb off: grey is encoded from linear light to display values, alpha is not');
+  ({ img } = await load({ path: 'inputs/rgba16.png', srgb: false }));
+  check(dev(img.layer('C'), 4, (i, c) => (c === 3 ? rgba16[i * 4 + 3] / 65535 : enc(rgba16[i * 4 + c] / 65535))) < 1e-6, 'srgb off on 16-bit RGBA: RGB encoded, alpha unchanged');
+  const made = findImage(await geo({ p: { type: 'tex_pattern', params: { resolution: 32 } }, n: { type: 'tex_colorize', in: ['p'], params: { ramp: [[0, '#202020'], [1, '#a5462e']], name: 'made' } } }, 'n'))!;
+  put('inputs/made.png', imagePNG(made, '', (d) => zlib.deflateSync(d)));
+  ({ img } = await load({ path: 'inputs/made.png' }));
+  check(img.name === 'made' && Buffer.from(imagePNG(img)).equals(Buffer.from(imagePNG(made))) && maxDiff(img.layer('C')!, made.layer('C')!) <= 0.5 / 255 + 1e-6,
+    'a PNG this engine wrote reads back unchanged (written again, the same bytes)');
+
+  // chaining: input 0 carries a mesh or other images; a second image of the same name replaces the first
+  const box = { b: { type: 'box' } };
+  const onBox = await load({ path: 'inputs/rgba8.png' }, box, 'b');
+  check(onBox.g.numPoints === 8 && onBox.g.numPrims === 6 && imagesOf(onBox.g).map((x) => x.name).join() === 'rgba8', 'with input 0 the image is added to that geometry (the box stays)');
+  let r = await load({ path: 'inputs/grey16.png' }, { a: { type: 'image_file', params: { path: 'inputs/rgba8.png' } } }, 'a');
+  check(imagesOf(r.g).map((x) => `${x.name}:${x.channels('C')}`).join() === 'rgba8:4,grey16:1' && !r.warnings.length, 'image_file nodes chain (rgba8, grey16)');
+  r = await load({ path: 'inputs/grey8.png', name: 'rgba8' }, { a: { type: 'image_file', params: { path: 'inputs/rgba8.png' } } }, 'a');
+  check(imagesOf(r.g).length === 1 && r.img.channels('C') === 1 && r.warnings.some((w) => w.includes('replaced the input\'s image "rgba8"')), 'an image of the same name is replaced, with a warning');
+
+  // into the texture family and materials
+  const lv = findImage(await geo({ f: { type: 'image_file', params: { path: 'inputs/rgba8.png' } }, l: { type: 'tex_levels', in: ['f'], params: { in_high: 0.5 } } }, 'l'))!;
+  check(lv.name === 'rgba8' && mean(lv.layer('C')!, 4, 0) > mean(rgbaImg.layer('C')!, 4, 0) + 0.1, 'filters process a loaded image (tex_levels)');
+  const tm = await geo({ ...box, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } }, f: { type: 'image_file', params: { path: 'inputs/rgba8.png' } }, m: { type: 'texture_to_material', in: ['uv', 'f'], params: { material: 'mine', base_color: 'rgba8' } } }, 'm');
+  check(readMaterials(tm).mine?.textures?.baseColor === 'image:rgba8' && findImage(tm, 'rgba8') !== null, 'texture_to_material takes it as a base colour map ("image:rgba8")');
+  const tv = renderGeometry((await load({ path: 'inputs/rgba8.png' })).g, { size: 128 });
+  check(tv.width === 128 && !tv.notes.some((n) => n.includes('no image')), 'render draws it in the texture view');
+
+  // the file node reads .png the same way (folders too), and importGeometry knows png
+  const viaFile = findImage(await geo({ f: { type: 'file', params: { path: 'inputs/rgba8.png' } } }, 'f'))!;
+  check(viaFile.name === 'rgba8' && maxDiff(viaFile.layer('C')!, rgbaImg.layer('C')!) === 0, 'file on a .png gives the image that image_file gives with its defaults');
+  put('inputs/scan.dat', pngOf(W, H, 1, 8, g8));
+  check(findImage(await geo({ f: { type: 'file', params: { path: 'inputs/scan.dat', format: 'png' } } }, 'f'))?.name === 'scan', 'format "png" reads a PNG with another extension');
+  put('kit/a.obj', 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n'); put('kit/b.png', pngOf(W, H, 1, 8, g8)); put('kit/c.png', 'not a png');
+  const kit = await cookOn(engine, { f: { type: 'file', params: { path: 'kit' } } }, 'f');
+  check(kit.geo.numPrims === 1 && kit.geo.prims.get('name')?.get(0) === 'a' && imagesOf(kit.geo).map((x) => x.name).join() === 'b' && kit.warnings.some((w) => w.includes('skipped c.png') && w.includes('bad signature')),
+    `folder mode: models and PNG images; an unreadable PNG is skipped with a warning (${kit.warnings.join('; ')})`);
+  const imported = importGeometry(new Uint8Array(fs.readFileSync(path.join(tmp, 'inputs/grey16.png'))), 'png', { path: 'maps/height.png' });
+  check(findImage(imported)?.name === 'height' && dev(findImage(imported)!.layer('C'), 1, (i) => g16[i] / 65535) < EPS, 'importGeometry(bytes, "png") gives the image too');
+
+  // a changed file is read again (the signature holds the file stamp)
+  put('inputs/live.png', pngOf(W, H, 1, 8, g8));
+  const s1 = (await load({ path: 'inputs/live.png' })).img;
+  put('inputs/live.png', pngOf(3, 2, 1, 8, [0, 50, 100, 150, 200, 250]));
+  const s2 = (await load({ path: 'inputs/live.png' })).img;
+  check(s1.width === W && s2.width === 3 && s2.height === 2, 'editing the file re-cooks the node');
+
+  // errors name the file and the problem
+  put('inputs/fake.png', 'hello, not a PNG');
+  put('inputs/cut.png', pngOf(W, H, 4, 8, rgba8).subarray(0, 60));
+  put('inputs/huge.png', pngOf(5000, 5000, 1, 8, [], zlib.deflateSync(new Uint8Array(16))));
+  const errOf = (p: Record<string, any>, type = 'image_file') => cookErr({ f: { type, params: p } }, 'f');
+  const missing = await errOf({ path: 'inputs/missing.png' }), fake = await errOf({ path: 'inputs/fake.png' }), cut = await errOf({ path: 'inputs/cut.png' });
+  const t0 = performance.now();
+  const huge = await errOf({ path: 'inputs/huge.png' });
+  const tHuge = performance.now() - t0;
+  check(missing.includes('cannot read "inputs/missing.png"'), `a missing file: ${missing.slice(0, 100)}…`);
+  check(fake.includes('"inputs/fake.png"') && fake.includes('bad signature'), `not a PNG: ${fake}`);
+  check(cut.includes('"inputs/cut.png"') && cut.includes('truncated'), `a truncated PNG: ${cut}`);
+  check(huge.includes('"inputs/huge.png"') && huge.includes('5000 × 5000') && tHuge < 1000, `an image over 4096 × 4096 pixels is refused before decoding (${tHuge.toFixed(0)} ms): ${huge}`);
+  check((await errOf({ path: '' })).includes('path is empty'), 'an empty path says so');
+  check((await errOf({ path: 'inputs/fake.png' }, 'file')).includes('"inputs/fake.png" cannot be read as a PNG image'), 'the file node reports a broken PNG with its path too');
+
+  // the live viewer draws an image-only geometry as flat textured quads (render/texview.ts withImagePreview)
+  const two = await geo({ a: { type: 'image_file', params: { path: 'inputs/rgba8.png' } }, b: { type: 'image_file', in: ['a'], params: { path: 'inputs/grey16.png' } } }, 'b');
+  const quads = withImagePreview(two);
+  const P = quads.P, mats = readMaterials(quads);
+  const quadSize = (k: number) => [P[k * 12 + 3] - P[k * 12], P[k * 12 + 7] - P[k * 12 + 1], P[k * 12 + 2]];
+  const [qw, qh, qz] = quadSize(0);
+  check(quads.numPrims === 2 && quads.numPoints === 8 && Math.abs(qw - 1) < 1e-9 && Math.abs(qh - H / W) < 1e-9 && qz === 0 && quads.points.has('uv') && imagesOf(quads).length === 2,
+    `two images → two quads 1 m wide and height / width tall in the XY plane (${qw.toFixed(3)} × ${qh.toFixed(3)})`);
+  check(!!mats['image:rgba8']?.unlit && mats['image:rgba8'].textures?.baseColor === 'image:rgba8' && quads.prims.get('material')?.get(1) === 'image:grey16', 'each quad has an unlit material "image:<name>" with the image as its base colour map');
+  check(withImagePreview(onBox.g) === onBox.g && withImagePreview(tm) === tm, 'a geometry with points is left as it is');
+  const qglb = await exportGeometryAsync(quads, 'glb', { splitByName: false });
+  const qj = JSON.parse(new TextDecoder().decode(qglb.subarray(20, 20 + new DataView(qglb.buffer, qglb.byteOffset).getUint32(12, true))));
+  const qreport = await validator.validateBytes(qglb);
+  check(qj.images?.length === 2 && qj.materials.every((m: any) => m.extensions?.KHR_materials_unlit && m.pbrMetallicRoughness?.baseColorTexture) && qreport.issues.numErrors === 0,
+    `its GLB embeds both images with unlit materials and validates (${qreport.issues.numErrors} errors)`);
 }
 
 // ---------------------------------------------------------------- render

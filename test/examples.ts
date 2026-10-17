@@ -22,6 +22,7 @@ const FIXTURE_FILES: Record<string, string> = {
   file: objPath,
   heightfield_from_image: path.join(tmp, 'height16.png'),
   attribute_from_map: path.join(tmp, 'colormap.png'),
+  image_file: path.join(tmp, 'colormap.png'),
 };
 // graph_ref: any workspace graph name resolves to this graph (node "ground" is its output)
 const REF_GRAPH: GraphSpec = {

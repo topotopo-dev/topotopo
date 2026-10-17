@@ -1,6 +1,6 @@
 // Minimal PNG decoder (pure TypeScript, no host APIs): non-interlaced grey, grey+alpha, RGB, RGBA and palette
 // images at 1/2/4/8/16 bits per channel, with a small inflate (RFC 1950/1951) so it runs anywhere the core runs.
-// Used by heightfield_from_image; exported for other readers (attribute from map, textures).
+// Used by heightfield_from_image, attribute_from_map and image_file (io/textures.ts), and the glTF importer.
 
 // ---------------------------------------------------------------- inflate
 
@@ -165,8 +165,11 @@ export interface PngImage {
 
 const SIG = [137, 80, 78, 71, 13, 10, 26, 10];
 
-/** Decode a PNG file. Throws a readable Error for unsupported or corrupt files. */
-export function decodePNG(bytes: Uint8Array): PngImage {
+/**
+ * Decode a PNG file. Throws a readable Error for unsupported or corrupt files, and for images of more than maxPixels
+ * pixels before any pixel memory is allocated.
+ */
+export function decodePNG(bytes: Uint8Array, maxPixels = Infinity): PngImage {
   for (let i = 0; i < 8; i++) if (bytes[i] !== SIG[i]) throw new Error('not a PNG file (bad signature)');
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let pos = 8, width = 0, height = 0, depth = 0, ctype = -1, interlace = 0;
@@ -194,6 +197,10 @@ export function decodePNG(bytes: Uint8Array): PngImage {
   const okDepth = ctype === 0 ? [1, 2, 4, 8, 16] : ctype === 3 ? [1, 2, 4, 8] : [8, 16];
   if (!okDepth.includes(depth)) throw new Error(`unsupported PNG bit depth ${depth} for colour type ${ctype}`);
   if (ctype === 3 && !palette) throw new Error('palette PNG without a PLTE chunk');
+  if (width * height > maxPixels) {
+    const side = Math.floor(Math.sqrt(maxPixels));
+    throw new Error(`the image is ${width} × ${height} pixels, more than the ${maxPixels.toLocaleString('en-US')} pixels allowed here (e.g. ${side} × ${side}): scale it down`);
+  }
   let total = 0;
   for (const c of idat) total += c.length;
   const z = new Uint8Array(total);

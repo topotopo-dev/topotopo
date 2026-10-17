@@ -51,13 +51,14 @@ graph and its seeds, and the core is browser-ready.
   with the exact Landscape import settings, the meshes and the instance stream.
 - **Textures**: a Substance-Designer-style image node family (noise, patterns, cells, shapes, blends, levels, warps,
   normal and AO from height, channel packing) and bakes from meshes in uv space (AO, curvature, thickness, normals and
-  height from a high-res mesh, island ids, masks, vertex colour). Images travel with the geometry, materials reference
-  them as `image:<name>`, and glTF/USD exports carry them, so assets ship with textures whose licence is the graph's.
+  height from a high-res mesh, island ids, masks, vertex colour). Your own PNGs (8 or 16 bit, grey or colour) load as
+  images with `image_file` and go through the same nodes. Images travel with the geometry, materials reference them as
+  `image:<name>`, and glTF/USD exports carry them, so assets ship with textures whose licence is the graph's.
 - **Live preview and controls**: a local three.js page that refreshes whenever a graph changes. Click any node to
   see its result. A graph's exposed `params` appear as sliders, checkboxes, selects and colour pickers; dragging one
   re-cooks only the nodes that read it. Drop your own files
-  anywhere on the page: they land in the workspace `inputs/` folder, show as grey reference layers, and `file` nodes
-  read them.
+  anywhere on the page: they land in the workspace `inputs/` folder, show as grey reference layers (a PNG as a flat
+  picture), and `file` nodes read them.
 
 **Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, the shelf and example galleries, the
 design notes and the release notes, generated from this repository (`npm run site`).
@@ -151,7 +152,7 @@ Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`
 The workspace folder holds `graphs/` (one JSON file per graph), `assets/` (saved assets), `inputs/` and `exports/`.
 `inputs/` is where you put your own material: meshes, guide curves and points, blockouts and PNG masks from Blender,
 Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` tool lists and describes them, and a
-`file` node reads one as `inputs/<file>`. Naming objects `path.river`, `zone.park`, `site.well`, `volume.no_trees` or
+`file` node reads one as `inputs/<file>` (a PNG as an image for the texture nodes). Naming objects `path.river`, `zone.park`, `site.well`, `volume.no_trees` or
 `blockout.house` tells the agent what they mean (help topic `inputs`).
 
 ## MCP tools
@@ -239,7 +240,7 @@ boundary. Do not cook graphs from untrusted sources in a privileged process.
 | sdf | `sdf_shape` `sdf_expr` `sdf_combine` `sdf_modify` `sdf_from_mesh` `sdf_to_mesh` (implicit, lazily sampled); sampled grids (Rust/WASM): `sdf_grid` `grid_combine` `grid_offset` `grid_blur` `grid_dilate` `grid_erode` `grid_resample` `grid_to_mesh` (sharp dual contouring or marching cubes) `grid_to_sdf` `voxel_remesh` |
 | heightfield | `heightfield` `heightfield_noise` `heightfield_from_mesh` `heightfield_from_image` `heightfield_to_mesh` `heightfield_to_sdf` `heightfield_remap` `heightfield_blur` `heightfield_terrace` `heightfield_clip` `heightfield_cutout` `heightfield_layer` `heightfield_mask_by_feature` `heightfield_mask_by_object` `heightfield_mask_noise` `heightfield_mask_blur` `heightfield_mask_expand` `heightfield_erode` `heightfield_fill_sinks` `heightfield_flow` `heightfield_project` `heightfield_path` `heightfield_scatter` `heightfield_resample` `heightfield_transform` (grids in XZ with named layers; export `png16`/`r16`/`mask_png` for Unreal Landscape) |
 | uv | `uv_project` `uv_transform` `uv_unwrap` (xatlas) `uv_flatten` (LSCM) `uv_layout` `uv_autoseam` |
-| texture | generators `tex_noise` `tex_pattern` `tex_cells` `tex_gradient` `tex_shape` `tex_splatter` `tex_scratches` `tex_text`; filters `tex_blend` `tex_levels` `tex_curves` `tex_blur` `tex_warp` `tex_transform` `tex_edge_detect` `tex_invert` `tex_threshold` `tex_histogram_scan` `tex_normal_from_height` `tex_height_to_ao` `tex_channel` (ORM packing) `tex_colorize` `tex_tile_sampler` `tex_output`; bakes in uv space `bake_ao` `bake_curvature` `bake_thickness` `bake_position` `bake_normal` `bake_world_normal` `bake_height` `bake_island_id` `bake_mask` `bake_vertex_color`; `texture_to_material` `tex_to_heightfield` `heightfield_to_tex` (images are 2D float layers carried on the geometry; glb/usda embed them, export format `textures` writes PNGs) |
+| texture | generators `tex_noise` `tex_pattern` `tex_cells` `tex_gradient` `tex_shape` `tex_splatter` `tex_scratches` `tex_text`; PNG files `image_file`; filters `tex_blend` `tex_levels` `tex_curves` `tex_blur` `tex_warp` `tex_transform` `tex_edge_detect` `tex_invert` `tex_threshold` `tex_histogram_scan` `tex_normal_from_height` `tex_height_to_ao` `tex_channel` (ORM packing) `tex_colorize` `tex_tile_sampler` `tex_output`; bakes in uv space `bake_ao` `bake_curvature` `bake_thickness` `bake_position` `bake_normal` `bake_world_normal` `bake_height` `bake_island_id` `bake_mask` `bake_vertex_color`; `texture_to_material` `tex_to_heightfield` `heightfield_to_tex` (images are 2D float layers carried on the geometry; glb/usda embed them, export format `textures` writes PNGs) |
 | sim | `particles` (Houdini POPs in one node: emission from points, gravity, drag, wind, curl noise, point/heightfield/SDF fields, attraction, floor and mesh collisions with die/slide/bounce, trails as polylines; steps with the frame, each frame's state cached; bit-identical on the worker pool) `rbd_settle` (drop pieces onto a terrain, container or ground until they rest; Rapier rigid bodies, packed instances stay packed) `rbd_stack` (drop them one at a time into piles) `drape` (XPBD cloth: colliders, floor, pins, wind, self collision) `inflate` (pressure: cushions, balloons) |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |

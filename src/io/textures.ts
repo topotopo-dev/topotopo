@@ -1,13 +1,15 @@
-// Image volumes as texture files, without touching a file system: PNG bytes encoded in memory, the "image:<name>"
-// references of material tables, the PNGs a USD export writes next to the .usda, and the "textures" export format
-// (every image of a geometry as PNG files in a folder). Values are written as round(value × 255): see core/image.ts
-// for why no transfer curve is applied (colour layers already hold display values; data maps are linear).
+// Image volumes as texture files, without touching a file system: PNG bytes encoded in memory, PNG files read into
+// image volumes (image_file, the file node), the "image:<name>" references of material tables, the PNGs a USD export
+// writes next to the .usda, and the "textures" export format (every image of a geometry as PNG files in a folder).
+// Values are written as round(value × 255) and read as sample / max: see core/image.ts for why no transfer curve is
+// applied (colour layers already hold display values; data maps are linear).
 import type { Geometry } from '../core/geometry.ts';
-import { Image, channelsOf, imageRef, imageToBytes, opaque, referenceableImages } from '../core/image.ts';
+import { Image, LUMA, MAX_PIXELS, channelsOf, imageRef, imageToBytes, opaque, referenceableImages } from '../core/image.ts';
 import { TEXTURE_SLOTS, mergeMaterialTables } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { encodePNG } from '../render/png.ts';
 import { encodeGreyPNG, zlibStored } from './heightmap.ts';
+import { decodePNG } from './png-decode.ts';
 import type { PngImage } from './png-decode.ts';
 import { baseOf, dirOf, joinPath } from './common.ts';
 
@@ -21,22 +23,79 @@ export function imagePNG(img: Image, layer = '', deflate?: (d: Uint8Array) => Ui
   return encodePNG(bytes, img.width, img.height, deflate ?? zlibStored);
 }
 
-/** An image volume from a decoded PNG: grey → 1 channel, grey+alpha / RGB / RGBA → RGBA; samples / maxValue. */
-export function imageFromPNG(png: PngImage, name: string): Image {
-  const n = png.width * png.height, ch = png.channels, d = png.data, k = 1 / (png.maxValue || 255);
+/** How a PNG's channels become layers: see ImageFromPNGOptions. */
+export const PNG_LAYERS = ['auto', 'grey', 'rgba'] as const;
+export type PngLayers = (typeof PNG_LAYERS)[number];
+
+export interface ImageFromPNGOptions {
+  /**
+   * 'auto' (default): grey files (1 or 2 channels) give a grey layer C, colour files an RGBA one; 'grey': a grey C
+   * (Rec. 709 luminance of a colour file); 'rgba': an RGBA C (grey g as g, g, g). A grey C puts the file's alpha, when
+   * it has one, in the grey layer "A" (Houdini's alpha plane).
+   */
+  layers?: PngLayers;
+  /**
+   * true (default): the samples are display (sRGB-encoded) values, which colour layers hold too, so they are kept as
+   * they are; false: they are linear light, and grey and RGB are encoded to display values (alpha never is).
+   */
+  srgb?: boolean;
+}
+
+/** Display (sRGB-encoded) value of a linear one (io/gltf.ts converts back and forth for glTF's linear factors). */
+const toDisplay = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
+
+/** An image volume from a decoded PNG: values = samples / maxValue (16-bit files keep their precision). */
+export function imageFromPNG(png: PngImage, name: string, o: ImageFromPNGOptions = {}): Image {
+  const n = png.width * png.height, ch = png.channels, d = png.data, max = png.maxValue || 255, k = 1 / max;
+  // samples are integers 0..max: tables give every value once (alpha is never converted)
+  const lin = new Float32Array(max + 1);
+  for (let s = 0; s <= max; s++) lin[s] = s * k;
+  const col = o.srgb === false ? Float32Array.from(lin, (_, s) => toDisplay(s * k)) : lin;
   const img = new Image(png.width, png.height, name);
-  if (ch === 1) {
-    const a = new Float32Array(n);
-    for (let i = 0; i < n; i++) a[i] = d[i] * k;
-    return img.set('C', a);
+  const mode = o.layers ?? 'auto';
+  if (mode === 'grey' || (mode === 'auto' && ch <= 2)) {
+    const C = new Float32Array(n);
+    if (ch <= 2) for (let i = 0; i < n; i++) C[i] = col[d[i * ch]];
+    else for (let i = 0; i < n; i++) { const p = i * ch; C[i] = col[d[p]] * LUMA[0] + col[d[p + 1]] * LUMA[1] + col[d[p + 2]] * LUMA[2]; }
+    img.set('C', C);
+    if (ch === 2 || ch === 4) {
+      const A = new Float32Array(n);
+      for (let i = 0; i < n; i++) A[i] = lin[d[i * ch + ch - 1]];
+      img.set('A', A);
+    }
+    return img;
   }
   const a = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) {
-    const o = i * ch;
-    if (ch === 2) { a[i * 4] = a[i * 4 + 1] = a[i * 4 + 2] = d[o] * k; a[i * 4 + 3] = d[o + 1] * k; }
-    else { a[i * 4] = d[o] * k; a[i * 4 + 1] = d[o + 1] * k; a[i * 4 + 2] = d[o + 2] * k; a[i * 4 + 3] = ch === 4 ? d[o + 3] * k : 1; }
+    const p = i * ch, q = i * 4;
+    if (ch <= 2) a[q] = a[q + 1] = a[q + 2] = col[d[p]];
+    else { a[q] = col[d[p]]; a[q + 1] = col[d[p + 1]]; a[q + 2] = col[d[p + 2]]; }
+    a[q + 3] = ch === 2 || ch === 4 ? lin[d[p + ch - 1]] : 1;
   }
   return img.set('C', a);
+}
+
+/** The image name a file gives: its name without folders and extension ("inputs/brick.png" → "brick"). */
+export function imageNameOf(path: string): string {
+  let p = String(path);
+  if (/^\w+:\/\//.test(p)) p = p.split(/[?#]/)[0];
+  return baseOf(p.replace(/[\\/]+$/, '')).replace(/\.[^.]*$/, '') || 'image';
+}
+
+/**
+ * An image volume from the bytes of the PNG file `path` (the image_file node and the file node's .png path), named
+ * `name` or after the file (imageNameOf). Errors name the file; images over MAX_PIXELS are refused before decoding.
+ */
+export function imageFromPNGFile(bytes: Uint8Array, path: string, o: ImageFromPNGOptions & { name?: string } = {}): Image {
+  let png: PngImage;
+  try { png = decodePNG(bytes, MAX_PIXELS); } catch (e: any) { throw new Error(`"${path}" cannot be read as a PNG image: ${e?.message ?? e}`); }
+  return imageFromPNG(png, o.name || imageNameOf(path), o);
+}
+
+/** imageFromPNGFile on a file read through `readFile` (usually Host.readFile). */
+export async function readImageFile(readFile: (path: string) => Promise<Uint8Array>, path: string, o: ImageFromPNGOptions & { name?: string } = {}): Promise<Image> {
+  const bytes = await readFile(path).catch((e: any) => { throw new Error(`cannot read "${path}": ${e?.message ?? e}`); });
+  return imageFromPNGFile(bytes, path, o);
 }
 
 /** A file-name-safe version of an image name ("" → "image"). */
