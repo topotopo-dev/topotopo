@@ -1,8 +1,8 @@
 // Texture nodes (category "texture"): a Substance Designer / Houdini COP style image family. Images are volumes of
-// kind 'image' carried in the geometry (core/image.ts): generators make a geometry holding one image, filters
-// process one layer of one image of their first input and pass everything else through, texture_to_material attaches
-// images to a material ("image:<name>" texture slots), and exporters embed them (glTF) or write them next to the file
-// (USD, the "textures" format). Bakes from meshes live in nodes/bake.ts.
+// kind 'image' carried in the geometry (core/image.ts): generators make a geometry holding one image, image_file loads
+// a PNG, filters process one layer of one image of their first input and pass everything else through,
+// texture_to_material attaches images to a material ("image:<name>" texture slots), and exporters embed them (glTF) or
+// write them next to the file (USD, the "textures" format). Bakes from meshes live in nodes/bake.ts.
 import { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER, MAX_PIXELS, channelsOf, findImage, imagesOf, isImage, resizeLayer, toGrey } from '../core/image.ts';
 import {
@@ -14,6 +14,7 @@ import type { CellsJob, NoiseJob } from '../core/texture.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
 import { MATERIAL_ATTRIB, normalizeMaterial, readMaterials, writeMaterials } from '../core/materials.ts';
 import { readUV } from '../core/uv.ts';
+import { PNG_LAYERS, readImageFile } from '../io/textures.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, ParamDef } from '../graph/types.ts';
@@ -23,7 +24,7 @@ import { P, mask } from './util.ts';
 
 // ---------------------------------------------------------------- shared params and helpers
 
-export const NO_IMAGE = 'make one with a generator (tex_noise, tex_pattern, tex_shape, tex_cells …), a bake (bake_ao, bake_curvature …) or heightfield_to_tex';
+export const NO_IMAGE = 'make one with a generator (tex_noise, tex_pattern, tex_shape, tex_cells …), a bake (bake_ao, bake_curvature …) or heightfield_to_tex, or load a PNG with image_file';
 
 export const resolutionParam = (def = 512): ParamDef => ({
   type: 'ivec2', default: [def, def], min: 1, max: 8192,
@@ -387,6 +388,59 @@ defineNode({
       if (c.length >= 6) contours.push(c);
     }
     return imageGeo(img.set(MAIN_LAYER, fillContours(contours, w, h)));
+  },
+});
+
+// ---------------------------------------------------------------- files
+
+defineNode({
+  type: 'image_file',
+  category: 'texture',
+  packed: 'keep',
+  summary: 'Load a PNG (8 or 16 bit, grey or colour) as an image: your own textures and masks into the texture nodes and materials.',
+  description:
+    'Houdini COP: File; Substance: Bitmap. The image is named after the file ("inputs/brick.png" → "brick") unless name ' +
+    'is set; layer C holds it, grey or RGBA (layers), and a grey image keeps the file\'s alpha, when it has one, in layer ' +
+    '"A". Values are samples / 255 (16-bit files / 65535: their precision is kept). Colour layers hold display values, as ' +
+    'every colour in the engine does ("#a5462e" is 0.65, 0.27, 0.18), so srgb (on by default) keeps the numbers the file ' +
+    'stores: a PNG this engine wrote reads back unchanged, and masks, heights, normal and roughness maps load as they are. ' +
+    'Turn srgb off only for a file holding linear-light colour (a linear render): grey and RGB are then encoded to display ' +
+    'values, alpha never (unlike Unreal\'s sRGB checkbox, off does not mean "data"). With input 0 connected the image is ' +
+    'added to that geometry, replacing an image of the same name, so image_file nodes chain. The file node reads .png ' +
+    'files the same way (with these defaults).',
+  aliases: ['image_read', 'png_read', 'texture_file'],
+  inputs: [{ name: 'geo', desc: 'optional: add the image to this geometry (chain image_file nodes, or carry a mesh); else the output holds only the image', optional: true }],
+  params: {
+    path: { type: 'path', default: '', desc: 'PNG file (relative to the workspace, e.g. "inputs/brick.png") or URL', aliases: ['file', 'filename'] },
+    name: nameParam('', 'image name ("" = the file name without .png); materials reference it as "image:<name>"'),
+    layers: { type: 'enum', options: [...PNG_LAYERS], default: 'auto', desc: 'auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels', aliases: ['channels'] },
+    srgb: { type: 'bool', default: true, desc: 'the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never)' },
+  },
+  signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
+  outputs: 'image <name>: C grey or RGBA 0..1; A grey (the file\'s alpha, for a grey image of a file with alpha)',
+  example: {
+    nodes: {
+      color: { type: 'image_file', params: { path: 'inputs/brick_color.png' } },
+      maps: { type: 'image_file', in: ['color'], params: { path: 'inputs/brick_rough.png', layers: 'grey' } },
+      box: { type: 'box' },
+      uv: { type: 'uv_project', in: ['box'], params: { method: 'box' } },
+      out: { type: 'texture_to_material', in: ['uv', 'maps'], params: { material: 'brick', base_color: 'brick_color', roughness: 'brick_rough' } },
+    },
+    output: 'out',
+  },
+  async cook(ctx) {
+    const { p, type, engine } = ctx;
+    if (!String(p.path ?? '').trim()) throw new NodeError(`${type}: path is empty`, 'a PNG relative to the workspace (people drop theirs into inputs/) or a URL');
+    let img: Image;
+    try {
+      img = await readImageFile((f) => engine.host.readFile(f), p.path, { name: String(p.name ?? '').trim(), layers: p.layers, srgb: !!p.srgb });
+    } catch (e: any) { throw new NodeError(`${type}: ${e?.message ?? e}`); }
+    const g = ctx.hasInput(0) ? ctx.input(0).clone() : new Geometry();
+    const before = g.volumes.length;
+    g.volumes = g.volumes.filter((v) => !(isImage(v) && v.name === img.name));
+    if (g.volumes.length < before) ctx.warn(`${type}: replaced the input's image "${img.name}" (set name to keep both)`);
+    g.volumes.push(img);
+    return g;
   },
 });
 

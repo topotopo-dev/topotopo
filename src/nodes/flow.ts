@@ -7,6 +7,7 @@ import { stableStringify } from '../graph/engine.ts';
 import type { CookReport } from '../graph/engine.ts';
 import { hashString } from '../core/random.ts';
 import { IMPORT_FORMATS, importFormatFromPath, importGeometryAsync } from '../io/import.ts';
+import { readImageFile } from '../io/textures.ts';
 import type { Host } from '../host/types.ts';
 import { mergeMaterialTables, writeMaterials } from '../core/materials.ts';
 import { fusePoints } from './transform.ts';
@@ -420,12 +421,12 @@ defineNode({
   type: 'file',
   category: 'io',
   packed: 'keep',
-  summary: 'Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON. .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively: name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points). copy_to_points {variants: \'name\'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.',
+  summary: 'Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON; a PNG becomes an image volume named after the file, as image_file reads it with its defaults (image_file has the layer and colour options). .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively: name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points); its PNGs become images. copy_to_points {variants: \'name\'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.',
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {
     path: { type: 'path', default: '', desc: 'file or folder path (relative to the workspace) or file URL; folder mode needs directory support in the host', aliases: ['file', 'filename'] },
-    format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc)' },
+    format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
     weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances)' },
@@ -440,6 +441,12 @@ defineNode({
     if (!p.path) throw new NodeError('path is empty');
     const host = engine.host, files = directoryFiles(p.path, host);
     const read = async (file: string, format: string) => {
+      if (format === 'png') {
+        // an image, not a mesh: the image_file loader (its defaults), and no axis, scale or weld
+        const g = new Geometry();
+        try { g.volumes = [await readImageFile((f) => host.readFile(f), file)]; } catch (e: any) { throw new NodeError(String(e?.message ?? e)); }
+        return g;
+      }
       let fmt = format;
       let bytes: Uint8Array;
       if (fmt === 'blend') {
@@ -476,6 +483,11 @@ defineNode({
     for (const file of files) {
       const fmt = importFormatFromPath(file);
       if (!IMPORT_FORMATS.includes(fmt) || (fmt === 'blend' && !host.convertFile)) continue;
+      if (fmt === 'png') {
+        // images ride along with the models; one that cannot be read (a thumbnail too large, interlaced) is skipped
+        try { parts.push(await read(childPath(p.path, file), fmt)); } catch (e: any) { warn(`skipped ${file}: ${e?.message ?? e}`); }
+        continue;
+      }
       parts.push(folderNames(await read(childPath(p.path, file), fmt), file));
     }
     const g = Geometry.merge(parts);

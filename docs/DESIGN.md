@@ -81,13 +81,14 @@ src/graph/     node system
   parallel.ts    CookContext.parallelMap: a kernel in chunks on the host's worker pool, or in one piece without it
   migrate.ts     graph format versions and migrations
 src/nodes/     200+ node types, one defineNode() each (typed params with defaults and descriptions, a cooked example)
-src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision); texview.ts: the texture view and
-               base colour sampling of image textures
+src/render/    software rasteriser → PNG (labelled multi-view images for LLM vision); texview.ts: the texture view, base
+               colour sampling of image textures, and the flat textured quads the live viewer shows for images
 src/inspect.ts, src/explain.ts  text views of geometry: summaries, statistics, a "reads as" description, diffs
 src/io/        import/export: glTF via gltf-transform (gltf.ts), Houdini .geo/.bgeo (hgeo.ts), CSV + points JSON and the
                instance stream (points.ts), obj, stl, ply, usda, native json; materials table helpers in core/materials.ts ·
                heightmaps (png16, r16, mask_png) · PNG decoder · multi-file exports (files.ts) · Unreal Landscape bundle (unreal.ts) ·
-               image volumes as PNG files (textures.ts: glTF/USD texture data, the "textures" format)
+               image volumes to and from PNG files (textures.ts: glTF/USD texture data, the "textures" format, the PNG
+               reader behind image_file and the file node)
 src/wasm/      loaders: kernels.ts (the Rust kernels, read through Host.readFile), rapier.ts (Rapier, a lazy import)
 src/host/      Node host: fs, vm sandbox (timeouts), fonts, worker pool (pool.ts, worker.ts), optional convertFile
                (.blend -> cached GLB through headless Blender), isDirectory/listDir for file-node folder imports
@@ -183,7 +184,7 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   `erodeStep(field, params, rng)` in `core/erosion.ts`, over plain typed arrays (particle droplets + thermal talus
   relaxation, deterministic, mass-conserving with closed borders), so a WASM kernel can replace it. Export writes
   16-bit PNG / RAW heightmaps with a JSON sidecar holding the range and the Unreal import scale (`io/heightmap.ts`),
-  and `io/png-decode.ts` is a dependency-free PNG decoder (inflate included) for heightmap and mask import.
+  and `io/png-decode.ts` is a dependency-free PNG decoder (inflate included) for heightmap, mask and image import.
   `heightfield_fill_sinks` calls the Rust priority-flood kernel over eight neighbours; `fill` is added terrain depth
   and `lake` is retained standing water depth in metres. A positive `max_depth` preserves an entire connected
   depression if its deepest point exceeds the limit, with no partial clipping of the lake bed. No-fill masks
@@ -211,6 +212,13 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   colour-space tag per image (is this RGBA a colour or a normal map?) and would make texture colours disagree with the
   same hex in a material or a Cd attribute everywhere the engine shows them; blending in display space is also what
   Substance Designer and image editors do by default.
+  PNG files read back the same way: `image_file` (and the `file` node for `.png`, with its defaults) stores sample / max
+  with no curve, keeping 16-bit precision, so colour PNGs (sRGB by convention) and data maps both load as the numbers
+  they hold and a PNG the engine wrote reads back unchanged; its `srgb: false` exists only for files of linear-light
+  colour, whose grey and RGB it encodes to display values (never alpha). Grey files (1–2 channels) load grey by default,
+  colour files RGBA, and a grey image keeps the file's alpha in layer "A". The live viewer cannot draw a bare image, so
+  its GLB routes turn image-only geometry into flat unlit quads (`withImagePreview`, render/texview.ts) whose materials
+  are named "image:<name>"; the page keeps their pixels when it ghosts reference layers.
   Materials reference images as `image:<name>` texture paths (`texture_to_material`, or any material map path); the
   exporters encode them from memory: glTF embeds PNGs (an `orm` slot is both `occlusionTexture` and
   `metallicRoughnessTexture`), USD writes `<name>_textures/<image>.png` next to the `.usda` (`io/files.ts`), and the
@@ -892,7 +900,8 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
 - The Unreal round trip, verified on 2026-10-13 in Unreal 5.8 (instance rows, Interchange glTF axes, the Landscape
   import with the manifest values), with the same scene loading in Blender 5.2 and Houdini 22.
 - Phase 3 except the optional CAD module: procedural textures and bakes (37 texture nodes, image volumes, materials
-  referencing `image:<name>`, embedded export, the texture view); sampled SDF grids; and simulation-lite in the `sim`
+  referencing `image:<name>`, embedded export, the texture view; since 2026-10-17 also `image_file`, the PNG reader);
+  sampled SDF grids; and simulation-lite in the `sim`
   category: `rbd_settle` and `rbd_stack` on Rapier ([Rigid bodies](#rigid-bodies-rapier)), `particles`
   ([Particles](#particles)), and XPBD cloth with `drape` and `inflate` ([Cloth](#cloth-xpbd)).
 - Rust/WASM kernels, sessions 1–7: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual
@@ -937,7 +946,7 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   `heightfield_flow` and stream-power erosion; `unreal_landscape` export supports overlapping tiles, shared height/weight ranges and per-tile instance streams (K-12), imported as components in plain levels or streaming proxies in World Partition levels with independent spatial HISM actors per tile.
 - Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
-- Textures: MikkTSpace tangents, a PNG-to-image reader node, bakes outside the 0..1 uv square.
+- Textures: MikkTSpace tangents, bakes outside the 0..1 uv square.
 - Houdini interop: `.bgeo.sc` (Blosc) and a USD layer writer with variants.
 - Phase 3 remainder: volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points) and an
   optional OpenCascade/replicad CAD module for B-rep fillets and STEP export (P3-D; its LGPL licence needs a decision
@@ -946,7 +955,8 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
 **GUI (makes the app usable without an LLM)**
 - Order, decided 2026-10-17: the live viewer grows into the GUI in the order a person working with an agent needs it.
   Done: a Controls panel generated from the graph's `params` (`POST /api/vars`, bursts coalesced), a drop zone
-  that stores files in `inputs/` and shows them as ghosted reference layers (`GET/POST /api/inputs`, `GET /api/input`).
+  that stores files in `inputs/` and shows them as ghosted reference layers (`GET/POST /api/inputs`, `GET /api/input`;
+  a PNG as a flat textured quad).
   Next: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`), then a chat
   panel, then the node editor.
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated

@@ -7,6 +7,7 @@ import type { Workspace, InputFile } from '../workspace.ts';
 import { inputExt, inputKind } from '../workspace.ts';
 import type { Geometry, Attribute } from '../core/geometry.ts';
 import { decodePNG } from '../io/png-decode.ts';
+import { imageNameOf } from '../io/textures.ts';
 import { readMaterials, MATERIAL_ATTRIB } from '../core/materials.ts';
 import { didYouMean } from '../graph/params.ts';
 import { fmtNum } from '../render/raster.ts';
@@ -120,6 +121,8 @@ export class InputDescriber {
       '               (stretched over the connected heightfield; then heightfield_scatter, mask_layer, …)',
       `  on points    {"type":"attribute_from_map","in":["pts"],"params":{"path":"${rel}","projection":"xz","size":[100,100],"name":"mask"}}`,
       '               (top view: column along +X, row 0 at min Z; then scatter density_mask, prune, copy_to_points scale_attrib)',
+      `  a texture    {"type":"image_file","params":{"path":"${rel}"}}`,
+      `               (an image "${imageNameOf(rel)}" for the texture nodes and texture_to_material; a file node reads it the same way)`,
     ].join('\n');
     return { short, long, failed: false };
   }

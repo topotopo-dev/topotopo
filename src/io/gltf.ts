@@ -1095,7 +1095,11 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
       const name = imageRef(path);
       const bytes = t?.getImage();
       if (name === null || images.has(name) || !bytes?.length || imageMime(bytes) !== 'image/png') continue;
-      try { images.set(name, imageFromPNG(decodePNG(bytes), name)); } catch (e: any) { warn(`texture "${path}": ${e?.message ?? e}`); }
+      try {
+        // one layer per texture: a grey + alpha map stays RGBA, so a re-export writes its alpha
+        const png = decodePNG(bytes);
+        images.set(name, imageFromPNG(png, name, { layers: png.channels === 1 ? 'grey' : 'rgba' }));
+      } catch (e: any) { warn(`texture "${path}": ${e?.message ?? e}`); }
     }
   }
   out.volumes.push(...images.values());

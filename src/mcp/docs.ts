@@ -144,7 +144,8 @@ ROLES AND RECIPES
 IMAGES: PNG masks and heightmaps. heightfield_from_image {path:"inputs/height.png", size:[x, z], height_min, height_max}
   makes a terrain (16-bit greys keep the detail); with a heightfield connected it writes into layer (e.g. "mask",
   height_min 0, height_max 1). attribute_from_map {path, projection:"xz", size, center, name:"mask"} samples it onto
-  points (scatter density_mask, prune {mode:"density"}).
+  points (scatter density_mask, prune {mode:"density"}). Textures: image_file {path:"inputs/albedo.png"} (or a file
+  node) loads it as an image named "albedo" for the texture nodes and texture_to_material {base_color:"albedo"}.
 EXAMPLE: inputs/guides.glb holds path.* curves and zone.* areas: roads cut into hills, trees in the zones off the road,
 the vars a person would tune exposed as params:
 ${graphLines(INPUTS_EXAMPLE)}
@@ -419,6 +420,10 @@ GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/
   hex, dots, grid; gap = mortar, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance / edges /
   id / crackle) · tex_gradient · tex_shape (disc, square, polygon, star, ring; falloff; tile) · tex_splatter (blobs) ·
   tex_scratches (strokes) · tex_text.
+FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour; the file node reads .png the same way)
+  as an image named after the file ("brick"; name sets another); layers auto/grey/rgba; srgb (default on) keeps the stored
+  values, which suits colour and data maps alike (off only for linear-light colour). Input 0 = a geometry to add it to,
+  so image_file nodes chain. People drop their own textures and masks into inputs/.
 FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer; name renames; every
   other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min, max,
   difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable

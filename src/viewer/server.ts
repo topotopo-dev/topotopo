@@ -15,6 +15,7 @@ import type { GraphSpec } from '../graph/types.ts';
 import { exportGeometryAsync } from '../io/export.ts';
 import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
+import { withImagePreview } from '../render/texview.ts';
 import { wiringOf } from '../graph/engine.ts';
 
 // index.html sits next to this module (the build copies it to dist/viewer/)
@@ -36,8 +37,8 @@ class HttpError extends Error {
   constructor(status: number, msg: string) { super(msg); this.status = status; }
 }
 
-/** The shape every geometry route serves: the same GLB options as /api/geo. */
-const toGLB = (g: Geometry) => exportGeometryAsync(withHeightfieldPreview(g), 'glb', { splitByName: false, lineMode: 'lines', custom: false });
+/** The shape every geometry route serves: the same GLB options as /api/geo; images alone show as textured quads. */
+const toGLB = (g: Geometry) => exportGeometryAsync(withImagePreview(withHeightfieldPreview(g)), 'glb', { splitByName: false, lineMode: 'lines', custom: false });
 const issueText = (e: { node: string; message: string }) => `[${e.node}] ${e.message}`;
 
 /**

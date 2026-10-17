@@ -186,8 +186,16 @@ function inView(obj) {
 function applyWire(obj) {
   obj.traverse((o) => { if (o.isMesh) { o.material.wireframe = state.wire; o.material.side = THREE.DoubleSide; } });
 }
-function dispose(obj, materials = true) {
-  obj.traverse((o) => { o.geometry?.dispose(); if (materials) o.material?.dispose?.(); });
+/** Free an object's geometry, materials and their textures (the ghost materials are shared and stay). */
+function dispose(obj) {
+  obj.traverse((o) => {
+    o.geometry?.dispose();
+    for (const m of [o.material ?? []].flat()) {
+      if (Object.values(ghost).includes(m)) continue;
+      for (const v of Object.values(m)) if (v?.isTexture) v.dispose();
+      m.dispose();
+    }
+  });
 }
 
 function setStatus(text, kind = '') { const s = $('status'); s.textContent = text; s.className = kind; s.title = text; }
@@ -232,6 +240,7 @@ const loadGeo = coalesce(async () => {
   });
   applyWire(current);
   scene.add(current);
+  placePictures();
   if (!state.framed) { frame(current); state.framed = true; }
   const info = await (await fetch('/api/info?' + q)).json().catch(() => null);
   state.infoText = info?.summary ? `${state.graph}/${info.target}  (${info.ms.toFixed(0)} ms)\n${info.summary}` : '';
@@ -584,6 +593,29 @@ const MEMO = `topotopo.viewer.refs.${location.host}`;
 const remember = () => { try { localStorage.setItem(MEMO, JSON.stringify([...inp.checked])); } catch { /* storage blocked */ } };
 const recall = () => { try { const v = JSON.parse(localStorage.getItem(MEMO) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 
+/** A PNG arrives as flat quads with unlit materials named "image:<name>" (withImagePreview): a picture, not a place. */
+function isPicture(root) {
+  let meshes = 0, all = true;
+  root.traverse((o) => { if (o.isMesh) { meshes++; all &&= [o.material].flat().every((m) => m.name?.startsWith('image:')); } });
+  return meshes > 0 && all;
+}
+/** Pictures keep their pixels and stand in a row right of the output and the other layers, half as wide as those. */
+function placePictures() {
+  const pics = inp.list.map((f) => inp.layers.get(f.path)?.obj).filter((o) => o?.userData.picture);
+  if (!pics.length) return;
+  const box = new THREE.Box3();
+  for (const o of [current, ...refs.children]) if (o && !o.userData.picture) box.expandByObject(o);
+  const empty = box.isEmpty(), size = empty ? new THREE.Vector3() : box.getSize(new THREE.Vector3());
+  const s = Math.max(1, Math.max(size.x, size.z) / 2), gap = 0.1 * s;
+  let x = empty ? 0 : box.max.x + gap;
+  for (const o of pics) {
+    o.position.set(0, 0, 0); o.scale.setScalar(1); o.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(o);
+    o.scale.setScalar(s);
+    o.position.set(x - b.min.x * s, (empty ? 0 : box.min.y) - b.min.y * s, empty ? 0 : (box.min.z + box.max.z) / 2);
+    x += (b.max.x - b.min.x) * s + gap;
+  }
+}
 function ghostify(root) {
   root.traverse((o) => {
     if (!o.material) return;
@@ -596,7 +628,7 @@ function dropLayer(p) {
   const l = inp.layers.get(p);
   if (!l) return;
   inp.layers.delete(p);
-  if (l.obj) { refs.remove(l.obj); dispose(l.obj, false); }
+  if (l.obj) { refs.remove(l.obj); dispose(l.obj); placePictures(); }
 }
 async function loadLayer(p) {
   const f = inp.list.find((x) => x.path === p);
@@ -612,10 +644,12 @@ async function loadLayer(p) {
     const buf = await res.arrayBuffer();
     const gltf = await new Promise((resolve, reject) => loader.parse(buf, '', resolve, reject));
     if (inp.layers.get(p) !== entry) { dispose(gltf.scene); return; } // unchecked or replaced meanwhile
-    ghostify(gltf.scene);
+    gltf.scene.userData.picture = isPicture(gltf.scene);
+    if (!gltf.scene.userData.picture) ghostify(gltf.scene);
     gltf.scene.name = `inputs/${p}`;
     entry.obj = gltf.scene;
     refs.add(gltf.scene);
+    placePictures();
     if (!current || !inView(gltf.scene)) frameAll();
     if (inp.selected === p || inp.hover === p) fetchInfo(p);
   } catch (e) {
@@ -677,12 +711,12 @@ function renderInputs() {
   $('inputs-count').textContent = inp.list.length || '';
   if (!inp.list.length) {
     inp.rows.clear();
-    box.replaceChildren(el('div', 'none', 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON)'));
+    box.replaceChildren(el('div', 'none', 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON, PNG)'));
     return;
   }
   box.querySelector('.none')?.remove();
   let hint = box.querySelector('.hint');
-  if (!hint) { hint = el('div', 'hint', 'checked files show as grey reference layers; drop more files anywhere'); box.append(hint); }
+  if (!hint) { hint = el('div', 'hint', 'checked files show as grey reference layers (PNGs as pictures beside them); drop more files anywhere'); box.append(hint); }
   // rows are kept and updated in place, in list order
   const seen = new Set();
   let prev = null;

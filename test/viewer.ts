@@ -1,15 +1,17 @@
 // Live viewer tests (src/viewer/server.ts): the routes behind the human's control surface. Exposed vars in
-// /api/graphs, POST /api/vars (and how it coalesces bursts), the inputs/ drop target, reference-layer GLBs, and the
-// Host/Origin checks.
+// /api/graphs, POST /api/vars (and how it coalesces bursts), the inputs/ drop target, reference-layer GLBs (a PNG as a
+// textured quad), and the Host/Origin checks.
 //   node test/viewer.ts
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { spawn } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { encodePNG } from '../src/render/png.ts';
 import { Workspace } from '../src/workspace.ts';
 import type { EditOp } from '../src/workspace.ts';
 import { inputFileName, startViewer } from '../src/viewer/server.ts';
@@ -155,6 +157,36 @@ section('POST /api/vars: a burst during a cook is applied by one more cook');
     check(g.vars?.s === 5 && g.vars?.t === 1, 'the latest values are stored');
     const stored = JSON.parse(fs.readFileSync(path.join(ws.graphDir, 'g.json'), 'utf8'));
     check(stored.vars.s === 5 && stored.vars.t === 1, 'and persisted in the workspace');
+  } finally { v.close(); }
+}
+
+section('a dropped PNG and an image-only graph show as textured quads');
+{
+  const engine = new Engine(createNodeHost({ baseDir: path.join(tmp, 'wspng') }));
+  await engine.init();
+  const ws = new Workspace(path.join(tmp, 'wspng'), engine);
+  ws.load();
+  ws.setGraph('tex', { nodes: { n: { type: 'tex_noise', params: { resolution: [32, 16] } } } });
+  const v = await startViewer(ws, 0);
+  /** The JSON chunk of a GLB response. */
+  const glbJSON = async (p: string) => {
+    const b = new Uint8Array(await (await fetch(v.url + p)).arrayBuffer());
+    return new TextDecoder().decode(b.slice(0, 4)) === 'glTF' ? JSON.parse(new TextDecoder().decode(b.subarray(20, 20 + new DataView(b.buffer).getUint32(12, true)))) : null;
+  };
+  const quad = (j: any, name: string) => !!j && j.meshes?.length === 1 && j.images?.length === 1 && j.materials?.[0]?.name === `image:${name}`
+    && !!j.materials[0].extensions?.KHR_materials_unlit && !!j.materials[0].pbrMetallicRoughness?.baseColorTexture;
+  try {
+    // a 4 × 2 RGBA PNG, as the page uploads a dropped file
+    const png = encodePNG(new Uint8Array(32).fill(200), 4, 2, (d) => zlib.deflateSync(d));
+    const up = await fetch(`${v.url}api/inputs?name=albedo.png`, { method: 'POST', body: png });
+    check(up.status === 200, `POST /api/inputs stores a PNG (${up.status})`);
+    const list = await (await fetch(v.url + 'api/inputs')).json() as any[];
+    check(list.some((f) => f.path === 'albedo.png' && f.kind === 'image'), 'GET /api/inputs lists it as an image');
+    const j = await glbJSON('api/input?path=albedo.png');
+    check(quad(j, 'albedo'), `GET /api/input returns one flat quad with the image as an unlit base colour map (${JSON.stringify(j?.materials?.map((m: any) => m.name))})`);
+    const info = await (await fetch(v.url + 'api/input_info?path=albedo.png')).json() as any;
+    check(/image "albedo": 4×2, layers: C rgba/.test(info.summary), `GET /api/input_info summarises the image (${info.summary?.split('\n')[1]})`);
+    check(quad(await glbJSON('api/geo?graph=tex'), 'noise'), 'a graph whose output is only an image shows it the same way (GET /api/geo)');
   } finally { v.close(); }
 }
 
