@@ -1,6 +1,6 @@
 // Live viewer tests (src/viewer/server.ts): the routes behind the human's control surface. Exposed vars in
-// /api/graphs, POST /api/vars (and how it coalesces bursts), the inputs/ drop target, reference-layer GLBs, and the
-// Host/Origin checks.
+// /api/graphs, POST /api/vars (and how it coalesces bursts), the inputs/ drop target, reference-layer GLBs, markers
+// (POST /api/markers → inputs/markers.json, read back through a file node), and the Host/Origin checks.
 //   node test/viewer.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { primNormals } from '../src/core/topology.ts';
 import { Workspace } from '../src/workspace.ts';
 import type { EditOp } from '../src/workspace.ts';
 import { inputFileName, startViewer } from '../src/viewer/server.ts';
@@ -121,6 +122,16 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       const txt = await getJSON('/api/input?path=notes.txt');
       check(txt.status === 500 && /unsupported import format "txt"/.test(txt.j.error), `an unsupported file is a JSON 500 like /api/geo (${txt.j.error})`);
       check(!(await getJSON('/api/inputs')).j.some((f: any) => /\.part$/.test(f.path)), 'no upload leftovers in inputs/');
+
+      // markers through `topotopo view` (its inputs/ is a scratch folder: the files are checked in the next section)
+      const postMarkers = (markers: unknown[]) => fetch(`${url}/api/markers`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ markers }) });
+      const pm = await postMarkers([{ id: 's', kind: 'site', name: 'camp', points: [[0.5, 0, 0.5]] }]);
+      const mi = (await getJSON('/api/input_info?path=markers.json')).j;
+      check(pm.status === 200 && (await getJSON('/api/inputs')).j.some((f: any) => f.path === 'markers.json') && /1 points, 0 prims/.test(mi.summary ?? ''),
+        `view: POST /api/markers writes inputs/markers.json, which a file node reads (${String(mi.summary ?? mi.error).split('\n')[0]})`);
+      const pe = await postMarkers([]);
+      check(pe.status === 200 && !(await getJSON('/api/inputs')).j.some((f: any) => f.path === 'markers.json') && !(await getJSON('/api/markers')).j.markers.length,
+        'view: an empty marker list removes it again');
       ac.abort();
       await stream;
     }
@@ -156,6 +167,110 @@ section('POST /api/vars: a burst during a cook is applied by one more cook');
     const stored = JSON.parse(fs.readFileSync(path.join(ws.graphDir, 'g.json'), 'utf8'));
     check(stored.vars.s === 5 && stored.vars.t === 1, 'and persisted in the workspace');
   } finally { v.close(); }
+}
+
+section('markers: POST /api/markers writes inputs/markers.json, read back through a file node');
+{
+  // the engine the CLI and the MCP server use, its base directory the workspace: agents read "inputs/markers.json"
+  const dir = path.join(tmp, 'mk');
+  const engine = new Engine(createNodeHost({ baseDir: dir }));
+  await engine.init();
+  const ws = new Workspace(dir, engine);
+  ws.load();
+  const v = await startViewer(ws, 0);
+  const api = async (method: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const r = await fetch(`${v.url}api/markers`, { method, headers: { 'content-type': 'application/json', ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: r.status, j: await r.json() as any };
+  };
+  const listed = async () => ((await (await fetch(`${v.url}api/inputs`)).json()) as any[]).map((f) => f.path);
+  const geoFile = path.join(ws.inputDir, 'markers.json'), listFile = path.join(ws.inputDir, '.markers.json');
+  const ac = new AbortController();
+  let events = '';
+  const stream = fetch(v.url + 'api/events', { signal: ac.signal }).then(async (r) => {
+    const rd = r.body!.getReader(), dec = new TextDecoder();
+    for (;;) { const { value, done } = await rd.read(); if (done) break; events += dec.decode(value); }
+  }).catch(() => { /* aborted */ });
+  try {
+    await until(() => events.includes(': hello'), 5000);
+    check(JSON.stringify((await api('GET')).j) === '{"markers":[]}', 'GET /api/markers is an empty list before any marker');
+
+    const markers = [
+      { id: 'a', kind: 'site', name: 'village', points: [[10, 2, -5]], radius: 5 },
+      { id: 'b', kind: 'site', name: 'well', points: [[-4, 1, 3]] }, // radius: the default 5
+      { id: 'c', kind: 'path', name: 'road', points: [[0, 0, 0], [20, 1, 0], [20, 2, 30]] },
+      { id: 'd', kind: 'zone', name: 'keep empty', points: [[0, 0, 0], [10, 0, 0], [10, 0, 10], [0, 0, 10]] }, // clockwise seen from above
+      { id: 'e', kind: 'volume', name: 'no trees', points: [[30, 1, 30], [20, 2, 40]], height: 8 },
+    ];
+    const r = await api('POST', { markers });
+    check(r.status === 200 && r.j.ok && r.j.count === 5 && r.j.path === 'markers.json' && r.j.points === 17 && r.j.prims === 8,
+      `POST /api/markers with two sites, a path, a zone and a volume: 200 (${JSON.stringify(r.j)})`);
+    check(await until(() => /data: \{"inputs":\d+\}/.test(events), 5000), 'and broadcasts an {inputs: n} event');
+    const names = await listed();
+    check(fs.existsSync(geoFile) && fs.existsSync(listFile) && names.includes('markers.json') && !names.includes('.markers.json') && !fs.readdirSync(ws.inputDir).some((f) => f.endsWith('.part')),
+      `inputs/markers.json is listed, the editable inputs/.markers.json is stored but hidden (${JSON.stringify(names)})`);
+    const expected = markers.map((m) => (m.id === 'b' ? { ...m, radius: 5 } : m));
+    check(JSON.stringify((await api('GET')).j.markers) === JSON.stringify(expected), 'GET /api/markers returns the same list (defaults filled in)');
+
+    const cooked = await engine.cook({ nodes: { f: { type: 'file', params: { path: 'inputs/markers.json' } } }, output: 'f' });
+    const g = cooked.geo!;
+    check(cooked.ok && g.numPoints === 17 && g.numPrims === 8, `a file node reads inputs/markers.json (${cooked.errors.map((e) => e.message).join('; ') || `${g.numPoints} points, ${g.numPrims} prims`})`);
+    if (cooked.ok) {
+      const pt = (a: string) => g.points.get(a), pr = (a: string) => g.prims.get(a);
+      const sites = [...Array(g.numPoints).keys()].filter((i) => pt('role')?.get(i) === 'site');
+      check(sites.length === 2 && sites.map((i) => pt('name')?.get(i)).join() === 'village,well' && sites.every((i) => pt('pscale')?.get(i) === 5 && JSON.stringify(pt('orient')?.get(i)) === '[0,0,0,1]'),
+        `2 points with role site, pscale 5, orient identity and their names (${sites.map((i) => `${pt('name')?.get(i)} ${pt('pscale')?.get(i)}`).join(', ')})`);
+      const ofRole = (role: string) => [...Array(g.numPrims).keys()].filter((p) => pr('role')?.get(p) === role);
+      const [road] = ofRole('path'), [zone] = ofRole('zone'), vol = ofRole('volume');
+      check(ofRole('path').length === 1 && g.primClosed[road] === 0 && g.primSize(road) === 3 && pr('name')?.get(road) === 'road', 'one open polyline (3 points) with role path, named road');
+      const N = primNormals(g);
+      check(ofRole('zone').length === 1 && g.primClosed[zone] === 1 && g.primSize(zone) === 4 && pr('name')?.get(zone) === 'keep empty' && N[zone * 3 + 1] > 0.99,
+        `one closed polyline (4 points) with role zone, named "keep empty", turned to face up (normal y ${N[zone * 3 + 1]?.toFixed(2)})`);
+      // the box: 6 closed quads on 8 points, each edge shared by two faces in opposite directions, faces pointing out
+      const P = g.P, corners = new Set(vol.flatMap((p) => g.primPoints(p)));
+      const lo = [0, 1, 2].map((a) => Math.min(...[...corners].map((i) => P[i * 3 + a]))), hi = [0, 1, 2].map((a) => Math.max(...[...corners].map((i) => P[i * 3 + a])));
+      const edges = new Map<string, number>();
+      for (const p of vol) { const q = g.primPoints(p); q.forEach((a, k) => { const key = `${a}>${q[(k + 1) % q.length]}`; edges.set(key, (edges.get(key) ?? 0) + 1); }); }
+      const closed = edges.size === 24 && [...edges].every(([k, n]) => { const [a, b] = k.split('>'); return n === 1 && edges.get(`${b}>${a}`) === 1; });
+      const outward = vol.every((p) => {
+        const q = g.primPoints(p), c = [0, 1, 2].map((a) => q.reduce((s, i) => s + P[i * 3 + a], 0) / q.length);
+        return [0, 1, 2].reduce((s, a) => s + N[p * 3 + a] * (c[a] - (lo[a] + hi[a]) / 2), 0) > 0;
+      });
+      check(vol.length === 6 && vol.every((p) => g.primClosed[p] && g.primSize(p) === 4 && pr('name')?.get(p) === 'no trees') && corners.size === 8 && closed && outward
+        && [lo, hi].map((x) => x.join()).join(' ') === '20,1,30 30,9,40',
+        `one closed box of 6 quads with role volume, named "no trees", facing out, from the lower corner up 8 m (${lo.join()} → ${hi.join()})`);
+    }
+
+    const before = fs.readFileSync(geoFile, 'utf8');
+    const bad: [unknown, RegExp][] = [
+      [{ markers: 'x' }, /"markers"/],
+      [{ markers: [{ kind: 'lake', name: 'x', points: [[0, 0, 0]] }] }, /kind "lake"/],
+      [{ markers: [{ kind: 'path', name: 'x', points: [[0, 0, 0]] }] }, /2 or more points/],
+      [{ markers: [{ kind: 'zone', name: 'x', points: [[0, 0, 0], [1, 0, 0]] }] }, /3 or more points/],
+      [{ markers: [{ kind: 'site', name: 'A', points: [[0, 0, 0]] }, { kind: 'site', name: ' a', points: [[1, 0, 0]] }] }, /unique/],
+      [{ markers: [{ kind: 'site', name: 'x', points: [[0, 'y', 0]] }] }, /\[x, y, z\]/],
+      [{ markers: [{ kind: 'site', name: 'x', points: [[0, 0, 0]], radius: 0 }] }, /radius/],
+      [{ markers: [{ kind: 'volume', name: 'x', points: [[0, 0, 0], [0, 0, 5]] }] }, /differ in x and in z/],
+      [{ markers: [{ kind: 'site', name: '  ', points: [[0, 0, 0]] }] }, /name/],
+    ];
+    const replies = await Promise.all(bad.map(([b]) => api('POST', b)));
+    check(replies.every((x, i) => x.status === 400 && x.j.ok === false && bad[i][1].test(x.j.error)), `invalid bodies are 400 with a message (${replies.map((x) => x.j.error).join(' | ')})`);
+    const notJSON = await fetch(`${v.url}api/markers`, { method: 'POST', body: '{nope' });
+    const cross = await api('POST', { markers: [] }, { origin: 'http://evil.example' });
+    const del = await fetch(`${v.url}api/markers`, { method: 'DELETE' });
+    check(notJSON.status === 400 && cross.status === 403 && del.status === 405 && fs.readFileSync(geoFile, 'utf8') === before && (await api('GET')).j.markers.length === 5,
+      `no JSON 400, cross-origin 403, DELETE 405, and none of them changes the files (${notJSON.status}, ${cross.status}, ${del.status})`);
+
+    fs.writeFileSync(listFile, '{"markers": [{"kind": "site"}]}');
+    const broken = (await api('GET')).j;
+    check(Array.isArray(broken.markers) && !broken.markers.length && /unreadable/.test(broken.error), `a broken stored list reads as empty, with the reason (${broken.error})`);
+    const cleared = await api('POST', { markers: [] });
+    check(cleared.status === 200 && cleared.j.count === 0 && cleared.j.path === null && !fs.existsSync(geoFile) && !fs.existsSync(listFile) && !(await listed()).includes('markers.json') && !(await api('GET')).j.markers.length,
+      'an empty list removes inputs/markers.json and inputs/.markers.json');
+  } finally {
+    ac.abort();
+    await stream;
+    v.close();
+  }
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
