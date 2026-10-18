@@ -47,6 +47,9 @@ const DOMAIN = new URL(SITE_URL).host;
 const REPO = String(pkg.repository?.url || 'https://github.com/topotopo-dev/topotopo').replace(/^git\+/, '').replace(/\.git$/, '');
 const BRANCH = 'main';
 const CONTACT = /<([^<>\s]+@[^<>\s]+)>/.exec(String(pkg.author ?? ''))?.[1] ?? null;
+// Cloudflare Web Analytics (cookieless page views): the site token from the Cloudflare dashboard (the account
+// that holds the topotopo.dev zone), Observability → Analytics → Web analytics → topotopo.dev → Manage site. It is public (it ships in every page); empty leaves the beacon out.
+const CF_BEACON_TOKEN = 'e166f98611114840beed8a8e61ea96bd';
 const COMMIT = (() => {
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
   try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; }
@@ -332,7 +335,8 @@ ${p.abs ? '' : `<link rel="canonical" href="${esc(canonical)}">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="${u('favicon.svg')}" type="image/svg+xml">
 <link rel="stylesheet" href="${u(useFile('scripts/site/style.css', 'style.css'))}">
-</head>
+${CF_BEACON_TOKEN ? `<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='${esc(JSON.stringify({ token: CF_BEACON_TOKEN }))}'></script>
+` : ''}</head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header"><div class="wrap">
