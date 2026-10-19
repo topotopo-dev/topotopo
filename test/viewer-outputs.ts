@@ -12,6 +12,7 @@ import { Workspace } from '../src/workspace.ts';
 import { Image } from '../src/core/image.ts';
 import { exportGeometry } from '../src/io/export.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
+import { imagePNG } from '../src/io/textures.ts';
 import { startViewer } from '../src/viewer/server.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -19,6 +20,7 @@ import { outputZip } from '../src/viewer/outputs.ts';
 import { createViews } from '../src/viewer/app/camera.js';
 import * as km from '../src/viewer/app/keymap.js';
 import { channelPixels, zoomImage } from '../src/viewer/app/image-view.js';
+import { defaultExportSettings, resolveExport } from '../src/viewer/app/export-config.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-outputs-'));
 const host = createNodeHost({ baseDir: tmp, workers: 0 }), engine = new Engine(host);
@@ -44,9 +46,24 @@ async function settled() {
   throw new Error('outputs did not settle');
 }
 const post = async (body: any) => { const r = await fetch(viewer.url + 'api/output/export', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, data: await r.json() as any }; };
+const command = async (route: string, body: any) => { const r = await fetch(viewer.url + 'api/output/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, data: await r.json() as any }; };
 try {
   let items = await settled();
   check(items.filter((x: any) => x.generated && x.kind === 'geometry').length === 3, 'all graphs and named outputs listed');
+  fs.mkdirSync(ws.inputDir, { recursive: true });
+  for (const ext of ['jpg', 'jpeg', 'webp', 'png']) {
+    const bytes = ext === 'png' ? imagePNG(img) : Uint8Array.of(1, 2, 3);
+    fs.writeFileSync(path.join(ws.inputDir, 'reference.' + ext), bytes);
+    check((await get('api/input_info?path=reference.' + ext)).status === 200, `${ext} metadata bypasses procedural importer`);
+    const raw = await fetch(viewer.url + 'api/input_image?path=reference.' + ext);
+    check(raw.ok && Buffer.from(await raw.arrayBuffer()).equals(bytes), `${ext} original image bytes preserved`);
+  }
+  fs.writeFileSync(path.join(ws.inputDir, 'mesh.json'), exportGeometry(box, 'json'));
+  const inputThumb = await fetch(viewer.url + 'api/input_thumb?path=mesh.json');
+  check(inputThumb.ok && decodePNG(new Uint8Array(await inputThumb.arrayBuffer())).width === 160, 'mesh input has a rendered thumbnail');
+  check((await get('api/input_image?path=../asset.json')).status === 400, 'image routes reject traversal');
+  items = await settled();
+  check(!items.some((x: any) => x.label.startsWith('reference.')) && items.every((x: any) => x.origin === 'published'), 'input references do not enter the outputs catalogue');
   const texture = items.find((x: any) => x.image === 'atlas'), model = items.find((x: any) => x.graph === 'asset' && x.node === 'model' && x.kind === 'geometry');
   check(texture.width === 2 && texture.layers.join() === 'C,AO', 'generated images include every named layer');
   const pixels = async (mode: string) => decodePNG(new Uint8Array(await (await fetch(viewer.url + `api/output/image?id=${texture.id}&mode=${mode}`)).arrayBuffer()));
@@ -102,17 +119,57 @@ try {
   const refreshed = items.find((x: any) => x.id === model.id);
   const simultaneous = await Promise.all([post({ ...request, revision: refreshed.revision, name: 'parallel' }), post({ ...request, revision: refreshed.revision, name: 'parallel' })]);
   check(simultaneous.every((r) => r.status === 200) && fs.existsSync(path.join(ws.exportDir, 'parallel_2.glb')), 'concurrent exports serialize collision handling');
+  const other = items.find((x: any) => x.graph === 'asset' && x.node === 'second' && !x.parent);
+  const settings: any = defaultExportSettings();
+  check(!(await get('api/output/settings')).data.initialized, 'first export starts with unconfigured project settings');
+  settings.initialized = true; settings.checked = [model.id, other.id];
+  settings.destinations = { [model.id]: 'tower', [other.id]: 'nacelle' };
+  settings.defaults.geometry.subfolder = 'batch'; settings.defaults.geometry.formats.glb = { scale: 2 };
+  settings.overrides[other.id] = { formats: { glb: { scale: 3 } } };
+  check(resolveExport(settings, other).options.scale === 3 && resolveExport(settings, refreshed).options.scale === 2, 'output overrides inherit remaining project defaults');
+  check((await command('settings', settings)).status === 200, 'project defaults and overrides persist');
+  const batch = await command('export-batch', { ids: settings.checked });
+  check(batch.status === 200 && batch.data.results.length === 2 && fs.existsSync(path.join(ws.exportDir, 'batch', 'tower.glb')) && fs.existsSync(path.join(ws.exportDir, 'batch', 'nacelle.glb')), 'batch exports independent meshes to saved subfolder');
+  const imageBatch = await command('export-batch', { ids: [texture.id] });
+  check(imageBatch.status === 200 && (await list()).find((x: any) => x.id === imageBatch.data.results[0].id)?.files.length === 2, 'default quick image export includes all named layers shown by the settings dialog');
+  const savedSettings = fs.readFileSync(path.join(ws.exportDir, '.export-settings.json'), 'utf8');
+  check((await post({ ...request, revision: refreshed.revision, name: 'one-time', replace: true, options: { scale: 4 } })).status === 200 && fs.readFileSync(path.join(ws.exportDir, '.export-settings.json'), 'utf8') === savedSettings, 'one-time export leaves defaults and overrides untouched');
+  const firstTower = fs.readFileSync(path.join(ws.exportDir, 'batch', 'tower.glb'));
+  settings.destinations[other.id] = 'TOWER'; await command('settings', settings);
+  const conflict = await command('export-batch', { ids: settings.checked });
+  check(conflict.status === 409 && fs.readFileSync(path.join(ws.exportDir, 'batch', 'tower.glb')).equals(firstTower), 'case-insensitive batch path collisions stop before overwriting');
+  const companions = structuredClone(settings), meshName = path.basename(Object.keys(packedZip).find((p) => p.endsWith('.glb'))!, '.glb');
+  companions.destinations[packed.id] = 'companions'; companions.destinations[other.id] = meshName;
+  companions.overrides[packed.id] = { format: 'csv' }; companions.overrides[other.id] = { subfolder: 'batch/companions_meshes' };
+  await command('settings', companions);
+  const companionConflict = await command('export-batch', { ids: [packed.id, other.id] });
+  check(companionConflict.status === 409 && !fs.existsSync(path.join(ws.exportDir, 'batch', 'companions.csv')), 'companion mesh collisions are detected before any bundle file is written');
+  settings.destinations[other.id] = 'nacelle'; delete settings.overrides[other.id]; await command('settings', settings);
+  check(resolveExport((await get('api/output/settings')).data, other).options.scale === 2, 'reset override restores inherited project settings');
+  await ws.edit('asset', [{ op: 'vars', vars: { size: 6 } }]);
+  const recooked = await command('export-batch', { ids: settings.checked });
+  check(recooked.status === 200 && !fs.existsSync(path.join(ws.exportDir, 'batch', 'tower_2.glb')), 'quick export refreshes stale outputs and overwrites stable destinations');
+  check((await command('settings', { ...settings, defaults: { ...settings.defaults, geometry: { ...settings.defaults.geometry, subfolder: '../escape' } } })).status === 400, 'settings reject escaping subfolders');
+  const beforeRename = resolveExport(settings, other);
+  await ws.edit('asset', [{ op: 'rename', node: 'second', to: 'renamed_part' }]);
+  const afterRename = (await settled()).find((x: any) => x.id === other.id);
+  check(afterRename.node === 'renamed_part' && resolveExport((await get('api/output/settings')).data, afterRename).name === beforeRename.name, 'node rename retains published output settings and destination');
+  check((await post({ ...request, revision: refreshed.revision, subfolder: '../escape' })).status !== 200, 'one-time export cannot escape its root');
+  const beforeFailure = fs.readFileSync(path.join(ws.exportDir, 'batch', 'nacelle.glb'));
   await ws.edit('asset', [{ op: 'set', node: 'model', params: { path: 'missing.obj' } }]);
   items = await settled();
   const failed = items.find((x: any) => x.id === model.id);
   const retained = await fetch(viewer.url + `api/output/geo?id=${model.id}`);
   check(failed.status === 'error' && retained.status === 200 && new TextDecoder().decode(new Uint8Array(await retained.arrayBuffer()).subarray(0, 4)) === 'glTF', 'failed recook retains its last valid model preview');
+  const failedBatch = await command('export-batch', { ids: [other.id, model.id] });
+  check(failedBatch.status === 422 && fs.readFileSync(path.join(ws.exportDir, 'batch', 'nacelle.glb')).equals(beforeFailure), 'a later cook failure prevents all batch destination writes');
   ws.setGraph('broken', { nodes: { b: { type: 'file', params: { path: 'missing.obj' } } } }); ws.bump('broken');
   items = await settled(); check(items.some((x: any) => x.graph === 'broken' && x.status === 'error'), 'failed output remains visible');
   fs.writeFileSync(path.join(ws.exportDir, 'agent.txt'), 'result');
   check((await list()).some((x: any) => x.label === 'agent.txt'), 'external agent-written outputs discovered');
   viewer.close(); viewer = await startViewer(new Workspace(path.join(tmp, 'other'), engine, { exports: ws.exportDir }), 0);
   check((await list()).some((x: any) => x.id === exported.data.id), 'saved outputs survive server restart');
+  check((await get('api/output/settings')).data.checked.join() === settings.checked.join(), 'project export selection and settings survive server restart');
 } finally { viewer.close(); }
 
 const v = createViews(() => ({ center: new THREE.Vector3(), radius: 100 })); v.layout(800, 600);

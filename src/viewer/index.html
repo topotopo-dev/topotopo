@@ -23,15 +23,14 @@
     <button class="tb" id="scene-view">Scene</button>
     <button class="tb" id="open-image">Open image</button>
     <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
-    <button class="tb primary" id="export-output" disabled>Export…</button>
     <span class="tb mode" id="mode"></span>
     <label class="tb" title="keyboard and mouse bindings, remembered in this browser">keymap <select id="preset"></select></label>
     <button class="tb" id="help" title="the keymap (?)">?</button>
   </header>
   <aside id="outliner" class="panel">
-    <div class="phead panel-tabs"><button id="tab-outputs" class="on">Outputs</button><button id="tab-outliner">Outliner</button></div>
-    <div class="pscroll" id="outputs"></div>
-    <div class="pscroll" id="tree" hidden></div>
+    <div class="phead">Outliner <button id="thumb-size" title="Cycle thumbnail size" aria-label="Cycle thumbnail size">56 px</button></div>
+    <div id="outputs" hidden></div>
+    <div class="pscroll" id="tree"></div>
     <div class="grip v" data-grip="left" title="drag to resize"></div>
   </aside>
   <main id="viewport">

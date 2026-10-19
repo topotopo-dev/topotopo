@@ -61,7 +61,7 @@ export function createImageView(host, message) {
     const seq = ++sequence, current = item;
     error.hidden = true;
     const q = new URLSearchParams({ id: current.id, layer: layers.value, mode: mode.value, rev: current.revision });
-    const url = current.generated ? '/api/output/image?' + q : '/api/output/file?' + q;
+    const url = current.sourceURL ?? (current.generated ? '/api/output/image?' + q : '/api/output/file?' + q);
     try {
       const response = await fetch(url);
       if (!response.ok) throw new Error((await response.json()).error);
@@ -101,7 +101,7 @@ export function createImageView(host, message) {
   return {
     show(next) {
       const same = item?.id === next.id; if (!same) remember(); item = next; panel.hidden = false; host.classList.add('image-mode');
-      if (!same) { bitmap?.close(); bitmap = null; data = null; segments = []; uvToggle.checked = false; }
+      if (!same) { bitmap?.close(); bitmap = null; data = null; segments = []; uvToggle.checked = false; dim.textContent = 'Loading…'; }
       const saved = memory.get(next.id); if (!same) { state = saved ? { scale: saved.scale, x: saved.x, y: saved.y } : { scale: 1, x: 0, y: 0 }; fitNew = !saved; }
       layers.replaceChildren(...(next.layers ?? ['Image']).map((l) => new Option(l, l)));
       layers.value = next.layers?.includes(saved?.layer) ? saved.layer : next.layer ?? 'Image'; layers.hidden = !next.layers?.length;

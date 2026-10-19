@@ -6,13 +6,19 @@ import { opOf } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { EDITOR_NAMES } from './markers.js';
 import { fmtBytes } from './units.js';
-import { layerId } from './layers.js';
+import { layerId, isInputImage, inputImageURL } from './layers.js';
 import { guideId } from './guides.js';
 
 const EYE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle class="pupil" cx="8" cy="8" r="2"/><path class="slash" d="M3 13L13 3"/></svg>';
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 export function createOutliner(ctx, host) {
+  const sizes = [32, 56, 88], sizeButton = document.getElementById('thumb-size');
+  let size = ctx.store.get('outliner.thumbnailSize', 56);
+  if (!sizes.includes(size)) size = 56;
+  const applySize = () => { document.getElementById('outliner').style.setProperty('--thumb-size', size + 'px'); sizeButton.textContent = size + ' px'; };
+  sizeButton.onclick = () => { size = sizes[(sizes.indexOf(size) + 1) % sizes.length]; ctx.store.set('outliner.thumbnailSize', size); applySize(); };
+  applySize();
   const closed = new Set(ctx.store.get('outliner.closed', []));
   const sections = new Map();
   const section = (key, title) => {
@@ -74,7 +80,7 @@ export function createOutliner(ctx, host) {
   function render() {
     // output: the node being shown
     {
-      const s = section('output', 'Output');
+      const s = section('output', 'Scene');
       const g = ctx.graph.current();
       s.count.textContent = '';
       sync(s, g ? [{ key: 'out' }] : [], () => {
@@ -129,15 +135,21 @@ export function createOutliner(ctx, host) {
       s.count.textContent = L.list.length || '';
       sync(s, L.list.map((f) => ({ key: f.path, f })), ({ f: first }) => {
         const path = first.path, id = layerId(path);
-        const wrap = el('div', ''), row = el('div', 'row'), ey = eye(() => L.show(path, !L.shown.has(path))), nm = el('span', 'nm', path), mt = el('span', 'mt'), er = el('div', 'rowerr');
+        const wrap = el('div', ''), row = el('div', 'row input-card'), ey = eye(() => L.show(path, !L.shown.has(path))), nm = el('span', 'nm', path), mt = el('span', 'mt'), er = el('div', 'rowerr');
         const ds = displaySelect(LAYER_MODES, (m) => L.setDisplay(path, m));
-        row.append(ey, ds, nm, mt);
+        const thumb = el('img', 'input-thumb'), body = el('div', 'input-body'), controls = el('div', 'input-controls'), icon = el('span', 'file-icon', first.ext?.toUpperCase() || 'FILE');
+        thumb.alt = ''; thumb.loading = 'lazy'; thumb.onerror = () => { thumb.hidden = true; icon.hidden = false; };
+        controls.append(ey, ds, mt); body.append(nm, controls); row.append(thumb, icon, body);
         wrap.append(row, er);
         selectRow(row, id);
+        row.onclick = (e) => { if (!e.target.closest('button,select,input') && isInputImage(path)) ctx.outputs.openInput(path); };
         row.addEventListener('pointerenter', () => setTimeout(() => L.fetchInfo(path), 150));
         return {
           el: wrap,
           update({ f }) {
+            const canPreview = isInputImage(path) || ['mesh', 'geometry', 'points'].includes(f.kind) || /\.(obj|stl|ply|glb|gltf|blend|geo|bgeo|json|csv)$/i.test(path);
+            const src = canPreview ? (isInputImage(path) ? inputImageURL(f) : '/api/input_thumb?' + new URLSearchParams({ path, rev: `${f.mtime}:${f.size}` })) : '';
+            if (thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
             const on = L.shown.has(path), e = ctx.objects.get(id);
             ey.classList.toggle('off', !on);
             ey.title = on ? 'hide (unloads the layer)' : 'show as a reference layer';
@@ -151,8 +163,13 @@ export function createOutliner(ctx, host) {
           },
         };
       });
-      if (!L.list.length) note(s, 'none yet — drop files anywhere on this page (OBJ, STL, PLY, glTF/GLB, Houdini .geo, CSV, points JSON, PNG)');
+      if (!L.list.length) note(s, 'Drop meshes, data, PNG, JPEG or WebP files anywhere on this page.');
       if (L.where) { const n = note(s, `files go to inputs/ ${L.where}; a file node reads them as inputs/<name>`); n.title = L.dir; }
+    }
+    {
+      const s = section('outputs', 'Outputs'), outputs = document.getElementById('outputs');
+      if (outputs.parentElement !== s.rows) s.rows.append(outputs);
+      outputs.hidden = false; s.count.textContent = ctx.outputs?.count || '';
     }
     // guides
     {

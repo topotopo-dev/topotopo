@@ -34,13 +34,14 @@ discs, no inertia, no saturated fills.
                                                                  +------------------+
 ```
 
-- **Outputs / Outliner** (left): Outputs is the default tab. Cards grouped by graph list the main result, named
-  published results, their textures, saved renders and exports, with thumbnails and loading/error states.
+- **Outliner** (left): one tree, ordered Scene, Nodes, Inputs, Outputs, Guides. Inputs are reference files;
+  Outputs contains published graph results and their textures, grouped by graph, followed by a collapsed Saved
+  files subsection for renders and exports. Both sections have thumbnails; the header cycles 32/56/88 px (56 default).
+  Image input metadata, thumbnails and reference planes use browser decoding for PNG/JPEG/WebP, not a file node.
   Clicking a card isolates that result; Scene restores the previous scene camera, reference layers and guides.
   First explicit selection frames a model, then each output keeps its own camera. Updates never reframe.
-  The Outliner tab keeps the existing tree. Output (the cooked result, the node being followed), the graph's nodes (click to
-  view a node's result), inputs (reference layers, one per file in `inputs/`), guides (markers). Each row: visibility
-  eye, display mode, name. Selection in the outliner and in the viewport are the same selection.
+  Scene follows the current node; Nodes exposes intermediate results. Input/guide rows retain visibility and display
+  controls. Live output checkboxes select export targets independently of the preview; E edits persistent overrides.
 - **Viewport** (centre): single view or a 2×2 quad (persp, top, front, right). Each view prints its name and, for
   orthographic views, the grid step and the cursor's world position. An axis gizmo in a corner shows orientation and
   snaps the view to an axis when clicked.
@@ -220,11 +221,24 @@ Modelling and sculpting tools, animation, rendering settings, a chat panel, cute
   Generated images default to RGB so an AO-packed alpha does not hide colour. Alpha can be viewed as greyscale.
 - Open image and drop accept PNG, JPEG and WebP, keep originals under project inputs, and decode JPEG/WebP in the
   browser. This does not add JPEG/WebP to procedural image nodes. Each image remembers its zoom and pan.
-- Export… operates on the actual cooked result, with format, filename, destination display and relevant options.
-  GLB is the mesh default. Formats describe information they omit. Collision suffixes are automatic; Replace is
-  explicit. A stale result must refresh before export, and its receipt records the source revision.
+- Export (count), below the live output list, writes checked outputs as separate files/bundles using actual cooked
+  results. The first use opens setup; subsequent uses overwrite stable destinations immediately. The gear edits
+  project geometry/image defaults (GLB/PNG initially); E saves changed fields as per-output overrides. Right-click
+  Export opens a one-time dialog, initialized from effective settings without changing them. Replace is on by default;
+  turning it off adds collision suffixes. Reset overrides restores inheritance. Settings and checked IDs live in
+  `exports/.export-settings.json`, version 1, with relative subfolders and stable published-output identities.
+- All export modes use a 680×620 px dialog constrained to the viewport, a scrolling body, fixed header/footer,
+  aligned field columns and checkboxes before labels. Format changes retain in-progress options. Context menus
+  offer preview/frame, export inclusion, one-time export and settings; saved files offer open/download.
+- Batch export refreshes stale sources, cooks and serializes every result, and checks all companion paths before
+  any destination write. A preparation failure changes no existing exports; a filesystem replacement failure
+  reports the number of files already written. Receipts record the exact source revisions. Preview/camera and
+  checked outputs remain unchanged after exporting.
 - Persistent exports live in workspace `exports/`, or beside the graph for `topotopo view`. The CLI and MCP
   register exports and renders (including explicit destinations); the viewer also discovers agent-written files.
   Saved bundles expose individual files and deterministic ZIPs retaining relative texture/sidecar paths.
 - The viewer's output API serves validated catalogue identifiers, never arbitrary client-supplied file paths.
+  Input-image/thumbnail routes validate paths under inputs, including symlink containment. Settings use
+  GET/POST `/api/output/settings`; POST `/api/output/export-batch` accepts selected IDs and resolves project settings.
+  The existing single-export API retains explicit revision checks and caller-specified replace behavior.
   Output-change SSE events refresh cards and contents. Asset history, FBX, painting and the node editor are deferred.

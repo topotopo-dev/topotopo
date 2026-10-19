@@ -18,6 +18,8 @@ import { exportGeometryAsync, EXPORT_FORMATS } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
 import { summarize } from '../inspect.ts';
+import { ExportSettingsStore, validateOptions, validateName, validateSubfolder, exportPath } from './export-settings.ts';
+import { resolveExport } from './app/export-config.js';
 
 const digest = (x: string) => createHash('sha256').update(x).digest('hex');
 const imageExt = /\.(png|jpe?g|webp)$/i;
@@ -29,7 +31,7 @@ function err(status: number, message: string): never { throw Object.assign(new E
 const idFor = (...parts: string[]) => digest(JSON.stringify(parts)).slice(0, 24);
 
 export interface OutputEntry {
-  id: string; label: string; graph?: string; node?: string; parent?: string;
+  origin?: 'published' | 'saved'; id: string; label: string; graph?: string; node?: string; parent?: string;
   kind: 'geometry' | 'image' | 'file' | 'bundle'; status: 'loading' | 'ready' | 'error';
   revision: string; error?: string; summary?: string; width?: number; height?: number;
   layers?: string[]; layer?: string; image?: string; generated?: boolean; exportable?: boolean;
@@ -46,7 +48,7 @@ export function outputZip(files: { name: string; bytes: Uint8Array }[]): Uint8Ar
 }
 
 export function createOutputs(ws: Workspace, changed: () => void) {
-  const store = new ArtifactStore(ws.exportDir);
+  const store = new ArtifactStore(ws.exportDir), settings = new ExportSettingsStore(ws.exportDir);
   const items = new Map<string, Item>(), previewCache = new Map<string, Uint8Array>();
   let queue = Promise.resolve(), closed = false, lastFiles = '', exportQueue = Promise.resolve();
   const cache = async (key: string, make: () => Uint8Array | Promise<Uint8Array>) => {
@@ -63,7 +65,7 @@ export function createOutputs(ws: Workspace, changed: () => void) {
     if (!item.geo) return;
     for (const [name, img] of referenceableImages(item.geo)) {
       const id = idFor(item.entry.id, name);
-      items.set(id, { owner: item, img, entry: { id, parent: item.entry.id, graph: item.entry.graph, node: item.entry.node,
+      items.set(id, { owner: item, img, entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, node: item.entry.node,
         label: name, kind: 'image', generated: true, exportable: !!item.entry.exportable, status: 'ready', revision: item.entry.revision,
         width: img.width, height: img.height, layers: [...img.layers.keys()], layer: img.mainLayer, image: name } });
     }
@@ -121,14 +123,13 @@ export function createOutputs(ws: Workspace, changed: () => void) {
         const key = workspaceRevision;
         const old = items.get(id);
         if (old?.key === key) { old.entry.label = o.label ?? o.id; continue; }
-        const item: Item = { geo: old?.geo, key, entry: { id, graph, node: o.node, label: o.label ?? o.id, kind: 'geometry', generated: true, exportable: true, status: 'loading', revision: key } };
+        const item: Item = { geo: old?.geo, key, entry: { id, origin: 'published', graph, node: o.node, label: o.label ?? o.id, kind: 'geometry', generated: true, exportable: true, status: 'loading', revision: key } };
         // Carry last valid images until the replacement cook completes.
         if (old) for (const v of items.values()) if (v.owner === old) { v.owner = item; v.entry.status = 'loading'; }
         items.set(id, item); void cook(item);
       }
     }
     const saved = store.list();
-    for (const f of ws.listInputs().filter((f) => f.kind === 'image')) saved.push({ id: 'input-' + artifactId(path.join(ws.inputDir, f.path)), label: f.path, files: [path.join(ws.inputDir, f.path)], format: 'reference' });
     for (const a of saved) {
       const id = 'file-' + a.id; alive.add(id);
       const files = a.files.filter((p) => fs.statSync(p, { throwIfNoEntry: false })?.isFile());
@@ -137,7 +138,7 @@ export function createOutputs(ws: Workspace, changed: () => void) {
       if (items.get(id)?.entry.revision === revision) continue;
       const file = files[0];
       const kind = files.length > 1 ? 'bundle' : imageExt.test(file) ? 'image' : meshExt.test(file) ? 'geometry' : 'file';
-      items.set(id, { file, files, entry: { id, label: a.label, graph: a.graph, node: a.node, kind, status: 'ready', revision,
+      items.set(id, { file, files, entry: { id, origin: 'saved', label: a.label, graph: a.graph, node: a.node, kind, status: 'ready', revision,
         summary: a.format === 'reference' ? 'Reference image' : `Saved ${a.format ?? path.extname(file).slice(1)} output`,
         files: files.map((p) => ({ id: artifactId(p), name: path.relative(path.dirname(file), p).split(path.sep).join('/'), size: fs.statSync(p).size })) } });
     }
@@ -147,7 +148,7 @@ export function createOutputs(ws: Workspace, changed: () => void) {
       const id = item.entry.id + '-' + artifactId(file); alive.add(id);
       const revision = digest(stamp(file));
       if (items.get(id)?.entry.revision === revision) continue;
-      items.set(id, { file, files: [file], entry: { id, parent: item.entry.id, graph: item.entry.graph, label: path.basename(file),
+      items.set(id, { file, files: [file], entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, label: path.basename(file),
         kind: imageExt.test(file) ? 'image' : meshExt.test(file) ? 'geometry' : 'file', status: 'ready', revision,
         files: [{ id: artifactId(file), name: path.basename(file), size: stat.size }] } });
     }
@@ -157,6 +158,47 @@ export function createOutputs(ws: Workspace, changed: () => void) {
   };
   const get = (id: string | null) => items.get(id ?? '') ?? err(404, 'output no longer exists');
   const geometry = async (item: Item) => { if (item.owner) item = item.owner; if (!item.geo || item.pending) await cook(item); return item.geo ?? err(422, item.entry.error ?? 'no geometry'); };
+  const prepareExport = async (body: any, batch = false) => {
+    let item = get(body.id); const owner = item.owner ?? item;
+    if (!owner.entry.generated) err(400, 'select a live graph output to export');
+    await geometry(owner);
+    item = get(body.id);
+    // Recheck external file signatures as well as graph/UI edits before writing.
+    const fresh = await ws.cook(owner.entry.graph!, owner.entry.node);
+    const freshRevision = digest(`${owner.key}:${fresh.results.get(fresh.target)?.sig ?? ''}`);
+    if (!fresh.ok || !fresh.geo) {
+      owner.entry.status = 'error'; owner.entry.error = fresh.errors.map((e) => e.message).join('\n') || 'no geometry';
+      changed(); err(422, owner.entry.error);
+    }
+    if (owner.entry.status !== 'ready' || (!batch && body.revision !== owner.entry.revision) || freshRevision !== owner.entry.revision) { owner.key = undefined; refresh(); err(409, 'Output changed. Refresh its preview before exporting.'); }
+    const geo = fresh.geo!;
+    const format = body.format as ExportFormat;
+    if (!EXPORT_FORMATS.includes(format)) err(400, 'choose a supported export format');
+    if (item.img && format !== 'textures') err(400, 'select the model output to export geometry; images export as PNG textures');
+    const raw = validateName(body.name), subfolder = validateSubfolder(body.subfolder ?? '');
+    const o = body.options ?? {}, warnings: string[] = [];
+    validateOptions(o);
+    const extension = ({ textures: '', unreal_landscape: '', png16: '.png', mask_png: '.png', pointsjson: '.points.json' } as Record<string, string>)[format] ?? '.' + format;
+    const base = extension && raw.toLowerCase().endsWith(extension) ? raw.slice(0, -extension.length) : raw;
+    if (!base || base === '..') err(400, 'filename needs a stem');
+    const options = { upAxis: o.up_axis, scale: o.scale, splitByName: o.split_by_name ?? true, materials: o.materials ?? true,
+      custom: o.custom_attribs, compress: o.compress ?? 'none', quantize: o.quantize ?? false, instancing: o.instancing,
+      pcg: o.pcg || o.pcg_struct, pcgStruct: o.pcg_struct, instances: o.instances, meshes: o.meshes, attributes: o.attributes,
+      precision: o.precision, layer: o.layer, layers: o.layers, heightMin: o.height_min, heightMax: o.height_max, heightfield: o.heightfield, tile_size: o.tile_size,
+      deflate, readFile: (p: string) => ws.engine.host.readFile(p), warn: (m: string) => warnings.push(m) };
+    let result, destination = '';
+    for (let n = 0; ; n++) {
+      const dest = path.join(ws.exportDir, subfolder, base + (n ? `_${n + 1}` : '') + extension);
+      destination = dest;
+      let selected = geo;
+      if (item.img) { selected = geo.clone(); selected.volumes = [item.img.clone()]; selected.packedSources = []; }
+      result = await exportFilesAsync(selected, format, dest, { ...options, texturePath: (p) => path.relative(path.dirname(dest), ws.engine.host.resolvePath(p)).split(path.sep).join('/') });
+      for (const f of result.files) exportPath(ws.exportDir, f.path);
+      if (body.replace === true || result.files.every((f) => !fs.existsSync(f.path))) break;
+      if (n > 999) err(409, 'too many existing files with this name');
+    }
+    return { result, destination, owner, revision: owner.entry.revision, key: owner.key, format, warnings };
+  };
   const listener = () => { refresh(); changed(); };
   ws.listeners.add(listener);
   const timer = setInterval(() => { if (!closed) refresh(); }, 1500); timer.unref();
@@ -170,67 +212,69 @@ export function createOutputs(ws: Workspace, changed: () => void) {
       };
       const json = (j: unknown) => send(JSON.stringify(j), 'application/json');
       try {
-        if (req.method !== 'GET' && !(req.method === 'POST' && u.pathname === '/api/output/export')) err(405, 'GET, or POST /api/output/export');
+        if (req.method !== 'GET' && !(req.method === 'POST' && ['/api/output/export', '/api/output/export-batch', '/api/output/settings'].includes(u.pathname))) err(405, 'method not allowed');
+        if (req.method !== 'POST' && ['/api/output/export', '/api/output/export-batch'].includes(u.pathname)) err(405, 'POST required');
         refresh();
         if (u.pathname === '/api/outputs') { json({ items: [...items.values()].map((v) => v.entry), directory: ws.exportDir, formats: EXPORT_FORMATS }); return true; }
-        if (u.pathname === '/api/output/export') {
-          const body = await readJSON(req);
+        if (u.pathname === '/api/output/settings') {
+          json(req.method === 'POST' ? settings.write(await readJSON(req)) : settings.read());
+          if (req.method === 'POST') changed();
+          return true;
+        }
+        if (u.pathname === '/api/output/export' || u.pathname === '/api/output/export-batch') {
+          const body = await readJSON(req), batch = u.pathname.endsWith('-batch');
           let unlock!: () => void;
           const prior = exportQueue; exportQueue = new Promise<void>((r) => { unlock = r; });
           await prior;
           try {
-            const item = get(body.id), owner = item.owner ?? item;
-            if (!owner.entry.generated) err(400, 'select a live graph output to export');
-            await geometry(owner);
-            // Recheck external file signatures as well as graph/UI edits before writing.
-            const fresh = await ws.cook(owner.entry.graph!, owner.entry.node);
-            const freshRevision = digest(`${owner.key}:${fresh.results.get(fresh.target)?.sig ?? ''}`);
-            if (!fresh.ok || !fresh.geo) {
-              owner.entry.status = 'error'; owner.entry.error = fresh.errors.map((e) => e.message).join('\n') || 'no geometry';
-              changed(); err(422, owner.entry.error);
+            refresh();
+            const config = settings.read();
+            if (batch && (!Array.isArray(body.ids) || !body.ids.length || body.ids.some((id: unknown) => typeof id !== 'string') || new Set(body.ids).size !== body.ids.length)) err(400, 'select distinct live outputs to export');
+            const requests = batch ? body.ids.map((id: string) => ({ id })) : [body];
+            const prepared: Awaited<ReturnType<typeof prepareExport>>[] = [];
+            for (const request of requests) {
+              if (batch) {
+                await geometry(get(request.id));
+                Object.assign(request, resolveExport(config, get(request.id).entry), { replace: true });
+              }
+              prepared.push(await prepareExport(request, batch));
             }
-            if (owner.entry.status !== 'ready' || body.revision !== owner.entry.revision || freshRevision !== owner.entry.revision) { owner.key = undefined; refresh(); err(409, 'Output changed. Refresh its preview before exporting.'); }
-            const geo = fresh.geo!;
-            const format = body.format as ExportFormat;
-            if (!EXPORT_FORMATS.includes(format)) err(400, 'choose a supported export format');
-            if (item.img && format !== 'textures') err(400, 'select the model output to export geometry; images export as PNG textures');
-            const raw = String(body.name ?? '').trim();
-            if (!raw || raw.length > 160 || /[\\/<>:"|?*\x00-\x1f]/.test(raw) || raw.startsWith('.') || /[. ]$/.test(raw) || /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(raw)) err(400, 'use a plain filename without folders');
-            const o = body.options ?? {}, warnings: string[] = [];
-            if (!o || typeof o !== 'object' || Array.isArray(o)) err(400, 'options must be an object');
-            for (const k of ['split_by_name', 'materials', 'custom_attribs', 'quantize', 'pcg', 'pcg_struct', 'meshes']) if (o[k] !== undefined && typeof o[k] !== 'boolean') err(400, `invalid ${k}`);
-            if (o.instancing !== undefined && !['packed', 'expand'].includes(o.instancing)) err(400, 'invalid instancing');
-            if (o.instances !== undefined && !['rows', 'expand'].includes(o.instances)) err(400, 'invalid instances');
-            if (o.precision !== undefined && ![32, 64].includes(o.precision)) err(400, 'invalid precision');
-            if (o.attributes !== undefined && (!Array.isArray(o.attributes) || !o.attributes.every((v: unknown) => typeof v === 'string'))) err(400, 'attributes must be names');
-            if (o.layer !== undefined && typeof o.layer !== 'string') err(400, 'layer must be a name');
-            if (o.scale !== undefined && !(Number.isFinite(o.scale) && o.scale > 0)) err(400, 'scale must be positive');
-            if (o.up_axis !== undefined && !['y', 'z'].includes(o.up_axis)) err(400, 'up axis must be y or z');
-            if (o.compress !== undefined && !['none', 'meshopt', 'draco'].includes(o.compress)) err(400, 'invalid compression');
-            for (const k of ['height_min', 'height_max', 'tile_size', 'heightfield']) if (o[k] !== undefined && !Number.isFinite(o[k])) err(400, `invalid ${k}`);
-            for (const k of ['tile_size', 'heightfield']) if (o[k] !== undefined && (!Number.isInteger(o[k]) || o[k] < 0)) err(400, `invalid ${k}`);
-            if (o.layers !== undefined && (!Array.isArray(o.layers) || !o.layers.every((v: unknown) => typeof v === 'string'))) err(400, 'layers must be names');
-            const extension = ({ textures: '', unreal_landscape: '', png16: '.png', mask_png: '.png', pointsjson: '.points.json' } as Record<string, string>)[format] ?? '.' + format;
-            const base = extension && raw.toLowerCase().endsWith(extension) ? raw.slice(0, -extension.length) : raw;
-            if (!base || base === '..') err(400, 'filename needs a stem');
-            const options = { upAxis: o.up_axis, scale: o.scale, splitByName: o.split_by_name ?? true, materials: o.materials ?? true,
-              custom: o.custom_attribs, compress: o.compress ?? 'none', quantize: o.quantize ?? false, instancing: o.instancing,
-              pcg: o.pcg || o.pcg_struct, pcgStruct: o.pcg_struct, instances: o.instances, meshes: o.meshes, attributes: o.attributes,
-              precision: o.precision, layer: o.layer, layers: o.layers, heightMin: o.height_min, heightMax: o.height_max, heightfield: o.heightfield, tile_size: o.tile_size,
-              deflate, readFile: (p: string) => ws.engine.host.readFile(p), warn: (m: string) => warnings.push(m) };
-            let result, destination = '';
-            for (let n = 0; ; n++) {
-              const dest = path.join(ws.exportDir, base + (n ? `_${n + 1}` : '') + extension);
-              destination = dest;
-              let selected = geo;
-              if (item.img) { selected = geo.clone(); selected.volumes = [item.img.clone()]; selected.packedSources = []; }
-              result = await exportFilesAsync(selected, format, dest, { ...options, texturePath: (p) => path.relative(path.dirname(dest), ws.engine.host.resolvePath(p)).split(path.sep).join('/') });
-              if (body.replace === true || result.files.every((f) => !fs.existsSync(f.path))) break;
-              if (n > 999) err(409, 'too many existing files with this name');
+            const paths = new Set<string>();
+            for (const p of prepared) for (const f of p.result.files) {
+              const key = path.resolve(f.path).toLowerCase();
+              if (paths.has(key)) err(409, `Two selected outputs write ${path.relative(ws.exportDir, f.path)}. Change one output's filename or subfolder.`);
+              paths.add(key);
             }
-            for (const f of result.files) { fs.mkdirSync(path.dirname(f.path), { recursive: true }); fs.writeFileSync(f.path + '.part', f.bytes); fs.renameSync(f.path + '.part', f.path); }
-            const artifact = store.record(result.files.map((f) => f.path), { label: path.basename(destination), graph: owner.entry.graph, node: owner.entry.node, format, sourceRevision: owner.entry.revision });
-            refresh(); changed(); json({ ok: true, id: 'file-' + artifact.id, summary: result.summary, warnings, directory: ws.exportDir });
+            for (const p of prepared) for (const f of p.result.files) {
+              if (fs.statSync(f.path, { throwIfNoEntry: false })?.isDirectory()) err(409, `Export file conflicts with a folder: ${path.relative(ws.exportDir, f.path)}`);
+              let parent = path.dirname(path.resolve(f.path));
+              while (parent !== path.dirname(parent)) {
+                if (paths.has(parent.toLowerCase()) || fs.statSync(parent, { throwIfNoEntry: false })?.isFile()) err(409, `Export folder conflicts with a file: ${path.relative(ws.exportDir, parent)}`);
+                parent = path.dirname(parent);
+              }
+            }
+            refresh();
+            for (const p of prepared) if (get(p.owner.entry.id).key !== p.key || get(p.owner.entry.id).entry.revision !== p.revision) err(409, 'Outputs changed while preparing the export. Try again.');
+            // Serialization is complete before writes. A filesystem failure can still interrupt replacement.
+            let written = 0;
+            const results: { id: string; summary: string; warnings: string[] }[] = [];
+            try {
+              for (const p of prepared) {
+                for (const f of p.result.files) {
+                  exportPath(ws.exportDir, f.path);
+                  exportPath(ws.exportDir, f.path + '.part');
+                  fs.mkdirSync(path.dirname(f.path), { recursive: true });
+                  fs.writeFileSync(f.path + '.part', f.bytes); fs.renameSync(f.path + '.part', f.path); written++;
+                }
+                const artifact = store.record(p.result.files.map((f) => f.path), { label: path.basename(p.destination), graph: p.owner.entry.graph, node: p.owner.entry.node, format: p.format, sourceRevision: p.revision });
+                results.push({ id: 'file-' + artifact.id, summary: p.result.summary, warnings: p.warnings });
+              }
+            } catch (error: any) { err(500, `Export stopped after writing ${written} files: ${error.message}`); }
+            if (batch) {
+              for (const request of requests) config.destinations[request.id] = request.name;
+              settings.write(config);
+            }
+            refresh(); changed(); json(batch ? { ok: true, results, directory: ws.exportDir } : { ok: true, ...results[0], directory: ws.exportDir });
           } finally { unlock(); }
           return true;
         }
@@ -284,7 +328,8 @@ export function createOutputs(ws: Workspace, changed: () => void) {
           const g = await geometry(item), thumb = u.pathname.endsWith('/thumb');
           const bytes = await cache(`${item.entry.id}:${item.entry.revision}:${thumb}`, async () => {
             if (!thumb) return exportGeometryAsync(withImagePreview(withHeightfieldPreview(g)), 'glb', { custom: false, splitByName: false, readFile: (p) => ws.engine.host.readFile(p) });
-            const r = renderGeometry(g, { size: 160, views: ['persp'] }); return encodePNG(r.rgba, r.width, r.height, deflate);
+            const r = renderGeometry(g, { size: 160, views: ['persp'], viewLabels: false });
+            return encodePNG(r.rgba.subarray(0, r.width * 160 * 4), r.width, 160, deflate);
           });
           send(bytes, thumb ? 'image/png' : 'model/gltf-binary'); return true;
         }

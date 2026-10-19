@@ -9,6 +9,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +23,9 @@ import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { withImagePreview } from '../render/texview.ts';
 import { wiringOf } from '../graph/engine.ts';
 import { createOutputs } from './outputs.ts';
+import { renderGeometry } from '../render/raster.ts';
+import { encodePNG } from '../render/png.ts';
+import { imageFromPNGFile } from '../io/textures.ts';
 // the page's guide rules, shared so the page and this server check a marker list the same way
 import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList } from './app/markers.js';
 
@@ -200,8 +204,13 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     const abs = path.resolve(root, ...parts);
     if (!abs.startsWith(root + path.sep)) throw new HttpError(400, `input path ${JSON.stringify(raw)} leaves inputs/`);
     if (!fs.statSync(abs, { throwIfNoEntry: false })?.isFile()) throw new HttpError(404, `no input "${rel}" (GET /api/inputs lists them)`);
+    const realRelative = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
+    if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) throw new HttpError(400, 'input path leaves inputs/');
     return { rel, abs };
   };
+
+  const inputThumbs = new Map<string, Promise<Uint8Array>>();
+  const imageType = (p: string) => ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' })[path.extname(p).toLowerCase()];
   /** The one-node graph that loads an input. */
   const inputGraph = (rel: string, abs: string): GraphSpec => {
     // "inputs/<rel>", the path a graph's file node uses, resolves against the host's base directory: the folder that
@@ -403,8 +412,35 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         if (req.method !== 'GET' && req.method !== 'HEAD') return json(405, { ok: false, error: 'GET, or POST {"markers": [...]}' });
         return json(200, loadMarkers());
       }
+      if (u.pathname === '/api/input_image' || u.pathname === '/api/input_thumb') {
+        if (req.method !== 'GET') throw new HttpError(405, 'GET required');
+        const { rel, abs } = inputPath(u.searchParams.get('path')), mime = imageType(abs);
+        if (mime) return send(200, fs.readFileSync(abs), mime);
+        if (u.pathname === '/api/input_image') throw new HttpError(400, 'choose a PNG, JPEG or WebP image');
+        const stat = fs.statSync(abs), key = `${abs}:${stat.size}:${stat.mtimeMs}`;
+        if (!inputThumbs.has(key)) {
+          if (inputThumbs.size >= 128) inputThumbs.delete(inputThumbs.keys().next().value!);
+          const pending = (async () => {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            const r = await ws.engine.cook(inputGraph(rel, abs));
+            if (!r.ok || !r.geo) throw new HttpError(422, r.errors.map(issueText).join('\n'));
+            const image = renderGeometry(withHeightfieldPreview(r.geo), { size: 160, views: ['persp'], viewLabels: false });
+            return encodePNG(image.rgba.subarray(0, image.width * 160 * 4), image.width, 160, (d) => zlib.deflateSync(d));
+          })();
+          inputThumbs.set(key, pending);
+        }
+        return send(200, await inputThumbs.get(key)!, 'image/png');
+      }
       if (u.pathname === '/api/input' || u.pathname === '/api/input_info') {
         const { rel, abs } = inputPath(u.searchParams.get('path'));
+        if (u.pathname === '/api/input_info' && imageType(abs)) {
+          let summary = `${imageType(abs)} · ${fs.statSync(abs).size} bytes`;
+          // Preserve the existing PNG summary contract without cooking a file-node graph.
+          if (path.extname(abs).toLowerCase() === '.png') {
+            const geo = new GeoBuilder().build(); geo.volumes.push(imageFromPNGFile(fs.readFileSync(abs), abs)); summary = summarize(geo);
+          }
+          return json(200, { path: rel, summary, image: true });
+        }
         const r = await ws.engine.cook(inputGraph(rel, abs));
         if (!r.ok || !r.geo) return json(500, { error: r.errors.map(issueText).join('\n') });
         if (u.pathname === '/api/input_info') return json(200, { path: rel, summary: summarize(r.geo), ms: r.ms });

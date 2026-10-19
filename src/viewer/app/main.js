@@ -404,8 +404,7 @@ for (const g of document.querySelectorAll('.grip')) {
 
 // ------------------------------------------------------------------------------------------- actions
 /** Keys go to a field being typed in (text and number fields, menus), not to the keymap. */
-const TEXT_INPUTS = new Set(['text', 'number', 'search', 'email', 'url', 'password', 'tel']);
-const typing = (t) => (t instanceof HTMLInputElement && TEXT_INPUTS.has(t.type)) || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable;
+const typing = (t) => t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable || !!t?.closest?.('button, summary, [role="button"], [role="menu"]');
 const selectedOf = (kind) => ctx.selection.items.filter((id) => ctx.objects.get(parseId(id).obj)?.kind === kind && parseId(id).piece === null);
 const hiddenByH = { layers: new Set() };
 const DISPLAY_CYCLE = ['shaded', 'wire', 'shadedWire'];
@@ -610,6 +609,7 @@ ctx.previewOutput = async (item, bytes, update) => {
   firstFrame = false; ctx.emit('output'); ctx.requestRender(); syncTop();
 };
 ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; props.controls.render(ctx.graph.current()); } loadGeo(); ctx.requestRender(); };
+ctx.frameOutput = frameAll;
 ctx.outputs = createOutputPanel(ctx);
 
 const es = api.events({

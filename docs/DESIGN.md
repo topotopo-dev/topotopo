@@ -971,6 +971,10 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   chat panel in the viewer: Claude Code is the conversation (decided 2026-10-17).
 - Outputs now lists all graphs' default and named results, textures, renders and saved exports. Selection isolates
   a result, with per-result camera or image pan/zoom. The image viewer exposes channels, layers and mesh UVs.
+  Outputs sits below Inputs in one Outliner; references stay exclusively in Inputs. Thumbnail sizes cycle in the
+  header. Checked outputs export independently of preview selection, with project defaults, per-output overrides
+  and temporary one-time settings. Fixed-size export dialogs scroll internally. Batch preparation validates every
+  result and companion path before replacing any destinations; settings persist under `exports/.export-settings.json`.
   Export uses the actual cook and existing exporters, persists alongside the graph under `exports/`, records
   source revisions, and offers individual/ZIP downloads. JPEG/WebP are browser-viewable references only.
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
