@@ -187,6 +187,7 @@ export function createLayers(ctx) {
         const r = await uploadOne(f, files.length > 1 ? ` (${i + 1}/${files.length})` : '');
         if (r.path) {
           added.push(r.path);
+          if (/\.(png|jpe?g|webp)$/i.test(r.path)) { await L.refresh(); await ctx.outputs?.openInput(r.path); continue; }
           // show it at once, and select it
           L.shown.add(r.path);
           for (const m of [L.info, L.errors]) m.delete(r.path);

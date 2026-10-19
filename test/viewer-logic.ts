@@ -28,7 +28,7 @@ const throws = (f: () => unknown) => { try { f(); return null; } catch (e: any) 
 
 section('keymap presets (section 9)');
 {
-  check(km.PRESETS.map((p: any) => p.id).join() === 'maya,houdini,blender' && km.DEFAULT_PRESET === 'maya', 'three presets, Maya the default');
+  check(km.PRESETS.map((p: any) => p.id).join() === 'topotopo,maya,houdini,blender' && km.DEFAULT_PRESET === 'topotopo', 'four presets, TopoTopo the default');
   const ids = km.PRESETS.map((p: any) => p.id);
   check(km.ROWS.length === 22 && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
     `every row of the table has binding text in every preset (${km.ROWS.length} rows)`);

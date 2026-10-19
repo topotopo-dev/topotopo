@@ -21,6 +21,7 @@ import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { withImagePreview } from '../render/texview.ts';
 import { wiringOf } from '../graph/engine.ts';
+import { createOutputs } from './outputs.ts';
 // the page's guide rules, shared so the page and this server check a marker list the same way
 import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList } from './app/markers.js';
 
@@ -158,6 +159,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     for (const c of clients) c.write(msg);
   };
   ws.listeners.add(broadcast);
+  const outputs = createOutputs(ws, () => broadcast({ outputs: true }));
 
   // ---------------------------------------------------------------- inputs/
   let inputsVersion = 0;
@@ -335,6 +337,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       if (req.method !== 'GET' && req.method !== 'HEAD' && origin !== undefined && origin !== `http://${host}`) return json(403, { error: `cross-origin ${req.method} refused (${origin})` });
       const u = new URL(req.url ?? '/', 'http://localhost');
       route = u.pathname;
+      if (await outputs.handle(req, res, u, readJSON)) return;
       if (u.pathname === '/' || u.pathname === '/index.html') return send(200, fs.readFileSync(path.join(here, 'index.html')), MIME['.html']);
       // the page's modules and style sheet
       if (u.pathname.startsWith('/app/')) {
@@ -442,6 +445,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     url: `http://127.0.0.1:${actual}/`,
     close: () => {
       closed = true;
+      outputs.close();
       clearInterval(keepAlive);
       clearTimeout(watchTimer);
       unwatch();

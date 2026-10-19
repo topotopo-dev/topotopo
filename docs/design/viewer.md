@@ -1,6 +1,6 @@
 # The viewer: a production editor viewport
 
-Status: standard, agreed 2026-10-17. Every change to `src/viewer` is built to this document; a brief that departs
+Status: standard, updated 2026-10-19 for outputs, images and TopoTopo navigation. Every change to `src/viewer` is built to this document; a brief that departs
 from it says so and why.
 
 ## 1. What it is
@@ -34,7 +34,11 @@ discs, no inertia, no saturated fills.
                                                                  +------------------+
 ```
 
-- **Outliner** (left): one tree. Output (the cooked result, the node being followed), the graph's nodes (click to
+- **Outputs / Outliner** (left): Outputs is the default tab. Cards grouped by graph list the main result, named
+  published results, their textures, saved renders and exports, with thumbnails and loading/error states.
+  Clicking a card isolates that result; Scene restores the previous scene camera, reference layers and guides.
+  First explicit selection frames a model, then each output keeps its own camera. Updates never reframe.
+  The Outliner tab keeps the existing tree. Output (the cooked result, the node being followed), the graph's nodes (click to
   view a node's result), inputs (reference layers, one per file in `inputs/`), guides (markers). Each row: visibility
   eye, display mode, name. Selection in the outliner and in the viewport are the same selection.
 - **Viewport** (centre): single view or a 2×2 quad (persp, top, front, right). Each view prints its name and, for
@@ -48,24 +52,30 @@ discs, no inertia, no saturated fills.
 
 ## 3. Navigation
 
-Three keymap presets, chosen in the top bar and remembered per browser: **Maya** (the default), **Houdini** and
-**Blender**. A preset binds every action of section 9; the actions themselves are the same. Navigation in the Maya
-preset:
+Four keymap presets, chosen in the top bar and remembered per browser: **TopoTopo** (the default), **Maya**,
+**Houdini** and **Blender**. Existing saved choices remain in use. A preset binds every action of section 9;
+the actions themselves are the same. Navigation in TopoTopo needs no modifier keys:
 
 | action | input |
 |---|---|
-| tumble | Alt + left drag |
-| track | Alt + middle drag |
-| dolly | Alt + right drag, or wheel (towards the cursor) |
+| tumble | right drag |
+| track | middle drag (also right drag in orthographic views) |
+| zoom toward cursor | wheel |
+| select / box-select | left click / left drag |
 | frame selection | F |
 | frame all | A |
 | toggle single / quad view | Space (tap) |
-| perspective / top / front / right | view menu, or Alt+1 / Alt+2 / Alt+3 / Alt+4 |
+| perspective / top / front / right | view menu, or 1 / 2 / 3 / 4 |
+| wire / shaded / shaded + wire | 5 / 6 / 7 |
 | orthographic toggle of the current view | O |
 
-No inertia, no damping, no auto-framing: the camera moves only when the person moves it or frames. Loading a layer,
-placing a guide, saving or re-cooking never moves the camera. Orbit pivot: the selection centre when something is
-selected, else the last frame target. Tumble is disabled in orthographic views (track and dolly only). Near and far
+No inertia or damping: the camera moves only when the person navigates, frames, or first opens an output.
+Loading a layer, placing a guide, saving or re-cooking never moves the camera. TopoTopo picks the nearest visible
+mesh surface beneath the cursor on orbit start, without moving the camera, and holds that pivot for the drag.
+A miss keeps that camera's previous pivot; selection does not override it. Pan moves the camera and pivot equally,
+using surface depth when available. Wheel zoom anchors to the hit or the navigation-depth plane and cannot cross it.
+Orbit remains upright; pointer cancellation and window blur release navigation. Other presets retain their
+selection-centred orbit. Tumble becomes pan in TopoTopo orthographic views. Near and far
 planes follow the scene size (logarithmic depth stays on) so a 1 km terrain and a 2 cm bolt both work.
 
 ## 4. Grid, units, readouts
@@ -123,10 +133,11 @@ reset per control. Undeclared vars appear under "other vars".
 
 ## 9. Keymap presets (complete)
 
-One table of actions, three bindings. The page holds this as data (`app/keymap.js`), the top bar selects the
+One table of actions, four bindings. TopoTopo uses the navigation and shading bindings above, and Maya's other
+bindings below. The page holds this as data (`app/keymap.js`), the top bar selects the
 preset, `?` shows the active table as an overlay. Mouse buttons are L / M / R; "held" means the key acts while down.
 
-| action | Maya (default) | Houdini | Blender |
+| action | Maya | Houdini | Blender |
 |---|---|---|---|
 | tumble | Alt + L drag | Space + L drag | M drag |
 | track | Alt + M drag | Space + M drag | Shift + M drag |
@@ -164,9 +175,11 @@ changes shape later.
 
 ```
 app/main.js        boot, layout, undo stack
-app/keymap.js      the action table and the Maya / Houdini / Blender presets, the overlay
+app/keymap.js      the action table and TopoTopo / Maya / Houdini / Blender presets, the overlay
 app/api.js         the server routes (graphs, geo, vars, inputs, markers, events)
-app/camera.js      Maya navigation, views, quad layout, framing (no OrbitControls)
+app/camera.js      surface navigation, views, quad layout, framing (no OrbitControls)
+app/outputs.js     output cards, isolated previews, downloads and export dialog
+app/image-view.js  image layers, channel display, pan/zoom, checkerboard and UV overlay
 app/grid.js        adaptive grid, axes, axis gizmo, readouts
 app/scene.js       output geometry, display modes, backface and edge overlays
 app/layers.js      reference layers (inputs) with display modes
@@ -195,3 +208,23 @@ pane check with a screenshot is part of every viewer session's report.
 ## 12. Non-goals
 
 Modelling and sculpting tools, animation, rendering settings, a chat panel, cute defaults.
+
+## 13. Images, publication and exports
+
+- Graphs publish additional deliverables with `outputs: {id: {node, label?}}`; the existing `output` stays the
+  default. Renaming/removing nodes maintains these references. Intermediate nodes remain in the outliner.
+- Discover and cook outputs asynchronously. Cache previews by revision. Failed outputs stay listed, with an error
+  and their last valid preview when available; background updates do not change the selected card or camera.
+- Published images, including images in packed sources, expose every named layer. The 2D viewer has drag pan,
+  cursor-centred wheel zoom, Fit, 100%, dimensions, RGB/RGBA/R/G/B/A, checkerboard and optional mesh UVs.
+  Generated images default to RGB so an AO-packed alpha does not hide colour. Alpha can be viewed as greyscale.
+- Open image and drop accept PNG, JPEG and WebP, keep originals under project inputs, and decode JPEG/WebP in the
+  browser. This does not add JPEG/WebP to procedural image nodes. Each image remembers its zoom and pan.
+- Export… operates on the actual cooked result, with format, filename, destination display and relevant options.
+  GLB is the mesh default. Formats describe information they omit. Collision suffixes are automatic; Replace is
+  explicit. A stale result must refresh before export, and its receipt records the source revision.
+- Persistent exports live in workspace `exports/`, or beside the graph for `topotopo view`. The CLI and MCP
+  register exports and renders (including explicit destinations); the viewer also discovers agent-written files.
+  Saved bundles expose individual files and deterministic ZIPs retaining relative texture/sidecar paths.
+- The viewer's output API serves validated catalogue identifiers, never arbitrary client-supplied file paths.
+  Output-change SSE events refresh cards and contents. Asset history, FBX, painting and the node editor are deferred.

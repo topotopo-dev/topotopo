@@ -37,6 +37,7 @@ class Cam {
     this.name = name;
     this.ortho = name !== 'persp';
     this.target = new THREE.Vector3();
+    this.pivot = new THREE.Vector3();
     this.quat = name === 'persp' ? perspQuat() : quatOf(AXIS_VIEWS[name].f, AXIS_VIEWS[name].u);
     this.dist = 12;
     this.halfH = 6;
@@ -45,12 +46,14 @@ class Cam {
   get right() { return new THREE.Vector3(1, 0, 0).applyQuaternion(this.quat); }
   get up() { return new THREE.Vector3(0, 1, 0).applyQuaternion(this.quat); }
   get eye() { return this.target.clone().addScaledVector(this.back, this.dist); }
-  toJSON() { return { ortho: this.ortho, target: this.target.toArray(), quat: this.quat.toArray(), dist: this.dist, halfH: this.halfH }; }
+  toJSON() { return { ortho: this.ortho, target: this.target.toArray(), pivot: this.pivot.toArray(), quat: this.quat.toArray(), dist: this.dist, halfH: this.halfH }; }
   load(j) {
     if (!j) return;
     const ok = (a, n) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
     if (typeof j.ortho === 'boolean') this.ortho = j.ortho;
     if (ok(j.target, 3)) this.target.fromArray(j.target);
+    this.pivot.copy(this.target);
+    if (ok(j.pivot, 3)) this.pivot.fromArray(j.pivot);
     if (ok(j.quat, 4)) this.quat.fromArray(j.quat).normalize();
     if (j.dist > 0) this.dist = Math.min(MAX_D, Math.max(MIN_D, j.dist));
     if (j.halfH > 0) this.halfH = Math.min(MAX_D, Math.max(MIN_D, j.halfH));
@@ -126,10 +129,10 @@ export function createViews(scene) {
       return { x: r.x + ((q.x + 1) / 2) * r.w, y: r.y + ((1 - q.y) / 2) * r.h };
     },
     /** The point under a viewport point on the plane through the slot's target facing the camera. */
-    targetPlanePoint(i, x, y) {
+    targetPlanePoint(i, x, y, at) {
       const c = v.cam(i), rc = v.ray(i, x, y), n = c.back;
       const p = new THREE.Vector3();
-      return rc.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n, c.target), p) ? p : c.target.clone();
+      return rc.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n, at ?? c.target), p) ? p : (at ?? c.target).clone();
     },
 
     // ---------------------------------------------------------------- navigation
@@ -149,10 +152,25 @@ export function createViews(scene) {
       return true;
     },
     /** Track: the point at the target's depth follows the mouse. */
-    track(i, dx, dy) {
-      const c = v.cam(i), k = v.worldPerPixel(i);
-      c.target.addScaledVector(c.right, -dx * k).addScaledVector(c.up, dy * k);
+    track(i, dx, dy, at) {
+      const c = v.cam(i);
+      const depth = at && !c.ortho ? Math.max(MIN_D, c.eye.clone().sub(at).dot(c.back)) : c.dist;
+      const k = v.worldPerPixel(i) * (c.ortho ? 1 : depth / c.dist);
+      const delta = c.right.multiplyScalar(-dx * k).addScaledVector(c.up, dy * k);
+      c.target.add(delta); c.pivot.add(delta);
       v.placed = true;
+    },
+    /** Pick a navigation pivot without changing the camera's eye, aim or distance. */
+    anchor(i, hit) {
+      const c = v.cam(i);
+      if (hit && hit.toArray().every(Number.isFinite) && c.eye.clone().sub(hit).dot(c.back) > MIN_D) c.pivot.copy(hit);
+      return c.pivot.clone();
+    },
+    zoomAt(i, factor, at) {
+      const c = v.cam(i), before = c.ortho ? c.halfH : c.dist;
+      v.dolly(i, factor, at);
+      const scale = (c.ortho ? c.halfH : c.dist) / before;
+      c.pivot.sub(at).multiplyScalar(scale).add(at);
     },
     /** Dolly by factor s (< 1 closer) towards `at` (a world point on the target plane; default the target). */
     dolly(i, s, at) {
@@ -171,6 +189,7 @@ export function createViews(scene) {
       const center = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
       const radius = Math.max(size.length() / 2, 1e-3);
       c.target.copy(center);
+      c.pivot.copy(center);
       const half = (vfov(aspect) * Math.PI) / 360, halfW = Math.atan(Math.tan(half) * aspect);
       c.dist = Math.min(MAX_D, Math.max(MIN_D, (radius / Math.sin(Math.min(half, halfW))) * 1.05));
       // ortho: the box's extent across the view
@@ -201,6 +220,7 @@ export function createViews(scene) {
         // the new view looks at the same place at the same scale
         const n = cams.get(name);
         n.target.copy(c.target); n.halfH = c.ortho ? c.halfH : c.dist * 0.3;
+        n.pivot.copy(c.pivot);
         slots[i].cam = name;
       }
     },

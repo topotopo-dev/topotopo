@@ -960,14 +960,19 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   that stores files in `inputs/` and shows them as ghosted reference layers (`GET/POST /api/inputs`, `GET /api/input`;
   a PNG as a flat textured quad).
   Under `topotopo view <graph.json>` that is the `inputs/` folder beside the graph file, made by the first drop (the
-  scratch workspace keeps only graphs, assets and exports), so the graph reads drops as `inputs/<name>` and they
+  scratch workspace keeps only graphs and assets), so the graph reads drops as `inputs/<name>` and they
   outlive the viewer; the page names the folder (`GET /api/inputs_dir`).
   Done too: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`). That first
   page was judged toy-like (damped camera, no orthographic views, no snapping, invented icons), so the viewer is now
-  built to a standard, [design/viewer.md](design/viewer.md): a production editor viewport with Maya navigation,
+  built to a standard, [design/viewer.md](design/viewer.md): a production editor viewport with default TopoTopo
+  surface navigation (Maya, Houdini and Blender presets retained),
   quad and orthographic views with a metre grid, selection, outliner and properties, guides drawn as nulls, curves,
   areas and volumes, then a gizmo with snapping and typed values, then the node editor (full editor direction). No
   chat panel in the viewer: Claude Code is the conversation (decided 2026-10-17).
+- Outputs now lists all graphs' default and named results, textures, renders and saved exports. Selection isolates
+  a result, with per-result camera or image pan/zoom. The image viewer exposes channels, layers and mesh UVs.
+  Export uses the actual cook and existing exporters, persists alongside the graph under `exports/`, records
+  source revisions, and offers individual/ZIP downloads. JPEG/WebP are browser-viewable references only.
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
   from `ParamDef`s. Every param already carries type, default, range, enum options and a description.
 - The engine runs in a Web Worker. Graph JSON is the file format and is identical for humans and LLMs, and `ui: {x, y}`

@@ -517,6 +517,14 @@ export class Engine {
       return { errors, warnings };
     }
     const names = Object.keys(graph.nodes);
+    if (graph.outputs !== undefined) {
+      if (!graph.outputs || typeof graph.outputs !== 'object' || Array.isArray(graph.outputs))
+        errors.push({ node: path || '(graph)', message: 'outputs must be a map of names to {node, label?}' });
+      else for (const [id, out] of Object.entries(graph.outputs)) {
+        if (!id || !out || typeof out !== 'object' || typeof out.node !== 'string' || !Object.hasOwn(graph.nodes, out.node) || (out.label !== undefined && typeof out.label !== 'string'))
+          errors.push({ node: path || '(graph)', message: `named output "${id}" must reference an existing node and have an optional string label` });
+      }
+    }
     if (!names.length) errors.push({ node: path || '(graph)', message: 'graph has no nodes' });
     if (graph.output && !graph.nodes[graph.output])
       errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });

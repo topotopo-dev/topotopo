@@ -18,6 +18,7 @@ import { encodePNG } from '../render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
+import { ArtifactStore } from '../host/artifacts.ts';
 import type { Host } from '../host/types.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
@@ -77,7 +78,7 @@ function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: strin
  * Landscape bundle, or the single file of other formats). Textures are read through the host; USD texture paths are
  * written relative to the output file. Returns the report text.
  */
-export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host): Promise<string> {
+export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host, record?: (files: string[]) => void): Promise<string> {
   const warnings: string[] = [];
   const outDir = format === 'unreal_landscape' && !/\.json$/i.test(p) ? p : path.dirname(p);
   const res = await exportFilesAsync(geo, format, p, {
@@ -98,6 +99,7 @@ export async function writeExport(geo: Geometry, format: ExportFormat, p: string
     fs.writeFileSync(f.path, f.bytes);
   }
   const total = res.files.reduce((s, f) => s + f.bytes.byteLength, 0);
+  if (res.files.length) record?.(res.files.map((f) => f.path));
   const rel = (f: string) => path.relative(outDir, f).split(path.sep).join('/');
   const list = res.files.length === 1 ? res.files[0].path : `${res.files.length} files in ${outDir}: ${res.files.slice(0, 12).map((f) => rel(f.path)).join(', ')}${res.files.length > 12 ? ', …' : ''}`;
   return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${res.summary}${warnings.length ? '\nwarnings:\n  ' + [...new Set(warnings)].join('\n  ') : ''}`;
@@ -161,6 +163,12 @@ const RENDER_PROPS = {
 };
 
 export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<string> } = {}): ToolDef[] {
+  const renderDestination = (name: string, node: string) => {
+    const stem = `${name}-${node}`.replace(/[^A-Za-z0-9_.-]/g, '_');
+    let file = path.join(ws.exportDir, 'renders', stem + '.png');
+    for (let n = 2; fs.existsSync(file); n++) file = path.join(ws.exportDir, 'renders', `${stem}_${n}.png`);
+    return file;
+  };
   const engine = ws.engine;
 
   /** The text (+ optional render) of a cook report. */
@@ -168,7 +176,10 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
-      const { img, notes } = pngContent(r.geo, ro);
+      const { img, notes, png } = pngContent(r.geo, ro);
+      const renderPath = renderDestination(name, r.target);
+      fs.mkdirSync(path.dirname(renderPath), { recursive: true }); fs.writeFileSync(renderPath, png);
+      new ArtifactStore(ws.exportDir).record([renderPath], { graph: name, node: r.target, format: 'png' });
       content.push(img);
       if (notes.length) content.push({ type: 'text', text: 'render: ' + notes.join('; ') });
     }
@@ -235,7 +246,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result"}}, "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default.' },
           name: { type: 'string', description: 'graph name (default "main")' },
           mode: { type: 'string', enum: ['replace', 'merge'] },
           dry_run: { type: 'boolean' },
@@ -323,10 +334,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const { img, notes, png } = pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`));
         const content: Content[] = [img];
         const info: string[] = [];
-        if (a.save_to) {
-          const p = path.resolve(ws.dir, a.save_to);
+        {
+          const p = a.save_to ? path.resolve(ws.dir, a.save_to) : renderDestination(name, r.target);
           fs.mkdirSync(path.dirname(p), { recursive: true });
           fs.writeFileSync(p, png);
+          new ArtifactStore(ws.exportDir).record([p], { graph: name, node: r.target, format: 'png' });
           info.push(`saved ${p}`);
         }
         if (notes.length) info.push(notes.join('; '));
@@ -373,7 +385,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
         const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt0] ?? fmt0) as ExportFormat;
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
-        const report = await writeExport(geo, ext, p, a, engine.host);
+        const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }));
         return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)`);
       },
     },

@@ -36,6 +36,7 @@ import { encodePNG } from './render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { exportFilesAsync } from './io/files.ts';
+import { ArtifactStore } from './host/artifacts.ts';
 import { inspect } from './inspect.ts';
 import { catalogText, nodeDoc } from './mcp/docs.ts';
 
@@ -100,10 +101,10 @@ if (argv[0] === 'view') {
   const dir = path.dirname(path.resolve(file));
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
-  // A scratch workspace holds the graph, assets and exports: the graph file stays the only source. Files dropped on the
+  // A scratch workspace holds the graph and assets: the graph file stays the only source. Files dropped on the
   // page go to inputs/ beside the graph file instead, made on the first drop: its file nodes read them as
   // "inputs/<name>" (the path an MCP workspace uses too), and they outlive the viewer.
-  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs') });
+  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: path.join(dir, 'exports') });
   ws.load();
   const name = path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
   const load = async () => {
@@ -213,6 +214,7 @@ async function cook() {
       const p = at(out);
       fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
       fs.writeFileSync(p, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
+      new ArtifactStore(path.join(path.dirname(path.resolve(file)), 'exports')).record([p], { graph: path.basename(file, '.json'), node: r.target, format: 'png' });
       console.log(`rendered ${p} (${img.width}x${img.height})${img.notes.length ? ' — ' + img.notes.join('; ') : ''}`);
     }
     const ex = opt('--export');
@@ -248,6 +250,7 @@ async function cook() {
         fs.mkdirSync(path.dirname(path.resolve(f.path)), { recursive: true });
         fs.writeFileSync(f.path, f.bytes);
       }
+      if (files.length) new ArtifactStore(path.join(path.dirname(path.resolve(file)), 'exports')).record(files.map((f) => f.path), { graph: path.basename(file, '.json'), node: r.target, format: fmt });
       console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${summary}` : ''}`);
     }
   }

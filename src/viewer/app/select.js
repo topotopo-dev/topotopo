@@ -10,11 +10,11 @@ const DRAG_PX = 4;
 
 export function createSelect(ctx) {
   const S = { press: null, boxEl: document.getElementById('boxsel'), hoverAt: null, hoverQueued: false };
-  const meshEntries = () => [...ctx.objects.values()].filter((e) => e.mesh && e.visible && e.mesh.root.visible);
+  const meshEntries = () => [...ctx.objects.values()].filter((e) => e.mesh && (ctx.isolated ? e.id === 'out' && !ctx.previewEmpty : e.visible) && e.mesh.root.visible);
 
   /** What is under a viewport point in a slot: {id, point?} or null. Guides first (they draw on top). */
   S.pick = (slot, x, y) => {
-    const g = ctx.guides.pick(slot, x, y);
+    const g = ctx.isolated ? null : ctx.guides.pick(slot, x, y);
     if (g) return { id: g.id };
     const rc = ctx.views.ray(slot, x, y);
     const linePx = ctx.views.worldPerPixel(slot) * 5;
@@ -49,6 +49,17 @@ export function createSelect(ctx) {
     if (best) return { point: best.point, surface: true };
     const p = rc.ray.intersectPlane(planeOf(slot), new THREE.Vector3());
     return p ? { point: p, surface: false } : null;
+  };
+  /** Navigation hits actual visible surfaces, never the infinite construction plane or selection bounds. */
+  S.navigationPoint = (slot, x, y) => {
+    const rc = ctx.views.ray(slot, x, y);
+    let best = null;
+    for (const e of meshEntries()) {
+      if (e.surface === false || e.mesh.picture || e.mesh.bboxMode) continue;
+      const h = e.mesh.pick(rc, 0);
+      if (h && h.dist < (best?.dist ?? Infinity)) best = h;
+    }
+    return best?.point?.clone() ?? null;
   };
   /** A viewport point on the horizontal plane at height `level`, through slot's camera. */
   S.planePoint = (slot, x, y, level) => ctx.views.ray(slot, x, y).ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -level), new THREE.Vector3());
