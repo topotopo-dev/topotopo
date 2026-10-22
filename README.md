@@ -78,6 +78,7 @@ Requires Node ≥ 22.18.
 npx topotopo --catalog                                      # node types by category
 npx topotopo --help-node scatter                            # one node's params, defaults and example
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
+npx topotopo graph.json --export-all                        # every output's export target, into exports/ beside it
 npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
 npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
@@ -113,13 +114,17 @@ To browse the examples in the live 3D viewer without an MCP client:
 npm run preview
 ```
 
-The viewer opens on **Outputs**, with all graphs' main results, named deliverables, textures and saved exports.
-Click a result to inspect it alone; **Scene** restores the scene. Publish extra results in graph JSON with
-`"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default.
-**Open image** or drop a PNG/JPEG/WebP to inspect layers and channels in the 2D viewer (generated textures default
-to RGB; use A to inspect packed alpha/AO). **Export…** saves the actual cooked result, with format-specific options,
-to persistent `exports/`; bundles offer individual files and ZIP downloads. For `topotopo view graph.json`,
-`inputs/` and `exports/` are beside that graph. JPEG/WebP viewing does not change procedural PNG support.
+The viewer's left panel has three tabs: **Scene** (the graph's nodes and guides), **Outputs** and **Inputs**.
+**Outputs**, the default, shows all graphs' main results, named deliverables and their textures; click one to
+inspect it alone, and **Scene** in the top bar restores the scene. Publish extra results in graph JSON with
+`"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default. Each result
+has an **Export** button: the first click asks for a format and a file inside `exports/` and stores that target in
+the graph (`"export": "glb"`, or `{"format": "obj", "path": "parts/rotor.obj", "up_axis": "z"}`, on the graph or on an
+output); later clicks overwrite the same file, and **Export all** writes every target. MCP `export {output}` and the
+CLI's `--export-all` write the same targets. **Inputs** lists your files in `inputs/`, with **Add input** (or drop
+files anywhere on the page); the agent is told about new ones in its next tool answer. Images open in a 2D viewer
+with layers and channels (generated textures default to RGB; use A to inspect packed alpha/AO); JPEG/WebP are for
+viewing only. For `topotopo view graph.json`, `inputs/` and `exports/` are beside that graph.
 
 The default **TopoTopo** keymap uses right-drag orbit around the surface beneath the cursor, middle-drag pan and
 wheel zoom toward the cursor. F/A frame, 1–4 select cameras, 5–7 change shading, O toggles orthographic and Space

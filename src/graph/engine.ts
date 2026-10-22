@@ -27,6 +27,7 @@ import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
 import type { Host } from '../host/types.ts';
+import { targetError } from '../io/targets.ts';
 import { allAliases, getNodeDef } from './registry.ts';
 import {
   DeferredExpr, REF_FUNCS, didYouMean, hasRefs, resolveParamName, resolveParams, scanNodeRefs, scanValue, vecOut,
@@ -523,8 +524,12 @@ export class Engine {
       else for (const [id, out] of Object.entries(graph.outputs)) {
         if (!id || !out || typeof out !== 'object' || typeof out.node !== 'string' || !Object.hasOwn(graph.nodes, out.node) || (out.label !== undefined && typeof out.label !== 'string'))
           errors.push({ node: path || '(graph)', message: `named output "${id}" must reference an existing node and have an optional string label` });
+        else if (out.export !== undefined && targetError(out.export))
+          errors.push({ node: path || '(graph)', message: `named output "${id}": ${targetError(out.export)}` });
       }
     }
+    if (graph.export !== undefined && targetError(graph.export))
+      errors.push({ node: path || '(graph)', message: targetError(graph.export)! });
     if (!names.length) errors.push({ node: path || '(graph)', message: 'graph has no nodes' });
     if (graph.output && !graph.nodes[graph.output])
       errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });

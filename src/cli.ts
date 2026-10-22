@@ -37,12 +37,17 @@ import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { exportFilesAsync } from './io/files.ts';
 import { ArtifactStore } from './host/artifacts.ts';
+import { prepareTarget, writeTargets } from './host/export-targets.ts';
+import type { PreparedTarget } from './host/export-targets.ts';
+import { publishedOutputs } from './io/targets.ts';
 import { inspect } from './inspect.ts';
 import { catalogText, nodeDoc } from './mcp/docs.ts';
 
 const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
 const fail = (msg: string): never => { console.error(msg); process.exit(1); };
+/** A graph file's name as a graph (view mode) and in receipts and default export file names. */
+const graphName = (file: string) => path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
 // the command as the user typed it: the sources from a clone, or the package's bin (dist/cli.js)
 const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo';
 
@@ -56,6 +61,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]`,
     '         [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all]',
+    '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
@@ -106,7 +112,7 @@ if (argv[0] === 'view') {
   // "inputs/<name>" (the path an MCP workspace uses too), and they outlive the viewer.
   const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: path.join(dir, 'exports') });
   ws.load();
-  const name = path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
+  const name = graphName(file);
   const load = async () => {
     let spec;
     try { spec = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { console.error(`${file}: ${(e as Error).message} (keeping the last good version)`); return; }
@@ -116,7 +122,18 @@ if (argv[0] === 'view') {
     ws.bump(name);
   };
   await load();
-  const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined, { inputsWhere: `beside ${path.basename(file)}` });
+  // an export target set on the page goes into the graph file, the only source here: only "export" keys change
+  const persistGraph = (g: string) => {
+    if (g !== name) return;
+    const spec = ws.getGraph(name), raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (spec.export === undefined) delete raw.export; else raw.export = spec.export;
+    for (const [id, o] of Object.entries(spec.outputs ?? {})) {
+      if (!raw.outputs?.[id]) continue;
+      if (o.export === undefined) delete raw.outputs[id].export; else raw.outputs[id].export = o.export;
+    }
+    fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n');
+  };
+  const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined, { inputsWhere: `beside ${path.basename(file)}`, persistGraph });
   console.log(`view: ${v.url}  (watching ${file}; files dropped on the page go to ${path.join(path.dirname(file), 'inputs') + path.sep}; Ctrl+C to stop)`);
   let timer: ReturnType<typeof setTimeout> | undefined;
   fs.watch(file, () => { clearTimeout(timer); timer = setTimeout(() => { load().catch((e) => console.error(String(e))); }, 150); });
@@ -169,6 +186,7 @@ async function cook() {
   const framesArg = opt('--frames');
   const frameArg = opt('--frame');
   if (framesArg && frameArg) fail('use either --frame or --frames, not both');
+  if (framesArg && argv.includes('--export-all')) fail('--export-all writes one frame: use --frame N, not --frames');
   const single = frameArg !== undefined ? Number(frameArg) : undefined;
   if (single !== undefined && !Number.isFinite(single)) fail(`--frame expects a number, got "${frameArg}"`);
 
@@ -208,7 +226,7 @@ async function cook() {
     const exportsDir = path.join(path.dirname(path.resolve(file)), 'exports');
     const record = (paths: string[], format: string) => {
       const inside = paths.every((p) => { const rel = path.relative(exportsDir, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); });
-      if (inside) new ArtifactStore(exportsDir).record(paths, { graph: path.basename(file, '.json'), node: r.target, format });
+      if (inside) new ArtifactStore(exportsDir).record(paths, { graph: graphName(file), node: r.target, format });
     };
     for (const { out, get, has } of renders) {
       const ro = renderFlags(get, has);
@@ -281,6 +299,26 @@ async function cook() {
     console.log(`cooked ${file} → ${r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''} in ${r.ms.toFixed(0)} ms`);
     console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary' }));
     await writeOutputs(r);
+    if (argv.includes('--export-all')) await exportAll();
+  }
+
+  /** --export-all: every published output with an export target (io/targets.ts), into exports/ beside the graph. */
+  async function exportAll() {
+    const name = graphName(file), exportsDir = path.join(path.dirname(path.resolve(file)), 'exports');
+    const published = publishedOutputs(name, graph, engine.findOutput(graph).name);
+    if (!published.some((p) => p.target)) fail(`--export-all: no output of ${file} has an export target; add "export": "glb" to the graph (default output) or to an entry of "outputs"`);
+    const prepared: PreparedTarget[] = [];
+    for (const p of published) {
+      if (!p.target) continue;
+      const r = await engine.cook(graph, { target: p.node, frame: single, fps });
+      report(r);
+      if (!r.ok || !r.geo) fail(`--export-all: "${p.label}" did not cook; nothing was written`);
+      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host));
+    }
+    writeTargets(prepared, exportsDir);
+    for (const p of prepared) console.log(`exported ${p.label} → ${path.join('exports', ...p.target.path.split('/'))} — ${p.summary}`);
+    const skipped = published.filter((p) => !p.target).map((p) => p.label);
+    if (skipped.length) console.log(`no export target (skipped): ${skipped.join(', ')}`);
   }
   // stop the kernel worker threads (idle ones would not hold the process, but a clean exit should not wait on them)
   await engine.host.pool?.close();

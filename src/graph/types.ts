@@ -103,13 +103,21 @@ export interface GraphMeta {
   [key: string]: any;
 }
 
+/**
+ * Where a published output exports to: a format name ("glb"), written as exports/<output>.<ext>, or an object with
+ * the format, an optional path inside exports/ and the export tool's options ({format: "obj", up_axis: "z"}).
+ */
+export type ExportTarget = string | { format: string; path?: string; [option: string]: unknown };
+
 export interface GraphSpec {
   /** graph format version (see GRAPH_VERSION); missing = 0, migrated on load */
   version?: number;
   nodes: Record<string, NodeSpec>;
   output?: string;
+  /** where the default output exports to (io/targets.ts): a format ("glb"), or {format, path?, ...export options} */
+  export?: ExportTarget;
   /** Named deliverables for the viewer. `output` remains the default cook target. */
-  outputs?: Record<string, { node: string; label?: string }>;
+  outputs?: Record<string, { node: string; label?: string; export?: ExportTarget }>;
   vars?: Record<string, any>;
   /** metadata for exposed vars: asset parameters, and the controls the live viewer shows for them */
   params?: Record<string, VarDef>;

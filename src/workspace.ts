@@ -8,13 +8,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Engine, wiringOf } from './graph/engine.ts';
 import type { CookReport, Issue } from './graph/engine.ts';
-import type { GraphSpec, NodeSpec } from './graph/types.ts';
+import type { ExportTarget, GraphSpec, NodeSpec } from './graph/types.ts';
 import { didYouMean, renameExprRefs } from './graph/params.ts';
 import { migrateGraph } from './graph/migrate.ts';
 
 export interface EditOp {
-  op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert';
+  op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert' | 'export';
   node?: string;
+  /** op export: the named output (omitted: the default output) and its target (null removes it) */
+  output?: string;
+  export?: ExportTarget | null;
   params?: Record<string, any>;
   spec?: NodeSpec;
   type?: string;
@@ -196,6 +199,7 @@ export class Workspace {
     if (patch.params) base.params = { ...(base.params ?? {}), ...patch.params };
     if (patch.output) base.output = patch.output;
     if (patch.outputs) base.outputs = { ...base.outputs, ...patch.outputs };
+    if (patch.export !== undefined) base.export = patch.export;
     if (patch.description) base.description = patch.description;
     return base;
   }
@@ -303,6 +307,18 @@ export class Workspace {
           break;
         }
         case 'bypass': g.nodes[need(op.node, where)].bypass = op.value ?? true; break;
+        case 'export': {
+          // the target of the default output, or of a named one; null removes it (validated with the graph)
+          if (op.export === undefined) throw new Error(`${where}: give "export": a format ("glb"), {format, path?, ...options}, or null`);
+          if (op.output === undefined) { if (op.export === null) delete g.export; else g.export = op.export; break; }
+          const out = g.outputs?.[op.output];
+          if (!out) {
+            const s = didYouMean(op.output, Object.keys(g.outputs ?? {}));
+            throw new Error(`${where}: no output "${op.output}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''} (publish it in "outputs" first)`);
+          }
+          if (op.export === null) delete out.export; else out.export = op.export;
+          break;
+        }
         case 'insert': {
           const after = need(op.after, `${where} after`);
           if (!op.node || !NAME_RE.test(op.node) || g.nodes[op.node]) throw new Error(`${where}: "node" must be a new valid name`);
@@ -314,7 +330,7 @@ export class Workspace {
           notes.push(`inserted "${op.node}" after "${after}"${consumers.length ? `; now feeds ${consumers.map((c) => c.node).join(', ')}` : ''}`);
           break;
         }
-        default: throw new Error(`${where}: unknown op. Use set, add, remove, connect, rename, output, vars, bypass, replace, insert`);
+        default: throw new Error(`${where}: unknown op. Use set, add, remove, connect, rename, output, vars, bypass, replace, insert, export`);
       }
     }
     return { graph: g, notes };

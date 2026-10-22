@@ -1,4 +1,6 @@
-// Output catalogue and download/export routes. Geometry stays server-side; cards and previews are lazy.
+// Output catalogue, previews, downloads and exports. Geometry stays server-side; cards and previews are lazy.
+// A published output exports to its target in the graph (io/targets.ts): its Export button writes it, Export all
+// writes every target, and a first export sets the target in the graph so the next click just writes again.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -6,6 +8,9 @@ import { createHash } from 'node:crypto';
 import type http from 'node:http';
 import { zipSync } from 'fflate';
 import { ArtifactStore, artifactId } from '../host/artifacts.ts';
+import type { Artifact } from '../host/artifacts.ts';
+import { prepareTarget, writeTargets } from '../host/export-targets.ts';
+import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Workspace } from '../workspace.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { Image, referenceableImages, imageToBytes, resizeLayer } from '../core/image.ts';
@@ -14,12 +19,10 @@ import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { withImagePreview } from '../render/texview.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
-import { exportGeometryAsync, EXPORT_FORMATS } from '../io/export.ts';
-import type { ExportFormat } from '../io/export.ts';
-import { exportFilesAsync } from '../io/files.ts';
+import { exportGeometryAsync } from '../io/export.ts';
+import { FORMAT_LABELS, TARGET_FORMATS, publishedOutputs, targetError, targetExtension } from '../io/targets.ts';
+import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { summarize } from '../inspect.ts';
-import { ExportSettingsStore, validateOptions, validateName, validateSubfolder, exportPath } from './export-settings.ts';
-import { resolveExport } from './app/export-config.js';
 
 const digest = (x: string) => createHash('sha256').update(x).digest('hex');
 const imageExt = /\.(png|jpe?g|webp)$/i;
@@ -29,12 +32,19 @@ const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
 const stamp = (p: string) => { const s = fs.statSync(p, { throwIfNoEntry: false }); return s ? `${s.size}:${s.mtimeMs}` : 'missing'; };
 function err(status: number, message: string): never { throw Object.assign(new Error(message), { status }); }
 const idFor = (...parts: string[]) => digest(JSON.stringify(parts)).slice(0, 24);
+const inside = (dir: string, p: string) => { const rel = path.relative(dir, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 
 export interface OutputEntry {
   origin?: 'published' | 'saved'; id: string; label: string; graph?: string; node?: string; parent?: string;
   kind: 'geometry' | 'image' | 'file' | 'bundle'; status: 'loading' | 'ready' | 'error';
   revision: string; error?: string; summary?: string; width?: number; height?: number;
-  layers?: string[]; layer?: string; image?: string; generated?: boolean; exportable?: boolean;
+  layers?: string[]; layer?: string; image?: string; generated?: boolean;
+  /** a published output's card has an Export button: `output` is its id (null = the graph's default output) */
+  exportable?: boolean; output?: string | null;
+  /** where it exports (posix path inside exports/, the export tool's options), or null before a first export sets it */
+  target?: { format: string; path: string; options: Record<string, unknown> } | null;
+  /** its last export to that target: newest file time (ms), total bytes, file count */
+  saved?: { at: number; size: number; files: number };
   files?: { id: string; name: string; size: number }[];
 }
 interface Item { entry: OutputEntry; geo?: Geometry; file?: string; files?: string[]; img?: Image; owner?: Item; key?: string; pending?: Promise<void> }
@@ -47,8 +57,13 @@ export function outputZip(files: { name: string; bytes: Uint8Array }[]): Uint8Ar
   return zipSync(entries);
 }
 
-export function createOutputs(ws: Workspace, changed: () => void) {
-  const store = new ArtifactStore(ws.exportDir), settings = new ExportSettingsStore(ws.exportDir);
+export interface OutputsOptions {
+  /** after a target is set in a graph (topotopo view writes it back into the graph file) */
+  persistGraph?: (graph: string) => void;
+}
+
+export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsOptions = {}) {
+  const store = new ArtifactStore(ws.exportDir);
   const items = new Map<string, Item>(), previewCache = new Map<string, Uint8Array>();
   let queue = Promise.resolve(), closed = false, lastFiles = '', exportQueue = Promise.resolve();
   const cache = async (key: string, make: () => Uint8Array | Promise<Uint8Array>) => {
@@ -66,7 +81,7 @@ export function createOutputs(ws: Workspace, changed: () => void) {
     for (const [name, img] of referenceableImages(item.geo)) {
       const id = idFor(item.entry.id, name);
       items.set(id, { owner: item, img, entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, node: item.entry.node,
-        label: name, kind: 'image', generated: true, exportable: !!item.entry.exportable, status: 'ready', revision: item.entry.revision,
+        label: name, kind: 'image', generated: true, status: 'ready', revision: item.entry.revision,
         width: img.width, height: img.height, layers: [...img.layers.keys()], layer: img.mainLayer, image: name } });
     }
   };
@@ -101,6 +116,20 @@ export function createOutputs(ws: Workspace, changed: () => void) {
     });
     return item.pending;
   };
+  /** The last export of a published output to its current target, from the receipts. */
+  const lastSaved = (records: Artifact[], graph: string, p: PublishedOutput) => {
+    if (!p.target) return undefined;
+    const dest = path.join(ws.exportDir, ...p.target.path.split('/'));
+    let best: OutputEntry['saved'];
+    for (const r of records) {
+      if (r.graph !== graph || r.output !== (p.output ?? '') || !r.files.some((f) => inside(dest, f))) continue;
+      const stats = r.files.map((f) => fs.statSync(f, { throwIfNoEntry: false })).filter((s) => s?.isFile());
+      if (!stats.length) continue;
+      const at = Math.max(...stats.map((s) => s!.mtimeMs));
+      if (!best || at > best.at) best = { at: Math.round(at), size: stats.reduce((n, s) => n + s!.size, 0), files: stats.length };
+    }
+    return best;
+  };
   const refresh = () => {
     const alive = new Set<string>();
     const inputStamp = JSON.stringify(ws.listInputs().map((f) => [f.path, f.size, f.mtime]));
@@ -115,15 +144,15 @@ export function createOutputs(ws: Workspace, changed: () => void) {
       } } catch { /* a disappearing file is reported by the next cook */ }
     }
     const workspaceRevision = digest(JSON.stringify([...ws.graphs]) + inputStamp + JSON.stringify([...sourceFiles]));
+    const records = store.records();
     for (const [graph, spec] of ws.graphs) {
-      const target = ws.engine.findOutput(spec).name;
-      const outputs = [{ node: target, label: 'Main output', id: 'main', primary: true }, ...Object.entries(spec.outputs ?? {}).map(([id, o]) => ({ ...o, id, primary: false }))];
-      for (const o of outputs) {
-        const id = idFor('graph', graph, o.primary ? 'default' : 'named', o.id); alive.add(id);
-        const key = workspaceRevision;
-        const old = items.get(id);
-        if (old?.key === key) { old.entry.label = o.label ?? o.id; continue; }
-        const item: Item = { geo: old?.geo, key, entry: { id, origin: 'published', graph, node: o.node, label: o.label ?? o.id, kind: 'geometry', generated: true, exportable: true, status: 'loading', revision: key } };
+      for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name)) {
+        const id = idFor('graph', graph, p.output === null ? 'default' : 'named', p.output ?? 'main'); alive.add(id);
+        const key = workspaceRevision, old = items.get(id);
+        const meta = { label: p.label, output: p.output, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null, saved: lastSaved(records, graph, p) };
+        if (old?.key === key) { Object.assign(old.entry, meta); if (!meta.saved) delete old.entry.saved; continue; }
+        const item: Item = { geo: old?.geo, key, entry: { id, origin: 'published', graph, node: p.node, kind: 'geometry', generated: true, exportable: true, status: 'loading', revision: key, ...meta } };
+        if (!meta.saved) delete item.entry.saved;
         // Carry last valid images until the replacement cook completes.
         if (old) for (const v of items.values()) if (v.owner === old) { v.owner = item; v.entry.status = 'loading'; }
         items.set(id, item); void cook(item);
@@ -153,51 +182,28 @@ export function createOutputs(ws: Workspace, changed: () => void) {
         files: [{ id: artifactId(file), name: path.basename(file), size: stat.size }] } });
     }
     for (const [id, item] of items) if (!alive.has(id) && !item.owner) { items.delete(id); for (const [child, v] of items) if (v.owner === item) items.delete(child); }
-    const signature = JSON.stringify([...items.values()].filter((v) => v.files).map((v) => [v.entry.id, v.entry.revision]));
+    const signature = JSON.stringify([...items.values()].filter((v) => v.files || v.entry.exportable).map((v) => [v.entry.id, v.entry.revision, v.entry.target, v.entry.saved]));
     if (signature !== lastFiles) { lastFiles = signature; changed(); }
   };
   const get = (id: string | null) => items.get(id ?? '') ?? err(404, 'output no longer exists');
   const geometry = async (item: Item) => { if (item.owner) item = item.owner; if (!item.geo || item.pending) await cook(item); return item.geo ?? err(422, item.entry.error ?? 'no geometry'); };
-  const prepareExport = async (body: any, batch = false) => {
-    let item = get(body.id); const owner = item.owner ?? item;
-    if (!owner.entry.generated) err(400, 'select a live graph output to export');
-    await geometry(owner);
-    item = get(body.id);
-    // Recheck external file signatures as well as graph/UI edits before writing.
-    const fresh = await ws.cook(owner.entry.graph!, owner.entry.node);
-    const freshRevision = digest(`${owner.key}:${fresh.results.get(fresh.target)?.sig ?? ''}`);
-    if (!fresh.ok || !fresh.geo) {
-      owner.entry.status = 'error'; owner.entry.error = fresh.errors.map((e) => e.message).join('\n') || 'no geometry';
-      changed(); err(422, owner.entry.error);
-    }
-    if (owner.entry.status !== 'ready' || (!batch && body.revision !== owner.entry.revision) || freshRevision !== owner.entry.revision) { owner.key = undefined; refresh(); err(409, 'Output changed. Refresh its preview before exporting.'); }
-    const geo = fresh.geo!;
-    const format = body.format as ExportFormat;
-    if (!EXPORT_FORMATS.includes(format)) err(400, 'choose a supported export format');
-    if (item.img && format !== 'textures') err(400, 'select the model output to export geometry; images export as PNG textures');
-    const raw = validateName(body.name), subfolder = validateSubfolder(body.subfolder ?? '');
-    const o = body.options ?? {}, warnings: string[] = [];
-    validateOptions(o);
-    const extension = ({ textures: '', unreal_landscape: '', png16: '.png', mask_png: '.png', pointsjson: '.points.json' } as Record<string, string>)[format] ?? '.' + format;
-    const base = extension && raw.toLowerCase().endsWith(extension) ? raw.slice(0, -extension.length) : raw;
-    if (!base || base === '..') err(400, 'filename needs a stem');
-    const options = { upAxis: o.up_axis, scale: o.scale, splitByName: o.split_by_name ?? true, materials: o.materials ?? true,
-      custom: o.custom_attribs, compress: o.compress ?? 'none', quantize: o.quantize ?? false, instancing: o.instancing,
-      pcg: o.pcg || o.pcg_struct, pcgStruct: o.pcg_struct, instances: o.instances, meshes: o.meshes, attributes: o.attributes,
-      precision: o.precision, layer: o.layer, layers: o.layers, heightMin: o.height_min, heightMax: o.height_max, heightfield: o.heightfield, tile_size: o.tile_size,
-      deflate, readFile: (p: string) => ws.engine.host.readFile(p), warn: (m: string) => warnings.push(m) };
-    let result, destination = '';
-    for (let n = 0; ; n++) {
-      const dest = path.join(ws.exportDir, subfolder, base + (n ? `_${n + 1}` : '') + extension);
-      destination = dest;
-      let selected = geo;
-      if (item.img) { selected = geo.clone(); selected.volumes = [item.img.clone()]; selected.packedSources = []; }
-      result = await exportFilesAsync(selected, format, dest, { ...options, texturePath: (p) => path.relative(path.dirname(dest), ws.engine.host.resolvePath(p)).split(path.sep).join('/') });
-      for (const f of result.files) exportPath(ws.exportDir, f.path);
-      if (body.replace === true || result.files.every((f) => !fs.existsSync(f.path))) break;
-      if (n > 999) err(409, 'too many existing files with this name');
-    }
-    return { result, destination, owner, revision: owner.entry.revision, key: owner.key, format, warnings };
+  /** The published output behind a card, as the graph now has it. */
+  const published = (entry: OutputEntry): PublishedOutput => {
+    const spec = ws.getGraph(entry.graph!);
+    return publishedOutputs(entry.graph!, spec, ws.engine.findOutput(spec).name).find((p) => p.output === entry.output) ?? err(404, 'output no longer exists');
+  };
+  /** Cook now and serialize to the target: the export writes the current graph, whatever the preview last showed. */
+  const prepare = async (graph: string, p: PublishedOutput): Promise<PreparedTarget> => {
+    const r = await ws.cook(graph, p.node);
+    if (!r.ok || !r.geo) err(422, `${p.label} (${graph}): ` + (r.errors.map((e) => `${e.node}: ${e.message}`).join('; ') || 'no geometry'));
+    return prepareTarget(r.geo!, graph, p as PublishedOutput & { target: ResolvedTarget }, ws.exportDir, ws.engine.host);
+  };
+  /** One export at a time, so two clicks never interleave their writes. */
+  const exclusive = async <T>(work: () => Promise<T>): Promise<T> => {
+    let unlock!: () => void;
+    const prior = exportQueue; exportQueue = new Promise<void>((r) => { unlock = r; });
+    await prior;
+    try { return await work(); } finally { unlock(); }
   };
   // A file can vanish while a scan stats it. The next tick or request rescans; neither callback may throw (an
   // exception in the timer would end the viewer's process, the MCP server's too when it hosts the viewer).
@@ -214,72 +220,51 @@ export function createOutputs(ws: Workspace, changed: () => void) {
         res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(name ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` } : {}) }); res.end(body);
       };
       const json = (j: unknown) => send(JSON.stringify(j), 'application/json');
+      const posts = ['/api/output/export', '/api/output/export-all'];
       try {
-        if (req.method !== 'GET' && !(req.method === 'POST' && ['/api/output/export', '/api/output/export-batch', '/api/output/settings'].includes(u.pathname))) err(405, 'method not allowed');
-        if (req.method !== 'POST' && ['/api/output/export', '/api/output/export-batch'].includes(u.pathname)) err(405, 'POST required');
+        if (posts.includes(u.pathname) ? req.method !== 'POST' : req.method !== 'GET') err(405, posts.includes(u.pathname) ? 'POST required' : 'method not allowed');
         refresh();
-        if (u.pathname === '/api/outputs') { json({ items: [...items.values()].map((v) => v.entry), directory: ws.exportDir, formats: EXPORT_FORMATS }); return true; }
-        if (u.pathname === '/api/output/settings') {
-          json(req.method === 'POST' ? settings.write(await readJSON(req)) : settings.read());
-          if (req.method === 'POST') changed();
+        if (u.pathname === '/api/outputs') {
+          json({ items: [...items.values()].map((v) => v.entry), directory: ws.exportDir,
+            formats: TARGET_FORMATS.map((f) => ({ format: f, label: FORMAT_LABELS[f], extension: targetExtension(f) })) });
           return true;
         }
-        if (u.pathname === '/api/output/export' || u.pathname === '/api/output/export-batch') {
-          const body = await readJSON(req), batch = u.pathname.endsWith('-batch');
-          let unlock!: () => void;
-          const prior = exportQueue; exportQueue = new Promise<void>((r) => { unlock = r; });
-          await prior;
-          try {
-            refresh();
-            const config = settings.read();
-            if (batch && (!Array.isArray(body.ids) || !body.ids.length || body.ids.some((id: unknown) => typeof id !== 'string') || new Set(body.ids).size !== body.ids.length)) err(400, 'select distinct live outputs to export');
-            const requests = batch ? body.ids.map((id: string) => ({ id })) : [body];
-            const prepared: Awaited<ReturnType<typeof prepareExport>>[] = [];
-            for (const request of requests) {
-              if (batch) {
-                await geometry(get(request.id));
-                Object.assign(request, resolveExport(config, get(request.id).entry), { replace: true });
-              }
-              prepared.push(await prepareExport(request, batch));
+        if (u.pathname === '/api/output/export') {
+          // {id} writes the output to its target; {id, export} first sets the target ({id, export: null} only removes it)
+          const body = await readJSON(req), item = get(body?.id);
+          if (!item.entry.exportable) err(400, 'only a published output (a card with an Export button) exports');
+          return await exclusive(async () => {
+            const graph = item.entry.graph!;
+            if (body.export !== undefined) {
+              if (body.export !== null && targetError(body.export)) err(400, targetError(body.export)!);
+              try { await ws.edit(graph, [{ op: 'export', ...(item.entry.output === null ? {} : { output: item.entry.output! }), export: body.export }]); }
+              catch (e) { err(400, (e as Error).message); }
+              opts.persistGraph?.(graph);
+              if (body.export === null) { rescan(); changed(); json({ ok: true, cleared: true }); return true; }
             }
-            const paths = new Set<string>();
-            for (const p of prepared) for (const f of p.result.files) {
-              const key = path.resolve(f.path).toLowerCase();
-              if (paths.has(key)) err(409, `Two selected outputs write ${path.relative(ws.exportDir, f.path)}. Change one output's filename or subfolder.`);
-              paths.add(key);
-            }
-            for (const p of prepared) for (const f of p.result.files) {
-              if (fs.statSync(f.path, { throwIfNoEntry: false })?.isDirectory()) err(409, `Export file conflicts with a folder: ${path.relative(ws.exportDir, f.path)}`);
-              let parent = path.dirname(path.resolve(f.path));
-              while (parent !== path.dirname(parent)) {
-                if (paths.has(parent.toLowerCase()) || fs.statSync(parent, { throwIfNoEntry: false })?.isFile()) err(409, `Export folder conflicts with a file: ${path.relative(ws.exportDir, parent)}`);
-                parent = path.dirname(parent);
-              }
-            }
-            refresh();
-            for (const p of prepared) if (get(p.owner.entry.id).key !== p.key || get(p.owner.entry.id).entry.revision !== p.revision) err(409, 'Outputs changed while preparing the export. Try again.');
-            // Serialization is complete before writes. A filesystem failure can still interrupt replacement.
-            let written = 0;
-            const results: { id: string; summary: string; warnings: string[] }[] = [];
-            try {
-              for (const p of prepared) {
-                for (const f of p.result.files) {
-                  exportPath(ws.exportDir, f.path);
-                  exportPath(ws.exportDir, f.path + '.part');
-                  fs.mkdirSync(path.dirname(f.path), { recursive: true });
-                  fs.writeFileSync(f.path + '.part', f.bytes); fs.renameSync(f.path + '.part', f.path); written++;
-                }
-                const artifact = store.record(p.result.files.map((f) => f.path), { label: path.basename(p.destination), graph: p.owner.entry.graph, node: p.owner.entry.node, format: p.format, sourceRevision: p.revision });
-                results.push({ id: 'file-' + artifact.id, summary: p.result.summary, warnings: p.warnings });
-              }
-            } catch (error: any) { err(500, `Export stopped after writing ${written} files: ${error.message}`); }
-            if (batch) {
-              for (const request of requests) config.destinations[request.id] = request.name;
-              settings.write(config);
-            }
-            refresh(); changed(); json(batch ? { ok: true, results, directory: ws.exportDir } : { ok: true, ...results[0], directory: ws.exportDir });
-          } finally { unlock(); }
-          return true;
+            const p = published(item.entry);
+            if (!p.target) err(400, 'no export target yet: choose a format');
+            const prepared = await prepare(graph, p);
+            writeTargets([prepared], ws.exportDir);
+            rescan(); changed();
+            json({ ok: true, path: p.target.path, files: prepared.files.length, summary: prepared.summary, warnings: prepared.warnings });
+            return true;
+          });
+        }
+        if (u.pathname === '/api/output/export-all') {
+          return await exclusive(async () => {
+            const targets: { graph: string; p: PublishedOutput }[] = [], skipped: { graph: string; label: string }[] = [];
+            for (const [graph, spec] of ws.graphs) for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name))
+              if (p.target) targets.push({ graph, p }); else skipped.push({ graph, label: p.label });
+            if (!targets.length) err(400, 'no output has an export target yet: export one with its Export button first');
+            // every target cooks and serializes before any file is written
+            const prepared: PreparedTarget[] = [];
+            for (const t of targets) prepared.push(await prepare(t.graph, t.p));
+            writeTargets(prepared, ws.exportDir);
+            rescan(); changed();
+            json({ ok: true, written: prepared.map((x) => ({ graph: x.graph, label: x.label, path: x.target.path, warnings: x.warnings })), skipped });
+            return true;
+          });
         }
         const item = get(u.searchParams.get('id'));
         const mode = u.searchParams.get('mode') ?? 'RGB', layer = u.searchParams.get('layer') ?? item.entry.layer ?? '';
@@ -314,7 +299,8 @@ export function createOutputs(ws: Workspace, changed: () => void) {
             }
             return encodePNG(rgba, img.width, img.height, deflate);
           });
-          send(bytes, 'image/png'); return true;
+          // a texture card's Download: the image as a PNG named after it
+          send(bytes, 'image/png', u.searchParams.has('download') ? `${item.entry.label}${layer && layer !== img.mainLayer ? '_' + layer : ''}.png` : undefined); return true;
         }
         if (u.pathname === '/api/output/uv') {
           const g = expandPacked(await geometry(item)).geo, uv = g.vertices.get('uv') ?? g.points.get('uv'), segments: number[][] = [];
@@ -340,6 +326,7 @@ export function createOutputs(ws: Workspace, changed: () => void) {
         }
         err(404, 'unknown output route');
       } catch (error: any) {
+        if (error?.name === 'EditRejected') error.status = 400;
         res.writeHead(error.status ?? 500, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ ok: false, error: String(error.message) }));
       }
       return true;

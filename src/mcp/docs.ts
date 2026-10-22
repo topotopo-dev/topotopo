@@ -95,6 +95,10 @@ export const TOPICS: Record<string, string> = {
   its textures/layers. Rename/remove edits maintain references. The latest render of each graph node is saved as
   exports/renders/<graph>-<node>.png (each render overwrites it) unless save_to is supplied; explicit render/export
   destinations are registered in the viewer too.
+- Optional "export" (on the graph for the default output, or on an entry of "outputs") is where that output
+  exports: a format ("glb" → exports/<graph or output id>.glb) or {"format":"obj","path":"parts/a.obj","up_axis":"z"}
+  (the export tool's options), always inside exports/. The person's Export buttons in the viewer, export {output} /
+  export {all:true} and the CLI's --export-all write these targets; set one with edit {op:"export", output?, export}.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
@@ -102,8 +106,9 @@ export const TOPICS: Record<string, string> = {
 - Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the workspace.`,
 
   inputs: `HUMAN INPUT (guides, blockouts and masks in the workspace inputs/ folder)
-People feed in their own material by dropping files into <workspace>/inputs/ (or onto the live viewer): meshes, guide
-curves and points drawn in Blender, Houdini or Unreal, placeholder blockouts, PNG masks and heightmaps. Before building a
+People feed in their own material by dropping files into <workspace>/inputs/ (or onto the live viewer, or with its Add
+input button): meshes, guide curves and points drawn in Blender, Houdini or Unreal, placeholder blockouts, PNG masks and
+heightmaps. Every tool answer ends with a note when inputs/ has files new or changed since your last call. Before building a
 landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path} tells what one holds (polygons, open
 polylines, loose points, packed prims; bbox in metres; attributes; every name and role value; materials). Read a file
 with a file node, the path relative to the workspace: {"type":"file","params":{"path":"inputs/guides.glb"}}.
@@ -737,6 +742,8 @@ CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pie
   --no-view-labels`,
 
   export: `EXPORT
+export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic
+  "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
 export {path:"exports/thing.glb"} — format from the extension:
   glb / gltf    glTF 2.0 via gltf-transform (recommended for Unreal, Blender, web)
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)

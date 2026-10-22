@@ -1,5 +1,6 @@
-// The outliner (docs/design/viewer.md section 2): one tree of the output (the node being shown), the graph's nodes
-// (click one to show its result; the square is its display flag), the inputs (reference layers) and the guides.
+// The left panel (docs/design/viewer.md section 2): three tabs. Scene is the outliner tree: the output (the node being
+// shown), the graph's nodes (click one to show its result; the square is its display flag) and the guides. Outputs
+// is the published results (outputs.js). Inputs is the files in inputs/ (reference layers) with Add input.
 // Rows carry a visibility eye, a display mode and the name; selecting a row selects in the viewport and back.
 // Rows are kept and updated in place, so an open menu survives a refresh.
 import { opOf } from './selection.js';
@@ -12,7 +13,30 @@ import { guideId } from './guides.js';
 const EYE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle class="pupil" cx="8" cy="8" r="2"/><path class="slash" d="M3 13L13 3"/></svg>';
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
-export function createOutliner(ctx, host) {
+export function createOutliner(ctx, panes) {
+  // the tabs: one pane shown, remembered per browser; arrow keys move between tabs
+  const tabs = [...document.querySelectorAll('#outliner [data-tab]')], paneEls = [...document.querySelectorAll('#outliner [data-pane]')];
+  let tab = ctx.store.get('outliner.tab', 'outputs');
+  const showTab = (name, focus = false) => {
+    if (!tabs.some((t) => t.dataset.tab === name)) name = 'outputs';
+    tab = name; ctx.store.set('outliner.tab', name);
+    for (const t of tabs) { const on = t.dataset.tab === name; t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus(); }
+    for (const p of paneEls) p.hidden = p.dataset.pane !== name;
+  };
+  for (const t of tabs) {
+    t.onclick = () => showTab(t.dataset.tab);
+    t.onkeydown = (e) => {
+      if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      e.preventDefault();
+      const i = tabs.indexOf(t), next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      showTab(next.dataset.tab, true);
+    };
+  }
+  showTab(tab);
+  const tabCount = (name, n) => { const c = document.querySelector(`#tab-${name} .count`); if (c) c.textContent = n ? String(n) : ''; };
+  const picker = document.getElementById('input-file');
+  document.getElementById('add-input').onclick = () => picker.click();
+  picker.onchange = () => { ctx.layers.upload([...picker.files], []); picker.value = ''; };
   const sizes = [32, 56, 88], sizeButton = document.getElementById('thumb-size');
   let size = ctx.store.get('outliner.thumbnailSize', 56);
   if (!sizes.includes(size)) size = 56;
@@ -21,14 +45,16 @@ export function createOutliner(ctx, host) {
   applySize();
   const closed = new Set(ctx.store.get('outliner.closed', []));
   const sections = new Map();
-  const section = (key, title) => {
+  /** A collapsible section in a pane (the scene tree by default); a headless one is just rows (the Inputs tab). */
+  const section = (key, title, pane = panes.scene, headless = false) => {
     let s = sections.get(key);
     if (s) return s;
-    const box = el('div', 'sec' + (closed.has(key) ? ' closed' : '')), head = el('div', 'sh'), rows = el('div', 'rows'), count = el('span', 'count');
+    const box = el('div', 'sec' + (closed.has(key) && !headless ? ' closed' : '')), head = el('div', 'sh'), rows = el('div', 'rows'), count = el('span', 'count');
     head.append(el('span', '', title), count);
     head.onclick = () => { box.classList.toggle('closed'); if (box.classList.contains('closed')) closed.add(key); else closed.delete(key); ctx.store.set('outliner.closed', [...closed]); };
+    head.hidden = headless;
     box.append(head, rows);
-    host.append(box);
+    pane.append(box);
     s = { box, rows, count, keyed: new Map(), tail: [] };
     sections.set(key, s);
     return s;
@@ -128,11 +154,13 @@ export function createOutliner(ctx, host) {
         };
       });
     }
-    // inputs: reference layers
+    // inputs: reference layers, in the Inputs tab
     {
-      const s = section('inputs', 'Inputs');
+      const s = section('inputs', 'Inputs', panes.inputs, true);
       const L = ctx.layers;
-      s.count.textContent = L.list.length || '';
+      tabCount('inputs', L.list.length);
+      const where = document.getElementById('inputs-where');
+      where.textContent = L.where ? `inputs/ ${L.where}` : 'inputs/'; where.title = L.dir ?? '';
       sync(s, L.list.map((f) => ({ key: f.path, f })), ({ f: first }) => {
         const path = first.path, id = layerId(path);
         const wrap = el('div', ''), row = el('div', 'row input-card'), ey = eye(() => L.show(path, !L.shown.has(path))), nm = el('span', 'nm', path), mt = el('span', 'mt'), er = el('div', 'rowerr');
@@ -163,14 +191,10 @@ export function createOutliner(ctx, host) {
           },
         };
       });
-      if (!L.list.length) note(s, 'Drop meshes, data, PNG, JPEG or WebP files anywhere on this page.');
-      if (L.where) { const n = note(s, `files go to inputs/ ${L.where}; a file node reads them as inputs/<name>`); n.title = L.dir; }
+      if (!L.list.length) note(s, 'No inputs yet: Add input, or drop meshes, curves, points, PNG, JPEG or WebP files anywhere on this page. The agent hears about new files and reads them as inputs/<name>.');
+      else note(s, 'a file node reads these as inputs/<name>; the agent hears about new ones');
     }
-    {
-      const s = section('outputs', 'Outputs'), outputs = document.getElementById('outputs');
-      if (outputs.parentElement !== s.rows) s.rows.append(outputs);
-      outputs.hidden = false; s.count.textContent = ctx.outputs?.count || '';
-    }
+    tabCount('outputs', ctx.outputs?.count);
     // guides
     {
       const s = section('guides', 'Guides');

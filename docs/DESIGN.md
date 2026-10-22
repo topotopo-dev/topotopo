@@ -982,14 +982,14 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   TopoTopo surface navigation (no modifier keys; Maya, Houdini and Blender presets retained). Next: phase 2, a gizmo
   with snapping, typed values and CV editing; then phase 3, the node editor. No chat panel in the viewer: Claude Code
   is the conversation (decided 2026-10-17).
-- Outputs now lists all graphs' default and named results, textures, renders and saved exports. Selection isolates
-  a result, with per-result camera or image pan/zoom. The image viewer exposes channels, layers and mesh UVs.
-  Outputs sits below Inputs in one Outliner; references stay exclusively in Inputs. Thumbnail sizes cycle in the
-  header. Checked outputs export independently of preview selection, with project defaults, per-output overrides
-  and temporary one-time settings. Fixed-size export dialogs scroll internally. Batch preparation validates every
-  result and companion path before replacing any destinations; settings persist under `exports/.export-settings.json`.
-  Export uses the actual cook and existing exporters, persists alongside the graph under `exports/`, records
-  source revisions, and offers individual/ZIP downloads. JPEG/WebP are browser-viewable references only.
+- The left panel has three tabs (2026-10-22): Scene (the outliner tree), Outputs and Inputs. Outputs lists all
+  graphs' default and named results as cards with their textures; selection isolates a result, with its own camera
+  or image pan/zoom, and the image viewer exposes channels, layers and mesh UVs. Each result exports to its target in
+  the graph (`export` / `outputs.<id>.export`: a format, or format + path + export options, inside `exports/`; see
+  `io/targets.ts`): one Export button per card, which asks for a format and file the first time and stores that
+  target, Export all for every target, always overwriting. The same targets export from MCP (`export {output}` /
+  `{all: true}`) and the CLI (`--export-all`). Inputs lists the files of `inputs/` with Add input; the agent hears
+  about new inputs in its next tool answer. JPEG/WebP are browser-viewable references only.
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
   from `ParamDef`s. Every param already carries type, default, range, enum options and a description.
 - The engine runs in a Web Worker. Graph JSON is the file format and is identical for humans and LLMs, and `ui: {x, y}`

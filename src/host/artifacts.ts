@@ -11,6 +11,8 @@ export interface Artifact {
   node?: string;
   format?: string;
   sourceRevision?: string;
+  /** the published output a target export wrote ('' = the graph's default output) */
+  output?: string;
   files: string[];
 }
 export const artifactId = (p: string) => createHash('sha256').update(path.resolve(p)).digest('hex').slice(0, 24);

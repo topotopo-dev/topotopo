@@ -136,7 +136,7 @@ ctx.guides = createGuides(ctx);
 ctx.select = createSelect(ctx);
 ctx.surfacePoint = ctx.select.surfacePoint;
 ctx.planePoint = ctx.select.planePoint;
-const outliner = createOutliner(ctx, $('tree'));
+const outliner = createOutliner(ctx, { scene: $('tree'), inputs: $('inputs-list') });
 const props = createProps(ctx);
 
 // ------------------------------------------------------------------------------------------- graphs and the output

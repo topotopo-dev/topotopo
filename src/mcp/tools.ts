@@ -17,8 +17,10 @@ import { renderArgs } from '../render/options.ts';
 import { encodePNG } from '../render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
-import { exportFilesAsync } from '../io/files.ts';
+import { publishedOutputs } from '../io/targets.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
+import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
+import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Host } from '../host/types.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
@@ -79,30 +81,18 @@ function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: strin
  * written relative to the output file. Returns the report text.
  */
 export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host, record?: (files: string[]) => void): Promise<string> {
-  const warnings: string[] = [];
-  const outDir = format === 'unreal_landscape' && !/\.json$/i.test(p) ? p : path.dirname(p);
-  const res = await exportFilesAsync(geo, format, p, {
-    upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
-    materials: a.materials, compress: a.compress, quantize: a.quantize, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct,
-    precision: a.precision, instancing: a.instancing, instances: a.instances, meshes: a.meshes,
-    layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield, tile_size: a.tile_size,
-    deflate: (d) => zlib.deflateSync(d, { level: 6 }),
-    readFile: (t) => host.readFile(t),
-    texturePath: (t) => {
-      const abs = host.resolvePath(t);
-      return /^[a-z][a-z0-9+.-]*:\/\//i.test(abs) ? abs : path.relative(outDir, abs).split(path.sep).join('/');
-    },
-    warn: (m) => warnings.push(m),
-  });
-  for (const f of res.files) {
-    fs.mkdirSync(path.dirname(f.path), { recursive: true });
-    fs.writeFileSync(f.path, f.bytes);
-  }
-  const total = res.files.reduce((s, f) => s + f.bytes.byteLength, 0);
+  const res = await serializeExport(geo, format, p, a, host);
+  writeExportFiles(res.files);
   if (res.files.length) record?.(res.files.map((f) => f.path));
+  return exportReport(res.files, res.outDir, format, res.summary, res.warnings);
+}
+
+/** "wrote <file or N files in dir> (format, KB): summary", then any warnings. */
+function exportReport(files: { path: string; bytes: Uint8Array }[], outDir: string, format: string, summary: string, warnings: string[]): string {
+  const total = files.reduce((s, f) => s + f.bytes.byteLength, 0);
   const rel = (f: string) => path.relative(outDir, f).split(path.sep).join('/');
-  const list = res.files.length === 1 ? res.files[0].path : `${res.files.length} files in ${outDir}: ${res.files.slice(0, 12).map((f) => rel(f.path)).join(', ')}${res.files.length > 12 ? ', …' : ''}`;
-  return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${res.summary}${warnings.length ? '\nwarnings:\n  ' + [...new Set(warnings)].join('\n  ') : ''}`;
+  const list = files.length === 1 ? files[0].path : `${files.length} files in ${outDir}: ${files.slice(0, 12).map((f) => rel(f.path)).join(', ')}${files.length > 12 ? ', …' : ''}`;
+  return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${summary}${warnings.length ? '\nwarnings:\n  ' + warnings.join('\n  ') : ''}`;
 }
 function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
@@ -199,6 +189,32 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     return { r, name, geo: r.geo };
   };
 
+  /** export without a path: the graph's targets (the default output's, a named one's, or all), inside exports/ */
+  const exportTargets = async (a: any): Promise<ToolResult> => {
+    const name = a.graph ?? a.name ?? 'main', spec = ws.getGraph(name);
+    const published = publishedOutputs(name, spec, engine.findOutput(spec).name);
+    const hint = (o: string | undefined) => `edit {ops:[{op:"export"${o === undefined ? '' : `, output:"${o}"`}, export:"glb"}]}`;
+    let chosen = published;
+    if (!a.all) {
+      const p = a.output === undefined ? published[0] : published.find((x) => x.output === a.output);
+      if (!p) return text(`graph "${name}" publishes no output "${a.output}" (outputs: ${published.slice(1).map((x) => x.output).join(', ') || 'none'})`, true);
+      if (!p.target) return text(`${a.output === undefined ? 'the default output' : `output "${a.output}"`} of "${name}" has no export target: set one with ${hint(a.output)}, or pass path`, true);
+      chosen = [p];
+    }
+    const targets = chosen.filter((p) => p.target);
+    if (!targets.length) return text(`no output of "${name}" has an export target: set one with ${hint(undefined)}, or pass path`, true);
+    const prepared: PreparedTarget[] = [];
+    for (const p of targets) {
+      const r = await ws.cook(name, p.node, a.frame);
+      if (!r.ok || !r.geo) return text(reportText(name, r), true);
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host));
+    }
+    writeTargets(prepared, ws.exportDir);
+    const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
+    return text(prepared.map((p) => exportReport(p.files, ws.exportDir, p.target.format, `${p.label}: ${p.summary}`, p.warnings)).join('\n')
+      + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : ''));
+  };
+
   const tools: ToolDef[] = [
     {
       name: 'catalog',
@@ -244,7 +260,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result"}}, "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default.' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
           name: { type: 'string', description: 'graph name (default "main")' },
           mode: { type: 'string', enum: ['replace', 'merge'] },
           dry_run: { type: 'boolean' },
@@ -272,7 +288,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'edit',
-      description: 'Incrementally edit a graph, then re-cook (only affected nodes recompute). ops: {op:"set",node,params} (null removes a param) · {op:"add",node,type,in,params} · {op:"insert",node,type,params,after} (splice after a node) · {op:"remove",node} (rewires consumers) · {op:"connect",node,in:[...]} or {op:"connect",node,input:1,from:"x"} · {op:"rename",node,to} · {op:"replace",node,type?,params?,in?} · {op:"output",node} · {op:"vars",vars:{k:v}} · {op:"bypass",node,value}.',
+      description: 'Incrementally edit a graph, then re-cook (only affected nodes recompute). ops: {op:"set",node,params} (null removes a param) · {op:"add",node,type,in,params} · {op:"insert",node,type,params,after} (splice after a node) · {op:"remove",node} (rewires consumers) · {op:"connect",node,in:[...]} or {op:"connect",node,input:1,from:"x"} · {op:"rename",node,to} · {op:"replace",node,type?,params?,in?} · {op:"output",node} · {op:"vars",vars:{k:v}} · {op:"bypass",node,value} · {op:"export",output?,export} (the export target of a named output, or of the default output without "output": a format "glb" or {format, path?, ...export options}; null removes it).',
       inputSchema: {
         type: 'object',
         required: ['ops'],
@@ -349,10 +365,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]).',
       inputSchema: {
         type: 'object',
-        required: ['path'],
         properties: {
           graph: { type: 'string', description: 'graph name (default "main")' }, node: { type: 'string', description: 'node to look at (default: the graph output)' },
-          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap), "exports/level" (unreal_landscape: a directory), "exports/maps" (textures: a directory)' },
+          path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap), "exports/level" (unreal_landscape: a directory), "exports/maps" (textures: a directory). Without path: the graph\'s export targets (output / all), written inside exports/' },
+          output: { type: 'string', description: 'without path: export this named output (graph.outputs) to its target; omitted = the default output (graph.export)' },
+          all: { type: 'boolean', description: 'without path: export every output of the graph that has an export target' },
           format: { type: 'string', enum: EXPORT_FORMATS, description: 'default: from the extension (.points.json = pointsjson)' },
           layer: { type: 'string', description: 'heightmaps: layer to write (png16/r16 default "height", mask_png default "mask")' },
           layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png); textures: extra image layers to write as <image>_<layer>.png ("*" = all)' },
@@ -378,6 +395,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         },
       },
       run: async (a) => {
+        if (a.path === undefined) return exportTargets(a);
         const { geo, name, r } = await resolveNodeGeo(a);
         const p = path.resolve(ws.dir, a.path);
         const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
@@ -490,6 +508,26 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       inputSchema: { type: 'object', properties: {} },
       run: async () => text(`live preview: ${await opts.onPreview!()}  (updates automatically on every build/edit; click a node in the outliner to see its result)`),
     });
+  }
+  // A person can add files to inputs/ at any time (the viewer's Add input, a drop, the folder). The first answer says
+  // what is there, later answers what is new or changed since the last one; the inputs tool's own answer counts.
+  let heard: Map<string, string> | null = null;
+  const inputsNote = (tool: string): string => {
+    const files = ws.listInputs(), now = new Map(files.map((f) => [f.path, `${f.size}:${f.mtime}`]));
+    const first = heard === null, fresh = files.filter((f) => heard?.get(f.path) !== now.get(f.path));
+    heard = now;
+    if (tool === 'inputs' || !fresh.length) return '';
+    const shown = fresh.slice(0, 8).map((f) => `inputs/${f.path} (${f.kind}, ${(f.size / 1024).toFixed(0)} KB)`).join(', ') + (fresh.length > 8 ? `, and ${fresh.length - 8} more` : '');
+    return `${first ? `inputs/ holds ${files.length} file(s) from the person` : 'new or changed in inputs/ since your last call'}: ${shown}. inputs {action:"describe", path} tells what one holds.`;
+  };
+  for (const t of tools) {
+    const run = t.run;
+    t.run = async (args) => {
+      const result = await run(args);
+      const note = inputsNote(t.name);
+      if (note) result.content.push({ type: 'text', text: note });
+      return result;
+    };
   }
   return tools;
 }

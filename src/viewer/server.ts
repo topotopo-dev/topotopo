@@ -154,6 +154,11 @@ export interface ViewerOptions {
    * Default: "in the workspace" (or the folder that holds it, when the workspace was given another inputs folder).
    */
   inputsWhere?: string;
+  /**
+   * Called after the page sets an export target in a graph: `topotopo view` writes it back into the graph file, which
+   * is the only source there (an MCP workspace stores the graph itself).
+   */
+  persistGraph?: (graph: string) => void;
 }
 
 export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341), opts: ViewerOptions = {}): Promise<{ url: string; close: () => void }> {
@@ -163,7 +168,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     for (const c of clients) c.write(msg);
   };
   ws.listeners.add(broadcast);
-  const outputs = createOutputs(ws, () => broadcast({ outputs: true }));
+  const outputs = createOutputs(ws, () => broadcast({ outputs: true }), { persistGraph: opts.persistGraph });
 
   // ---------------------------------------------------------------- inputs/
   let inputsVersion = 0;

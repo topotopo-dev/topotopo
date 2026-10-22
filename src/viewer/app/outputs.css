@@ -1,4 +1,20 @@
-#thumb-size { margin-left: auto; font-size: 10px; letter-spacing: 0; min-width: 48px; }
+/* the left panel's tabs: Scene, Outputs, Inputs */
+.phead.tabs { padding: 0 6px 0 0; gap: 0; align-items: stretch; }
+.phead.tabs [role=tab] { padding: 6px 10px 5px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--dim); font: inherit; letter-spacing: .06em; text-transform: uppercase; }
+.phead.tabs [role=tab]:hover { color: var(--text); }
+.phead.tabs [role=tab].on { color: var(--text); border-bottom-color: var(--sel); }
+.phead.tabs [role=tab]:focus-visible { outline: 1px solid var(--sel); outline-offset: -1px; }
+.phead.tabs [role=tab] .count { margin-left: 3px; color: var(--faint); letter-spacing: 0; }
+#thumb-size { margin: auto 0 auto auto; font-size: 10px; letter-spacing: 0; min-width: 48px; }
+.tabpane { flex: 1; }
+.tabpane[hidden] { display: none; }
+/* the bars at the top of the Outputs and Inputs tabs stay in view while the cards scroll */
+.outputs-bar, .inputs-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--panel); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.outputs-bar .primary, .inputs-bar .primary { flex: none; padding: 4px 12px; }
+.outputs-bar .dim, .inputs-bar .dim { font-size: 11px; }
+.primary { border-color: var(--sel); }
+button:disabled { opacity: .45; cursor: default; }
+/* input cards */
 .input-card.row { height: auto; min-height: calc(var(--thumb-size) + 12px); padding: 6px; gap: 8px; }
 .input-thumb, .file-icon { width: var(--thumb-size); height: var(--thumb-size); flex: none; object-fit: contain; background: var(--view); }
 .file-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--dim); font-size: 10px; overflow: hidden; }
@@ -6,29 +22,38 @@
 .input-body .nm { display: block; white-space: normal; overflow-wrap: anywhere; }
 .input-controls { display: flex; gap: 3px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 .input-controls .mt { margin-left: auto; }
+/* output cards: thumbnail, name, what it is, where it exports, and its Export button */
 .output-group { padding: 12px 10px 5px; color: var(--dim); font-size: 11px; overflow-wrap: anywhere; }
-.output-card { display: flex; align-items: center; width: calc(100% - 8px); margin: 3px 4px; padding: 5px; gap: 6px; text-align: left; background: var(--bg); border: 1px solid transparent; min-height: calc(var(--thumb-size) + 12px); cursor: pointer; }
+.output-card { display: flex; align-items: center; width: calc(100% - 8px); margin: 3px 4px; padding: 5px; gap: 8px; text-align: left; background: var(--bg); border: 1px solid transparent; min-height: calc(var(--thumb-size) + 12px); cursor: pointer; }
 .output-card:hover { background: var(--hover-bg); }
 .output-card:focus-visible { outline: 1px solid var(--sel); }
 .output-card.selected { border-color: var(--sel); background: var(--sel-bg); }
 .output-card.child { margin-left: 12px; width: calc(100% - 16px); }
 .output-card img { width: var(--thumb-size); height: var(--thumb-size); object-fit: contain; background: var(--view); flex: none; }
-.output-card .output-body { display: flex; flex: 1; flex-direction: column; min-width: 0; justify-content: center; gap: 4px; }
-.output-card input { margin: 0; flex: none; }
-.output-edit { padding: 2px 5px; flex: none; font-size: 10px; }
+.output-card .output-body { display: flex; flex: 1; flex-direction: column; min-width: 0; justify-content: center; gap: 3px; }
 .output-card .output-label { overflow-wrap: anywhere; }
 .output-card small { overflow: hidden; text-overflow: ellipsis; max-height: 32px; }
-.output-export-bar { display: flex; gap: 6px; padding: 10px 8px; border-top: 1px solid var(--line); margin-top: 8px; }
-.output-export-bar > :first-child { flex: 1; padding: 6px; }
-.output-export-bar > :last-child { min-width: 30px; font-size: 16px; }
-.primary { border-color: var(--sel); }
-button:disabled { opacity: .45; cursor: default; }
-.saved-outputs { border-top: 1px solid var(--line); }
+.output-export { flex: none; padding: 3px 10px; }
+.output-target { align-self: flex-start; max-width: 100%; padding: 0; border: 0; background: none; color: var(--dim); font-size: 11px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.output-target:hover { color: var(--text); text-decoration: underline; }
+.output-target.unset { font-style: italic; color: var(--faint); }
+.saved-outputs { border-top: 1px solid var(--line); margin-top: 8px; }
 .saved-outputs > summary { padding: 8px 10px; color: var(--dim); cursor: pointer; }
 .output-menu { position: fixed; z-index: 30; min-width: 190px; padding: 4px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px #0007; border-radius: 4px; }
 .output-menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 7px 12px; }
 .output-menu button:hover, .output-menu button:focus { background: var(--hover-bg); outline: none; }
+/* the export target popover: a format and a file inside exports/ */
+.export-popover { position: fixed; z-index: 40; display: flex; flex-direction: column; gap: 8px; width: 330px; max-width: calc(100vw - 12px); padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 6px 20px #0008; }
+.export-title { font-weight: 600; overflow-wrap: anywhere; }
+.export-field { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 8px; }
+.export-field select, .export-field input { width: 100%; min-width: 0; padding: 4px 6px; }
+.export-where { font: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.export-error { color: var(--err); font-size: 11px; }
+.export-error:empty { display: none; }
+.export-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.export-actions button { padding: 4px 12px; }
 .dim { color: var(--dim); }
+.err { color: var(--err); }
 .empty { padding: 12px; color: var(--dim); }
 #output-details { padding: 12px; border-bottom: 1px solid var(--line); max-height: 36%; overflow: auto; overflow-wrap: anywhere; }
 #output-details p { white-space: pre-wrap; max-height: 120px; overflow: auto; }
@@ -45,28 +70,4 @@ button:disabled { opacity: .45; cursor: default; }
 .image-stage canvas:active { cursor: grabbing; }
 .image-error { position: absolute; left: 10px; bottom: 10px; padding: 8px; background: var(--bg); color: var(--err); }
 .image-mode > #gl, .image-mode > #views, .image-mode > #boxsel { visibility: hidden; pointer-events: none; }
-.export-dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; width: 680px; height: 620px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); padding: 0; overflow: hidden; }
-.export-dialog::backdrop { background: #0009; }
-.export-dialog form { display: flex; flex-direction: column; height: 100%; }
-.export-dialog header { padding: 20px 24px 15px; flex: none; border-bottom: 1px solid var(--line); }
-.export-dialog h2 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
-.export-dialog h3 { font-size: 12px; color: var(--dim); margin: 0 0 12px; font-weight: 600; }
-.export-dialog .export-scope { color: var(--dim); margin: 0; overflow-wrap: anywhere; }
-.export-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px 24px; scrollbar-gutter: stable; }
-.export-scroll > section { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
-.export-field { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 16px; margin: 10px 0; }
-.export-field > input, .export-field > select { width: 100%; min-width: 0; padding: 6px 8px; }
-.export-check { display: flex; align-items: center; gap: 9px; margin: 12px 0; }
-.export-check > input { margin: 0; }
-.export-dialog .export-dir { color: var(--dim); overflow-wrap: anywhere; font: var(--mono); }
-.export-dialog .format-note { color: var(--dim); line-height: 1.5; margin: 12px 0 0; }
-.export-target { padding: 6px 0; }
-.export-target small { display: block; color: var(--dim); overflow-wrap: anywhere; }
-.export-dialog footer { flex: none; padding: 12px 24px 16px; border-top: 1px solid var(--line); }
-.export-actions { display: flex; align-items: center; gap: 10px; }
-.export-actions button { padding: 7px 12px; }
-.export-error { max-height: 55px; overflow: auto; white-space: pre-wrap; margin-bottom: 10px; }
-.export-error:empty { display: none; }
-.export-dialog summary { cursor: pointer; padding: 4px 0 10px; }
-@media (max-width: 560px) { .export-field { grid-template-columns: 120px minmax(0, 1fr); gap: 10px; } .export-scroll, .export-dialog header, .export-dialog footer { padding: 12px; } .export-actions button { padding: 6px; } }
 @media (max-width: 1100px) { #top .readout { display: none; } #top { gap: 4px; } #top .tb select { max-width: 120px; } }
