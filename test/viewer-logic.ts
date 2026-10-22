@@ -1,7 +1,7 @@
 // The viewer page's browser-free logic (src/viewer/app/*.js, docs/design/viewer.md section 10): the keymap presets,
 // guide (marker) rules shared with the server, the grid step, selection set operations, the undo stack, mesh
-// topology (welding, pieces, the render tool's edge classes) and the Controls rules. Also checks that the page's
-// modules only import each other and the served three.js.
+// topology (welding, pieces, the render tool's edge classes), the Controls rules and the status line. Also checks
+// that the page's modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +15,7 @@ import * as sel from '../src/viewer/app/selection.js';
 import { createUndo } from '../src/viewer/app/undo.js';
 import * as mesh from '../src/viewer/app/mesh.js';
 import * as vars from '../src/viewer/app/vars.js';
+import * as status from '../src/viewer/app/status.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0, passes = 0;
@@ -235,6 +236,23 @@ section('Controls rules (section 8)');
     'slider ranges: declared, 0..4×default, −1..1 around 0');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
+}
+
+section('status line (section 4)');
+{
+  check(status.graphsLine('', 0) === status.NO_GRAPHS_LINE && status.graphsLine(status.LIVE_LINE, 0) === status.NO_GRAPHS_LINE,
+    'no graph: the hint, whatever was shown');
+  check(status.graphsLine(status.NO_GRAPHS_LINE, 1) === status.LIVE_LINE, 'the first graph replaces the hint with the live line');
+  check(status.graphsLine(status.LIVE_LINE, 3) === null && status.graphsLine('undid guide', 2) === null && status.graphsLine('keymap: Maya (? shows it)', 1) === null,
+    'with graphs, any other line stays');
+  check(status.connectedLine(0) === status.NO_GRAPHS_LINE && status.connectedLine(2) === status.LIVE_LINE,
+    'connecting shows the hint without graphs and the live line with them');
+  // startup runs the graph fetch and the stream's open in either order; both orders end on the same line
+  const ends = (n: number) => {
+    const fetchFirst = status.connectedLine(n), openFirst = status.graphsLine(status.connectedLine(0), n) ?? status.connectedLine(0);
+    return [fetchFirst, openFirst];
+  };
+  check(ends(0).every((l) => l === status.NO_GRAPHS_LINE) && ends(1).every((l) => l === status.LIVE_LINE), 'either startup order ends on the line that fits the workspace');
 }
 
 section('the page\'s modules');

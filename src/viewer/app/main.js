@@ -16,6 +16,7 @@ import { createUndo } from './undo.js';
 import { EDITOR_NAMES } from './markers.js';
 import * as KM from './keymap.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
+import { connectedLine, graphsLine } from './status.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -165,7 +166,8 @@ const refreshGraphs = ctx.coalesce(async () => {
   const g = G.current();
   if (G.node && !g?.nodes.some((n) => n.name === G.node)) G.node = null;
   props.controls.render(g, issued);
-  if (!g) ctx.message('no graphs yet — build one via MCP');
+  const line = graphsLine(msgEl.textContent, list.length);
+  if (line) ctx.message(line);
   ctx.emit('graphs');
 });
 $('graph').onchange = (e) => {
@@ -563,7 +565,7 @@ ctx.selection.onChange(() => ctx.emit('selection'));
 
 const es = api.events({
   open() {
-    ctx.message('live — updates on every build, edit and file save');
+    ctx.message(connectedLine(ctx.graph.list.length));
     // after a reconnect the server may have restarted: fetch everything again
     if (es.opened) { refreshGraphs().then(loadGeo); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
     es.opened = true;

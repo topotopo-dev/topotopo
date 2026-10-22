@@ -476,9 +476,9 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   if (opts.onPreview) {
     tools.push({
       name: 'preview',
-      description: 'Start (or get the URL of) the live 3D preview web page for humans: orbit view of any graph/node that auto-refreshes after every build/edit. Returns the URL to open in a browser.',
+      description: 'Start (or get the URL of) the live viewer for humans: an editor viewport of the workspace (graph menu, an outliner with the graph\'s nodes, single and quad views, the graph\'s params as Controls, input layers and guides) that updates after every build/edit. Returns the URL to open in a browser.',
       inputSchema: { type: 'object', properties: {} },
-      run: async () => text(`live preview: ${await opts.onPreview!()}  (updates automatically on every build/edit; click nodes in the sidebar to view intermediate results)`),
+      run: async () => text(`live preview: ${await opts.onPreview!()}  (updates automatically on every build/edit; click a node in the outliner to see its result)`),
     });
   }
   return tools;
