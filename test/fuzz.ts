@@ -57,6 +57,19 @@ const SEED = Number(flag('--seed') ?? 1);
 const VERBOSE = args.includes('--verbose');
 const TIMEOUT_MS = 1000;
 
+// A rejected host promise with nobody listening would end this run with a bare stack and no case (CI on 2026-10-22:
+// a script's time limit stopped it between starting lib.run('script') and listening to it). Record each one against
+// the case or section that was running, report it as a failure and go on; the exit code counts them. Rejections of
+// the script realm's own promises are dropped by the host, as in the MCP server.
+let current = 'start-up';
+const stray: { at: string; message: string }[] = [];
+process.on('unhandledRejection', (reason: any, promise) => {
+  if (promise instanceof Promise) stray.push({ at: current, message: String(reason?.stack ?? reason).split('\n').slice(0, 3).join(' | ') });
+});
+let strayReported = 0;
+/** The stray rejections since the last call, as problem lines. */
+const strayProblems = () => stray.slice(strayReported, (strayReported = stray.length)).map((s) => `unhandled rejection (while ${s.at} ran; it can come from an earlier script still settling): ${s.message}`);
+
 // ------------------------------------------------------------------ grammar
 
 type Rand = () => number;
@@ -206,6 +219,7 @@ const counts = { valid: 0, malformed: 0, hang: 0 };
 
 for (const [i, c] of cases.entries()) {
   counts[c.kind]++;
+  current = `case #${i} (${c.node ?? 'wrangle'} ${c.kind})`;
   const problems: string[] = [];
   const t = performance.now();
   let r;
@@ -240,6 +254,7 @@ for (const [i, c] of cases.entries()) {
       if (ms > TIMEOUT_MS * 3 + 2000) problems.push(`timeout fired late: ${ms.toFixed(0)} ms for a ${TIMEOUT_MS} ms limit`);
     }
   }
+  problems.push(...strayProblems());
   if (problems.length) {
     fail++;
     console.log(`FAIL #${i} ${c.node ?? 'wrangle'} ${c.kind} (run_over ${c.runOver}, on ${c.source})`);
@@ -252,6 +267,7 @@ const secs = ((performance.now() - t0) / 1000).toFixed(1);
 console.log(`wrangle fuzz: ${cases.length} snippets (${counts.valid} valid, ${counts.malformed} malformed, ${counts.hang} infinite loops; seed ${SEED}), ${fail} failed, ${gaps} known line-hint gaps (${secs}s)`);
 
 // ------------------------------------------------------------------ "=expr" sandbox
+current = 'the =expr sandbox';
 
 /**
  * Hostile parameter expressions. Each one gives a number when it gets out (so an escape cooks instead of failing),
@@ -322,6 +338,7 @@ for (const workers of [0, 2]) {
 console.log(`expression sandbox: ${EXPR_CASES.length} hostile expressions × pool off/on, ${exprFail} failed (${((performance.now() - te) / 1000).toFixed(1)}s)`);
 
 // ------------------------------------------------------------------ code params: heightfield_layer, sdf_expr, parametric
+current = 'the code params';
 
 /**
  * Hostile code in the code params that run in the scripting realm outside a wrangle: heightfield_layer's expression
@@ -398,6 +415,7 @@ for (const workers of [0, 2]) {
 console.log(`code params: ${codeRuns} hostile heightfield_layer/sdf_expr/parametric cooks over pool off/on, ${codeFail} failed (${((performance.now() - tc) / 1000).toFixed(1)}s)`);
 
 // ------------------------------------------------------------------ fields sampled later; what wrangles and scripts throw
+current = 'later sampling and thrown values';
 
 /**
  * User code that runs after its own node has cooked: an sdf_expr field is only probed at the origin by sdf_expr and is
@@ -511,6 +529,7 @@ for (const workers of [0, 2]) {
 console.log(`later sampling, thrown values: ${laterRuns} hostile sdf_to_mesh/sdf_grid/wrangle/script cooks over pool off/on, ${laterFail} failed (${((performance.now() - tl) / 1000).toFixed(1)}s)`);
 
 // ------------------------------------------------------------------ a realm whose stack formatting never returns
+current = 'the poisoned stack formatting';
 
 /**
  * The scripting realm is shared by every cook of a host, and code can change it: with Error.prepareStackTrace looping,
@@ -561,6 +580,7 @@ for (const workers of [0, 2]) {
 console.log(`poisoned realm: ${POISON_CASES.length} failing nodes × pool off/on after Error.prepareStackTrace loops, ${poisonFail} failed (${((performance.now() - tp) / 1000).toFixed(1)}s)`);
 
 // ------------------------------------------------------------------ a realm whose Promise.prototype.then never returns
+current = 'the poisoned Promise.prototype.then';
 
 /**
  * R-17: the script node subscribed to its run's promise outside the time limit, through the realm's
@@ -594,6 +614,7 @@ for (const poison of THEN_POISONS) {
 console.log(`poisoned Promise.prototype.then: ${THEN_POISONS.length} poisons × (the poisoning script, a later script), ${thenFail} failed (${((performance.now() - tt) / 1000).toFixed(1)}s)`);
 
 // ------------------------------------------------------------------ realm slots and values handed back (R-18)
+current = 'the realm slots and returned values';
 
 /**
  * R-17 N1: the engine handed jobs and the wrangle's geometry API to the scripting realm through properties of its
@@ -686,4 +707,10 @@ for (const workers of [0, 2]) {
   for (const p of problems) { resultFail++; console.log(`FAIL values a script hands back, ${mode}: ${p}`); }
 }
 console.log(`values a script hands back: ${RESULT_CASES.length} cases × pool off/on, ${resultFail} failed (${((performance.now() - tr) / 1000).toFixed(1)}s)`);
-process.exit(fail || exprFail || codeFail || laterFail || poisonFail || thenFail || slotFail || resultFail ? 1 : 0);
+// stragglers: a script stopped late in a section can reject after its case was judged
+current = 'the end of the run';
+await new Promise((r) => setTimeout(r, TIMEOUT_MS + 200));
+const late = strayProblems();
+for (const p of late) console.log(`FAIL ${p}`);
+console.log(`stray rejections: ${stray.length} (each reported as a failure above)`);
+process.exit(fail || exprFail || codeFail || laterFail || poisonFail || thenFail || slotFail || resultFail || late.length ? 1 : 0);

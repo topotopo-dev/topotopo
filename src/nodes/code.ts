@@ -86,8 +86,9 @@ defineNode({
 function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }) {
   const engine = ctx.engine;
   // compiled in the script realm: a synchronous node's result resolves a realm promise, so `await lib.run(...)`
-  // continues inside the same time-limited call; only async nodes hand back an outside promise (then: wake)
-  const realmAsync = engine.host.compile('(function(f){ return async function run(...a) { return f(...a); }; })');
+  // continues inside the same time-limited call; an async node hands back its outcome (see run below), which the
+  // realm awaits and turns back into the node's value or error
+  const realmAsync = engine.host.compile('(function(f){ return async function run(...a) { const r = f(...a); if (r && r.libRunOutcome) { const o = await r.libRunOutcome; if (o.failed) throw o.error; return o.value; } return r; }; })');
   return {
     Geometry, GeoBuilder, math, topology, random,
     noise: { makeNoise, fractal, makeCurl },
@@ -128,9 +129,25 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
         node: `${ctx.node}/${type}`, type: def.type, p: rp.values, inputs,
         input: (i: number) => inputs[i] ?? new Geometry(), hasInput: (i: number) => !!inputs[i], inputSigs: inputs.map(() => 'script'),
       });
-      const r = def.cook(sub);
-      if (r && typeof (r as any).then === 'function') (r as Promise<Geometry>).then(wake, wake);
-      return r;
+      // The script's time limit can stop it anywhere, also between starting an async node and listening to it: that
+      // node's promise would then reject later with nobody listening, which ends the process (MCP server included).
+      // So an async node's promise is awaited right inside `outcome`, with no call in between that the limit could
+      // stop, and `outcome` never rejects. A synchronous node returns (or throws) here, as before.
+      let started: any, thrownNow: { error: unknown } | null = null;
+      const isAsync = () => !!started && typeof started.then === 'function';
+      const outcome = (async () => {
+        try {
+          started = def.cook(sub);
+          // property reads only from here to the await: a function call is where the limit could stop the script
+          if (!started || typeof started.then !== 'function') return null;
+          return { value: await started };
+        } catch (error) {
+          if (!isAsync()) { thrownNow = { error }; return null; }
+          return { failed: true, error };
+        } finally { if (isAsync()) wake(); }
+      })();
+      if (thrownNow) throw (thrownNow as { error: unknown }).error;
+      return isAsync() ? { libRunOutcome: outcome } : started;
     }),
     warn: (m: string) => ctx.warn(String(m)),
   };
