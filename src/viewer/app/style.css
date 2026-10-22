@@ -9,6 +9,7 @@
   --mono: 11px/1.35 ui-monospace, Consolas, "SF Mono", monospace;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--font); overflow: hidden; }
 #app {
   display: grid; height: 100%;

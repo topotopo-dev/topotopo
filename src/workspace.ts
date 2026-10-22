@@ -43,7 +43,7 @@ export interface InputFile {
 }
 
 const GEOMETRY_EXTS = new Set(['obj', 'stl', 'ply', 'glb', 'gltf', 'geo', 'bgeo', 'blend', 'csv', 'json', 'points.json']);
-const IMAGE_EXTS = new Set(['png']);
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp']);
 
 /** Lower-case extension of a file name without the dot; ".points.json" is one extension, dot-files have none. */
 export function inputExt(file: string): string {
@@ -65,6 +65,8 @@ export interface WorkspaceOptions {
    * graph that never gets a drop leaves no empty inputs/ beside it.
    */
   inputs?: string;
+  /** Persistent exports directory; view mode places it beside the source graph. */
+  exports?: string;
 }
 
 /** Thrown by Workspace.edit when the edited graph does not validate; the stored graph is unchanged. */
@@ -86,17 +88,19 @@ export class Workspace {
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
   /** the inputs folder given to the constructor (WorkspaceOptions.inputs), if any */
   private inputsAt: string | undefined;
+  private exportsAt: string | undefined;
 
   constructor(dir: string, engine: Engine, opts: WorkspaceOptions = {}) {
     this.dir = path.resolve(dir);
     this.engine = engine;
     this.inputsAt = opts.inputs === undefined ? undefined : path.resolve(opts.inputs);
+    this.exportsAt = opts.exports === undefined ? undefined : path.resolve(opts.exports);
     (engine as any).graphResolver = (n: string) => this.graphs.get(n);
   }
 
   get graphDir() { return path.join(this.dir, 'graphs'); }
   get assetDir() { return path.join(this.dir, 'assets'); }
-  get exportDir() { return path.join(this.dir, 'exports'); }
+  get exportDir() { return this.exportsAt ?? path.join(this.dir, 'exports'); }
   /**
    * files people drop in: meshes, guide curves and points, PNG masks and heightmaps (read as "inputs/<path>");
    * <dir>/inputs unless the constructor was given another folder
@@ -191,6 +195,7 @@ export class Workspace {
     if (patch.vars) base.vars = { ...(base.vars ?? {}), ...patch.vars };
     if (patch.params) base.params = { ...(base.params ?? {}), ...patch.params };
     if (patch.output) base.output = patch.output;
+    if (patch.outputs) base.outputs = { ...base.outputs, ...patch.outputs };
     if (patch.description) base.description = patch.description;
     return base;
   }
@@ -256,6 +261,7 @@ export class Workspace {
           if (refs.length) notes.push(`removed "${n}"; rewired ${refs.map((r) => r.node).join(', ')} to ${up ?? '(nothing)'}`);
           delete g.nodes[n];
           if (g.output === n) delete g.output;
+          for (const [id, out] of Object.entries(g.outputs ?? {})) if (out.node === n) delete g.outputs![id];
           break;
         }
         case 'connect': {
@@ -278,6 +284,7 @@ export class Workspace {
           delete g.nodes[n];
           for (const r of refsTo(n)) setRef(r.node, r.idx, op.to);
           if (g.output === n) g.output = op.to;
+          for (const out of Object.values(g.outputs ?? {})) if (out.node === n) out.node = op.to;
           // expression references: npoints("old"), ch("old/param") …
           const touched: string[] = [];
           for (const [k, spec] of Object.entries(g.nodes)) {

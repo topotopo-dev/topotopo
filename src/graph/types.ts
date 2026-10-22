@@ -108,6 +108,8 @@ export interface GraphSpec {
   version?: number;
   nodes: Record<string, NodeSpec>;
   output?: string;
+  /** Named deliverables for the viewer. `output` remains the default cook target. */
+  outputs?: Record<string, { node: string; label?: string }>;
   vars?: Record<string, any>;
   /** metadata for exposed vars: asset parameters, and the controls the live viewer shows for them */
   params?: Record<string, VarDef>;

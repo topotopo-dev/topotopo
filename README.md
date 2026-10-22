@@ -113,6 +113,18 @@ To browse the examples in the live 3D viewer without an MCP client:
 npm run preview
 ```
 
+The viewer opens on **Outputs**, with all graphs' main results, named deliverables, textures and saved exports.
+Click a result to inspect it alone; **Scene** restores the scene. Publish extra results in graph JSON with
+`"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default.
+**Open image** or drop a PNG/JPEG/WebP to inspect layers and channels in the 2D viewer (generated textures default
+to RGB; use A to inspect packed alpha/AO). **Export…** saves the actual cooked result, with format-specific options,
+to persistent `exports/`; bundles offer individual files and ZIP downloads. For `topotopo view graph.json`,
+`inputs/` and `exports/` are beside that graph. JPEG/WebP viewing does not change procedural PNG support.
+
+The default **TopoTopo** keymap uses right-drag orbit around the surface beneath the cursor, middle-drag pan and
+wheel zoom toward the cursor. F/A frame, 1–4 select cameras, 5–7 change shading, O toggles orthographic and Space
+toggles quad view. Maya, Houdini and Blender presets, including previously saved choices, remain available.
+
 **Threads.** Heavy per-element work (noise displacement, attribute noise, occlusion rays, point wrangles) runs in
 chunks on a pool of worker threads, and independent graph branches cook concurrently. The output is the same bit for
 bit with or without it. `TOPOTOPO_WORKERS` sets the number of threads (default: CPU threads − 1; `0` turns the pool

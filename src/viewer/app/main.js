@@ -11,6 +11,7 @@ import { createGuides, PLACE_KINDS } from './guides.js';
 import { createSelect } from './select.js';
 import { createOutliner } from './outliner.js';
 import { createProps } from './props.js';
+import { createOutputPanel } from './outputs.js';
 import { createSelection, parseId } from './selection.js';
 import { createUndo } from './undo.js';
 import { EDITOR_NAMES } from './markers.js';
@@ -85,8 +86,8 @@ const grid = createGrid(scene);
 ctx.sceneBounds = ({ pictures = true, guides = true } = {}) => {
   const b = new THREE.Box3();
   if (ctx.output.mesh && ctx.output.visible) b.union(ctx.output.mesh.bounds());
-  b.union(ctx.layers.bounds({ pictures }));
-  if (guides) for (const m of ctx.guides.list) if (!ctx.guides.hidden.has(m.id)) b.union(ctx.guides.bounds(m));
+  if (!ctx.isolated) b.union(ctx.layers.bounds({ pictures }));
+  if (guides && !ctx.isolated) for (const m of ctx.guides.list) if (!ctx.guides.hidden.has(m.id)) b.union(ctx.guides.bounds(m));
   return b;
 };
 let sphere = { center: new THREE.Vector3(), radius: 10 }, sphereAt = -1;
@@ -145,6 +146,7 @@ ctx.graph = {
   /** the node whose result is shown: the chosen one, else the graph's output */
   shownNode() { const g = this.current(); return this.node ?? g?.output ?? null; },
   show(node) {
+    if (ctx.outputs?.active) ctx.outputs.scene();
     const g = this.current();
     this.node = !g || node === g.output ? null : node;
     ctx.selection.apply(['out']);
@@ -171,6 +173,7 @@ const refreshGraphs = ctx.coalesce(async () => {
   ctx.emit('graphs');
 });
 $('graph').onchange = (e) => {
+  if (ctx.outputs?.active) ctx.outputs.scene();
   ctx.graph.name = e.target.value; ctx.graph.node = null;
   local.set('graph', ctx.graph.name);
   props.controls.render(ctx.graph.current());
@@ -180,13 +183,14 @@ $('graph').onchange = (e) => {
 
 let firstFrame = !views.placed;
 const loadGeo = ctx.coalesce(async () => {
+  if (ctx.outputs?.active) { await ctx.outputs.refresh(); return; }
   const G = ctx.graph, o = ctx.output;
   if (!G.name) return;
   const graph = G.name, node = G.node ?? '';
   o.loading = true; ctx.emit('output');
   const r = await api.geo(graph, node);
   o.loading = false;
-  if (graph !== G.name) return;
+  if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) return;
   if (!r.ok) {
     // the last good geometry stays
     o.error = r.error;
@@ -195,6 +199,7 @@ const loadGeo = ctx.coalesce(async () => {
   }
   let src;
   try { src = await parseGLB(r.buf); } catch (e) { o.error = String(e?.message ?? e); ctx.emit('output'); updateCook(); return; }
+  if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) { new MeshObject('', src).dispose(); return; }
   const prev = o.mesh;
   o.mesh = new MeshObject('out', src);
   o.mesh.onReady = () => { ctx.requestRender(); ctx.emit('output'); };
@@ -217,6 +222,9 @@ const loadGeo = ctx.coalesce(async () => {
 
 function updateCook() {
   const el = $('cook'), o = ctx.output, g = ctx.graph.current();
+  if (ctx.outputs?.active?.kind === 'image') {
+    const image = ctx.outputs.active; el.textContent = image.width ? `${image.width} × ${image.height} · ${image.layers?.length ?? 1} layer(s)` : image.label; return;
+  }
   if (!g) { el.textContent = ''; return; }
   const m = /geometry: ([\d,]+) points, ([\d,]+) prims/.exec(o.summary ?? '');
   const parts = [`${g.name}/${ctx.graph.shownNode() ?? ''}`];
@@ -286,7 +294,8 @@ function drawViews() {
     renderer.setScissor(r.x, glY, r.w, r.h);
     renderer.clear();
     for (const m of LINE_MATERIALS) m.resolution.set(r.w, r.h);
-    for (const e of entries) { e.mesh.root.visible = !!e.visible; e.mesh.setMode(modeOf(e.display ?? 'view', s.shading)); }
+    for (const e of entries) { e.mesh.root.visible = e.id === 'out' && ctx.isolated ? !ctx.previewEmpty : !!e.visible; e.mesh.setMode(modeOf(e.display ?? 'view', s.shading)); }
+    ctx.layersRoot.visible = ctx.guidesRoot.visible = !ctx.isolated;
     steps[i] = grid.prepare(cam, views.worldPerPixel(i));
     lights.follow(camera, cam.target);
     renderer.render(scene, camera);
@@ -397,12 +406,12 @@ for (const g of document.querySelectorAll('.grip')) {
 
 // ------------------------------------------------------------------------------------------- actions
 /** Keys go to a field being typed in (text and number fields, menus), not to the keymap. */
-const TEXT_INPUTS = new Set(['text', 'number', 'search', 'email', 'url', 'password', 'tel']);
-const typing = (t) => (t instanceof HTMLInputElement && TEXT_INPUTS.has(t.type)) || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable;
+const typing = (t) => t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable || !!t?.closest?.('button, summary, [role="button"], [role="menu"]');
 const selectedOf = (kind) => ctx.selection.items.filter((id) => ctx.objects.get(parseId(id).obj)?.kind === kind && parseId(id).piece === null);
 const hiddenByH = { layers: new Set() };
 const DISPLAY_CYCLE = ['shaded', 'wire', 'shadedWire'];
 function run(action) {
+  if (document.querySelector('dialog[open]') || document.getElementById('image-view')?.hidden === false) return;
   const slot = views.slots[views.active];
   switch (action) {
     case 'frameSelection': return frameSelection();
@@ -458,6 +467,7 @@ const undoKeys = () => KM.overlayRows(preset).find((r) => r.label.startsWith('un
 // keys; Space is a tap (Maya) or a held modifier (Houdini)
 const space = { down: false, tap: false, t: 0 };
 addEventListener('keydown', (e) => {
+  if (document.querySelector('dialog[open]')) return;
   if (typing(e.target)) return;
   if (e.code === 'Space' || e.key === ' ') {
     e.preventDefault();
@@ -472,6 +482,7 @@ addEventListener('keydown', (e) => {
   run(action);
 });
 addEventListener('keyup', (e) => {
+  if (document.querySelector('dialog[open]')) { space.down = false; return; }
   if (e.code === 'Space' || e.key === ' ') {
     const tap = space.down && space.tap && performance.now() - space.t < 400;
     space.down = false;
@@ -498,7 +509,9 @@ canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   if (nav) {
     const sel = ctx.select.selectionBounds();
-    drag = { kind: 'nav', nav, slot, x, y, id: e.pointerId, pivot: sel.isEmpty() ? null : sel.getCenter(new THREE.Vector3()) };
+    const topo = preset === 'topotopo', hit = topo ? ctx.select.navigationPoint(slot, x, y) : null;
+    const pivot = topo ? views.anchor(slot, hit) : sel.isEmpty() ? null : sel.getCenter(new THREE.Vector3());
+    drag = { kind: 'nav', nav: topo && nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id: e.pointerId, pivot, topo };
     viewport.classList.add('nav');
     return;
   }
@@ -513,7 +526,7 @@ canvas.addEventListener('pointermove', (e) => {
       const dx = x - drag.x, dy = y - drag.y;
       drag.x = x; drag.y = y;
       if (drag.nav === 'tumble') views.tumble(drag.slot, dx, dy, drag.pivot);
-      else if (drag.nav === 'track') views.track(drag.slot, dx, dy);
+      else if (drag.nav === 'track') views.track(drag.slot, dx, dy, drag.topo ? views.cam(drag.slot).pivot : undefined);
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
     } else if (drag.kind === 'place') ctx.guides.pointerMove(drag.slot, x, y);
@@ -539,6 +552,8 @@ const endDrag = (e, cancel = false) => {
 };
 canvas.addEventListener('pointerup', (e) => endDrag(e));
 canvas.addEventListener('pointercancel', (e) => endDrag(e, true));
+canvas.addEventListener('lostpointercapture', (e) => endDrag(e, true));
+addEventListener('blur', () => { if (drag) endDrag({ pointerId: drag.id, clientX: 0, clientY: 0 }, true); });
 canvas.addEventListener('pointerleave', () => { if (!drag) { cursor.slot = -1; ctx.select.hover(-1); ctx.guides.leave(); requestOverlays(); } });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
@@ -547,7 +562,11 @@ canvas.addEventListener('wheel', (e) => {
   const { x, y } = at(e), slot = views.slotAt(x, y);
   if (slot < 0) return;
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
-  views.dolly(slot, Math.exp(Math.max(-1, Math.min(1, dy * 0.0015))), views.targetPlanePoint(slot, x, y));
+  const factor = Math.exp(Math.max(-1, Math.min(1, dy * 0.0015)));
+  if (preset === 'topotopo') {
+    const hit = ctx.select.navigationPoint(slot, x, y); if (hit) views.anchor(slot, hit);
+    views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
+  } else views.dolly(slot, factor, views.targetPlanePoint(slot, x, y));
   clearTimeout(canvas.wheelTimer); canvas.wheelTimer = setTimeout(saveViews, 300);
   ctx.requestRender();
 }, { passive: false });
@@ -563,18 +582,52 @@ ctx.on('*', (type) => {
 });
 ctx.selection.onChange(() => ctx.emit('selection'));
 
+// Each deliverable owns a camera; the scene view keeps its camera and layer visibility.
+const outputViews = new Map();
+let sceneView = null, previewSerial = 0;
+let sceneGraph = null;
+ctx.rememberOutputView = (id) => { if (id) outputViews.set(id, views.toJSON()); else if (!ctx.isolated) { sceneView = views.placed ? views.toJSON() : null; sceneGraph = { name: ctx.graph.name, node: ctx.graph.node }; } };
+ctx.hideModelPreview = () => { previewSerial++; ctx.previewEmpty = true; ctx.selection.clear(); ctx.requestRender(); };
+ctx.outputGraph = (item) => {
+  if (item.graph && ctx.graph.list.some((g) => g.name === item.graph)) {
+    ctx.graph.name = item.graph; ctx.graph.node = item.node; $('graph').value = item.graph;
+    props.controls.render(ctx.graph.current());
+  }
+};
+ctx.previewOutput = async (item, bytes, update) => {
+  const serial = ++previewSerial, src = await parseGLB(bytes);
+  if (serial !== previewSerial || ctx.outputs.active?.id !== item.id) { new MeshObject('', src).dispose(); return; }
+  const mesh = new MeshObject('out', src); mesh.onReady = () => ctx.requestRender();
+  ctx.output.mesh?.dispose(); ctx.output.mesh = mesh; ctx.outputRoot.add(mesh.root); ctx.previewEmpty = false;
+  ctx.output.summary = item.summary ?? ''; ctx.output.error = item.error ?? null;
+  ctx.outputGraph(item);
+  outEntry(); ctx.selection.clear();
+  if (!update || !outputViews.has(item.id)) {
+    const saved = outputViews.get(item.id);
+    if (saved) views.load(saved);
+    else { layoutViews(); views.frame(views.active, mesh.bounds()); }
+    outputViews.set(item.id, views.toJSON());
+  }
+  firstFrame = false; ctx.emit('output'); ctx.requestRender(); syncTop();
+};
+ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; props.controls.render(ctx.graph.current()); } loadGeo(); ctx.requestRender(); };
+ctx.frameOutput = frameAll;
+ctx.outputs = createOutputPanel(ctx);
+
 const es = api.events({
   open() {
     ctx.message(connectedLine(ctx.graph.list.length));
     // after a reconnect the server may have restarted: fetch everything again
-    if (es.opened) { refreshGraphs().then(loadGeo); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
+    if (es.opened) { refreshGraphs().then(loadGeo); ctx.outputs.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
     es.opened = true;
   },
   error() { ctx.message('disconnected (server stopped?)', 'err'); },
   async message(ev) {
-    if (ev.inputs !== undefined) { ctx.layers.refresh(); return; }
+    if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
+    if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); return; }
     await refreshGraphs();
     if (ev.graph === ctx.graph.name) loadGeo();
+    ctx.outputs.refresh();
   },
 });
 
@@ -583,6 +636,7 @@ outliner.render();
 props.render();
 ctx.requestRender();
 await refreshGraphs();
+await ctx.outputs.refresh();
 loadGeo();
 ctx.layers.refresh();
 ctx.layers.loadWhere();

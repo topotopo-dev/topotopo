@@ -11,6 +11,8 @@ export const MAX_UPLOAD = 512 * 1024 * 1024; // POST /api/inputs limit (src/view
 const stampOf = (f) => `${f.mtime}:${f.size}`;
 const errText = (e) => String(e?.message ?? e).replace(/^\[f\] /gm, '');
 export const layerId = (path) => `layer:${path}`;
+export const isInputImage = (path) => /\.(png|jpe?g|webp)$/i.test(path);
+export const inputImageURL = (f) => '/api/input_image?' + new URLSearchParams({ path: f.path, rev: stampOf(f) });
 
 export function createLayers(ctx) {
   const memo = ctx.store;
@@ -61,11 +63,19 @@ export function createLayers(ctx) {
     L.loaded.set(path, slot);
     L.errors.delete(path);
     entry(path); changed();
-    const r = await api.input(path);
     let src = null;
     try {
-      if (!r.ok) throw new Error(r.error);
-      src = await parseGLB(r.buf);
+      if (isInputImage(path)) {
+        const img = new Image(); img.src = inputImageURL(f); await img.decode();
+        const texture = new THREE.Texture(img); texture.colorSpace = THREE.SRGBColorSpace; texture.needsUpdate = true;
+        const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
+        material.name = 'image:' + path;
+        src = new THREE.Mesh(new THREE.PlaneGeometry(img.naturalWidth / img.naturalHeight, 1), material);
+      } else {
+        const r = await api.input(path);
+        if (!r.ok) throw new Error(r.error);
+        src = await parseGLB(r.buf);
+      }
     } catch (e) {
       if (L.loaded.get(path) === slot) {
         L.loaded.delete(path); L.shown.delete(path); remember();
@@ -106,9 +116,17 @@ export function createLayers(ctx) {
     const stamp = stampOf(f), have = L.info.get(path);
     if (have && have.stamp === stamp) return;
     L.info.set(path, { stamp, pending: true });
-    const r = await api.inputInfo(path);
+    let r;
+    if (isInputImage(path)) {
+      try {
+        const img = new Image(); img.src = inputImageURL(f); await img.decode();
+        r = { ok: true, summary: `${img.naturalWidth} × ${img.naturalHeight} · ${L.fileText(f)}` };
+      } catch { r = { ok: false, error: 'Cannot decode this image. Check that the file is a valid PNG, JPEG or WebP.' }; }
+    } else r = await api.inputInfo(path);
+    if (L.info.get(path)?.stamp !== stamp) return;
     if (r.ok) L.info.set(path, { stamp, summary: r.summary });
     else { L.info.set(path, { stamp, error: errText(r.error) }); L.errors.set(path, { stamp, msg: errText(r.error) }); }
+    if (r.ok) L.errors.delete(path);
     changed();
   }
 
@@ -187,6 +205,7 @@ export function createLayers(ctx) {
         const r = await uploadOne(f, files.length > 1 ? ` (${i + 1}/${files.length})` : '');
         if (r.path) {
           added.push(r.path);
+          if (/\.(png|jpe?g|webp)$/i.test(r.path)) { await L.refresh(); await ctx.outputs?.openInput(r.path); continue; }
           // show it at once, and select it
           L.shown.add(r.path);
           for (const m of [L.info, L.errors]) m.delete(r.path);

@@ -1,6 +1,7 @@
 node_modules/
 workspace/
 examples/inputs/
+examples/exports/
 tmp/
 out/
 dist/

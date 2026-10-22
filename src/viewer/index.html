@@ -7,6 +7,7 @@
 <link rel="icon" href="data:,">
 <!-- the viewer page (docs/design/viewer.md): ES modules from /app/, three.js from /vendor/three/, no build step -->
 <link rel="stylesheet" href="/app/style.css">
+<link rel="stylesheet" href="/app/outputs.css">
 <script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
 <script type="module" src="/app/main.js"></script>
 </head>
@@ -14,17 +15,21 @@
 <div id="app">
   <header id="top">
     <label class="tb" title="the graph shown">graph <select id="graph"></select></label>
-    <label class="tb" title="the current view's camera (Alt+1..4 in the Maya keymap)">view <select id="view-cam"></select></label>
-    <label class="tb" title="the current view's shading (4 / 5 / 6 in the Maya keymap)">shading <select id="view-shading"></select></label>
+    <label class="tb" title="the current view's camera; see ? for active key bindings">view <select id="view-cam"></select></label>
+    <label class="tb" title="the current view's shading; see ? for active key bindings">shading <select id="view-shading"></select></label>
     <span class="tb readout" id="step" title="the current view's grid step"></span>
     <button class="tb" id="quad" title="single / quad view">quad</button>
     <span class="grow"></span>
+    <button class="tb" id="scene-view">Scene</button>
+    <button class="tb" id="open-image">Open image</button>
+    <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
     <span class="tb mode" id="mode"></span>
     <label class="tb" title="keyboard and mouse bindings, remembered in this browser">keymap <select id="preset"></select></label>
     <button class="tb" id="help" title="the keymap (?)">?</button>
   </header>
   <aside id="outliner" class="panel">
-    <div class="phead">Outliner</div>
+    <div class="phead">Outliner <button id="thumb-size" title="Cycle thumbnail size" aria-label="Cycle thumbnail size">56 px</button></div>
+    <div id="outputs" hidden></div>
     <div class="pscroll" id="tree"></div>
     <div class="grip v" data-grip="left" title="drag to resize"></div>
   </aside>
@@ -36,6 +41,7 @@
   <aside id="props" class="panel">
     <div class="grip v" data-grip="right" title="drag to resize"></div>
     <div class="phead">Properties</div>
+    <div id="output-details" hidden></div>
     <div class="pscroll" id="props-body"></div>
     <div class="grip h" data-grip="split" title="drag to resize"></div>
     <div class="phead">Controls <span class="count" id="controls-count"></span></div>

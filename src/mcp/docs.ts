@@ -13,6 +13,7 @@ WORKFLOW
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal.
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
+OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
@@ -89,6 +90,10 @@ export const TOPICS: Record<string, string> = {
   keep a value, keep it.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
 - Output node: "output", else a node named out/OUT, else the last unconnected node.
+- Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
+  the default. Publish complete assets and useful separate parts; the viewer isolates each on click and lists
+  its textures/layers. Rename/remove edits maintain references. Renders automatically save into exports/renders
+  unless save_to is supplied; explicit render/export destinations are registered in the viewer too.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.

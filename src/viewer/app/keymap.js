@@ -1,14 +1,15 @@
-// The keymap of docs/design/viewer.md section 9: one table of actions, three presets (Maya, the default; Houdini;
-// Blender). Each row carries the text the overlay prints per preset and, for the actions phase 1 builds, the bindings:
+// The keymap of docs/design/viewer.md section 9: one table of actions, four presets (TopoTopo, the default;
+// Maya, Houdini, Blender). Each row carries the text the overlay prints per preset and the built actions' bindings:
 // chord → action. Transform and snapping rows (phase 2) ship their text but no bindings, so a preset never changes
 // shape later. Plain data and functions: the overlay is the only DOM code, and it runs only when called.
 
 export const PRESETS = [
+  { id: 'topotopo', label: 'TopoTopo' },
   { id: 'maya', label: 'Maya' },
   { id: 'houdini', label: 'Houdini' },
   { id: 'blender', label: 'Blender' },
 ];
-export const DEFAULT_PRESET = 'maya';
+export const DEFAULT_PRESET = 'topotopo';
 
 const place = { 'Shift+1': 'placeNull', 'Shift+2': 'placeCurve', 'Shift+3': 'placeArea', 'Shift+4': 'placeVolume' };
 const curve = { Enter: 'finish', Backspace: 'removeLast', Esc: 'cancel' };
@@ -56,6 +57,17 @@ export const ROWS = [
   { label: 'hide the selection / show all', maya: ['H / Shift+H', { keys: { H: 'hide', 'Shift+H': 'showAll' } }], houdini: ['H / Shift+H', { keys: { H: 'hide', 'Shift+H': 'showAll' } }], blender: ['H / Alt+H', { keys: { H: 'hide', 'Alt+H': 'showAll' } }] },
   { label: 'keymap overlay', maya: ['?', { keys: { '?': 'overlay' } }], houdini: ['?', { keys: { '?': 'overlay' } }], blender: ['?', { keys: { '?': 'overlay' } }] },
 ];
+
+// Editing shortcuts follow Maya; navigation is available without held modifiers.
+const topo = {
+  tumble: ['Right drag (pan in orthographic)', { drag: { R: 'tumble' } }],
+  track: ['Middle drag', { drag: { M: 'track' } }],
+  dolly: ['Wheel toward cursor'],
+  perspective: ['1', { keys: { 1: 'viewPersp' } }],
+  'top / front / right': ['2 / 3 / 4', { keys: { 2: 'viewTop', 3: 'viewFront', 4: 'viewRight' } }],
+  'wire / shaded / shaded + wire': ['5 / 6 / 7', { keys: { 5: 'displayWire', 6: 'displayShaded', 7: 'displayShadedWire' } }],
+};
+for (const row of ROWS) row.topotopo = topo[row.label] ?? row.maya;
 
 /** Every action a binding may name (main.js handles each). */
 export const ACTIONS = [
