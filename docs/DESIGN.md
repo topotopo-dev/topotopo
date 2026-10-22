@@ -930,8 +930,8 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
 - The testing week's fixes ([release/dogfood-log.md](release/dogfood-log.md)) and the first GUI pieces (below).
 
 **Around the release**
-- With the maintainer: the v0.2 tag and `npm publish` (the version is 0.2.0; Rapier stays a regular dependency), then
-  the demo video and launch posts by the end of October.
+- v0.2.0 released on 2026-10-22: npm, the tag and its GitHub release (Rapier stays a regular dependency). Next: the
+  demo video and launch posts by the end of October.
 - Grant applications (Epic MegaGrants, cycle 1 of 2027: the text in December, submission in the January–March window)
   built on the Unreal 5.8 demo video; trademark filing once there is revenue or a grant.
 
