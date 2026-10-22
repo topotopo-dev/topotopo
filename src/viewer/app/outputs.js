@@ -20,9 +20,9 @@ export function createOutputPanel(ctx) {
   function showDetails(item) {
     details.replaceChildren(); details.hidden = !item;
     if (!item) return;
-    details.append(text('strong', item.label), text('p', item.error ?? item.summary ?? `${item.kind}${item.width ? ` Â· ${item.width} Ã— ${item.height}` : ''}`, item.error ? 'err' : 'dim'));
+    details.append(text('strong', item.label), text('p', item.error ?? item.summary ?? `${item.kind}${item.width ? ` · ${item.width} × ${item.height}` : ''}`, item.error ? 'err' : 'dim'));
     if (item.files) for (const f of item.files) {
-      const a = text('a', `${f.name} Â· ${fmtBytes(f.size)}`); a.href = url('file', item, { file: f.id, download: '1' }); a.download = f.name; details.append(a);
+      const a = text('a', `${f.name} · ${fmtBytes(f.size)}`); a.href = url('file', item, { file: f.id, download: '1' }); a.download = f.name; details.append(a);
     }
     if (item.files?.length > 1) { const a = text('a', 'Download ZIP'); a.href = url('zip', item); a.download = item.label + '.zip'; details.append(a); }
   }

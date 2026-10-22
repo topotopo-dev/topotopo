@@ -234,8 +234,9 @@ Modelling and sculpting tools, animation, rendering settings, a chat panel, cute
   any destination write. A preparation failure changes no existing exports; a filesystem replacement failure
   reports the number of files already written. Receipts record the exact source revisions. Preview/camera and
   checked outputs remain unchanged after exporting.
-- Persistent exports live in workspace `exports/`, or beside the graph for `topotopo view`. The CLI and MCP
-  register exports and renders (including explicit destinations); the viewer also discovers agent-written files.
+- Persistent exports live in workspace `exports/`, or beside the graph for `topotopo view`. MCP registers its exports
+  and renders (explicit destinations too; a render without `save_to` overwrites `exports/renders/<graph>-<node>.png`),
+  the CLI those it writes inside the graph's `exports/` folder, and the viewer also discovers agent-written files.
   Saved bundles expose individual files and deterministic ZIPs retaining relative texture/sidecar paths.
 - The viewer's output API serves validated catalogue identifiers, never arbitrary client-supplied file paths.
   Input-image/thumbnail routes validate paths under inputs, including symlink containment. Settings use

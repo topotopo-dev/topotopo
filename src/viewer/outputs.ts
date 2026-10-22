@@ -140,7 +140,7 @@ export function createOutputs(ws: Workspace, changed: () => void) {
       const kind = files.length > 1 ? 'bundle' : imageExt.test(file) ? 'image' : meshExt.test(file) ? 'geometry' : 'file';
       items.set(id, { file, files, entry: { id, origin: 'saved', label: a.label, graph: a.graph, node: a.node, kind, status: 'ready', revision,
         summary: a.format === 'reference' ? 'Reference image' : `Saved ${a.format ?? path.extname(file).slice(1)} output`,
-        files: files.map((p) => ({ id: artifactId(p), name: path.relative(path.dirname(file), p).split(path.sep).join('/'), size: fs.statSync(p).size })) } });
+        files: files.map((p) => ({ id: artifactId(p), name: path.relative(path.dirname(file), p).split(path.sep).join('/'), size: fs.statSync(p, { throwIfNoEntry: false })?.size ?? 0 })) } });
     }
     // Bundle contents are individual inspectable outputs as well as downloads.
     for (const item of [...items.values()]) if (alive.has(item.entry.id) && item.files && item.files.length > 1) for (const file of item.files) {
@@ -199,9 +199,12 @@ export function createOutputs(ws: Workspace, changed: () => void) {
     }
     return { result, destination, owner, revision: owner.entry.revision, key: owner.key, format, warnings };
   };
-  const listener = () => { refresh(); changed(); };
+  // A file can vanish while a scan stats it. The next tick or request rescans; neither callback may throw (an
+  // exception in the timer would end the viewer's process, the MCP server's too when it hosts the viewer).
+  const rescan = () => { try { refresh(); } catch { /* rescanned on the next tick */ } };
+  const listener = () => { rescan(); changed(); };
   ws.listeners.add(listener);
-  const timer = setInterval(() => { if (!closed) refresh(); }, 1500); timer.unref();
+  const timer = setInterval(() => { if (!closed) rescan(); }, 1500); timer.unref();
 
   return {
     close() { closed = true; clearInterval(timer); ws.listeners.delete(listener); items.clear(); previewCache.clear(); },
@@ -287,7 +290,9 @@ export function createOutputs(ws: Workspace, changed: () => void) {
         }
         if (u.pathname === '/api/output/zip') {
           if (!item.files?.length) err(400, 'no saved files');
-          const root = path.dirname(item.files[0]);
+          // names relative to the folder every file shares, so no entry climbs out with "../"
+          const common = (a: string, b: string) => { while (a !== path.dirname(a) && path.relative(a, b).startsWith('..')) a = path.dirname(a); return a; };
+          const root = item.files.map((p) => path.dirname(p)).reduce(common);
           send(outputZip(item.files.map((p) => ({ name: path.relative(root, p).split(path.sep).join('/'), bytes: fs.readFileSync(p) }))), 'application/zip', item.entry.label + '.zip'); return true;
         }
         if (u.pathname === '/api/output/image' || u.pathname === '/api/output/thumb' && item.img) {

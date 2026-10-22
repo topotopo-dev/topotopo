@@ -163,12 +163,10 @@ const RENDER_PROPS = {
 };
 
 export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<string> } = {}): ToolDef[] {
-  const renderDestination = (name: string, node: string) => {
-    const stem = `${name}-${node}`.replace(/[^A-Za-z0-9_.-]/g, '_');
-    let file = path.join(ws.exportDir, 'renders', stem + '.png');
-    for (let n = 2; fs.existsSync(file); n++) file = path.join(ws.exportDir, 'renders', `${stem}_${n}.png`);
-    return file;
-  };
+  // One file per graph node, overwritten by each render: agents render after most edits, so a new file per render
+  // would pile up in exports/renders (save_to keeps a copy elsewhere).
+  const renderDestination = (name: string, node: string) =>
+    path.join(ws.exportDir, 'renders', `${name}-${node}`.replace(/[^A-Za-z0-9_.-]/g, '_') + '.png');
   const engine = ws.engine;
 
   /** The text (+ optional render) of a cook report. */

@@ -203,6 +203,13 @@ async function cook() {
   async function writeOutputs(r: CookReport, frame?: number) {
     const geo = r.geo!;
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
+    // Receipts for the viewer's saved files, only for files inside exports/ beside the graph: a run whose output goes
+    // elsewhere leaves no exports/ folder behind (the viewer lists that folder's files without receipts too).
+    const exportsDir = path.join(path.dirname(path.resolve(file)), 'exports');
+    const record = (paths: string[], format: string) => {
+      const inside = paths.every((p) => { const rel = path.relative(exportsDir, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); });
+      if (inside) new ArtifactStore(exportsDir).record(paths, { graph: path.basename(file, '.json'), node: r.target, format });
+    };
     for (const { out, get, has } of renders) {
       const ro = renderFlags(get, has);
       const v = get('--views');
@@ -214,7 +221,7 @@ async function cook() {
       const p = at(out);
       fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
       fs.writeFileSync(p, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
-      new ArtifactStore(path.join(path.dirname(path.resolve(file)), 'exports')).record([p], { graph: path.basename(file, '.json'), node: r.target, format: 'png' });
+      record([p], 'png');
       console.log(`rendered ${p} (${img.width}x${img.height})${img.notes.length ? ' — ' + img.notes.join('; ') : ''}`);
     }
     const ex = opt('--export');
@@ -250,7 +257,7 @@ async function cook() {
         fs.mkdirSync(path.dirname(path.resolve(f.path)), { recursive: true });
         fs.writeFileSync(f.path, f.bytes);
       }
-      if (files.length) new ArtifactStore(path.join(path.dirname(path.resolve(file)), 'exports')).record(files.map((f) => f.path), { graph: path.basename(file, '.json'), node: r.target, format: fmt });
+      if (files.length) record(files.map((f) => f.path), fmt);
       console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${summary}` : ''}`);
     }
   }

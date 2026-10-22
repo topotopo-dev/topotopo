@@ -59,7 +59,7 @@ export function createExportUI(ctx, { items, directory, refresh, changed }) {
       const result = await request('export-batch', { ids: selected().map((v) => v.id) });
       await refresh();
       const warnings = result.results.flatMap((r) => r.warnings);
-      ctx.message(`Exported ${result.results.length} outputs` + (warnings.length ? ' · ' + warnings.join('; ') : ''), warnings.length ? 'err' : 'ok', 7000);
+      ctx.message(`Exported ${result.results.length} output${result.results.length === 1 ? '' : 's'}` +(warnings.length ? ' · ' + warnings.join('; ') : ''), warnings.length ? 'err' : 'ok', 7000);
     } catch (e) { ctx.message(e.message, 'err', 10000); }
     finally { busy = false; update(); }
   }

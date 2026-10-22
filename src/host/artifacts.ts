@@ -40,8 +40,9 @@ export class ArtifactStore {
     const all = this.records().filter((a) => a.files.some((p) => fs.statSync(p, { throwIfNoEntry: false })?.isFile()));
     const known = new Set(all.flatMap((a) => a.files.map((p) => path.resolve(p))));
     const walk = (dir: string) => {
-      if (!fs.existsSync(dir)) return;
-      for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+      // a folder can be missing, or vanish between listing its parent and reading it
+      const entries = (() => { try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; } })();
+      for (const e of entries.sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
         if (e.name.startsWith('.') || e.isSymbolicLink()) continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) walk(p);

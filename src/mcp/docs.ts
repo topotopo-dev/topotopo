@@ -92,8 +92,9 @@ export const TOPICS: Record<string, string> = {
 - Output node: "output", else a node named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
   the default. Publish complete assets and useful separate parts; the viewer isolates each on click and lists
-  its textures/layers. Rename/remove edits maintain references. Renders automatically save into exports/renders
-  unless save_to is supplied; explicit render/export destinations are registered in the viewer too.
+  its textures/layers. Rename/remove edits maintain references. The latest render of each graph node is saved as
+  exports/renders/<graph>-<node>.png (each render overwrites it) unless save_to is supplied; explicit render/export
+  destinations are registered in the viewer too.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.

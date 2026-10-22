@@ -1,8 +1,10 @@
 // Published results, persistence, export consistency, image channels and camera navigation contracts.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { unzipSync } from 'fflate';
 import * as THREE from 'three';
 import '../src/nodes/index.ts';
@@ -16,7 +18,7 @@ import { imagePNG } from '../src/io/textures.ts';
 import { startViewer } from '../src/viewer/server.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { makeTools } from '../src/mcp/tools.ts';
-import { outputZip } from '../src/viewer/outputs.ts';
+import { createOutputs, outputZip } from '../src/viewer/outputs.ts';
 import { createViews } from '../src/viewer/app/camera.js';
 import * as km from '../src/viewer/app/keymap.js';
 import { channelPixels, zoomImage } from '../src/viewer/app/image-view.js';
@@ -87,11 +89,18 @@ try {
   const entries = unzipSync(zip); check(Object.keys(entries).length === 2 && !!entries['atlas_AO.png'], 'ZIP preserves companion files');
   const zinput = [{ name: 'a/file.png', bytes: Uint8Array.from([1, 2, 3]) }];
   check(Buffer.compare(outputZip(zinput), outputZip(zinput)) === 0, 'ZIP bytes deterministic');
+  const nestedDir = path.join(ws.exportDir, 'nested'), deepFile = path.join(nestedDir, 'deep', 'a.bin'), topFile = path.join(nestedDir, 'top.txt');
+  fs.mkdirSync(path.dirname(deepFile), { recursive: true }); fs.writeFileSync(deepFile, 'a'); fs.writeFileSync(topFile, 'b');
+  const nested = new ArtifactStore(ws.exportDir).record([deepFile, topFile], { label: 'nested' });
+  const nestedZip = unzipSync(new Uint8Array(await (await fetch(viewer.url + `api/output/zip?id=file-${nested.id}`)).arrayBuffer()));
+  check(Object.keys(nestedZip).sort().join() === 'deep/a.bin,top.txt', 'ZIP names are relative to the folder all files share (no ../)');
   const tools = makeTools(ws), render = tools.find((t) => t.name === 'render')!;
   await render.run({ graph: 'asset', node: 'second', size: 64 });
   check(new ArtifactStore(ws.exportDir).list().some((a) => a.format === 'png'), 'MCP renders are saved and registered automatically');
   await render.run({ graph: 'asset', node: 'second', size: 64 });
-  check(fs.existsSync(path.join(ws.exportDir, 'renders', 'asset-second_2.png')), 'automatic renders preserve previous results with suffixes');
+  const shots = fs.readdirSync(path.join(ws.exportDir, 'renders')).filter((f) => f.startsWith('asset-second'));
+  const shotReceipts = new ArtifactStore(ws.exportDir).records().filter((a) => a.files.some((p) => path.basename(p).startsWith('asset-second')));
+  check(shots.join() === 'asset-second.png' && shotReceipts.length === 1, 'repeated renders overwrite one file and one receipt per graph node');
   await ws.edit('asset', [{ op: 'vars', vars: { size: 3 } }]);
   check((await post(request)).status === 409, 'stale source revisions refused');
   items = await settled(); const current = items.find((x: any) => x.id === model.id);
@@ -190,4 +199,26 @@ check(km.matchDrag('topotopo', { button: 2 }) === 'tumble' && km.matchDrag('topo
 check(km.matchKey('topotopo', { key: '4', code: 'Digit4' }) === 'viewRight', 'TopoTopo views need no modifiers');
 check(channelPixels(Uint8ClampedArray.from([10, 20, 30, 40]), 'A').join() === '40,40,40,255', 'image alpha mode');
 const z = zoomImage({ x: 20, y: 30, scale: 1 }, 70, 90, 2); check(z.x === -30 && z.y === -30 && z.scale === 2, '2D zoom preserves cursor pixel');
+// The CLI keeps receipts in exports/ beside the graph only for files it writes there.
+const cliDir = path.join(tmp, 'cli'), cliGraph = path.join(cliDir, 'g.json'), cliExports = path.join(cliDir, 'exports');
+fs.mkdirSync(cliDir); fs.writeFileSync(cliGraph, JSON.stringify({ nodes: { b: { type: 'box' } } }));
+const cli = (...args: string[]) => execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), cliGraph, ...args], { stdio: 'pipe' });
+cli('--render', path.join(tmp, 'elsewhere.png'));
+check(!fs.existsSync(cliExports), 'a CLI render outside exports/ leaves no exports folder beside the graph');
+cli('--render', path.join(cliExports, 'shot.png'));
+check(new ArtifactStore(cliExports).records().some((a) => a.files.some((p) => path.basename(p) === 'shot.png')), 'a CLI render inside exports/ is registered for the viewer');
+
+// A scan that fails (a file vanishing mid-scan) must not throw from the workspace listener; the timer shares the guard.
+const broken = new Workspace(path.join(tmp, 'broken'), engine, { exports: path.join(tmp, 'broken-exports') }); broken.load();
+const brokenOutputs = createOutputs(broken, () => {});
+broken.listInputs = () => { throw new Error('vanished mid-scan'); };
+let threw = false;
+try { for (const l of broken.listeners) l({ graph: 'main', version: 1 }); } catch { threw = true; } finally { brokenOutputs.close(); }
+check(!threw, 'a failing outputs scan never throws from the workspace listener or the refresh timer');
+
+// UTF-8 text saved twice as Latin-1 ("Â·", "Ã—") showed up in the Properties panel once.
+const appDir = fileURLToPath(new URL('../src/viewer/app/', import.meta.url));
+const garbled = [...fs.readdirSync(appDir).map((f) => path.join(appDir, f)), fileURLToPath(new URL('../src/viewer/index.html', import.meta.url))]
+  .filter((f) => /\.(js|css|html)$/.test(f) && /[ÂÃ]/.test(fs.readFileSync(f, 'utf8')));
+check(!garbled.length, `viewer sources carry no double-encoded UTF-8 (${garbled.map((f) => path.basename(f)).join(', ') || 'none'})`);
 console.log(`viewer outputs: ${checks} passed`);
