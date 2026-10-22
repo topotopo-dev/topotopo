@@ -4,6 +4,7 @@
 //   topotopo mcp [--workspace <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
 // Env: TOPOTOPO_WORKSPACE, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_SIM_TIMEOUT_MS, TOPOTOPO_WORKERS
 // stdout carries the MCP protocol — log only to stderr.
+import fs from 'node:fs';
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -40,8 +41,10 @@ if (argv.includes('--viewer') || process.env.TOPOTOPO_VIEWER === '1') await ensu
 
 const tools = makeTools(ws, { onPreview: ensureViewer });
 
+// package.json sits two levels above both src/mcp/server.ts and dist/mcp/server.js
+const pkg = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 const server = new Server(
-  { name: 'topotopo', version: '0.1.0' },
+  { name: 'topotopo', version: pkg.version },
   { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
 );
 

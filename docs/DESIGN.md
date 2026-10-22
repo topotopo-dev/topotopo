@@ -892,7 +892,7 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
 
 Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its analysis in [ROADMAP.md](ROADMAP.md).
 
-**Shipped (as of commit 81895f2, 2026-10-13)**
+**Shipped in v0.2 (2026-10-22)**
 - Roadmap phases 0–2: the test layers (smoke, golden, property, fuzz, docs, examples), time and `solver`, expression
   references, graph versioning, edge/vertex groups and the half-edge structure, array attributes, the worker pool;
   modelling parity (bevel, knife/polysplit, bridge, quad fill, loop ops, deformers, xatlas unwrap and LSCM, isotropic
@@ -900,36 +900,48 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   prims, copy variants, scatter v2, masks, the heightfield suite with erosion, the spline toolkit, the asset shelf,
   gltf-transform/USD/`.geo`/CSV exporters).
 - The Unreal round trip, verified on 2026-10-13 in Unreal 5.8 (instance rows, Interchange glTF axes, the Landscape
-  import with the manifest values), with the same scene loading in Blender 5.2 and Houdini 22.
+  import with the manifest values), with the same scene loading in Blender 5.2 and Houdini 22. Since then the
+  TopoTopoPCG plugin (0.1.5, `integrations/unreal/TopoTopoPCG`) imports an `unreal_landscape` bundle in one command
+  (Landscape, weight layers, a generated material, HISM instances, static objects; tiled bundles as World Partition
+  streaming proxies), and its 19 automation tests pass in the editor.
 - Phase 3 except the optional CAD module: procedural textures and bakes (37 texture nodes, image volumes, materials
   referencing `image:<name>`, embedded export, the texture view; since 2026-10-17 also `image_file`, the PNG reader);
   sampled SDF grids; and simulation-lite in the `sim`
   category: `rbd_settle` and `rbd_stack` on Rapier ([Rigid bodies](#rigid-bodies-rapier)), `particles`
   ([Particles](#particles)), and XPBD cloth with `drape` and `inflate` ([Cloth](#cloth-xpbd)).
-- Rust/WASM kernels, sessions 1–7: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual
-  contouring, field-aligned quad remeshing, heightfield erosion (droplet, virtual-pipe and stream-power models behind
+- Rust/WASM kernels, sessions 1–16 (9–11 and 16 also built the Unreal plugin): straight skeleton (roofs, offsets),
+  sampled SDF grids with CSG, morphology and dual contouring, field-aligned quad remeshing, heightfield erosion (droplet, virtual-pipe and stream-power models behind
   `heightfield_erode`; the TypeScript droplet erosion stays the default) and D8/D-infinity drainage (`heightfield_flow`);
   an erosion speed pass (session 5); SIMD and scalar builds side by side, SIMD chosen by feature detection with
   `TOPOTOPO_WASM` as override and byte-identical results (session 6); quad-remesher regularity (1.83 % irregular
-  vertices on the large sphere, 2.69 % with UV seams) and about a 2× speed-up (session 7).
+  vertices on the large sphere, 2.69 % with UV seams) and about a 2× speed-up (session 7); edge-dual dual contouring
+  with QEF vertices, straight box edges and both speed targets met (session 8); scatter's sample elimination,
+  minimum-distance rejection and relaxation behind `backend: auto`, byte-identical to the TypeScript path (sessions
+  12–13); priority-flood depression filling and filled drainage routing (session 14); pipe erosion at 1.9 s native and
+  3.0 s WebAssembly for 1024² × 200 steps, both targets met (session 15); tiled Landscape bundles (session 16).
 - User code under the script timeout: `"=expr"` parameters in their own sandboxed realm (R-11), `heightfield_layer`
   expressions and `sdf_expr` fields wherever they are sampled (R-12, R-13 and the particles field guard), thrown values
   read inside the guard (`runUserCode`), script bodies compiled inside it; see
-  [Host and script sandbox](#host-and-script-sandbox).
+  [Host and script sandbox](#host-and-script-sandbox). Count parameters have maxima and the long-running nodes a
+  wall-clock budget (`TOPOTOPO_SIM_TIMEOUT_MS`, R-18).
 - The rename to TopoTopo in the code (R-4) and the publishable package: `dist/` build, `topotopo`/`topo` commands, the
-  `mcp` subcommand, `npm run pack:test` (R-10).
+  `mcp` subcommand, `npm run pack:test` (R-10). Public since 2026-10-15: github.com/topotopo-dev/topotopo, the docs
+  site (R-14) at topotopo.dev, CI on Ubuntu and Windows (R-19).
+- The testing week's fixes ([release/dogfood-log.md](release/dogfood-log.md)) and the first GUI pieces (below).
 
-**Before the first release**
-- With the maintainer: the GitHub repository rename to topotopo-dev/topotopo, the public flip, the npm publish and the
-  v0.2 tag; then CI back on and the docs site (R-14) on topotopo.dev. Decide whether Rapier stays a regular dependency.
-- Grant applications (Epic MegaGrants, cycle 1 of 2027) built on an Unreal 5.8 demo video; trademark filing once
-  there is revenue or a grant.
+**Around the release**
+- With the maintainer: the v0.2 tag and `npm publish` (the version is 0.2.0; Rapier stays a regular dependency), then
+  the demo video and launch posts by the end of October.
+- Grant applications (Epic MegaGrants, cycle 1 of 2027: the text in December, submission in the January–March window)
+  built on the Unreal 5.8 demo video; trademark filing once there is revenue or a grant.
 
 **Next for the engine**
-- Kernels: a dual-contouring quality pass (session 8, running: edge serration, adaptive extraction, speed). Speed
-  targets still missed, measured under load: pipe erosion 4.6 s in Node and 3.2 s native for 1024² × 200 steps
-  (targets 4 s / 2 s), the droplet kernel 1.46× TypeScript (target 3×), the quad remesher 5.1 s for 100k triangles
-  with the SIMD build (target 3 s).
+- Kernels: speed targets still missed, mostly measured under load (`kernels/BENCH.md`): the droplet kernel 1.38×
+  TypeScript (target 3×), the quad remesher 5.1 s for 100k triangles with the SIMD build (target 3 s), scatter of
+  100k blue-noise points 0.65 s on 15 workers (target 0.5 s) and 1M → 100k elimination 3.2 s (target 1.5 s). Dual
+  contouring leaves up to 0.4 voxel at sharp union junctions (target 0.1) and has no adaptive octree.
+- From the testing week, after v0.2: an on-disk cook cache between CLI runs, far-instance LOD for dense previews, and
+  drainage that does not run in straight lines across filled flats (dogfood log row 9).
 - Simulation-lite follow-ups: convex decomposition for concave rigid pieces, moving and animated colliders for
   particles and cloth, particle–particle interaction, cloth tearing and welds, `drape` speed (3.3 s against a 3 s
   target for 100 × 100 × 200 steps).
@@ -964,10 +976,11 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   outlive the viewer; the page names the folder (`GET /api/inputs_dir`).
   Done too: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`). That first
   page was judged toy-like (damped camera, no orthographic views, no snapping, invented icons), so the viewer is now
-  built to a standard, [design/viewer.md](design/viewer.md): a production editor viewport with Maya navigation,
-  quad and orthographic views with a metre grid, selection, outliner and properties, guides drawn as nulls, curves,
-  areas and volumes, then a gizmo with snapping and typed values, then the node editor (full editor direction). No
-  chat panel in the viewer: Claude Code is the conversation (decided 2026-10-17).
+  built to a standard, [design/viewer.md](design/viewer.md) (full editor direction). Phase 1, the production editor
+  viewport, is done (2026-10-17): Maya navigation with Houdini and Blender keymap presets, quad and orthographic views
+  with a metre grid, selection, outliner and properties, guides drawn as nulls, curves, areas and volumes. Next:
+  phase 2, a gizmo with snapping, typed values and CV editing; then phase 3, the node editor. No chat panel in the
+  viewer: Claude Code is the conversation (decided 2026-10-17).
 - Browser app, last: a node editor (React Flow or LiteGraph), the three.js viewport, and parameter panels generated
   from `ParamDef`s. Every param already carries type, default, range, enum options and a description.
 - The engine runs in a Web Worker. Graph JSON is the file format and is identical for humans and LLMs, and `ui: {x, y}`

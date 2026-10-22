@@ -209,7 +209,7 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
       const r: any = await client.callTool({ name, arguments: args });
       return { txt: r.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'), isError: !!r.isError };
     };
-    check(client.getServerVersion()?.name === NAME, `server ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
+    check(client.getServerVersion()?.name === NAME && client.getServerVersion()?.version === pkg.version, `server ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
     const cat = await call('catalog', {});
     check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('[shelf]'), 'catalog lists the nodes and the installed shelf');
     const b = await call('build', { graph: { nodes: { b: { type: 'box' }, g: { type: 'sdf_grid', in: ['b'], params: { voxel_size: 0.1 } }, m: { type: 'grid_to_mesh', in: ['g'] } } } });

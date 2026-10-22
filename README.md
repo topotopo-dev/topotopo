@@ -82,8 +82,9 @@ npx topotopo view graph.json                                # live 3D viewer, re
 npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
 
-`topotopo@0.1.0` on npm is an early preview; v0.2 is the first tagged release. To try unreleased changes, build the
-tarball from a clone: `npm pack`, then `npm install -g ./topotopo-<version>.tgz` (or into a project).
+v0.2 is the first tagged release ([release notes](docs/release/v0.2-release-notes.md)); `topotopo@0.1.0` was an untagged
+preview. To try unreleased changes, build the tarball from a clone: `npm pack`, then
+`npm install -g ./topotopo-<version>.tgz` (or into a project).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations.
 
 **From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for
