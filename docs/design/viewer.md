@@ -197,7 +197,7 @@ app/style.css
 
 Logic that does not need a browser (snapping maths, grid step choice, marker validation, keymap tables, the undo
 stack, selection set operations) lives in plain functions and is tested in Node (`test/viewer*.ts`); the browser
-pane check with a screenshot is part of every viewer session's report.
+pane check with a screenshot is part of every viewer change.
 
 ## 11. Phases
 

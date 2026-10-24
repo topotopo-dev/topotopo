@@ -48,7 +48,7 @@ npm run site:check   # fails on broken internal links or anchors, missing images
 ```
 
 `.github/workflows/pages.yml` runs `npm run site` and `npm run site:check` on every push to `main` and deploys `site/`
-to GitHub Pages; DNS and repository settings for the domain are in `docs/release/site-dns.md`.
+to GitHub Pages.
 
 `npm run pack:test` is not part of `npm test` (it takes about a minute and needs the npm cache or network for the
 install). It fails if the tarball misses a runtime file or carries sources, tests or examples, or if anything that

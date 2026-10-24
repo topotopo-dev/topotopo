@@ -1,6 +1,6 @@
 {
   "name": "topotopo",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "An open-source procedural geometry engine: node graphs in JSON, cooked headless and deterministic, exported to Unreal, Blender and Houdini. Built for LLM agents through MCP, and for people through the CLI.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

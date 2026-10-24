@@ -1,4 +1,4 @@
-// Demo video footage: render the engine shots of docs/release/demo-shots.json (from docs/release/demo-video-plan.md)
+// Demo video footage: render the engine shots of docs/release/demo-shots.json
 // into out/video/<id>/frame_0001.png …, with the left-pane graph excerpt next to them as out/video/<id>/left.txt;
 // --assemble then encodes out/video/<id>.mp4 per shot and out/video/contact_sheet.png with ffmpeg (if it is on PATH).
 //   node scripts/demo-footage.ts [--shot id[,id…]] [--jobs N] [--assemble] [--no-render] [--limit N] [--out dir] [--list]

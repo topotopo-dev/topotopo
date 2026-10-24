@@ -12,9 +12,9 @@
 //   npm run bench -- --output out/run.json               preserve a named report instead of bench/last.json
 //
 // Each case cooks a graph with a cleared cache (warm-up run, then best of N). The time reported is the target node's
-// own cook time (inputs are cooked first and not counted); "total" is the whole graph. Targets come from
-// docs/ROADMAP.md §1.7 where it names one, otherwise they are working goals. Results are informational: a missed
-// target never fails the run (a failed cook does). bench/baseline.json is a reference run from one machine.
+// own cook time (inputs are cooked first and not counted); "total" is the whole graph. Targets are working goals.
+// Results are informational: a missed target never fails the run (a failed cook does). bench/baseline.json is a
+// reference run from one machine.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

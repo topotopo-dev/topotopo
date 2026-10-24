@@ -83,8 +83,8 @@ npx topotopo view graph.json                                # live 3D viewer, re
 npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
 
-v0.2 is the first tagged release ([release notes](docs/release/v0.2-release-notes.md)); `topotopo@0.1.0` was an untagged
-preview. To try unreleased changes, build the tarball from a clone: `npm pack`, then
+The current release is v0.3 ([release notes](docs/release/v0.3-release-notes.md)); v0.2 was the first tagged release
+([release notes](docs/release/v0.2-release-notes.md)). To try unreleased changes, build the tarball from a clone: `npm pack`, then
 `npm install -g ./topotopo-<version>.tgz` (or into a project).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations.
 

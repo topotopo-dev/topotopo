@@ -7,7 +7,7 @@
 #   - Settings → Pages → Build and deployment → Source: "GitHub Actions" (not "Deploy from a branch").
 #   - Settings → Pages → Custom domain: topotopo.dev, then "Enforce HTTPS" once the certificate is issued. The domain
 #     is set there; site/CNAME carries the same name for completeness.
-#   - DNS records at the registrar (Cloudflare) and the domain verification: docs/release/site-dns.md.
+#   - DNS records at the registrar for the apex and www, and the domain verification for the organisation.
 name: Pages
 
 on:

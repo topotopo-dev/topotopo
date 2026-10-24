@@ -210,7 +210,7 @@ and both Houdini users and LLMs already know its conventions (`P N Cd uv pscale 
   renderer shows those numbers), so a base colour PNG has the bytes of the colours that made it and glTF/USD read it
   as sRGB as they require. Colour *values* are different: glTF's baseColorFactor, emissiveFactor and COLOR_0 and USD's
   colour inputs and displayColor are linear, so those exporters decode display values to linear on the way out (the
-  glTF importer encodes them back, losslessly); `.geo` keeps Houdini's raw Cd for now (dogfood log, colour space). The alternative, linear colour in memory with sRGB encoding on export, would need a
+  glTF importer encodes them back, losslessly); `.geo` keeps Houdini's raw Cd for now. The alternative, linear colour in memory with sRGB encoding on export, would need a
   colour-space tag per image (is this RGBA a colour or a normal map?) and would make texture colours disagree with the
   same hex in a material or a Cd attribute everywhere the engine shows them; blending in display space is also what
   Substance Designer and image editors do by default.
@@ -318,7 +318,7 @@ call and inside that call's timeout.
   snippet library and declares the realm's control object `__topotopo` as a global `const`, a frozen object of realm
   functions (`run`, `setJob`, `setCur`). The job of a timed call and the wrangle's geometry API (what `point()`,
   `addpoint()` … dispatch to) are closure variables behind it. After setup the host never reads or writes a property
-  of the realm's global object, which user code can redefine: until R-18 the job and the API were the globals `__job`
+  of the realm's global object, which user code can redefine: before v0.2 the job and the API were the globals `__job`
   and `__cur`, written outside the time limit, and a script that gave them a looping setter hung the process (in a
   pool worker, the worker). A global `const` can be neither reassigned nor shadowed at the top level, where user code
   never runs.
@@ -348,10 +348,10 @@ call and inside that call's timeout.
   awaited engine calls included, has a wall-clock deadline, so `await new Promise(() => {})` or an endless chain of
   awaits also fails the node. After the run, `lib.run` refuses to cook, so a continuation left over from a timed-out
   script dies at its next call. Subscribing to the run's promise also happens in the first timed call: `then` is
-  looked up on the realm's `Promise.prototype`, which a script can replace with a loop (R-17).
+  looked up on the realm's `Promise.prototype`, which a script can replace with a loop.
 - What a script hands back is read after the timed call: its result, and the inputs and params of a `lib.run` of an
   async node (which cooks on in the main queue). `instanceof Geometry` on a Proxy runs its `getPrototypeOf` trap, so a
-  returned Proxy hung the process (R-17 N2). Geometries now carry a brand (a WeakSet filled by the constructor and
+  returned Proxy hung the process. Geometries now carry a brand (a WeakSet filled by the constructor and
   `Geometry.blank()`, which replaces `Object.create(Geometry.prototype)` in the fast paths): `isGeometry` runs no
   code of the value, the script node and the engine accept only branded results (with their original prototype), and
   `lib.run` refuses unbranded inputs and copies its params with `structuredClone` inside the call (getters run there;
@@ -432,8 +432,8 @@ there only the attribute arrays travel, the workers are already running, and the
 
 ### Resource limits
 
-R-17 found that valid but huge params took the process down or kept it busy for hours (N4): a fatal heap OOM is not
-an exception a node can catch, and nothing limited a simulation's time. Since R-18 (`test/limits.ts`):
+Valid but huge params could take the process down or keep it busy for hours: a fatal heap OOM is not an exception a
+node can catch, and nothing limited a simulation's time. So (`test/limits.ts`):
 - **Counts.** Every int param that counts something has a `max` (values above are clamped, like values below `min`);
   the registry scan in the test lists the int params that are not counts (seeds, frames, indices, an offset, a pixel
   height). The maxes keep one node at its max within the default heap, measured: a 2048 × 2048 grid builds 4.2 M quads
@@ -511,7 +511,7 @@ tie order. Candidate sampling and attribute interpolation remain in TS; large el
 worker with cloned inputs when a pool is present, and otherwise run on the cooking thread; minimum-distance
 selection and projected relaxation stay on that thread.
 Elimination itself has no hard minimum-spacing guarantee; the separate `min_distance` pass provides that constraint.
-See `kernels/BENCH.md` session 12 for parity checks, worker placement measurements and performance limits.
+See `kernels/BENCH.md` (scatter kernels) for parity checks, worker placement measurements and performance limits.
 
 Not in chunks, and why:
 - `heightfield_erode`: droplets run one after another over the terrain the previous ones left; a split would change
@@ -613,7 +613,7 @@ worker pool bit for bit and can be cut into frames anywhere:
   age, also when a `die` collision removed it earlier (those keep their slot in `__pholders`). So a run of steps is emitted
   first (serially, cheap), then every particle integrates through it on its own: one `parallelMap` per run, not per step.
   Since `max_particles` counts live particles only, a high rate with a short life over many steps once materialised
-  hundreds of millions of births in one run and exhausted the heap (R-17 N3). A run is now emitted and integrated in
+  hundreds of millions of births in one run and exhausted the heap. A run is now emitted and integrated in
   batches: emission stops at the end of the step at which its births reach `max_births` (default 1,000,000), the batch is
   integrated and compacted, and the next one starts from there (the result is the one of a single run, as for frames);
   and one step gives at most `max_births` births (the rest are refused and reported, like `max_particles`).
@@ -752,7 +752,7 @@ so the dependency costs nothing until a graph uses it, and a browser bundle spli
 - **Determinism.** Same inputs, params and seed give the same bits: Rapier's WASM arithmetic is IEEE-754 without
   platform-dependent rounding (no SIMD build, no threads), bodies are inserted in a spatial order (y, x, z of their
   input pose to 1e-6 m, then a 64-bit hash of the piece's shape in its body frame, exact pose, velocities and
-  `active`) so permuting the input changes nothing, and the jitter is seeded by that rank. Until R-18 pieces at the same
+  `active`) so permuting the input changes nothing, and the jitter is seeded by that rank. Before v0.2 pieces at the same
   position were ordered by input index, so permuting coincident pieces of different shapes changed the result;
   identical pieces still tie, and being interchangeable they give the same set of results. `rbd_stack`'s order
   `height` breaks equal heights by the same rank (order `input` follows the input by definition). Tested: two engines
@@ -825,10 +825,10 @@ they also drive the tests: `test/fixtures.ts` gives every node type a fixture gr
 - **Property**: random chains from the registry check the engine's contracts: errors are per node and never thrown,
   cooks are deterministic, and the content-addressed cache gives the same result after a param is changed and
   restored. A wrangle fuzz checks the sandbox timeout and that compile errors point at the snippet line; hostile
-  `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on; since R-11
-  they run in the host's vm sandbox with a timeout. Since R-12 the code params of `heightfield_layer` and `sdf_expr`
+  `"=expr"` params (escapes and endless loops) must fail their node clearly, with the pool off and on; they run in
+  the host's vm sandbox with a timeout. The code params of `heightfield_layer` and `sdf_expr`
   run under the script timeout too (loops, also after an await or in a thrown object's message getter, and wrapper
-  escapes are fuzzed with the pool off and on). Since R-13 so do the parametric nodes, an `sdf_expr` field sampled
+  escapes are fuzzed with the pool off and on). So do the parametric nodes, an `sdf_expr` field sampled
   later by `sdf_to_mesh` and `sdf_grid` (also through transform/modify/combine), and what wrangles and scripts throw
   (message/stack/toString getters that never return, in workers too); `test/examples.ts` fails on any example warning.
 - **Docs staleness**: `docs/nodes.md` must match the registry, and the README's node table must name every node type.
@@ -890,99 +890,93 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
 
 ## Roadmap
 
-Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its analysis in [ROADMAP.md](ROADMAP.md).
-
 **Shipped in v0.2 (2026-10-22)**
-- Roadmap phases 0–2: the test layers (smoke, golden, property, fuzz, docs, examples), time and `solver`, expression
-  references, graph versioning, edge/vertex groups and the half-edge structure, array attributes, the worker pool;
-  modelling parity (bevel, knife/polysplit, bridge, quad fill, loop ops, deformers, xatlas unwrap and LSCM, isotropic
-  remesh, attribute-preserving decimation, LOD, measures and `assert`, render overlays); PCG and instancing (packed
-  prims, copy variants, scatter v2, masks, the heightfield suite with erosion, the spline toolkit, the asset shelf,
+- The test layers (smoke, golden, property, fuzz, docs, examples), time and `solver`, expression references, graph
+  versioning, edge/vertex groups and the half-edge structure, array attributes, the worker pool; modelling parity
+  (bevel, knife/polysplit, bridge, quad fill, loop ops, deformers, xatlas unwrap and LSCM, isotropic remesh,
+  attribute-preserving decimation, LOD, measures and `assert`, render overlays); PCG and instancing (packed prims, copy
+  variants, scatter v2, masks, the heightfield suite with erosion, the spline toolkit, the asset shelf,
   gltf-transform/USD/`.geo`/CSV exporters).
-- The Unreal round trip, verified on 2026-10-13 in Unreal 5.8 (instance rows, Interchange glTF axes, the Landscape
-  import with the manifest values), with the same scene loading in Blender 5.2 and Houdini 22. Since then the
-  TopoTopoPCG plugin (0.1.5, `integrations/unreal/TopoTopoPCG`) imports an `unreal_landscape` bundle in one command
-  (Landscape, weight layers, a generated material, HISM instances, static objects; tiled bundles as World Partition
-  streaming proxies), and its 19 automation tests pass in the editor.
-- Phase 3 except the optional CAD module: procedural textures and bakes (37 texture nodes, image volumes, materials
-  referencing `image:<name>`, embedded export, the texture view; since 2026-10-17 also `image_file`, the PNG reader);
-  sampled SDF grids; and simulation-lite in the `sim`
+- The Unreal round trip, verified in Unreal 5.8 (instance rows, Interchange glTF axes, the Landscape import with the
+  manifest values), with the same scene loading in Blender 5.2 and Houdini 22. The TopoTopoPCG plugin (0.1.5,
+  `integrations/unreal/TopoTopoPCG`) imports an `unreal_landscape` bundle in one command (Landscape, weight layers, a
+  generated material, HISM instances, static objects; tiled bundles as World Partition streaming proxies), and its 19
+  automation tests pass in the editor.
+- Procedural textures and bakes (37 texture nodes, image volumes, materials referencing `image:<name>`, embedded
+  export, the texture view, `image_file`, the PNG reader); sampled SDF grids; and simulation-lite in the `sim`
   category: `rbd_settle` and `rbd_stack` on Rapier ([Rigid bodies](#rigid-bodies-rapier)), `particles`
   ([Particles](#particles)), and XPBD cloth with `drape` and `inflate` ([Cloth](#cloth-xpbd)).
-- Rust/WASM kernels, sessions 1–16 (9–11 and 16 also built the Unreal plugin): straight skeleton (roofs, offsets),
-  sampled SDF grids with CSG, morphology and dual contouring, field-aligned quad remeshing, heightfield erosion (droplet, virtual-pipe and stream-power models behind
-  `heightfield_erode`; the TypeScript droplet erosion stays the default) and D8/D-infinity drainage (`heightfield_flow`);
-  an erosion speed pass (session 5); SIMD and scalar builds side by side, SIMD chosen by feature detection with
-  `TOPOTOPO_WASM` as override and byte-identical results (session 6); quad-remesher regularity (1.83 % irregular
-  vertices on the large sphere, 2.69 % with UV seams) and about a 2× speed-up (session 7); edge-dual dual contouring
-  with QEF vertices, straight box edges and both speed targets met (session 8); scatter's sample elimination,
-  minimum-distance rejection and relaxation behind `backend: auto`, byte-identical to the TypeScript path (sessions
-  12–13); priority-flood depression filling and filled drainage routing (session 14); pipe erosion at 1.9 s native and
-  3.0 s WebAssembly for 1024² × 200 steps, both targets met (session 15); tiled Landscape bundles (session 16).
-- User code under the script timeout: `"=expr"` parameters in their own sandboxed realm (R-11), `heightfield_layer`
-  expressions and `sdf_expr` fields wherever they are sampled (R-12, R-13 and the particles field guard), thrown values
-  read inside the guard (`runUserCode`), script bodies compiled inside it; see
-  [Host and script sandbox](#host-and-script-sandbox). Count parameters have maxima and the long-running nodes a
-  wall-clock budget (`TOPOTOPO_SIM_TIMEOUT_MS`, R-18).
-- The rename to TopoTopo in the code (R-4) and the publishable package: `dist/` build, `topotopo`/`topo` commands, the
-  `mcp` subcommand, `npm run pack:test` (R-10). Public since 2026-10-15: github.com/topotopo-dev/topotopo, the docs
-  site (R-14) at topotopo.dev, CI on Ubuntu and Windows (R-19).
-- The testing week's fixes ([release/dogfood-log.md](release/dogfood-log.md)) and the first GUI pieces (below).
+- Rust/WASM kernels: straight skeleton (roofs, offsets), sampled SDF grids with CSG, morphology and dual contouring
+  (edge-dual, QEF vertices, straight box edges), field-aligned quad remeshing (1.83 % irregular vertices on the large
+  sphere, 2.69 % with UV seams), heightfield erosion (droplet, virtual-pipe and stream-power models behind
+  `heightfield_erode`; the TypeScript droplet erosion stays the default; pipe erosion at 1.9 s native and 3.0 s
+  WebAssembly for 1024² × 200 steps), D8/D-infinity drainage (`heightfield_flow`), priority-flood depression filling
+  and filled drainage routing, scatter's sample elimination, minimum-distance rejection and relaxation behind
+  `backend: auto` (byte-identical to the TypeScript path), and tiled Landscape bundles. SIMD and scalar builds ship
+  side by side, SIMD chosen by feature detection with `TOPOTOPO_WASM` as override and byte-identical results.
+- User code under the script timeout: `"=expr"` parameters in their own sandboxed realm, `heightfield_layer`
+  expressions and `sdf_expr` fields wherever they are sampled, thrown values read inside the guard (`runUserCode`),
+  script bodies compiled inside it; see [Host and script sandbox](#host-and-script-sandbox). Count parameters have
+  maxima and the long-running nodes a wall-clock budget (`TOPOTOPO_SIM_TIMEOUT_MS`).
+- The package: `dist/` build, `topotopo`/`topo` commands, the `mcp` subcommand, `npm run pack:test`; the public
+  repository, the docs site at topotopo.dev, CI on Ubuntu and Windows.
+- Fixes from real-world use (see the [v0.2 release notes](release/v0.2-release-notes.md)) and the first GUI pieces
+  (below).
 
-**Around the release**
-- v0.2.0 released on 2026-10-22: npm, the tag and its GitHub release (Rapier stays a regular dependency). Next: the
-  demo video and launch posts by the end of October.
-- Grant applications (Epic MegaGrants, cycle 1 of 2027: the text in December, submission in the January–March window)
-  built on the Unreal 5.8 demo video; trademark filing once there is revenue or a grant.
+**Shipped in v0.3 (2026-10-24)**
+- Published outputs (`graph.outputs`) and export targets stored in the graph (`export` / `outputs.<id>.export`),
+  written from the viewer, MCP (`export {output}` / `{all: true}`) and the CLI (`--export-all`).
+- The viewer's Scene, Outputs and Inputs tabs, the image viewer and TopoTopo surface navigation (below).
+- Scripts: a time limit can no longer leave a rejected promise unobserved (which ended the process).
 
 **Next for the engine**
 - Kernels: speed targets still missed, mostly measured under load (`kernels/BENCH.md`): the droplet kernel 1.38×
   TypeScript (target 3×), the quad remesher 5.1 s for 100k triangles with the SIMD build (target 3 s), scatter of
   100k blue-noise points 0.65 s on 15 workers (target 0.5 s) and 1M → 100k elimination 3.2 s (target 1.5 s). Dual
   contouring leaves up to 0.4 voxel at sharp union junctions (target 0.1) and has no adaptive octree.
-- From the testing week, after v0.2: an on-disk cook cache between CLI runs, far-instance LOD for dense previews, and
-  drainage that does not run in straight lines across filled flats (dogfood log row 9).
+- From real-world use: an on-disk cook cache between CLI runs, far-instance LOD for dense previews, and drainage that
+  does not run in straight lines across filled flats.
 - Simulation-lite follow-ups: convex decomposition for concave rigid pieces, moving and animated colliders for
   particles and cloth, particle–particle interaction, cloth tearing and welds, `drape` speed (3.3 s against a 3 s
   target for 100 × 100 × 200 steps).
 - Performance follow-ups: done (scatter on the pool, one-pass point normals, SAH BVH with a `-0` ray-direction fix,
-  relaxed scatter ≈ 1.2 s per 100k, the density-mask neighbour rebuild since R-12); still open: the AO bake
-  (2048² × 16 rays ≈ 6 s) and a WebGPU spike.
+  relaxed scatter ≈ 1.2 s per 100k, the density-mask neighbour rebuild); still open: the AO bake (2048² × 16 rays
+  ≈ 6 s) and a WebGPU spike.
 - Packed primitives: packed disk references (Houdini packed disk prims), USD variants and per-frame layers, and
   instanced rendering in the rasteriser (it draws expanded copies within a triangle budget).
 - Heightfields: `sample: unreal_triangles` is done (scatter and project_curve match a Landscape to 2e-14 m).
-  The UE 5.8 TopoTopoPCG importer now creates ordered layer infos and imports the bundle's PNG weights with
+  The UE 5.8 TopoTopoPCG importer creates ordered layer infos and imports the bundle's PNG weights with
   `ALandscape::Import`. Independent paint-layer storage preserves the exported bytes (including already
   normalised sediment/debris); the generated Landscape material blends colour/roughness and normalizes only
   its appearance. `layers=0` and `material=0` opt out independently. See the plugin's
   [editor workflow](../integrations/unreal/TopoTopoPCG/EDITOR_WORKFLOW.md) for assets and editor acceptance.
-  Depression filling for drainage is implemented (K-11): `heightfield_fill_sinks`, optional filled routing in
-  `heightfield_flow` and stream-power erosion; `unreal_landscape` export supports overlapping tiles, shared height/weight ranges and per-tile instance streams (K-12), imported as components in plain levels or streaming proxies in World Partition levels with independent spatial HISM actors per tile.
+  Depression filling for drainage is implemented: `heightfield_fill_sinks`, optional filled routing in
+  `heightfield_flow` and stream-power erosion; `unreal_landscape` export supports overlapping tiles, shared
+  height/weight ranges and per-tile instance streams, imported as components in plain levels or streaming proxies in
+  World Partition levels with independent spatial HISM actors per tile.
 - Curves: curve booleans in 3D, NURBS surfaces, `.geo` NURBCurve/BezierCurve read/write, USD BasisCurves with a
   bspline/bezier basis, exact spline offsets (refit) and carve/ends that keep the spline form.
 - Textures: MikkTSpace tangents, bakes outside the 0..1 uv square.
 - Houdini interop: `.bgeo.sc` (Blosc) and a USD layer writer with variants.
-- Phase 3 remainder: volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points) and an
-  optional OpenCascade/replicad CAD module for B-rep fillets and STEP export (P3-D; its LGPL licence needs a decision
-  first, and it would load as a separate module).
+- Volumes beyond the sampled SDF grids (adaptive extraction, VDB IO, volumes from points), and later an optional
+  OpenCascade/replicad CAD module for B-rep fillets and STEP export (LGPL, so it would load as a separate package).
 
 **GUI (makes the app usable without an LLM)**
-- Order, decided 2026-10-17: the live viewer grows into the GUI in the order a person working with an agent needs it.
+- The live viewer grows into the GUI in the order a person working with an agent needs it.
   Done: a Controls panel generated from the graph's `params` (`POST /api/vars`, bursts coalesced), a drop zone
   that stores files in `inputs/` and shows them as ghosted reference layers (`GET/POST /api/inputs`, `GET /api/input`;
   a PNG as a flat textured quad).
   Under `topotopo view <graph.json>` that is the `inputs/` folder beside the graph file, made by the first drop (the
   scratch workspace keeps only graphs and assets), so the graph reads drops as `inputs/<name>` and they
   outlive the viewer; the page names the folder (`GET /api/inputs_dir`).
-  Done too: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`). That first
-  page was judged toy-like (damped camera, no orthographic views, no snapping, invented icons), so the viewer is now
-  built to a standard, [design/viewer.md](design/viewer.md) (full editor direction). Phase 1, the production editor
-  viewport, is done (2026-10-17): quad and orthographic views with a metre grid, selection, outliner and properties,
-  guides drawn as nulls, curves, areas and volumes, keymap presets. Since 2026-10-19 the default navigation is
-  TopoTopo surface navigation (no modifier keys; Maya, Houdini and Blender presets retained). Next: phase 2, a gizmo
-  with snapping, typed values and CV editing; then phase 3, the node editor. No chat panel in the viewer: Claude Code
-  is the conversation (decided 2026-10-17).
-- The left panel has three tabs (2026-10-22): Scene (the outliner tree), Outputs and Inputs. Outputs lists all
+  Done too: markers (sites, paths, zones and volumes placed by clicking, stored as `inputs/markers.json`). The viewer
+  is built to a professional editor standard, [design/viewer.md](design/viewer.md). Phase 1, the production editor
+  viewport, is done: quad and orthographic views with a metre grid, selection, outliner and properties,
+  guides drawn as nulls, curves, areas and volumes, keymap presets. The default navigation is TopoTopo surface
+  navigation (no modifier keys; Maya, Houdini and Blender presets retained). Next: phase 2, a gizmo with snapping,
+  typed values and CV editing; then phase 3, the node editor. No chat panel in the viewer: Claude Code (or another
+  MCP client) is the conversation.
+- The left panel has three tabs: Scene (the outliner tree), Outputs and Inputs. Outputs lists all
   graphs' default and named results as cards with their textures; selection isolates a result, with its own camera
   or image pan/zoom, and the image viewer exposes channels, layers and mesh UVs. Each result exports to its target in
   the graph (`export` / `outputs.<id>.export`: a format, or format + path + export options, inside `exports/`; see
@@ -999,7 +993,7 @@ Live item status is in [WORKLOG.md](WORKLOG.md); the long-range plan and its ana
   conventions (plain `name` / `role` attributes, name prefixes such as `path.` and `zone.`). A graph's `params`
   (`VarDef`: type, desc, min, max, options, label, step) are the controls the viewer draws; people change vars through
   `Workspace.edit`, and an agent reads the graph before assuming a var's value. There is no lock: a person who wants
-  a value kept says so (a lock was built and removed on 2026-10-17 as unneeded).
+  a value kept says so.
 - The MCP server and the GUI share one workspace. The live viewer (`preview` tool) already streams updates over SSE, so
   you can watch an agent build while you inspect intermediate nodes.
 - The LLM side stays in Claude Code (or any MCP client) talking to the same workspace; the viewer gets no chat panel.
