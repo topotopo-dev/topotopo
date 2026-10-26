@@ -1,0 +1,49 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "P:float:3",
+        "name:string:1",
+        "orient:float:4",
+        "parent:string:1",
+        "scale:float:3",
+        "scene_empty:int:1"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0, 0.3, -0.25],
+      "min": [0, 0.3, -0.25]
+    },
+    "counts": {
+      "points": 1,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "93aaef3670771cbc",
+      "attributes": {
+        "point.name": "a36eeffbad859eb5",
+        "point.orient": "d90371d17ac8abfb",
+        "point.parent": "6c796466cf5d8990",
+        "point.scale": "1fc3c7d80c9f58a6",
+        "point.scene_empty": "3e80124432b7cade"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "node.scene_null",
+  "ok": true,
+  "source": "fixture for node type \"scene_null\" (test/fixtures.ts)",
+  "warnings": []
+}

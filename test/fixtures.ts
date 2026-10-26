@@ -159,6 +159,7 @@ export const PARAMS: Record<string, any> = {
   script: { code: "const s = await lib.run('sphere', { radius: 0.5 });\nreturn lib.merge([geo, s]);" },
   foreach: { mode: 'prims', body: { nodes: { i: { type: 'input', params: { index: 0 } }, x: { type: 'poly_extrude', in: ['i'], params: { distance: '=0.1 + iteration * 0.01' } } }, output: 'x' } },
   file: { path: 'cube.obj' },
+  scene_null: { name: 'muzzle', translation: [0, 0.3, -0.25], rotation: [0, 90, 0] },
   attrib_rename: { from: 'N', to: 'nrm' },
   attrib_promote: { name: 'N', from: 'point', to: 'prim' },
   attrib_delete: { names: 'N' },

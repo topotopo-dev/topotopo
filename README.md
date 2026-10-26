@@ -264,7 +264,7 @@ boundary. Do not cook graphs from untrusted sources in a privileged process.
 | sim | `particles` (Houdini POPs in one node: emission from points, gravity, drag, wind, curl noise, point/heightfield/SDF fields, attraction, floor and mesh collisions with die/slide/bounce, trails as polylines; steps with the frame, each frame's state cached; bit-identical on the worker pool) `rbd_settle` (drop pieces onto a terrain, container or ground until they rest; Rapier rigid bodies, packed instances stay packed) `rbd_stack` (drop them one at a time into piles) `drape` (XPBD cloth: colliders, floor, pins, wind, self collision) `inflate` (pressure: cushions, balloons) |
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
-| io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json) |
+| io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json), `scene_null` (named scene empty / attachment socket: a meshless glTF node under the root, an empty or a mesh) |
 | shelf | graph assets used like nodes, e.g. `stairs` `railing` `roof_skeleton` `house` `crate` `tree_lowpoly` `forest_patch`; every asset is listed with its thumbnail under [Shelf](#shelf) |
 
 Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated

@@ -789,7 +789,10 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
   uncompressed GLB.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
-  (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. N → NORMAL (else computed, 60° cusp),
+  (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
+  scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or
+  a uniquely named mesh, with the local TRS that keeps their geometry-space placement; set point attributes → node extras;
+  missing, ambiguous or cyclic parents and GPU-instanced parents are errors; import brings them back. N → NORMAL (else computed, 60° cusp),
   uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. TANGENT (tangents "auto", the default): MikkTSpace
   tangents (xyz + handedness w) for every primitive whose material has a normal map, computed per corner before
   vertices are welded (uv seams, hard normals and mirrored islands keep their own frames), the same frame bake_normal

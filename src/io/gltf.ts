@@ -4,6 +4,10 @@
 // Export layout
 //   one node + mesh per prim "name" (splitByName), one primitive per material within a mesh:
 //   polygons → TRIANGLES, polylines → one LINE_STRIP per curve (or LINES), isolated points → POINTS.
+//   Scene empties (isolated points marked scene_empty, core/scene.ts; the scene_null node) → nodes without a mesh, under
+//   their parent (the scene, another empty or a uniquely named mesh node), with the local TRS that reproduces their
+//   geometry-space transform; other set point attributes → node extras. Missing, ambiguous or cyclic parents, and
+//   parents that are GPU-instanced meshes, are errors.
 //   POSITION · NORMAL (N, else computed) · TANGENT (see below) · TEXCOORD_0/1 from uv/uv2 (V flipped, core/texcoord.ts)
 //   · COLOR_0 from Cd (+Alpha → VEC4).
 //   TANGENT (option tangents, default 'auto'): MikkTSpace tangents (core/tangents.ts) computed per triangle corner from
@@ -41,7 +45,8 @@
 //   both the metallicRoughness and the occlusion texture (metallicFactor 1).
 //
 // Import
-//   node hierarchy flattened with world transforms, EXT_mesh_gpu_instancing as packed prims (one source per mesh;
+//   node hierarchy flattened with world transforms (nodes without a mesh → scene empties: points with scene_empty 1,
+//   name, parent = the nearest imported ancestor, P / orient / scale in world space, extras as attributes), EXT_mesh_gpu_instancing as packed prims (one source per mesh;
 //   instancing 'expand' = real geometry), every primitive mode,
 //   meshopt (meshoptimizer decoder) and Draco (when draco3dgltf is installed) decoded, external .bin files read
 //   relative to the file. Mesh/node names → prim "name", materials → prim "material" + table, COLOR_0 → Cd/Alpha,
@@ -64,7 +69,9 @@ import { TANGENT_ATTRIB, cornerTangents, loadMikkTSpace, tangentProblem, transfo
 import { gltfV } from '../core/texcoord.ts';
 import { DEFAULT_MATERIAL, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
 import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
-import { m4apply, m4applyDir, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
+import { m4apply, m4applyDir, m4fromQuat, m4invert, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
+import { EMPTY_ATTRIB, PARENT_ATTRIB, sceneEmpties } from '../core/scene.ts';
+import type { SceneEmpty } from '../core/scene.ts';
 import type { Mat4 } from '../core/math.ts';
 import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, baseOf, decomposeXform, isolatedMask, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { AnchorAttrib, ExportOptions } from './common.ts';
@@ -360,6 +367,13 @@ const rgbAllOnes = (d: number[], size: number) => {
 /** Build a gltf-transform Document for the geometry (no IO yet). */
 export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   if (hasSplinesDeep(g)) g = splinesToPolylinesDeep(g).geo; // Bezier/NURBS prims (also in packed sources) as polylines
+  // scene empties become nodes, not POINTS
+  const empties = sceneEmpties(g);
+  if (empties.length) {
+    const keep = new Uint8Array(g.numPoints).fill(1);
+    for (const e of empties) keep[e.point] = 0;
+    g = g.subsetPoints(keep);
+  }
   const doc = new Document();
   doc.getRoot().getAsset().generator = 'topotopo';
   const buffer = doc.createBuffer();
@@ -547,12 +561,78 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     const w = writeMesh(doc, buffer, scene, name, outs, info, quantize);
     job.onMesh?.(w);
   }
+  if (empties.length) writeEmpties(doc, scene, empties, o);
   if (quantize) doc.createExtension(KHRMeshQuantization).setRequired(true);
   if (noUV) o.warn?.(`glTF: ${noUV} primitive(s) use a textured material but have no uv attribute (add uv_project or uv_unwrap)`);
   return doc;
 }
 
 interface WrittenMesh { node: GNode; center: number[]; extent: number }
+
+/**
+ * Scene empties as meshless nodes. Parents resolve by name among the empties and the mesh nodes written so far; each
+ * node gets the local TRS that places it at its geometry-space transform (in export space: axis conversion, scale).
+ */
+function writeEmpties(doc: Document, scene: ReturnType<Document['createScene']>, empties: SceneEmpty[], o: ExportOptions) {
+  const meshNodes = new Map<string, GNode[]>();
+  for (const n of doc.getRoot().listNodes()) {
+    const l = meshNodes.get(n.getName());
+    if (l) l.push(n); else meshNodes.set(n.getName(), [n]);
+  }
+  const byName = new Map<string, SceneEmpty[]>();
+  for (const e of empties) {
+    if (!e.name) throw new Error(`glTF: scene empty at point ${e.point} has no name`);
+    const l = byName.get(e.name);
+    if (l) l.push(e); else byName.set(e.name, [e]);
+  }
+  type Parent = { empty: SceneEmpty } | { node: GNode } | null;
+  const parentOf = new Map<SceneEmpty, Parent>();
+  for (const e of empties) {
+    if (!e.parent) { parentOf.set(e, null); continue; }
+    const es = byName.get(e.parent) ?? [], ms = meshNodes.get(e.parent) ?? [];
+    const where = `glTF: scene empty "${e.name}": parent "${e.parent}"`;
+    if (!es.length && !ms.length) throw new Error(`${where} is neither an empty nor a mesh (meshes: ${[...meshNodes.keys()].slice(0, 12).join(', ') || 'none'}; empties: ${[...byName.keys()].slice(0, 12).join(', ')})`);
+    if (es.length + ms.length > 1) throw new Error(`${where} is ambiguous: ${es.length} empt${es.length === 1 ? 'y' : 'ies'} and ${ms.length} mesh${ms.length === 1 ? '' : 'es'} have that name`);
+    if (ms.length && ms[0].getExtension('EXT_mesh_gpu_instancing')) throw new Error(`${where} is a GPU-instanced mesh; parenting to an individual instance is not supported (parent to the scene or an empty instead)`);
+    parentOf.set(e, es.length ? { empty: es[0] } : { node: ms[0] });
+  }
+  for (const e of empties) {
+    const chain: string[] = [];
+    const seen = new Set<SceneEmpty>();
+    for (let c: SceneEmpty | null = e; c;) {
+      if (seen.has(c)) throw new Error(`glTF: scene empties form a parent cycle: ${[...chain, c.name].join(' → ')}`);
+      seen.add(c); chain.push(c.name);
+      const pr = parentOf.get(c);
+      c = pr && 'empty' in pr ? pr.empty : null;
+    }
+  }
+  // world matrix in export space: translation converted like positions, rotation conjugated by the axis change
+  const world = new Map<SceneEmpty, Float64Array>();
+  for (const e of empties) {
+    const R = xfLinear(xform3(m4fromQuat(e.orient)), 0, o), t = xf(e.P[0], e.P[1], e.P[2], o);
+    const m = new Float64Array(16);
+    for (let c = 0; c < 3; c++) for (let r = 0; r < 3; r++) m[c * 4 + r] = R[c * 3 + r] * e.scale[c];
+    m[12] = t[0]; m[13] = t[1]; m[14] = t[2]; m[15] = 1;
+    world.set(e, m);
+  }
+  const made = new Map<SceneEmpty, GNode>();
+  const make = (e: SceneEmpty): GNode => {
+    const done = made.get(e);
+    if (done) return done;
+    const pr = parentOf.get(e)!;
+    const parentNode = pr ? ('empty' in pr ? make(pr.empty) : pr.node) : null;
+    const pw = pr ? ('empty' in pr ? world.get(pr.empty)! : (Float64Array.from(pr.node.getWorldMatrix()) as unknown as Mat4)) : null;
+    const local = pw ? m4mul(m4invert(pw as Mat4), world.get(e)! as unknown as Mat4) : (world.get(e)! as unknown as Mat4);
+    const { q, s, shear } = decomposeXform(xform3(local));
+    if (shear) o.warn?.(`glTF: scene empty "${e.name}": its transform relative to "${e.parent}" has shear (non-uniform parent scale with rotation); the nearest TRS was written`);
+    const node = doc.createNode(e.name).setTranslation([local[12], local[13], local[14]]).setRotation([q[0], q[1], q[2], q[3]]).setScale([s[0], s[1], s[2]]);
+    if (Object.keys(e.extras).length) node.setExtras(e.extras);
+    if (parentNode) parentNode.addChild(node); else scene.addChild(node);
+    made.set(e, node);
+    return node;
+  };
+  for (const e of empties) make(e);
+}
 interface MeshJob { src: Geometry; split: boolean; onMesh?: (w: WrittenMesh) => void }
 
 /**
@@ -993,7 +1073,19 @@ function instanceMatrices(inst: InstancedMesh): Mat4[] {
   return out;
 }
 
-const RESERVED_EXTRAS = new Set('P N uv uv2 Cd Alpha material name path orient scale pscale'.split(' '));
+const RESERVED_EXTRAS = new Set(`P N uv uv2 Cd Alpha material name path orient scale pscale ${EMPTY_ATTRIB} ${PARENT_ATTRIB}`.split(' '));
+
+/**
+ * The parent an imported empty refers to: the name (node name, else its mesh's) of the nearest ancestor that is imported
+ * as an empty or a mesh; cameras, lights and GPU-instanced meshes are skipped (the world transform is kept either way).
+ */
+function importedParent(node: GNode): string {
+  for (let p = node.getParentNode(); p; p = p.getParentNode()) {
+    if (p.getCamera() || p.getExtension('KHR_lights_punctual') || p.getExtension('EXT_mesh_gpu_instancing')) continue;
+    return p.getName() || p.getMesh()?.getName() || '';
+  }
+  return '';
+}
 
 function constantAttribute(table: AttribTable, name: string, type: AttribType, size: number, value: number | string | number[]) {
   const a = table.add(name, type, size);
@@ -1061,7 +1153,9 @@ export function documentToGeometry(doc: Document, warn: (m: string) => void = ()
     if (!mesh) {
       const g = new Geometry({ positions: [world[12], world[13], world[14]] });
       const { q, s } = decomposeXform(xform3(world));
+      constantAttribute(g.points, EMPTY_ATTRIB, 'int', 1, 1);
       constantAttribute(g.points, 'name', 'string', 1, node.getName());
+      constantAttribute(g.points, PARENT_ATTRIB, 'string', 1, importedParent(node));
       constantAttribute(g.points, 'path', 'string', 1, path);
       constantAttribute(g.points, 'orient', 'float', 4, q);
       constantAttribute(g.points, 'scale', 'float', 3, s);

@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-224 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+225 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -23,7 +23,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
-- [io](#io-nodes): [file](#file)
+- [io](#io-nodes): [file](#file) · [scene_null](#scene_null)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [roof_skeleton](#roof_skeleton) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
@@ -9086,6 +9086,98 @@ None (generator).
     "up_axis": "z",
     "weld": true
   }
+}
+```
+
+### scene_null
+
+category: `io` · aliases: `null_object`, `empty`, `socket`, `locator`, `scene_empty`, `attachment_point`
+
+Add a named scene empty (attachment socket): a meshless node in glTF export, parented to the root, another empty or a mesh.
+
+Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated point marked scene_empty = 1 with point attributes name, parent, orient and scale (help topic "export"). translation, rotation and scale are in geometry (model) space, so later transform nodes move the empty with the mesh; glTF export writes it as a node without a mesh under its parent with the local transform that keeps this geometry-space placement. parent names another empty or a mesh (the prim "name" of the pieces export splits by); missing, ambiguous and cyclic parents are export errors. Other point attributes set on the empty (e.g. a "forward" vector) export as node extras. Ordinary loose points still export as POINTS.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | yes | no | geometry to add the empty to (optional) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `name` | string | `"socket"` |  |  | `node_name`, `socket_name` | node name of the empty (unique when something parents to it) |
+| `parent` | string | `""` |  |  | `parent_name`, `attach_to` | parent: "" = scene root, else the name of another empty or of a mesh (prim "name") |
+| `translation` | vec3 | `[0,0,0]` |  |  | `translate`, `t`, `position` | position in geometry (model) space, metres |
+| `rotation` | vec3 | `[0,0,0]` |  |  | `rotate`, `r` | rotation in geometry space, degrees (x, then y, then z) |
+| `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale |
+
+**Writes:** the input plus one point: scene_empty 1, name, parent, orient, scale
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "body": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.06,
+          0.1,
+          0.3
+        ]
+      }
+    },
+    "named": {
+      "type": "attrib_create",
+      "in": [
+        "body"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "receiver"
+      }
+    },
+    "muzzle": {
+      "type": "scene_null",
+      "in": [
+        "named"
+      ],
+      "params": {
+        "name": "muzzle",
+        "parent": "receiver",
+        "translation": [
+          0,
+          0.02,
+          -0.15
+        ]
+      }
+    },
+    "flash": {
+      "type": "scene_null",
+      "in": [
+        "muzzle"
+      ],
+      "params": {
+        "name": "flash",
+        "parent": "muzzle",
+        "translation": [
+          0,
+          0.02,
+          -0.17
+        ],
+        "rotation": [
+          0,
+          180,
+          0
+        ]
+      }
+    }
+  },
+  "output": "flash"
 }
 ```
 
