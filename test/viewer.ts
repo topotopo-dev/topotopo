@@ -493,7 +493,7 @@ section('viewer setWorkspace');
   const v = await startViewer(one, 0);
   const ac = new AbortController();
   try {
-    const names = async () => (await (await fetch(v.url + 'api/graphs')).json()).map((g: any) => g.name).join();
+    const names = async () => ((await (await fetch(v.url + 'api/graphs')).json()) as any[]).map((g: any) => g.name).join();
     check(await names() === 'first', 'serves the first workspace');
     let ended = false;
     const stream = fetch(v.url + 'api/events', { signal: ac.signal }).then(async (r) => { for await (const _ of r.body as any) { /* read */ } ended = true; }).catch(() => {});

@@ -262,7 +262,7 @@ if (url) {
   await call('build', { graph: { nodes: { c: { type: 'cylinder' } }, output: 'c' } });
   check(fs.existsSync(path.join(projDir, 'graphs', 'main.json')) && !fs.existsSync(path.join(wsDir, 'graphs', 'barrel.json')), 'build after open writes into the project folder');
   const url = (await call('preview', {})).txt.match(/http:\/\/[^\s]+/)?.[0] ?? '';
-  const names = (await (await fetch(url + 'api/graphs')).json()).map((g: any) => g.name);
+  const names = ((await (await fetch(url + 'api/graphs')).json()) as any[]).map((g: any) => g.name);
   check(names.join() === 'main', `the live viewer shows the project (${names})`);
   const upd = await call('library', { action: 'update', description: 'An oil barrel', bake: { frame: 1 } });
   check(!upd.isError && JSON.parse(fs.readFileSync(path.join(projDir, 'project.json'), 'utf8')).description === 'An oil barrel', "library update edits the open project's project.json");
