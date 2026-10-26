@@ -156,11 +156,24 @@ function rayDirs(b: Bake): Float64Array {
   return R;
 }
 
-/** Point normals of a mesh: its point N when present, else area-weighted face normals. */
+/**
+ * Point normals of a mesh: its point N when present, else area-weighted face normals. Points whose N is zero or not
+ * finite take the computed normal: a merge of parts with and without N fills the missing ones with zeros, which would
+ * bake as grey.
+ */
 function pointNormalsOf(g: Geometry): Float64Array {
   const a = g.points.get('N');
-  if (a && a.type === 'float' && a.size === 3) return a.data as Float64Array;
-  return pointNormals(g);
+  if (!a || a.type !== 'float' || a.size !== 3) return pointNormals(g);
+  const N = a.data as Float64Array;
+  let out: Float64Array | null = null, computed: Float64Array | null = null;
+  for (let i = 0; i < N.length; i += 3) {
+    const l = Math.hypot(N[i], N[i + 1], N[i + 2]);
+    if (l > 1e-12 && Number.isFinite(l)) continue;
+    out ??= N.slice();
+    computed ??= pointNormals(g);
+    out[i] = computed[i]; out[i + 1] = computed[i + 1]; out[i + 2] = computed[i + 2];
+  }
+  return out ?? N;
 }
 
 /** andThen() for a callback that may itself return a promise (a cook result); keeps synchronous runs synchronous. */

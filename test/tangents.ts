@@ -219,5 +219,26 @@ await loadMikkTSpace();
   check(n > 0.5 * R * R * 0.4 && sum / n < 0.05 && worst < 0.5, `bake_normal decoded with the exported TANGENT/NORMAL equals bake_world_normal (${n} texels, mean ${(sum / n).toFixed(4)}°, max ${worst.toFixed(3)}°)`);
 }
 
+// ---------------------------------------------------------------- a merged high mesh with partial N bakes no grey texels
+{
+  // merge fills N with zeros on the parts that had none; those must bake with computed normals, not as (0.5, 0.5, 0.5)
+  const R = 64;
+  const nodes: Record<string, NodeSpec> = {
+    low: { type: 'box', params: { size: [0.1, 0.1, 0.1] } },
+    uv: { type: 'uv_unwrap', in: ['low'], params: { resolution: R } },
+    hb: { type: 'poly_bevel', in: ['low'], params: { offset: 0.01, divisions: 4 } },
+    hbn: { type: 'attrib_delete', in: ['hb'], params: { pattern: 'N' } },
+    dot: { type: 'sphere', params: { radius: 0.004, center: [0, 0.05, 0] } },
+    dotn: { type: 'normal', in: ['dot'], params: { class: 'point' } },
+    high: { type: 'merge', in: ['hbn', 'dotn'] },
+    tn: { type: 'bake_normal', in: ['uv', 'high'], params: { resolution: R, padding: 0, name: 'normal' } },
+  };
+  const img = [...referenceableImages(await cook(nodes, 'tn')).values()][0];
+  const c = img.layer('C')!, mask = img.layer('mask')!;
+  let grey = 0, n = 0;
+  for (let px = 0; px < R * R; px++) if (mask[px] >= 1) { n++; if (c[px * 4 + 2] < 0.6) grey++; }
+  check(n > 0 && grey === 0, `bake_normal: a merged high mesh whose N is partly zero bakes no grey texels (${grey} of ${n})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
