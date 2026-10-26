@@ -145,5 +145,13 @@ const BODY: Record<string, NodeSpec> = {
   check(await throwsWith(() => exportGLB(used), /used by a primitive/), 'a marked point used by a primitive is an error, not a silent mesh vertex');
 }
 
+// ---------------------------------------------------------------- the empties' attributes stay off the meshes
+{
+  const g = await cook({ ...BODY, a: { type: 'scene_null', in: ['both'], params: { name: 'muzzle', parent: 'receiver', translation: [0, 0, -0.2], rotation: [0, -90, 0] } } }, 'a');
+  const d = await doc(await exportGLB(g));
+  const sem = d.getRoot().listMeshes().flatMap((m) => m.listPrimitives().flatMap((p) => p.listSemantics()));
+  check(!sem.some((x) => /^_(SCENE_EMPTY|ORIENT|SCALE)$/.test(x)), `mesh primitives carry no _SCENE_EMPTY, _ORIENT or _SCALE (${[...new Set(sem)].join(', ')})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

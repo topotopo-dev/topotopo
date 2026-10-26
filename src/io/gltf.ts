@@ -373,6 +373,16 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     const keep = new Uint8Array(g.numPoints).fill(1);
     for (const e of empties) keep[e.point] = 0;
     g = g.subsetPoints(keep);
+    // the empties' own attributes are no mesh data: merged meshes only hold their default fill
+    g.points.delete(EMPTY_ATTRIB);
+    for (const n of ['orient', 'scale']) {
+      const a = g.points.get(n);
+      if (!a || a.type !== 'float' || typeof a.def === 'string') continue;
+      const d = a.def, sz = a.size, data = a.data as Float64Array;
+      let fill = true;
+      for (let i = 0; i < data.length && fill; i++) fill = data[i] === d[i % sz] || data[i] === 0;
+      if (fill) g.points.delete(n);
+    }
   }
   const doc = new Document();
   doc.getRoot().getAsset().generator = 'topotopo';
