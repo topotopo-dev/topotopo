@@ -449,5 +449,63 @@ section('markers: POST /api/markers writes inputs/markers.json, read back throug
   }
 }
 
+section('two workspaces on one folder (Workspace.watch)');
+{
+  const dir = path.join(tmp, 'shared');
+  const open = async () => {
+    const e = new Engine(createNodeHost({ baseDir: dir }));
+    await e.init();
+    const w = new Workspace(dir, e);
+    w.load();
+    w.watch();
+    return w;
+  };
+  const a = await open(), b = await open();
+  const heard: string[] = [];
+  b.listeners.add((ev) => heard.push(`${ev.graph}@${ev.version}`));
+  try {
+    a.setGraph('main', { nodes: { box: { type: 'box' } }, output: 'box' });
+    check(await until(() => b.graphs.get('main')?.output === 'box', 5000) && heard.length === 1, `a graph saved by one is read by the other, which notifies once (${heard})`);
+    const before = heard.length;
+    await sleep(500);
+    check(heard.length === before, 'reading it back does not echo (equal content is no change)');
+    await b.edit('main', [{ op: 'set', node: 'box', params: { size: [2, 2, 2] } }]);
+    check(await until(() => JSON.stringify(a.graphs.get('main')?.nodes.box.params) === JSON.stringify({ size: [2, 2, 2] }), 5000), 'and the other way round');
+    fs.writeFileSync(path.join(dir, 'assets', 'peg.json'), JSON.stringify({ nodes: { c: { type: 'tube' } }, output: 'c' }));
+    check(await until(() => b.engine.assets.has('peg'), 5000), 'an asset written by another process is registered');
+    fs.rmSync(path.join(dir, 'graphs', 'main.json'));
+    check(await until(() => !b.graphs.has('main'), 5000), 'a removed graph file removes the graph');
+  } finally { a.unwatch(); b.unwatch(); }
+}
+
+section('viewer setWorkspace');
+{
+  const mk = async (name: string, graph: string) => {
+    const dir = path.join(tmp, name);
+    const e = new Engine(createNodeHost({ baseDir: dir }));
+    await e.init();
+    const w = new Workspace(dir, e);
+    w.load();
+    w.setGraph(graph, { nodes: { s: { type: 'sphere' } }, output: 's' });
+    return w;
+  };
+  const one = await mk('swap-one', 'first'), two = await mk('swap-two', 'second');
+  const v = await startViewer(one, 0);
+  const ac = new AbortController();
+  try {
+    const names = async () => (await (await fetch(v.url + 'api/graphs')).json()).map((g: any) => g.name).join();
+    check(await names() === 'first', 'serves the first workspace');
+    let ended = false;
+    const stream = fetch(v.url + 'api/events', { signal: ac.signal }).then(async (r) => { for await (const _ of r.body as any) { /* read */ } ended = true; }).catch(() => {});
+    check(await until(() => v.clients() === 1, 3000), 'clients() counts the open page');
+    v.setWorkspace(two);
+    check(await names() === 'second', 'after setWorkspace the routes serve the new workspace at the same URL');
+    check(await until(() => ended, 3000) && v.clients() === 0, 'open pages are disconnected so they reconnect and reload');
+    await two.edit('second', [{ op: 'set', node: 's', params: { radius: 2 } }]);
+    check(two.listeners.size === 2 && one.listeners.size === 0, 'the viewer (events and outputs) listens to the new workspace only');
+    void stream;
+  } finally { ac.abort(); v.close(); }
+}
+
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);

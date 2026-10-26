@@ -4,6 +4,7 @@
 // connected pieces for picking and box selection, and the orange selection wireframe.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -502,7 +503,8 @@ export class MeshObject {
 }
 
 // --------------------------------------------------------------------------------------------- loading GLBs
-const loader = new GLTFLoader();
+// meshopt for the gallery's baked preview.glb (the live routes send plain GLB)
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 /** Parse a GLB buffer into a three.js scene, or throw. */
 export const parseGLB = (buf) => new Promise((resolve, reject) => loader.parse(buf, '', (g) => resolve(g.scene), reject));
 /** A PNG arrives as flat quads with unlit materials named "image:<name>" (src/render/texview.ts): a picture. */

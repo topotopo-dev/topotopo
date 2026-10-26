@@ -181,6 +181,8 @@ app/main.js        boot, layout, undo stack
 app/keymap.js      the action table and TopoTopo / Maya / Houdini / Blender presets, the overlay
 app/api.js         the server routes (graphs, geo, vars, inputs, markers, events)
 app/camera.js      surface navigation, views, quad layout, framing (no OrbitControls)
+app/embed.js       the gallery's embed page only (docs/design/gallery.md): a baked GLB under three's OrbitControls, the
+                   one exception, since an embed on a board behaves like a model viewer, not an editor
 app/outputs.js     the Outputs tab: cards, isolated previews, Export / Export all, downloads
 app/export-popover.js  an output's export target: format and file inside exports/
 app/image-view.js  image layers, channel display, pan/zoom, checkerboard and UV overlay

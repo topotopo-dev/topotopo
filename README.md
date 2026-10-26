@@ -179,7 +179,7 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 | tool | purpose |
 |---|---|
 | `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, uv, render, export, verify, cloth, recipes |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, uv, render, export, verify, cloth, library, recipes |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inputs` | `list` the files in the workspace `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
@@ -191,6 +191,7 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
+| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `update` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer |
 
 ## Graph format
 
@@ -325,6 +326,22 @@ Landscape heightmap. Generate the sample with `npm run export:demo`; the plugin 
 the two-node PCG graph, coordinates, automation tests and editor verification steps. It is separate from the npm
 package; copy it into your Unreal project's `Plugins/` directory.
 
+## Gallery
+
+Keep projects in libraries on your PC and browse them as a website: `topotopo gallery` serves every library's projects
+at http://127.0.0.1:7340 with a page, a thumbnail and an iframe embed for each, so a board or wiki can link a concept
+to the model. A project is a workspace folder with a `project.json` (title, tags, links) and `attachments/` for
+concept art; previews bake by themselves when its graphs change, and agents reach every library through the MCP
+`library` tool.
+
+```bash
+topotopo library add game D:/game-assets
+topotopo library new game weapons/uzi --title "Uzi" --tags weapon
+topotopo gallery
+```
+
+Format, URLs and board snippets: [docs/design/gallery.md](docs/design/gallery.md).
+
 ## Shelf
 
 [shelf/](shelf) holds ready-made graph assets (TopoTopo's answer to a shelf of HDAs): walls with windows and doors,
@@ -451,7 +468,8 @@ a minute and is not part of `npm test`; run it before a release (see [CONTRIBUTI
 
 `src/core` holds the geometry model and algorithms. `src/graph` holds the node system and cooking engine, and `src/nodes`
 the node library. The renderer is in `src/render`, import/export in `src/io`, and the MCP server, tools and docs in
-`src/mcp`. `src/viewer` has the live preview, and `src/host` the Node host (sandbox, files, fonts). The structure is
+`src/mcp`. `src/viewer` has the live preview, `src/gallery` the gallery website of project libraries, and `src/host` the Node
+host (sandbox, files, fonts). The structure is
 described in [docs/DESIGN.md](docs/DESIGN.md). `dist/` (not in git) is the compiled package: `npm run build` mirrors
 `src/` there one to one, so the shelf, fonts, kernels and worker entry are found relative to either.
 

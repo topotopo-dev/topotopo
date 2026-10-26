@@ -19,6 +19,8 @@
 //   node src/cli.ts mcp [--workspace dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
+//   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/gallery/cli.ts)
+//   node src/cli.ts library add|list|new|bake …           libraries and projects; edit <project> opens the live viewer
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -80,6 +82,9 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} --catalog | --help-node <type> | --version`,
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
+    `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's projects, stable links for a board)`,
+    `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <project>|--stale|--all`,
+    `       ${prog} edit <project folder> [--port 7341]   (the live viewer on a gallery project)`,
   ].join('\n'));
   process.exit(0);
 }
@@ -137,6 +142,11 @@ if (argv[0] === 'view') {
   console.log(`view: ${v.url}  (watching ${file}; files dropped on the page go to ${path.join(path.dirname(file), 'inputs') + path.sep}; Ctrl+C to stop)`);
   let timer: ReturnType<typeof setTimeout> | undefined;
   fs.watch(file, () => { clearTimeout(timer); timer = setTimeout(() => { load().catch((e) => console.error(String(e))); }, 150); });
+} else if (argv[0] === 'gallery' || argv[0] === 'library' || argv[0] === 'edit') {
+  // the gallery website, its libraries and its editor (src/gallery/cli.ts)
+  const g = await import('./gallery/cli.ts');
+  const run = { gallery: g.galleryCommand, library: g.libraryCommand, edit: g.editCommand }[argv[0]];
+  await run(argv.slice(1), prog);
 } else if (argv[0] === 'mcp') {
   // `topotopo mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin

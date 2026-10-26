@@ -17,10 +17,10 @@ import type { Workspace } from '../workspace.ts';
 import { GeoBuilder } from '../core/geometry.ts';
 import type { Geometry } from '../core/geometry.ts';
 import type { GraphSpec } from '../graph/types.ts';
-import { exportGeometry, exportGeometryAsync } from '../io/export.ts';
+import { exportGeometry } from '../io/export.ts';
+import { previewGLB } from '../render/preview.ts';
 import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
-import { withImagePreview } from '../render/texview.ts';
 import { wiringOf } from '../graph/engine.ts';
 import { createOutputs } from './outputs.ts';
 import { renderGeometry } from '../render/raster.ts';
@@ -31,14 +31,14 @@ import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList } f
 
 // index.html and app/ sit next to this module (the build copies them to dist/viewer/)
 const here = path.dirname(fileURLToPath(import.meta.url));
-const appDir = path.join(here, 'app');
+export const appDir = path.join(here, 'app');
 // three.js where Node resolves it: this checkout's node_modules, or the hoisted copy next to an installed package
-const threeDir = (() => {
+export const threeDir = (() => {
   try { return path.resolve(path.dirname(fileURLToPath(import.meta.resolve('three'))), '..'); }
   catch { return path.resolve(here, '..', '..', 'node_modules', 'three'); }
 })();
 
-const MIME: Record<string, string> = { '.js': 'text/javascript', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.glb': 'model/gltf-binary' };
+export const MIME: Record<string, string> = { '.js': 'text/javascript', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.glb': 'model/gltf-binary' };
 /** largest file POST /api/inputs accepts */
 export const MAX_UPLOAD = 512 * 1024 * 1024;
 /** uploads in progress are written next to their target as `.<name>.<n>.part`, then renamed */
@@ -50,7 +50,7 @@ class HttpError extends Error {
 }
 
 /** The shape every geometry route serves: the same GLB options as /api/geo; images alone show as textured quads. */
-const toGLB = (g: Geometry) => exportGeometryAsync(withImagePreview(withHeightfieldPreview(g)), 'glb', { splitByName: false, lineMode: 'lines', custom: false });
+const toGLB = (g: Geometry) => previewGLB(g);
 const issueText = (e: { node: string; message: string }) => `[${e.node}] ${e.message}`;
 
 /**
@@ -161,20 +161,34 @@ export interface ViewerOptions {
   persistGraph?: (graph: string) => void;
 }
 
-export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341), opts: ViewerOptions = {}): Promise<{ url: string; close: () => void }> {
+/** A running viewer: its URL, the open pages (SSE clients), a workspace swap, and close. */
+export interface Viewer {
+  url: string;
+  /** pages open now (event-stream connections) */
+  clients: () => number;
+  /**
+   * Show another workspace (the MCP library tool's open): the routes serve it from now on and every open page
+   * reconnects and reloads, so the URL stays the same.
+   */
+  setWorkspace: (ws: Workspace) => void;
+  close: () => void;
+}
+
+export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341), opts: ViewerOptions = {}): Promise<Viewer> {
   const clients = new Set<http.ServerResponse>();
   const broadcast = (ev: object) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
     for (const c of clients) c.write(msg);
   };
   ws.listeners.add(broadcast);
-  const outputs = createOutputs(ws, () => broadcast({ outputs: true }), { persistGraph: opts.persistGraph });
+  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { persistGraph: opts.persistGraph });
+  let outputs = makeOutputs();
 
   // ---------------------------------------------------------------- inputs/
   let inputsVersion = 0;
   const inputsChanged = () => broadcast({ inputs: ++inputsVersion });
   const listInputs = () => ws.listInputs().filter((f) => !PART_RE.test(f.path));
-  const inputsWhere = opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? 'in the workspace' : `in ${path.dirname(ws.inputDir)}`);
+  const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? 'in the workspace' : `in ${path.dirname(ws.inputDir)}`);
   // Files copied into inputs/ by other means (file manager, an agent) show up too, once the folder exists. The viewer
   // does not make it just to watch it (`topotopo view`'s inputs/ beside the graph file appears with the first drop):
   // uploads and listings start the watch when the folder is there by then.
@@ -411,7 +425,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         return json(200, listInputs());
       }
       // where dropped files go: the absolute folder, and in words for the page ("beside house.json")
-      if (u.pathname === '/api/inputs_dir') return json(200, { dir: ws.inputDir, where: inputsWhere });
+      if (u.pathname === '/api/inputs_dir') return json(200, { dir: ws.inputDir, where: inputsWhere() });
       if (u.pathname === '/api/markers') {
         if (req.method === 'POST') return json(200, saveMarkers(parseMarkers(await readJSON(req))));
         if (req.method !== 'GET' && req.method !== 'HEAD') return json(405, { ok: false, error: 'GET, or POST {"markers": [...]}' });
@@ -484,6 +498,23 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   keepAlive.unref();
   return {
     url: `http://127.0.0.1:${actual}/`,
+    clients: () => clients.size,
+    setWorkspace: (next: Workspace) => {
+      if (next === ws || closed) return;
+      ws.listeners.delete(broadcast);
+      outputs.close();
+      clearTimeout(watchTimer);
+      unwatch();
+      varQueues.clear();
+      inputThumbs.clear();
+      ws = next;
+      ws.listeners.add(broadcast);
+      outputs = makeOutputs();
+      watchInputs();
+      // the pages reconnect (EventSource retries) and reload graphs, layers and guides from the new workspace
+      for (const c of clients) c.end();
+      clients.clear();
+    },
     close: () => {
       closed = true;
       outputs.close();

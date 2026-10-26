@@ -16,9 +16,7 @@ import { Engine } from '../src/graph/engine.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
 import { SHELF_DIR, createNodeHost } from '../src/host/node.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { renderGeometry } from '../src/render/raster.ts';
-import { renderArgs } from '../src/render/options.ts';
-import { encodePNG } from '../src/render/png.ts';
+import { thumbOptions, thumbnailPNG as renderThumb } from '../src/render/preview.ts';
 
 export { SHELF_DIR };
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,19 +111,9 @@ export function checkShelf(files = readShelfFiles()): string[] {
   return out;
 }
 
-/** Render options of a thumbnail: one persp view, 256 px, matcap, no view label, plus the asset's meta.thumbnail_render. */
-export function thumbOptions(g: GraphSpec) {
-  const extra = g.meta?.thumbnail_render ?? {};
-  return { ...renderArgs({ views: 'persp', size: 256, shading: 'matcap', wireframe: false, annotate: false, view_labels: false, ...extra }) };
-}
-
-/** Render a thumbnail PNG (the view tile only, without the footer). */
-export function thumbnailPNG(geo: any, g: GraphSpec): Uint8Array {
-  const r = renderGeometry(geo, thumbOptions(g));
-  const size = r.width; // a single square view tile sits above the footer
-  const rgba = r.rgba.subarray(0, size * size * 4);
-  return encodePNG(rgba, size, size, (d) => zlib.deflateSync(d, { level: 9 }));
-}
+/** A shelf thumbnail: 256 px, deflate level 9 (the options live in src/render/preview.ts, shared with the gallery). */
+export const thumbnailPNG = (geo: any, g: GraphSpec): Uint8Array => renderThumb(geo, g, (d) => zlib.deflateSync(d, { level: 9 }));
+export { thumbOptions };
 
 // realpath on both sides: started through a symlinked path, argv[1] keeps the link while the module URL does not
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {

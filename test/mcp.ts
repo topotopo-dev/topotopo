@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { INPUTS_EXAMPLE } from '../src/mcp/docs.ts';
 
 /** A 16-bit grey PNG made by hand (signature, IHDR, IDAT, IEND), the way a heightmap arrives. */
@@ -27,9 +27,15 @@ function grey16PNG(w: number, h: number, values: number[]): Buffer {
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-'));
+// the library tool reads the person's config: give it one of its own, never the real ~/.topotopo
+const libDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-lib-'));
+const configFile = path.join(libDir, 'config.json');
+fs.writeFileSync(configFile, JSON.stringify({ libraries: [{ name: 'game', path: path.join(libDir, 'lib') }], gallery: { port: 7399 } }));
+fs.mkdirSync(path.join(libDir, 'lib'));
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [path.join(root, 'src/mcp/server.ts'), '--workspace', wsDir],
+  env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile },
   stderr: 'pipe',
 });
 const client = new Client({ name: 'topotopo-test', version: '0.0.1' });
@@ -244,6 +250,30 @@ if (url) {
   const ev = await Promise.race([got, new Promise<string>((r) => setTimeout(() => r(''), 5000))]);
   ac.abort();
   check(ev.includes('"graph":"main"'), `viewer SSE update event: ${ev}`);
+}
+
+// libraries: create opens the project as the workspace; build lands in it; the viewer follows
+{
+  const empty = await call('library', { action: 'list' });
+  check(empty.txt.includes('library "game"') && empty.txt.includes('0 projects'), 'library list: the configured library');
+  const made = await call('library', { action: 'create', library: 'game', path: 'props/barrel', title: 'Barrel', tags: ['props'], links: [{ label: 'board', url: 'http://board.local/1' }] });
+  const projDir = path.join(libDir, 'lib', 'props', 'barrel');
+  check(!made.isError && made.txt.includes('opened') && made.txt.includes('http://127.0.0.1:7399/p/game/barrel'), `library create: ${made.txt.split('\n')[0]}`);
+  await call('build', { graph: { nodes: { c: { type: 'cylinder' } }, output: 'c' } });
+  check(fs.existsSync(path.join(projDir, 'graphs', 'main.json')) && !fs.existsSync(path.join(wsDir, 'graphs', 'barrel.json')), 'build after open writes into the project folder');
+  const url = (await call('preview', {})).txt.match(/http:\/\/[^\s]+/)?.[0] ?? '';
+  const names = (await (await fetch(url + 'api/graphs')).json()).map((g: any) => g.name);
+  check(names.join() === 'main', `the live viewer shows the project (${names})`);
+  const upd = await call('library', { action: 'update', description: 'An oil barrel', bake: { frame: 1 } });
+  check(!upd.isError && JSON.parse(fs.readFileSync(path.join(projDir, 'project.json'), 'utf8')).description === 'An oil barrel', "library update edits the open project's project.json");
+  const bk = await call('library', { action: 'bake' });
+  check(!bk.isError && !!bk.img && fs.existsSync(path.join(projDir, '.gallery', 'preview.glb')), 'library bake renders the previews and shows the thumbnail');
+  const got = await call('library', { action: 'get', library: 'game', id: 'barrel', thumbnail: true });
+  check(got.txt.includes('(open)') && got.txt.includes('main (shown)') && got.txt.includes('board: http://board.local/1') && !!got.img, 'library get: manifest, graphs, links, thumbnail');
+  const back = await call('library', { action: 'open', path: wsDir });
+  check(back.isError && back.txt.includes('no project.json'), 'open refuses a folder that is not a project');
+  const found = await call('library', { action: 'list', query: 'barrel' });
+  check(found.txt.includes('barrel (open)') && found.txt.includes('baked'), 'library list finds it by words, marks the open one and its status');
 }
 
 await client.close();

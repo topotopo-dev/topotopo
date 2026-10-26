@@ -31,7 +31,7 @@ export interface EditOp {
   note?: string;
 }
 
-const NAME_RE = /^[A-Za-z_][\w.-]*$/;
+export const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 
 /** A file under <workspace>/inputs. */
 export interface InputFile {
@@ -358,5 +358,71 @@ export class Workspace {
     const r = await this.engine.cook(g, { target, frame });
     if (!target) this.lastReport.set(name, r);
     return r;
+  }
+
+  private watchers: fs.FSWatcher[] = [];
+  private watchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /**
+   * Follow what other processes write into graphs/ and assets/ (a second Workspace on the same folder: the gallery's
+   * editor next to an MCP server, or a person editing the JSON). A graph file whose content differs from the stored
+   * graph replaces it and notifies the listeners; a removed file removes the graph. Our own writes read back equal, so
+   * they change nothing. An asset whose content changed is registered again and every graph is notified (any may use
+   * it); a removed asset stays registered until the next load(). Two writers to one graph: the last write wins.
+   */
+  watch() {
+    if (this.watchers.length) return;
+    const on = (dir: string, apply: (name: string, file: string) => void) => {
+      try {
+        const w = fs.watch(dir, (_ev, f) => {
+          const rel = f ? String(f) : '';
+          // Windows names a removed folder by its absolute path: stop rather than follow a folder that is gone
+          if (path.isAbsolute(rel)) { w.close(); return; }
+          if (!rel.endsWith('.json') || rel.includes(path.sep) || rel.startsWith('.')) return;
+          const name = rel.slice(0, -'.json'.length), key = dir + '|' + name;
+          clearTimeout(this.watchTimers.get(key));
+          // persist() is not atomic: let the writer finish, and read again if the JSON is still half written
+          let tries = 0;
+          const run = () => {
+            this.watchTimers.delete(key);
+            try { apply(name, path.join(dir, rel)); }
+            catch (e) { if (e instanceof SyntaxError && ++tries < 5) this.watchTimers.set(key, setTimeout(run, 100).unref()); }
+          };
+          this.watchTimers.set(key, setTimeout(run, 150).unref());
+        });
+        w.on('error', () => w.close());
+        w.unref();
+        this.watchers.push(w);
+      } catch { /* no folder: nothing to follow */ }
+    };
+    on(this.graphDir, (name, file) => {
+      if (!NAME_RE.test(name)) return;
+      if (!fs.existsSync(file)) {
+        if (this.graphs.delete(name)) { this.lastReport.delete(name); this.bump(name); }
+        return;
+      }
+      const spec = migrateGraph(JSON.parse(fs.readFileSync(file, 'utf8')));
+      const cur = this.graphs.get(name);
+      if (cur && JSON.stringify(cur) === JSON.stringify(spec)) return;
+      this.graphs.set(name, spec);
+      this.lastReport.delete(name);
+      this.bump(name);
+    });
+    on(this.assetDir, (name, file) => {
+      if (!fs.existsSync(file)) return;
+      const spec = migrateGraph(JSON.parse(fs.readFileSync(file, 'utf8')));
+      const before = this.engine.assets.get(name)?.hash;
+      this.engine.registerAsset(name, spec);
+      if (this.engine.assets.get(name)?.hash === before) return;
+      for (const g of this.graphs.keys()) { this.lastReport.delete(g); this.bump(g); }
+    });
+  }
+
+  /** Stop following the folders (watch()). */
+  unwatch() {
+    for (const w of this.watchers) w.close();
+    for (const t of this.watchTimers.values()) clearTimeout(t);
+    this.watchers = [];
+    this.watchTimers.clear();
   }
 }

@@ -26,7 +26,8 @@ TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-fr
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
-PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".`;
+PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
+LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -68,6 +69,28 @@ export function graphLines(g: GraphSpec): string {
 }
 
 export const TOPICS: Record<string, string> = {
+  library: `LIBRARIES AND THE GALLERY
+A library is a folder the person listed (\`topotopo library add <name> <folder>\`, kept in ~/.topotopo/config.json). A
+project is any folder in it holding project.json, and is a workspace of its own:
+  weapons/uzi/project.json      {id, title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
+  weapons/uzi/graphs/ assets/ inputs/ exports/    as in any workspace
+  weapons/uzi/attachments/      concept art, references, source files (shown on the project's gallery page)
+  weapons/uzi/.gallery/         thumb.png, preview.glb, bake.json: derived, never edit
+The parent folders ("weapons") are the project's collection. The gallery (\`topotopo gallery\`, http://127.0.0.1:7340)
+shows every library as a grid; each project has a page (/p/<library>/<id>), a thumbnail (…/thumb.png) and an
+iframe embed (/embed/<library>/<id>) that the person's board pastes. It bakes the previews by itself after graphs,
+assets or inputs change, from the graph named in "graph" (or "bake": another graph, a node, a frame).
+
+WORKING IN A PROJECT
+- library {action:"list", query?, tag?} → find it; library {action:"get", library, id, thumbnail:true} → what it holds.
+- library {action:"open", library, id} → every tool (build, edit, render, export, inputs, assets, preview) now works
+  in that folder. Build the project's model into graph "main" (or the manifest's "graph").
+- library {action:"create", library, path:"props/barrel", title, tags, links} → a new project, opened.
+- library {action:"update", tags, links, description, bake:{frame: 48}} → edit project.json (bake.frame for
+  simulations that settle after frame 1; bake.node to show one part).
+- library {action:"bake"} → render the previews now and see the thumbnail.
+Put reference images the person gives you in attachments/, guide files in inputs/. Links in "links" point back to the
+board or concept pages, so the gallery page and the board link both ways.`,
   graph: `GRAPH FORMAT
 {
   "nodes": {

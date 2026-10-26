@@ -997,3 +997,8 @@ node and the exporters union tables (`mergeMaterialTables`); other internal merg
 - The MCP server and the GUI share one workspace. The live viewer (`preview` tool) already streams updates over SSE, so
   you can watch an agent build while you inspect intermediate nodes.
 - The LLM side stays in Claude Code (or any MCP client) talking to the same workspace; the viewer gets no chat panel.
+- Gallery (docs/design/gallery.md): a person's projects as libraries on their own PC, shown by `topotopo gallery` as a
+  website with stable URLs a board links and embeds (project page, thumbnail, iframe embed of a baked meshopt GLB).
+  A project is a workspace folder with `project.json` and `attachments/`; previews bake in child processes when its
+  graphs, assets or inputs change; the MCP `library` tool lists, creates and opens projects (the server's workspace
+  and viewer switch to it), and `Workspace.watch()` lets the gallery's editor and an MCP server share one project.

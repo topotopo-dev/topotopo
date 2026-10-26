@@ -14,8 +14,11 @@ import { Engine } from '../graph/engine.ts';
 import { createNodeHost } from '../host/node.ts';
 import { Workspace } from '../workspace.ts';
 import { makeTools } from './tools.ts';
+import type { ToolDef } from './tools.ts';
+import { libraryTool } from './library.ts';
 import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
+import type { Viewer } from '../viewer/server.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
@@ -23,23 +26,37 @@ const wsDir = path.resolve(argOf('--workspace') ?? process.env.TOPOTOPO_WORKSPAC
 
 const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + '\n');
 
-const engine = new Engine(createNodeHost({ baseDir: wsDir }));
-if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
-if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) engine.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
-await engine.init();
-const ws = new Workspace(wsDir, engine);
-const loaded = ws.load();
-log(`workspace ${wsDir}: ${loaded.graphs} graphs, ${loaded.assets} assets, ${loaded.shelf} shelf assets`);
-for (const e of loaded.assetErrors) log('asset error:', e);
-
-let viewer: { url: string; close: () => void } | null = null;
+// The workspace can change while the server runs (library {action:"open"} opens a gallery project): every tool and
+// the live viewer then work on the new folder. Each workspace has its own engine (asset registry, base directory,
+// cache); the worker pool is shared by the process. Workspaces follow what other processes write into them
+// (Workspace.watch: the gallery's editor, a person editing JSON).
+let engine: Engine, ws: Workspace, tools: ToolDef[];
+let viewer: Viewer | null = null;
 const ensureViewer = async () => {
   if (!viewer) { viewer = await startViewer(ws); log('preview at', viewer.url); }
   return viewer.url;
 };
+const library = libraryTool({ workspace: () => ws, open: (dir) => openWorkspace(dir) });
+async function openWorkspace(dir: string) {
+  const e = new Engine(createNodeHost({ baseDir: dir }));
+  if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) e.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
+  if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) e.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
+  await e.init();
+  const w = new Workspace(dir, e);
+  const loaded = w.load();
+  w.watch();
+  log(`workspace ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets, ${loaded.shelf} shelf assets`);
+  for (const x of loaded.assetErrors) log('asset error:', x);
+  const prev = ws as Workspace | undefined;
+  engine = e;
+  ws = w;
+  tools = [...makeTools(w, { onPreview: ensureViewer }), library];
+  viewer?.setWorkspace(w);
+  prev?.unwatch();
+  return loaded;
+}
+await openWorkspace(wsDir);
 if (argv.includes('--viewer') || process.env.TOPOTOPO_VIEWER === '1') await ensureViewer();
-
-const tools = makeTools(ws, { onPreview: ensureViewer });
 
 // package.json sits two levels above both src/mcp/server.ts and dist/mcp/server.js
 const pkg = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
