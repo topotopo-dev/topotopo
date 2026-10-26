@@ -26,3 +26,5 @@ export { decodePNG, inflateZlib, pngChannel } from './io/png-decode.ts';
 export { Image, imagesOf, findImage, imageToBytes } from './core/image.ts';
 export { imagePNG, texturesExport } from './io/textures.ts';
 export { summarize, inspect } from './inspect.ts';
+export { uvReport } from './core/uvreport.ts';
+export type { UVReport, UVReportOptions } from './core/uvreport.ts';

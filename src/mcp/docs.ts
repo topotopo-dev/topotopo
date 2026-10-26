@@ -728,6 +728,11 @@ SEE IT: render views "uv" (or "quad_uv" = persp + uv): the 0..1 square with a 0.
 by chart/island colour, island borders yellow, overlapping uv in RED (footer/notes give the overlap %).
 render checker:true shades 3D views with an 8×8 uv checker: squares should look square and equal-sized
 (stretch = rectangles, density = cell size, mirrored charts flip the red/green gradient).
+MEASURE IT: inspect {detail:"uv", resolution:1024, json:true}: exact overlaps (triangle pairs, their prims and areas,
+folds inside one chart included; shared edges are not overlaps), collapsed / non-finite / out-of-tile triangles, UDIM
+tiles, charts, mirrored triangles, utilization (exact for a clean atlas in 0..1, else a labelled raster ESTIMATE) and
+per-piece (prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
+CLI: --inspect uv --uv-resolution 1024 [--json].
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
   render: `RENDER (pick the overlay that answers your question; everything is off by default)

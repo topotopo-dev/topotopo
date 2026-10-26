@@ -6,7 +6,7 @@
 //                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
-//                   [--inspect summary|attributes|topology|all]
+//                   [--inspect summary|attributes|topology|all|uv [--uv-resolution 1024] [--json]]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   Packed instances to .csv/.points.json: one row per instance + <name>.meshes.json + <name>_meshes/<Mesh>.glb.
 //   Heightfields: --export terrain.png (16-bit heightmap + terrain.json sidecar for Unreal), .r16/.raw, or
@@ -43,6 +43,7 @@ import { prepareTarget, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { publishedOutputs } from './io/targets.ts';
 import { inspect } from './inspect.ts';
+import { uvReport } from './core/uvreport.ts';
 import { catalogText, nodeDoc } from './mcp/docs.ts';
 
 const argv = process.argv.slice(2);
@@ -62,7 +63,7 @@ if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]`,
-    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all]',
+    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all|topology|uv] [--uv-resolution 1024] [--json] (uv: overlaps, utilization, texel density; --json: the report as JSON)',
     '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
@@ -309,7 +310,8 @@ async function cook() {
     report(r);
     if (!r.ok || !r.geo) process.exit(1);
     console.log(`cooked ${file} → ${r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''} in ${r.ms.toFixed(0)} ms`);
-    console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary' }));
+    if (opt('--inspect') === 'uv' && argv.includes('--json')) console.log(JSON.stringify(uvReport(r.geo, { resolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }), null, 2));
+    else console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary', uvResolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }));
     await writeOutputs(r);
     if (argv.includes('--export-all')) await exportAll();
   }

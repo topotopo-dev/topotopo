@@ -311,13 +311,16 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'inspect',
-      description: 'Inspect any node\'s output as text: summary; detail "attributes" (min/max/mean, unique strings), "topology" (watertight/manifold, pieces, volume, area, genus), "elements" (list values for a range), or "all".',
+      description: 'Inspect any node\'s output as text: summary; detail "attributes" (min/max/mean, unique strings), "topology" (watertight/manifold, pieces, volume, area, genus, render/export triangle health), "elements" (list values for a range), "all", or "uv" (exact uv overlaps with triangle pairs and areas, collapsed / non-finite / out-of-tile triangles, charts, utilization, per-piece texel density with resolution; json:true appends the machine-readable report).',
       inputSchema: {
         type: 'object',
         properties: {
           graph: { type: 'string', description: 'graph name (default "main")' },
           node: { type: 'string', description: 'node to inspect (default: graph output)' },
-          detail: { type: 'string', enum: ['summary', 'attributes', 'topology', 'elements', 'all'] },
+          detail: { type: 'string', enum: ['summary', 'attributes', 'topology', 'elements', 'all', 'uv'] },
+          uv_attrib: { type: 'string', description: 'detail "uv": the uv attribute (default "uv")' },
+          resolution: { description: 'detail "uv": texture size in texels for texel density, n or [width, height]', anyOf: [{ type: 'number' }, { type: 'array', items: { type: 'number' } }] },
+          json: { type: 'boolean', description: 'detail "uv": append the report as JSON' },
           class: { type: 'string', enum: ['point', 'prim', 'vertex', 'detail', 'edge'], description: 'element class; "edge" lists unique edges (point pair, length, polygon count, dihedral angle, edge groups)' },
           attribs: { type: 'array', items: { type: 'string' } },
           start: { type: 'number' }, count: { type: 'number' },
@@ -330,7 +333,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const node = r.target;
         const res = r.results.get(node);
         const head = `${name}/${node}${atFrame(r)}${res ? ` (${res.cached ? 'cached' : res.ms.toFixed(0) + ' ms'})` : ''}`;
-        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group }));
+        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, json: a.json }));
       },
     },
     {

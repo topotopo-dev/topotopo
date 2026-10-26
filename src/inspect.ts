@@ -11,6 +11,7 @@ import { packedSummaryLine } from './core/packed.ts';
 import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
 import { imageSummary } from './core/image.ts';
 import { sdfGridSummary } from './core/sdfgrid.ts';
+import { uvReport, uvReportText } from './core/uvreport.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
@@ -153,12 +154,17 @@ function attribStats(a: Attribute, count: number, sel?: Uint8Array | null): stri
 }
 
 export interface InspectOptions {
-  detail?: 'summary' | 'attributes' | 'topology' | 'elements' | 'all';
+  /** 'uv': the structured uv report (core/uvreport.ts); not part of 'all' */
+  detail?: 'summary' | 'attributes' | 'topology' | 'elements' | 'all' | 'uv';
   cls?: 'point' | 'prim' | 'vertex' | 'detail' | 'edge';
   attribs?: string[];
   start?: number;
   count?: number;
   group?: string;
+  /** detail 'uv': uv attribute (default "uv"), texture size for texel density, and the report as JSON after the text */
+  uvAttrib?: string;
+  uvResolution?: number | [number, number];
+  json?: boolean;
 }
 
 export function inspect(g: Geometry, o: InspectOptions = {}): string {
@@ -192,6 +198,11 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     for (let p = 0; p < g.numPrims; p++) area += primArea(g, p);
     out.push(`  surface area ${fmtNum(area)}${r.closed ? `; volume ${fmtNum(signedVolume(g))}${signedVolume(g) < 0 ? ' (NEGATIVE: faces point inward — use reverse)' : ''}` : ''}`);
     if (r.closed && r.pieces === 1) out.push(`  euler ${r.euler} → genus ${(2 - r.euler) / 2}`);
+  }
+  if (detail === 'uv') {
+    const r = uvReport(g, { attribute: o.uvAttrib, resolution: o.uvResolution });
+    out.push(...uvReportText(r));
+    if (o.json) out.push('uv report (JSON):', JSON.stringify(r));
   }
   if ((detail === 'elements' || detail === 'all') && o.cls === 'edge') out.push(...edgeElements(g, o));
   else if (detail === 'elements' || detail === 'all') {
