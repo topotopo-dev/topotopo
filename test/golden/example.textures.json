@@ -30,7 +30,7 @@
         "prim.chart": "e399f705098b82df",
         "prim.material": "1e6b2155cabe4d0f",
         "prim.name": "fb9ddf19c50d541b",
-        "vertex.uv": "bf4c3f6587f2df7f"
+        "vertex.uv": "cac2c45d65adfeef"
       },
       "topology": "244b84081b91bcfa"
     },
@@ -93,7 +93,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "2c6cc8c499d64c2a"
+          "C": "40dc1eae49a17974"
         },
         "name": "crate_color"
       },
@@ -108,7 +108,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "9b4c9f69a01c3e43"
+          "C": "62f0eb458a0a2ac7"
         },
         "name": "crate_orm"
       }

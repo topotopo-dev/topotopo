@@ -64,6 +64,21 @@ export interface XatlasResult {
   utilization: number[];
 }
 
+/** Bounding-box diagonal small inputs are scaled up to before xatlas sees them (world units). */
+const XATLAS_SIZE = 100;
+
+/** The factor that brings a position list's bounding-box diagonal up to XATLAS_SIZE (1 when it is already larger). */
+function xatlasScale(pos: number[]): number {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pos.length; i++) {
+    const a = i % 3;
+    if (pos[i] < lo[a]) lo[a] = pos[i];
+    if (pos[i] > hi[a]) hi[a] = pos[i];
+  }
+  const d = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  return d > 0 && d < XATLAS_SIZE ? XATLAS_SIZE / d : 1;
+}
+
 /**
  * Run xatlas on the closed polygons of g (prims outside primMask are skipped). Input vertices are the
  * geometry points, or per-vertex keys (`vertexKey[v]`, e.g. split along seams); `faceGroup[prim]`
@@ -97,6 +112,17 @@ export function runXatlas(
     width: 0, height: 0, atlasCount: 0, chartCount: 0, utilization: [],
   };
   if (!nt) return result;
+  // xatlas compares positions and areas against absolute epsilons (about 1e-4 and 1.2e-7), so on a model a few
+  // centimetres across it welds bevel corners and drops small faces as degenerate. Scale small inputs up to a
+  // bounding-box diagonal of XATLAS_SIZE; the world-unit options scale with them, so the result is unchanged.
+  const k = xatlasScale(pos), repack = pack;
+  if (k !== 1) {
+    for (let i = 0; i < pos.length; i++) pos[i] *= k;
+    chart = { ...chart };
+    if (chart.maxChartArea) chart.maxChartArea *= k * k;
+    if (chart.maxBoundaryLength) chart.maxBoundaryLength *= k;
+    if (pack?.texelsPerUnit) pack = { ...pack, texelsPerUnit: pack.texelsPerUnit / k };
+  }
   const atlas = X.createAtlas();
   try {
     const decl: any = { positions: Float32Array.from(pos), indices: idx };
@@ -118,7 +144,7 @@ export function runXatlas(
       const t = (i / 3) | 0;
       if (ov.chartIndex >= 0 && result.triChart[t] < 0) { result.triChart[t] = ov.chartIndex; result.triAtlas[t] = ov.atlasIndex; }
     }
-    if (opts.unmirror && pack) unmirrorAndRepack(X, result, out, verts.length, pack);
+    if (opts.unmirror && repack) unmirrorAndRepack(X, result, out, verts.length, repack);
   } finally {
     atlas.destroy();
   }

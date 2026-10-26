@@ -9,6 +9,7 @@ import { buildCharts, lscm, polygonSides, readUV, uvSeamPairs } from '../src/cor
 import { exportGeometryAsync } from '../src/io/export.ts';
 import { importGeometryAsync } from '../src/io/import.ts';
 import { renderGeometry } from '../src/render/raster.ts';
+import { uvReport } from '../src/core/uvreport.ts';
 import { encodePNG } from '../src/render/png.ts';
 import zlib from 'node:zlib';
 import type { GraphSpec } from '../src/graph/types.ts';
@@ -261,6 +262,22 @@ const sameTopology = (a: Geometry, b: Geometry) =>
   check(coloured > 2000, `uv view draws filled charts (${coloured} coloured pixels)`);
   const none = renderGeometry(new Geometry({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], prims: [[0, 1, 2]] }), { views: ['uv'], size: 128 });
   check(none.notes.some((n) => /no uv/.test(n)), `uv view without uv: note "${none.notes.find((n) => /no uv/.test(n))}"`);
+}
+
+// a real-size small part (6 cm, 0.6 mm bevels) unwraps like the same part scaled up (xatlas's absolute epsilons)
+{
+  const part = (k: number): GraphSpec['nodes'] => ({
+    c: { type: 'curve', params: { points: [[0, 0, 0], [0, 0.02, 0], [0, 0.025, -0.03], [0, 0.01, -0.06], [0, -0.01, -0.05], [0, -0.015, -0.02]], closed: true } },
+    f: { type: 'fillet_curve', in: ['c'], params: { radius: 0.004, segments: 4 } },
+    e: { type: 'extrude', in: ['f'], params: { height: 0.012, center: true, plane: 'yz' } },
+    b: { type: 'poly_bevel', in: ['e'], params: { offset: 0.0006, divisions: 2, group: 'angle>40' } },
+    s: { type: 'transform', in: ['b'], params: { scale: [k, k, k] } },
+    t: { type: 'triangulate', in: ['s'] },
+    out: { type: 'uv_unwrap', in: ['t'], params: { padding: 4, resolution: 1024 } },
+  });
+  const small = uvReport((await cook(part(1))).geo, { resolution: 1024 }), big = uvReport((await cook(part(100))).geo, { resolution: 1024 });
+  check(small.overlap.pairs === 0 && small.collapsed === 0, `uv_unwrap at real size (6 cm): ${small.overlap.pairs} overlapping pairs, ${small.collapsed} collapsed triangles`);
+  check(small.charts === big.charts, `uv_unwrap: the same charts at 1x and 100x (${small.charts} / ${big.charts})`);
 }
 
 console.log(fail ? `\n${fail} uv check(s) failed` : '\nuv: all checks passed');
