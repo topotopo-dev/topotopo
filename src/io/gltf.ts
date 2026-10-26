@@ -601,6 +601,9 @@ function writeEmpties(doc: Document, scene: ReturnType<Document['createScene']>,
     if (!e.parent) { parentOf.set(e, null); continue; }
     const es = byName.get(e.parent) ?? [], ms = meshNodes.get(e.parent) ?? [];
     const where = `glTF: scene empty "${e.name}": parent "${e.parent}"`;
+    // without splitByName every mesh is merged into one node ("mesh"), so a named mesh parent no longer exists: the
+    // empty goes on the scene root, where its geometry-space transform places it the same (previews, viewers)
+    if (!es.length && !ms.length && o.splitByName === false) { parentOf.set(e, null); continue; }
     if (!es.length && !ms.length) throw new Error(`${where} is neither an empty nor a mesh (meshes: ${[...meshNodes.keys()].slice(0, 12).join(', ') || 'none'}; empties: ${[...byName.keys()].slice(0, 12).join(', ')})`);
     if (es.length + ms.length > 1) throw new Error(`${where} is ambiguous: ${es.length} empt${es.length === 1 ? 'y' : 'ies'} and ${ms.length} mesh${ms.length === 1 ? '' : 'es'} have that name`);
     if (ms.length && ms[0].getExtension('EXT_mesh_gpu_instancing')) throw new Error(`${where} is a GPU-instanced mesh; parenting to an individual instance is not supported (parent to the scene or an empty instead)`);

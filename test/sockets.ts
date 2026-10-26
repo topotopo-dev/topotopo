@@ -12,6 +12,7 @@ import type { ExportOptions } from '../src/io/common.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 import { sceneEmpties } from '../src/core/scene.ts';
+import { previewGLB } from '../src/render/preview.ts';
 import { m4fromQuat, m4trs, qFromMat } from '../src/core/math.ts';
 import type { Vec3 } from '../src/core/math.ts';
 
@@ -151,6 +152,10 @@ const BODY: Record<string, NodeSpec> = {
   const d = await doc(await exportGLB(g));
   const sem = d.getRoot().listMeshes().flatMap((m) => m.listPrimitives().flatMap((p) => p.listSemantics()));
   check(!sem.some((x) => /^_(SCENE_EMPTY|ORIENT|SCALE)$/.test(x)), `mesh primitives carry no _SCENE_EMPTY, _ORIENT or _SCALE (${[...new Set(sem)].join(', ')})`);
+  // the gallery's preview GLB merges every mesh into one node: a mesh-parented empty goes on the root, in place
+  const pv = await doc(await previewGLB(g));
+  const m = nodeNamed(pv, 'muzzle')[0];
+  check(m && !m.getParentNode() && close(m.getTranslation(), [0, 0, -0.2], 1e-6), 'preview GLB: an empty parented to a mesh lands on the scene root at its position');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
