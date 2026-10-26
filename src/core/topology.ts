@@ -338,6 +338,13 @@ export function boundaryLoops(g: Geometry): number[][] {
   return loops;
 }
 
+/**
+ * A quad diagonal is numerically healthy when each of its two triangles covers more than this
+ * fraction of the polygon's area. Collinear corners leave one triangle at ~1e-16 of the area
+ * (pure rounding); any real split, however thin, is far above it.
+ */
+const QUAD_SPLIT_REL_AREA = 1e-9;
+
 export interface Triangulation {
   tris: Uint32Array; // vertex indices, 3 per triangle
   triPrim: Uint32Array; // source prim per triangle
@@ -362,9 +369,16 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
     if (n === 3) { tris.push(s, s + 1, s + 2); tp.push(p); continue; }
     primNewell(g, p, nrm);
     if (n === 4) {
-      // pick the diagonal that keeps both triangles facing the polygon normal
-      const ok02 = triN(s, s + 1, s + 2) > 0 && triN(s, s + 2, s + 3) > 0;
-      if (ok02 || !(triN(s + 1, s + 2, s + 3) > 0 && triN(s + 1, s + 3, s) > 0)) {
+      // Pick the diagonal that keeps both triangles facing the polygon normal. A diagonal whose
+      // triangles both hold a healthy share of the polygon's area wins first, so a quad with
+      // (nearly) collinear corners never yields a zero-area sliver when the other diagonal is fine.
+      // triN is 2·area_tri·|nrm| for planar quads and |nrm|² = 4·area_poly², so the ratio is scale-free.
+      const t0 = triN(s, s + 1, s + 2), t1 = triN(s, s + 2, s + 3);
+      const t2 = triN(s + 1, s + 2, s + 3), t3 = triN(s + 1, s + 3, s);
+      const tol = QUAD_SPLIT_REL_AREA * (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]);
+      const ok02 = t0 > 0 && t1 > 0, ok13 = t2 > 0 && t3 > 0;
+      const healthy02 = t0 > tol && t1 > tol, healthy13 = t2 > tol && t3 > tol;
+      if (healthy02 || (!healthy13 && (ok02 || !ok13))) {
         tris.push(s, s + 1, s + 2, s, s + 2, s + 3);
       } else tris.push(s + 1, s + 2, s + 3, s + 1, s + 3, s);
       tp.push(p, p);
@@ -380,10 +394,19 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
       for (let k = 1; k < n - 1; k++) { tris.push(s, s + k, s + k + 1); tp.push(p); }
       continue;
     }
+    // earcut's triangles share one orientation in the projection plane: flip them all or none so they
+    // follow the polygon's winding. (A per-triangle 3D test would flip single triangles of a strongly
+    // non-planar polygon and fold the surface.)
+    let poly2 = 0, tri2 = 0;
+    for (let k = 0, j = n - 1; k < n; j = k++) poly2 += flat[j * 2] * flat[k * 2 + 1] - flat[k * 2] * flat[j * 2 + 1];
     for (let k = 0; k < idx.length; k += 3) {
-      let a = s + idx[k], b = s + idx[k + 1], c = s + idx[k + 2];
-      if (triN(a, b, c) < 0) [b, c] = [c, b];
-      tris.push(a, b, c);
+      const a = idx[k] * 2, b = idx[k + 1] * 2, c = idx[k + 2] * 2;
+      tri2 += (flat[b] - flat[a]) * (flat[c + 1] - flat[a + 1]) - (flat[c] - flat[a]) * (flat[b + 1] - flat[a + 1]);
+    }
+    const flip = poly2 * tri2 < 0;
+    for (let k = 0; k < idx.length; k += 3) {
+      const a = s + idx[k], b = s + idx[k + 1], c = s + idx[k + 2];
+      if (flip) tris.push(a, c, b); else tris.push(a, b, c);
       tp.push(p);
     }
   }
@@ -490,5 +513,52 @@ export function topologyReport(g: Geometry) {
     polys, lines, tris, quads, ngons, degenerate, edges: Ecount, boundaryEdges: boundary,
     nonManifoldEdges: nonManifold, unusedPoints: unused, pieces: conn.count,
     closed, euler: V - Ecount + F,
+  };
+}
+
+/** Triangle shape quality q = 4√3·area / Σ edge² (1 for equilateral, 0 for collinear corners). */
+export const TRI_DEGENERATE_QUALITY = 1e-9;
+export const TRI_NEAR_DEGENERATE_QUALITY = 1e-4;
+
+export interface TriangleReport {
+  triangles: number;
+  /** Smallest triangle area (Infinity when there are no triangles). */
+  minArea: number;
+  /** Smallest shape quality q (see TRI_DEGENERATE_QUALITY). */
+  minQuality: number;
+  /** Triangles with zero area or q below TRI_DEGENERATE_QUALITY (collinear corners within rounding). */
+  degenerate: number;
+  /** Slivers with q below TRI_NEAR_DEGENERATE_QUALITY that are not degenerate. */
+  nearDegenerate: number;
+  /** Source polygons of the degenerate / near-degenerate triangles, ascending, at most `limit` each. */
+  degeneratePrims: number[];
+  nearDegeneratePrims: number[];
+}
+
+/**
+ * Health of the triangles that export, rendering and baking actually use (the same triangulate()
+ * split), which polygon-level checks can miss: a non-degenerate quad can still split into a sliver.
+ */
+export function triangleReport(g: Geometry, tri: Triangulation = triangulate(g), limit = 32): TriangleReport {
+  const P = g.P, vp = g.vertexPoint, { tris, triPrim } = tri;
+  let minArea = Infinity, minQuality = Infinity, degenerate = 0, nearDegenerate = 0;
+  const dp = new Set<number>(), np = new Set<number>();
+  for (let t = 0; t < tris.length; t += 3) {
+    const a = vp[tris[t]] * 3, b = vp[tris[t + 1]] * 3, c = vp[tris[t + 2]] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+    const wx = P[c] - P[a], wy = P[c + 1] - P[a + 1], wz = P[c + 2] - P[a + 2];
+    const vx = P[c] - P[b], vy = P[c + 1] - P[b + 1], vz = P[c + 2] - P[b + 2];
+    const area = 0.5 * Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx);
+    const e2 = ux * ux + uy * uy + uz * uz + wx * wx + wy * wy + wz * wz + vx * vx + vy * vy + vz * vz;
+    const q = e2 > 0 ? (4 * Math.sqrt(3) * area) / e2 : 0;
+    if (area < minArea) minArea = area;
+    if (q < minQuality) minQuality = q;
+    if (area === 0 || q < TRI_DEGENERATE_QUALITY) { degenerate++; dp.add(triPrim[t / 3]); }
+    else if (q < TRI_NEAR_DEGENERATE_QUALITY) { nearDegenerate++; np.add(triPrim[t / 3]); }
+  }
+  const ids = (s: Set<number>) => [...s].sort((x, y) => x - y).slice(0, limit);
+  return {
+    triangles: tris.length / 3, minArea, minQuality: tris.length ? minQuality : Infinity, degenerate, nearDegenerate,
+    degeneratePrims: ids(dp), nearDegeneratePrims: ids(np),
   };
 }

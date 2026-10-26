@@ -2,7 +2,7 @@
 // topology health, and element listings.
 import { Geometry } from './core/geometry.ts';
 import type { AttribClass, Attribute } from './core/geometry.ts';
-import { primArea, signedVolume, topologyReport } from './core/topology.ts';
+import { primArea, signedVolume, topologyReport, triangleReport } from './core/topology.ts';
 import { evalGroup } from './core/groups.ts';
 import { edgeList } from './core/edges.ts';
 import { halfEdges } from './core/halfedge.ts';
@@ -181,6 +181,11 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     out.push('topology:');
     out.push(`  ${r.closed ? 'CLOSED manifold surface (watertight)' : `open/non-manifold: ${r.boundaryEdges} boundary edges, ${r.nonManifoldEdges} non-manifold edges`}`);
     out.push(`  ${r.pieces} connected piece(s); ${r.edges} edges; ${r.degenerate} degenerate prims; ${r.unusedPoints} unused points`);
+    const t = triangleReport(g);
+    if (t.triangles) {
+      const ids = (a: number[]) => (a.length ? ` (prims ${a.slice(0, 12).join(' ')}${a.length > 12 ? ' …' : ''})` : '');
+      out.push(`  ${t.triangles} render/export triangles; min area ${fmtNum(t.minArea)}, min quality ${fmtNum(t.minQuality)}; ${t.degenerate} degenerate${ids(t.degeneratePrims)}, ${t.nearDegenerate} near-degenerate${ids(t.nearDegeneratePrims)}`);
+    }
     const flipped = halfEdges(g).flippedEdges.size;
     if (flipped) out.push(`  ${flipped} edge(s) with inconsistent winding between neighbouring polygons (use reverse on part of the mesh or clean fix_winding)`);
     let area = 0;

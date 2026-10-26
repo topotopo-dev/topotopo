@@ -10,7 +10,8 @@ import { halfEdges } from '../src/core/halfedge.ts';
 import type { HalfEdgeMesh } from '../src/core/halfedge.ts';
 import { evalGroup, evalEdgeGroup } from '../src/core/groups.ts';
 import { convertSelection } from '../src/core/groupconvert.ts';
-import { boundaryLoops, primNormals } from '../src/core/topology.ts';
+import { boundaryLoops, primArea, primNormals, topologyReport, triangleReport, triangulate } from '../src/core/topology.ts';
+import { readFileSync } from 'node:fs';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
 import { summarize, inspect } from '../src/inspect.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
@@ -466,6 +467,75 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   let topOk = true;
   for (let v = 0; v < partial.numVertices; v++) if (fn[vp[v] * 3 + 1] > 0.9 && N[v * 3 + 1] < 1 - 1e-12) topOk = false;
   check(topOk, 'hard rim: the top face is flat-shaded, sides stay smooth across vertical edges');
+}
+
+// ---------------------------------------------------------------- quad triangulation and triangle health
+{
+  const quad = (pts: number[][], scale = 1) => {
+    const b = new GeoBuilder();
+    for (const [x, y, z] of pts) b.addPoint(x * scale, y * scale, z * scale);
+    b.addPrim(pts.map((_, i) => i));
+    return b.build();
+  };
+  /** Smallest triangle area along the polygon normal (negative = flipped), total triangle area and polygon area. */
+  const triHealth = (g: Geometry) => {
+    const { tris, triPrim } = triangulate(g), fn = primNormals(g), P = g.P, vp = g.vertexPoint;
+    let minSigned = Infinity, sum = 0;
+    for (let t = 0; t < tris.length; t += 3) {
+      const a = vp[tris[t]] * 3, b = vp[tris[t + 1]] * 3, c = vp[tris[t + 2]] * 3, f = triPrim[t / 3] * 3;
+      const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+      const wx = P[c] - P[a], wy = P[c + 1] - P[a + 1], wz = P[c + 2] - P[a + 2];
+      const s = 0.5 * ((uy * wz - uz * wy) * fn[f] + (uz * wx - ux * wz) * fn[f + 1] + (ux * wy - uy * wx) * fn[f + 2]);
+      minSigned = Math.min(minSigned, s); sum += s;
+    }
+    let area = 0;
+    for (let p = 0; p < g.numPrims; p++) area += primArea(g, p);
+    return { minSigned, sum, area };
+  };
+  const firstDiag = (g: Geometry) => { const t = triangulate(g).tris; return t[0] === 0 && t[2] === 2 ? '02' : t[0] === 1 && t[2] === 3 ? '13' : `${t[0]}${t[2]}`; };
+
+  check(firstDiag(quad([[0, 0, 0], [1, 0, 0], [1.2, 1, 0], [0, 1, 0]])) === '02', 'healthy quad keeps the 0-2 diagonal (existing triangulation preserved)');
+  // corner 1 lies exactly on the segment 0-2: the 0-2 diagonal would make a zero-area triangle
+  const collinear = [[0, 0, 0], [1, 0.5, 0], [2, 1, 0], [0, 1, 0]];
+  for (const scale of [1, 1e-4, 1e4]) {
+    const g = quad(collinear, scale), h = triHealth(g), r = triangleReport(g);
+    check(firstDiag(g) === '13' && h.minSigned > 1e-3 * h.area && Math.abs(h.sum - h.area) < 1e-12 * h.area,
+      `collinear-corner quad at scale ${scale}: 1-3 diagonal, both triangles keep area and winding, coverage exact`);
+    check(r.degenerate === 0 && r.nearDegenerate === 0, `collinear-corner quad at scale ${scale}: triangleReport sees no slivers`);
+  }
+  const hc = triHealth(quad([[0, 0, 0], [2, 0, 0], [0.5, 0.5, 0], [0, 2, 0]]));
+  check(hc.minSigned > 0 && Math.abs(hc.sum - hc.area) < 1e-12 * hc.area, 'concave dart quad: both triangles face the polygon normal, coverage exact');
+  const hr = triHealth(quad([[0, 1, 0], [2, 1, 0], [1, 0.5, 0], [0, 0, 0]]));
+  check(hr.minSigned > 0 && Math.abs(hr.sum - hr.area) < 1e-12 * hr.area, 'clockwise collinear-corner quad: triangles follow the winding, coverage exact');
+  // a genuinely collapsed quad still triangulates and is reported, not hidden
+  const rf = triangleReport(quad([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]]));
+  check(rf.triangles === 2 && rf.degenerate === 2 && rf.degeneratePrims.join() === '0' && rf.minArea === 0, 'collapsed quad keeps both triangles and reports them degenerate (prim 0)');
+
+  // Uzi guard regression: boolean then bevel left two quads whose first diagonal was a zero-area sliver
+  const spec = JSON.parse(readFileSync(new URL('./data/guard-bevel.graph.json', import.meta.url), 'utf8'));
+  const g = (await engine.cook(spec, { target: 'post_cut_bevel' })).geo!;
+  const r = triangleReport(g), t = topologyReport(g);
+  check(r.triangles === 346 && r.degenerate === 0 && r.nearDegenerate === 0 && r.minArea > 1e-9,
+    `guard bevel: 346 triangles, none degenerate or near-degenerate (min area ${r.minArea.toExponential(2)}, min quality ${r.minQuality.toExponential(2)})`);
+  check(t.closed && t.degenerate === 0, 'guard bevel: still a closed manifold with no degenerate polygons');
+  // projected (signed, along each polygon's Newell normal) triangle areas sum to the polygon's area, also for the
+  // non-planar bevel corners, and the triangle mesh is closed with consistent winding: every directed edge once,
+  // its reverse once
+  const { tris, triPrim } = triangulate(g), fn = primNormals(g), per = new Float64Array(g.numPrims), P = g.P, vp = g.vertexPoint;
+  const directed = new Map<string, number>();
+  for (let k = 0; k < tris.length; k += 3) {
+    const a = vp[tris[k]] * 3, b = vp[tris[k + 1]] * 3, c = vp[tris[k + 2]] * 3, f = triPrim[k / 3] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], wx = P[c] - P[a], wy = P[c + 1] - P[a + 1], wz = P[c + 2] - P[a + 2];
+    const s = 0.5 * ((uy * wz - uz * wy) * fn[f] + (uz * wx - ux * wz) * fn[f + 1] + (ux * wy - uy * wx) * fn[f + 2]);
+    for (const [x, y] of [[a, b], [b, c], [c, a]]) directed.set(`${x / 3}>${y / 3}`, (directed.get(`${x / 3}>${y / 3}`) ?? 0) + 1);
+    per[triPrim[k / 3]] += s;
+  }
+  let cover = 0;
+  for (let p = 0; p < g.numPrims; p++) cover = Math.max(cover, Math.abs(per[p] - primArea(g, p)) / primArea(g, p));
+  let windingOk = true;
+  for (const [k, cnt] of directed) { const [x, y] = k.split('>'); if (cnt !== 1 || directed.get(`${y}>${x}`) !== 1) windingOk = false; }
+  check(cover < 1e-9 && windingOk, `guard bevel: every polygon's triangles cover its projected area (worst relative error ${cover.toExponential(2)}); triangle mesh closed with consistent winding`);
+  check(/346 render\/export triangles; .* 0 degenerate, 0 near-degenerate/.test(inspect(g, { detail: 'topology' })), 'inspect topology reports render/export triangle health');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
