@@ -8,4 +8,5 @@ LLM-native procedural geometry engine (Houdini-SOP style node graphs), headless 
 - Cooked geometry is immutable: `clone()` before writing.
 - Conventions: Y-up, metres, degrees; Houdini attribute names.
 - Verify: `npm run typecheck`, `npm test` (smoke, golden fingerprints, property + fuzz, docs staleness, io, MCP e2e), `npm run showcase` then look at `examples/renders/*.png`. New or changed geometry output: `npm run test:update`, review `git diff test/golden`, `npm run docs`, commit both. Node fixtures live in `test/fixtures.ts`.
+- Public repository: keep it professional, minimal and about the product. Work logs, agent briefs, plans, run notes, acceptance logs, machine-specific paths and other internal material never go into this repository (files, docs or commit messages); they are kept outside it.
 - Design and roadmap: `docs/DESIGN.md`.

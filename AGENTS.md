@@ -5,6 +5,8 @@ Read, in this order: `CLAUDE.md` (hard rules and verify steps), `CONTRIBUTING.md
 Rules that apply to every session:
 - Work only on the branch and in the worktree you were given. Never commit to `main`, never push, never rebase.
 - Commit with explicit `git add <paths>`; never add files you did not create or change for the task.
+- This is a public repository: commit only product material (code, tests, public docs). Work logs, briefs, plans,
+  run notes and machine-specific paths stay out of files and commit messages; report them to whoever gave you the task.
 - Node >= 22.18 runs the TypeScript directly: only erasable TS syntax, `import type`, `.ts` import extensions, no build step.
   `src/core`, `src/graph`, `src/nodes` stay host-agnostic (no Node APIs).
 - New node types: one `defineNode()`; params with type, default and desc; an `example` graph that cooks (`test/examples.ts` checks every node); a fixture in `test/fixtures.ts` and a golden via `npm run test:update`.
