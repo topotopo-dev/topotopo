@@ -116,7 +116,7 @@ const d = 0.1;
   const bev = members(g, 'bevel');
   check(watertight(g), 'clamp: huge offset stays watertight');
   check(outward(g, bev, [0, 0, 0]), 'clamp: strips and corners keep positive area and outward normals');
-  check(warnings.some((w) => w.includes('clamped')), 'clamp: warns that the offset was clamped');
+  check(warnings.some((w) => /clamped|reduced/.test(w)), 'clamp: warns that the offset was reduced');
   const bb = g.bbox();
   check(bb.min.every((x) => x >= -0.5 - 1e-12) && bb.max.every((x) => x <= 0.5 + 1e-12) && signedVolume(g) > 0.16, `clamp: stays inside the box, volume ${signedVolume(g).toFixed(4)} (octahedron limit 1/6)`);
   const { geo: r } = await bevel(BOX, { offset: 10, divisions: 3 });
@@ -320,6 +320,26 @@ const d = 0.1;
     }
     check(!bad, `every edge subset around every point of ${name} (${runs} bevels): ${closed0 ? 'watertight' : 'manifold'}, no degenerate prims${bad ? ' — ' + bad : ''}`);
   }
+}
+
+// ---- clamping is local: one short edge must not shrink every bevel of the mesh
+{
+  // a rounded_rect whose radius is half its width: neighbouring arcs meet, and the shared point must appear once
+  const rr = await cookR({ s: { type: 'shape2d', params: { shape: 'rounded_rect', size: [0.08, 0.3], corner_radius: 0.1, corner_segments: 6 } } }, 's');
+  const P = rr.geo.P, np = rr.geo.numPoints;
+  let dup = 0;
+  for (let i = 0; i < np; i++) { const j = (i + 1) % np; if (Math.hypot(P[i * 3] - P[j * 3], P[i * 3 + 1] - P[j * 3 + 1], P[i * 3 + 2] - P[j * 3 + 2]) < 1e-9) dup++; }
+  check(dup === 0, `shape2d rounded_rect with a radius of half the width has no repeated points (${np} points)`);
+  const slab = await bevel({ s: { type: 'shape2d', params: { shape: 'rounded_rect', size: [0.08, 0.3], corner_radius: 0.1 } }, e: { type: 'extrude', in: ['s'], params: { height: 0.04, center: true } } }, { offset: 0.003, divisions: 1, group: 'angle>40' });
+  check(watertight(slab.geo) && !slab.warnings.some((w) => /clamped|reduced|sharp/.test(w)), `that outline extruded and bevelled: watertight, the full offset everywhere (${slab.warnings.join('; ') || 'no warnings'})`);
+  // a profile with one 1.4 mm edge: only the bevels around it shrink
+  const notch = await bevel({
+    c: { type: 'curve', params: { points: [[0, 0, 0], [0.3, 0, 0], [0.3, 0.2, 0], [0.151, 0.2, 0], [0.15, 0.201, 0], [0, 0.2, 0]], closed: true } },
+    e: { type: 'extrude', in: ['c'], params: { height: 0.2 } },
+  }, { offset: 0.01, divisions: 1, group: 'angle>40' });
+  const touched = notch.warnings.reduce((n, w) => n + Number(/(?:at |^)(\d+) edge/.exec(w)?.[1] ?? 0), 0);
+  check(!notch.warnings.some((w) => /clamped/.test(w)) && touched > 0 && touched <= 8 && topologyReport(notch.geo).degenerate === 0,
+    `a short edge reduces or leaves sharp only the bevels next to it (${notch.warnings.join('; ') || 'no warnings'})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

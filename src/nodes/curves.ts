@@ -261,6 +261,12 @@ defineNode({
           const a = ((a0 + (90 * k) / s) * Math.PI) / 180;
           pts2.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
         }
+        // a radius of half the width or depth makes neighbouring arcs meet: keep their shared end point once
+        const eps = 1e-9 * Math.max(hw, hd);
+        for (let i = pts2.length - 1; i >= 0 && pts2.length > 3; i--) {
+          const q = pts2[(i + 1) % pts2.length];
+          if (Math.abs(pts2[i][0] - q[0]) <= eps && Math.abs(pts2[i][1] - q[1]) <= eps) pts2.splice(i, 1);
+        }
         break;
       }
       case 'ngon': for (let i = 0; i < p.sides; i++) { const a = (2 * Math.PI * i) / p.sides; pts2.push([p.radius * Math.cos(a), p.radius * Math.sin(a)]); } break;

@@ -476,92 +476,142 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
 
   const C = new Ctx(g, opts.divisions ?? 0, opts.shape ?? 0);
   const n = C.n;
-  const recs = new Map<number, VRec>();
-  // ---- pass A: symbolic corner chains and offset vectors at scale 1
-  for (const [v, fan] of fans) {
-    if (!fan) continue;
-    const k = fan.hs.length, m = fan.edges.length;
-    const bev = new Uint8Array(m), d = new Float64Array(m), elen = new Float64Array(m);
-    const dir: V3[] = [];
-    let any = false;
-    const pv = C.pt(v);
-    for (let j = 0; j < m; j++) {
-      bev[j] = bevE[fan.edges[j]];
-      if (bev[j]) any = true;
-      d[j] = bev[j] ? offE[fan.edges[j]] : 0;
-      const w = sub(C.pt(fan.ends[j]), pv);
-      elen[j] = len(w);
-      dir.push(unit(w, [1, 0, 0]));
+  // Pass A and the crossing constraints at the current offsets: each constraint is [largest scale, its two points].
+  const analyse = () => {
+    const recs = new Map<number, VRec>();
+    const cons: [number, number, number][] = [];
+    // ---- pass A: symbolic corner chains and offset vectors at scale 1
+    for (const [v, fan] of fans) {
+      if (!fan) continue;
+      const k = fan.hs.length, m = fan.edges.length;
+      const bev = new Uint8Array(m), d = new Float64Array(m), elen = new Float64Array(m);
+      const dir: V3[] = [];
+      let any = false;
+      const pv = C.pt(v);
+      for (let j = 0; j < m; j++) {
+        bev[j] = bevE[fan.edges[j]];
+        if (bev[j]) any = true;
+        d[j] = bev[j] ? offE[fan.edges[j]] : 0;
+        const w = sub(C.pt(fan.ends[j]), pv);
+        elen[j] = len(w);
+        dir.push(unit(w, [1, 0, 0]));
+      }
+      if (!any) continue;
+      const rec: VRec = {
+        fan, k, bev, d, dir, elen, slideT: new Float64Array(m).fill(NaN), elems: [],
+        slidePt: new Int32Array(m).fill(-1), chains: [], chainSrc: [],
+      };
+      const sum = new Float64Array(m), cnt = new Int32Array(m);
+      const uu: number[] = [];
+      for (let i = 0; i < k; i++) {
+        const N = C.faceN(he.heFace[fan.hs[i]]);
+        const jo = i, ji = inIdx(rec, i);
+        const uo = dir[jo], ui = dir[ji];
+        const upo = unit(sub(uo, scale(N, dot(uo, N))), uo), upi = unit(sub(ui, scale(N, dot(ui, N))), ui);
+        const mo = cross3(N, upo), mi = cross3(upi, N);
+        if (bev[jo] && bev[ji]) {
+          const sig = dot(N, cross3(upo, upi));
+          let x: V3;
+          if (Math.abs(sig) > 1e-4) x = scale(add(scale(upi, d[jo]), scale(upo, d[ji])), 1 / sig);
+          else x = scale(unit(add(mi, mo), mo), (d[jo] + d[ji]) / 2);
+          rec.elems[i] = [{ k: 2, x }];
+        } else if (bev[jo]) {
+          const s = dot(ui, mo);
+          sum[ji] += s > 0 ? d[jo] / Math.max(s, 0.2) : d[jo]; cnt[ji]++;
+          rec.elems[i] = [{ k: 1, j: ji }];
+        } else if (bev[ji]) {
+          const s = dot(uo, mi);
+          sum[jo] += s > 0 ? d[ji] / Math.max(s, 0.2) : d[ji]; cnt[jo]++;
+          rec.elems[i] = [{ k: 1, j: jo }];
+        } else uu.push(i);
+      }
+      for (let j = 0; j < m; j++) if (cnt[j]) rec.slideT[j] = sum[j] / cnt[j];
+      for (const i of uu) {
+        const jo = i, ji = inIdx(rec, i);
+        const a: Elem = Number.isNaN(rec.slideT[ji]) ? { k: 0 } : { k: 1, j: ji };
+        const c: Elem = Number.isNaN(rec.slideT[jo]) ? { k: 0 } : { k: 1, j: jo };
+        rec.elems[i] = a.k === 0 && c.k === 0 ? [a] : [a, c];
+      }
+      recs.set(v, rec);
     }
-    if (!any) continue;
-    const rec: VRec = {
-      fan, k, bev, d, dir, elen, slideT: new Float64Array(m).fill(NaN), elems: [],
-      slidePt: new Int32Array(m).fill(-1), chains: [], chainSrc: [],
+    // ---- clamp: largest scale at which nothing crosses
+    const vecOf = (rec: VRec, el: Elem): V3 => (el.k === 0 ? [0, 0, 0] : el.k === 1 ? scale(rec.dir[el.j], rec.slideT[el.j]) : el.x);
+    let lambda = Infinity;
+    let pair: [number, number] = [-1, -1];
+    const limit = (length: number, coef: number) => {
+      if (coef <= 1e-12) return;
+      const l = length / coef;
+      if (l < lambda) lambda = l;
+      if (l < 1) cons.push([l, pair[0], pair[1]]);
     };
-    const sum = new Float64Array(m), cnt = new Int32Array(m);
-    const uu: number[] = [];
-    for (let i = 0; i < k; i++) {
-      const N = C.faceN(he.heFace[fan.hs[i]]);
-      const jo = i, ji = inIdx(rec, i);
-      const uo = dir[jo], ui = dir[ji];
-      const upo = unit(sub(uo, scale(N, dot(uo, N))), uo), upi = unit(sub(ui, scale(N, dot(ui, N))), ui);
-      const mo = cross3(N, upo), mi = cross3(upi, N);
-      if (bev[jo] && bev[ji]) {
-        const sig = dot(N, cross3(upo, upi));
-        let x: V3;
-        if (Math.abs(sig) > 1e-4) x = scale(add(scale(upi, d[jo]), scale(upo, d[ji])), 1 / sig);
-        else x = scale(unit(add(mi, mo), mo), (d[jo] + d[ji]) / 2);
-        rec.elems[i] = [{ k: 2, x }];
-      } else if (bev[jo]) {
-        const s = dot(ui, mo);
-        sum[ji] += s > 0 ? d[jo] / Math.max(s, 0.2) : d[jo]; cnt[ji]++;
-        rec.elems[i] = [{ k: 1, j: ji }];
-      } else if (bev[ji]) {
-        const s = dot(uo, mi);
-        sum[jo] += s > 0 ? d[ji] / Math.max(s, 0.2) : d[ji]; cnt[jo]++;
-        rec.elems[i] = [{ k: 1, j: jo }];
-      } else uu.push(i);
+    for (const [v, rec] of recs) {
+      const { fan } = rec;
+      for (let j = 0; j < fan.edges.length; j++) {
+        if (rec.bev[j] || Number.isNaN(rec.slideT[j])) continue;
+        const w = fan.ends[j], rw = recs.get(w);
+        let tw = 0;
+        if (rw) { const jw = rw.fan.edges.indexOf(fan.edges[j]); if (jw >= 0 && !Number.isNaN(rw.slideT[jw])) tw = rw.slideT[jw]; }
+        pair = [v, w];
+        limit(rec.elen[j], rec.slideT[j] + tw);
+      }
     }
-    for (let j = 0; j < m; j++) if (cnt[j]) rec.slideT[j] = sum[j] / cnt[j];
-    for (const i of uu) {
-      const jo = i, ji = inIdx(rec, i);
-      const a: Elem = Number.isNaN(rec.slideT[ji]) ? { k: 0 } : { k: 1, j: ji };
-      const c: Elem = Number.isNaN(rec.slideT[jo]) ? { k: 0 } : { k: 1, j: jo };
-      rec.elems[i] = a.k === 0 && c.k === 0 ? [a] : [a, c];
+    for (let e = 0; e < ne; e++) {
+      if (!bevE[e]) continue;
+      const h = he.edgeHalf[e], t = he.heTwin[h];
+      const a = he.heOrigin[h], c = he.dest(h);
+      const ra = recs.get(a)!, rc = recs.get(c)!;
+      const ja = ra.fan.hs.indexOf(h), jc = rc.fan.hs.indexOf(t);
+      const u = unit(sub(C.pt(c), C.pt(a)));
+      const L = len(sub(C.pt(c), C.pt(a)));
+      // side F_L: a's chain in face(h) (last element), c's chain in face(h) = face before jc (first element)
+      pair = [a, c];
+      const La = ra.elems[ja][ra.elems[ja].length - 1], Lc = rc.elems[faceBefore(rc, jc)][0];
+      limit(L, dot(vecOf(ra, La), u) - dot(vecOf(rc, Lc), u));
+      const Ra = ra.elems[faceBefore(ra, ja)][0], Rc = rc.elems[jc][rc.elems[jc].length - 1];
+      limit(L, dot(vecOf(ra, Ra), u) - dot(vecOf(rc, Rc), u));
     }
-    recs.set(v, rec);
+    return { recs, cons, lambda };
+  };
+  // ---- clamp, locally: where bevels would cross, shrink only the offsets of the edges at the points involved (a
+  // few rounds), so one short edge does not flatten every bevel of the mesh; an edge that would keep under a tenth of
+  // what the best-kept edges keep (a zero-length or tiny edge next to it) stays sharp. Whatever still crosses is
+  // clamped by one factor.
+  const clamp = opts.clamp ?? true;
+  const off0 = Float64Array.from(offE);
+  let { recs, cons, lambda } = analyse();
+  let nDropped = 0;
+  for (let round = 0; clamp && lambda < 1 && round < 8; round++) {
+    const sV = new Map<number, number>();
+    const lower = (v: number, l: number) => { if (v >= 0) sV.set(v, Math.min(sV.get(v) ?? 1, l)); };
+    for (const [l, p, q] of cons) { lower(p, l * 0.999); lower(q, l * 0.999); }
+    let best = 0;
+    for (let e = 0; e < ne; e++) {
+      if (!bevE[e]) continue;
+      const f = Math.min(sV.get(he.edgeA[e]) ?? 1, sV.get(he.edgeB[e]) ?? 1);
+      if (f < 1) offE[e] *= f;
+      best = Math.max(best, offE[e] / off0[e]);
+    }
+    // an edge keeping under a tenth of what the best-kept edges keep would only be a sliver: leave it sharp (a huge
+    // offset that every edge must give up evenly is not dropped)
+    for (let e = 0; e < ne; e++)
+      if (bevE[e] && offE[e] < off0[e] * 0.1 * best) { bevE[e] = 0; offE[e] = 0; nDropped++; }
+    ({ recs, cons, lambda } = analyse());
   }
-  // ---- clamp: largest scale at which nothing crosses
-  const vecOf = (rec: VRec, el: Elem): V3 => (el.k === 0 ? [0, 0, 0] : el.k === 1 ? scale(rec.dir[el.j], rec.slideT[el.j]) : el.x);
-  let lambda = Infinity;
-  const limit = (length: number, coef: number) => { if (coef > 1e-12) lambda = Math.min(lambda, length / coef); };
-  for (const [v, rec] of recs) {
-    const { fan } = rec;
-    for (let j = 0; j < fan.edges.length; j++) {
-      if (rec.bev[j] || Number.isNaN(rec.slideT[j])) continue;
-      const w = fan.ends[j], rw = recs.get(w);
-      let tw = 0;
-      if (rw) { const jw = rw.fan.edges.indexOf(fan.edges[j]); if (jw >= 0 && !Number.isNaN(rw.slideT[jw])) tw = rw.slideT[jw]; }
-      limit(rec.elen[j], rec.slideT[j] + tw);
-    }
-    void v;
+  let reduced = 0, minLocal = 1;
+  for (let e = 0; e < ne; e++)
+    if (bevE[e] && offE[e] < off0[e] * 0.9999) { reduced++; minLocal = Math.min(minLocal, offE[e] / off0[e]); }
+  if (reduced) warnings.push(`offset reduced at ${reduced} edge(s) (to ${(minLocal * 100).toFixed(1)}% at least) so neighbouring bevels do not overlap; the other edges keep the full offset`);
+  if (nDropped) warnings.push(`${nDropped} edge(s) left sharp: a neighbouring edge is too short to fit the bevel (zero-length edges from duplicate points? fuse first)`);
+  if (nDropped) {
+    count = 0;
+    for (let e = 0; e < ne; e++) count += bevE[e];
   }
-  for (let e = 0; e < ne; e++) {
-    if (!bevE[e]) continue;
-    const h = he.edgeHalf[e], t = he.heTwin[h];
-    const a = he.heOrigin[h], c = he.dest(h);
-    const ra = recs.get(a)!, rc = recs.get(c)!;
-    const ja = ra.fan.hs.indexOf(h), jc = rc.fan.hs.indexOf(t);
-    const u = unit(sub(C.pt(c), C.pt(a)));
-    const L = len(sub(C.pt(c), C.pt(a)));
-    // side F_L: a's chain in face(h) (last element), c's chain in face(h) = face before jc (first element)
-    const La = ra.elems[ja][ra.elems[ja].length - 1], Lc = rc.elems[faceBefore(rc, jc)][0];
-    limit(L, dot(vecOf(ra, La), u) - dot(vecOf(rc, Lc), u));
-    const Ra = ra.elems[faceBefore(ra, ja)][0], Rc = rc.elems[jc][rc.elems[jc].length - 1];
-    limit(L, dot(vecOf(ra, Ra), u) - dot(vecOf(rc, Rc), u));
+  if (!count) {
+    warnings.push('no edges to bevel: geometry unchanged');
+    return { geo: g, warnings, count: 0, scale: 0 };
   }
   let sc = 1;
-  if ((opts.clamp ?? true) && lambda < 1) {
+  if (clamp && lambda < 1) {
     sc = lambda * 0.999;
     warnings.push(`offset clamped to ${(sc * 100).toFixed(1)}% so neighbouring bevels do not overlap`);
   }

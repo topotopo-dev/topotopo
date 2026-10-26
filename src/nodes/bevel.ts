@@ -13,8 +13,9 @@ defineNode({
     'for a chamfer (triangle at a box corner), rings of quads for round bevels (a sphere octant at a box corner). A ' +
     'bevelled edge ending at an unbevelled point slides its offset along the neighbouring edges and ends flush; two ' +
     'bevelled edges meeting at a point with one other edge (a cylinder rim) are mitred. Boundary and non-manifold edges ' +
-    'are skipped with a warning (chamfering open-mesh boundary edges is out of scope). clamp scales all offsets down just ' +
-    'enough that no face edge collapses past another (huge offsets stay clean). Point mode truncates the selected points: ' +
+    'are skipped with a warning (chamfering open-mesh boundary edges is out of scope). clamp shrinks the offsets only ' +
+    'around edges that would cross (huge offsets stay clean; one short edge does not flatten every bevel), and leaves an ' +
+    'edge sharp when a zero-length neighbour leaves no room. Point mode truncates the selected points: ' +
     'every edge at the point is cut at "offset", the corner becomes a polygon, or a dome of "divisions" rings. Faces keep ' +
     'their attributes (uv is interpolated inside each face), strips take prim attributes from the larger neighbouring face, ' +
     'corner patches from the first face around the point; N is recomputed if present. Select edges with patterns: ' +
@@ -31,7 +32,7 @@ defineNode({
     mode: { type: 'enum', options: ['edges', 'points'], default: 'edges', desc: 'bevel edges, or truncate points', aliases: ['bevel_type', 'class'] },
     offset: { type: 'float', default: 0.1, min: 0, desc: 'distance from the edge across each adjacent face (points mode: along each edge)', aliases: ['distance', 'width', 'radius', 'size', 'amount'] },
     offset_mode: { type: 'enum', options: ['distance', 'fraction'], default: 'distance', desc: 'distance = offset in scene units; fraction = offset x the shortest edge at the edge\'s points (stays proportional on small faces)', aliases: ['distance_mode', 'offsetmode'] },
-    clamp: { type: 'bool', default: true, desc: 'scale all offsets down by one factor, just enough that no bevel crosses its neighbours (Houdini Clamp Offset); warns when it does', aliases: ['clamp_offset', 'clamp_overlap'] },
+    clamp: { type: 'bool', default: true, desc: 'shrink the offsets where bevels would cross their neighbours, only at the edges involved (Houdini Clamp Offset, applied locally); warns when it does', aliases: ['clamp_offset', 'clamp_overlap'] },
     divisions: { type: 'int', default: 0, min: 0, max: 64, desc: '0 = flat chamfer (one strip of quads per edge); n = round profile with n+1 strips', aliases: ['segments', 'divs', 'subdivisions'] },
     shape: { type: 'float', default: 0, min: -1, max: 1, desc: 'profile convexity for round bevels: 0 = circular arc, 1 = bulges out to a nearly square corner, -0.5 = straight, -1 = concave cove', aliases: ['profile_shape', 'convexity', 'profile'] },
   },
