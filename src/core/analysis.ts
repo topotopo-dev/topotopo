@@ -13,6 +13,7 @@ import type { Vec3 } from './math.ts';
 import { buildEdges, connectivity, pointNeighbors, triangulate } from './topology.ts';
 import { halfEdges } from './halfedge.ts';
 import { EDGE_BAND, KDTree, TriBVH, invDir } from './spatial.ts';
+import { trianglesContact } from './tritri.ts';
 import type { TriBVHArrays } from './spatial.ts';
 import { hash32, hashNumber } from './random.ts';
 
@@ -970,8 +971,11 @@ export interface SelfIntersectionResult {
  * Pairs of non-adjacent triangles (no shared point) that cross each other: an edge of one passes through the
  * interior of the other. Coplanar overlaps and touching configurations are not reported. The BVH limits the
  * candidates; the search stops after maxTests candidate pairs.
+ * strict: every pair that meets beyond what it shares (core/tritri.ts): crossings, touching contacts, coplanar
+ * overlaps, and triangles with a shared corner or edge that fold through or onto each other. Used by solidify.
  */
-export function selfIntersections(g: Geometry, maxTests = 2_000_000): SelfIntersectionResult {
+export function selfIntersections(g: Geometry, maxTests = 2_000_000, opts: { strict?: boolean } = {}): SelfIntersectionResult {
+  const strict = !!opts.strict;
   const prims = new Uint8Array(g.numPrims);
   const bvh = new TriBVH(g);
   const nt = bvh.numTris, T = bvh.T, vp = g.vertexPoint, tv = bvh.triVtx;
@@ -997,14 +1001,15 @@ export function selfIntersections(g: Geometry, maxTests = 2_000_000): SelfInters
         const j = order[k];
         if (j <= i) continue;
         const b0 = vp[tv[j * 3]], b1 = vp[tv[j * 3 + 1]], b2 = vp[tv[j * 3 + 2]];
-        if (b0 === a0 || b0 === a1 || b0 === a2 || b1 === a0 || b1 === a1 || b1 === a2 || b2 === a0 || b2 === a1 || b2 === a2) continue;
+        const shared = (b0 === a0 || b0 === a1 || b0 === a2 ? 1 : 0) + (b1 === a0 || b1 === a1 || b1 === a2 ? 1 : 0) + (b2 === a0 || b2 === a1 || b2 === a2 ? 1 : 0);
+        if (shared && !strict) continue;
         const q = j * 9;
         if (Math.min(T[q], T[q + 3], T[q + 6]) > mxx || Math.max(T[q], T[q + 3], T[q + 6]) < mnx ||
             Math.min(T[q + 1], T[q + 4], T[q + 7]) > mxy || Math.max(T[q + 1], T[q + 4], T[q + 7]) < mny ||
             Math.min(T[q + 2], T[q + 5], T[q + 8]) > mxz || Math.max(T[q + 2], T[q + 5], T[q + 8]) < mnz) continue;
         if (tested >= maxTests) { capped = true; break outer; }
         tested++;
-        if (trianglesCross(T, o, q, eps)) {
+        if (strict ? trianglesContact(T, o, q, Math.min(shared, 2), pad) || shared === 3 : trianglesCross(T, o, q, eps)) {
           pairs++;
           prims[bvh.triPrim[i]] = 1; prims[bvh.triPrim[j]] = 1;
         }

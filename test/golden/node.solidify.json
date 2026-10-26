@@ -1,0 +1,40 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.0051, 1.0051, 1.0051],
+      "min": [-1.0051, -1.0051, -1.0051]
+    },
+    "counts": {
+      "points": 324,
+      "prims": 640,
+      "vertices": 1920,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["inner", "outer", "rim"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "dc986dfdf245938f",
+      "attributes": {
+        "group.prim.inner": "1daf262fd8c64de5",
+        "group.prim.outer": "a5e42eaf76e37b65",
+        "group.prim.rim": "828726efec4d79a5"
+      },
+      "topology": "98a01b5a26a70e38"
+    }
+  },
+  "name": "node.solidify",
+  "ok": true,
+  "source": "fixture for node type \"solidify\" (test/fixtures.ts)",
+  "warnings": []
+}

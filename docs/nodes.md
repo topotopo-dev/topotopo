@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-225 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+226 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -15,7 +15,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [measure](#measure-nodes): [assert](#assert) · [curvature](#curvature) · [distance](#distance) · [occlusion](#occlusion)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
-- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [reverse](#reverse) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
+- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [reverse](#reverse) · [solidify](#solidify) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
@@ -3547,6 +3547,7 @@ Every check is off by default; enable the ones that express what the graph must 
 | `min_edge_length` | float | `0` | 0.. |  |  | no edge shorter than this (0 = off) |
 | `no_degenerate` | bool | `false` |  |  |  | no zero-area polygons (area <= tolerance²) and no two points within tolerance of each other |
 | `no_self_intersections` | bool | `false` |  |  | `no_intersections` | no two non-adjacent triangles cross each other (BVH search, capped at max_tests) |
+| `strict_intersections` | bool | `false` |  |  | `strict` | no_self_intersections also fails on touching contacts, coplanar overlaps and triangles folding through a shared corner or onto a shared edge |
 | `max_tests` | int | `2000000` | 1000..1000000000 |  |  | self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped) *(advanced)* |
 | `attrib` | string | `""` |  |  | `attribute` | attribute that must exist ("" = off) |
 | `attrib_class` | enum | `"auto"` |  | `auto`, `point`, `vertex`, `prim`, `detail` |  | where attrib must live (auto = any class: vertex, point, prim, detail) |
@@ -5306,6 +5307,71 @@ Flip polygon winding (normals).
   "params": {
     "group": "@P.y<0"
   }
+}
+```
+
+### solidify
+
+category: `topology` · aliases: `shell`, `thicken`, `solidify_surface`, `wall_thickness`
+
+Give a consistently wound polygon surface a constant wall thickness (inside, centred or outside), with rim faces; invalid results are errors, never repaired.
+
+Blender: Solidify (complex mode); Houdini: PolyExtrude with output back + side, or Thicken. Select the intended surface upstream. Every point moves along the mitre of its faces' offset planes, so each face of both surface copies is exactly its share of thickness away from the original: folds keep their full wall (mitred corners), open boundaries get rim faces. offset -1 grows the wall behind the surface (against the face normal; the input stays the outer face), 0 centres it, +1 grows it outward (the input becomes the inner face). Groups outer, inner, rim; attributes follow their source elements; uv is copied to both surfaces and the rim gets metric uv (u along the boundary, v across the thickness); N and tangent are dropped (recompute downstream). Errors instead of a broken shell: polylines, non-manifold edges or points, inconsistent winding, collapsed faces, mitres longer than miter_limit × thickness, corners whose offset planes do not meet (saddles, twists), surface copies that turn inside out, and any self-intersection of the result (crossings, coplanar overlaps, contacts beyond shared edges). Use poly_extrude for per-face extrusion and sdf shells for organic thickening.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | a polygon surface with consistent winding (a sheet, a folded panel or a closed hull) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `thickness` | float | `0.01` | 0.. |  | `thick`, `width`, `depth` | wall thickness in metres (must be positive) |
+| `offset` | float | `0` | -1..1 |  | `bias`, `side` | where the wall grows relative to the face winding: -1 inside (behind the normal), 0 centred, +1 outside |
+| `fill_rim` | bool | `true` |  |  | `rim`, `cap_rim`, `fill` | close open boundaries with rim faces (off: two separate surfaces) |
+| `miter_limit` | float | `4` | 1.. |  | `mitre_limit`, `miter` | largest allowed point offset as a multiple of the thickness at folds (4 ≈ folds up to 150°) |
+
+**Writes:** the shell: prim groups outer, inner, rim
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "panel": {
+      "type": "grid",
+      "params": {
+        "size": [
+          0.4,
+          0.3
+        ],
+        "rows": 3,
+        "cols": 4
+      }
+    },
+    "fold": {
+      "type": "wrangle",
+      "in": [
+        "panel"
+      ],
+      "params": {
+        "snippet": "if (@P.x > 0.05) { @P.y = @P.x - 0.05; @P.x = 0.05; }"
+      }
+    },
+    "wall": {
+      "type": "solidify",
+      "in": [
+        "fold"
+      ],
+      "params": {
+        "thickness": 0.01,
+        "offset": -1
+      }
+    }
+  },
+  "output": "wall"
 }
 ```
 

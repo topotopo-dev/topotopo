@@ -310,6 +310,7 @@ defineNode({
     min_edge_length: { type: 'float', default: 0, min: 0, desc: 'no edge shorter than this (0 = off)' },
     no_degenerate: { type: 'bool', default: false, desc: 'no zero-area polygons (area <= tolerance²) and no two points within tolerance of each other' },
     no_self_intersections: { type: 'bool', default: false, desc: 'no two non-adjacent triangles cross each other (BVH search, capped at max_tests)', aliases: ['no_intersections'] },
+    strict_intersections: { type: 'bool', default: false, desc: 'no_self_intersections also fails on touching contacts, coplanar overlaps and triangles folding through a shared corner or onto a shared edge', aliases: ['strict'] },
     max_tests: { type: 'int', default: 2000000, min: 1000, max: 1000000000, desc: 'self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped)', advanced: true },
     attrib: { type: 'string', default: '', desc: 'attribute that must exist ("" = off)', aliases: ['attribute'] },
     attrib_class: { type: 'enum', options: ['auto', 'point', 'vertex', 'prim', 'detail'], default: 'auto', desc: 'where attrib must live (auto = any class: vertex, point, prim, detail)' },
@@ -430,10 +431,10 @@ defineNode({
     }
     if (p.no_self_intersections) {
       checks++;
-      const r = selfIntersections(g, p.max_tests);
+      const r = selfIntersections(g, p.max_tests, { strict: p.strict_intersections });
       const capped = r.capped ? ` (search stopped after ${r.tested.toLocaleString('en-US')} candidate pairs: there may be more)` : '';
       if (r.pairs) {
-        fail('no_self_intersections', `${r.pairs} pair(s) of crossing triangles${capped}`);
+        fail('no_self_intersections', `${r.pairs} pair(s) of ${p.strict_intersections ? 'intersecting or touching' : 'crossing'} triangles${capped}`);
         for (let q = 0; q < g.numPrims; q++) if (r.prims[q]) primFail[q] = 1;
       } else if (r.capped) warn(`no_self_intersections: none found, but the search stopped after ${r.tested.toLocaleString('en-US')} candidate pairs (raise max_tests to check everything)`);
     }

@@ -31,3 +31,4 @@ import './particles.ts';
 import './rbd.ts';
 import './cloth.ts';
 import './scene.ts';
+import './solidify.ts';
