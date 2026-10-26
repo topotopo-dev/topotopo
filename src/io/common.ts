@@ -20,6 +20,14 @@ export interface ExportOptions {
   custom?: boolean;
   /** glTF: write NORMAL (N if present, else computed with cuspAngle). false = only when N exists. Default true. */
   normals?: boolean;
+  /**
+   * glTF TANGENT accessors (MikkTSpace, xyz + handedness w): 'auto' (default) generates them for primitives whose
+   * material has a normal map and writes a valid supplied point/vertex "tangent" (float[4]) attribute on the others
+   * (a malformed one is dropped with a warning); 'preserve' writes the supplied attribute everywhere it exists (a
+   * malformed one is an error) and generates only where it is missing on normal-mapped primitives; 'none' never
+   * writes TANGENT.
+   */
+  tangents?: 'auto' | 'preserve' | 'none';
   /** glTF: 'none' (default), 'meshopt' (EXT_meshopt_compression + KHR_mesh_quantization), 'draco' (needs draco3dgltf) */
   compress?: 'none' | 'meshopt' | 'draco';
   /** glTF: KHR_mesh_quantization (16-bit positions, 8-bit normals, 16-bit uv/colour) without compression */

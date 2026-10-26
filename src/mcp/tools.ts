@@ -384,6 +384,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           materials: { type: 'boolean', description: 'glTF: write materials from the prim "material" attribute + table (default true)' },
           compress: { type: 'string', enum: ['none', 'meshopt', 'draco'], description: 'glTF: meshopt = EXT_meshopt_compression + quantization; draco needs the optional draco3dgltf package' },
           quantize: { type: 'boolean', description: 'glTF: KHR_mesh_quantization (smaller, lossy) without compression' },
+          tangents: { type: 'string', enum: ['auto', 'preserve', 'none'], description: 'glTF TANGENT: auto (default) = MikkTSpace for normal-mapped materials, a valid supplied "tangent" attribute elsewhere; preserve = the supplied attribute wherever it exists (malformed = error); none = never' },
           attributes: { type: 'array', items: { type: 'string' }, description: 'csv / points.json: point attributes to write (default all)' },
           pcg: { type: 'boolean', description: 'csv: Unreal PCG columns (Position/Rotation/Scale/Density/Color/Seed) in Unreal space (Z-up, left-handed, cm)' },
           pcg_struct: { type: 'boolean', description: 'csv with pcg: Unreal struct-text cells ("(X=…,Y=…,Z=…)") for DataTable import with a row struct' },

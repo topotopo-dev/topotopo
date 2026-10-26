@@ -4,7 +4,7 @@
 //                   [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
 //                   [--shading flat|matcap|ao] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
-//                   [--compress meshopt] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
+//                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
 //                   [--inspect summary|attributes|topology|all]
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
@@ -72,7 +72,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         several renders per cook: repeat --render; options after a --render apply to it, options before the first apply to all',
     '           e.g. --views top --render h.png --color-by height --render r.png --color-by river',
     '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails)',
-    '         export options: [--compress none|meshopt|draco] [--quantize] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '         export options: [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
     '                         [--instances rows|expand] [--no-meshes] (csv/points.json of packed instances: one row per instance + meshes sidecar + GLBs)',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json; heightfields .png (png16) .r16,',
@@ -260,12 +260,14 @@ async function cook() {
       if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
       const up = opt('--up-axis');
       if (argv.includes('--tile-size') && opt('--tile-size') === undefined) fail('--tile-size requires a number of quads (e.g. 1008)');
+      if (opt('--tangents') !== undefined && !['auto', 'preserve', 'none'].includes(opt('--tangents')!)) fail(`--tangents must be auto, preserve or none (got "${opt('--tangents')}")`);
       const outDir = fmt === 'unreal_landscape' && !/\.json$/i.test(p) ? path.resolve(p) : path.dirname(path.resolve(p));
       const host = engine.host;
       const { files, summary } = await exportFilesAsync(geo, fmt, p, {
         splitByName: true,
         compress: opt('--compress') as any,
         quantize: argv.includes('--quantize') || undefined,
+        tangents: opt('--tangents') as any,
         pcg: argv.includes('--pcg') || argv.includes('--pcg-struct') || undefined,
         pcgStruct: argv.includes('--pcg-struct') || undefined,
         attributes: opt('--attributes'),

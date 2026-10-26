@@ -11459,7 +11459,7 @@ category: `texture` · aliases: `normal_bake`, `bake_tangent_normal`, `bake_norm
 
 Bake a tangent-space normal map from a high-res mesh (input 1) onto the uv of the low mesh: OpenGL or DirectX.
 
-Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's tangent frame (N interpolated, T from the uv per triangle, B by handedness) as 0.5 + 0.5 n. Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
+Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's MikkTSpace tangent frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
 
 **Inputs**
 

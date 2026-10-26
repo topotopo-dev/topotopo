@@ -21,6 +21,7 @@ import { mergeMaterialTables, writeMaterials } from './materials.ts';
 import { m4normalMatrix, qFromMat, qMul } from './math.ts';
 import { resolveVertexNormals } from './topology.ts';
 import { splineCounts, splinesToPolylines } from './splines.ts';
+import { TANGENT_ATTRIB, transformTangents } from './tangents.ts';
 import type { Mat4, Quat } from './math.ts';
 
 /**
@@ -303,6 +304,11 @@ export function expandPacked(g: Geometry, o: ExpandOptions = {}): ExpandResult {
     const a = tables[c].get(n);
     if (a && a.type === 'float' && a.size === 3) vecAttrs.push({ c, a });
   }
+  const tanAttrs: { c: 'point' | 'vertex'; a: Attribute }[] = [];
+  for (const c of ['point', 'vertex'] as const) {
+    const a = tables[c].get(TANGENT_ATTRIB);
+    if (a && a.type === 'float' && a.size === 4) tanAttrs.push({ c, a });
+  }
   const orientA = out.points.get('orient');
   const orient = orientA && orientA.type === 'float' && orientA.size === 4 ? (orientA.data as Float64Array) : null;
   const OP = out.P;
@@ -355,6 +361,10 @@ export function expandPacked(g: Geometry, o: ExpandOptions = {}): ExpandResult {
         d[i * 3 + 1] = m[1] * x + m[5] * y + m[9] * z;
         d[i * 3 + 2] = m[2] * x + m[6] * y + m[10] * z;
       }
+    }
+    for (const { c, a: A } of tanAttrs) {
+      const [e0, e1] = range(c, j);
+      transformTangents((A.data as Float64Array).subarray(e0 * 4, e1 * 4), e1 - e0, xform3(m));
     }
     // one-level expansion: instances inside the source compose this instance's transform
     if (out.primKind) composePackedXforms(out, m, null, offs[j * 3 + 2], offs[j * 3 + 5]);

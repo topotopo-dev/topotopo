@@ -165,6 +165,17 @@ export function interpolate(s: BakeSamples, tris: ArrayLike<number>, vals: Array
   return out;
 }
 
+/** Per-sample interpolation of per-triangle-corner values (`size` floats per corner t·3 + k, e.g. MikkTSpace tangents). */
+export function interpolateCorners(s: BakeSamples, vals: ArrayLike<number>, size: number): Float64Array {
+  const out = new Float64Array(s.n * size);
+  for (let k = 0; k < s.n; k++) {
+    const t = s.tri[k], w1 = s.b1[k], w2 = s.b2[k], w0 = 1 - w1 - w2;
+    const a = t * 3 * size, b = a + size, c = b + size;
+    for (let q = 0; q < size; q++) out[k * size + q] = vals[a + q] * w0 + vals[b + q] * w1 + vals[c + q] * w2;
+  }
+  return out;
+}
+
 /**
  * Average the samples (ch values each) into the W × H output: data (W·H·ch) and coverage (covered fraction of each
  * texel's S × S samples). Texels without samples stay 0 (dilate() fills them).
@@ -320,7 +331,7 @@ export function vertexPositions(g: Geometry): Float64Array {
   return out;
 }
 
-// ---------------------------------------------------------------- islands, tangents, id colours
+// ---------------------------------------------------------------- islands, id colours
 
 /**
  * UV islands: triangles connected through corners with the same point and the same uv (union-find over corner keys).
@@ -350,29 +361,6 @@ export function uvIslands(g: Geometry, uv: ArrayLike<number>, tris: ArrayLike<nu
     triIsland[t] = l;
   }
   return { triIsland, count: label.size };
-}
-
-/** Tangent per triangle (unnormalised dP/du from uv) and the handedness sign of (dP/du, dP/dv) against the face normal. */
-export function triangleTangents(g: Geometry, uv: ArrayLike<number>, tris: ArrayLike<number>): { T: Float64Array; sign: Float32Array } {
-  const nt = Math.floor(tris.length / 3), P = g.P;
-  const T = new Float64Array(nt * 3), sign = new Float32Array(nt);
-  for (let t = 0; t < nt; t++) {
-    const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2];
-    const a = g.vertexPoint[va] * 3, b = g.vertexPoint[vb] * 3, c = g.vertexPoint[vc] * 3;
-    const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2];
-    const e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
-    const du1 = uv[vb * 2] - uv[va * 2], dv1 = uv[vb * 2 + 1] - uv[va * 2 + 1], du2 = uv[vc * 2] - uv[va * 2], dv2 = uv[vc * 2 + 1] - uv[va * 2 + 1];
-    const det = du1 * dv2 - du2 * dv1;
-    const r = Math.abs(det) > 1e-20 ? 1 / det : 0;
-    const tx = (e1x * dv2 - e2x * dv1) * r, ty = (e1y * dv2 - e2y * dv1) * r, tz = (e1z * dv2 - e2z * dv1) * r;
-    const bx = (e2x * du1 - e1x * du2) * r, by = (e2y * du1 - e1y * du2) * r, bz = (e2z * du1 - e1z * du2) * r;
-    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
-    // (N × T) · B > 0: right-handed
-    const cx = ny * tz - nz * ty, cy = nz * tx - nx * tz, cz = nx * ty - ny * tx;
-    T[t * 3] = tx; T[t * 3 + 1] = ty; T[t * 3 + 2] = tz;
-    sign[t] = cx * bx + cy * by + cz * bz < 0 ? -1 : 1;
-  }
-  return { T, sign };
 }
 
 /** Random colour of an island id (stable per id and seed). */

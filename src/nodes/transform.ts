@@ -15,7 +15,8 @@ import { transformSdfGrid } from '../core/sdfgrid.ts';
 import { AXES, P, getPointNormals, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
 import { andThen } from '../graph/parallel.ts';
-import { composePackedXforms } from '../core/packed.ts';
+import { composePackedXforms, xform3 } from '../core/packed.ts';
+import { TANGENT_ATTRIB, transformTangents } from '../core/tangents.ts';
 
 /**
  * Apply a matrix to positions and vector-like attributes of selected points. Packed prims move with their anchor
@@ -59,6 +60,8 @@ export function applyMatrix(src: Geometry, m: Mat4, ptMask: Uint8Array | null = 
           const q = qMul(rotQ, [d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]]);
           d.set(q, i * 4);
         }
+      } else if (name === TANGENT_ATTRIB && a.size === 4 && cls !== 'prim') {
+        transformTangents(d, t.count, xform3(m), sel);
       }
     }
   }

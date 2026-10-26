@@ -8,8 +8,9 @@
 import type { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER } from '../core/image.ts';
 import {
-  averagedVertexNormals, bakeSamples, curvatureEdges, dilate, edgeGrid, idColor, interpolate, normalize3, resolve, triangleTangents, uvIslands, vertexPositions, vertexValues,
+  averagedVertexNormals, bakeSamples, curvatureEdges, dilate, edgeGrid, idColor, interpolate, interpolateCorners, normalize3, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
+import { cornerTangents, loadMikkTSpace, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
 import { RayScene, bboxDiagonal } from '../core/analysis.ts';
 import type { RaySampleOptions } from '../core/analysis.ts';
@@ -408,9 +409,11 @@ defineBake({
   summary: 'Bake a tangent-space normal map from a high-res mesh (input 1) onto the uv of the low mesh: OpenGL or DirectX.',
   description:
     'Substance Painter / Marmoset "Normal". ' + BAKE_DOC + 'For each texel a ray from cage above the low surface along -N finds ' +
-    'the high-res surface (within cage below); its interpolated normal is written in the low mesh\'s tangent frame (N ' +
-    'interpolated, T from the uv per triangle, B by handedness) as 0.5 + 0.5 n. Misses and a missing input 1 give the ' +
-    'flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).',
+    'the high-res surface (within cage below); its interpolated normal is written in the low mesh\'s MikkTSpace tangent ' +
+    'frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map ' +
+    'decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made ' +
+    'perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender ' +
+    'read OpenGL; Unreal DirectX (or flip green on import).',
   aliases: ['normal_bake', 'bake_tangent_normal', 'bake_normal_map'],
   params: {
     ...BAKE_PARAMS('normal'),
@@ -436,28 +439,31 @@ defineBake({
       ctx.warn(`${ctx.type}: no high-res mesh on input 1: the map is flat (0.5, 0.5, 1)`);
       return finish(b, out, 4, [0.5, 0.5, 1, 1]);
     }
-    const tan = triangleTangents(b.g, b.uv, b.tris);
     const dx = p.format === 'directx' ? -1 : 1;
-    return andThen(onHigh(b, high), (h) => {
-      for (let i = 0; i < n; i++) {
-        if (!(h.D[i] === h.D[i])) continue;
-        const t = b.s.tri[i];
-        const nx = b.N[i * 3], ny = b.N[i * 3 + 1], nz = b.N[i * 3 + 2];
-        let tx = tan.T[t * 3], ty = tan.T[t * 3 + 1], tz = tan.T[t * 3 + 2];
-        const d = tx * nx + ty * ny + tz * nz;
-        tx -= nx * d; ty -= ny * d; tz -= nz * d;
-        const tl = Math.hypot(tx, ty, tz);
-        if (!(tl > 1e-12)) continue;
-        tx /= tl; ty /= tl; tz /= tl;
-        const sg = tan.sign[t];
-        const bx = (ny * tz - nz * ty) * sg, by = (nz * tx - nx * tz) * sg, bz = (nx * ty - ny * tx) * sg;
-        const hx = h.N[i * 3], hy = h.N[i * 3 + 1], hz = h.N[i * 3 + 2];
-        const u = hx * tx + hy * ty + hz * tz, v = hx * bx + hy * by + hz * bz, w = hx * nx + hy * ny + hz * nz;
-        const l = Math.hypot(u, v, w) || 1;
-        out[i * 4] = 0.5 + (0.5 * u) / l; out[i * 4 + 1] = 0.5 + (0.5 * v * dx) / l; out[i * 4 + 2] = 0.5 + (0.5 * w) / l;
+    const bakeWith = () => {
+      // the same vertex normals (cusp 60°) and uv the exporter writes, so the frame matches the exported TANGENT
+      const { tangents, diag } = cornerTangents(b.g, b.tris, resolveVertexNormals(b.g, 60), b.uv);
+      if (diag.uvDegenerate || diag.uvNonFinite) ctx.warn(`${ctx.type}: ${diag.uvDegenerate + diag.uvNonFinite} of ${diag.triangles} triangles have collapsed or non-finite uvs: no tangent frame there (flat texels)`);
+      const T = interpolateCorners(b.s, tangents, 4), f = new Float64Array(9);
+      const collapsed = new Uint8Array(diag.triangles);
+      for (let t = 0; t < diag.triangles; t++) {
+        const u0 = b.uv[b.tris[t * 3] * 2], v0 = b.uv[b.tris[t * 3] * 2 + 1];
+        const du1 = b.uv[b.tris[t * 3 + 1] * 2] - u0, dv1 = b.uv[b.tris[t * 3 + 1] * 2 + 1] - v0, du2 = b.uv[b.tris[t * 3 + 2] * 2] - u0, dv2 = b.uv[b.tris[t * 3 + 2] * 2 + 1] - v0;
+        if (!(Math.abs(du1 * dv2 - du2 * dv1) > 0)) collapsed[t] = 1;
       }
-      return finish(b, out, 4, [0.5, 0.5, 1, 1]);
-    });
+      return andThen(onHigh(b, high), (h) => {
+        for (let i = 0; i < n; i++) {
+          if (!(h.D[i] === h.D[i]) || collapsed[b.s.tri[i]]) continue;
+          if (!shadingFrame(b.N[i * 3], b.N[i * 3 + 1], b.N[i * 3 + 2], T[i * 4], T[i * 4 + 1], T[i * 4 + 2], T[i * 4 + 3], f)) continue;
+          const hx = h.N[i * 3], hy = h.N[i * 3 + 1], hz = h.N[i * 3 + 2];
+          const u = hx * f[0] + hy * f[1] + hz * f[2], v = hx * f[3] + hy * f[4] + hz * f[5], w = hx * f[6] + hy * f[7] + hz * f[8];
+          const l = Math.hypot(u, v, w) || 1;
+          out[i * 4] = 0.5 + (0.5 * u) / l; out[i * 4 + 1] = 0.5 + (0.5 * v * dx) / l; out[i * 4 + 2] = 0.5 + (0.5 * w) / l;
+        }
+        return finish(b, out, 4, [0.5, 0.5, 1, 1]);
+      });
+    };
+    return mikkTSpaceReady() ? bakeWith() : loadMikkTSpace().then(bakeWith);
   },
 });
 

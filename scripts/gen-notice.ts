@@ -79,6 +79,7 @@ reproduced here.)`,
 /** Bundled assets that are not npm packages. */
 const BUNDLED: { name: string; licence: string; homepage: string; file: string }[] = [
   { name: 'DejaVu Sans (assets/fonts/DejaVuSans.ttf)', licence: 'Bitstream Vera Fonts licence + public domain (DejaVu changes)', homepage: 'https://dejavu-fonts.github.io/', file: 'assets/fonts/LICENSE_DEJAVU' },
+  { name: 'MikkTSpace (in three/examples/jsm/libs/mikktspace.module.js)', licence: 'Zlib (MikkTSpace); MIT (mikktspace-wasm); MIT OR Apache-2.0 (mikktspace crate)', homepage: 'http://www.mikktspace.com/', file: 'assets/licenses/MIKKTSPACE.txt' },
 ];
 
 interface Dep { name: string; version: string; licence: string; homepage?: string; text: string }

@@ -9,6 +9,7 @@ dependencies or bundled assets.
 Summary
 -------
 DejaVu Sans (assets/fonts/DejaVuSans.ttf): Bitstream Vera Fonts licence + public domain (DejaVu changes) (https://dejavu-fonts.github.io/)
+MikkTSpace (in three/examples/jsm/libs/mikktspace.module.js): Zlib (MikkTSpace); MIT (mikktspace-wasm); MIT OR Apache-2.0 (mikktspace crate) (http://www.mikktspace.com/)
 @dimforge/rapier3d-compat@0.21.0: Apache-2.0 (https://rapier.rs)
 @gltf-transform/core@4.5.1: MIT (https://gltf-transform.dev/)
 @gltf-transform/extensions@4.5.1: MIT (https://gltf-transform.dev/extensions.html)
@@ -288,6 +289,35 @@ from Tavmjong Bah. For further information, contact: tavmjong @ free
 . fr.
 
 $Id: LICENSE 2133 2007-11-28 02:46:28Z lechimp $
+
+==============================================================================
+MikkTSpace (in three/examples/jsm/libs/mikktspace.module.js)
+Licence: Zlib (MikkTSpace); MIT (mikktspace-wasm); MIT OR Apache-2.0 (mikktspace crate)
+Source: http://www.mikktspace.com/
+
+TopoTopo computes tangent space (glTF TANGENT export, bake_normal, the PBR preview) with the MikkTSpace WebAssembly
+module that the three.js package ships as examples/jsm/libs/mikktspace.module.js (three.js itself is MIT, listed
+above). That module is mikktspace-wasm by Don McCurdy (https://github.com/donmccurdy/mikktspace-wasm, MIT), a
+WebAssembly build of the Rust crate mikktspace (https://github.com/gltf-rs/mikktspace, MIT OR Apache-2.0), which is a
+port of the reference MikkTSpace implementation by Morten S. Mikkelsen, distributed under the following licence:
+
+Copyright (C) 2011 by Morten S. Mikkelsen
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
 @dimforge/rapier3d-compat@0.21.0

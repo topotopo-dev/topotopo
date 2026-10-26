@@ -4,7 +4,13 @@
 // Export layout
 //   one node + mesh per prim "name" (splitByName), one primitive per material within a mesh:
 //   polygons → TRIANGLES, polylines → one LINE_STRIP per curve (or LINES), isolated points → POINTS.
-//   POSITION · NORMAL (N, else computed) · TEXCOORD_0/1 from uv/uv2 (V flipped) · COLOR_0 from Cd (+Alpha → VEC4).
+//   POSITION · NORMAL (N, else computed) · TANGENT (see below) · TEXCOORD_0/1 from uv/uv2 (V flipped, core/texcoord.ts)
+//   · COLOR_0 from Cd (+Alpha → VEC4).
+//   TANGENT (option tangents, default 'auto'): MikkTSpace tangents (core/tangents.ts) computed per triangle corner from
+//   the exported positions, normals and uv BEFORE vertices are welded, so uv seams, hard normals and mirrored islands
+//   keep their own frames, for every primitive whose material has a normal map; a supplied point/vertex "tangent"
+//   float[4] attribute is written on the others ('preserve': everywhere it exists). Collapsed or missing uvs are
+//   reported, never written as invalid tangents.
 //   Custom attributes: every other numeric point/vertex attribute of size 1–4 becomes `_NAME` (upper-cased; float,
 //   or the smallest integer type that holds an int attribute). The original names and types are kept in mesh
 //   extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale as `_PSCALE`.
@@ -39,7 +45,8 @@
 //   instancing 'expand' = real geometry), every primitive mode,
 //   meshopt (meshoptimizer decoder) and Draco (when draco3dgltf is installed) decoded, external .bin files read
 //   relative to the file. Mesh/node names → prim "name", materials → prim "material" + table, COLOR_0 → Cd/Alpha,
-//   TEXCOORD_0/1 → uv/uv2, custom `_X` → attributes, instance `_X` accessors → anchor attributes. Texture images are
+//   TEXCOORD_0/1 → uv/uv2, TANGENT → point "tangent" (float[4]; node transforms applied, w flipped under mirrors),
+//   custom `_X` → attributes, instance `_X` accessors → anchor attributes. Texture images are
 //   not decoded: their paths (URI resolved against the file, or "embedded:<name>" for images inside a GLB) go into the
 //   material table's textures entries; files written by topotopo restore the original paths from material extras,
 //   and their "image:<name>" textures are decoded back into image volumes (8-bit precision).
@@ -53,6 +60,8 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geometry.ts';
 import type { AttribClass, AttribType } from '../core/geometry.ts';
 import { resolveVertexNormals, triangulate } from '../core/topology.ts';
+import { TANGENT_ATTRIB, cornerTangents, loadMikkTSpace, tangentProblem, transformTangents, vertexUV } from '../core/tangents.ts';
+import { gltfV } from '../core/texcoord.ts';
 import { DEFAULT_MATERIAL, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
 import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
@@ -69,7 +78,7 @@ import type { Image } from '../core/image.ts';
 /** Above this many polylines per material and mesh, curves go into one LINES primitive instead of LINE_STRIPs. */
 const MAX_LINE_STRIPS = 256;
 /** Attributes with a dedicated glTF semantic (never exported as `_NAME`). */
-const RESERVED = new Set(['P', 'N', 'uv', 'uv2', 'Cd', 'Alpha', 'material', 'name']);
+const RESERVED = new Set(['P', 'N', 'uv', 'uv2', 'Cd', 'Alpha', 'material', 'name', TANGENT_ATTRIB]);
 const TYPES = ['SCALAR', 'VEC2', 'VEC3', 'VEC4'] as const;
 const DRACO_MODULE = 'draco3dgltf';
 
@@ -142,7 +151,8 @@ interface Channel {
   int: boolean;
   /** value depends only on the point (no need to split shared vertices) */
   perPoint: boolean;
-  read(v: number, pt: number, pr: number, out: number[], o: number): void;
+  /** k: index of the corner in the emitted corner list (per-triangle-corner channels such as TANGENT) */
+  read(v: number, pt: number, pr: number, out: number[], o: number, k: number): void;
 }
 
 interface PrimOut {
@@ -187,9 +197,9 @@ function colorChannel(g: Geometry): Channel | null {
   const size = al ? 4 : 3;
   return {
     semantic: 'COLOR_0', size, int: false, perPoint: (!cd || cd.perPoint) && (!al || al.perPoint),
-    read(v, pt, pr, out, o) {
-      if (cd) cd.read(v, pt, pr, out, o); else { out[o] = out[o + 1] = out[o + 2] = 1; }
-      if (al) al.read(v, pt, pr, out, o + 3);
+    read(v, pt, pr, out, o, k) {
+      if (cd) cd.read(v, pt, pr, out, o, k); else { out[o] = out[o + 1] = out[o + 2] = 1; }
+      if (al) al.read(v, pt, pr, out, o + 3, k);
     },
   };
 }
@@ -230,7 +240,7 @@ function emit(channels: Channel[], corners: ArrayLike<number>, vprim: Int32Array
     const v = corners[k];
     const pt = v >= 0 ? g.vertexPoint[v] : -1 - v;
     const pr = v >= 0 && vprim ? vprim[v] : -1;
-    channels.forEach((c, ci) => c.read(v >= 0 ? v : -1, pt, pr, tmp[ci], 0));
+    channels.forEach((c, ci) => c.read(v >= 0 ? v : -1, pt, pr, tmp[ci], 0, k));
     let key: string | number = pt;
     if (weld && keyed.length) {
       let s = String(pt);
@@ -363,6 +373,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   };
   let noUV = 0;
   const custom = o.custom !== false;
+  const tangentMode = o.tangents ?? 'auto';
   const lineMode = o.lineMode ?? 'strip';
   // what to write: the geometry, or (packed) its non-instanced part plus one instanced mesh per packed source
   const split = o.splitByName ?? true;
@@ -381,7 +392,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
       semantic: 'POSITION', size: 3, int: false, perPoint: true,
       read(_v, pt, _pr, out, oo) { const P = geo.P; const p = xf(P[pt * 3], P[pt * 3 + 1], P[pt * 3 + 2], o); out[oo] = p[0]; out[oo + 1] = p[1]; out[oo + 2] = p[2]; },
     };
-    const uvCh = (n: string, sem: string) => attribChannel(geo, n, sem, ['vertex', 'point', 'prim', 'detail'], (s, out, oo) => { out[oo] = s[0]; out[oo + 1] = 1 - (s[1] ?? 0); }, 2);
+    const uvCh = (n: string, sem: string) => attribChannel(geo, n, sem, ['vertex', 'point', 'prim', 'detail'], (s, out, oo) => { out[oo] = s[0]; out[oo + 1] = gltfV(s[1] ?? 0); }, 2);
     const color = colorChannel(geo);
     const customs = custom ? customChannels(geo, used, info) : [];
     // group prims by (closed, material)
@@ -418,6 +429,43 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
         if (!out.channels.some((c) => c.semantic === 'TEXCOORD_0')) noUV++;
       }
     };
+    /**
+     * TANGENT of one triangle primitive (option tangents): the supplied tangent attribute where the mode takes it
+     * (validated), else MikkTSpace per corner for a normal-mapped material, else none.
+     */
+    const tangentChannel = (tris: Uint32Array, nrm: Float64Array | null, mat: string, piece: string): Channel | null => {
+      if (tangentMode === 'none') return null;
+      const m = mat ? st.table[mat] : undefined;
+      const normalMapped = !!(m?.textures?.normal && textureFor(st, m.textures.normal));
+      const supplied = geo.findAttrib(TANGENT_ATTRIB, ['vertex', 'point']);
+      const where = `mesh "${piece}"${mat ? ` material "${mat}"` : ''}`;
+      if (supplied && (tangentMode === 'preserve' || !normalMapped)) {
+        const bad = tangentProblem(geo);
+        if (bad && tangentMode === 'preserve') throw new Error(`glTF: tangents "preserve": ${where}: ${bad}`);
+        if (bad) o.warn?.(`glTF: ${where}: supplied tangent attribute not written (${bad})`);
+        else if (!nrm) o.warn?.(`glTF: ${where}: tangent attribute without NORMAL (normals: false): no TANGENT written`);
+        else {
+          const L = xfLinear([1, 0, 0, 0, 1, 0, 0, 0, 1], 0, o), tmp = new Float64Array(4);
+          return attribChannel(geo, TANGENT_ATTRIB, 'TANGENT', ['vertex', 'point'], (s, out, oo) => {
+            tmp[0] = s[0]; tmp[1] = s[1]; tmp[2] = s[2]; tmp[3] = s[3];
+            transformTangents(tmp, 1, L);
+            out[oo] = tmp[0]; out[oo + 1] = tmp[1]; out[oo + 2] = tmp[2]; out[oo + 3] = tmp[3];
+          }, 4);
+        }
+      }
+      if (!normalMapped) return null;
+      if (!nrm) { o.warn?.(`glTF: ${where}: normal map without NORMAL (normals: false): no TANGENT written`); return null; }
+      const uv = vertexUV(geo, 'uv');
+      if (!uv) return null; // reported once, as a textured primitive without uv
+      const { tangents, diag } = cornerTangents(geo, tris, nrm, uv);
+      if (diag.uvNonFinite || diag.uvDegenerate) {
+        o.warn?.(`glTF: ${where}: ${diag.uvDegenerate} of ${diag.triangles} triangles have collapsed uvs${diag.uvNonFinite ? ` and ${diag.uvNonFinite} non-finite uvs` : ''}; their ${diag.fallbackCorners} corners get a fallback tangent (the normal map has no orientation there)`);
+      } else if (diag.fallbackCorners) o.warn?.(`glTF: ${where}: MikkTSpace left ${diag.fallbackCorners} corners without a tangent; a fallback was written`);
+      return {
+        semantic: 'TANGENT', size: 4, int: false, perPoint: false,
+        read(_v, _pt, _pr, out, oo, k) { const d = xfDir(tangents[k * 4], tangents[k * 4 + 1], tangents[k * 4 + 2], o); out[oo] = d[0]; out[oo + 1] = d[1]; out[oo + 2] = d[2]; out[oo + 3] = tangents[k * 4 + 3]; },
+      };
+    };
     for (const gr of groups.values()) {
       if (gr.closed) {
         const { tris } = triangulate(geo, gr.mask);
@@ -431,6 +479,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
           chans.push({ semantic: 'NORMAL', size: 3, int: false, perPoint: pointN, read(v, _pt, _pr, out, oo) { const d = xfDir(nn[v * 3], nn[v * 3 + 1], nn[v * 3 + 2], o); out[oo] = d[0]; out[oo + 1] = d[1]; out[oo + 2] = d[2]; } });
         }
         const uv0 = uvCh('uv', 'TEXCOORD_0'), uv1 = uvCh('uv2', 'TEXCOORD_1');
+        const tan = tangentChannel(tris, normals, gr.mat, name);
+        if (tan) chans.push(tan);
         if (uv0) chans.push(uv0);
         if (uv1) chans.push(uv1);
         if (color) chans.push(color);
@@ -671,8 +721,8 @@ function writeMesh(doc: Document, buffer: ReturnType<Document['createBuffer']>, 
         const q = new Int16Array(d.length);
         for (let i = 0; i < d.length; i++) q[i] = Math.round(Math.max(-1, Math.min(1, (d[i] - center[i % 3]) / extent)) * 32767);
         a = acc(q as any, 3, true);
-      } else if (ch.semantic === 'NORMAL' && quantize) {
-        a = acc(Int8Array.from(d, (x) => Math.round(Math.max(-1, Math.min(1, x)) * 127)), 3, true);
+      } else if ((ch.semantic === 'NORMAL' || ch.semantic === 'TANGENT') && quantize) {
+        a = acc(Int8Array.from(d, (x) => Math.round(Math.max(-1, Math.min(1, x)) * 127)), ch.size, true);
       } else if (ch.semantic.startsWith('TEXCOORD_') && quantize && d.every((x) => x >= 0 && x <= 1)) {
         a = acc(Uint16Array.from(d, (x) => Math.round(x * 65535)), 2, true);
       } else if (ch.semantic === 'COLOR_0' && quantize && d.every((x) => x >= 0 && x <= 1)) {
@@ -735,6 +785,7 @@ async function withTextures(g: Geometry, o: ExportOptions): Promise<ExportOption
 /** GLB bytes. */
 export async function exportGLB(g: Geometry, o: ExportOptions = {}): Promise<Uint8Array> {
   o = await withTextures(g, o);
+  if (o.tangents !== 'none') await loadMikkTSpace();
   const doc = gltfDocument(g, o);
   const io = await exportIO(doc, o);
   return io.writeBinary(doc);
@@ -743,6 +794,7 @@ export async function exportGLB(g: Geometry, o: ExportOptions = {}): Promise<Uin
 /** Self-contained .gltf JSON text (buffers embedded as data URIs). */
 export async function exportGLTF(g: Geometry, o: ExportOptions = {}): Promise<string> {
   o = await withTextures(g, o);
+  if (o.tangents !== 'none') await loadMikkTSpace();
   const doc = gltfDocument(g, o);
   const io = await exportIO(doc, o);
   const { json, resources } = await io.writeJSON(doc, { format: 'GLTF' as any });
@@ -884,7 +936,8 @@ function primitiveGeometry(prim: Primitive, attrInfo: Record<string, CustomInfo>
     const es = a.getElementSize();
     if (sem === 'POSITION') continue;
     if (sem === 'NORMAL') setPt('N', a, 3, 'float');
-    else if (sem === 'TEXCOORD_0' || sem === 'TEXCOORD_1') setPt(sem === 'TEXCOORD_0' ? 'uv' : 'uv2', a, 3, 'float', (s, i, out) => { out[i * 3] = s[i * es]; out[i * 3 + 1] = 1 - s[i * es + 1]; out[i * 3 + 2] = 0; });
+    else if (sem === 'TANGENT' && es === 4) setPt(TANGENT_ATTRIB, a, 4, 'float');
+    else if (sem === 'TEXCOORD_0' || sem === 'TEXCOORD_1') setPt(sem === 'TEXCOORD_0' ? 'uv' : 'uv2', a, 3, 'float', (s, i, out) => { out[i * 3] = s[i * es]; out[i * 3 + 1] = gltfV(s[i * es + 1]); out[i * 3 + 2] = 0; });
     else if (sem === 'COLOR_0') {
       // COLOR_0 is linear; Cd holds display values
       setPt('Cd', a, 3, 'float', (s, i, out) => { out[i * 3] = toDisplay(s[i * es]); out[i * 3 + 1] = toDisplay(s[i * es + 1]); out[i * 3 + 2] = toDisplay(s[i * es + 2]); });
@@ -894,7 +947,7 @@ function primitiveGeometry(prim: Primitive, attrInfo: Record<string, CustomInfo>
       const name = inf?.name ?? sem.slice(1).toLowerCase();
       setPt(name, a, es, inf?.type === 'int' ? 'int' : 'float');
     }
-    // TANGENT, JOINTS_n, WEIGHTS_n, TEXCOORD_2+, COLOR_1+ are not imported
+    // JOINTS_n, WEIGHTS_n, TEXCOORD_2+, COLOR_1+ are not imported
   }
   // a constant Cd that the exporter folded into the material factor comes back as the point colour it was
   const folded = (prim.getExtras() as any)?.topotopo?.Cd;
@@ -920,6 +973,8 @@ function transformGeo(local: Geometry, m: Mat4): Geometry {
       d[i] /= l; d[i + 1] /= l; d[i + 2] /= l;
     }
   }
+  const T = g.points.get(TANGENT_ATTRIB);
+  if (T && T.size === 4) transformTangents(T.data as Float64Array, g.numPoints, xform3(m));
   return g;
 }
 

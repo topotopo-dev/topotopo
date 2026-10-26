@@ -777,13 +777,18 @@ export {path:"exports/thing.glb"} — format from the extension:
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
-  quantize (KHR_mesh_quantization alone), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
+  quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
   prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
   uncompressed GLB.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. N → NORMAL (else computed, 60° cusp),
-  uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. Custom attributes: every other numeric point/vertex attribute
+  uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. TANGENT (tangents "auto", the default): MikkTSpace
+  tangents (xyz + handedness w) for every primitive whose material has a normal map, computed per corner before
+  vertices are welded (uv seams, hard normals and mirrored islands keep their own frames), the same frame bake_normal
+  bakes in; a valid point/vertex "tangent" float[4] (from an import) is written on other primitives. "preserve" writes
+  the supplied attribute wherever it exists (malformed = error), "none" never writes TANGENT. Collapsed uvs are
+  reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors). Custom attributes: every other numeric point/vertex attribute
   of size 1-4 → _NAME (upper-cased, float or the smallest int type); mesh extras keep the original names and types.
 MATERIALS: the material node writes prim "material" + the detail table. Vertex colours win: prims whose Cd is not all
   white export baseColor white × COLOR_0 with the material's metallic/roughness/emissive; otherwise baseColor = the

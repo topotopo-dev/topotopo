@@ -27,6 +27,7 @@ import { expandPacked, flattenSource } from './packed.ts';
 import { heightfieldsOf, heightfieldToMesh } from './heightfield.ts';
 import { qFromMat, qMul, qNormalize } from './math.ts';
 import { rand } from './random.ts';
+import { TANGENT_ATTRIB } from './tangents.ts';
 import type { Quat, Vec3 } from './math.ts';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { Collider, RigidBody, Shape, World } from '@dimforge/rapier3d-compat';
@@ -1098,6 +1099,13 @@ function rotateVectors(t: AttribTable, pieceOf: (i: number) => number, dR: Float
         if (k < 0) continue;
         const R = dR.subarray(k * 9, k * 9 + 9), x = d[i * 3], y = d[i * 3 + 1], z = d[i * 3 + 2];
         d[i * 3] = R[0] * x + R[3] * y + R[6] * z; d[i * 3 + 1] = R[1] * x + R[4] * y + R[7] * z; d[i * 3 + 2] = R[2] * x + R[5] * y + R[8] * z;
+      }
+    } else if (name === TANGENT_ATTRIB && a.size === 4) {
+      for (let i = 0; i < t.count; i++) {
+        const k = pieceOf(i);
+        if (k < 0) continue;
+        const R = dR.subarray(k * 9, k * 9 + 9), x = d[i * 4], y = d[i * 4 + 1], z = d[i * 4 + 2];
+        d[i * 4] = R[0] * x + R[3] * y + R[6] * z; d[i * 4 + 1] = R[1] * x + R[4] * y + R[7] * z; d[i * 4 + 2] = R[2] * x + R[5] * y + R[8] * z;
       }
     } else if (point && name === 'orient' && a.size === 4) {
       for (let i = 0; i < t.count; i++) {
