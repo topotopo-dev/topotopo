@@ -23,6 +23,8 @@ import type { DepthTol, LegendItem, RGB } from './overlay.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler } from './texview.ts';
+import { pbrScene, preparePBR } from './pbr.ts';
+import type { PBRScene, PBRTextures } from './pbr.ts';
 
 /**
  * 3D views, 'persp@<azimuth>' (a persp view at that azimuth), 'section' (the cut through the section plane,
@@ -32,7 +34,7 @@ export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | '
 /** Edge overlays: every polygon edge, edges sharper than hardAngle (+ crease/hard/sharp edge groups), open/non-manifold/flipped edges, edge groups. */
 export type WireMode = 'none' | 'all' | 'hard' | 'boundary' | 'groups';
 export type GlyphMode = 'none' | 'N' | 'up' | 'orient' | 'v' | 'custom';
-export type ShadingMode = 'default' | 'flat' | 'matcap' | 'ao';
+export type ShadingMode = 'default' | 'flat' | 'matcap' | 'ao' | 'pbr';
 export type Axis = 'x' | 'y' | 'z';
 export interface ClipOptions {
   axis: Axis;
@@ -93,6 +95,10 @@ export interface RenderOptions {
   /** legend for color_by (gradient bar / categorical swatches) and highlight */
   legend?: boolean;
   shading?: ShadingMode;
+  /** shading 'pbr': exposure in stops (default 0) */
+  exposure?: number;
+  /** shading 'pbr': texture files read by renderGeometryAsync (preparePBR); image volumes need none */
+  pbrTextures?: PBRTextures;
   /** ao sample radius in output pixels (default 10) */
   aoRadius?: number;
   /** ortho views: world width visible across a tile (default: fit the bbox) */
@@ -135,7 +141,7 @@ export function parseViews(spec: string | readonly string[] | null | undefined):
 const AXES: Axis[] = ['x', 'y', 'z'];
 const WIRE_MODES = ['none', 'all', 'hard', 'boundary', 'groups'];
 const GLYPH_MODES = ['none', 'N', 'up', 'orient', 'v', 'custom'];
-const SHADING_MODES = ['default', 'flat', 'matcap', 'ao'];
+const SHADING_MODES = ['default', 'flat', 'matcap', 'ao', 'pbr'];
 const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9];
 
 export interface RenderResult { width: number; height: number; rgba: Uint8Array; notes: string[] }
@@ -201,7 +207,16 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
   return { name, persp: false, eye: c, f: v.f, r: v.r, u: v.u, c, focal: 0, scale: s };
 }
 
-/** Render the geometry; returns RGBA pixels. */
+/**
+ * Render with the asynchronous preparation shading 'pbr' needs (MikkTSpace, texture files through readFile, usually
+ * Host.readFile); every other mode renders exactly as renderGeometry does.
+ */
+export async function renderGeometryAsync(g: Geometry, o: RenderOptions = {}, readFile?: (path: string) => Promise<Uint8Array>): Promise<RenderResult> {
+  if (o.shading === 'pbr' && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
+  return renderGeometry(g, o);
+}
+
+/** Render the geometry; returns RGBA pixels. Shading 'pbr' needs renderGeometryAsync first (or MikkTSpace loaded). */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
   if (g.hasPacked() || g.hasSplines()) {
@@ -424,7 +439,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // shading
   const flatN = shadingMode === 'flat' && nTri ? primNormals(g) : null;
   const matcap = shadingMode === 'matcap';
-  if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
+  let pbrS: PBRScene | null = null;
+  if (shadingMode === 'pbr' && nTri) {
+    const ev = o.exposure ?? 0;
+    if (!Number.isFinite(ev)) throw new Error(`render: exposure expects a number of stops, got ${o.exposure}`);
+    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes);
+    if (o.colorBy || o.highlight || o.checker) notes.push('pbr: color_by, highlight and checker are not shown under shading "pbr"');
+    ovDesc.push(`SHADING PBR STUDIO EV ${fmtNum(ev)} (${pbrS.summary.toUpperCase()})`);
+  } else if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
   // section / clip planes
   const planeAt = (k: number, off: number | undefined, abs: boolean | undefined) => (abs ? off ?? 0 : bmin[k] + (bmax[k] - bmin[k]) * (off ?? 0.5));
   const secC = planeAt(secK, o.sectionOffset, o.sectionAbsolute);
@@ -703,6 +725,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       for (let x = 0; x < W; x++) { const i = (y * W + x) * 3; col[i] = r; col[i + 1] = gg; col[i + 2] = b; }
     }
     const cam = makeCam(vname, bmin, bmax, W, H, o, kind, azDeg, secK);
+    if (pbrS) pbrS.camera(cam.r, cam.u, cam.f);
     // project points
     const sx = new Float32Array(np), sy = new Float32Array(np), cz = new Float32Array(np), vz = new Float32Array(np);
     const project = (x: number, y: number, z: number, outp: number[]) => {
@@ -767,6 +790,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const na = [0, 0, 0], nb = [0, 0, 0], nc = [0, 0, 0];
     const tn = [0, 0, 0];
     const chk = [0, 0, 0];
+    const pbrUV0 = [0, 0], pbrUV1 = [0, 0], pbrUV2 = [0, 0], pbrV = [0, 0, 0], pbrRGB = [0, 0, 0];
     const bf = vi === backView ? new Uint8Array(W * H) : null;
     for (let t = 0; t < nTri; t++) {
       const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2];
@@ -807,6 +831,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       }
       const za = cz[a], zb2 = cz[b], zc = cz[c];
       const inv = 1 / area;
+      // shading 'pbr': screen-space gradients of the affine weights (uv derivatives for the texture level of detail)
+      const g0x = (by - cy) * inv, g0y = (cx - bx) * inv, g1x = (cy - ay) * inv, g1y = (ax - cx) * inv;
       // base colour map: mip level from the triangle's texels per screen pixel (render/texview.ts)
       const texP = texS && texS.has(triPrim[t]) ? triPrim[t] : -1;
       let texLod = 0;
@@ -833,7 +859,30 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           }
           zb[zi] = depth;
           if (bf) bf[zi] = suspicious ? 1 : 0;
+          const aw0 = w0, aw1 = w1;
           if (cam.persp) { const s = w0 * za + w1 * zb2 + w2 * zc; w0 = (w0 * za) / s; w1 = (w1 * zb2) / s; w2 = 1 - w0 - w1; }
+          if (pbrS) {
+            let dudx = 0, dvdx = 0, dudy = 0, dvdy = 0;
+            if (pbrS.hasUV) {
+              const at = (q0: number, q1: number, out: number[]) => {
+                let p0 = q0, p1 = q1;
+                if (cam.persp) { const s = q0 * za + q1 * zb2 + (1 - q0 - q1) * zc; p0 = (q0 * za) / s; p1 = (q1 * zb2) / s; }
+                pbrS!.uvAt(t, p0, p1, 1 - p0 - p1, out);
+              };
+              at(aw0, aw1, pbrUV0); at(aw0 + g0x, aw1 + g1x, pbrUV1); at(aw0 + g0y, aw1 + g1y, pbrUV2);
+              dudx = pbrUV1[0] - pbrUV0[0]; dvdx = pbrUV1[1] - pbrUV0[1]; dudy = pbrUV2[0] - pbrUV0[0]; dvdy = pbrUV2[1] - pbrUV0[1];
+            }
+            if (cam.persp) {
+              const px3 = Pd[a * 3] * w0 + Pd[b * 3] * w1 + Pd[c * 3] * w2, py3 = Pd[a * 3 + 1] * w0 + Pd[b * 3 + 1] * w1 + Pd[c * 3 + 1] * w2, pz3 = Pd[a * 3 + 2] * w0 + Pd[b * 3 + 2] * w1 + Pd[c * 3 + 2] * w2;
+              const vx = cam.eye[0] - px3, vy = cam.eye[1] - py3, vz2 = cam.eye[2] - pz3, vl = Math.hypot(vx, vy, vz2) || 1;
+              pbrV[0] = vx / vl; pbrV[1] = vy / vl; pbrV[2] = vz2 / vl;
+            } else { pbrV[0] = -cam.f[0]; pbrV[1] = -cam.f[1]; pbrV[2] = -cam.f[2]; }
+            pbrS.shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, pbrV, back, pbrRGB);
+            const ci = zi * 3;
+            if (suspicious) { pbrRGB[0] = pbrRGB[0] * 0.35 + 0.12; pbrRGB[1] = pbrRGB[1] * 0.35 + 0.22; pbrRGB[2] = pbrRGB[2] * 0.35 + 0.6; }
+            col[ci] = pbrRGB[0]; col[ci + 1] = pbrRGB[1]; col[ci + 2] = pbrRGB[2];
+            continue;
+          }
           tn[0] = ca[0] * w0 + cb[0] * w1 + cc[0] * w2;
           tn[1] = ca[1] * w0 + cb[1] * w1 + cc[1] * w2;
           tn[2] = ca[2] * w0 + cb[2] * w1 + cc[2] * w2;

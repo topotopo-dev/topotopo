@@ -3,7 +3,7 @@
 //   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
-//                   [--shading flat|matcap|ao] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
+//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
 //                   [--inspect summary|attributes|topology|all]
@@ -30,7 +30,7 @@ import { Engine } from './graph/engine.ts';
 import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { createNodeHost } from './host/node.ts';
-import { renderGeometry } from './render/raster.ts';
+import { renderGeometryAsync } from './render/raster.ts';
 import { parseViews } from './render/raster.ts';
 import type { RenderOptions } from './render/raster.ts';
 import { renderArgs } from './render/options.ts';
@@ -66,7 +66,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
-    '                          [--shading flat|matcap|ao] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
+    '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
     '                          [--textures] (base colour maps on meshes) [--texture name|image/layer|material] (adds the texture view)',
     '                          [--max-triangles 600000] (packed instances drawn; above it an evenly spread subset)',
     '         several renders per cook: repeat --render; options after a --render apply to it, options before the first apply to all',
@@ -211,7 +211,7 @@ async function cook() {
     for (const [f, k] of [['--wireframe', 'wireframe'], ['--hard-angle', 'hard_angle'], ['--section', 'section'], ['--clip', 'clip'], ['--glyphs', 'glyphs'],
       ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
       ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
-      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles']]) if (get(f) !== undefined) a[k] = get(f);
+      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure']]) if (get(f) !== undefined) a[k] = get(f);
     for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures']]) if (has(f)) a[k] = true;
     if (has('--no-view-labels')) a.view_labels = false;
     try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
@@ -245,7 +245,7 @@ async function cook() {
       if (get('--section') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('section') ? views : [...(views ?? parseViews('quad')!), 'section'];
       if (get('--texture') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('texture') ? views : [...(views ?? parseViews('quad')!), 'texture'];
       const title = path.basename(file, '.json') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
-      const img = renderGeometry(geo, { ...ro, views, colorBy: get('--color-by') ?? null, checker: has('--checker'), title });
+      const img = await renderGeometryAsync(geo, { ...ro, views, colorBy: get('--color-by') ?? null, checker: has('--checker'), title }, (t) => engine.host.readFile(t));
       const p = at(out);
       fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
       fs.writeFileSync(p, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));

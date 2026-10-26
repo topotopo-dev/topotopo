@@ -757,11 +757,18 @@ QUESTION → OPTION
   What do the colours mean?                        color_by + legend:true (gradient bar with min/max, or categorical swatches)
   What shape is it?                                shading:"matcap" (clay, reads form) · "ao" (ambient occlusion: creases and
                    cavities darken; ao_radius px) · "flat" (facets, ignores N)
+  How do the materials read? Roughness, metal, maps?  shading:"pbr": the metallic-roughness material glTF export writes
+                   (base colour map × vertex colour, tangent-space normal map in the exported MikkTSpace frame, orm or
+                   roughness map, metallic, emissive, unlit) under a fixed camera-relative studio rig (key, fill, rim and a
+                   sky/ground environment), GGX specular, ACES, exposure (stops, default 0). Deterministic: the same graph
+                   gives the same PNG. Texture files are read from disk; transparency is not evaluated (shaded opaque,
+                   with a note), nor are missing or non-PNG maps (named in the notes).
 Labels never overlap: ones without room are skipped (note says how many; raise size or lower max_labels).
 view_labels:false drops each view's name label and the persp axis gizmo (clean thumbnails, e.g. the shelf's).
 Examples: render {views:["persp","section"], section_axis:"z", wireframe:"hard", label_groups:true}
           render {views:"turntable", shading:"matcap"} · render {glyphs:"N", clip:{axis:"x", offset:0.5}}
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
+  --shading pbr --exposure 0.5
   --no-view-labels`,
 
   export: `EXPORT

@@ -11,7 +11,7 @@ import { didYouMean } from '../graph/params.ts';
 import { migrateGraph } from '../graph/migrate.ts';
 import { catalogText, nodeDoc, TOPICS, topicList, INSTRUCTIONS } from './docs.ts';
 import { summarize, inspect } from '../inspect.ts';
-import { renderGeometry } from '../render/raster.ts';
+import { renderGeometryAsync } from '../render/raster.ts';
 import type { RenderOptions } from '../render/raster.ts';
 import { renderArgs } from '../render/options.ts';
 import { encodePNG } from '../render/png.ts';
@@ -69,8 +69,9 @@ const FRAME_PROP = {
   frame: { type: 'number', description: 'frame to cook at (default 1; frame 1 = time 0, 24 fps). Only time-dependent nodes (solver, @Frame wrangles, "=frame" params) change between frames.' },
 };
 
-function pngContent(g: Geometry, o: RenderOptions): { img: Content; notes: string[]; png: Uint8Array } {
-  const r = renderGeometry(g, o);
+/** Render to a PNG content block; shading "pbr" reads texture files through the host. */
+async function pngContent(g: Geometry, o: RenderOptions, host: Host): Promise<{ img: Content; notes: string[]; png: Uint8Array }> {
+  const r = await renderGeometryAsync(g, o, (t) => host.readFile(t));
   const png = encodePNG(r.rgba, r.width, r.height, (d) => zlib.deflateSync(d, { level: 6 }));
   return { img: { type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, notes: r.notes, png };
 }
@@ -141,7 +142,8 @@ const RENDER_PROPS = {
   label_pieces: { type: 'boolean', description: 'number connected pieces (#0, #1, … in connectivity order)' },
   label_attrib: { type: 'string', description: 'label each distinct value of a string/int attribute (e.g. "name") on its elements; colours match color_by' },
   legend: { type: 'boolean', description: 'legend for color_by (gradient bar with min/max, or categorical swatches) and highlight' },
-  shading: { type: 'string', enum: ['default', 'flat', 'matcap', 'ao'], description: 'flat: facets (ignores N); matcap: clay that reads form; ao: screen-space ambient occlusion darkens creases and cavities' },
+  shading: { type: 'string', enum: ['default', 'flat', 'matcap', 'ao', 'pbr'], description: 'flat: facets (ignores N); matcap: clay that reads form; ao: screen-space ambient occlusion darkens creases and cavities; pbr: the exported metallic-roughness material (base colour, normal, orm/roughness maps, emissive, unlit) under a fixed studio light rig, deterministic' },
+  exposure: { type: 'number', description: 'shading "pbr": exposure in stops (default 0)' },
   ao_radius: { type: 'number', description: 'shading "ao": sample radius in pixels (default 10)' },
   look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x,y,z] (same as target)' },
   ortho_scale: { type: 'number', description: 'ortho/section views: world width across a view (default: fit the bbox)' },
@@ -160,11 +162,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const engine = ws.engine;
 
   /** The text (+ optional render) of a cook report. */
-  const reportResult = (name: string, r: CookReport, a: any, extraNotes: string[] = []): ToolResult => {
+  const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
     const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
-      const { img, notes, png } = pngContent(r.geo, ro);
+      const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
       const renderPath = renderDestination(name, r.target);
       fs.mkdirSync(path.dirname(renderPath), { recursive: true }); fs.writeFileSync(renderPath, png);
       new ArtifactStore(ws.exportDir).record([renderPath], { graph: name, node: r.target, format: 'png' });
@@ -345,7 +347,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
-        const { img, notes, png } = pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`));
+        const { img, notes, png } = await pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`), engine.host);
         const content: Content[] = [img];
         const info: string[] = [];
         {

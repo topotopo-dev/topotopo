@@ -8,6 +8,7 @@ import { Image, channelsOf, imageRef, isImage, referenceableImages, resizeLayer 
 import { MATERIAL_ATTRIB, normalizeMaterial, primMaterials, readMaterials, writeMaterials } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { drawText, textWidth } from './font.ts';
+import { imageRowOfV } from '../core/texcoord.ts';
 
 interface Entry { label: string; img: Image; layer: string }
 
@@ -189,7 +190,7 @@ export function textureSampler(g: Geometry, notes: string[]): TextureSampler | n
     sample(p, u, v, lod, out) {
       const chain = perPrim[p]!;
       const m = chain[Math.max(0, Math.min(chain.length - 1, Math.round(lod)))];
-      const x = u * m.w - 0.5, y = (1 - v) * m.h - 0.5;
+      const x = u * m.w - 0.5, y = imageRowOfV(v, m.h) - 0.5;
       const x0 = Math.floor(x), y0 = Math.floor(y), tx = x - x0, ty = y - y0;
       const i0 = wrap(x0, m.w), i1 = wrap(x0 + 1, m.w), j0 = wrap(y0, m.h), j1 = wrap(y0 + 1, m.h);
       const d = m.data, ch = m.ch;
