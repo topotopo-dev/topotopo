@@ -138,6 +138,7 @@ const RENDER_PROPS = {
   glyph_scale: { type: 'number', description: 'glyph length in world units (default 5% of the bbox diagonal)' },
   max_glyphs: { type: 'number', description: 'evenly subsample to at most this many glyphs (default 400)' },
   max_triangles: { type: 'number', description: 'packed instances: draw up to this many expanded triangles (default 600000, max 50M); above it an evenly spread subset is drawn and a note says so' },
+  heightfield_res: { description: 'heightfields: the most quads drawn per side (default 256: a 513 × 513 field draws at 257 × 257, and the footer and a note say so), or "full" for every sample', anyOf: [{ type: 'number', minimum: 1 }, { type: 'string', enum: ['full'] }] },
   label_groups: { type: 'boolean', description: 'name each point/prim group on a visible member near its centroid, outline prim groups / mark group points in the label colour, legend with counts' },
   label_pieces: { type: 'boolean', description: 'number connected pieces (#0, #1, … in connectivity order)' },
   label_attrib: { type: 'string', description: 'label each distinct value of a string/int attribute (e.g. "name") on its elements; colours match color_by' },

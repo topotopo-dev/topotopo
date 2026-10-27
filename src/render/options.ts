@@ -47,6 +47,13 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = String(v);
   }
+  // heightfields: quads per side (default 256), or "full" for every sample
+  const hr = pick('heightfield_res', 'heightfieldRes');
+  if (hr !== undefined) {
+    const v = hr === 'full' || hr === Infinity ? Infinity : typeof hr === 'string' || typeof hr === 'number' ? Number(hr) : NaN;
+    if (!(v >= 1)) throw new Error(`render: heightfield_res expects quads per side (1 or more) or "full", got ${JSON.stringify(hr)}`);
+    o.heightfieldRes = v;
+  }
   const sa = pick('section_axis', 'sectionAxis');
   if (sa !== undefined) o.sectionAxis = axis(sa, 'section_axis');
   const so = pick('section_offset', 'sectionOffset');

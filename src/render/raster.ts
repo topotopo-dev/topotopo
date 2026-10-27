@@ -5,7 +5,8 @@
 // (all / hard / boundary / edge groups), a section view and a persp clip plane with filled caps,
 // vector glyphs (N, up, orient, v), point/prim numbers, group/piece/attribute labels, legends,
 // flat/matcap/AO shading and a self-describing annotation footer. With none of them set the
-// output is exactly what it always was.
+// output is exactly what it always was, except that a heightfield drawn at fewer samples than it has
+// (above heightfieldRes quads per side) gets a second footer line saying so.
 import { readMaterials, primMaterials } from '../core/materials.ts';
 import { Geometry } from '../core/geometry.ts';
 import { buildEdges, connectivity, primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
@@ -20,7 +21,7 @@ import { PLANE_UV, sliceTriangles, windingGrid } from './section.ts';
 import type { Slice } from './section.ts';
 import { LabelPlacer, ambientOcclusion, dotOv, drawLabel, drawLegend, lineOv } from './overlay.ts';
 import type { DepthTol, LegendItem, RGB } from './overlay.ts';
-import { withHeightfieldPreview } from '../core/heightfield.ts';
+import { heightfieldPreviewStep, isHeightfield, withHeightfieldPreview } from '../core/heightfield.ts';
 import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler } from './texview.ts';
 import { pbrScene, preparePBR } from './pbr.ts';
@@ -63,6 +64,11 @@ export interface RenderOptions {
   ssaa?: number;
   /** packed instances: triangles to draw at most (default RENDER_TRIANGLE_BUDGET, 600k; up to 50M); above it an evenly spread subset */
   maxTriangles?: number;
+  /**
+   * heightfields: the most quads drawn per side (default HEIGHTFIELD_RENDER_RES, 256; Infinity = every sample). A
+   * larger field is drawn decimated, and the footer and a note say so.
+   */
+  heightfieldRes?: number;
   title?: string;
   /** shade 3D views with an 8×8 procedural checker from uv (stretch and flips become visible) */
   checker?: boolean;
@@ -114,6 +120,9 @@ export interface RenderOptions {
   /** 'texture' view: "" = every image, an image name, "image/layer", or a material name (its maps as a strip) */
   texture?: string;
 }
+
+/** The most quads per side a heightfield is drawn with by default (RenderOptions.heightfieldRes). */
+export const HEIGHTFIELD_RENDER_RES = 256;
 
 /** View presets accepted by parseViews (MCP render "views", CLI --views). */
 export const VIEW_PRESETS: Record<string, ViewName[]> = {
@@ -224,7 +233,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const x = expandForRender(g, o, budget);
     const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r;
   }
-  g = withHeightfieldPreview(g); // heightfields draw as their (decimated) grid mesh with layers as attributes
+  // heightfields draw as their grid mesh with layers as attributes, decimated to heightfieldRes quads per side
+  const hfRes = o.heightfieldRes ?? HEIGHTFIELD_RENDER_RES;
+  if (!(hfRes >= 1)) throw new Error(`heightfieldRes must be at least 1 (quads per side) or Infinity (every sample), got ${hfRes}`);
+  const hfShown = g.volumes.filter(isHeightfield).map((v) => ({ v, ...heightfieldPreviewStep(v, hfRes) })).filter((x) => x.step > 1);
+  g = withHeightfieldPreview(g, hfRes);
   g = withSdfGridPreview(g); // sampled SDFs draw through the existing level-set mesher at preview resolution
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   // images and nothing else to draw in 3D: the texture view (render/texview.ts)
@@ -250,10 +263,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const clipK = o.clip ? AXES.indexOf(o.clip.axis) : -1;
   if (o.clip && clipK < 0) throw new Error(`unknown clip axis "${o.clip.axis}" (use x, y or z)`);
   const annotate = o.annotate ?? !!(wireMode || o.pointNumbers || o.primNumbers || hasSection || clipK >= 0 || glyphMode || o.labelGroups || o.labelPieces || o.labelAttrib || o.legend || shadingMode);
-  const footerH = 22 * ui + (annotate ? 16 * ui : 0);
+  // a heightfield drawn at fewer samples than it has: said on the second footer line (unless annotate is false)
+  const hfLine = hfShown.map((x) => `HEIGHTFIELD ${hfShown.length > 1 ? x.v.name.toUpperCase() + ' ' : ''}SHOWN AT ${x.shown[0]}×${x.shown[1]} OF ${x.v.width}×${x.v.height}`).join('  ·  ');
+  const hfFooter = !!hfLine && o.annotate !== false;
+  const footerH = 22 * ui + (annotate || hfFooter ? 16 * ui : 0);
   const viewLabels = o.viewLabels ?? true;
   const outW = cols * tile + (cols - 1) * 2, outH = rows * tile + (rows - 1) * 2 + footerH;
-  const notes: string[] = [];
+  const notes: string[] = hfShown.map((x) =>
+    `heightfield "${x.v.name}" shown at ${x.shown[0]}×${x.shown[1]} of ${x.v.width}×${x.v.height} samples (1 in ${x.step} per side); heightfield_res "full" (CLI --heightfield-res full) draws every sample`);
 
   // --- scene data shared by all views
   const Pd = g.P, np = g.numPoints;
@@ -1219,26 +1236,29 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     if (lx > textWidth(stats, 2 * ui) + 30 * ui) drawText(out, outW, outH, lx, fy, legend, [1, 0.85, 0.4], 2 * ui, false);
   }
   if (labelsSkipped) notes.push(`labels: ${labelsSkipped} not drawn to avoid overlaps (raise size, zoom in, or lower max_labels)`);
-  if (annotate) {
-    // second line: active overlays, then up to three geometry notes
+  if (annotate || hfFooter) {
+    // second line: a decimated heightfield, then the active overlays and up to three geometry notes
     const gn: string[] = [];
-    if (np) { const pieces = conn ? conn.count : connectivity(g).count; gn.push(`${pieces} PIECE${pieces === 1 ? '' : 'S'}`); }
-    if (closedPrims) gn.push(openEdges ? `${openEdges} OPEN EDGES` : nonManifoldEdges ? `${nonManifoldEdges} NON-MANIFOLD EDGES` : 'NO OPEN EDGES');
-    const capAll = capCells + capFlipCells;
-    const bp = shadedPix ? (backPix / shadedPix) * 100 : 0;
-    if (capFlipCells && capAll) {
-      const pct = (capFlipCells / capAll) * 100;
-      gn.push(`CUT ${pct.toFixed(1)}% INSIDE-OUT`);
-      notes.push(`section: ${pct.toFixed(1)}% of the cut area is inside-out (blue): flipped normals`);
-    } else if (bp >= 0.05) gn.push(`BACK-FACING ${bp.toFixed(1)}% OF PIXELS`);
-    if (bp >= 0.05) notes.push(`${bp.toFixed(1)}% of the shaded pixels in the ${views[backView]} view are back faces of closed pieces (blue): flipped normals?`);
-    const line = [...ovDesc, ...gn.slice(0, 3)].join('  ·  ');
+    if (annotate) {
+      if (np) { const pieces = conn ? conn.count : connectivity(g).count; gn.push(`${pieces} PIECE${pieces === 1 ? '' : 'S'}`); }
+      if (closedPrims) gn.push(openEdges ? `${openEdges} OPEN EDGES` : nonManifoldEdges ? `${nonManifoldEdges} NON-MANIFOLD EDGES` : 'NO OPEN EDGES');
+      const capAll = capCells + capFlipCells;
+      const bp = shadedPix ? (backPix / shadedPix) * 100 : 0;
+      if (capFlipCells && capAll) {
+        const pct = (capFlipCells / capAll) * 100;
+        gn.push(`CUT ${pct.toFixed(1)}% INSIDE-OUT`);
+        notes.push(`section: ${pct.toFixed(1)}% of the cut area is inside-out (blue): flipped normals`);
+      } else if (bp >= 0.05) gn.push(`BACK-FACING ${bp.toFixed(1)}% OF PIXELS`);
+      if (bp >= 0.05) notes.push(`${bp.toFixed(1)}% of the shaded pixels in the ${views[backView]} view are back faces of closed pieces (blue): flipped normals?`);
+    }
+    const overlays = [...ovDesc, ...gn.slice(0, 3)].join('  ·  ');
+    const line = [hfFooter ? hfLine : '', annotate ? overlays : ''].filter(Boolean).join('  ·  ');
     const maxW = outW - 12 * ui;
     let fs2 = 2 * ui, txt = line;
     if (textWidth(txt, fs2) > maxW) fs2 = ui;
     while (txt.length > 4 && textWidth(txt, fs2) > maxW) txt = txt.slice(0, -4) + '..';
     drawText(out, outW, outH, 6 * ui, fy + 18 * ui + (fs2 < 2 * ui ? 3 * ui : 0), txt, [0.62, 0.84, 1], fs2, false);
-    notes.push('overlays: ' + line.toLowerCase());
+    if (annotate) notes.push('overlays: ' + overlays.toLowerCase());
   }
   const rgba = new Uint8Array(outW * outH * 4);
   for (let i = 0, j = 0; i < out.length; i += 3, j += 4) {

@@ -621,6 +621,22 @@ section('CLI arguments');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
 }
 
+section('CLI heightfield render resolution');
+{
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const big = path.join(tmp, 'big_field.json');
+  fs.writeFileSync(big, JSON.stringify({ nodes: { hf: { type: 'heightfield', params: { size: [64, 64], samples: [513, 513] } }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 4, element_size: 16 } } } }));
+  const sizeOf = (f: string) => { const d = fs.readFileSync(f); return [d.readUInt32BE(16), d.readUInt32BE(20)]; };
+  const preview = cli(big, '--views', 'top', '--size', '160', '--render', path.join(tmp, 'hf_preview.png'));
+  check(preview.status === 0 && /heightfield "heightfield" shown at 257×257 of 513×513 samples \(1 in 2 per side\); heightfield_res "full" \(CLI --heightfield-res full\)/.test(preview.stdout),
+    `a 513 × 513 heightfield renders at 257 × 257 and the notes say so (${preview.stdout.split('\n').find((l) => l.startsWith('rendered')) ?? preview.stderr.slice(0, 200)})`);
+  const full = cli(big, '--views', 'top', '--size', '160', '--heightfield-res', 'full', '--render', path.join(tmp, 'hf_full.png'));
+  check(full.status === 0 && !/shown at/.test(full.stdout) && sizeOf(path.join(tmp, 'hf_preview.png'))[1] === sizeOf(path.join(tmp, 'hf_full.png'))[1] + 16,
+    '--heightfield-res full draws every sample: no note, and no second footer line');
+  const bad = cli(big, '--heightfield-res', 'lots', '--render', path.join(tmp, 'hf_bad.png'));
+  check(bad.status === 1 && /heightfield_res expects quads per side/.test(bad.stderr), '--heightfield-res rejects a value that is not a number or "full"');
+}
+
 section('CLI several renders per cook, triangle budget');
 {
   // dogfood 2026-10-15: three layers cost three cooks; dense instancing previewed as a 10% subset

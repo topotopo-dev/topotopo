@@ -285,6 +285,10 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   let e1 = '';
   try { renderArgs({ section_axis: 'w' }); } catch (e: any) { e1 = e.message; }
   check(/section_axis expects/.test(e1), 'renderArgs: bad axis rejected');
+  let e2 = '';
+  try { renderArgs({ heightfield_res: 0 }); } catch (e: any) { e2 = e.message; }
+  check(renderArgs({ heightfield_res: 'full' }).heightfieldRes === Infinity && renderArgs({ heightfield_res: '512' }).heightfieldRes === 512 && renderArgs({}).heightfieldRes === undefined
+    && /heightfield_res expects quads per side/.test(e2), 'renderArgs: heightfield_res takes quads per side or "full"');
   // winding: a CCW square fills +1, a CW one -1, a CCW square with a CW hole leaves the hole empty
   const sq = (x0: number, y0: number, x1: number, y1: number, ccw: boolean) => {
     const p = ccw ? [x0, y0, x1, y0, x1, y1, x0, y1] : [x0, y0, x0, y1, x1, y1, x1, y0];

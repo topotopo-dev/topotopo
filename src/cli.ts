@@ -3,7 +3,7 @@
 //   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
-//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800] [--render-scale 2] [--export out.glb]
+//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800] [--render-scale 2] [--heightfield-res 256|full] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
 //                   [--inspect summary|attributes|topology|all|uv [--uv-resolution 1024] [--json]]
@@ -70,6 +70,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
     '                          [--textures] (base colour maps on meshes) [--texture name|image/layer|material] (adds the texture view)',
     '                          [--max-triangles 600000] (packed instances drawn; above it an evenly spread subset)',
+    '                          [--heightfield-res 256|full] (heightfields: quads drawn per side, default 256, said in the footer when a field has more; full = every sample)',
     '         several renders per cook: repeat --render; options after a --render apply to it, options before the first apply to all',
     '           e.g. --views top --render h.png --color-by height --render r.png --color-by river',
     '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails)',
@@ -212,7 +213,8 @@ async function cook() {
     for (const [f, k] of [['--wireframe', 'wireframe'], ['--hard-angle', 'hard_angle'], ['--section', 'section'], ['--clip', 'clip'], ['--glyphs', 'glyphs'],
       ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
       ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
-      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure']]) if (get(f) !== undefined) a[k] = get(f);
+      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'],
+      ['--heightfield-res', 'heightfield_res']]) if (get(f) !== undefined) a[k] = get(f);
     for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures']]) if (has(f)) a[k] = true;
     if (has('--no-view-labels')) a.view_labels = false;
     try { return renderArgs(a); } catch (e: any) { return fail(e.message); }

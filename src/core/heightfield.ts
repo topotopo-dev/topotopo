@@ -553,11 +553,18 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
   return g;
 }
 
+/**
+ * How the preview draws a heightfield with at most maxRes quads per side (Infinity: every sample): every step-th
+ * sample (the last one always), `shown` samples along X and Z.
+ */
+export function heightfieldPreviewStep(hf: HeightfieldVolume, maxRes = 256): { step: number; shown: [number, number] } {
+  const step = Math.max(1, Math.ceil((Math.max(hf.width, hf.height) - 1) / Math.max(1, maxRes)));
+  return { step, shown: [steps(hf.width, step).length, steps(hf.height, step).length] };
+}
+
 /** The render preview of a heightfield: its grid decimated to at most maxRes quads per side, all layers as point attributes, height-ramp Cd with the mask in red. */
 export function heightfieldPreviewMesh(hf: HeightfieldVolume, maxRes = 256): Geometry {
-  const f = asHeightfield(hf);
-  const step = Math.max(1, Math.ceil((Math.max(f.width, f.height) - 1) / Math.max(1, maxRes)));
-  return heightfieldToMesh(f, { step, layers: true, normals: true, color: 'preview' });
+  return heightfieldToMesh(asHeightfield(hf), { step: heightfieldPreviewStep(hf, maxRes).step, layers: true, normals: true, color: 'preview' });
 }
 
 /**

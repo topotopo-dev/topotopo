@@ -608,6 +608,18 @@ section('render, inspect, fingerprints, MCP export');
   check(!img.notes.some((n) => /SDF/.test(n)) && hi - lo > 40, 'render draws a heightfield as its shaded preview mesh (mask in red)');
   const lay = renderGeometry(g, { views: ['top'], size: 128, colorBy: 'mask' });
   check(lay.notes.some((n) => /color by mask/.test(n)), 'render color_by a layer');
+  // a field larger than heightfieldRes (256 quads per side) is drawn decimated, and the render says so
+  check(img.height === 128 + 22 && !img.notes.some((n) => /shown at/.test(n)), 'a 41 × 41 field renders in full: one footer line, no note');
+  const big = await geo({ hf: { type: 'heightfield', params: { size: [64, 32], samples: [513, 257] } } }, 'hf');
+  const dec = renderGeometry(big, { views: ['top'], size: 128 });
+  const all = renderGeometry(big, { views: ['top'], size: 128, heightfieldRes: Infinity });
+  const half = renderGeometry(big, { views: ['top'], size: 128, heightfieldRes: 128 });
+  check(dec.notes[0] === 'heightfield "heightfield" shown at 257×129 of 513×257 samples (1 in 2 per side); heightfield_res "full" (CLI --heightfield-res full) draws every sample'
+    && dec.height === 128 + 22 + 16, `decimated heightfield: a note and a second footer line (${dec.notes[0]})`);
+  check(!all.notes.some((n) => /shown at/.test(n)) && all.height === 128 + 22 && half.notes.some((n) => /shown at 129×65 of 513×257 samples \(1 in 4 per side\)/.test(n)),
+    'heightfieldRes: Infinity draws every sample, a smaller value decimates further');
+  const quiet = renderGeometry(big, { views: ['top'], size: 128, annotate: false });
+  check(quiet.notes.some((n) => /shown at 257×129/.test(n)) && quiet.height === 128 + 22, 'annotate: false keeps the single footer line (the note stays in the notes)');
   const s = summarize(g);
   check(/1 heightfield\(s\)/.test(s) && /heightfield "heightfield": 41×41 samples, cell 0.10 m/.test(s) && /mask \[/.test(s), 'inspect summary lists the heightfield and its layers');
   const fp1 = fingerprint(g), fp2 = fingerprint(g.clone());
