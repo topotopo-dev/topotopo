@@ -37,7 +37,7 @@ struct FExpectedMesh
 
 constexpr FExpectedMesh ExpectedMeshes[] = {
     {TEXT("pine"), 117}, {TEXT("fir"), 81}, {TEXT("oak"), 94},
-    {TEXT("rock_a"), 119}, {TEXT("rock_b"), 125}
+    {TEXT("rock_a"), 118}, {TEXT("rock_b"), 125}
 };
 
 FString FindDemoCSV()
@@ -225,7 +225,7 @@ private:
                 OutputPoints += Points->GetNumPoints();
             }
         }
-        Test.TestEqual(TEXT("Graph output contains 536 points"), OutputPoints, 536);
+        Test.TestEqual(TEXT("Graph output contains 535 points"), OutputPoints, 535);
 
         TArray<UInstancedStaticMeshComponent*> Instances;
         Actor->GetComponents(Instances); // Includes UHierarchicalInstancedStaticMeshComponent subclasses.
@@ -249,7 +249,7 @@ private:
                         // ISM matrices are floats even with LWC. 0.01 cm / 0.0001 degrees/scale comfortably
                         // covers float storage without permitting an axis swap or local/world-space error.
                         Test.TestTrue(TEXT("First pine world position"),
-                            First.GetLocation().Equals(FVector(3740.23858, -6233.69197, 396.099846), 0.01));
+                            First.GetLocation().Equals(FVector(3840.23858, -6233.69197, 363.347349), 0.01));
                         Test.TestTrue(TEXT("First pine world rotation"),
                             First.Rotator().Equals(FRotator(0, -105.954505, 0), 0.0001));
                         Test.TestTrue(TEXT("First pine world scale"),
@@ -261,7 +261,7 @@ private:
             Test.TestEqual(FString::Printf(TEXT("%s instance count"), Expected.Name), MeshInstances, Expected.Instances);
             TotalInstances += MeshInstances;
         }
-        Test.TestEqual(TEXT("Total spawned instance count"), TotalInstances, 536);
+        Test.TestEqual(TEXT("Total spawned instance count"), TotalInstances, 535);
     }
 
     void Cleanup()

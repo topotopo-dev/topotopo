@@ -31,7 +31,7 @@ an import, choose another set name; the utility does not overwrite assets or cle
 
 - **Meshes/**: each sidecar prototype GLB imports through Interchange as one named Static Mesh with its material slots. Without the sidecar, `meshes/*.glb` filenames supply the mesh names. Import is stopped if a prototype produces multiple meshes or loses its expected name. Exact `Mesh -> asset path` entries are printed in `LogTopoTopoImport`.
 - **Objects/**: Interchange imports the expanded GLB with mesh combination disabled, preserving per-name splits and materials. Expanded copies of any instanced prototypes are reference assets only. The utility places only ordinary meshes absent from the prototype list, such as `road`. It checks that the used prototype names survive the expanded import before placing anything, so unexpected importer renaming cannot silently duplicate the trees/rocks.
-- **TopoTopo_PluginDemo**: one actor with a HISM component per prototype, populated from CSV world transforms. The demo has **536 instances** in **five prototype components**: pine 117, fir 81, oak 94, rock_a 119, rock_b 125. With `objects=1`, one additional HISM component has the ordinary road at the identity transform. The expanded pine/fir/oak/rock meshes are not placed.
+- **TopoTopo_PluginDemo**: one actor with a HISM component per prototype, populated from CSV world transforms. The demo has **535 instances** in **five prototype components**: pine 117, fir 81, oak 94, rock_a 118, rock_b 125. With `objects=1`, one additional HISM component has the ordinary road at the identity transform. The expanded pine/fir/oak/rock meshes are not placed.
 - **TopoTopo_PluginDemo_Landscape** (optional): one Landscape from the 16-bit heightmap. It has 253 x 253 samples, 63 quads per section, 2 x 2 sections per component, and 2 x 2 components. The actor corner is `(-6300, -6300, 1169.3223)` cm, scale `(50, 50, 4.603792)`. Its XY extent is -6300 to +6300 cm. The UI's centered location `(0, 0, 1169.3223)` is not the actor corner.
 - **Landscape/LI_*** (`landscape=1 layers=1`): `ULandscapeLayerInfoObject` assets for every manifest layer,
   assigned to the Landscape with their PNG weights. Demo order: `LI_mask`, `LI_sediment`, `LI_debris`,
@@ -41,7 +41,7 @@ an import, choose another set name; the utility does not overwrite assets or cle
   Landscape. The final destination folder supplies the set name in `M_TopoTopo_<set>`; all eleven demo
   Landscape assets live under `/Game/TopoTopo/PluginDemo/Landscape/`.
 
-The first pine transform is approximately position `(3740.24, -6233.69, 396.10)` cm, yaw `-105.95` degrees and uniform scale `2.029`. The CSV is already converted to Unreal axes and units; it is read in `AsWritten` mode. No second Y/Z swap or metre-to-centimetre scaling is applied.
+The first pine transform is approximately position `(3840.24, -6233.69, 363.35)` cm, yaw `-105.95` degrees and uniform scale `2.029`. The CSV is already converted to Unreal axes and units; it is read in `AsWritten` mode. No second Y/Z swap or metre-to-centimetre scaling is applied.
 
 Current CSVs call the prim name attribute `name_attr`, separate from the canonical `Name` row key. For older
 CSVs containing both `Name` and `name` (or `Mesh` and `mesh`, etc.), the loader retains the canonical column,
@@ -154,7 +154,7 @@ Set a **TopoTopo Point Stream** node's file to the same `instances.csv`, coordin
 
 For automation, supply `-TopoTopoDemoCSV="<absolute path>/instances.csv"` at editor startup and run
 `Automation RunTests TopoTopo.PCG.GraphSpawns536`. It builds and runs the two-node graph in an isolated test
-world, waits for PCG generation across automation frames (60-second timeout), checks 536 output points and
+world, waits for PCG generation across automation frames (60-second timeout), checks 535 output points and
 the five component counts/first pine transform, then cleans up. It can use the existing PluginDemo meshes
 without modifying the imported scene. Missing meshes produce an explicit `SKIPPED` warning, which is not
 PCG acceptance; missing CSV fails. Full test names and expected outcomes are in [README.md](README.md#automation-and-editor-checks).

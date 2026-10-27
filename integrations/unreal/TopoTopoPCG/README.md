@@ -70,7 +70,7 @@ expanded reference meshes into `<set>/Objects`. Only ordinary objects absent fro
 expanded file; placing its tree/rock reference meshes too would duplicate the CSV instances. Assets and level
 changes remain unsaved for review. Repeated imports require a fresh destination folder.
 
-Expected demo: 536 instances in five groups (117 pine, 81 fir, 94 oak, 119 rock_a, 125 rock_b), plus the road,
+Expected demo: 535 instances in five groups (117 pine, 81 fir, 94 oak, 118 rock_a, 125 rock_b), plus the road,
 and optionally one 253 x 253 Landscape with ten assigned weight layers and a readable demo material.
 With all Landscape options enabled, `/Game/TopoTopo/PluginDemo/Landscape/` contains:
 
@@ -133,7 +133,7 @@ Content Browser Interchange into `/Game/TopoTopo/PluginDemo/Meshes`. In a fresh 
    to inspect the resulting points. The graph **Input** is not needed.
 3. Assign this graph to a PCG component/volume and Generate. Positions are world space; moving the PCG actor
    does not offset the stream. Do not also keep workflow 1's instance actor in this level.
-4. Inspect the point-stream node: 536 points, `Mesh` as the original name and `MeshPath` as a Soft Object Path.
+4. Inspect the point-stream node: 535 points, `Mesh` as the original name and `MeshPath` as a Soft Object Path.
    Inspect the spawner's mesh selector: **PCGMeshSelectorByAttribute**, **Attribute Name = MeshPath**.
 
 `TopoTopo Instance Spawner` is a thin settings subclass of Unreal's Static Mesh Spawner. It selects `MeshPath`
@@ -238,7 +238,7 @@ Output Log console command for the acceptance fixture is:
 Automation RunTests TopoTopo.UnrealDemo.PointStream
 ```
 
-The fixture checks 536 points and the first pine at `(3740.23858,-6233.69197,396.099846)`, rotator
+The fixture checks 535 points and the first pine at `(3840.23858,-6233.69197,363.347349)`, rotator
 `(Pitch=0,Yaw=-105.954505,Roll=0)`, uniform scale `2.02927671`, mesh counts, types and `name_attr` PCG metadata.
 
 After importing the five meshes into `/Game/TopoTopo/PluginDemo/Meshes`, run the actual PCG path:
@@ -254,8 +254,8 @@ world's PCG subsystem while editor frames service asynchronous work. A synchrono
 next-frame callbacks used by PCG. Completion or a 60-second timeout cancels pending work, cleans up managed
 resources and destroys the test world. The current level and content assets are not saved or changed.
 
-Expect 536 graph-output points, exactly five ISM/HISM components, counts pine 117 / fir 81 / oak 94 /
-rock_a 119 / rock_b 125, and the first pine world transform above. ISM float storage is checked within
+Expect 535 graph-output points, exactly five ISM/HISM components, counts pine 117 / fir 81 / oak 94 /
+rock_a 118 / rock_b 125, and the first pine world transform above. ISM float storage is checked within
 0.01 cm for position and 0.0001 for rotation degrees and scale. If any required mesh is absent, the test emits
 **SKIPPED TopoTopo.PCG.GraphSpawns536** with the missing paths and import instructions. UE simple automation
 displays this as success with a warning, **not an accepted PCG run**; import the meshes and rerun.
@@ -279,7 +279,7 @@ bundle and rerun. Shader compilation and visual inspection still belong to the e
 
 | Test | Expected result |
 |---|---|
-| `TopoTopo.UnrealDemo.PointStream` | 536 fixture points; five mesh totals, transforms, typed metadata including `name_attr`, mapping override. Requires CSV, no mesh assets. |
+| `TopoTopo.UnrealDemo.PointStream` | 535 fixture points; five mesh totals, transforms, typed metadata including `name_attr`, mapping override. Requires CSV, no mesh assets. |
 | `TopoTopo.PCG.GraphSpawns536` | Real graph generation and component/transform checks above. Requires CSV and five imported meshes; no skip for acceptance. |
 | `TopoTopo.Stream.CSVCollisionCompatibility` | Canonical columns and suffixed attributes preserved, independent of column order; warnings and exact metadata filtering checked. |
 | `TopoTopo.Stream.LegacyFormats` | Legacy points JSON keeps native conversion; both mesh-sidecar tags resolve identical paths and reject version 2. |

@@ -150,13 +150,13 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
         AddError(Error);
         return false;
     }
-    TestEqual(TEXT("Demo has 536 points"), Stream.Rows.Num(), 536);
+    TestEqual(TEXT("Demo has 535 points"), Stream.Rows.Num(), 535);
     if (Stream.Rows.IsEmpty())
     {
         return false;
     }
     const FTopoTopoStreamRow& First = Stream.Rows[0];
-    TransformNear(*this, TEXT("First pine"), First.Transform, FVector(3740.23858, -6233.69197, 396.099846),
+    TransformNear(*this, TEXT("First pine"), First.Transform, FVector(3840.23858, -6233.69197, 363.347349),
         FRotator(0, -105.954505, 0), FVector(2.02927671));
     TestEqual(TEXT("First seed"), First.Seed, 0);
     Near(*this, TEXT("First density"), First.Density, 1);
@@ -193,7 +193,7 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Pine instances"), Counts.FindRef(TEXT("pine")), 117);
     TestEqual(TEXT("Fir instances"), Counts.FindRef(TEXT("fir")), 81);
     TestEqual(TEXT("Oak instances"), Counts.FindRef(TEXT("oak")), 94);
-    TestEqual(TEXT("Rock A instances"), Counts.FindRef(TEXT("rock_a")), 119);
+    TestEqual(TEXT("Rock A instances"), Counts.FindRef(TEXT("rock_a")), 118);
     TestEqual(TEXT("Rock B instances"), Counts.FindRef(TEXT("rock_b")), 125);
 
     UPCGPointArrayData* Data = TopoTopoPCG::CreatePointData(Stream);
@@ -201,9 +201,9 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
     {
         return false;
     }
-    TestEqual(TEXT("PCG emits 536 points"), Data->GetNumPoints(), 536);
+    TestEqual(TEXT("PCG emits 535 points"), Data->GetNumPoints(), 535);
     TransformNear(*this, TEXT("PCG first pine"), Data->GetConstTransformValueRange()[0],
-        FVector(3740.23858, -6233.69197, 396.099846), FRotator(0, -105.954505, 0), FVector(2.02927671));
+        FVector(3840.23858, -6233.69197, 363.347349), FRotator(0, -105.954505, 0), FVector(2.02927671));
     const PCGMetadataEntryKey Entry = Data->GetConstMetadataEntryValueRange()[0];
     if (const auto* Mesh = MetadataAttribute<FString>(*this, Data, TEXT("Mesh")))
     {
