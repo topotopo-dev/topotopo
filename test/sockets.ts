@@ -40,20 +40,20 @@ const throwsWith = async (f: () => Promise<unknown>, re: RegExp) => { try { awai
 const named = (name: string, input: string): NodeSpec => ({ type: 'attrib_create', in: [input], params: { name: 'name', class: 'prim', value: name } });
 const BODY: Record<string, NodeSpec> = {
   box: { type: 'box', params: { size: [0.06, 0.1, 0.3] } },
-  body: named('receiver', 'box'),
+  body: named('housing', 'box'),
   m0: { type: 'box', params: { size: [0.03, 0.12, 0.04], center: [0, -0.06, 0.08] } },
-  mag: named('magazine_lod0', 'm0'),
-  both: { type: 'merge', in: ['body', 'mag'] },
+  glass: named('glass_lod0', 'm0'),
+  both: { type: 'merge', in: ['body', 'glass'] },
 };
 
 // ---------------------------------------------------------------- nested empties and a mesh parent
 {
   const g = await cook({
     ...BODY,
-    a: { type: 'scene_null', in: ['both'], params: { name: 'muzzle', parent: 'receiver', translation: [0, 0.02, -0.15], rotation: [0, 30, 0] } },
-    b: { type: 'scene_null', in: ['a'], params: { name: 'flash', parent: 'muzzle', translation: [0.01, 0.03, -0.2], rotation: [10, 0, 45], scale: [2, 2, 2] } },
-    c: { type: 'scene_null', in: ['b'], params: { name: 'spark', parent: 'flash', translation: [0, 0.05, -0.25] } },
-    d: { type: 'scene_null', in: ['c'], params: { name: 'mag_socket', parent: 'magazine_lod0', translation: [0, -0.1, 0.08], rotation: [0, 0, 180] } },
+    a: { type: 'scene_null', in: ['both'], params: { name: 'wick', parent: 'housing', translation: [0, 0.02, -0.15], rotation: [0, 30, 0] } },
+    b: { type: 'scene_null', in: ['a'], params: { name: 'flame', parent: 'wick', translation: [0.01, 0.03, -0.2], rotation: [10, 0, 45], scale: [2, 2, 2] } },
+    c: { type: 'scene_null', in: ['b'], params: { name: 'spark', parent: 'flame', translation: [0, 0.05, -0.25] } },
+    d: { type: 'scene_null', in: ['c'], params: { name: 'glass_socket', parent: 'glass_lod0', translation: [0, -0.1, 0.08], rotation: [0, 0, 180] } },
     e: { type: 'scene_null', in: ['d'], params: { name: 'root_socket', translation: [1, 2, 3] } },
   }, 'e');
   check(sceneEmpties(g).length === 5, 'scene_null adds marked isolated points (5 empties)');
@@ -63,21 +63,21 @@ const BODY: Record<string, NodeSpec> = {
   const d = await doc(bytes);
   const prims = d.getRoot().listMeshes().flatMap((m) => m.listPrimitives());
   check(prims.every((p) => p.getMode() !== 0), 'no POINTS primitive: empties are not written as geometry');
-  const [mz] = nodeNamed(d, 'muzzle'), [fl] = nodeNamed(d, 'flash'), [sp] = nodeNamed(d, 'spark'), [ms] = nodeNamed(d, 'mag_socket'), [rs] = nodeNamed(d, 'root_socket');
-  check(mz && !mz.getMesh() && mz.getParentNode()?.getName() === 'receiver', 'muzzle: meshless node under the receiver mesh node');
-  check(fl?.getParentNode() === mz && sp?.getParentNode() === fl, 'flash under muzzle, spark under flash (nested empties)');
-  check(ms?.getParentNode()?.getName() === 'magazine_lod0' && !!ms.getParentNode()?.getMesh(), 'mag_socket under the separate magazine mesh');
+  const [wk] = nodeNamed(d, 'wick'), [fl] = nodeNamed(d, 'flame'), [sp] = nodeNamed(d, 'spark'), [ms] = nodeNamed(d, 'glass_socket'), [rs] = nodeNamed(d, 'root_socket');
+  check(wk && !wk.getMesh() && wk.getParentNode()?.getName() === 'housing', 'wick: meshless node under the housing mesh node');
+  check(fl?.getParentNode() === wk && sp?.getParentNode() === fl, 'flame under wick, spark under flame (nested empties)');
+  check(ms?.getParentNode()?.getName() === 'glass_lod0' && !!ms.getParentNode()?.getMesh(), 'glass_socket under the separate glass mesh');
   check(rs && !rs.getParentNode() && d.getRoot().listScenes()[0].listChildren().includes(rs), 'root_socket at the scene root');
   const W = (n: GNode) => n.getWorldMatrix();
-  check(close(W(mz), expected([0, 0.02, -0.15], [0, 30, 0])), 'muzzle world matrix = its geometry-space transform');
-  check(close(W(fl), expected([0.01, 0.03, -0.2], [10, 0, 45], [2, 2, 2])), 'flash (rotated, scaled, under a rotated empty): world matrix exact');
+  check(close(W(wk), expected([0, 0.02, -0.15], [0, 30, 0])), 'wick world matrix = its geometry-space transform');
+  check(close(W(fl), expected([0.01, 0.03, -0.2], [10, 0, 45], [2, 2, 2])), 'flame (rotated, scaled, under a rotated empty): world matrix exact');
   check(close(W(sp), expected([0, 0.05, -0.25], [0, 0, 0])) && close(sp.getScale(), [0.5, 0.5, 0.5]), 'spark under a scaled empty: world exact, local scale compensates (0.5)');
-  check(close(W(ms), expected([0, -0.1, 0.08], [0, 0, 180])), 'mag_socket world matrix exact');
-  check(close(mz.getTranslation(), [0, 0.02, -0.15]) && !close(fl.getTranslation(), [0.01, 0.03, -0.2]), 'local translations: under an unmoved mesh node = geometry space; under a rotated empty = relative to it');
+  check(close(W(ms), expected([0, -0.1, 0.08], [0, 0, 180])), 'glass_socket world matrix exact');
+  check(close(wk.getTranslation(), [0, 0.02, -0.15]) && !close(fl.getTranslation(), [0.01, 0.03, -0.2]), 'local translations: under an unmoved mesh node = geometry space; under a rotated empty = relative to it');
 
   // transformed mesh parent: quantization puts a translation + scale on mesh nodes
   const q = await doc(await exportGLB(g, { quantize: true }));
-  const [qm] = nodeNamed(q, 'muzzle'), [qms] = nodeNamed(q, 'mag_socket');
+  const [qm] = nodeNamed(q, 'wick'), [qms] = nodeNamed(q, 'glass_socket');
   const rec = qm.getParentNode()!;
   check(!close(rec.getScale(), [1, 1, 1]) && close(qm.getWorldMatrix(), expected([0, 0.02, -0.15], [0, 30, 0]), 1e-9) && close(qms.getWorldMatrix(), expected([0, -0.1, 0.08], [0, 0, 180]), 1e-9),
     `quantized export (mesh nodes scaled ${rec.getScale().map((x) => +x.toFixed(3)).join(', ')}): empties keep their world placement`);
@@ -85,7 +85,7 @@ const BODY: Record<string, NodeSpec> = {
   // export space: Z-up and centimetres
   const opt: ExportOptions = { upAxis: 'z', scale: 100 };
   const z = await doc(await exportGLB(g, opt));
-  const zm = nodeNamed(z, 'muzzle')[0].getWorldMatrix();
+  const zm = nodeNamed(z, 'wick')[0].getWorldMatrix();
   const want = expected([0, 0.02, -0.15], [0, 30, 0]);
   // C = (x, y, z) → (x, -z, y): translation converted and scaled, rotation conjugated, no scale on the empty itself
   const C = (v: number[]) => [v[0], -v[2], v[1]];
@@ -98,11 +98,11 @@ const BODY: Record<string, NodeSpec> = {
   // round trip: import keeps markers, names, parents and transforms; re-export gives the same nodes
   const back = await importGLTFAsync(bytes);
   const e2 = sceneEmpties(back), byN = new Map(e2.map((e) => [e.name, e]));
-  check(e2.length === 5 && byN.get('flash')?.parent === 'muzzle' && byN.get('mag_socket')?.parent === 'magazine_lod0' && byN.get('root_socket')?.parent === '', 'import: empties come back marked, with names and parents');
-  const fe = byN.get('flash')!;
+  check(e2.length === 5 && byN.get('flame')?.parent === 'wick' && byN.get('glass_socket')?.parent === 'glass_lod0' && byN.get('root_socket')?.parent === '', 'import: empties come back marked, with names and parents');
+  const fe = byN.get('flame')!;
   check(close(m4trs(fe.P, [0, 0, 0], fe.scale), expected([0.01, 0.03, -0.2], [0, 0, 0], [2, 2, 2]), 1e-6) && close(qFromMat(m4fromQuat(fe.orient)), qFromMat(expected([0, 0, 0], [10, 0, 45])), 1e-6), 'import: world P / orient / scale of a nested empty');
   const again = await doc(await exportGLB(back));
-  const same = ['muzzle', 'flash', 'spark', 'mag_socket', 'root_socket'].every((n) => {
+  const same = ['wick', 'flame', 'spark', 'glass_socket', 'root_socket'].every((n) => {
     const a = nodeNamed(d, n)[0], b = nodeNamed(again, n)[0];
     return b && b.getParentNode()?.getName() === a.getParentNode()?.getName() && close(a.getWorldMatrix(), b.getWorldMatrix(), 1e-6);
   });
@@ -129,7 +129,7 @@ const BODY: Record<string, NodeSpec> = {
   check(await throwsWith(() => exportGLB(missing), /parent "nowhere" is neither an empty nor a mesh/), 'a missing parent is an export error');
   const dup = await cook({ ...BODY, a: empty('x', '', 'both'), b: empty('x', '', 'a'), c: empty('child', 'x', 'b') }, 'c');
   check(await throwsWith(() => exportGLB(dup), /parent "x" is ambiguous: 2 empties/), 'a parent name shared by two empties is ambiguous');
-  const clash = await cook({ ...BODY, a: empty('receiver', '', 'both'), c: empty('child', 'receiver', 'a') }, 'c');
+  const clash = await cook({ ...BODY, a: empty('housing', '', 'both'), c: empty('child', 'housing', 'a') }, 'c');
   check(await throwsWith(() => exportGLB(clash), /ambiguous: 1 empty and 1 mesh/), 'a parent name shared by an empty and a mesh is ambiguous');
   const cyc = await cook({ ...BODY, a: empty('a', 'b', 'both'), b: empty('b', 'c', 'a'), c: empty('c', 'a', 'b') }, 'c');
   check(await throwsWith(() => exportGLB(cyc), /parent cycle: a → b → c → a/), 'a parent cycle is an export error naming the cycle');
@@ -148,13 +148,13 @@ const BODY: Record<string, NodeSpec> = {
 
 // ---------------------------------------------------------------- the empties' attributes stay off the meshes
 {
-  const g = await cook({ ...BODY, a: { type: 'scene_null', in: ['both'], params: { name: 'muzzle', parent: 'receiver', translation: [0, 0, -0.2], rotation: [0, -90, 0] } } }, 'a');
+  const g = await cook({ ...BODY, a: { type: 'scene_null', in: ['both'], params: { name: 'wick', parent: 'housing', translation: [0, 0, -0.2], rotation: [0, -90, 0] } } }, 'a');
   const d = await doc(await exportGLB(g));
   const sem = d.getRoot().listMeshes().flatMap((m) => m.listPrimitives().flatMap((p) => p.listSemantics()));
   check(!sem.some((x) => /^_(SCENE_EMPTY|ORIENT|SCALE)$/.test(x)), `mesh primitives carry no _SCENE_EMPTY, _ORIENT or _SCALE (${[...new Set(sem)].join(', ')})`);
   // the gallery's preview GLB merges every mesh into one node: a mesh-parented empty goes on the root, in place
   const pv = await doc(await previewGLB(g));
-  const m = nodeNamed(pv, 'muzzle')[0];
+  const m = nodeNamed(pv, 'wick')[0];
   check(m && !m.getParentNode() && close(m.getTranslation(), [0, 0, -0.2], 1e-6), 'preview GLB: an empty parented to a mesh lands on the scene root at its position');
 }
 

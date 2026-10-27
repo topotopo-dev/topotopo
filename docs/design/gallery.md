@@ -12,7 +12,7 @@ templates, `cli.ts` commands, `app/` the pages' CSS and script), `src/viewer/app
 
 ```
 <library root>/                      a folder listed in the config
-  weapons/uzi/                       a project; its parent folders ("weapons") are its collection
+  props/lantern/                     a project; its parent folders ("props") are its collection
     project.json                     {id, title, description, tags, graph: "main", bake: {graph?, node?, frame?},
                                       links: [{label, url}], created}
     graphs/ assets/ inputs/ exports/ a normal workspace: the MCP server, `topotopo edit` and the viewer work on it as is
@@ -57,9 +57,9 @@ Always `http://127.0.0.1:<port>`. The server binds IPv4 only, and `localhost` ca
 On a board:
 
 ```html
-<a href="http://127.0.0.1:7340/p/game/uzi">Uzi</a>
-<img src="http://127.0.0.1:7340/p/game/uzi/thumb.png" width="256" alt="Uzi">
-<iframe src="http://127.0.0.1:7340/embed/game/uzi" width="640" height="480" style="border:0" allow="fullscreen"></iframe>
+<a href="http://127.0.0.1:7340/p/game/lantern">Lantern</a>
+<img src="http://127.0.0.1:7340/p/game/lantern/thumb.png" width="256" alt="Lantern">
+<iframe src="http://127.0.0.1:7340/embed/game/lantern" width="640" height="480" style="border:0" allow="fullscreen"></iframe>
 ```
 
 The project page has copy buttons for all three snippets. The links work only while the gallery runs. To start it with

@@ -9190,9 +9190,9 @@ Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated poi
       "type": "box",
       "params": {
         "size": [
-          0.06,
-          0.1,
-          0.3
+          0.12,
+          0.2,
+          0.12
         ]
       }
     },
@@ -9204,46 +9204,46 @@ Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated poi
       "params": {
         "name": "name",
         "class": "prim",
-        "value": "receiver"
+        "value": "housing"
       }
     },
-    "muzzle": {
+    "wick": {
       "type": "scene_null",
       "in": [
         "named"
       ],
       "params": {
-        "name": "muzzle",
-        "parent": "receiver",
+        "name": "wick",
+        "parent": "housing",
         "translation": [
           0,
-          0.02,
-          -0.15
+          -0.05,
+          0
         ]
       }
     },
-    "flash": {
+    "flame": {
       "type": "scene_null",
       "in": [
-        "muzzle"
+        "wick"
       ],
       "params": {
-        "name": "flash",
-        "parent": "muzzle",
+        "name": "flame",
+        "parent": "wick",
         "translation": [
           0,
-          0.02,
-          -0.17
+          -0.03,
+          0
         ],
         "rotation": [
           0,
-          180,
+          45,
           0
         ]
       }
     }
   },
-  "output": "flash"
+  "output": "flame"
 }
 ```
 

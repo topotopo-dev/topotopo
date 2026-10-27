@@ -1,8 +1,8 @@
 {
  "version": 1,
- "description": "Uzi guard regression: boolean then poly_bevel left two quads whose first diagonal split into zero-area triangles (both have healthy alternative diagonals). From the Raven Hunt Uzi prototype.",
+ "description": "Bracket regression: boolean then poly_bevel left two quads whose first diagonal split into zero-area triangles (both have healthy alternative diagonals).",
  "nodes": {
-  "guard_outer_profile": {
+  "bracket_outer_profile": {
    "type": "curve",
    "params": {
     "points": [
@@ -90,10 +90,10 @@
     "closed": true
    }
   },
-  "guard_outer_extrude": {
+  "bracket_outer_extrude": {
    "type": "extrude",
    "in": [
-    "guard_outer_profile"
+    "bracket_outer_profile"
    ],
    "params": {
     "height": 0.019,
@@ -101,7 +101,7 @@
     "plane": "yz"
    }
   },
-  "guard_tool_profile": {
+  "bracket_tool_profile": {
    "type": "curve",
    "params": {
     "points": [
@@ -189,10 +189,10 @@
     "closed": true
    }
   },
-  "guard_tool_extrude": {
+  "bracket_tool_extrude": {
    "type": "extrude",
    "in": [
-    "guard_tool_profile"
+    "bracket_tool_profile"
    ],
    "params": {
     "height": 0.03,
@@ -200,11 +200,11 @@
     "plane": "yz"
    }
   },
-  "guard_cut": {
+  "bracket_cut": {
    "type": "boolean",
    "in": [
-    "guard_outer_extrude",
-    "guard_tool_extrude"
+    "bracket_outer_extrude",
+    "bracket_tool_extrude"
    ],
    "params": {
     "operation": "subtract"
@@ -213,7 +213,7 @@
   "post_cut_bevel": {
    "type": "poly_bevel",
    "in": [
-    "guard_cut"
+    "bracket_cut"
    ],
    "params": {
     "group": "angle>50",

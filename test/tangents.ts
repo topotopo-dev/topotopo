@@ -72,7 +72,7 @@ const withNormalMap = (input: string): Record<string, NodeSpec> => ({ ...NORMAL_
 
 await loadMikkTSpace();
 
-// ---------------------------------------------------------------- the Uzi repro: box → unwrap → normal-mapped material
+// ---------------------------------------------------------------- a hard-surface repro: box → unwrap → normal-mapped material
 {
   const g = await cook({ box: { type: 'box' }, uv: { type: 'uv_unwrap', in: ['box'], params: { resolution: 64 } }, ...withNormalMap('uv') }, 'out');
   const { bytes, warnings } = await glb(g);

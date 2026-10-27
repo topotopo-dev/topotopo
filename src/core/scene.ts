@@ -1,5 +1,5 @@
-// Scene empties: transforms that export as meshless scene nodes (attachment sockets such as a muzzle or a magazine
-// well), carried as isolated points with a reserved marker so they never become visible geometry.
+// Scene empties: transforms that export as meshless scene nodes (attachment sockets such as a lantern's hook or a
+// door's hinge), carried as isolated points with a reserved marker so they never become visible geometry.
 //
 // Contract (point attributes of an isolated point):
 //   scene_empty  int 1         marks the point as an empty (absent or 0: an ordinary loose point, exported as POINTS)

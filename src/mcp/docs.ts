@@ -72,11 +72,11 @@ export const TOPICS: Record<string, string> = {
   library: `LIBRARIES AND THE GALLERY
 A library is a folder the person listed (\`topotopo library add <name> <folder>\`, kept in ~/.topotopo/config.json). A
 project is any folder in it holding project.json, and is a workspace of its own:
-  weapons/uzi/project.json      {id, title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
-  weapons/uzi/graphs/ assets/ inputs/ exports/    as in any workspace
-  weapons/uzi/attachments/      concept art, references, source files (shown on the project's gallery page)
-  weapons/uzi/.gallery/         thumb.png, preview.glb, bake.json: derived, never edit
-The parent folders ("weapons") are the project's collection. The gallery (\`topotopo gallery\`, http://127.0.0.1:7340)
+  props/lantern/project.json    {id, title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
+  props/lantern/graphs/ assets/ inputs/ exports/  as in any workspace
+  props/lantern/attachments/    concept art, references, source files (shown on the project's gallery page)
+  props/lantern/.gallery/       thumb.png, preview.glb, bake.json: derived, never edit
+The parent folders ("props") are the project's collection. The gallery (\`topotopo gallery\`, http://127.0.0.1:7340)
 shows every library as a grid; each project has a page (/p/<library>/<id>), a thumbnail (…/thumb.png) and an
 iframe embed (/embed/<library>/<id>) that the person's board pastes. It bakes the previews by itself after graphs,
 assets or inputs change, from the graph named in "graph" (or "bake": another graph, a node, a frame).

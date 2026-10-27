@@ -50,7 +50,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
     name: 'library',
     description: 'The person\'s libraries of projects (the TopoTopo Gallery website shows them; a board links to them). A library is a folder; a project is a folder in it with project.json (title, description, tags, links to concept art/board pages) and is a workspace of its own (graphs/, assets/, inputs/, exports/, attachments/ for concept art and references). ' +
       'list {query?, tag?, library?}: every project with status and gallery URL. get {library, id} (or the open project): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
-      'open {library, id} | {path}: make that project the workspace of every tool and the live viewer, then build/edit/render/export work in it. create {library, path:"weapons/uzi", title?, description?, tags?, links?}: a new project, opened. ' +
+      'open {library, id} | {path}: make that project the workspace of every tool and the live viewer, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new project, opened. ' +
       'update {library?, id?, title?, description?, tags?, links?, graph?, bake?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). See help topic "library".',
     inputSchema: {
       type: 'object',
@@ -59,7 +59,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'update', 'bake'] },
         library: { type: 'string', description: 'library name (list shows them)' },
         id: { type: 'string', description: 'project id' },
-        path: { type: 'string', description: 'create: folder below the library ("weapons/uzi"); open/get: a project folder on disk instead of {library, id}' },
+        path: { type: 'string', description: 'create: folder below the library ("props/lantern"); open/get: a project folder on disk instead of {library, id}' },
         query: { type: 'string', description: 'list: words to match in title, id, collection, description, tags' },
         tag: { type: 'string', description: 'list: only projects with this tag' },
         title: { type: 'string' },
@@ -125,7 +125,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         }
         case 'create': {
           if (!a.library) throw new Error(`"library" is required (${cfg.libraries.map((l) => l.name).join(', ') || 'none configured'})`);
-          if (!a.path) throw new Error('"path" is required: the project folder below the library, e.g. "weapons/uzi"');
+          if (!a.path) throw new Error('"path" is required: the project folder below the library, e.g. "props/lantern"');
           const lib = cfg.libraries.find((l) => l.name === a.library);
           if (!lib) throw new Error(`no library "${a.library}" (${cfg.libraries.map((l) => l.name).join(', ') || `none: the person adds one with \`topotopo library add <name> <folder>\``})`);
           const p = createProject(lib, a.path, { title: a.title, description: a.description, tags: a.tags, links: a.links });

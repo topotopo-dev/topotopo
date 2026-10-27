@@ -252,14 +252,14 @@ export function projectDirOf(start: string): string | null {
 export interface CreateOptions { title?: string; description?: string; tags?: string[]; links?: ProjectLink[]; graph?: object }
 
 /**
- * A new project at `<library root>/<rel>` ("weapons/uzi"): project.json, the workspace folders, attachments/, and a
+ * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the workspace folders, attachments/, and a
  * .gitignore for the derived files. `graph` (a graph spec) becomes graphs/main.json. Fails when the folder holds a
  * project already or the id is taken in the library.
  */
 export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {}): Project {
   const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean);
   if (!parts.length || parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || SKIP.has(p) || /[<>:"|?*\u0000-\u001f]/.test(p)))
-    throw new Error(`bad project path "${rel}": give folders below the library, e.g. "weapons/uzi"`);
+    throw new Error(`bad project path "${rel}": give folders below the library, e.g. "props/lantern"`);
   const root = path.resolve(lib.path);
   const dir = path.join(root, ...parts);
   if (fs.existsSync(manifestFile(dir))) throw new Error(`${dir} is a project already`);

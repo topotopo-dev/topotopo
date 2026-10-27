@@ -336,7 +336,7 @@ concept art; previews bake by themselves when its graphs change, and agents reac
 
 ```bash
 topotopo library add game D:/game-assets
-topotopo library new game weapons/uzi --title "Uzi" --tags weapon
+topotopo library new game props/lantern --title "Lantern" --tags prop
 topotopo gallery
 ```
 

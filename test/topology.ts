@@ -511,13 +511,13 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   const rf = triangleReport(quad([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]]));
   check(rf.triangles === 2 && rf.degenerate === 2 && rf.degeneratePrims.join() === '0' && rf.minArea === 0, 'collapsed quad keeps both triangles and reports them degenerate (prim 0)');
 
-  // Uzi guard regression: boolean then bevel left two quads whose first diagonal was a zero-area sliver
-  const spec = JSON.parse(readFileSync(new URL('./data/guard-bevel.graph.json', import.meta.url), 'utf8'));
+  // Bracket regression: boolean then bevel left two quads whose first diagonal was a zero-area sliver
+  const spec = JSON.parse(readFileSync(new URL('./data/bracket-bevel.graph.json', import.meta.url), 'utf8'));
   const g = (await engine.cook(spec, { target: 'post_cut_bevel' })).geo!;
   const r = triangleReport(g), t = topologyReport(g);
   check(r.triangles === 346 && r.degenerate === 0 && r.nearDegenerate === 0 && r.minArea > 1e-9,
-    `guard bevel: 346 triangles, none degenerate or near-degenerate (min area ${r.minArea.toExponential(2)}, min quality ${r.minQuality.toExponential(2)})`);
-  check(t.closed && t.degenerate === 0, 'guard bevel: still a closed manifold with no degenerate polygons');
+    `bracket bevel: 346 triangles, none degenerate or near-degenerate (min area ${r.minArea.toExponential(2)}, min quality ${r.minQuality.toExponential(2)})`);
+  check(t.closed && t.degenerate === 0, 'bracket bevel: still a closed manifold with no degenerate polygons');
   // projected (signed, along each polygon's Newell normal) triangle areas sum to the polygon's area, also for the
   // non-planar bevel corners, and the triangle mesh is closed with consistent winding: every directed edge once,
   // its reverse once
@@ -534,7 +534,7 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   for (let p = 0; p < g.numPrims; p++) cover = Math.max(cover, Math.abs(per[p] - primArea(g, p)) / primArea(g, p));
   let windingOk = true;
   for (const [k, cnt] of directed) { const [x, y] = k.split('>'); if (cnt !== 1 || directed.get(`${y}>${x}`) !== 1) windingOk = false; }
-  check(cover < 1e-9 && windingOk, `guard bevel: every polygon's triangles cover its projected area (worst relative error ${cover.toExponential(2)}); triangle mesh closed with consistent winding`);
+  check(cover < 1e-9 && windingOk, `bracket bevel: every polygon's triangles cover its projected area (worst relative error ${cover.toExponential(2)}); triangle mesh closed with consistent winding`);
   check(/346 render\/export triangles; .* 0 degenerate, 0 near-degenerate/.test(inspect(g, { detail: 'topology' })), 'inspect topology reports render/export triangle health');
 }
 

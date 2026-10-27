@@ -32,17 +32,17 @@ defineNode({
   outputs: 'the input plus one point: scene_empty 1, name, parent, orient, scale',
   example: {
     nodes: {
-      body: { type: 'box', params: { size: [0.06, 0.1, 0.3] } },
-      named: { type: 'attrib_create', in: ['body'], params: { name: 'name', class: 'prim', value: 'receiver' } },
-      muzzle: { type: 'scene_null', in: ['named'], params: { name: 'muzzle', parent: 'receiver', translation: [0, 0.02, -0.15] } },
-      flash: { type: 'scene_null', in: ['muzzle'], params: { name: 'flash', parent: 'muzzle', translation: [0, 0.02, -0.17], rotation: [0, 180, 0] } },
+      body: { type: 'box', params: { size: [0.12, 0.2, 0.12] } },
+      named: { type: 'attrib_create', in: ['body'], params: { name: 'name', class: 'prim', value: 'housing' } },
+      wick: { type: 'scene_null', in: ['named'], params: { name: 'wick', parent: 'housing', translation: [0, -0.05, 0] } },
+      flame: { type: 'scene_null', in: ['wick'], params: { name: 'flame', parent: 'wick', translation: [0, -0.03, 0], rotation: [0, 45, 0] } },
     },
-    output: 'flash',
+    output: 'flame',
   },
   cook: (ctx) => {
     const { p } = ctx;
     const name = String(p.name ?? '').trim(), parent = String(p.parent ?? '').trim();
-    if (!name) throw new NodeError('scene_null: name is empty', 'give the empty a name, e.g. "muzzle"');
+    if (!name) throw new NodeError('scene_null: name is empty', 'give the empty a name, e.g. "handle"');
     if (parent === name) throw new NodeError(`scene_null: "${name}" cannot be its own parent`, 'use "" for the scene root or name another empty or mesh');
     const s = p.scale as number[];
     if (!s.every((x) => Number.isFinite(x) && x !== 0)) throw new NodeError(`scene_null: scale (${s.join(', ')}) needs finite, non-zero components`, 'a zero scale cannot be inverted for children');
