@@ -128,7 +128,37 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #controls { padding: 4px 6px 8px; }
 .ctl { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 1px 2px; }
 .ctl:hover { background: var(--hover-bg); }
-.ctl > .cl { flex: 0 0 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctl > .cl { flex: 0 0 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a value that differs from the graph file: a bar before its name, the name in the accent colour */
+.ctl > .cmark { flex: 0 0 3px; width: 3px; height: 16px; border-radius: 1px; }
+.ctl.changed > .cmark { background: var(--sel); }
+.ctl.changed > .cl { color: var(--sel); }
+/* above the controls: the cook state (always one line, so nothing below moves) and, over a graph file, the session */
+#controls-bar { position: relative; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 3px 8px 4px; border-bottom: 1px solid var(--line); }
+#controls-bar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; pointer-events: none; }
+#props.cooking #controls-bar::after { background: linear-gradient(90deg, transparent, var(--sel), transparent) no-repeat; background-size: 35% 100%; animation: cookbar 1.4s linear infinite; }
+@keyframes cookbar { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+#controls-bar .cookline { height: 20px; }
+.sessionline { display: flex; align-items: center; gap: 6px; height: 22px; }
+.sessionline .stext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.sessionline button { flex: none; padding: 0 8px; height: 20px; }
+.sessionline button:disabled { opacity: .45; cursor: default; }
+/* the cook state: what cooks and for how long, how the last cook ended */
+.cookline { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; color: var(--dim); }
+.cookline .ctext { overflow: hidden; text-overflow: ellipsis; min-width: 0; font: var(--mono); }
+.cookline .cdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.cookline .cstop { display: none; flex: none; padding: 0 8px; height: 18px; line-height: 1; }
+.cookline.running, .cookline.stopping { color: var(--sel); }
+.cookline.running .cdot, .cookline.stopping .cdot { background: var(--sel); animation: cookpulse 1s ease-in-out infinite; }
+.cookline.running .cstop { display: inline-block; }
+.cookline.failed { color: var(--err); }
+.cookline.failed .cdot { background: var(--err); }
+.cookline.stopped { color: var(--text); }
+.cookline.stopped .cdot { background: var(--dim); border-radius: 1px; }
+.cookline.ok .cdot { background: var(--ok); }
+.cookline.none .cdot { visibility: hidden; }
+@keyframes cookpulse { 50% { opacity: .3; } }
+#status .cookline { max-width: 55%; }
 .ctl > .cw { flex: 1; display: flex; gap: 4px; align-items: center; min-width: 0; }
 .cw input { padding: 1px 4px; }
 .cw input[type=range] { flex: 1; min-width: 40px; padding: 0; border: 0; background: none; accent-color: var(--sel); }

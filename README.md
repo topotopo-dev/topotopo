@@ -56,7 +56,8 @@ graph and its seeds, and the core is browser-ready.
   `image:<name>`, and glTF/USD exports carry them, so assets ship with textures whose licence is the graph's.
 - **Live preview and controls**: a local three.js page that refreshes whenever a graph changes. Click any node to
   see its result. A graph's exposed `params` appear as sliders, checkboxes, selects and colour pickers; dragging one
-  re-cooks only the nodes that read it. Drop your own files
+  re-cooks only the nodes that read it, the newest value replacing a cook still running, and the page shows which
+  node is cooking and for how long, with a Stop button. Drop your own files
   anywhere on the page: they land in the workspace `inputs/` folder (with `topotopo view`, the `inputs/` folder beside
   the graph file), show as grey reference layers (a PNG as a flat picture), and `file` nodes read them as
   `inputs/<name>`.
@@ -124,6 +125,16 @@ CLI's `--export-all` write the same targets. **Inputs** lists your files in `inp
 files anywhere on the page); the agent is told about new ones in its next tool answer. Images open in a 2D viewer
 with layers and channels (generated textures default to RGB; use A to inspect packed alpha/AO); JPEG/WebP are for
 viewing only. For `topotopo view graph.json`, `inputs/` and `exports/` are beside that graph.
+
+The **Controls** panel holds the graph's exposed vars. Above them, and in the status bar, the cook in progress: the
+node cooking and the time so far, then the last cook's time, or the failing node and its message. **Stop** ends a cook
+at the next node (long nodes such as erosion stop between their iterations; others finish first, and the line says
+so); the view keeps the last finished result. Changing a value while a cook runs starts over with the newest value.
+With `topotopo view graph.json` the graph file stays as you wrote it: the values you tune are kept by the viewer,
+through exports, output switches and saves of the file (a value goes back to the file's only when its declaration in
+`params` changes or the var is removed). A mark shows each value that differs from the file; ↺ takes one back,
+**Reset all** takes all of them back, and **Save values** writes them into the file's `vars`. The viewer's writes to
+the file (saved values, export targets) change only those values: formatting, key order and number spellings stay.
 
 The default **TopoTopo** keymap uses right-drag orbit around the surface beneath the cursor, middle-drag pan and
 wheel zoom toward the cursor. F/A frame, 1–4 select cameras, 5–7 change shading, O toggles orthographic and Space

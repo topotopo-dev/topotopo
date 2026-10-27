@@ -18,6 +18,7 @@ import { EDITOR_NAMES } from './markers.js';
 import * as KM from './keymap.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
 import { connectedLine, graphsLine } from './status.js';
+import { cookLine, isRunning } from './cooking.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -59,6 +60,39 @@ ctx.message = (text, kind = '', hold = 0) => {
   heldUntil = hold ? now + hold : 0;
   msgEl.textContent = text; msgEl.className = kind; msgEl.title = text;
 };
+// ------------------------------------------------------------------------------------------- cook state
+// What is cooking for each graph (the server's {cook} events, and /api/graphs), shown in the status bar and above the
+// Controls: the node, the time (counted on here between events), how the last cook ended. Stop stops it.
+const cooks = new Map(), cookLines = [$('status-cook'), $('controls-cook')];
+let cookTick = 0;
+ctx.cookState = (graph) => cooks.get(graph)?.state ?? null;
+function setCook(graph, state) { cooks.set(graph, { state, at: performance.now() }); renderCook(); }
+function renderCook() {
+  const c = cooks.get(ctx.graph?.name);
+  const line = cookLine(c?.state, c ? performance.now() - c.at : 0);
+  for (const el of cookLines) {
+    el.className = `cookline ${line.kind}`;
+    const t = el.querySelector('.ctext');
+    if (t.textContent !== line.text) t.textContent = line.text;
+    el.title = line.title;
+  }
+  $('props').classList.toggle('cooking', line.kind === 'running' || line.kind === 'stopping');
+  const running = isRunning(c?.state);
+  if (running && !cookTick) cookTick = setInterval(renderCook, 200);
+  else if (!running && cookTick) { clearInterval(cookTick); cookTick = 0; }
+}
+for (const el of cookLines) el.querySelector('.cstop').onclick = async (e) => {
+  e.currentTarget.blur();
+  const graph = ctx.graph.name;
+  if (!graph) return;
+  // at once: the server hears the stop only when the node it is on lets it (see the line's title)
+  const c = cooks.get(graph);
+  if (c?.state?.running) { c.state = { ...c.state, running: { ...c.state.running, stopping: true } }; renderCook(); }
+  const j = await api.stop(graph);
+  if (!j.ok) ctx.message(j.error, 'err');
+  else ctx.message(j.stopping ? 'stopping: the cook ends when the node it is on has finished' : 'nothing is cooking');
+};
+
 /** A small question in the status bar; resolves to the answer. */
 ctx.ask = (text, yes = 'Yes', no = 'No') => new Promise((resolve) => {
   $('ask-text').textContent = text; $('ask-yes').textContent = yes; $('ask-no').textContent = no;
@@ -141,8 +175,11 @@ const props = createProps(ctx);
 
 // ------------------------------------------------------------------------------------------- graphs and the output
 ctx.graph = {
-  list: [], name: null, node: null,
+  /** the graphs as last read (/api/graphs), and when that read was asked for: values the page sent later stand */
+  list: [], fetched: -1e9, name: null, node: null,
   current() { return this.list.find((g) => g.name === this.name) ?? null; },
+  /** the Controls for the graph shown, from the list as last read (never as if it had just been read) */
+  renderControls() { props.controls.render(this.current(), this.fetched); },
   /** the node whose result is shown: the chosen one, else the graph's output */
   shownNode() { const g = this.current(); return this.node ?? g?.output ?? null; },
   show(node) {
@@ -158,7 +195,7 @@ const refreshGraphs = ctx.coalesce(async () => {
   const list = await api.graphs();
   if (!list) return;
   const G = ctx.graph;
-  G.list = list;
+  G.list = list; G.fetched = issued;
   const names = list.map((g) => g.name);
   const sel = $('graph');
   // the options are rebuilt only when the graphs change, so an open list stays open
@@ -167,6 +204,9 @@ const refreshGraphs = ctx.coalesce(async () => {
   sel.value = G.name ?? '';
   const g = G.current();
   if (G.node && !g?.nodes.some((n) => n.name === G.node)) G.node = null;
+  // the cook states the list carries, unless an event brought a newer one while it was fetched
+  for (const x of list) if (x.cook && !((cooks.get(x.name)?.at ?? -1) > issued)) cooks.set(x.name, { state: x.cook, at: performance.now() });
+  renderCook();
   props.controls.render(g, issued);
   const line = graphsLine(msgEl.textContent, list.length);
   if (line) ctx.message(line);
@@ -176,7 +216,8 @@ $('graph').onchange = (e) => {
   if (ctx.outputs?.active) ctx.outputs.scene();
   ctx.graph.name = e.target.value; ctx.graph.node = null;
   local.set('graph', ctx.graph.name);
-  props.controls.render(ctx.graph.current());
+  ctx.graph.renderControls();
+  renderCook();
   ctx.emit('graphs');
   loadGeo();
 };
@@ -190,10 +231,10 @@ const loadGeo = ctx.coalesce(async () => {
   o.loading = true; ctx.emit('output');
   const r = await api.geo(graph, node);
   o.loading = false;
-  if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) return;
+  if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) { ctx.emit('output'); return; }
   if (!r.ok) {
-    // the last good geometry stays
-    o.error = r.error;
+    // the last good geometry stays; a stopped cook is no error (the cook line says where it stopped)
+    if (!r.stopped) o.error = r.error;
     ctx.emit('output'); updateCook();
     return;
   }
@@ -230,7 +271,9 @@ function updateCook() {
   const parts = [`${g.name}/${ctx.graph.shownNode() ?? ''}`];
   if (m) parts.push(`${m[1]} points`, `${m[2]} prims`);
   if (o.report?.cooked) parts.push(`cook ${fmtNum(o.report.ms, 0)} ms`);
-  const err = o.error ?? (o.report?.errors?.length ? o.report.errors[0] : null) ?? g.nodes.find((n) => n.error)?.error;
+  // a failed cook of the graph is told by the cook line beside this (its node and message); this tells the rest
+  const told = cookLine(ctx.cookState(g.name)).kind === 'failed';
+  const err = o.error ?? (told ? null : (o.report?.errors?.length ? o.report.errors[0] : null) ?? g.nodes.find((n) => n.error)?.error);
   el.replaceChildren(document.createTextNode(parts.join(' · ')));
   if (err) { const e = document.createElement('span'); e.className = 'err'; e.textContent = ` · ${String(err).split('\n')[0]}`; el.append(e); el.title = String(err); }
   else el.title = parts.join(' · ');
@@ -591,7 +634,7 @@ ctx.hideModelPreview = () => { previewSerial++; ctx.previewEmpty = true; ctx.sel
 ctx.outputGraph = (item) => {
   if (item.graph && ctx.graph.list.some((g) => g.name === item.graph)) {
     ctx.graph.name = item.graph; ctx.graph.node = item.node; $('graph').value = item.graph;
-    props.controls.render(ctx.graph.current());
+    ctx.graph.renderControls();
   }
 };
 ctx.previewOutput = async (item, bytes, update) => {
@@ -610,7 +653,7 @@ ctx.previewOutput = async (item, bytes, update) => {
   }
   firstFrame = false; ctx.emit('output'); ctx.requestRender(); syncTop();
 };
-ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; props.controls.render(ctx.graph.current()); } loadGeo(); ctx.requestRender(); };
+ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); ctx.requestRender(); };
 ctx.frameOutput = frameAll;
 ctx.outputs = createOutputPanel(ctx);
 
@@ -623,10 +666,12 @@ const es = api.events({
   },
   error() { ctx.message('disconnected (server stopped?)', 'err'); },
   async message(ev) {
+    if (ev.cook !== undefined) { setCook(ev.cook.graph, ev.cook); if (ev.cook.graph === ctx.graph.name) updateCook(); return; }
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
     if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); return; }
     await refreshGraphs();
-    if (ev.graph === ctx.graph.name) loadGeo();
+    // after a stop the geometry in view stays: fetching it would cook what was just stopped
+    if (ev.graph === ctx.graph.name && !ev.stopped) loadGeo();
     ctx.outputs.refresh();
   },
 });

@@ -53,12 +53,17 @@
     <div class="pscroll" id="props-body"></div>
     <div class="grip h" data-grip="split" title="drag to resize"></div>
     <div class="phead">Controls <span class="count" id="controls-count"></span></div>
+    <div id="controls-bar">
+      <div class="cookline" id="controls-cook"><span class="cdot"></span><span class="ctext"></span><button class="cstop" type="button" title="stop the cook at the next node">Stop</button></div>
+      <div class="sessionline" id="controls-session" hidden><span class="stext"></span><button id="vars-save" type="button">Save values</button><button id="vars-reset" type="button">Reset all</button></div>
+    </div>
     <div class="pscroll" id="controls"></div>
   </aside>
   <footer id="status">
     <span id="msg"></span>
     <span id="ask" hidden><span id="ask-text"></span><button id="ask-yes">Yes</button><button id="ask-no">No</button></span>
     <span class="grow"></span>
+    <span class="cookline" id="status-cook"><span class="cdot"></span><span class="ctext"></span><button class="cstop" type="button" title="stop the cook at the next node">Stop</button></span>
     <span id="cook"></span>
   </footer>
 </div>

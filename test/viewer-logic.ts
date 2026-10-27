@@ -1,7 +1,8 @@
 // The viewer page's browser-free logic (src/viewer/app/*.js): the keymap presets,
 // guide (marker) rules shared with the server, the grid step, selection set operations, the undo stack, mesh
-// topology (welding, pieces, the render tool's edge classes), the Controls rules and the status line. Also checks
-// that the page's modules only import each other and the served three.js.
+// topology (welding, pieces, the render tool's edge classes), the Controls rules, the status and cook state lines,
+// and the minimal edits the viewer makes to a graph file (src/viewer/json-edit.ts). Also checks that the page's
+// modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +17,8 @@ import { createUndo } from '../src/viewer/app/undo.js';
 import * as mesh from '../src/viewer/app/mesh.js';
 import * as vars from '../src/viewer/app/vars.js';
 import * as status from '../src/viewer/app/status.js';
+import * as cooking from '../src/viewer/app/cooking.js';
+import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0, passes = 0;
@@ -236,6 +239,67 @@ section('Controls rules (section 8)');
     'slider ranges: declared, 0..4×default, −1..1 around 0');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
+  // over a graph file ↺ goes back to the file's value; in a workspace to the declared default
+  check(vars.baseValue('file', { default: 1 }, { s: 3 }, 's') === 3 && vars.baseValue('file', { default: 1 }, {}, 's') === 1 && vars.baseValue('file', { type: 'bool' }, {}, 'b') === false
+    && vars.baseValue('workspace', { default: 1 }, { s: 3 }, 's') === 1 && vars.baseValue('workspace', null, { s: 3 }, 's') === undefined,
+    'what ↺ goes back to: the graph file\'s value (else the default, else a blank), in a workspace the declared default');
+  check(vars.rowShape({ type: 'float', min: 0, max: 10 }, 2) === vars.rowShape({ type: 'float', min: 0, max: 10 }, 7) && vars.rowShape({ type: 'float', min: 0, max: 10 }, 2) !== vars.rowShape({ type: 'float', min: 0, max: 20 }, 2)
+    && vars.rowShape(null, [1, 2]) !== vars.rowShape(null, [1, 2, 3]) && vars.rowShape(null, 'a') !== vars.rowShape(null, '#ff0000'),
+    'a row keeps its element while its shape stays: a new value keeps it, a new range, vector length or widget builds it again');
+  // the reset that a stale graph list caused: values sent after the list was read stand
+  const st = { pending: {}, unacked: new Map(), ackAt: new Map([['amp', 500]]), active: null, typing: () => false };
+  check(!vars.serverValueWins(st, 'amp', 400) && vars.serverValueWins(st, 'amp', 600) && vars.serverValueWins(st, 'seed', 400),
+    'a graph list read before an answer about a var does not replace it; one read after does; other vars follow the list');
+  check(!vars.serverValueWins({ ...st, pending: { seed: 2 } }, 'seed', 1e9) && !vars.serverValueWins({ ...st, unacked: new Map([['seed', 1]]) }, 'seed', 1e9)
+    && !vars.serverValueWins({ ...st, active: 'seed' }, 'seed', 1e9) && !vars.serverValueWins({ ...st, typing: (k: string) => k === 'seed' }, 'seed', 1e9),
+    'nor while a change is on the way (pending, unanswered), dragged or typed');
+  check(vars.sessionText(0, 'terrain.json') === 'values as in terrain.json' && vars.sessionText(1, 'terrain.json') === '1 value differs from terrain.json' && vars.sessionText(3, null) === '3 values differ from the graph',
+    'the line above the Controls over a graph file');
+}
+
+section('cook state line');
+{
+  const run = (o: any) => ({ running: { cooks: 1, kinds: ['edit'], elapsed: 2000, node: 'eroded', nodeElapsed: 1500, inner: null, stopping: false, superseded: false, ...o }, last: { ok: true, ms: 13200, at: 0 } });
+  check(cooking.fmtDuration(850) === '850 ms' && cooking.fmtDuration(4210) === '4.21 s' && cooking.fmtDuration(12345) === '12.3 s' && cooking.fmtDuration(125000) === '2 min 05 s',
+    'durations: ms, s, min');
+  const l1 = cooking.cookLine(run({}), 500);
+  check(l1.kind === 'running' && l1.text === 'cooking eroded · 2.50 s' && /eroded has cooked for 2\.00 s/.test(l1.title), `running: the node and the time, counted on between events (${l1.text})`);
+  check(cooking.cookLine(run({ inner: 'copy', node: 'loop' })).text === 'cooking loop › copy · 2.00 s' && cooking.cookLine(run({ kinds: ['export'] })).text.startsWith('exporting eroded'),
+    'a nested node beside its loop; an export says so');
+  const l2 = cooking.cookLine(run({ stopping: true }));
+  check(l2.kind === 'stopping' && l2.text === 'stopping after eroded · 2.00 s' && /cannot be interrupted mid-way/.test(l2.title), `a stop on its way says the node runs to its end (${l2.text})`);
+  check(/the new value follows/.test(cooking.cookLine(run({ superseded: true })).text), 'a newer value waiting for the node to end says so');
+  check(cooking.cookLine(run({ elapsed: 40 }), 20).text === 'cooked in 13.2 s' && cooking.cookLine(run({ elapsed: 40 }), 200).kind === 'running',
+    `a cook shows as running once it has run ${cooking.SHOW_AFTER} ms (short ones do not flicker)`);
+  const fail = cooking.cookLine({ running: null, last: { ok: false, ms: 30, error: { node: 'scatter', message: 'no points to scatter on\nsecond line' } } });
+  check(fail.kind === 'failed' && fail.text === 'failed at scatter: no points to scatter on' && /second line/.test(fail.title), `a failure: the node and the message (${fail.text})`);
+  const stopped = cooking.cookLine({ running: null, last: { ok: false, ms: 30, stopped: 'eroded' } });
+  check(stopped.kind === 'stopped' && /stopped at eroded · the view shows the last finished cook/.test(stopped.text) && cooking.cookLine(null).kind === 'none',
+    'a stop: where, and that the view shows the last finished cook');
+}
+
+section('graph file edits (json-edit.ts): only what changes');
+{
+  const text = '{\n  "nodes": { "b": { "type": "box", "params": { "size": "=s" } } },\n  "vars": { "s": 2.0, "t": 1.50, "label": "a\\u2026b" },\n  "output": "b"\n}\n';
+  const add = editJSONText(text, [{ path: ['export'], value: 'glb' }]);
+  check(add === text.replace('"output": "b"\n}', '"output": "b",\n  "export": "glb"\n}'), 'a new member goes after the last one, on its own line with its indent');
+  const set = editJSONText(text, [{ path: ['vars', 's'], value: 5 }, { path: ['vars', 't'], value: 1.5 }, { path: ['vars', 'label'], value: 'a…b' }]);
+  check(set === text.replace('"s": 2.0', '"s": 5'), 'a changed value is written in place; equal ones keep their spelling (1.50, \\u2026)');
+  const inline = editJSONText(text, [{ path: ['vars', 'u'], value: [1, 2] }]);
+  check(inline === text.replace('"label": "a\\u2026b" }', '"label": "a\\u2026b", "u": [1, 2] }'), 'inline objects stay inline, with the separators they use');
+  const nested = editJSONText(text, [{ path: ['outputs', 'rock', 'export'], value: { format: 'obj', path: 'parts/rock.obj' } }]);
+  check(JSON.parse(nested).outputs.rock.export.path === 'parts/rock.obj' && nested.startsWith(text.slice(0, text.lastIndexOf('\n}'))), 'missing objects on the way are made');
+  const removed = editJSONText(add, [{ path: ['export'] }]);
+  const middle = editJSONText(text, [{ path: ['vars', 't'] }]);
+  check(removed === text && middle === text.replace('"t": 1.50, ', ''), 'removing a member takes its comma and space with it');
+  const crlf = text.replace(/\n/g, '\r\n'), crlfAdd = editJSONText(crlf, [{ path: ['export'], value: 'glb' }]);
+  check(crlfAdd === add.replace(/\n/g, '\r\n'), 'Windows line ends stay');
+  const ascii = '{"vars":{"label":"x\\u00e9"}}';
+  check(editJSONText(ascii, [{ path: ['vars', 'k'], value: 'é…' }]) === '{"vars":{"label":"x\\u00e9","k":"\\u00e9\\u2026"}}', 'a file written with \\u escapes only gets escapes, and no spaces where it has none');
+  check(editJSONText(text, [{ path: ['vars', 's'], value: 2 }]) === text, 'an equal value changes nothing');
+  const bad = (() => { try { editJSONText('{"a": 1,}', [{ path: ['b'], value: 1 }]); return null; } catch (e) { return e; } })();
+  check(bad instanceof SyntaxError, 'text that is not JSON is refused (SyntaxError), not rewritten');
+  check(JSON.stringify(applyJSONEdits({ a: { b: 1 }, c: 2 }, [{ path: ['a', 'd'], value: 3 }, { path: ['c'] }])) === '{"a":{"b":1,"d":3}}', 'applyJSONEdits: the value the edited text must read as');
 }
 
 section('status line (section 4)');

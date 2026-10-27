@@ -115,6 +115,8 @@ board or concept pages, so the gallery page and the board link both ways.`,
   JSON values are parsed, other text is a string; an unknown name lists the graph's vars), and --output <id> renders,
   exports and inspects a named output instead of the default: topotopo terrain.json --output land --var relief=8
   --render r.png --export land.glb. Exports record the vars they were made with (help topic "export", SOURCE).
+- The viewer shows each cook as it runs (the node, the time) and has a Stop button: a cook a person stopped fails with
+  "cook stopped" at the node it stopped at. That is their decision, not an error to retry: ask before cooking it again.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
 - Output node: "output", else a node named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside

@@ -11,25 +11,32 @@ async function json(url, init) {
   const j = await res.json().catch(() => ({ ok: false, error: `${res.status} ${res.statusText}` }));
   return { status: res.status, j };
 }
-/** A GLB route: {ok, buf} or {ok: false, error}. */
+/** A GLB route: {ok, buf} or {ok: false, error, stopped?} (stopped: the node its cook was stopped at). */
 async function glb(url) {
   let res;
   try { res = await fetch(url); } catch { return fail(offline); }
-  if (!res.ok) { const j = await res.json().catch(() => ({})); return fail(j.error ?? `${res.status} ${res.statusText}`); }
+  if (!res.ok) { const j = await res.json().catch(() => ({})); return { ...fail(j.error ?? `${res.status} ${res.statusText}`), ...(j.stopped ? { stopped: j.stopped } : {}) }; }
   return { ok: true, buf: await res.arrayBuffer() };
 }
 const post = (body) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 export const api = {
-  /** [{name, output, version, vars, params, nodes: [{name, type, in, error, ms}]}] or null */
+  /**
+   * [{name, output, version, vars, graphVars, overrides, params, mode, file, cook, nodes: [{name, type, in, error, ms}]}]
+   * or null. vars: what the controls show; graphVars: the graph's own; mode "file": session values over a graph file.
+   */
   async graphs() { const { status, j } = await json('/api/graphs'); return status === 200 && Array.isArray(j) ? j : null; },
   /** the last cook of a graph: {ok, ms, target, errors, warnings} */
   async report(graph) { const { status, j } = await json('/api/report?' + q({ graph })); return status === 200 ? j : null; },
   geo: (graph, node) => glb('/api/geo?' + q({ graph, node })),
   /** {target, summary, ms} or null */
   async info(graph, node) { const { status, j } = await json('/api/info?' + q({ graph, node })); return status === 200 ? j : null; },
-  /** {ok, ms, errors, vars?} */
+  /** {ok, ms, errors, vars?, graphVars?, overrides?, stopped?}, once a cook has applied the values (or a stop ended it) */
   async vars(graph, vars) { const { status, j } = await json('/api/vars?' + q({ graph }), post({ vars })); return status ? j : { ok: false, ms: 0, errors: [offline] }; },
+  /** Save values to the graph file: {ok, saved, file, vars, graphVars, overrides} or {ok: false, error} */
+  async saveVars(graph, vars) { const { status, j } = await json('/api/vars/save?' + q({ graph }), post({ vars })); return status === 200 ? j : fail(j.error ?? `${status}`); },
+  /** Stop the cooks of a graph: {ok, stopping} or {ok: false, error} */
+  async stop(graph) { const { status, j } = await json('/api/cook/stop?' + q({ graph }), post({})); return status === 200 ? j : fail(j.error ?? `${status}`); },
   async inputs() { const { status, j } = await json('/api/inputs'); return status === 200 && Array.isArray(j) ? j : null; },
   /** {dir, where} or null */
   async inputsDir() { const { status, j } = await json('/api/inputs_dir'); return status === 200 ? j : null; },

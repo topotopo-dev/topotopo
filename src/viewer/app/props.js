@@ -8,7 +8,8 @@ import * as M from './markers.js';
 import { parseId } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
-import { isNum, same, HEX3, fmt, short, jsonKind, kindOf, blank, rangeOf, autoStep, snapTo, controlList } from './vars.js';
+import { isNum, same, HEX3, fmt, short, kindOf, blank, rangeOf, autoStep, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
+import { fmtDuration } from './cooking.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const $ = (id) => document.getElementById(id);
@@ -188,17 +189,24 @@ export function createProps(ctx) {
 
 // ---------------------------------------------------------------------------------------------- the Controls
 // One control per declared param (graph.params), then the undeclared vars. Values are POSTed to /api/vars (sliders at
-// most every 100 ms, plus once on release). Updates from the server set values in place; the panel is rebuilt only
-// when the set of params changes. A finished change (release, Enter, a pick) is one undo step.
+// most every 100 ms, plus once on release); the server cooks the latest one and stops the cook of the one before.
+// Rows are kept and updated in place: a row is built again only when its shape changes (vars.js rowShape), and never
+// while it is dragged, so the panel keeps its layout and scroll position through reloads and cooks. A finished change
+// (release, Enter, a pick) is one undo step.
+// Over a graph file (`topotopo view`, mode "file") the values are session values over the file: a mark shows each one
+// that differs from the file, ↺ goes back to the file's value, Reset all does so for all of them, and Save values
+// writes them into the file's vars. In a workspace the values edit the stored graph and ↺ goes to the declared default.
 function createControls(ctx) {
   const box = $('controls'), count = $('controls-count');
+  const bar = $('controls-session'), barText = bar.querySelector('.stext'), saveBtn = $('vars-save'), resetBtn = $('vars-reset');
   const ctl = {
-    graph: null, sig: null, rows: new Map(), active: null, deferred: null,
+    graph: null, mode: 'workspace', file: null, graphVars: {}, rows: new Map(), active: null, deferred: null, saving: false,
     pending: {}, timer: 0, lastSend: -1e9, seq: 0,
     // var → id of its newest POST not answered yet / time its newest POST was answered: older server state is ignored
     unacked: new Map(), ackAt: new Map(),
     // var → its value when the change being made began (the undo step's "before")
     begin: new Map(), values: new Map(),
+    sub: el('div', 'sub'), none: el('div', 'none'),
   };
   addEventListener('pointerup', () => endDrag(), true);
   addEventListener('pointercancel', () => endDrag(), true);
@@ -330,79 +338,179 @@ function createControls(ctx) {
     },
   };
 
-  function controlRow(name, vd, value) {
+  /** One control row: its widget, the mark that it differs from the graph file, and ↺. */
+  function controlRow(name, vd, value, shape) {
     const declared = !!vd;
     vd = vd ?? {};
-    const def = declared ? vd.default : undefined;
-    if (value === undefined) value = def !== undefined ? def : blank(vd);
+    if (value === undefined) value = declared && vd.default !== undefined ? vd.default : blank(vd);
     const label = (typeof vd.label === 'string' && vd.label) || name;
-    const wrap = el('div', 'ctl'), cw = el('div', 'cw');
+    const wrap = el('div', 'ctl'), cw = el('div', 'cw'), mark = el('span', 'cmark');
     wrap.title = [label !== name ? name : '', declared ? vd.desc : 'not declared in the graph\'s "params"'].filter(Boolean).join(' — ');
     const w = WIDGETS[kindOf(declared ? vd : null, value)](name, vd, value, cw);
-    const reset = el('button', 'ib' + (def === undefined ? ' gone' : ''), '↺');
-    if (def !== undefined) reset.title = `reset ${name} to ${short(def)}`;
-    reset.onclick = () => { w.set(def); queueVar(name, def, true); reset.blur(); };
-    wrap.append(el('span', 'cl', label), cw, reset);
+    const reset = el('button', 'ib', '↺');
+    reset.onclick = () => { reset.blur(); resetVars([name]); };
+    wrap.append(mark, el('span', 'cl', label), cw, reset);
     const r = {
-      def,
+      el: wrap, name, shape,
+      /** what ↺ goes back to (vars.js baseValue), undefined: nothing */
+      base: undefined,
       set(v) { w.set(v); r.sync(); },
       get: () => w.get(),
       typing: () => w.typing?.() ?? false,
-      sync() { reset.disabled = def === undefined || same(w.get(), def); },
+      /** differs from the graph file (marked) */
+      changed: () => ctl.mode === 'file' && r.base !== undefined && !same(ctl.values.get(name), r.base),
+      sync() {
+        const changed = r.changed();
+        wrap.classList.toggle('changed', changed);
+        mark.title = changed ? `differs from ${ctl.file ?? 'the graph'}, where it is ${short(r.base)}` : '';
+        reset.classList.toggle('gone', r.base === undefined);
+        reset.disabled = r.base === undefined || same(w.get(), r.base);
+        reset.title = r.base === undefined ? '' : ctl.mode === 'file' ? `back to ${short(r.base)}, the value in ${ctl.file ?? 'the graph'}` : `reset ${name} to ${short(r.base)}`;
+      },
     };
-    r.sync();
-    ctl.rows.set(name, r);
     ctl.values.set(name, value);
-    return wrap;
+    return r;
   }
 
+  /**
+   * Show a graph's controls. Rows are kept in place: a row whose shape changed is built again (after the drag when it
+   * is the one being dragged), rows of vars that went away are removed, new ones are added in order.
+   */
   function render(g, issued = performance.now()) {
-    const params = g?.params ?? {}, vars = g?.vars ?? {};
-    const { declared, other } = controlList(params, vars);
-    const sig = g ? JSON.stringify([g.name, params, other.map((k) => [k, jsonKind(vars[k]), Array.isArray(vars[k]) ? vars[k].length : 0])]) : '';
-    if (sig === ctl.sig) return applyValues(vars, issued);
-    // the set of params changed: rebuild, but not under a slider being dragged
-    if (ctl.active && g?.name === ctl.graph) { ctl.deferred = [g, issued]; return; }
-    if (ctl.graph !== (g?.name ?? null)) {
+    const name = g?.name ?? null;
+    if (ctl.graph !== name) {
       if (ctl.graph) flushVars();
       ctl.pending = {}; ctl.unacked.clear(); ctl.ackAt.clear(); ctl.begin.clear(); ctl.values.clear();
+      for (const r of ctl.rows.values()) r.el.remove();
+      ctl.rows.clear(); ctl.deferred = null;
+      ctl.graph = name;
     }
-    ctl.graph = g?.name ?? null; ctl.sig = sig; ctl.rows.clear();
-    box.replaceChildren();
+    ctl.mode = g?.mode ?? 'workspace'; ctl.file = g?.file ?? null;
+    const params = g?.params ?? {}, vars = g?.vars ?? {};
+    ctl.graphVars = g?.graphVars ?? vars;
+    const { declared, other } = controlList(params, vars);
     count.textContent = declared.length + other.length || '';
-    if (!declared.length && !other.length) { box.append(el('div', 'none', g ? 'none — this graph exposes no vars' : 'none')); return; }
-    for (const k of declared) box.append(controlRow(k, params[k] ?? {}, vars[k]));
-    if (other.length) {
-      box.append(el('div', 'sub', declared.length ? 'other vars' : 'vars (none declared in "params")'));
-      for (const k of other) box.append(controlRow(k, null, vars[k]));
+    let deferred = false;
+    const wanted = new Set(), els = [];
+    const place = (k, vd) => {
+      wanted.add(k);
+      // a row the person is changing keeps the value it shows; the shape is the server's otherwise
+      const local = ctl.rows.has(k) && holding(k, issued);
+      let v = local ? ctl.values.get(k) : vars[k];
+      if (v === undefined) v = vd?.default !== undefined ? vd.default : blank(vd ?? {});
+      const shape = rowShape(vd, v);
+      let r = ctl.rows.get(k);
+      if (r && r.shape !== shape) {
+        if (ctl.active === k) deferred = true;
+        else { const n = controlRow(k, vd, v, shape); r.el.replaceWith(n.el); ctl.rows.set(k, n); r = n; }
+      }
+      if (!r) { r = controlRow(k, vd, v, shape); ctl.rows.set(k, r); }
+      r.base = baseValue(ctl.mode, vd, ctl.graphVars, k);
+      els.push(r.el);
+    };
+    for (const k of declared) place(k, params[k] ?? {});
+    if (other.length) { ctl.sub.textContent = declared.length ? 'other vars' : 'vars (none declared in "params")'; els.push(ctl.sub); }
+    for (const k of other) place(k, null);
+    if (!els.length) { ctl.none.textContent = g ? 'none — this graph exposes no vars' : 'none'; els.push(ctl.none); }
+    // in order, moving only what is out of place (the scroll position and an open menu stay)
+    let prev = null;
+    for (const e of els) { const at = prev ? prev.nextSibling : box.firstChild; if (e !== at) box.insertBefore(e, at); prev = e; }
+    for (const [k, r] of ctl.rows) {
+      if (wanted.has(k)) continue;
+      if (ctl.active === k) { deferred = true; continue; }
+      r.el.remove(); ctl.rows.delete(k); ctl.values.delete(k);
     }
+    for (const e of [ctl.sub, ctl.none]) if (!els.includes(e)) e.remove();
+    ctl.deferred = deferred ? [g, issued] : null;
+    applyValues(vars, issued);
+    for (const r of ctl.rows.values()) r.sync();
+    renderBar();
   }
+
+  /** The person has a change of var k on the way, is dragging it or typing in it: the server's value waits. */
+  const typing = (k) => !!ctl.rows.get(k)?.typing();
+  const holding = (k, issued) => !serverValueWins({ pending: ctl.pending, unacked: ctl.unacked, ackAt: ctl.ackAt, active: ctl.active, typing }, k, issued);
 
   /** Server state into the controls, except where the person has edits on the way or is dragging/typing. */
   function applyValues(vars, issued) {
     for (const [k, r] of ctl.rows) {
-      if (k in ctl.pending || ctl.unacked.has(k) || (ctl.ackAt.get(k) ?? -1e9) > issued || ctl.active === k || r.typing()) continue;
-      const v = k in vars ? vars[k] : r.def;
+      if (holding(k, issued)) continue;
+      const v = k in vars ? vars[k] : r.base;
+      if (v === undefined) continue;
       r.set(v);
       ctl.values.set(k, v);
+      r.sync();
     }
+    renderBar();
   }
 
-  /** A change from a control; `final` ends the change (one undo step from its start). `undoing` skips the record. */
-  function queueVar(name, value, final = false, undoing = false) {
+  /** The line above the Controls over a graph file: how many values differ from it, Save values, Reset all. */
+  function renderBar() {
+    const file = ctl.mode === 'file';
+    bar.hidden = !file;
+    if (!file) return;
+    const changed = [...ctl.rows.values()].filter((r) => r.changed()).length;
+    barText.textContent = sessionText(changed, ctl.file);
+    // a viewer that cannot write the file (it does not name one) offers no Save
+    saveBtn.hidden = !ctl.file;
+    saveBtn.disabled = !changed || ctl.saving;
+    saveBtn.title = ctl.file ? `write the ${changed || ''} changed value${changed === 1 ? '' : 's'} into "vars" of ${ctl.file}`.replace('  ', ' ') : '';
+    resetBtn.disabled = !changed;
+    resetBtn.title = `every value back to ${ctl.file ?? 'the graph'}'s`;
+  }
+
+  /** ↺ and Reset all: the vars back to their base value (over a graph file: the file's, one undo step for all). */
+  function resetVars(names) {
+    const rows = names.map((k) => ctl.rows.get(k)).filter((r) => r && r.base !== undefined && !same(ctl.values.get(r.name), r.base));
+    if (!rows.length) return;
+    const graph = ctl.graph, before = new Map(rows.map((r) => [r.name, ctl.values.get(r.name)])), after = new Map(rows.map((r) => [r.name, r.base]));
+    // over a graph file null drops the session value; in a workspace the default is stored
+    for (const r of rows) { r.set(r.base); queueVar(r.name, ctl.mode === 'file' ? null : r.base, false, true, r.base); }
+    const apply = (m) => {
+      if (ctl.graph !== graph) { api.vars(graph, Object.fromEntries(m)); return; }
+      for (const [k, v] of m) if (ctl.rows.has(k)) { ctl.rows.get(k).set(v); queueVar(k, v, false, true); }
+      flushVars();
+    };
+    ctx.undo.push({ label: rows.length === 1 ? `${rows[0].name} = ${short(rows[0].base)}` : `reset ${rows.length} values`, undo: () => apply(before), redo: () => apply(after) });
+    flushVars();
+  }
+  resetBtn.onclick = () => { resetBtn.blur(); resetVars([...ctl.rows.values()].filter((r) => r.changed()).map((r) => r.name)); };
+  saveBtn.onclick = async () => {
+    saveBtn.blur();
+    const graph = ctl.graph, values = Object.fromEntries([...ctl.rows.values()].filter((r) => r.changed()).map((r) => [r.name, ctl.values.get(r.name)]));
+    if (!graph || !Object.keys(values).length) return;
+    ctl.saving = true; renderBar();
+    // values still on their way go first; the save carries what the controls show
+    flushVars();
+    const j = await api.saveVars(graph, values);
+    ctl.saving = false;
+    if (graph !== ctl.graph) return;
+    if (!j.ok) { ctx.message(j.error, 'err', 8000); renderBar(); return; }
+    ctl.graphVars = j.graphVars ?? ctl.graphVars;
+    for (const [k, r] of ctl.rows) { if (Object.hasOwn(ctl.graphVars, k)) r.base = ctl.graphVars[k]; r.sync(); }
+    renderBar();
+    ctx.message(`saved ${j.saved.length} value${j.saved.length === 1 ? '' : 's'} to ${j.file}: ${j.saved.join(', ')}`, 'ok', 5000);
+  };
+
+  /**
+   * A change from a control; `final` ends the change (one undo step from its start). `undoing` skips the record.
+   * `shown` is what the control shows when `value` is not it (null: back to the graph file's value).
+   */
+  function queueVar(name, value, final = false, undoing = false, shown = value) {
     if (!undoing && !ctl.begin.has(name)) ctl.begin.set(name, ctl.values.get(name));
     ctl.pending[name] = value;
-    ctl.values.set(name, value);
+    ctl.values.set(name, shown);
     ctl.rows.get(name)?.sync();
+    renderBar();
     if (final) {
       const before = ctl.begin.get(name), graph = ctl.graph;
       ctl.begin.delete(name);
-      if (!undoing && !same(before, value)) {
+      if (!undoing && !same(before, shown)) {
         const apply = (v) => {
           if (ctl.graph === graph && ctl.rows.has(name)) { ctl.rows.get(name).set(v); queueVar(name, v, true, true); }
           else api.vars(graph, { [name]: v });
         };
-        ctx.undo.push({ label: `${name} = ${short(value)}`, undo: () => apply(before), redo: () => apply(value) });
+        ctx.undo.push({ label: `${name} = ${short(shown)}`, undo: () => apply(before), redo: () => apply(shown) });
       }
       return flushVars();
     }
@@ -411,6 +519,7 @@ function createControls(ctx) {
     else if (!ctl.timer) ctl.timer = setTimeout(flushVars, wait);
   }
 
+  /** Send the changes on the way; the answer comes once a cook has applied them (or a stop ended it). */
   async function flushVars() {
     clearTimeout(ctl.timer); ctl.timer = 0;
     const vars = ctl.pending, graph = ctl.graph;
@@ -423,9 +532,12 @@ function createControls(ctx) {
     const now = performance.now();
     for (const k in vars) if (ctl.unacked.get(k) === id) { ctl.unacked.delete(k); ctl.ackAt.set(k, now); }
     if (graph !== ctl.graph) return;
-    const what = Object.entries(vars).map(([k, v]) => `${k} = ${short(v)}`).join(', ');
-    if (j.ok) ctx.message(`${what} · cooked in ${Math.round(j.ms)} ms`, 'ok');
+    const what = Object.entries(vars).map(([k, v]) => `${k} = ${v === null ? short(ctl.values.get(k)) : short(v)}`).join(', ');
+    // the cook's own state (time, failing node, where it stopped) is in the status bar; this says what was sent
+    if (j.stopped) ctx.message(`${what} set · its cook was stopped at ${j.stopped}`);
+    else if (j.ok) ctx.message(`${what} · cooked in ${fmtDuration(j.ms)}`, 'ok');
     else ctx.message(`${j.vars ? `${what} applied, cook failed` : `${what} not applied`} — ${(j.errors ?? []).join('; ') || 'unknown error'}`, 'err');
+    if (j.graphVars) ctl.graphVars = j.graphVars;
     if (j.vars) applyValues(j.vars, now);
   }
   return { render, flush: flushVars };

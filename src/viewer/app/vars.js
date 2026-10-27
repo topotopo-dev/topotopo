@@ -62,3 +62,38 @@ export const snapTo = (r, v) => +(r.lo + Math.round((v - r.lo) / r.step) * r.ste
 export function controlList(params = {}, vars = {}) {
   return { declared: Object.keys(params), other: Object.keys(vars).filter((k) => !(k in params)) };
 }
+
+/**
+ * What a control's ↺ goes back to. Over a graph file ("file" mode) the graph's own value (graphVars), else its
+ * declared default, else a blank of its type; in a workspace the declared default (undefined: no reset).
+ */
+export function baseValue(mode, vd, graphVars, k) {
+  if (mode !== 'file') return vd?.default;
+  if (graphVars && Object.hasOwn(graphVars, k)) return graphVars[k];
+  return vd?.default !== undefined ? vd.default : blank(vd);
+}
+
+/**
+ * A control's shape: its widget and what the widget is built from (the declaration, the value's kind and length). A
+ * row keeps its element while its shape stays; a new shape builds the row again.
+ */
+export function rowShape(vd, value) {
+  return JSON.stringify([kindOf(vd, value), vd ?? null, jsonKind(value), Array.isArray(value) ? value.length : 0]);
+}
+
+/**
+ * Whether a value the server reported for var k may replace what its control shows. `issued`: when the report was
+ * asked for (a graph list read earlier stays as old as it was). Not while the person has a change of k on the way
+ * (pending, sent and not answered), is dragging it or typing in it, nor when an answer about k came after the report.
+ * st: {pending: {k: v}, unacked: Map, ackAt: Map(k → time), active: k | null, typing: (k) => bool}.
+ */
+export function serverValueWins(st, k, issued) {
+  return !(k in st.pending) && !st.unacked.has(k) && !((st.ackAt.get(k) ?? -1e9) > issued) && st.active !== k && !st.typing(k);
+}
+
+/** The line above the Controls over a graph file: how many values differ from it. */
+export function sessionText(changed, file) {
+  const where = file ?? 'the graph';
+  if (!changed) return `values as in ${where}`;
+  return `${changed} value${changed === 1 ? '' : 's'} differ${changed === 1 ? 's' : ''} from ${where}`;
+}
