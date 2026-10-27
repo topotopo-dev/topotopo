@@ -7819,7 +7819,7 @@ category: `heightfield` · aliases: `hf_mask_noise`
 
 Noise into a mask layer (clamped 0..1): break up masks, vary scatter density and materials.
 
-Houdini: HeightField Mask Noise. Same noise as heightfield_noise with mask defaults: range positive, mode replace; use mode multiply to break up an existing mask.
+Houdini: HeightField Mask Noise. Same noise as heightfield_noise (domain warp included) with mask defaults: range positive, mode replace; use mode multiply to break up an existing mask. A band around 0.5 of a warped mask noise traces meandering lines: rivers, paths, strata.
 
 **Inputs**
 
@@ -7844,6 +7844,11 @@ Houdini: HeightField Mask Noise. Same noise as heightfield_noise with mask defau
 | `range` | enum | `"positive"` |  | `zero_centered`, `positive` |  | zero_centered: noise in [-amplitude, amplitude]; positive: [0, amplitude] |
 | `offset` | vec3 | `[0,0,0]` |  |  | `translate_noise`, `noise_offset` | noise-space offset (scrolls the pattern; Y picks another slice) |
 | `seed` | float | `0` |  |  |  | random seed |
+| `warp_amplitude` | float | `0` | 0.. |  | `warp`, `warp_amount` | domain warp: how far (metres) a second noise moves each sample's lookup along X and Z, bending ridges, valleys and contours into meanders (0 = off) |
+| `warp_element_size` | float | `10` | 0.001.. |  |  | domain warp: size of the bends (metres); frequency = 1 / warp_element_size |
+| `warp_frequency` | float | `0` | 0.. |  |  | domain warp: bends per metre; > 0 overrides warp_element_size |
+| `warp_octaves` | int | `3` | 1..8 |  |  | domain warp: fractal octaves of the warp noise (more = wigglier bends) |
+| `warp_seed` | float | `0` |  |  |  | domain warp: seed of the warp noise (independent of seed) |
 | `contrast` | float | `1` | 0.. |  |  | sharpen (> 1) or soften (< 1) the noise around 0.5 before combining |
 
 **Writes:** the mask layer (0..1)
@@ -7877,7 +7882,7 @@ category: `heightfield` · aliases: `hf_noise`, `heightfield_mountain`
 
 Add (or multiply, replace, max, min) fractal noise on a heightfield layer: mountains, hills, dunes, mask variation.
 
-Houdini: HeightField Noise. Noise is sampled at each sample's world X/Z, so it is resolution-independent. For mountains use fractal ridged, amplitude a few metres, element_size about a third of the field. mask_layer blends the result in by a 0..1 layer.
+Houdini: HeightField Noise. Noise is sampled at each sample's world X/Z, so it is resolution-independent and a tile of a map gets the map's values. For mountains use fractal ridged, amplitude a few metres, element_size about a third of the field. Domain warp (warp_amplitude > 0) moves each lookup by a second noise, in metres: ridges, escarpments and valleys meander instead of running straight (warp_element_size a few times element_size for broad bends, smaller for wiggles; terrace the result for meandering cliff bands). mask_layer blends the result in by a 0..1 layer.
 
 **Inputs**
 
@@ -7902,6 +7907,11 @@ Houdini: HeightField Noise. Noise is sampled at each sample's world X/Z, so it i
 | `range` | enum | `"zero_centered"` |  | `zero_centered`, `positive` |  | zero_centered: noise in [-amplitude, amplitude]; positive: [0, amplitude] |
 | `offset` | vec3 | `[0,0,0]` |  |  | `translate_noise`, `noise_offset` | noise-space offset (scrolls the pattern; Y picks another slice) |
 | `seed` | float | `0` |  |  |  | random seed |
+| `warp_amplitude` | float | `0` | 0.. |  | `warp`, `warp_amount` | domain warp: how far (metres) a second noise moves each sample's lookup along X and Z, bending ridges, valleys and contours into meanders (0 = off) |
+| `warp_element_size` | float | `10` | 0.001.. |  |  | domain warp: size of the bends (metres); frequency = 1 / warp_element_size |
+| `warp_frequency` | float | `0` | 0.. |  |  | domain warp: bends per metre; > 0 overrides warp_element_size |
+| `warp_octaves` | int | `3` | 1..8 |  |  | domain warp: fractal octaves of the warp noise (more = wigglier bends) |
+| `warp_seed` | float | `0` |  |  |  | domain warp: seed of the warp noise (independent of seed) |
 | `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
 
 **Writes:** the layer (created if missing)
@@ -7930,7 +7940,9 @@ Houdini: HeightField Noise. Noise is sampled at each sample's world X/Z, so it i
         "fractal": "ridged",
         "amplitude": 4,
         "element_size": 8,
-        "range": "positive"
+        "range": "positive",
+        "warp_amplitude": 2.5,
+        "warp_element_size": 12
       }
     }
   },

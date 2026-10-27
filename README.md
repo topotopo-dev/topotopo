@@ -306,7 +306,8 @@ path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert
 repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
 sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube, and
 `erosion_models` erodes one ridged terrain four ways (TypeScript and WASM droplets, virtual pipes, pipes plus stream
-power). `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
+power), and `terrain_tiles` bends escarpments and a river with domain-warped noise, with one tile of the map cooked on
+its own (`heightfield_crop`) floating above the area it matches. `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
 collision surface, curl noise, sliding contacts; trails coloured by age) next to a fountain bouncing on a plane.
 `rbd_settle` drops shelf rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
 crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of shelf crates, a

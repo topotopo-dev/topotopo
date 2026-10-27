@@ -11,7 +11,7 @@ import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Heightfield, blurGrid, distanceTransform, heightfieldsOf } from '../src/core/heightfield.ts';
 import { DEFAULT_EROSION, erodeStep, makeErosionField } from '../src/core/erosion.ts';
-import { fractal, makeNoise } from '../src/core/noise.ts';
+import { fractal, makeNoise, makeWarp } from '../src/core/noise.ts';
 import { rng } from '../src/core/random.ts';
 import { decodePNG, inflateZlib, pngChannel } from '../src/io/png-decode.ts';
 import { encodeGreyPNG, heightmapExport, heightmapPaths, quantize16, zlibStored } from '../src/io/heightmap.ts';
@@ -141,6 +141,44 @@ section('noise, from_mesh, to_mesh');
   check(dec.numPoints === 11 * 11 && dec.points.has('Cd'), 'to_mesh step 4 decimates (41 → 11 per side) and colours');
 }
 
+// ---------------------------------------------------------------- domain warp
+section('noise domain warp');
+{
+  const WARPED = (extra: any = {}, resolution = 0.25): Record<string, NodeSpec> => ({
+    hf: { type: 'heightfield', params: { size: [16, 12], resolution } },
+    n: { type: 'heightfield_noise', in: ['hf'], params: { fractal: 'ridged', amplitude: 3, element_size: 6, seed: 2, ...extra } },
+  });
+  const W = { warp_amplitude: 2.5, warp_element_size: 8, warp_seed: 4 };
+  const plain = (await field(WARPED(), 'n')).layer('height')!;
+  const zero = (await field(WARPED({ warp_amplitude: 0, warp_element_size: 3, warp_octaves: 5, warp_seed: 9 }), 'n')).layer('height')!;
+  check(same(zero, plain), 'warp_amplitude 0 leaves the noise bit for bit, whatever the other warp params');
+  const a = await field(WARPED(W), 'n');
+  engine.cache.clear();
+  const b = await field(WARPED(W), 'n');
+  const c = await field(WARPED({ ...W, warp_seed: 5 }), 'n');
+  const A = a.layer('height')!;
+  check(A !== b.layer('height') && same(A, b.layer('height')!) && maxDiff(A, plain) > 0.3 && maxDiff(A, c.layer('height')!) > 0.1,
+    `the warp is deterministic, bends the field (max change ${maxDiff(A, plain).toFixed(2)} m) and warp_seed picks another warp`);
+  check(same(A, (await field(WARPED({ ...W, warp_element_size: 50, warp_frequency: 0.125 }), 'n')).layer('height')!), 'warp_frequency 1/8 per metre = warp_element_size 8 m');
+  // each sample is the noise looked up at its position moved by warp_amplitude × the warp noise (core/noise.ts makeWarp)
+  const base = fractal(makeNoise('simplex', 2), { octaves: 6, roughness: 0.5, lacunarity: 2.01, fractal: 'ridged' }), warp = makeWarp(4, 3);
+  let err = 0, reach = 0;
+  for (let j = 0; j < a.height; j++) for (let i = 0; i < a.width; i++) {
+    const x = a.x(i), z = a.z(j), wx = warp.x(x / 8, 0, z / 8), wz = warp.z(x / 8, 0, z / 8);
+    reach = Math.max(reach, Math.abs(wx), Math.abs(wz));
+    err = Math.max(err, Math.abs(A[j * a.width + i] - base((x + 2.5 * wx) / 6, 0, (z + 2.5 * wz) / 6) * 3));
+  }
+  check(err < 1e-5 && reach <= 1 && reach > 0.3, `warped(x, z) = noise(x + 2.5 wx, z + 2.5 wz) with the warp noise |w| ≤ 1 (max error ${err.toExponential(1)}, largest offset ${(2.5 * reach).toFixed(2)} m)`);
+  // world positions: the 0.25 m grid's samples are the 0.125 m grid's samples at the same X/Z (dyadic cells: same bits)
+  const fine = await field(WARPED(W, 0.125), 'n');
+  let grids = fine.width === 2 * a.width - 1;
+  for (let j = 0; j < a.height && grids; j++) for (let i = 0; i < a.width; i++) if (A[j * a.width + i] !== fine.layer('height')![2 * j * fine.width + 2 * i]) { grids = false; break; }
+  check(grids, 'the warp works in metres: a 0.25 m and a 0.125 m field agree bit for bit where their samples coincide');
+  const mask = await field({ ...WARPED(), m: { type: 'heightfield_mask_noise', in: ['n'], params: { warp_amplitude: 3, warp_element_size: 10 } } }, 'm');
+  const mask0 = await field({ ...WARPED(), m: { type: 'heightfield_mask_noise', in: ['n'] } }, 'm');
+  check(mask.layer('mask')!.every((v) => v >= 0 && v <= 1) && maxDiff(mask.layer('mask')!, mask0.layer('mask')!) > 0.05, 'heightfield_mask_noise takes the same warp and stays in 0..1');
+}
+
 // ---------------------------------------------------------------- filters
 section('remap, blur, terrace, clip, cutout, layer');
 {
@@ -242,7 +280,7 @@ section('crop and tiles: a tile cooked on its own matches the same area of the w
   // A dyadic cell (0.25 m) puts both grids' samples at bit-identical positions.
   const BASE: Record<string, NodeSpec> = { map: { type: 'heightfield', params: { size: [32, 24], resolution: 0.25 } } };
   const CHAIN = (input: string, extra: Record<string, any> = {}): Record<string, NodeSpec> => ({
-    noise: { type: 'heightfield_noise', in: [input], params: { fractal: 'ridged', amplitude: 6, element_size: 9, range: 'positive', seed: 3 } },
+    noise: { type: 'heightfield_noise', in: [input], params: { fractal: 'ridged', amplitude: 6, element_size: 9, range: 'positive', seed: 3, warp_amplitude: 3, warp_element_size: 14, warp_seed: 1 } },
     hills: { type: 'heightfield_noise', in: ['noise'], params: { amplitude: 0.8, element_size: 2.5, seed: 8 } },
     terrace: { type: 'heightfield_terrace', in: ['hills'], params: { step_height: 0.75, base: 0.2, rounding: 0.4, ...extra.terrace } },
     remap: { type: 'heightfield_remap', in: ['terrace'], params: { input_min: 0, input_max: 7, output_min: -1, output_max: 9, ramp: [[0, 0], [0.5, 0.3], [1, 1]], ...extra.remap } },
@@ -278,7 +316,7 @@ section('crop and tiles: a tile cooked on its own matches the same area of the w
   const [oi, oj] = tileGeo.detail.get('crop_offset')!.get(0) as number[];
   let imgSame = !!localImg && !!wholeImg;
   if (imgSame) for (let j = 0; j < localImg.height; j++) for (let i = 0; i < localImg.width; i++) if (localImg.layers.get('C')[j * localImg.width + i] !== wholeImg.layers.get('C')[(oj + j) * wholeImg.width + oi + i]) imgSame = false;
-  check(localSame && imgSame, `noise, terrace (step), remap (input range), x z expressions, height masks, mask noise, clip and to_tex: the tile equals the map's samples bit for bit (${localTile.width} × ${localTile.height} samples, ${localTile.layers.size} layers)`);
+  check(localSame && imgSame, `noise (domain warp included), terrace (step), remap (input range), x z expressions, height masks, mask noise, clip and to_tex: the tile equals the map's samples bit for bit (${localTile.width} × ${localTile.height} samples, ${localTile.layers.size} layers)`);
   // filters read neighbours: with a margin of their reach the core matches, without one the tile edges differ
   const tiled = (margin: number) => geo({ ...BASE, tile: { type: 'heightfield_crop', in: ['map'], params: { ...TILE, margin } }, ...CHAIN('tile'), ...FILTERS,
     core: { type: 'heightfield_crop', in: ['out'], params: { mode: 'bounds', min: [ref.origin[0], ref.origin[1]], max: [ref.x(ref.width - 1), ref.z(ref.height - 1)] } } }, 'core');

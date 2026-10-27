@@ -1,0 +1,51 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "height:float:1",
+        "mask:float:1",
+        "river:float:1",
+        "uv:float:3"
+      ],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [32, 39.1468, 32],
+      "min": [-32, 0.6203, -32]
+    },
+    "counts": {
+      "points": 82690,
+      "prims": 81920,
+      "vertices": 327680,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "97987f2bd59446f1",
+      "attributes": {
+        "point.Cd": "9e78ea047ce59b7a",
+        "point.N": "cb8d25f5ec4d10a7",
+        "point.height": "dcd2ce2956b611a3",
+        "point.mask": "4725f90518d5761f",
+        "point.river": "392a27a317e6b8b1",
+        "point.uv": "78d2edf547cb4f2f"
+      },
+      "topology": "dc15c4214d1d3b9f"
+    }
+  },
+  "name": "example.terrain_tiles",
+  "ok": true,
+  "source": "examples/terrain_tiles.json",
+  "warnings": []
+}

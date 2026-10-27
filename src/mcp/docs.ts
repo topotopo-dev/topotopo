@@ -404,6 +404,8 @@ counts landscape vertices the same way). Layers: height (world Y), mask (0..1 se
 (written by heightfield_erode), path (heightfield_path) and any user layer (rock, snow …).
 WORKFLOW
   heightfield {size, resolution} → heightfield_noise {fractal: "ridged", amplitude, element_size, range: "positive"}
+    (warp_amplitude, warp_element_size: a domain warp in metres bends ridges, escarpments and rivers into meanders;
+    terrace a broad warped noise for cliff bands, carve a band of a warped mask_noise around 0.5 for a river)
   → heightfield_erode {iterations: 60} (gullies and sediment fans; writes flow, sediment, debris, water)
   → heightfield_path (road along a curve, writes "path") · heightfield_project (stamp meshes/curves: plateaus, ridges)
   → heightfield_mask_by_feature (slope/height/curvature/direction/flow/occlusion) → heightfield_scatter → copy_to_points

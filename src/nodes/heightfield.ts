@@ -10,7 +10,7 @@ import {
 } from '../core/heightfield.ts';
 import { erodeStep, makeErosionField } from '../core/erosion.ts';
 import type { ErosionParams } from '../core/erosion.ts';
-import { fractal, makeNoise } from '../core/noise.ts';
+import { fractal, makeNoise, makeWarp } from '../core/noise.ts';
 import { rng } from '../core/random.ts';
 import { decodePNG, pngChannel } from '../io/png-decode.ts';
 import type { PngChannel } from '../io/png-decode.ts';
@@ -172,6 +172,11 @@ const NOISE_PARAMS: Record<string, ParamDef> = {
   range: { type: 'enum', options: ['zero_centered', 'positive'], default: 'zero_centered', desc: 'zero_centered: noise in [-amplitude, amplitude]; positive: [0, amplitude]' },
   offset: { type: 'vec3', default: [0, 0, 0], desc: 'noise-space offset (scrolls the pattern; Y picks another slice)', aliases: ['translate_noise', 'noise_offset'] },
   seed: P.seed(),
+  warp_amplitude: { type: 'float', default: 0, min: 0, desc: 'domain warp: how far (metres) a second noise moves each sample\'s lookup along X and Z, bending ridges, valleys and contours into meanders (0 = off)', aliases: ['warp', 'warp_amount'] },
+  warp_element_size: { type: 'float', default: 10, min: 0.001, desc: 'domain warp: size of the bends (metres); frequency = 1 / warp_element_size' },
+  warp_frequency: { type: 'float', default: 0, min: 0, desc: 'domain warp: bends per metre; > 0 overrides warp_element_size' },
+  warp_octaves: { type: 'int', default: 3, min: 1, max: 8, desc: 'domain warp: fractal octaves of the warp noise (more = wigglier bends)' },
+  warp_seed: { ...P.seed(), desc: 'domain warp: seed of the warp noise (independent of seed)' },
 };
 
 function noiseValues(hf: Heightfield, p: any): Float32Array {
@@ -182,10 +187,20 @@ function noiseValues(hf: Heightfield, p: any): Float32Array {
   const [ox, oy, oz] = p.offset as number[];
   const worley = p.noise === 'worley' && (p.fractal === 'fbm' || p.fractal === 'none');
   const positive = p.range === 'positive';
+  // domain warp: the lookup at world (x, z) moves by amplitude × the warp noise there, both in world metres, so it is
+  // the same at any resolution and on any tile of a map
+  const A = p.warp_amplitude > 0 ? p.warp_amplitude : 0;
+  const warp = A ? makeWarp(p.warp_seed, p.warp_octaves) : null;
+  const fw = p.warp_frequency > 0 ? p.warp_frequency : 1 / Math.max(1e-6, p.warp_element_size);
+  const qy = oy * fw;
   for (let j = 0; j < hf.height; j++) {
-    const z = (hf.z(j) + oz) * f;
+    const zw = hf.z(j) + oz, z = zw * f, qz = zw * fw;
     for (let i = 0; i < hf.width; i++) {
-      let v = n((hf.x(i) + ox) * f, oy * f, z);
+      let v: number;
+      if (warp) {
+        const x = hf.x(i) + ox, qx = x * fw;
+        v = n((x + A * warp.x(qx, qy, qz)) * f, oy * f, (zw + A * warp.z(qx, qy, qz)) * f);
+      } else v = n((hf.x(i) + ox) * f, oy * f, z);
       if (worley) v = v * 2 - 1;
       if (positive) v = v * 0.5 + 0.5;
       out[j * hf.width + i] = v * p.amplitude;
@@ -198,7 +213,7 @@ defineNode({
   type: 'heightfield_noise',
   category: 'heightfield',
   summary: 'Add (or multiply, replace, max, min) fractal noise on a heightfield layer: mountains, hills, dunes, mask variation.',
-  description: 'Houdini: HeightField Noise. Noise is sampled at each sample\'s world X/Z, so it is resolution-independent. For mountains use fractal ridged, amplitude a few metres, element_size about a third of the field. mask_layer blends the result in by a 0..1 layer.',
+  description: 'Houdini: HeightField Noise. Noise is sampled at each sample\'s world X/Z, so it is resolution-independent and a tile of a map gets the map\'s values. For mountains use fractal ridged, amplitude a few metres, element_size about a third of the field. Domain warp (warp_amplitude > 0) moves each lookup by a second noise, in metres: ridges, escarpments and valleys meander instead of running straight (warp_element_size a few times element_size for broad bends, smaller for wiggles; terrace the result for meandering cliff bands). mask_layer blends the result in by a 0..1 layer.',
   aliases: ['hf_noise', 'heightfield_mountain'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -208,7 +223,7 @@ defineNode({
     mask_layer: maskParam(),
   },
   outputs: 'the layer (created if missing)',
-  example: { nodes: { hf: { type: 'heightfield', params: { size: [20, 20], resolution: 0.1 } }, mtn: { type: 'heightfield_noise', in: ['hf'], params: { fractal: 'ridged', amplitude: 4, element_size: 8, range: 'positive' } } }, output: 'mtn' },
+  example: { nodes: { hf: { type: 'heightfield', params: { size: [20, 20], resolution: 0.1 } }, mtn: { type: 'heightfield_noise', in: ['hf'], params: { fractal: 'ridged', amplitude: 4, element_size: 8, range: 'positive', warp_amplitude: 2.5, warp_element_size: 12 } } }, output: 'mtn' },
   cook: (ctx) => {
     const { p } = ctx;
     checkName(p.layer, ctx.type);
@@ -223,7 +238,7 @@ defineNode({
   type: 'heightfield_mask_noise',
   category: 'heightfield',
   summary: 'Noise into a mask layer (clamped 0..1): break up masks, vary scatter density and materials.',
-  description: 'Houdini: HeightField Mask Noise. Same noise as heightfield_noise with mask defaults: range positive, mode replace; use mode multiply to break up an existing mask.',
+  description: 'Houdini: HeightField Mask Noise. Same noise as heightfield_noise (domain warp included) with mask defaults: range positive, mode replace; use mode multiply to break up an existing mask. A band around 0.5 of a warped mask noise traces meandering lines: rivers, paths, strata.',
   aliases: ['hf_mask_noise'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {

@@ -1,0 +1,32 @@
+{
+  "description": "A 64 × 64 m map (0.25 m cells) with meandering escarpments and a river, and one of its tiles cooked on its own. Domain warp bends a broad noise's contours, absolute terraces turn them into cliff bands, and a band of a warped mask noise carves the river. Above the map floats tile [1, 0] of a 2 × 2 grid: the flat map cropped with a 2 m margin (heightfield_crop), run through the same nodes and cropped back to its core; its samples equal the map's below it. Colours come from absolute heights and the river layer, so the tile and the map share them too.",
+  "meta": { "render": { "views": ["persp"], "azimuth": 30, "elevation": 24 } },
+  "nodes": {
+    "map": { "type": "heightfield", "params": { "size": [64, 64], "resolution": 0.25, "name": "map" } },
+
+    "land": { "type": "heightfield_noise", "in": ["map"], "params": { "noise": "perlin", "octaves": 2, "amplitude": 16, "element_size": 50, "range": "positive", "seed": 3, "warp_amplitude": 10, "warp_element_size": 30, "warp_seed": 1 } },
+    "mesas": { "type": "heightfield_terrace", "in": ["land"], "params": { "step_height": 3, "rounding": 0.25 } },
+    "rough": { "type": "heightfield_noise", "in": ["mesas"], "params": { "amplitude": 0.25, "element_size": 3, "octaves": 5, "seed": 8 } },
+    "river": { "type": "heightfield_mask_noise", "in": ["rough"], "params": { "layer": "river", "octaves": 2, "element_size": 40, "seed": 5, "warp_amplitude": 7, "warp_element_size": 20, "warp_seed": 2 } },
+    "bed": { "type": "heightfield_layer", "in": ["river"], "params": { "layer": "river", "expression": "1 - smoothstep(0.004, 0.014, abs(river - 0.5))" } },
+    "carve": { "type": "heightfield_layer", "in": ["bed"], "params": { "expression": "height - 2.5 * river" } },
+    "ground": { "type": "heightfield_blur", "in": ["carve"], "params": { "radius": 0.5 } },
+
+    "tile": { "type": "heightfield_crop", "in": ["map"], "params": { "tiles": [2, 2], "tile": [1, 0], "margin": 2 } },
+    "t_land": { "type": "heightfield_noise", "in": ["tile"], "params": { "noise": "perlin", "octaves": 2, "amplitude": 16, "element_size": 50, "range": "positive", "seed": 3, "warp_amplitude": 10, "warp_element_size": 30, "warp_seed": 1 } },
+    "t_mesas": { "type": "heightfield_terrace", "in": ["t_land"], "params": { "step_height": 3, "rounding": 0.25 } },
+    "t_rough": { "type": "heightfield_noise", "in": ["t_mesas"], "params": { "amplitude": 0.25, "element_size": 3, "octaves": 5, "seed": 8 } },
+    "t_river": { "type": "heightfield_mask_noise", "in": ["t_rough"], "params": { "layer": "river", "octaves": 2, "element_size": 40, "seed": 5, "warp_amplitude": 7, "warp_element_size": 20, "warp_seed": 2 } },
+    "t_bed": { "type": "heightfield_layer", "in": ["t_river"], "params": { "layer": "river", "expression": "1 - smoothstep(0.004, 0.014, abs(river - 0.5))" } },
+    "t_carve": { "type": "heightfield_layer", "in": ["t_bed"], "params": { "expression": "height - 2.5 * river" } },
+    "t_ground": { "type": "heightfield_blur", "in": ["t_carve"], "params": { "radius": 0.5 } },
+    "t_core": { "type": "heightfield_crop", "in": ["t_ground"], "params": { "mode": "bounds", "min": [0, -32], "max": [32, 0] } },
+
+    "map_mesh": { "type": "heightfield_to_mesh", "in": ["ground"] },
+    "tile_mesh": { "type": "heightfield_to_mesh", "in": ["t_core"] },
+    "tile_lift": { "type": "transform", "in": ["tile_mesh"], "params": { "translate": [0, 30, 0] } },
+    "both": { "type": "merge", "in": ["map_mesh", "tile_lift"] },
+    "out": { "type": "wrangle", "in": ["both"], "params": { "code": "const h = f@height, steep = 1 - @N.y;\nconst rock = smoothstep(0.25, 0.5, steep);\nlet c = mix(mix([0.4, 0.5, 0.28], [0.78, 0.7, 0.52], smoothstep(2, 15, h)), [0.48, 0.36, 0.28], rock);\n@Cd = mix(c, [0.12, 0.34, 0.58], smoothstep(0.2, 0.8, f@river));" } }
+  },
+  "output": "out"
+}

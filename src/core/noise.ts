@@ -1,5 +1,5 @@
 // Noise library: Perlin (improved), simplex (via simplex-noise), Worley/cellular,
-// value noise, fractal layering (fBm / ridged / turbulence) and curl noise.
+// value noise, fractal layering (fBm / ridged / turbulence), domain warp and curl noise.
 // All generators are seeded and return values roughly in [-1, 1] (worley: [0, ~1]).
 import { createNoise3D } from 'simplex-noise';
 import { rng, hash32 } from './random.ts';
@@ -138,6 +138,16 @@ export function fractal(base: Noise3, o: FractalOpts = {}): Noise3 {
     const v = sum / norm;
     return mode === 'ridged' || mode === 'turbulence' ? v * 2 - 1 : v;
   };
+}
+
+/**
+ * Domain warp: two decorrelated fBm simplex noises, roughly in [-1, 1] (at most 1 in magnitude), for the X and Z offsets
+ * of another noise's lookup: n(p + amplitude × (warp.x(q), warp.z(q))) with q = p × frequency bends straight
+ * features into meanders. Deterministic per seed.
+ */
+export function makeWarp(seed = 0, octaves = 3): { x: Noise3; z: Noise3 } {
+  const n = fractal(makeNoise('simplex', seed), { octaves, roughness: 0.5, lacunarity: 2.01, fractal: 'fbm' });
+  return { x: n, z: (x, y, z) => n(x + 71.37, y + 23.11, z - 47.21) };
 }
 
 /** Divergence-free curl noise from three decorrelated potentials. */
