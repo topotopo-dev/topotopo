@@ -7,7 +7,8 @@
 //
 // Workers start on demand (no thread exists until the first task), one task each at a time. Idle workers do not
 // keep the process alive (unref) and stop after the idle time. A kernel error rejects its task with the kernel's
-// name; a worker that crashes or exceeds the task's timeoutMs fails only that task and is replaced on demand.
+// name; a worker that crashes or exceeds the task's timeoutMs fails only that task and is replaced on demand. A task
+// whose stop signal is aborted (a stopped cook) fails with code STOPPED; its worker, if it had started, is replaced.
 // If workers cannot start at all, tasks reject with code POOL_UNAVAILABLE (parallelMap then runs on the caller).
 import os from 'node:os';
 import { Worker } from 'node:worker_threads';
@@ -56,6 +57,7 @@ interface Slot {
 }
 
 const unavailable = (msg: string) => Object.assign(new Error(msg), { code: 'POOL_UNAVAILABLE' });
+const stopped = (kernel: string) => Object.assign(new Error(`kernel "${kernel}" stopped`), { code: 'STOPPED' });
 
 class NodeWorkerPool implements WorkerPool {
   readonly size: number;
@@ -65,7 +67,8 @@ class NodeWorkerPool implements WorkerPool {
   private slots: Slot[] = [];
   private queue: Job[] = [];
   private nextId = 1;
-  private counters = { started: 0, tasks: 0, crashes: 0, timeouts: 0 };
+  private counters = { started: 0, tasks: 0, crashes: 0, timeouts: 0, stops: 0 };
+  private stopTimer: ReturnType<typeof setInterval> | undefined;
   /** consecutive workers that died before becoming ready */
   private startFailures = 0;
   private broken: Error | null = null;
@@ -83,11 +86,44 @@ class NodeWorkerPool implements WorkerPool {
   run<T = PoolResult>(task: PoolTask): Promise<T> {
     if (this.broken) return Promise.reject(unavailable(`worker pool unavailable: ${this.broken.message}`));
     if (!(this.size > 0)) return Promise.reject(unavailable('worker pool has no threads'));
+    if (task.signal?.aborted) return Promise.reject(stopped(task.kernel));
     return new Promise<T>((resolve, reject) => {
       this.queue.push({ id: this.nextId++, task, resolve, reject });
       this.pump();
       this.refresh();
+      if (task.signal) this.watchStops();
     });
+  }
+
+  /**
+   * Tasks with a stop signal are looked at every 50 ms while there are any: a stopped one leaves the queue, or its
+   * worker is replaced (the work it was doing is dropped).
+   */
+  private watchStops() {
+    if (this.stopTimer) return;
+    this.stopTimer = setInterval(() => {
+      let watched = false;
+      for (const j of [...this.queue]) {
+        if (!j.task.signal) continue;
+        watched = true;
+        if (j.task.signal.aborted) { this.queue.splice(this.queue.indexOf(j), 1); j.reject(stopped(j.task.kernel)); }
+      }
+      for (const s of [...this.slots]) {
+        const j = s.busy;
+        if (!j?.task.signal) continue;
+        watched = true;
+        if (!j.task.signal.aborted) continue;
+        clearTimeout(j.timer);
+        s.busy = null;
+        this.counters.stops++;
+        j.reject(stopped(j.task.kernel));
+        this.retire(s);
+      }
+      if (!watched) { clearInterval(this.stopTimer); this.stopTimer = undefined; }
+      this.pump();
+      this.refresh();
+    }, 50);
+    this.stopTimer.unref?.();
   }
 
   stats() {
@@ -118,6 +154,8 @@ class NodeWorkerPool implements WorkerPool {
 
   async close(): Promise<void> {
     const err = new Error('worker pool closed');
+    clearInterval(this.stopTimer);
+    this.stopTimer = undefined;
     for (const j of this.queue.splice(0)) j.reject(err);
     const exits = this.slots.map((s) => {
       s.retired = true;

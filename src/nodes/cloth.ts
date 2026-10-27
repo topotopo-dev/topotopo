@@ -162,6 +162,8 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
   sim.settleFloor();
   for (let s = 0; s < p.steps; s++) {
     budget.check();
+    // a stopped cook stops between steps
+    await ctx.checkpoint();
     if (collider) {
       const r = detect();
       if (r instanceof Promise) await r;

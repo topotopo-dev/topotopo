@@ -1,5 +1,5 @@
 import type { Geometry } from '../core/geometry.ts';
-import type { CookOptions, CookReport, Engine } from './engine.ts';
+import type { CookOptions, CookReport, Engine, StopSignal } from './engine.ts';
 import type { KernelJob, ParallelOptions, ParallelRun } from './parallel.ts';
 
 /** Current graph format version. Bump it together with a migration in migrate.ts. */
@@ -149,6 +149,16 @@ export interface CookContext {
   readonly timeInc: number;
   /** mark the result as depending on time (when the dependency is not visible to the engine) */
   markTimeDependent(): void;
+  /**
+   * The cook's stop signal (CookOptions.signal), if it has one. The engine stops at node boundaries; pool tasks of the
+   * node (parallelMap, big WASM calls) stop with it, and a long node calls checkpoint() between its steps.
+   */
+  readonly signal?: StopSignal;
+  /**
+   * Between the steps of a long node (iterations, simulation steps): lets the host serve requests meanwhile (a stop
+   * among them), and throws NodeError(STOPPED) once the cook was asked to stop. Cheap when the cook has no signal.
+   */
+  checkpoint(): Promise<void>;
   /** cook a nested graph (foreach body, asset, solver step) inheriting the time; propagates time dependence */
   subcook(graph: GraphSpec, opts?: CookOptions): Promise<CookReport>;
   /** input i cooked at another frame (the current result if the input is not time-dependent) */
@@ -170,3 +180,6 @@ export class NodeError extends Error {
     this.hint = hint;
   }
 }
+
+/** The error of a node that a stopped cook did not cook, or stopped while it cooked (CookOptions.signal). */
+export const STOPPED = 'cook stopped';

@@ -1077,7 +1077,8 @@ defineNode({
       }
       const field = makeErosionField(hf.width, hf.height, hf.cellSize, H, hard, frz);
       const r = rng(p.seed);
-      for (let it = 0; it < p.iterations; it++) { budget.check(); erodeStep(field, params, r); }
+      // a stopped cook stops between iterations
+      for (let it = 0; it < p.iterations; it++) { budget.check(); await ctx.checkpoint(); erodeStep(field, params, r); }
       droplets += Math.round(p.rain_density * hf.count) * p.iterations;
       hf.layers.set('height', Float32Array.from(field.h));
       for (const [name, delta] of [['sediment', field.sediment], ['debris', field.debris]] as const) {

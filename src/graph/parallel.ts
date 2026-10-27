@@ -12,7 +12,8 @@
 // Host-agnostic: needs only SharedArrayBuffer and the Host's WorkerPool.
 import { KERNELS, hashArrays } from '../core/kernels.ts';
 import type { KernelContext, TypedArray } from '../core/kernels.ts';
-import type { PoolResult, WorkerPool } from '../host/types.ts';
+import type { PoolResult, StopSignal, WorkerPool } from '../host/types.ts';
+import { NodeError, STOPPED } from './types.ts';
 
 export interface KernelJob {
   /** number of elements: kernels process [0, count) */
@@ -51,6 +52,8 @@ export interface ParallelOptions {
    * the worker's realm; on this thread it runs in the main realm); registry kernels default to KERNELS[kernel].run.
    */
   serial?: () => any;
+  /** the cook's stop signal (set by the engine): chunks not done when it is aborted stop, and the job fails as STOPPED */
+  signal?: StopSignal;
 }
 
 export interface ParallelRun {
@@ -156,11 +159,12 @@ export function parallelMap(
   const tasks: Promise<PoolResult>[] = [];
   for (let c = 0; c < chunks; c++) {
     const start = Math.floor((c * job.count) / chunks), end = Math.floor(((c + 1) * job.count) / chunks);
-    tasks.push(pool.run<PoolResult>({ kernel, args, range: [start, end], arrays, shared, timeoutMs: opts.timeoutMs }));
+    tasks.push(pool.run<PoolResult>({ kernel, args, range: [start, end], arrays, shared, timeoutMs: opts.timeoutMs, ...(opts.signal ? { signal: opts.signal } : {}) }));
   }
   return Promise.allSettled(tasks).then((settled) => {
     const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (failed) {
+      if (settled.some((r) => r.status === 'rejected' && r.reason?.code === 'STOPPED')) throw new NodeError(STOPPED);
       // no worker could start (e.g. the worker module failed to load): do the work here instead
       if (settled.some((r) => r.status === 'rejected' && r.reason?.code === 'POOL_UNAVAILABLE')) {
         for (const v of inPlace) v.fill(0); // chunks that did run wrote into them

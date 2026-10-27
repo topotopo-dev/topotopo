@@ -1,6 +1,6 @@
 // Worker pool tests: lazy start and close, kernel round trips (transfer), CookContext.parallelMap against the serial
 // loop for every ported node (bit-identical arrays, same fingerprints and reports with the pool on and off),
-// concurrent branches and in-flight sharing, the lazy switch, worker errors, crashes and timeouts, the size
+// concurrent branches and in-flight sharing, the lazy switch, worker errors, crashes, timeouts and stops, the size
 // threshold, TOPOTOPO_WORKERS=0, the CLI exiting with the pool in use, and the MCP server ending on stdin close.
 //   node test/pool.ts            these tests
 //   node test/pool.ts --golden   also the golden layer with every kernel forced onto the pool (npm run test:pool)
@@ -13,7 +13,7 @@ import { Engine } from '../src/graph/engine.ts';
 import type { CookReport } from '../src/graph/engine.ts';
 import { defineNode } from '../src/graph/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { NodeError } from '../src/graph/types.ts';
+import { NodeError, STOPPED } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { createNodePool, poolOptionsFromEnv, workersFromEnv } from '../src/host/pool.ts';
 import type { PoolResult, PoolTask } from '../src/host/types.ts';
@@ -382,6 +382,15 @@ section('worker errors, crashes and timeouts fail only the node');
   check(ok3.ok, 'the next cook works after a timeout');
   const graph: GraphSpec = { nodes: { a: { type: 'test_pool_kernel', params: { kernel: 'selftest.throw', count: 100, args: { at: 5 } } }, b: { type: 'box' }, m: { type: 'merge', in: ['b'] } }, output: 'm' };
   check((await on.cook(graph)).ok, 'a failing kernel node outside the output branch does not affect the cook');
+  // a stopped cook stops its node's pool tasks: running ones (their workers are replaced) and those still waiting
+  const stops = on.host.pool!.stats().stops, t1 = performance.now(), ac = new AbortController();
+  setTimeout(() => ac.abort(), 300);
+  const e4 = await on.cook(k({ kernel: 'selftest.spin', count: 16, args: { ms: 3000 } }), { signal: ac.signal });
+  const took = performance.now() - t1;
+  check(!e4.ok && e4.stopped === 'k' && e4.errors[0]?.message === STOPPED && took < 2000 && on.host.pool!.stats().stops > stops,
+    `a stop ends the node's running kernel tasks (${took.toFixed(0)} ms of 3000, ${on.host.pool!.stats().stops - stops} stopped): ${e4.errors[0]?.message}`);
+  const ok4 = await on.cook(k({ count: 4003 }));
+  check(ok4.ok, 'the next cook works after a stop');
 }
 
 // ------------------------------------------------------------------ modules

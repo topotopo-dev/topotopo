@@ -6,6 +6,7 @@
 // the same arrays, so the result is the same bits. Small calls, and hosts without a pool, run here.
 import { kernelsWasmVariant } from '../wasm/kernels.ts';
 import type { Kernels } from '../wasm/kernels.ts';
+import { NodeError, STOPPED } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
 import type { SimBudget } from './util.ts';
 
@@ -52,9 +53,11 @@ export async function wasmCallUnderBudget(
   if (!pool || pool.size <= 0 || size < (pool.minElements ?? minSize)) return runWasmCall(kernels, call, present);
   budget.check();
   try {
-    const r = await pool.run({ kernel: 'wasm', args: { ...call, variant: kernelsWasmVariant }, arrays: present, timeoutMs: Math.max(1, budget.left()) });
+    // a stopped cook stops the call too (its worker is replaced)
+    const r = await pool.run({ kernel: 'wasm', args: { ...call, variant: kernelsWasmVariant }, arrays: present, timeoutMs: Math.max(1, budget.left()), ...(ctx.signal ? { signal: ctx.signal } : {}) });
     return r.value;
   } catch (e: any) {
+    if (e?.code === 'STOPPED') throw new NodeError(STOPPED);
     if (e?.kernel === undefined && /^kernel "wasm" timed out/.test(String(e?.message))) throw budget.error();
     // no worker could start, or the worker selected another WASM build: run it here
     if (e?.code === 'POOL_UNAVAILABLE' || /WASM variant/.test(String(e?.message))) return runWasmCall(kernels, call, present);

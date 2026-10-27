@@ -2,8 +2,8 @@
 // browser GUI all build on this.
 import './nodes/index.ts';
 
-export { Engine } from './graph/engine.ts';
-export type { CookReport, NodeResult, Issue } from './graph/engine.ts';
+export { Engine, STOPPED } from './graph/engine.ts';
+export type { CookOptions, CookReport, NodeProgress, NodeResult, Issue, StopSignal } from './graph/engine.ts';
 export type { GraphSpec, NodeSpec, NodeDef, ParamDef } from './graph/types.ts';
 export { allNodeDefs, getNodeDef, CATEGORY_ORDER } from './graph/registry.ts';
 export { Geometry, GeoBuilder } from './core/geometry.ts';

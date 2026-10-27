@@ -233,6 +233,8 @@ defineNode({
       const perStep = Math.min(ep.maxBirths, Math.ceil(ep.rate) * prep.emitter.count);
       for (;;) {
         budget.check();
+        // a stopped cook stops between batches
+        await ctx.checkpoint();
         const { geo: st, end } = emitSteps(state, prep.emitter, s0, Math.min(s1, s0 + batchSteps(state ? state.numPoints : 0, perStep)), ep);
         batches++;
         state = await integrate(st, s0, end, prep);

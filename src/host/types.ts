@@ -27,7 +27,15 @@ export interface PoolTask {
   shared?: { key: string; arrays: Record<string, ArrayBufferView> };
   /** wall-clock limit in ms (0 / absent = none): the task fails with a "timed out" error and its worker is replaced */
   timeoutMs?: number;
+  /**
+   * Stops the task once `aborted` is true (a stopped cook): a waiting task leaves the queue, a running one's worker is
+   * replaced. Either way it fails with an error whose code is "STOPPED".
+   */
+  signal?: StopSignal;
 }
+
+/** What stops a cook or a task: an AbortSignal, or any object whose `aborted` turns true. */
+export interface StopSignal { readonly aborted: boolean }
 
 /** What a pool task resolves with: the kernel's return value and the task's non-shared arrays, handed back. */
 export interface PoolResult<V = any> {
@@ -55,8 +63,8 @@ export interface WorkerPool {
   run<T = PoolResult>(task: PoolTask): Promise<T>;
   /** stop all workers; pending tasks fail. The pool restarts on the next run. */
   close(): Promise<void>;
-  /** counters for tests and diagnostics */
-  stats(): { workers: number; busy: number; queued: number; started: number; tasks: number; crashes: number; timeouts: number };
+  /** counters for tests and diagnostics (stops: running tasks stopped by their signal) */
+  stats(): { workers: number; busy: number; queued: number; started: number; tasks: number; crashes: number; timeouts: number; stops: number };
 }
 
 /**

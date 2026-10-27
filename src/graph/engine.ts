@@ -27,7 +27,7 @@ import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { primIntrinsic } from '../core/intrinsics.ts';
 import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
-import type { Host } from '../host/types.ts';
+import type { Host, StopSignal } from '../host/types.ts';
 import { targetError } from '../io/targets.ts';
 import { allAliases, getNodeDef } from './registry.ts';
 import {
@@ -37,7 +37,7 @@ import type { ExprRefs, ResolvedParams, TimeState } from './params.ts';
 import { migrateGraphDetailed } from './migrate.ts';
 import { parallelMap as runKernel } from './parallel.ts';
 import type { PoolStats } from './parallel.ts';
-import { NodeError } from './types.ts';
+import { NodeError, STOPPED } from './types.ts';
 import type { CookContext, GraphSpec, NodeDef, NodeSpec, ParamDef } from './types.ts';
 
 export type { TimeState } from './params.ts';
@@ -75,7 +75,31 @@ export interface CookReport {
   fps: number;
   /** the target's result depends on time (other than through subgraph inputs) */
   timeDependent: boolean;
+  /** the cook was stopped (CookOptions.signal): the node it stopped at */
+  stopped?: string;
 }
+
+export { STOPPED };
+
+/**
+ * A node starting or ending its cook, for CookOptions.onNode (cache hits are not reported), and the steps of a long
+ * node between them (ctx.checkpoint: "step", where the host may yield; nothing else to report).
+ */
+export interface NodeProgress {
+  phase: 'start' | 'step' | 'end';
+  node: string;
+  type: string;
+  /** 0 for the graph's own nodes; nested cooks (assets, foreach, solver, graph_ref) report theirs deeper */
+  depth: number;
+  /** the enclosing nodes of a nested cook, outermost first ([] at depth 0) */
+  within: readonly string[];
+  /** end: the node's cook time in ms */
+  ms?: number;
+  /** end: its error, when it failed or was stopped */
+  error?: string;
+}
+
+export type { StopSignal };
 
 export interface SubInput { geo: Geometry; sig: string }
 
@@ -97,6 +121,20 @@ export interface CookOptions {
    * for an in-flight cook of the same signature when that cook is one of its ancestors (a recursive asset).
    */
   ancestors?: ReadonlySet<string>;
+  /**
+   * Progress: called when a node starts cooking and when it ends (cache hits are not reported), for the graph's own
+   * nodes and for those of nested cooks. A promise returned for a start is awaited before the node cooks: a host
+   * yields to its event loop there, so it can serve requests (a stop among them) while a long cook runs.
+   */
+  onNode?: (ev: NodeProgress) => void | Promise<void>;
+  /**
+   * Stop: once `aborted` is true the cook stops at the next node boundary. The node about to cook fails with STOPPED,
+   * the nodes downstream fail as upstream errors, and the report's `stopped` names the node. A node already cooking
+   * runs to its end unless it reads ctx.signal itself. Nested cooks (subcook, inputAt) share the signal.
+   */
+  signal?: StopSignal;
+  /** Internal: the enclosing nodes of a nested cook (NodeProgress.within). */
+  within?: readonly string[];
 }
 
 /** Frame range for cookFrames (end inclusive). */
@@ -795,6 +833,8 @@ export class Engine {
     report.ok = !res.error;
     report.geo = res.geo;
     report.timeDependent = res.timeDependent;
+    // a failure after a stop is the stop's doing: the first node that did not cook (a nested stop fails its parent)
+    if (!report.ok && opts.signal?.aborted) report.stopped = (report.errors.find((e) => e.message === STOPPED) ?? report.errors[0])?.node ?? target;
     report.ms = now() - t0;
     return report;
   }
@@ -955,6 +995,23 @@ export class Engine {
       result.cached = true;
       return result;
     }
+    // about to cook: report it (the host may yield there), and stop here when the cook was asked to stop
+    const progress: NodeProgress | null = opts.onNode ? { phase: 'start', node: name, type: def.type, depth, within: opts.within ?? [] } : null;
+    // a progress hook that throws must not break the cook
+    const ended = (ms: number, error?: string) => {
+      if (progress) try { void opts.onNode!({ ...progress, phase: 'end', ms, ...(error ? { error } : {}) }); } catch { /* ignore */ }
+    };
+    if (progress) try { await opts.onNode!(progress); } catch { /* ignore */ }
+    if (opts.signal?.aborted) {
+      result.error = { node: name, message: STOPPED };
+      ended(0, STOPPED);
+      return result;
+    }
+    if (progress) {
+      // while the host had the thread, another cook may have made this result
+      const made = this.cache.get(sig);
+      if (made) { result.geo = made; result.cached = true; ended(0); return result; }
+    }
     // the same signature is cooking elsewhere (another branch, an identical node, another iteration): share that cook
     const key = sig;
     const flight = this.inflight.get(key);
@@ -966,9 +1023,15 @@ export class Engine {
         result.timeDependent = d.timeDep || depTime;
         result.cached = true;
         s.shared.push({ leader: flight.result, waiter: result });
+        ended(0);
         return result;
       }
-      // it failed: cook here again, as a cook that came after it would
+      // it failed: cook here again, as a cook that came after it would (unless this cook was stopped meanwhile)
+      if (opts.signal?.aborted) {
+        result.error = { node: name, message: STOPPED };
+        ended(0, STOPPED);
+        return result;
+      }
     }
     let land!: (v: { geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean }) => void;
     const mine: Flight = { done: new Promise((r) => { land = r; }), result };
@@ -997,9 +1060,14 @@ export class Engine {
       get fps() { mark(); return time.fps; },
       get timeInc() { mark(); return time.timeInc; },
       markTimeDependent: mark,
+      signal: opts.signal,
       async subcook(g, o = {}) {
         const inherit = o.frame === undefined && o.time === undefined ? { frame: time.frame, time: time.time, timeInc: time.timeInc } : {};
-        const r = await engine.cook(g, { fps: time.fps, ...inherit, ...o, depth: depth + 1, ancestors: chain() });
+        // nested cooks report their nodes (inside this one) and stop with this cook
+        const r = await engine.cook(g, {
+          fps: time.fps, ...inherit, ...o, depth: depth + 1, ancestors: chain(),
+          onNode: opts.onNode, signal: opts.signal, within: [...(opts.within ?? []), name],
+        });
         if (r.timeDependent) mark();
         return r;
       },
@@ -1014,7 +1082,12 @@ export class Engine {
         return { geo: r.geo, sig: rr.sig, timeDependent: true };
       },
       stat: (k, v) => { (result.stats ??= {})[k] = v; },
-      parallelMap: (kernel, job, o) => runKernel(engine.host.pool, kernel, job, o, engine.poolStats),
+      // the node's pool tasks stop with the cook
+      parallelMap: (kernel, job, o) => runKernel(engine.host.pool, kernel, job, opts.signal ? { ...o, signal: opts.signal } : o, engine.poolStats),
+      async checkpoint() {
+        if (progress) try { await opts.onNode!({ ...progress, phase: 'step' }); } catch { /* ignore */ }
+        if (opts.signal?.aborted) throw new NodeError(STOPPED);
+      },
     };
     try {
       this.unpackInputs(def, rp.values, inputs, inputSigs, name, result);
@@ -1039,6 +1112,7 @@ export class Engine {
     result.ms = now() - t0;
     if (this.inflight.get(key) === mine) this.inflight.delete(key);
     land({ geo: result.geo, sig: result.sig, timeDep, failed: !!result.error });
+    ended(result.ms, result.error?.message);
     return result;
   }
 

@@ -1,5 +1,5 @@
 // Engine tests: time and time-dependent caching, the solver node, expression references to other
-// nodes, graph versioning, deprecation, and the CLI frame range.
+// nodes, graph versioning, deprecation, progress reports and stopping a cook, and the CLI frame range.
 //   node test/engine.ts
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
-import { Engine, resolveTime } from '../src/graph/engine.ts';
+import { Engine, resolveTime, STOPPED } from '../src/graph/engine.ts';
 import type { CookOptions, CookReport } from '../src/graph/engine.ts';
 import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
@@ -739,6 +739,81 @@ section('CLI several renders per cook, triangle budget');
   const lifted = cli(g, '--views', 'top', '--size', '120', '--render', a, '--max-triangles', '2000000');
   check(/rendering .* of 3\.6k instances/.test(capped.stdout) && lifted.status === 0 && !/rendering .* of/.test(lifted.stdout),
     '--max-triangles: 1.15M instance triangles draw as a subset by default and in full with a 2M budget');
+}
+
+section('progress and stop: CookOptions.onNode, signal, ctx.checkpoint');
+{
+  // test-only nodes: one holds the thread (a node cannot be interrupted), one waits in steps that check for a stop
+  let busyCooks = 0;
+  defineNode({
+    type: 'test_progress_busy', category: 'flow', summary: 'test only: holds the thread for ms, then passes its input on', inputs: [{ name: 'in', desc: 'geometry', optional: true }],
+    params: { ms: { type: 'int', default: 50, desc: 'ms' }, tag: { type: 'string', default: '', desc: 'signature tag' } },
+    cook: (ctx) => { busyCooks++; const t = performance.now(); while (performance.now() - t < ctx.p.ms); return ctx.hasInput(0) ? ctx.input(0) : new Geometry(); },
+  });
+  defineNode({
+    type: 'test_progress_steps', category: 'flow', summary: 'test only: waits for ms in 10 ms steps, checking for a stop', inputs: [{ name: 'in', desc: 'geometry', optional: true }],
+    params: { ms: { type: 'int', default: 50, desc: 'ms' }, tag: { type: 'string', default: '', desc: 'signature tag' } },
+    cook: async (ctx) => {
+      for (let t = 0; t < ctx.p.ms; t += 10) { await ctx.checkpoint(); await new Promise((r) => setTimeout(r, 10)); }
+      return ctx.hasInput(0) ? ctx.input(0) : new Geometry();
+    },
+  });
+  const e = await newEngine();
+  const chain = (tag: string, ms = 60): GraphSpec => ({
+    nodes: {
+      a: { type: 'test_progress_busy', params: { ms, tag } },
+      b: { type: 'test_progress_busy', in: ['a'], params: { ms, tag } },
+      c: { type: 'test_progress_busy', in: ['b'], params: { ms, tag } },
+    }, output: 'c',
+  });
+  const seen: string[] = [];
+  const onNode = (ev: any) => { seen.push(`${ev.phase}:${ev.node}${ev.depth ? `@${ev.depth}:${ev.within.join('/')}` : ''}`); };
+  const r1 = await e.cook(chain('p'), { onNode });
+  check(r1.ok && seen.join() === 'start:a,end:a,start:b,end:b,start:c,end:c', `onNode: each cooked node starts and ends, in cook order (${seen.join()})`);
+  seen.length = 0;
+  const r2 = await e.cook(chain('p'), { onNode });
+  check(r2.ok && !seen.length, 'cache hits are not reported');
+
+  // a stop while a node holds the thread: that node runs to its end, the next one does not cook
+  const signal = { aborted: false };
+  seen.length = 0;
+  const r3 = await e.cook(chain('q'), { onNode: (ev) => { onNode(ev); if (ev.phase === 'end' && ev.node === 'a') signal.aborted = true; }, signal });
+  check(!r3.ok && r3.stopped === 'b' && r3.errors.length === 1 && r3.errors[0].node === 'b' && r3.errors[0].message === STOPPED && seen.join() === 'start:a,end:a,start:b,end:b',
+    `a stop at a node boundary: a finished, b is where it stopped, c is upstream-failed (${r3.stopped}; ${seen.join()})`);
+  const before = busyCooks;
+  const r4 = await e.cook(chain('q'));
+  check(r4.ok && busyCooks - before === 2 && !r4.stopped, `nothing of the stopped cook is cached but what finished: the next cook cooks b and c only (${busyCooks - before} cooks)`);
+
+  // a node that checks between its steps stops mid-way
+  const steps: GraphSpec = { nodes: { s: { type: 'test_progress_steps', params: { ms: 3000, tag: 'x' } } }, output: 's' };
+  const ac = new AbortController();
+  const t0 = performance.now();
+  setTimeout(() => ac.abort(), 150);
+  const r5 = await e.cook(steps, { signal: ac.signal });
+  const took = performance.now() - t0;
+  check(!r5.ok && r5.stopped === 's' && r5.errors[0]?.message === STOPPED && took < 1500, `ctx.checkpoint stops a long node between its steps (${took.toFixed(0)} ms of 3000)`);
+  const r6 = await e.cook(structuredClone(steps), { signal: { aborted: false } });
+  check(r6.ok, 'and a cook without a stop runs it through');
+
+  // nested cooks report their nodes inside the node that runs them, and stop with the cook
+  const loop = (tag: string): GraphSpec => ({
+    nodes: {
+      seed: { type: 'box', params: { size: tag.length } },
+      loop: { type: 'foreach', in: ['seed'], params: { mode: 'count', count: 3, body: { nodes: { i: { type: 'input', params: { index: 0 } }, w: { type: 'test_progress_busy', in: ['i'], params: { ms: 20, tag: `="${tag}" + iteration` } } }, output: 'w' } } },
+    }, output: 'loop',
+  });
+  seen.length = 0;
+  const r7 = await e.cook(loop('a'), { onNode });
+  check(r7.ok && seen.filter((s) => s.startsWith('start:w@1:loop')).length === 3 && seen[0] === 'start:seed' && seen.includes('start:loop'),
+    `nested cooks report depth 1 within "loop" (${seen.filter((s) => s.includes('@')).length / 2} body cooks)`);
+  const ac2 = new AbortController();
+  const r8 = await e.cook(loop('bb'), { signal: ac2.signal, onNode: (ev) => { if (ev.depth === 1) ac2.abort(); } });
+  check(!r8.ok && r8.stopped === 'loop', `a stop inside a loop body stops the loop: the report names the loop node (${r8.stopped}: ${r8.errors[0]?.message})`);
+
+  // an aborted signal from the start: cached results are still served, the first node to cook stops
+  const r9 = await e.cook(chain('p'), { signal: { aborted: true } });
+  const r10 = await e.cook(chain('fresh'), { signal: { aborted: true } });
+  check(r9.ok && !r10.ok && r10.stopped === 'a', 'with a stop already asked for, cached results still come out and nothing new cooks');
 }
 
 section('CLI view');
