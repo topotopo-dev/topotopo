@@ -1,4 +1,4 @@
-// Long WASM kernel calls under a node's time limit (R-18, R-17 N4). remesh_quad and the kernel backend of
+// Long WASM kernel calls under a node's time limit. remesh_quad and the kernel backend of
 // heightfield_erode run one call into the Rust/WASM kernels (src/wasm/kernels.ts) that nothing on its own thread can
 // stop. When the host has a worker pool and the call is big, it runs on a pool worker instead, as the task "wasm"
 // (src/host/worker.ts) with the rest of the node's time limit as the task's limit: a call that runs too long is stopped

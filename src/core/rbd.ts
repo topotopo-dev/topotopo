@@ -625,7 +625,7 @@ export class RbdSim {
     }
     // bodies in a stable order: by input position (so permuting the input does not change the result); pieces at the
     // same position (to 1e-6 m: rbd_stack's "every crate at the same spot") by a hash of what they are, so permuting
-    // coincident pieces of different shapes changes nothing either (R-17 N7: ties went by input index). Pieces that
+    // coincident pieces of different shapes changes nothing either (ties went by input index). Pieces that
     // tie on that too are interchangeable: same shape, pose and velocities, so the set of results is the same.
     const order = pieces.map((_, i) => i);
     const q6 = (x: number) => Math.round(x * 1e6);

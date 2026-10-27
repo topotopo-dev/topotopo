@@ -85,7 +85,7 @@ const CASES: Case[] = [
     name: 'scatter_eliminate_1m',
     what: (q) => `weighted elimination of ${k(q ? 1e5 : 1e6)} uniform candidates to ${k(q ? 1e4 : 1e5)} points (neighbour search + heap + ABI copies)`,
     elements: (q) => q ? 1e5 : 1e6, unit: 'candidates',
-    target: 1500, targetSource: 'K-10 session 12 (1M candidates to 100k under 1.5 s)',
+    target: 1500, targetSource: 'scatter elimination target (1M candidates to 100k under 1.5 s)',
     direct: (q) => {
       const count = q ? 1e5 : 1e6, target = q ? 1e4 : 1e5, random = rng(1);
       const positions = new Float64Array(count * 3);
@@ -244,7 +244,7 @@ const CASES: Case[] = [
     name: 'occlusion_50k',
     what: (q) => `occlusion (32 rays per point, BVH build included) on a noisy sphere with ${k(q ? 63 * 80 + 2 : 198 * 251 + 2)} points`,
     elements: (q) => (q ? 63 * 80 + 2 : 198 * 251 + 2) * 32, unit: 'rays',
-    target: 2000, targetSource: 'P1-F (50k points × 32 samples under 2 s)',
+    target: 2000, targetSource: 'occlusion target (50k points × 32 samples under 2 s)',
     graph: (q) => ({
       nodes: {
         s: { type: 'sphere', params: { rows: q ? 64 : 199, cols: q ? 80 : 251 } },
@@ -257,14 +257,14 @@ const CASES: Case[] = [
     name: 'tex_noise_2048',
     what: (q) => `tex_noise ${q ? 512 : 2048}² (perlin fbm, 5 octaves, tileable)`,
     elements: (q) => (q ? 512 : 2048) ** 2, unit: 'pixels',
-    target: 1000, targetSource: 'P3-T (2048² noise under 1 s with the pool)',
+    target: 1000, targetSource: 'texture target (2048² noise under 1 s with the pool)',
     graph: (q) => ({ nodes: { target: { type: 'tex_noise', params: { resolution: q ? 512 : 2048 } } } }),
   },
   {
     name: 'bake_curvature_50k_2048',
     what: (q) => `bake_curvature ${q ? 512 : 2048}² of a noisy ${k(q ? 2 * 80 * 80 : 2 * 160 * 160)}-triangle grid (uv covers 0..1)`,
     elements: (q) => (q ? 512 : 2048) ** 2, unit: 'texels',
-    target: 5000, targetSource: 'P3-T (bakes of a 50k-triangle mesh at 2048² under 5 s)',
+    target: 5000, targetSource: 'bake target (bakes of a 50k-triangle mesh at 2048² under 5 s)',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [4, 4], divisions: q ? [80, 80] : [160, 160] } },
@@ -277,7 +277,7 @@ const CASES: Case[] = [
     name: 'bake_ao_50k_2048',
     what: (q) => `bake_ao ${q ? 512 : 2048}² (8 rays per texel) of a noisy ${k(q ? 2 * 80 * 80 : 2 * 160 * 160)}-triangle grid (uv covers 0..1)`,
     elements: (q) => (q ? 512 : 2048) ** 2 * 8, unit: 'rays',
-    target: 5000, targetSource: 'P3-T (bakes of a 50k-triangle mesh at 2048² under 5 s)',
+    target: 5000, targetSource: 'bake target (bakes of a 50k-triangle mesh at 2048² under 5 s)',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [4, 4], divisions: q ? [80, 80] : [160, 160] } },
@@ -307,7 +307,7 @@ const CASES: Case[] = [
     name: 'unpack_100k',
     what: (q) => `unpack ${k(q ? 1e4 : 1e5)} packed instances of a 100-triangle mesh`,
     elements: (q) => (q ? 1e4 : 1e5) * 100, unit: 'triangles out',
-    target: 2000, targetSource: 'goal (P2-A)',
+    target: 2000, targetSource: 'goal',
     graph: (q) => ({
       nodes: {
         tg: { type: 'grid', params: { size: [0.05, 0.05], divisions: [10, 5] } },
@@ -324,7 +324,7 @@ const CASES: Case[] = [
     name: 'heightfield_erode_512',
     what: (q) => `erosion (droplets + thermal), ${q ? 256 : 512}² samples × 100 iterations`,
     elements: (q) => (q ? 256 : 512) ** 2 * 100, unit: 'sample-iterations',
-    target: 3000, targetSource: 'P2-C brief (512² × 100 iterations under 3 s)',
+    target: 3000, targetSource: 'erosion target (512² × 100 iterations under 3 s)',
     graph: (q) => ({
       nodes: {
         hf: { type: 'heightfield', params: { size: [51.1, 51.1], samples: [q ? 256 : 512, q ? 256 : 512] } },
@@ -337,7 +337,7 @@ const CASES: Case[] = [
     name: 'scatter_relax_100k',
     what: (q) => `scatter ${k(scatterCount(q, 1e5))} points on a grid with relax (sample elimination of 5× candidates)`,
     elements: (q) => scatterCount(q, 1e5), unit: 'points', scatterFullCount: 1e5,
-    target: 500, targetSource: 'K-10 session 12 (100k relaxed blue-noise points under 0.5 s)',
+    target: 500, targetSource: 'blue-noise target (100k relaxed blue-noise points under 0.5 s)',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
@@ -349,7 +349,7 @@ const CASES: Case[] = [
     name: 'scatter_relax_mask_100k',
     what: (q) => `scatter ${k(scatterCount(q, 1e5))} points by a noise density mask, relax (radii follow the density)`,
     elements: (q) => scatterCount(q, 1e5), unit: 'points', scatterFullCount: 1e5,
-    target: 1000, targetSource: 'K-10 session 12 (100k density-mask blue-noise points under 1 s)',
+    target: 1000, targetSource: 'density-mask target (100k density-mask blue-noise points under 1 s)',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
@@ -362,7 +362,7 @@ const CASES: Case[] = [
     name: 'scatter_relax_iter_50k',
     what: (q) => `scatter ${k(scatterCount(q, 5e4))} points with relax and 5 relaxation passes (projected back onto the surface)`,
     elements: (q) => scatterCount(q, 5e4) * 5, unit: 'point-passes', scatterFullCount: 5e4,
-    target: 2000, targetSource: 'R-8 (goal)',
+    target: 2000, targetSource: 'goal',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
@@ -375,7 +375,7 @@ const CASES: Case[] = [
     name: 'scatter_min_distance_100k',
     what: (q) => `scatter ${k(scatterCount(q, 1e5))} points with relax and an exact min distance (refills from 5× candidates)`,
     elements: (q) => scatterCount(q, 1e5), unit: 'points', scatterFullCount: 1e5,
-    target: 2000, targetSource: 'R-8 (goal)',
+    target: 2000, targetSource: 'goal',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [100, 100], divisions: [100, 100] } },
@@ -387,7 +387,7 @@ const CASES: Case[] = [
     name: 'heightfield_scatter_100k',
     what: (q) => `heightfield_scatter ${k(q ? 1e4 : 1e5)} points with relax on a ${q ? 101 : 401}² field`,
     elements: (q) => (q ? 1e4 : 1e5), unit: 'points',
-    target: 2000, targetSource: 'R-8 (goal)',
+    target: 2000, targetSource: 'goal',
     graph: (q) => ({
       nodes: {
         h: { type: 'heightfield', params: { size: [200, 200], samples: q ? [101, 101] : [401, 401] } },
@@ -400,7 +400,7 @@ const CASES: Case[] = [
     name: 'point_normals_1m',
     what: (q) => `normal (point normals, area-weighted) on a noisy ${k((gridDiv(q ? 1e5 : 1e6) + 1) ** 2)}-point grid`,
     elements: (q) => (gridDiv(q ? 1e5 : 1e6) + 1) ** 2, unit: 'points',
-    target: 200, targetSource: 'R-8 (goal)',
+    target: 200, targetSource: 'goal',
     graph: (q) => ({
       nodes: {
         g: { type: 'grid', params: { size: [10, 10], divisions: [gridDiv(q ? 1e5 : 1e6), gridDiv(q ? 1e5 : 1e6)] } },
@@ -413,7 +413,7 @@ const CASES: Case[] = [
     name: 'distance_100k',
     what: (q) => `distance: closest points on a ${k(uvSphereTris(sphereRows(q ? 1e4 : 1e5)))}-triangle sphere from ${k((q ? 100 : 316) ** 2)} points (BVH build included)`,
     elements: (q) => (q ? 100 : 316) ** 2, unit: 'queries',
-    target: 1000, targetSource: 'R-8 (goal)',
+    target: 1000, targetSource: 'goal',
     graph: (q) => ({
       nodes: {
         s: { type: 'sphere', params: { type: 'uv', rows: sphereRows(q ? 1e4 : 1e5), cols: 2 * sphereRows(q ? 1e4 : 1e5) } },
@@ -426,7 +426,7 @@ const CASES: Case[] = [
     name: 'subdivide_sphere_100k',
     what: (q) => `Catmull-Clark, 1 level, UV sphere with ${k(uvSphereFaces(q ? 71 : 224))} faces (vertex N, vertex uv)`,
     elements: (q) => uvSphereFaces(q ? 71 : 224), unit: 'input faces',
-    target: 500, targetSource: 'goal (P0-F: attribute interpolation + normal refresh)',
+    target: 500, targetSource: 'goal (attribute interpolation + normal refresh)',
     graph: (q) => ({
       nodes: {
         s: { type: 'sphere', params: { rows: q ? 71 : 224, cols: q ? 142 : 448 } },
@@ -439,7 +439,7 @@ const CASES: Case[] = [
     name: 'ray_100k',
     what: (q) => `ray node: project ${k((q ? 100 : 316) ** 2)} points onto a ${k(uvSphereTris(sphereRows(q ? 1e4 : 1e5)))}-triangle sphere (BVH build included)`,
     elements: (q) => (q ? 100 : 316) ** 2, unit: 'rays',
-    target: 1000, targetSource: 'goal (P0-F)',
+    target: 1000, targetSource: 'goal',
     graph: (q) => ({
       nodes: {
         s: { type: 'sphere', params: { type: 'uv', rows: sphereRows(q ? 1e4 : 1e5), cols: 2 * sphereRows(q ? 1e4 : 1e5) } },
@@ -452,7 +452,7 @@ const CASES: Case[] = [
     name: 'particles_100k',
     what: (q) => `particles: ${k(q ? 1e4 : 1e5)} particles × 200 steps falling and bouncing on a floor (emit_all, velocity_var 2)`,
     elements: (q) => (q ? 1e4 : 1e5) * 200, unit: 'particle-steps',
-    target: 3000, targetSource: 'P3-B (100k × 200 steps with floor collisions under 3 s with the pool)',
+    target: 3000, targetSource: 'particles target (100k × 200 steps with floor collisions under 3 s with the pool)',
     graph: (q) => ({
       nodes: {
         p: { type: 'point_grid', params: { counts: [50, 1, q ? 200 : 2000], size: [10, 0, q ? 40 : 400], center: [0, 5, 0] } },
@@ -464,7 +464,7 @@ const CASES: Case[] = [
     name: 'drape_100x100',
     what: (q) => `drape: a ${q ? 50 : 100}×${q ? 50 : 100} cloth, 200 steps over a 5k-triangle sphere and the floor`,
     elements: (q) => (q ? 51 : 101) ** 2 * 200, unit: 'point-steps',
-    target: 3000, targetSource: 'brief P3-C (100×100 cloth, 200 steps, floor + mesh collisions under 3 s)',
+    target: 3000, targetSource: 'cloth target (100×100 cloth, 200 steps, floor + mesh collisions under 3 s)',
     graph: (q) => ({
       nodes: {
         cloth: { type: 'grid', params: { size: [4, 4], divisions: [q ? 50 : 100, q ? 50 : 100], center: [0, 2.2, 0] } },

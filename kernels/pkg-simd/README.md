@@ -6,7 +6,7 @@ SIMD and scalar WebAssembly builds; normal TopoTopo users do not install Rust.
 The loader feature-detects simd128 and defaults to SIMD, with scalar fallback.
 See [BUILD.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BUILD.md).
 
-## Scatter selection (sessions 12-13)
+## Scatter selection
 
 `scatter_eliminate(positions, scale, target_count, r_max)` and
 `scatter_min_distance(positions, order, radius, limit, groups, group_cap)` expose
@@ -62,7 +62,7 @@ positive minimum distances whose squares underflow to zero, and
 excessive pair lists return errors. Minimum-distance grid coordinates are limited
 to the exact integer range `abs(position / radius) <= 2^52 - 4`, so hostile tiny
 radii cannot produce overflowing or nonadvancing cell loops. No dependencies were
-added. See [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md) for measured parity, timing and remaining limits.
+added.
 
 `scatter_relax` accepts f64 positions, per-point spacing, triangle indices and
 barycentrics, plus the existing `TriSurface.arrays()` buffers (`T`, `nodes`, `child`,
@@ -87,8 +87,8 @@ with at least three started pool slots, or 500k with two; uniform elimination fr
 500k candidates with at least four, or 250k with at least eight; and projected
 relaxation from 50k kept points with at least three. Minimum-distance rejection
 uses WASM. Cold/disabled pools and stages below a pool threshold use WASM;
-counts beyond kernel budgets use JS. See session 13 in BENCH.md for the measured
-crossover and its machine-specific scope. Sampling and attribute
+counts beyond kernel budgets use JS. The measured crossover is machine-specific.
+Sampling and attribute
 interpolation remain in TS; heightfield_scatter retains its TS integration.
 `cargo bench --manifest-path kernels/Cargo.toml --features profile --bench scatter`
 prints native KD/search/heap/grid/projection stage timings. `bench/bench.ts` measures
@@ -105,10 +105,10 @@ initializes WASM once per worker on its first such job;
 the full-stage registry entry rejects split ranges, and an unavailable pool falls
 back to the loaded main-thread kernel.
 The pool threshold override can force this path for parity tests. The conservative
-default retains session 12's 1M placement cutoff; session 13's 500k measurement
-did not support lowering it.
+default keeps a 1M placement cutoff; a 500k measurement did not support lowering
+it.
 
-## Heightfield erosion (session 4)
+## Heightfield erosion
 
 `src/wasm/kernels.ts` exposes `erode_droplet`, `erode_pipe`, `thermal_erode`, and
 `flow_accumulation`. Heights and optional hardness/freeze/rain maps are flat row-major
@@ -191,9 +191,7 @@ use f64x2 SIMD while preserving scalar arithmetic and active thermal transfer
 order. Row bounds are validated
 before the small unchecked stencil/scatter loops; ordinary pipe and droplet work
 buffers are allocated before iteration. Filled routing allocates its flood and
-drainage buffers when refreshed. See the session 6 and session 15 measurements,
-rejected experiments and remaining limits in
-[BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).
+drainage buffers when refreshed.
 
 `flow_accumulation` offers D8 and triangular-facet D-infinity routing. Accumulation
 includes each sample's own cell area. Stable height/index ordering fixes the sum
@@ -221,10 +219,9 @@ Scalar/SIMD corpus parity compares every returned byte, with no floating toleran
 golden and pool tests exercise the default SIMD path. `TOPOTOPO_WASM=scalar|simd`
 selects an explicit path before import. No dependencies were added; existing crate
 licences below still apply.
-See [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md) for measured acceptance and performance, and
-`examples/renders/erosion_models.png` for the four-model comparison.
+See `examples/renders/erosion_models.png` for the four-model comparison.
 
-## Depression filling and lakes (session 14)
+## Depression filling and lakes
 
 The loader API is `fill_sinks(height, width, heightCount, options?, mask?)`, with
 `Float32Array` height/mask buffers and options `epsilon`, `maxDepth` and
@@ -303,9 +300,7 @@ filled and deeper lakes retained on the right. Both use the same contributing-ar
 colour scale; lake surfaces are blue. Its `filled` node is the terrain result;
 `water_surface` raises only the display mesh by `lake`, keeping water and terrain
 separate in the actual heightfield. Run `node test/showcase.ts drainage` and inspect
-`examples/renders/drainage.png`. See session 14 in
-[BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md)
-for the measured timings, backend parity and remaining limits.
+`examples/renders/drainage.png`.
 
 ## API and geometry
 
@@ -396,7 +391,7 @@ has not been established by an exhaustive platform matrix.
 Current limits are explicit:
 
 - At most 4096 contour vertices. Event search and incidence rebuilding are deliberately
-  exhaustive (roughly cubic time on typical inputs); this session prioritizes correctness.
+  exhaustive (roughly cubic time on typical inputs); correctness comes first.
 - Adjacent exactly collinear edges with **different** speeds/pitches are rejected with
   an actionable error. Equal-speed collinear points are supported and keep provenance.
 - Touching/intersecting contours, nested holes, duplicate points, zero-area rings, all
@@ -413,7 +408,7 @@ Current limits are explicit:
   the weights and then convert the returned times accordingly. Ordinary roof pitches
   and the explicit 90-degree gable are covered by tests; pitches extremely close to
   zero or 90 degrees can encounter the same limit.
-- The Rust isotropic remesher and point kernels are not included; sessions 3/4 add quad remeshing and erosion.
+- The Rust isotropic remesher and point kernels are not included; quad remeshing and erosion are separate kernels.
 
 ## Tests
 
@@ -461,9 +456,9 @@ dependency is used. `earcutr` is only used for flat cap triangulation, not skele
 
 `unicode-ident` is a compiler-only transitive dependency; its Unicode-3.0 data-table
 licence is permitted by the repository's build-time licence rule. Its identifier
-tables are not linked into the shipped WASM. Sessions 2, 3 and 4 add no dependencies.
+tables are not linked into the shipped WASM. The SDF, remeshing and erosion kernels add no dependencies.
 
-## Field-aligned quad remeshing (sessions 3 and 7)
+## Field-aligned quad remeshing
 
 ```js
 const mesh = remesh_quad(positions, tris, {
@@ -548,15 +543,14 @@ also capped at two million triangles. Self-intersecting inputs are not repaired.
 Face counts remain approximate, especially with locked borders or dense geometric
 constraints. Local cleanup and bounded integer correction do not establish global
 integrability or intersection freedom on arbitrary surfaces. Scalar/SIMD parity is
-tested on the regression corpus, not an exhaustive operating-system/compiler matrix. Session-7 measured
-acceptance, scalar/SIMD comparisons and remaining limits are in [BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).
+tested on the regression corpus, not an exhaustive operating-system/compiler matrix.
 
 Run `node test/remeshquad.ts`, `node bench/remeshquad.ts` and
 `cargo bench --manifest-path kernels/Cargo.toml --bench remesh_quad`.
 Inspect `examples/renders/quad_remesh.png`: gray inputs and colored results for a
 noisy sphere, bevelled box, shelf rock and capped tube, with every polygon edge visible.
 
-## Sampled SDF grids (sessions 2 and 8)
+## Sampled SDF grids
 
 The original skeleton API is unchanged. Additional generated WASM exports are:
 
@@ -628,9 +622,9 @@ Ambiguous topology and unsafe sharp fits trigger local conservative patches. Sha
 face connectors make the transition conforming, without unmatched edges or T-junctions.
 These guards detect risky local configurations, not every possible geometric
 self-intersection. Runtime validation checks oriented edge incidence; the test corpus
-also checks vertex links and proper nonadjacent triangle crossings. See session 8 in
-`BENCH.md` for the remaining union-junction accuracy limit.
-The explicit `conservative=true` path retains the session-2 minmod gradients and
+also checks vertex links and proper nonadjacent triangle crossings. Union junctions
+remain less accurate (about 0.4 voxel).
+The explicit `conservative=true` path retains the original minmod gradients and
 cell-local fans byte-for-byte. Signed negative zero at iso zero retains inside sign.
 Unclamped QEF fits are accepted only when they stay in their cells; otherwise the
 caller gets a clear enable-clamping error. The construction follows the uniform
@@ -673,5 +667,4 @@ existing `remesh` node and its `remesh_voxel` alias retain their old behavior.
 Run `node test/sdfgrid.ts` for Node integration, `node bench/sdfgrid.ts` for the 256³
 box benchmark, and inspect `examples/renders/voxel_remesh.png` (sharp left, smooth
 middle, dilate/erode/blur right). Existing goldens and render hashes are checked
-separately from the new example. Benchmarks and platform verification limits are in
-[BENCH.md](https://github.com/topotopo-dev/topotopo/blob/main/kernels/BENCH.md).
+separately from the new example.

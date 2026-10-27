@@ -1,4 +1,4 @@
-// Remeshing, decimation, repair and LOD tests (P1-E): remesh_isotropic, decimate, mesh_repair, lod.
+// Remeshing, decimation, repair and LOD tests: remesh_isotropic, decimate, mesh_repair, lod.
 //   node test/remesh.ts
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';

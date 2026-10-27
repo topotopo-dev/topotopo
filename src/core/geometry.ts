@@ -486,7 +486,7 @@ export interface GeoInit {
 /**
  * Every Geometry object the engine made (the constructor and Geometry.blank add them). A brand check that runs no user
  * code: `instanceof` and Object.getPrototypeOf call a Proxy's getPrototypeOf trap, and a script node may hand back a
- * Proxy of a geometry (R-18). WeakSet.prototype.has is bound now, so a later change to WeakSet.prototype in this realm
+ * Proxy of a geometry. WeakSet.prototype.has is bound now, so a later change to WeakSet.prototype in this realm
  * does not reach the check either.
  */
 const GEOMETRIES = new WeakSet<object>();

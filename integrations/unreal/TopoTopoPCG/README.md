@@ -32,11 +32,11 @@ From the repository root in PowerShell:
 ```powershell
 npm run export:demo
 $plugin = (Resolve-Path integrations/unreal/TopoTopoPCG/TopoTopoPCG.uplugin).Path
-$session = Join-Path (Get-Location) 'integrations/unreal/_build/session17'
-New-Item -ItemType Directory -Force -Path $session | Out-Null
-$package = Join-Path $session 'TopoTopoPCG'
-& 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin "-Plugin=$plugin" "-Package=$package" -TargetPlatforms=Win64 -Rocket *> (Join-Path $session 'BuildPlugin.log')
-if ($LASTEXITCODE -ne 0) { throw 'BuildPlugin failed; see integrations/unreal/_build/session17/BuildPlugin.log' }
+$out = Join-Path (Get-Location) 'integrations/unreal/_build/plugin'
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+$package = Join-Path $out 'TopoTopoPCG'
+& 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat' BuildPlugin "-Plugin=$plugin" "-Package=$package" -TargetPlatforms=Win64 -Rocket *> (Join-Path $out 'BuildPlugin.log')
+if ($LASTEXITCODE -ne 0) { throw 'BuildPlugin failed; see integrations/unreal/_build/plugin/BuildPlugin.log' }
 ```
 
 BuildPlugin runs the compiler without opening an editor. The package output, intermediate files and logs are
@@ -52,7 +52,7 @@ folder, for example `/Game/TopoTopo/PluginDemo`. Enable Landscape import for the
 and a generated terrain material default on. The console equivalent is:
 
 ```text
-TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo/landscape" /Game/TopoTopo/PluginDemo landscape=1 layers=1 material=1 objects=1 lighting=1
+TopoTopo.ImportScene "C:/path/to/topotopo/out/unreal_demo/landscape" /Game/TopoTopo/PluginDemo landscape=1 layers=1 material=1 objects=1 lighting=1
 ```
 
 `lighting=1` (off by default) adds the four actors of Unreal's Basic level (directional sun as the atmosphere sun light, sky
@@ -99,7 +99,7 @@ Run `npm run export:demo -- --tiles 2` to write a 2 x 2 bundle under `out/unreal
 Import it with the same command into an empty level and new content folder:
 
 ```text
-TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo_tiled/landscape" /Game/TopoTopo/TiledDemo landscape=1 layers=1 material=1 objects=1
+TopoTopo.ImportScene "C:/path/to/topotopo/out/unreal_demo_tiled/landscape" /Game/TopoTopo/TiledDemo landscape=1 layers=1 material=1 objects=1
 ```
 
 Version 2 adds `tile_grid` and row-major `tiles` entries. The importer reads `tiles/<x>_<y>/heightmap.png`
@@ -213,7 +213,7 @@ uses `new_landscape_location_cm` because that panel centres the grid. For this d
 `(-6300,-6300,1169.3223)`. Bounds should end at +/-6300 cm. Height is
 `actorZ + (uint16Value - 32768) * scaleZ / 128`.
 
-## Automation and editor handoff
+## Automation and editor checks
 
 The C++ automation tests compile with the plugin. Running them and validating the imported scene belong to
 the editor verification step; compilation alone does not prove rendering, import, undo or PCG regeneration.
@@ -221,7 +221,7 @@ the editor verification step; compilation alone does not prove rendering, import
 For an installed copy of the plugin, provide the CSV explicitly when starting the editor:
 
 ```text
--TopoTopoDemoCSV="C:/WORK/polyforge/out/unreal_demo/landscape/instances.csv"
+-TopoTopoDemoCSV="C:/path/to/topotopo/out/unreal_demo/landscape/instances.csv"
 ```
 
 Alternatively set the `TOPOTOPO_DEMO_CSV` environment variable before starting it, or keep the repository's
@@ -307,11 +307,11 @@ The three tiled tests generate all files themselves and use Unreal's built-in cu
 exported demo or imported project assets and never skip on missing fixtures. Run
 `Automation RunTests TopoTopo.Editor.TiledLandscape` in the installed plugin's editor. They create isolated
 test worlds and temporary files, leaving the current level unchanged. BuildPlugin compiles these tests;
-the session 16 build handoff does not claim that they have been executed in an editor.
+running them needs the editor.
 
 ## Limits
 
-- Only Win64 UE 5.8 is built in this handoff. Float parsing and rotation formulas mirror the exporter;
+- Only Win64 UE 5.8 builds are provided. Float parsing and rotation formulas mirror the exporter;
   cross-platform bit identity of Unreal/libm operations has not been measured.
 - File loading/parsing and editor import are synchronous. Large streams can stall generation; no 100k-point
   performance claim is made. External files are not automatically staged in packaged games.

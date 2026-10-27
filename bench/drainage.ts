@@ -10,7 +10,7 @@ const arg = (name: string, fallback: string) => process.argv.find(v => v.startsW
 const sizes = arg('size', '1024,4096').split(',').map(Number);
 const terrains = arg('terrain', 'massif,bowl,rough').split(',');
 const runs = Number(arg('runs', '5')), epsilon = Number(arg('epsilon', '0'));
-const output = arg('output', 'out/session14/drainage.json');
+const output = arg('output', 'out/bench/drainage.json');
 if (sizes.some(n => ![1024, 4096].includes(n)) || !Number.isInteger(runs) || runs < 1 || runs > 20 ||
     terrains.some(t => !['massif', 'bowl', 'rough'].includes(t)) || !Number.isFinite(epsilon) || epsilon < 0)
   throw new Error('invalid benchmark options');

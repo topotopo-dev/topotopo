@@ -1,4 +1,4 @@
-// Libraries of projects (docs/design/gallery.md). A library is a folder listed in the user's config; a project is any
+// Libraries of projects. A library is a folder listed in the user's config; a project is any
 // folder below it holding a project.json, and is itself a TopoTopo workspace (graphs/ assets/ inputs/ exports/) plus
 // attachments/ (concept art, references, source files) and .gallery/ (thumb.png, preview.glb, bake.json: derived).
 //   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], gallery: {port, cors: [origins]}}

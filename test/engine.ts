@@ -486,7 +486,7 @@ section('expression sandbox');
 // ------------------------------------------------------------------ param coercion
 section('param coercion');
 {
-  // R-17: a number param had to be finite, a numeric string did not: "Infinity" or "1e999" (JSON has no Infinity, so a
+  // A number param had to be finite, a numeric string did not: "Infinity" or "1e999" (JSON has no Infinity, so a
   // string is how one arrives from a graph file or an MCP client) reached the node as Infinity (resample
   // {count: "Infinity"} ran the process out of memory); here a box of infinite size cooked with a warning
   const bad = [

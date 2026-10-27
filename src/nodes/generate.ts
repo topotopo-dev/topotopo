@@ -451,7 +451,7 @@ defineNode({
   example: { type: 'point_grid', params: { counts: [10, 1, 10], size: [9, 0, 9], jitter: 0.3, seed: 1 } },
   cook: ({ p }) => {
     const [cx, cy, cz] = p.counts;
-    // each count has a max, but not their product (R-17 N4: a huge grid ran the process out of heap)
+    // each count has a max, but not their product (a huge grid ran the process out of heap)
     if (cx * cy * cz > MAX_GRID_POINTS) throw new NodeError(`point_grid: counts [${cx}, ${cy}, ${cz}] give ${(cx * cy * cz).toLocaleString('en-US')} points, more than ${MAX_GRID_POINTS.toLocaleString('en-US')}`, 'lower the counts, or scatter points instead');
     const r = rng(p.seed);
     const pos: number[] = [];

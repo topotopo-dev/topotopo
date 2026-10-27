@@ -1,7 +1,7 @@
 // Units on screen: the adaptive grid's step and how lengths and coordinates are printed (metres, Y up).
 // Plain functions, tested in Node (test/viewer-logic.ts).
 
-/** The grid steps the views choose from (docs/design/viewer.md section 4), in metres. */
+/** The grid steps the views choose from, in metres. */
 export const GRID_STEPS = [0.01, 0.1, 1, 10, 100, 1000];
 /** Major lines every this many steps. */
 export const MAJOR_EVERY = 10;

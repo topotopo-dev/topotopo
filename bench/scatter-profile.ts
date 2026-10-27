@@ -1,6 +1,6 @@
 // Stage timings from a --features profile package, plus measured wasm-bindgen input/output copies.
 // node scripts/kernels-build.ts --features profile
-// node --expose-gc bench/scatter-profile.ts --runs 3 --output out/session13/profile.json
+// node --expose-gc bench/scatter-profile.ts --runs 3 --output out/bench/profile.json
 // The generated glue is instrumented in memory only; shipped files are never changed.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -100,7 +100,7 @@ for (const [name, run] of cases) {
   report.cases.push({ name, samples });
   originalLog(`${name}: ${samples.map(s => s.total_ms.toFixed(1)).join(', ')} ms`);
 }
-const output = path.resolve(flag('--output') ?? 'out/session13/profile.json');
+const output = path.resolve(flag('--output') ?? 'out/bench/profile.json');
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n');
 originalLog(`wrote ${output}`);

@@ -399,7 +399,7 @@ export const REALM_CONTROL = '__topotopo';
  * The host keeps the object and calls setJob/setCur directly, outside the time limit, so they must not run user code:
  * the job and the API are closure variables, the object is frozen (own data properties only) and a global `const`
  * can be neither reassigned nor redefined by later code (user code never runs at the realm's top level, and a
- * property of the global object of the same name is shadowed by the binding). Before R-18 the host assigned
+ * property of the global object of the same name is shadowed by the binding). Previously the host assigned
  * global properties `__job` and `__cur`, and a script that gave them a looping setter hung the process.
  */
 export const SCRIPT_REALM_SETUP = `const ${REALM_CONTROL} = (() => {

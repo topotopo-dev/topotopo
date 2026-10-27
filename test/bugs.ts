@@ -1,4 +1,4 @@
-// Regression tests for bugs found by the property and fuzz tests (P0-E), plus a deterministic immutability sweep.
+// Regression tests for bugs found by the property and fuzz tests, plus a deterministic immutability sweep.
 //   node test/bugs.ts [--verbose]
 import { allNodeDefs } from '../src/graph/registry.ts';
 import type { GraphSpec, NodeDef, NodeSpec } from '../src/graph/types.ts';
@@ -218,7 +218,7 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
     `boolean fixture cuts B out of A (${g?.numPrims} prims, from_a ${count('from_a')}, from_b ${count('from_b')})`, errs(r));
 }
 
-// ------------------------------------------------------------------ 6. watertight ray-triangle tests (P0-F)
+// ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.
 

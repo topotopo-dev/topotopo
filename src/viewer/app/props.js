@@ -1,4 +1,4 @@
-// The properties column (docs/design/viewer.md sections 2 and 8): what the selection is (a guide's name, kind,
+// The properties column: what the selection is (a guide's name, kind,
 // translate / rotate / scale, radius or height and the attributes the LLM reads; a layer's file, counts, bbox and
 // display mode; the output's summary; a piece's size), and below it the Controls: the graph's exposed vars as
 // sliders, fields, checkboxes, menus and colour pickers. Drags post at most every 100 ms; each control resets to its

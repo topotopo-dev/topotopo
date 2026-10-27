@@ -1,4 +1,4 @@
-// Cameras and views (docs/design/viewer.md section 3): our own controller, no OrbitControls. Tumble around a pivot,
+// Cameras and views: our own controller, no OrbitControls. Tumble around a pivot,
 // track, dolly towards a point, no inertia: the camera moves only while the person drags, scrolls or frames. Seven
 // named cameras (persp and the axis views); one view, or four in a 2×2 quad, each showing one of them with its own
 // shading. Orthographic cameras cannot tumble. Near and far planes follow the scene size (the renderer keeps a

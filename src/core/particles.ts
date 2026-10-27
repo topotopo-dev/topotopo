@@ -617,7 +617,7 @@ function phaseOf(ep: EmitParams, key: number): number {
  * `max_particles` counts every particle from its birth through its death step, including the ones a collision removed
  * (listed in __pholders). `end` is s1, or the end of the first earlier step at which this call's births reach
  * `maxBirths`: the caller integrates [s0, end) and continues from there, which gives the same result as one run (runs
- * can be cut anywhere) while the births held at once stay bounded (R-17 N3: a high rate with a short life over many
+ * can be cut anywhere) while the births held at once stay bounded (a high rate with a short life over many
  * steps materialised every birth of the run and exhausted the heap).
  */
 export function emitSteps(state: Geometry | null, em: EmitterData, s0: number, s1: number, ep: EmitParams): { geo: Geometry; end: number } {

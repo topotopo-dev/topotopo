@@ -1,4 +1,4 @@
-// The `library` tool: the person's libraries of projects (src/gallery/library.ts, docs/design/gallery.md). An agent
+// The `library` tool: the person's libraries of projects (src/gallery/library.ts). An agent
 // lists and searches every library, reads a project, makes new ones, edits their project.json, bakes previews, and
 // opens a project: the server's workspace becomes that project folder, so build/edit/render/export work on it.
 import fs from 'node:fs';

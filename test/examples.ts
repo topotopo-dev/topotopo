@@ -88,7 +88,7 @@ for (const def of allNodeDefs()) {
     if (inv.length) { fail++; console.log(`FAIL ${def.type}: invariants: ${inv.join(', ')}`); continue; }
     if (r.warnings.length) {
       fail++;
-      // every shipped example cooks without warnings since R-12; node types added later (the phase 3 simulation
+      // every shipped example cooks without warnings; node types added later (the phase 3 simulation
       // nodes and any other) must keep it that way
       console.log(`FAIL ${def.type}: the example cooks with warnings; every node's example must cook without warnings, new node types included (change the example's params or inputs, or the node): ${r.warnings.map((w) => `[${w.node}] ${w.message}`).join('; ')}`);
       continue;

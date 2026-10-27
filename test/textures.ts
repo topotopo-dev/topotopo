@@ -1,4 +1,4 @@
-// Behavioural tests for procedural textures and bakes (P3-T): image volumes, generators (deterministic, tileable),
+// Behavioural tests for procedural textures and bakes: image volumes, generators (deterministic, tileable),
 // filters (blend modes, blur, normals), bakes (AO, curvature, padding, islands, normals from a high mesh), material
 // linkage, exports (glTF embeds PNGs and validates, USD writes files, the textures format), PNG files read as images
 // (image_file, the file node, the live viewer's quads), the texture view and texture sampling in the renderer, JSON

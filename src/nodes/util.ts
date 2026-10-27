@@ -127,7 +127,7 @@ export function polyGeo(curves: number[][][], closed: boolean | boolean[]): Geom
 }
 
 /**
- * The wall-clock budget of one cook of a long-running node (engine.simTimeoutMs from now; R-17 N4: a simulation had
+ * The wall-clock budget of one cook of a long-running node (engine.simTimeoutMs from now; a simulation had
  * no time limit, so large but valid params could keep an MCP server busy for hours). `check()` throws a NodeError that
  * names the node once the budget is spent (call it between steps, batches or iterations); `left()` is what remains, for
  * the limit of a pool task that runs work which cannot be stopped from here (a WASM call).

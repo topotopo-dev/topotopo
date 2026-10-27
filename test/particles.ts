@@ -304,7 +304,7 @@ section('max_particles');
   check(maxSeen <= 100 && minLate >= 50, `with life 0.5 s the slots free up: never above 100 over 60 frames, still ${minLate}+ alive after frame 30`);
   const zero = await cook(sim(emitter, { steps: 10, max_particles: 0 }));
   check(zero.geo!.numPoints === 0 && zero.geo!.points.has('age'), 'max_particles 0: an empty result with the usual attributes');
-  // R-17: refused births are counted per step and point, not looped over one by one (an emit_rate of 1e12 hung the
+  // Refused births are counted per step and point, not looped over one by one (an emit_rate of 1e12 hung the
   // cook), and the count does not wrap at 2^31 (it read -1894967306 here)
   const t0 = performance.now();
   const flood = await cook(sim({ type: 'points', params: { positions: [[0, 1, 0]] } }, { ...NOG, steps: 2, emit_rate: 1.2e9, max_particles: 10 }));
@@ -315,7 +315,7 @@ section('max_particles');
 
 section('max_births');
 {
-  // R-17 N3: max_particles counts live particles, but a run of steps materialised every birth of the run before
+  // max_particles counts live particles, but a run of steps materialised every birth of the run before
   // integrating it, so a high rate with a short life over many steps exhausted the heap and killed the process. Runs are
   // now emitted and integrated in batches of about max_births births (same result), and one step gives at most
   // max_births births.
@@ -425,7 +425,7 @@ section('fields and forces');
     { sd: { type: 'sdf_shape', params: { shape: 'sphere', radius: 0.5 } } }, [null as any, 'sd']));
   const sP = sdfF.geo!.P;
   check(sP[0] < 2 && Math.abs(sP[1]) < 1e-6 && sP[5] > -2.5 && Math.abs(sP[3]) < 1e-6, `SDF field: particles accelerate toward the surface along -gradient (${sP[0].toFixed(3)}, ${sP[5].toFixed(3)})`);
-  // R-17: bounds that overflow the sampling grid made its size NaN: the cook succeeded with v = NaN on every particle
+  // Bounds that overflow the sampling grid made its size NaN: the cook succeeded with v = NaN on every particle
   // (and P reset to 0 by the engine's finite check)
   const huge = await cook(sim({ type: 'points', params: { positions: [[0, 1, 0]] } }, { ...NOG, steps: 5, emit_all: true, emit_rate: 0 },
     { sd: { type: 'sdf_shape', params: { shape: 'sphere', radius: 1e308 } } }, [null as any, 'sd']));

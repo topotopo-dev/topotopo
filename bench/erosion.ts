@@ -2,7 +2,7 @@
 // SIMD is selected automatically; TOPOTOPO_WASM=scalar tests the fallback.
 // node bench/erosion.ts --runs=3 [--droplet-only | --pipe-only] [--thermal-interval=4]
 // --assert prints informational PASS/MISS targets; --native=path/to/erosion runs a prebuilt native bench.
-// Build with Cargo feature `profile` for pass timings (see kernels/BENCH.md).
+// Build with Cargo feature `profile` for pass timings.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

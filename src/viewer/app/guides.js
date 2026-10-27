@@ -1,4 +1,4 @@
-// Guides (docs/design/viewer.md section 7): nulls, curves, areas and volumes, the markers agents read as
+// Guides: nulls, curves, areas and volumes, the markers agents read as
 // inputs/markers.json (roles site, path, zone, volume). Drawn as the standard objects they are, in one desaturated
 // cyan, on top of the scene: a null is an axis cross (its radius circle only while hovered or selected), a curve a
 // polyline with CV squares and a direction tick, an area a closed curve with a light diagonal hatch, a volume a wire

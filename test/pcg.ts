@@ -1,4 +1,4 @@
-// Behavioural tests for the PCG toolkit (P2-B): scatter v2 (generate_by, density attribute and mask, relaxation, exact
+// Behavioural tests for the PCG toolkit: scatter v2 (generate_by, density attribute and mask, relaxation, exact
 // minimum distance, per-prim cap, emitted attributes), mask, attribute_from_map, orient, points_along_curve, cluster,
 // prune, and copy_to_points variant weights / scale_attrib / rotate_attrib (packed = real copies after unpack).
 //   node test/pcg.ts
@@ -97,7 +97,7 @@ section('kernels');
   check(km.k === 5 && km.label.every((l) => l >= 0 && l < 5) && km.label[0] === 0, 'kmeans: 5 clusters, labels in order of first appearance');
 }
 
-// ---------------------------------------------------------------- scatter kernels (core/scatter.ts, R-8)
+// ---------------------------------------------------------------- scatter kernels (core/scatter.ts)
 section('scatter kernels: the chunked stages give what the serial ones give');
 {
   // rngAt(state, m) is the m-th draw of rng(seed)

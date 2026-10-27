@@ -1,4 +1,4 @@
-// The keymap of docs/design/viewer.md section 9: one table of actions, four presets (TopoTopo, the default;
+// The keymap: one table of actions, four presets (TopoTopo, the default;
 // Maya, Houdini, Blender). Each row carries the text the overlay prints per preset and the built actions' bindings:
 // chord → action. Transform and snapping rows (phase 2) ship their text but no bindings, so a preset never changes
 // shape later. Plain data and functions: the overlay is the only DOM code, and it runs only when called.

@@ -1,4 +1,4 @@
-// Rigid-body settling (P3-A): rbd_settle and rbd_stack on Rapier.
+// Rigid-body settling: rbd_settle and rbd_stack on Rapier.
 //   node test/rbd.ts            (add --perf for the 1,000-piece timing only)
 // Pieces end up resting: above the ground or terrain, not inside each other (checked here on exact convex hulls,
 // independently of Rapier's contacts), settled, touching something. Deterministic across cooks, engines and the
@@ -264,7 +264,7 @@ if (!perfOnly) {
     check(!pu.hasPacked() && pu.numPrims === ex.numPrims && same(pu.P, ex.P), 'keep_packed false returns the unpacked result');
   }
   {
-    // R-17 N7: pieces at the same position were ordered by input index, so permuting coincident pieces of different
+    // Pieces at the same position were ordered by input index, so permuting coincident pieces of different
     // shapes changed the result (bodies and jitter follow that order). Ties now go by a hash of the piece's content.
     const tag = (n: number) => ({ type: 'attrib_create', params: { name: 'tag', class: 'prim', type: 'int', value: n } });
     const nodes: Record<string, NodeSpec> = {
@@ -360,7 +360,7 @@ if (!perfOnly) {
     check(o.warnings.some((w) => /started inside/.test(w)), `pieces that start inside each other are reported (${o.warnings.join(' | ')})`);
     const many = await engine.cook({ nodes: { ...ROCKS(12, { max_pieces: 5 }) }, output: 'settle' });
     check(!many.ok && /12 pieces is more than max_pieces \(5\)/.test(many.errors[0]?.message ?? ''), `max_pieces guards the cook (${many.errors[0]?.message})`);
-    // R-17 N6: ground_plane auto adds the ground only when input 1 is not connected (as the param says); a connected
+    // ground_plane auto adds the ground only when input 1 is not connected (as the param says); a connected
     // input without triangles (points only here) leaves nothing to land on, with a warning; on adds the ground anyway
     const pts = { type: 'points', params: { positions: [[0, 0, 0], [1, 0, 0]] } };
     const none = await cook({ a: nodes.a, pts, s: { type: 'rbd_settle', in: ['a', 'pts'], params: { duration: 3 } } }, 's');
@@ -442,7 +442,7 @@ if (!perfOnly) {
   const r = await cook(nodes, 'settle');
   const ms = performance.now() - t0;
   console.log(`     1,000 packed rocks (64-vertex hulls) dropped onto the ground: ${ms.toFixed(0)} ms, ${r.stats.steps} steps (${r.stats.sim_time} s simulated), ${r.stats.settled} settled`);
-  if (ms > 3000) console.log('     (over the 3 s target: the machine may be loaded; see docs/DESIGN.md for reference timings)');
+  if (ms > 3000) console.log('     (over the 3 s target: the machine may be loaded)');
   check(r.stats.settled === 1000 && ms < 12000, `1,000 convex pieces settle (${(ms / 1000).toFixed(2)} s; target 3 s, fails above 12 s)`);
 }
 

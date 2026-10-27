@@ -44,7 +44,7 @@ type Maybe<T> = T | Promise<T>;
 const then = <T, R>(x: Maybe<T>, f: (v: T) => R | Promise<R>): Maybe<R> => (x instanceof Promise ? x.then(f) : f(x));
 
 /**
- * Loaded-WASM auto policy, calibrated with interleaved medians (BENCH.md session 13).
+ * Loaded-WASM auto policy, calibrated with interleaved medians.
  * `workers` is zero for an unavailable/cold pool or a stage below its pool threshold.
  * Large elimination lists and projection passes benefit from multiple JS workers
  * despite faster individual Rust loops. Minimum-distance rejection stays in WASM.

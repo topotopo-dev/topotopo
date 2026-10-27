@@ -1,4 +1,4 @@
-// Resource limits (R-18, closing R-17 N4): huge counts and long simulations must fail or clamp, never take the process
+// Resource limits: huge counts and long simulations must fail or clamp, never take the process
 // down or keep it busy for hours.
 //   node test/limits.ts [--verbose]
 //

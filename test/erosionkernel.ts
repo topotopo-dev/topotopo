@@ -257,7 +257,7 @@ try {
   const parityW = 33, parityH = 25;
   const parityInput = Float32Array.from({ length: parityW * parityH }, (_, i) => 4 + (parityH - 1 - Math.floor(i / parityW)) / 16 + Math.abs(i % parityW - 16) / 32);
   const parity = kernels.erode_pipe(parityInput, null, parityW, parityH, 1, { iterations: 25, rainAmount: 0.01 }, 1);
-  // Session 6 native, scalar and SIMD WASM agree after conservative split gathering.
+  // Native, scalar and SIMD WASM agree after conservative split gathering.
   const nativeDigests = { height: '13671b26', sediment: 'b2627087', debris: '355aea95', flow: 'b8715d6e', water: 'ac938cfe', wear: '4f1e6002' };
   for (const name of ['height', 'sediment', 'debris', 'flow', 'water', 'wear'] as const) {
     let hash = 2166136261;

@@ -1,4 +1,4 @@
-// The left panel (docs/design/viewer.md section 2): three tabs. Scene is the outliner tree: the output (the node being
+// The left panel: three tabs. Scene is the outliner tree: the output (the node being
 // shown), the graph's nodes (click one to show its result; the square is its display flag) and the guides. Outputs
 // is the published results (outputs.js). Inputs is the files in inputs/ (reference layers) with Add input.
 // Rows carry a visibility eye, a display mode and the name; selecting a row selects in the viewport and back.

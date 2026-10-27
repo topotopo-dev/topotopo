@@ -1,4 +1,4 @@
-// Spline toolkit tests (P2-D): the evaluation core (Bezier against its closed form, a rational NURBS circle, de Boor =
+// Spline toolkit tests: the evaluation core (Bezier against its closed form, a rational NURBS circle, de Boor =
 // de Casteljau, arc length, closest point, exact conversions, fitting), the Geometry model (clone, merge, subsets,
 // JSON round trip, GeoBuilder), the engine's auto-conversion and its warning, the nodes (bezier, nurbs, convert_curve,
 // spline_fit, fillet_curve, offset_curve_3d, project_curve, curve_attribs, resample on splines), rendering and export,

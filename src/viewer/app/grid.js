@@ -1,4 +1,4 @@
-// The adaptive metre grid, the world axes, the axis gizmo and each view's readouts (docs/design/viewer.md section 4).
+// The adaptive metre grid, the world axes, the axis gizmo and each view's readouts.
 // The grid lies on y = 0 under persp and the top / bottom views, and on each side view's own plane (front: XY,
 // right: ZY), as Maya and Houdini draw them; minor lines every `step`, major every 10 steps, the axes in the
 // standard colours. One plane is set up again before each view renders.

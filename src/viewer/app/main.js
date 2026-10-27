@@ -1,4 +1,4 @@
-// The viewer page (docs/design/viewer.md): boot, layout, the render loop over the views, the keymap and the mouse,
+// The viewer page: boot, layout, the render loop over the views, the keymap and the mouse,
 // the status bar and the server's event stream. The camera moves only when the person moves it or frames: loading,
 // cooking, saving and placing never frame (the one exception is the very first view, when nothing is remembered).
 import * as THREE from 'three';

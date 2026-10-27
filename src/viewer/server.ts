@@ -1,5 +1,5 @@
 // Live preview web server: serves the viewer page (index.html, a shell loading the ES modules of app/ and three.js
-// from /vendor/three/; docs/design/viewer.md) that shows any graph/node of the workspace and refreshes over
+// from /vendor/three/) that shows any graph/node of the workspace and refreshes over
 // Server-Sent Events whenever a graph is rebuilt/edited.
 // It is also the human's control surface: files dropped on the page are stored in the workspace's inputs/ (under
 // `topotopo view`, the inputs/ beside the graph file) and shown as reference layers, the graph's exposed vars are set

@@ -346,7 +346,7 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
 }
 
 /** Display (sRGB-encoded) value to linear and back: glTF's factors and COLOR_0 are linear, TopoTopo colours are display
- *  values (docs/DESIGN.md, colour). */
+ *  values. */
 const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const toDisplay = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
 

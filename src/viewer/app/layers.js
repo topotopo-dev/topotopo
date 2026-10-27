@@ -1,4 +1,4 @@
-// Reference layers (docs/design/viewer.md section 7): the person's files in inputs/, one outliner row each, shown
+// Reference layers: the person's files in inputs/, one outliner row each, shown
 // when their eye is on (remembered in this browser), drawn in a display mode of their own (as the view by default;
 // ghost is one of the modes). PNGs stand as unlit image planes at their pixel aspect, one metre tall, beside the
 // scene. Files dropped on the page are uploaded to inputs/ (POST /api/inputs).

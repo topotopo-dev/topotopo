@@ -1,4 +1,4 @@
-// Picking and selecting in the viewport (docs/design/viewer.md section 5): click selects what is under the cursor
+// Picking and selecting in the viewport: click selects what is under the cursor
 // (a guide, else the nearest piece of the output or of a reference layer), Shift adds, Ctrl removes, a drag pulls a
 // box that selects what lies wholly inside it, a click on nothing clears. Hover draws a dimmer highlight. All
 // positions are viewport pixels.

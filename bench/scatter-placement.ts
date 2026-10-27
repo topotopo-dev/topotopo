@@ -75,7 +75,7 @@ if (!isMainThread) {
   const report = { generated: new Date().toISOString(), node: process.version, cpu: os.cpus()[0]?.model,
     wasm: kernelsWasmVariant, count, target, radius, masked, quick, runs, results,
     peak_rss_bytes: process.resourceUsage().maxRSS * 1024 };
-  const output = flag('--output') ?? 'out/session12/placement.json';
+  const output = flag('--output') ?? 'out/bench/placement.json';
   fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true });
   fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n');
   console.log(`wrote ${output}`);

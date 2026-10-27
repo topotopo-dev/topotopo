@@ -1,4 +1,4 @@
-// The Controls section's rules (docs/design/viewer.md section 8): which widget a var gets, a slider's range and step,
+// The Controls section's rules: which widget a var gets, a slider's range and step,
 // how values print. Plain functions, tested in Node (test/viewer-logic.ts); props.js builds the widgets.
 
 export const isNum = (v) => typeof v === 'number' && Number.isFinite(v);

@@ -23,7 +23,7 @@
 //     ordinary error texts are unchanged,
 //   - code that redefines properties of the realm's global object with looping accessors (`__job`, `__cur`, which the
 //     engine used to write outside the timeout) changes nothing for later cooks, and what a script returns or passes
-//     to lib.run (Proxies, look-alikes, getters an async node would read later) never runs outside the timeout (R-18).
+//     to lib.run (Proxies, look-alikes, getters an async node would read later) never runs outside the timeout.
 import { spawnSync } from 'node:child_process';
 import { rng } from '../src/core/random.ts';
 import { heightfieldsOf } from '../src/core/heightfield.ts';
@@ -359,7 +359,7 @@ const CODE_CASES: { code: string; want: RegExp; loop?: boolean; only?: CodeType 
   { code: '0); } })((() => { while (true) {} })()), (function () { return function () { return (0', want: /syntax error/ },
   { code: 'return 0; } })((() => { while (true) {} })()), (function () { return function () { return 0;', want: /syntax error/ },
   { code: 'return 0; }; })((() => { while (true) {} })()), (function () { return function () { return 0;', want: /syntax error/ },
-  // R-13: the parametric nodes' wrapper, their loops part-way along, a thrown object's toString, an ordinary error
+  // The parametric nodes' wrapper, their loops part-way along, a thrown object's toString, an ordinary error
   { code: 'return 0; })((() => { while (true) {} })()), (function () { return [0,0,0];', want: /syntax error/ },
   { code: 'return 0; }), (() => { while (true) {} })(), (function () { return [0,0,0];', want: /syntax error/ },
   { code: 't > 0.5 ? (() => { while (true) {} })() : [t, 0, 0]', want: /^parametric_curve: code exceeded \d+ ms \(infinite loop\?\)$/, loop: true, only: 'parametric_curve' },
@@ -583,7 +583,7 @@ console.log(`poisoned realm: ${POISON_CASES.length} failing nodes × pool off/on
 current = 'the poisoned Promise.prototype.then';
 
 /**
- * R-17: the script node subscribed to its run's promise outside the time limit, through the realm's
+ * The script node subscribed to its run's promise outside the time limit, through the realm's
  * Promise.prototype.then, which a script can replace: `Promise.prototype.then = function () { while (true) {} }` hung
  * the process (and the MCP server) for good. The poisoning script itself and every later script must fail within the
  * timeout instead. Each variant gets an engine (a realm) of its own; the script node runs on the cooking thread.
@@ -613,11 +613,11 @@ for (const poison of THEN_POISONS) {
 }
 console.log(`poisoned Promise.prototype.then: ${THEN_POISONS.length} poisons × (the poisoning script, a later script), ${thenFail} failed (${((performance.now() - tt) / 1000).toFixed(1)}s)`);
 
-// ------------------------------------------------------------------ realm slots and values handed back (R-18)
+// ------------------------------------------------------------------ realm slots and values handed back
 current = 'the realm slots and returned values';
 
 /**
- * R-17 N1: the engine handed jobs and the wrangle's geometry API to the scripting realm through properties of its
+ * The engine handed jobs and the wrangle's geometry API to the scripting realm through properties of its
  * global object (`__job`, `__cur`), written outside the time limit, so code that gave them a looping setter hung the
  * process for good (in a pool worker: the worker, until the pool's own limit). The job and the API are now closure
  * variables of the realm: the poisoning code and everything after it cook normally. Each poison gets an engine (a
@@ -665,7 +665,7 @@ for (const workers of [0, 2]) {
 console.log(`poisoned realm slots: ${SLOT_POISONS.length} poisons × (the poisoning code, ${AFTER_POISON.length} later cooks) × pool off/on (${slotRuns} cooks), ${slotFail} failed (${((performance.now() - ts) / 1000).toFixed(1)}s)`);
 
 /**
- * R-17 N2: what a script returns, and what it passes to lib.run, is read by the engine after the timed call: a Proxy
+ * What a script returns, and what it passes to lib.run, is read by the engine after the timed call: a Proxy
  * returned by a script hung the process at `instanceof` (its getPrototypeOf trap), and an async node given a Proxy
  * input or a param with a getter read them later, outside the limit. Results are now brand-checked, lib.run inputs
  * too, and lib.run params are copied as plain data inside the call. Nothing here may run past the time limit.

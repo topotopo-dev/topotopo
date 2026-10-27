@@ -61,10 +61,8 @@ graph and its seeds, and the core is browser-ready.
   the graph file), show as grey reference layers (a PNG as a flat picture), and `file` nodes read them as
   `inputs/<name>`.
 
-**Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, the shelf and example galleries, the
-design notes and the release notes, generated from this repository (`npm run site`).
-
-The design notes, including whether the browser is a limitation, are in [docs/DESIGN.md](docs/DESIGN.md).
+**Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, the shelf and example galleries and the
+release notes, generated from this repository (`npm run site`).
 
 ![city](examples/renders/voronoi_city.png)
 
@@ -134,7 +132,7 @@ toggles quad view. Maya, Houdini and Blender presets, including previously saved
 chunks on a pool of worker threads, and independent graph branches cook concurrently. The output is the same bit for
 bit with or without it. `TOPOTOPO_WORKERS` sets the number of threads (default: CPU threads − 1; `0` turns the pool
 off). Threads start on first use and stop after 30 s idle (`TOPOTOPO_WORKERS_IDLE_MS`); small inputs stay on the main
-thread. Details in [docs/DESIGN.md](docs/DESIGN.md#worker-pool).
+thread.
 
 ### Connect to Claude Code
 With the package, the server is the `mcp` subcommand of the `topotopo` command:
@@ -340,7 +338,8 @@ topotopo library new game props/lantern --title "Lantern" --tags prop
 topotopo gallery
 ```
 
-Format, URLs and board snippets: [docs/design/gallery.md](docs/design/gallery.md).
+Each project has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
+`/embed/<library>/<id>`.
 
 ## Shelf
 
@@ -469,8 +468,8 @@ a minute and is not part of `npm test`; run it before a release (see [CONTRIBUTI
 `src/core` holds the geometry model and algorithms. `src/graph` holds the node system and cooking engine, and `src/nodes`
 the node library. The renderer is in `src/render`, import/export in `src/io`, and the MCP server, tools and docs in
 `src/mcp`. `src/viewer` has the live preview, `src/gallery` the gallery website of project libraries, and `src/host` the Node
-host (sandbox, files, fonts). The structure is
-described in [docs/DESIGN.md](docs/DESIGN.md). `dist/` (not in git) is the compiled package: `npm run build` mirrors
+host (sandbox, files, fonts).
+`dist/` (not in git) is the compiled package: `npm run build` mirrors
 `src/` there one to one, so the shelf, fonts, kernels and worker entry are found relative to either.
 
 ## Support

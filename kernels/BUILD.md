@@ -44,8 +44,8 @@ as a contention diagnostic; the acceptance target always uses elapsed time.
 Before timing, inspect `tasklist /FI "IMAGENAME eq node.exe"` and
 `tasklist /FI "IMAGENAME eq cargo.exe"`; use process command lines to distinguish
 repository servers, builds and tests from unrelated tools. Run benchmarks
-sequentially without concurrent repository work and record background activity
-in `BENCH.md`. An exit code of zero validates execution, not the speed targets.
+sequentially without concurrent repository work. An exit code of zero validates
+execution, not the speed targets.
 
 Toolchain used on 2026-10-13:
 
@@ -60,10 +60,10 @@ target wasm32-unknown-unknown
 `Cargo.lock` must be retained. Release settings are optimization level 3, LTO, one codegen
 unit, stripped symbols and panic=abort. Invalid geometry is handled by Rust `Result`
 errors, not panics. `wasm-pack` runs `wasm-opt -O3 --enable-bulk-memory
---enable-nontrapping-float-to-int --enable-simd`. Session 6's combined scalar and
+--enable-nontrapping-float-to-int --enable-simd`. The combined scalar and
 SIMD WASM budget is 2,500,000 bytes, enforced by `kernels:build`, `build` and
 `pack:test`. The existing Node smoke test also retains its stricter 1,000,000-byte
-per-module check. See [BENCH.md](BENCH.md) for the measured sizes.
+per-module check.
 
 The speed-focused release settings are intentional: sampled-grid BVH traversal and
 dual-contouring loops are CPU-bound, and the combined module remains comfortably

@@ -1,4 +1,4 @@
-// The gallery web server (docs/design/gallery.md): every library's projects as a grid, a page per project with its 3D
+// The gallery web server: every library's projects as a grid, a page per project with its 3D
 // preview, and stable URLs a board pastes (link, thumbnail, iframe embed). It reads files and serves baked previews;
 // it never cooks: bakes run in child processes (BakeQueue) and "Open in editor" starts a `topotopo edit` child.
 // Bound to 127.0.0.1 on a fixed port (stable links); requests must name this server as their Host, and writes must

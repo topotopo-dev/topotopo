@@ -1,4 +1,4 @@
-// Geometry in the viewport (docs/design/viewer.md section 7): the cooked output and, through the same MeshObject,
+// Geometry in the viewport: the cooked output and, through the same MeshObject,
 // the reference layers. Display modes (as the view's shading, shaded, wire, shaded + wire, points, bounding box,
 // ghost), backfaces tinted blue and the open / non-manifold / flipped edges drawn as the render tool draws them,
 // connected pieces for picking and box selection, and the orange selection wireframe.

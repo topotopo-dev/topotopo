@@ -7,7 +7,7 @@
 //   nodes/               one page per category from the registered NodeDefs and shelf assets (the data of docs/nodes.md)
 //   shelf/               shelf/*.json grouped by meta.shelf_group, thumbnails from shelf/thumbs
 //   examples/            every examples/*.json with its render, its description and the graph JSON itself
-//   design/, releases/   docs/DESIGN.md and docs/release/v*-release-notes.md converted from Markdown
+//   releases/            docs/release/v*-release-notes.md converted from Markdown
 //   404.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg (docs/brand/mark.svg)
 // Links are relative, so the site works at the domain root, under a sub-path and from the file system; only 404.html,
 // which GitHub Pages serves for a missing path at any depth, uses root-absolute links. Only files a page uses are
@@ -151,7 +151,6 @@ function nodeTarget(frag: string): string {
 function siteTarget(repoPath: string, frag: string): string | null {
   const f = frag ? '#' + frag : '';
   if (repoPath === 'docs/nodes.md') return nodeTarget(frag);
-  if (repoPath === 'docs/DESIGN.md') return 'design/index.html' + f;
   const rel = releases.find((r) => r.src === repoPath);
   if (rel) return rel.out + f;
   if (repoPath === 'examples' || repoPath === 'examples/renders') return 'examples/index.html';
@@ -299,7 +298,6 @@ const NAV = [
   { key: 'nodes', label: 'Nodes', to: 'nodes/index.html' },
   { key: 'shelf', label: 'Shelf', to: 'shelf/index.html' },
   { key: 'examples', label: 'Examples', to: 'examples/index.html' },
-  { key: 'design', label: 'Design', to: 'design/index.html' },
   ...(releases.length ? [{ key: 'releases', label: 'Release notes', to: releases[0].out }] : []),
 ];
 
@@ -421,7 +419,6 @@ page({
     ['nodes/index.html', 'Node reference', `${nodeDefs.length} node types in ${nodeCategories.length} categories: params, inputs, examples`],
     ['shelf/index.html', 'Shelf', `${shelfAssets.length} ready-made graph assets used like nodes`],
     ['examples/index.html', 'Examples', `${examples.length} example graphs with their renders`],
-    ['design/index.html', 'Design notes', 'architecture, geometry model, cooking, sandbox, kernels'],
     ...(releases.length ? [[releases[0].out, 'Release notes', `what is in ${releases[0].version}, known limits`]] : []),
     [REPO, 'Source on GitHub', 'issues, contributing, licence'],
   ];
@@ -641,7 +638,7 @@ ${e.description ? `<p>${inline(e.description)}</p>` : ''}
 </div>`);
 
 // ---------------------------------------------------------------------------------------------------------------------
-// design notes, release notes, 404
+// release notes, 404
 
 function docPage(src: string, out: string, nav: string, extraSidebar = ''): void {
   const tokens = marked.lexer(read(src));
@@ -674,7 +671,6 @@ ${html}
   });
 }
 
-docPage('docs/DESIGN.md', 'design/index.html', 'design');
 for (const r of releases) {
   cur = { out: r.out, title: '', description: '', nav: '' };
   const others = releases.length > 1 ? `<h2>Releases</h2>\n<ul>${releases.map((o) => `<li><a href="${u(o.out)}"${o === r ? ' aria-current="page"' : ''}>${esc(o.version)}</a></li>`).join('')}</ul>` : '';

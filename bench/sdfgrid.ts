@@ -1,7 +1,7 @@
 // Real Node/WASM grid timings, including JS/WASM copies and returned mesh buffers.
 // node bench/sdfgrid.ts                 64^3 warmup, then three 256^3 narrow-band and filled runs
 // node bench/sdfgrid.ts --resolution=64 smaller diagnostic run
-// node bench/sdfgrid.ts --package=out/session8/before/pkg-simd --runs=3 preserved baseline
+// node bench/sdfgrid.ts --package=out/bench/before/pkg-simd --runs=3 preserved baseline
 import { readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import { performance } from 'node:perf_hooks';

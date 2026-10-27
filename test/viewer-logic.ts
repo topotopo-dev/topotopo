@@ -1,4 +1,4 @@
-// The viewer page's browser-free logic (src/viewer/app/*.js, docs/design/viewer.md section 10): the keymap presets,
+// The viewer page's browser-free logic (src/viewer/app/*.js): the keymap presets,
 // guide (marker) rules shared with the server, the grid step, selection set operations, the undo stack, mesh
 // topology (welding, pieces, the render tool's edge classes), the Controls rules and the status line. Also checks
 // that the page's modules only import each other and the served three.js.

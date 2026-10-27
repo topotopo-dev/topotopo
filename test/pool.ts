@@ -161,7 +161,7 @@ section('pool basics');
   check(p1.stats().tasks === 3, 'tasks with shared data reuse the worker cache');
   await p1.close();
 
-  // R-17: a worker keeps 8 shared keys, the pool still lists the ones it dropped. A task whose worker no longer holds
+  // A worker keeps 8 shared keys, the pool still lists the ones it dropped. A task whose worker no longer holds
   // its data is retried once, and the retry must carry the data: it can land on another worker that dropped it too
   // (here: A is free again when B's "missing" reply is handled; B is slow to read the task's 40 MB array), which
   // failed the task with 'shared data "K" missing in the worker'
@@ -217,7 +217,7 @@ section('ported nodes: pool on = pool off, bit for bit');
     nodes: { ...rock, ground: { type: 'grid', params: { size: [6, 6], center: [0, -1.1, 0] } }, o: { type: 'occlusion', in: ['n', 'ground'], params: { samples: 16, group: '@P.y<0', invert: true } } },
     output: 'o',
   }, { expectParallel: true });
-  // scatter (R-8): candidates, sample elimination (one radius, radii by density), exact minimum distance (conflict
+  // scatter: candidates, sample elimination (one radius, radii by density), exact minimum distance (conflict
   // lists), relaxation passes, curve and volume modes, heightfield_scatter
   const hills = { g: { type: 'grid', params: { size: [20, 20], divisions: [24, 24] } }, b: { type: 'noise_displace', in: ['g'], params: { amplitude: 1.2, frequency: 0.15 } } };
   const sc = (params: any, extra: any = {}) => ({ nodes: { ...hills, ...extra, s: { type: 'scatter', in: [extra.m ? 'm' : 'b'], params } }, output: 's' });
@@ -234,7 +234,7 @@ section('ported nodes: pool on = pool off, bit for bit');
     output: 's',
   }, { expectParallel: true });
   {
-    // R-12: the density-mask neighbour rebuild (scatter_elim_lists) in chunks on the pool, results in ordinary and in
+    // The density-mask neighbour rebuild (scatter_elim_lists) in chunks on the pool, results in ordinary and in
     // shared memory (written in place), = the serial loop it replaced, bit for bit
     const n = 5000, r = rng(7), pc = new Int32Array(n), PJl: number[] = [], PFl: number[] = [];
     for (let i = 0; i < n; i++) for (let k = Math.floor(r() * 12); k > 0; k--) { const j = Math.floor(r() * n); if (j !== i) { PJl.push(j); PFl.push(r()); pc[i]++; } }

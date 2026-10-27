@@ -82,7 +82,7 @@ try {
   const installed = path.join(app, 'node_modules', NAME);
   for (const variant of ['pkg', 'pkg-simd']) {
     const readme = fs.readFileSync(path.join(installed, 'kernels', variant, 'README.md'), 'utf8');
-    for (const document of ['BUILD.md', 'BENCH.md'])
+    for (const document of ['BUILD.md'])
       check(readme.includes(`https://github.com/topotopo-dev/topotopo/blob/main/kernels/${document}`) &&
         !readme.includes(`](${document}`), `${variant} README ${document} link works outside the source checkout`);
   }

@@ -75,7 +75,7 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   points_along_curve: { spacing: [0.01, 1], count: [0, 50], per_segment: [1, 8] },
   mask: { samples: [1, 8] },
   prune: { radius: [0, 0.5] },
-  // textures (P3-T): small images and few rays (resolution is an ivec2: [8, 48] per side)
+  // textures: small images and few rays (resolution is an ivec2: [8, 48] per side)
   tex_tile_sampler: { resolution: [8, 48], count: [1, 8] },
   bake_ao: { resolution: [8, 48], samples: [1, 8] },
   bake_thickness: { resolution: [8, 48], samples: [1, 8] },
@@ -88,7 +88,7 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   bake_mask: { resolution: [8, 48] },
   bake_vertex_color: { resolution: [8, 48] },
   tex_height_to_ao: { directions: [1, 8], steps: [1, 8] },
-  // cloth (P3-C): few steps; max_points stays at its default (random values would refuse most inputs)
+  // cloth: few steps; max_points stays at its default (random values would refuse most inputs)
   drape: { steps: [0, 12], substeps: [1, 4], iterations: [1, 2], max_points: 'keep' },
   inflate: { steps: [0, 12], substeps: [1, 4], iterations: [1, 2], max_points: 'keep' },
 };

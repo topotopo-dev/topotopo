@@ -37,7 +37,7 @@ export const SRC: Record<string, NodeSpec> = {
   LOFT: { type: 'merge', in: ['CIRCLE', 'CIRCLE_UP'] },
   CIRCLE_UP: { type: 'circle', params: { radius: 0.3, segments: 24, center: [0, 1, 0] } },
   COLORED: { type: 'color', in: ['MESH'], params: { mode: 'random' } },
-  // deformers (P1-C): lattice cages, a bar along +Z for path_deform, a point proxy for point_deform
+  // deformers: lattice cages, a bar along +Z for path_deform, a point proxy for point_deform
   LATTICE_REST: { type: 'bound', in: ['MESH'], params: { divisions: [2, 2, 2] } },
   LATTICE_DEF: { type: 'twist', in: ['LATTICE_REST'], params: { angle: 60 } },
   ZBAR: { type: 'box', params: { size: [0.2, 0.2, 2], center: [0, 0, 1], divisions: [1, 1, 10] } },
@@ -46,19 +46,19 @@ export const SRC: Record<string, NodeSpec> = {
   NBRS: { type: 'attrib_array', in: ['GRID'], params: { mode: 'from_neighbours' } },
   CUBE: { type: 'box' },
   OPENTUBE: { type: 'tube', params: { cols: 12, caps: false } },
-  // packed prims (P2-A): three identical boxes (pack shares one source), and packed copies of a coloured sphere
+  // packed prims: three identical boxes (pack shares one source), and packed copies of a coloured sphere
   PIECES: { type: 'copy_xform', in: ['BOX'], params: { count: 3, translate: [1.5, 0, 0], copy_attrib: '' } },
   PACKED: { type: 'copy_to_points', in: ['COLORED', 'PTS'], params: { pack: true } },
-  // heightfields (P2-C): a 4 × 4 m field at 0.1 m (41 × 41 samples), noise hills, a slope mask, a curve and a stamp
+  // heightfields: a 4 × 4 m field at 0.1 m (41 × 41 samples), noise hills, a slope mask, a curve and a stamp
   HF: { type: 'heightfield', params: { size: [4, 4], resolution: 0.1 } },
   HFN: { type: 'heightfield_noise', in: ['HF'], params: { amplitude: 0.8, element_size: 2, seed: 1 } },
   HFM: { type: 'heightfield_mask_by_feature', in: ['HFN'], params: { feature: 'slope', min_angle: 25 } },
   HF_CURVE: { type: 'curve', params: { points: [[-2, 0, -1], [0, 0.4, 0.5], [2, 0, 1]], smooth: true } },
   HF_STAMP: { type: 'box', params: { size: [1, 1, 1], center: [0.6, 0.5, 0] } },
-  // mesh_repair (P1-E): a box with a missing face and four reversed faces
+  // mesh_repair: a box with a missing face and four reversed faces
   HOLED: { type: 'delete', in: ['BOX'], params: { group: '0' } },
   BROKEN: { type: 'reverse', in: ['HOLED'], params: { group: '1-4' } },
-  // spline toolkit (P2-D): a weighted NURBS, the default Bezier, a noisy helix, a zig-zag path, a road over bumps
+  // spline toolkit: a weighted NURBS, the default Bezier, a noisy helix, a zig-zag path, a road over bumps
   NURBS: { type: 'nurbs', params: { points: [[0, 0, 0], [1, 0.5, 1], [2.5, 0, 1.2], [3, 0.8, 0], [4.2, 0.2, -0.5], [5, 0, 0.4]], weights: [1, 2, 1, 1, 0.5, 1] } },
   BEZIER: { type: 'bezier' },
   SPIRAL: { type: 'spiral', params: { turns: 1.5, points_per_turn: 40 } },
@@ -66,14 +66,14 @@ export const SRC: Record<string, NodeSpec> = {
   ZIGZAG: { type: 'curve', params: { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [2, 0.5, 1], [2, 0, 2]] } },
   BUMPY: { type: 'noise_displace', in: ['GRID'], params: { amplitude: 0.3 } },
   ROAD: { type: 'curve', params: { points: [[-0.9, 1, -0.8], [0, 1, 0.2], [0.9, 1, 0.7]] } },
-  // shelf assets (P2-F): a rising smooth path, a polyline with corners for pipes, a road centre line, a hilly ground
+  // shelf assets: a rising smooth path, a polyline with corners for pipes, a road centre line, a hilly ground
   SHELF_PATH: { type: 'curve', params: { points: [[0, 0, 0], [3, 0, 1], [6, 0.3, 0.5], [8, 0.6, -1]], smooth: true } },
   SHELF_PIPE: { type: 'curve', params: { points: [[0, 0.6, 0], [2, 0.6, 0], [2, 1.5, 0], [2, 1.5, 2], [4.5, 1.5, 2]] } },
   SHELF_ROAD: { type: 'curve', params: { points: [[-10, 0, 0], [0, 0, 4], [10, 0, 0]], smooth: true, subdivisions: 8 } },
   SHELF_GROUND: { type: 'terrain', params: { size: [16, 16], divisions: [24, 24], height: 1.5, frequency: 0.12, octaves: 3, seed: 3 } },
   // an L-shaped footprint on the ground (closed polygon), concave on purpose
   SHELF_FOOTPRINT: { type: 'curve', params: { points: [[0, 0, 0], [10, 0, 0], [10, 0, 6], [5, 0, 6], [5, 0, 9], [0, 0, 9]], closed: true } },
-  // textures (P3-T): small images (noise "noise", bricks "pattern" + id, a soft disc stamp "shape"), a box unwrapped
+  // textures: small images (noise "noise", bricks "pattern" + id, a soft disc stamp "shape"), a box unwrapped
   // for bakes (xatlas), the same box coloured, and its subdivided high-res version
   TEX: { type: 'tex_noise', params: { resolution: 64, seed: 1 } },
   TEX2: { type: 'tex_pattern', params: { resolution: [64, 32], count: [4, 4] } },
@@ -81,13 +81,13 @@ export const SRC: Record<string, NodeSpec> = {
   UVBOX: { type: 'uv_unwrap', in: ['BOX'] },
   UVCOLOR: { type: 'color', in: ['UVBOX'], params: { mode: 'random' } },
   HIGHBOX: { type: 'subdivide', in: ['BOX'], params: { levels: 2 } },
-  // rigid bodies (P3-A): 25 packed small spheres 3 m above the bumpy grid; six packed crates on one spot for stacking
+  // rigid bodies: 25 packed small spheres 3 m above the bumpy grid; six packed crates on one spot for stacking
   RBD_DROP: { type: 'copy_to_points', in: ['SMALLSPHERE', 'PTS_ABOVE'], params: { pack: true } },
   RBD_CRATE: { type: 'box', params: { size: [0.3, 0.2, 0.25], center: [0, 0.1, 0] } },
   RBD_SPOT: { type: 'point_grid', params: { counts: [1, 1, 1] } },
   RBD_SPOTS: { type: 'copy_xform', in: ['RBD_SPOT'], params: { count: 6, translate: [0.04, 0, 0.03] } },
   RBD_CRATES: { type: 'copy_to_points', in: ['RBD_CRATE', 'RBD_SPOTS'], params: { pack: true } },
-  // cloth (P3-C): a sheet above BOX for drape; inflate takes MESH (closed)
+  // cloth: a sheet above BOX for drape; inflate takes MESH (closed)
   CLOTH: { type: 'grid', params: { size: [2, 2], divisions: [12, 12], center: [0, 1.2, 0] } },
 };
 
@@ -124,7 +124,7 @@ export const INPUTS: Record<string, string[]> = {
   point_deform: ['MESH', 'PROXY', 'PROXY_DEF'],
   attrib_array: ['NBRS'],
   polysplit: ['BOX'], edge_divide: ['BOX'], dissolve: ['GRID'], polybridge: ['CUBE'], polyfill: ['OPENTUBE'],
-  // measure (P1-F): curvature on the box (flat faces, sharp edges), distance from grid points to the sphere
+  // measure: curvature on the box (flat faces, sharp edges), distance from grid points to the sphere
   curvature: ['BOX'], distance: ['GRID', 'MESH'],
   pack: ['PIECES'], unpack: ['PACKED'],
   heightfield_noise: ['HF'], heightfield_mask_noise: ['HF'], heightfield_to_mesh: ['HFN'], heightfield_to_sdf: ['HFN'],
@@ -134,17 +134,17 @@ export const INPUTS: Record<string, string[]> = {
   heightfield_erode: ['HFN'], heightfield_flow: ['HFN'], heightfield_fill_sinks: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
   heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
   remesh_isotropic: ['BOX'], remesh_quad: ['BOX'], mesh_repair: ['BROKEN'],
-  // PCG (P2-B): masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
+  // PCG: masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
   curve_attribs: ['NURBS'], straight_skeleton: ['SHELF_FOOTPRINT'],
-  // textures (P3-T): filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
+  // textures: filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
   tex_blend: ['TEX', 'TEX2', 'TEXSHAPE'], tex_levels: ['TEX'], tex_curves: ['TEX'], tex_blur: ['TEX'], tex_warp: ['TEX2', 'TEX'],
   tex_transform: ['TEX2'], tex_edge_detect: ['TEX2'], tex_invert: ['TEX'], tex_threshold: ['TEX'], tex_histogram_scan: ['TEX'],
   tex_normal_from_height: ['TEX2'], tex_height_to_ao: ['TEX2'], tex_channel: ['TEX', 'TEX2'], tex_colorize: ['TEX'],
   tex_tile_sampler: ['TEXSHAPE'], tex_output: ['TEX2'], texture_to_material: ['UVBOX', 'TEX'], tex_to_heightfield: ['TEX'],
   heightfield_to_tex: ['HFN'],
-  // particles (P3-B): a 5 × 5 point grid raining onto the bumpy grid
+  // particles: a 5 × 5 point grid raining onto the bumpy grid
   particles: ['PTS_ABOVE', 'BUMPY'],
   bake_ao: ['UVBOX'], bake_thickness: ['UVBOX'], bake_curvature: ['UVBOX'], bake_position: ['UVBOX'], bake_world_normal: ['UVBOX'],
   bake_normal: ['UVBOX', 'HIGHBOX'], bake_height: ['UVBOX', 'HIGHBOX'], bake_island_id: ['UVBOX'], bake_mask: ['UVBOX'],
@@ -213,7 +213,7 @@ export const PARAMS: Record<string, any> = {
   offset_curve_3d: { distance: 0.3, both: true, lift: 0.2 },
   project_curve: { spacing: 0.1, lift: 0.02 },
   curve_attribs: { frame: true, curvature: true, segment: true, ramp_attrib: 'width', ramp: [[0, 0.2], [1, 0.05]] },
-  // textures (P3-T): generators at 64² (the tests hash every pixel), bakes at 64² with few rays
+  // textures: generators at 64² (the tests hash every pixel), bakes at 64² with few rays
   tex_noise: { resolution: 64, fractal: 'ridged', scale: 3 },
   tex_pattern: { resolution: 64, pattern: 'hex', count: [4, 6], variation: 0.4 },
   tex_gradient: { resolution: 64, mode: 'radial' },

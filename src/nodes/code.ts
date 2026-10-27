@@ -210,7 +210,7 @@ defineNode({
       run.stopped = true;
     }
     // what the script returned is user code too: `instanceof` (and Object.getPrototypeOf) run a Proxy's
-    // getPrototypeOf trap here, outside the time limit, so only the engine's brand check looks at it (R-18)
+    // getPrototypeOf trap here, outside the time limit, so only the engine's brand check looks at it
     const bad = notGeometry(res);
     if (bad) throw new NodeError(`script must return a Geometry (got ${bad})`, 'return geo, a geometry from lib.run, or one built with lib.GeoBuilder / new lib.Geometry()');
     return res;

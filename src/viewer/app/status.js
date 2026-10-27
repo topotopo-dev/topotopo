@@ -1,4 +1,4 @@
-// The status bar's own lines (docs/design/viewer.md section 4): what the page says when nothing else is reported.
+// The status bar's own lines: what the page says when nothing else is reported.
 // Plain functions, tested in Node (test/viewer-logic.ts).
 
 /** While the event stream is connected. */

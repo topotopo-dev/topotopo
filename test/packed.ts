@@ -1,4 +1,4 @@
-// Packed primitive tests (P2-A): the Geometry model (clone, subsets, merge dedup, GeoBuilder, bbox), pack/unpack
+// Packed primitive tests: the Geometry model (clone, subsets, merge dedup, GeoBuilder, bbox), pack/unpack
 // round trips, packed copy_to_points against real copies (orient, N+up, pscale, scale, rot, pivot, trans, variants,
 // nested), transform/copy_xform composition, auto-unpack with its warning and cache, foreach over instances,
 // JSON/GLB/USD IO, exporters that expand, the render hook and its budget, inspect, and every node type fed packed

@@ -365,7 +365,7 @@ function encodeBinaryJSON(v: any): Uint8Array {
   }
   check(serr < 1e-5 && close((sb.points.get('Cd')!.get(2) as number[])[0], (pts.points.get('Cd')!.get(2) as number[])[0], 1e-6), `pcg struct csv re-import: position, rotation, colour (max error ${serr.toExponential(1)})`);
 
-  // R-17: attribute columns never repeat a column (Unreal FNames are case-insensitive and the TopoTopoPCG loader
+  // Attribute columns never repeat a column (Unreal FNames are case-insensitive and the TopoTopoPCG loader
   // rejects duplicate columns): attributes named exactly Seed, Name, Density or Position were written next to the
   // standard columns of the same name, and `constructor` (an Object.prototype key) got a suffix it does not need
   const clashGeo = (attrs: [string, 'int' | 'float' | 'string', number][]) => {

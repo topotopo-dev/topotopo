@@ -1,4 +1,4 @@
-/* The viewer page (docs/design/viewer.md): a neutral editor UI around the viewport. Section 7 colours: viewport
+/* The viewer page: a neutral editor UI around the viewport. Colours: viewport
    #2b2d31, selection orange #f0a030, guides one desaturated cyan. */
 :root {
   --bg: #1f2124; --panel: #26282c; --panel2: #2c2f33; --line: #3a3d42; --text: #d6d9dd; --dim: #8c939b; --faint: #5d636b;

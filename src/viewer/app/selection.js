@@ -1,4 +1,4 @@
-// The selection the outliner and the viewport share (docs/design/viewer.md section 5): an ordered set of ids, the
+// The selection the outliner and the viewport share: an ordered set of ids, the
 // last one the lead (the properties panel shows it). Ids name objects ("out", "layer:<path>", "guide:<id>") or a
 // connected piece of a mesh object ("out#12", "layer:<path>#3").
 // Plain functions, tested in Node (test/viewer-logic.ts).

@@ -4,7 +4,7 @@
 // input file (help topic "inputs": string attributes name and role, pscale = a null's radius).
 // Plain functions, no DOM and no three.js: tested in Node (test/viewer-logic.ts).
 
-/** The roles the LLM reads, and the editor's name for each (docs/design/viewer.md section 7). */
+/** The roles the LLM reads, and the editor's name for each. */
 export const MARKER_KINDS = ['site', 'path', 'zone', 'volume'];
 export const EDITOR_NAMES = { site: 'null', path: 'curve', zone: 'area', volume: 'volume' };
 /** [fewest, most] points per kind: a null's point, a curve's CVs, an area's corners, a volume's two ground corners */

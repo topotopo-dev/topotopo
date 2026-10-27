@@ -14,7 +14,7 @@ Open a disposable empty level in the intended project. Use a **new, empty** dest
 The command for the repository's demo bundle, entered in the Unreal Output Log console, is:
 
 ```text
-TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo/landscape" /Game/TopoTopo/PluginDemo landscape=1 layers=1 material=1 objects=1
+TopoTopo.ImportScene "C:/path/to/topotopo/out/unreal_demo/landscape" /Game/TopoTopo/PluginDemo landscape=1 layers=1 material=1 objects=1
 ```
 
 `landscape=0` skips terrain (the default). `layers=1` and `material=1` default on when a Landscape is imported;
@@ -61,7 +61,7 @@ Landscape import uses the exported UE 5.8 C++ APIs `FLandscapeImportHelper::GetH
 Generate the demo with `npm run export:demo -- --tiles 2` and import its bundle:
 
 ```text
-TopoTopo.ImportScene "C:/WORK/polyforge/out/unreal_demo_tiled/landscape" /Game/TopoTopo/TiledDemo landscape=1 layers=1 material=1 objects=1
+TopoTopo.ImportScene "C:/path/to/topotopo/out/unreal_demo_tiled/landscape" /Game/TopoTopo/TiledDemo landscape=1 layers=1 material=1 objects=1
 ```
 
 The exporter option `tile_size` is **quads per tile**, with zero retaining v1. Each tile file has
@@ -91,7 +91,7 @@ see Epic's [recommended sizes table](https://dev.epicgames.com/documentation/unr
 The tiled importer supports individual files up to 8193 samples and an assembled padded grid up to
 32769 samples per side. It holds full arrays during native import. At 16K x 16K, UE 5.8 allocates roughly
 6 GiB for its normal buffer alone, plus masks, heights and textures; tiling does not guarantee a small
-peak import memory footprint. Large terrains have not been performance-tested in this handoff.
+peak import memory footprint. Large terrains have not been performance-tested yet.
 The standard TopoTopo heightfield nodes still enforce a 4097 x 4097 total-sample budget; this work does
 not raise that generation limit or establish 16K generation. The exporter uses dense source arrays and
 keeps both global and tiled output bytes in memory.
@@ -157,7 +157,7 @@ For automation, supply `-TopoTopoDemoCSV="<absolute path>/instances.csv"` at edi
 world, waits for PCG generation across automation frames (60-second timeout), checks 536 output points and
 the five component counts/first pine transform, then cleans up. It can use the existing PluginDemo meshes
 without modifying the imported scene. Missing meshes produce an explicit `SKIPPED` warning, which is not
-PCG acceptance; missing CSV fails. Full test names and expected outcomes are in [README.md](README.md#automation-and-editor-handoff).
+PCG acceptance; missing CSV fails. Full test names and expected outcomes are in [README.md](README.md#automation-and-editor-checks).
 
 Run `Automation RunTests TopoTopo.Editor.WeightLayers` to import the terrain into a separate transient
 editor world with layers and material enabled. It checks ten layer infos, all PNG weight bytes and means

@@ -1,5 +1,5 @@
 // The embed page (src/gallery/pages.ts embedPage): a baked preview.glb under an orbit camera, made to sit in an iframe
-// on a board. Not the editor viewport (docs/design/viewer.md): no panels, no diagnostic overlays, and three's
+// on a board. Not the editor viewport: no panels, no diagnostic overlays, and three's
 // OrbitControls (left drag orbits, right drag pans, wheel zooms, as model viewers do), slowly turning until touched.
 // The thumbnail behind the canvas stays visible until the model is in, and when it cannot load.
 import * as THREE from 'three';

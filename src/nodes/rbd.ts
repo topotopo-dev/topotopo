@@ -83,7 +83,7 @@ async function cookRbd(ctx: CookContext, stack: boolean): Promise<Geometry> {
   const notes: string[] = [];
   const statics = ctx.hasInput(1) ? staticMesh(ctx.input(1), notes) : null;
   for (const m of notes) ctx.warn(m);
-  // auto: the ground plane stands in for a collision input that is not connected (R-17 N6: it was also added when the
+  // auto: the ground plane stands in for a collision input that is not connected (it was also added when the
   // input was connected but had no triangles, unlike the param says)
   const ground = p.ground_plane === 'on' || (p.ground_plane === 'auto' && !ctx.hasInput(1)) ? Number(p.ground) : null;
   if (ctx.hasInput(1) && !statics && ground === null)

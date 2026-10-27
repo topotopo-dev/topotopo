@@ -32,9 +32,9 @@ if (!cooked.ok || !cooked.geo) throw new Error(cooked.errors.map(e => e.message)
 const source = cooked.geo;
 const tris = Uint32Array.from(triangulate(source).tris, v => source.vertexPoint[v]);
 if (process.argv.includes('--export-fixtures')) {
-  mkdirSync('out/session7', { recursive: true });
-  writeFileSync('out/session7/sphere.positions.f64', Buffer.from(source.P.buffer, source.P.byteOffset, source.P.byteLength));
-  writeFileSync('out/session7/sphere.triangles.u32', Buffer.from(tris.buffer));
+  mkdirSync('out/bench', { recursive: true });
+  writeFileSync('out/bench/sphere.positions.f64', Buffer.from(source.P.buffer, source.P.byteOffset, source.P.byteLength));
+  writeFileSync('out/bench/sphere.triangles.u32', Buffer.from(tris.buffer));
 }
 const gridPositions = new Float64Array(201 * 251 * 3), gridTris = new Uint32Array(200 * 250 * 6);
 for (let r = 0; r <= 200; r++) for (let c = 0; c <= 250; c++) {
