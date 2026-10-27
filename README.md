@@ -75,6 +75,7 @@ Requires Node ≥ 22.18.
 ```bash
 npx topotopo --catalog                                      # node types by category
 npx topotopo --help-node scatter                            # one node's params, defaults and example
+npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
 npx topotopo graph.json --export-all                        # every output's export target, into exports/ beside it
 npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
@@ -309,6 +310,7 @@ node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.p
 node src/cli.ts examples/unreal_demo.json --node landscape --format unreal_landscape --export out/level   # Landscape bundle
 node src/cli.ts examples/forest.json --node forest --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
 node src/cli.ts view examples/unreal_demo.json   # live viewer at http://127.0.0.1:7341: node list, per-node geometry, re-cook on save
+node src/cli.ts --help-topic export   # a help topic; --catalog ends with the list
 ```
 
 Renders draw heightfields at up to 256 quads per side, so a 513 × 513 field shows at 257 × 257 and the footer says so;

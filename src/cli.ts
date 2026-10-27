@@ -15,7 +15,7 @@
 //                 instance stream).
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
-//   node src/cli.ts --catalog | --help-node scatter | --version
+//   node src/cli.ts --catalog | --help-node scatter | --help-topic export | --version
 //   node src/cli.ts mcp [--workspace dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
@@ -44,7 +44,8 @@ import type { PreparedTarget } from './host/export-targets.ts';
 import { publishedOutputs } from './io/targets.ts';
 import { inspect } from './inspect.ts';
 import { uvReport } from './core/uvreport.ts';
-import { catalogText, nodeDoc } from './mcp/docs.ts';
+import { didYouMean } from './graph/params.ts';
+import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
 
 const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
@@ -81,7 +82,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle; --tile-size 1008 for tiled Landscape);',
     '                       images: --format textures --export out/maps (one PNG per image; --layers a,b or * for extra layers)',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
-    `       ${prog} --catalog | --help-node <type> | --version`,
+    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version`,
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
     `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's projects, stable links for a board)`,
@@ -90,12 +91,25 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   ].join('\n'));
   process.exit(0);
 }
+if (argv.includes('--help-topic')) {
+  // the MCP help topics (src/mcp/docs.ts), the same text the help tool returns
+  const name = opt('--help-topic');
+  const topics = ['overview', ...topicList()];
+  if (name === undefined || name.startsWith('-')) fail(`--help-topic needs a topic: ${topics.join(', ')}`);
+  const text = topicText(name!);
+  if (text === null) {
+    const s = didYouMean(name!, topics);
+    fail(`unknown topic "${name}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; topics: ${topics.join(', ')}`);
+  }
+  console.log(text);
+  process.exit(0);
+}
 if (argv.includes('--catalog') || opt('--help-node')) {
   // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts
   const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
   await engine.init();
   const defs = [...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)];
-  if (argv.includes('--catalog')) console.log(catalogText(defs));
+  if (argv.includes('--catalog')) console.log(catalogText(defs, { cli: true }));
   else {
     const d = defs.find((x) => x.type === opt('--help-node'));
     console.log(d ? nodeDoc(d) : `unknown node "${opt('--help-node')}" (see --catalog)`);

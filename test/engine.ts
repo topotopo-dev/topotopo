@@ -619,6 +619,14 @@ section('CLI arguments');
   const hn = cli('--help-node', 'house');
   check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout), '--help-node documents a shelf asset');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
+  check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, library, graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
+    '--catalog ends with the command line\'s help flags and the topic names');
+  const topic = cli('--help-topic', 'export');
+  check(topic.status === 0 && topic.stdout.trim() === TOPICS.export.trim(), '--help-topic prints an MCP help topic');
+  check(/^TopoTopo: .*\n\nWORKFLOW/.test(cli('--help-topic', 'overview').stdout), '--help-topic overview prints the operating guide');
+  const badTopic = cli('--help-topic', 'exprt');
+  check(badTopic.status === 1 && /unknown topic "exprt" \(did you mean export\?\); topics: overview, library, graph, /.test(badTopic.stderr) && !badTopic.stdout,
+    '--help-topic: an unknown name fails and lists the topics');
 }
 
 section('CLI heightfield render resolution');

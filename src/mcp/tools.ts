@@ -9,7 +9,7 @@ import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
 import { migrateGraph } from '../graph/migrate.ts';
-import { catalogText, nodeDoc, TOPICS, topicList, INSTRUCTIONS } from './docs.ts';
+import { catalogText, nodeDoc, topicList, topicText, INSTRUCTIONS } from './docs.ts';
 import { summarize, inspect } from '../inspect.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import type { RenderOptions } from '../render/raster.ts';
@@ -242,11 +242,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` } } },
       run: async (a) => {
         const out: string[] = [];
-        if (a.topic) {
-          if (a.topic === 'overview' || a.topic === 'instructions') out.push(INSTRUCTIONS);
-          else if (TOPICS[a.topic]) out.push(TOPICS[a.topic]);
-          else out.push(`unknown topic "${a.topic}". Topics: overview, ${topicList().join(', ')}`);
-        }
+        if (a.topic) out.push(topicText(String(a.topic)) ?? `unknown topic "${a.topic}". Topics: overview, ${topicList().join(', ')}`);
         for (const n of a.nodes ?? []) {
           const d = engine.resolveDef(n);
           if (!d) { const s = didYouMean(n, engine.allTypeNames()); out.push(`unknown node "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); continue; }

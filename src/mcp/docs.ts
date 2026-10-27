@@ -1011,6 +1011,12 @@ export function topicList() {
   return Object.keys(TOPICS);
 }
 
+/** A help topic's text ("overview" or "instructions": the operating guide), or null for a name that is not a topic. */
+export function topicText(name: string): string | null {
+  if (name === 'overview' || name === 'instructions') return INSTRUCTIONS;
+  return Object.hasOwn(TOPICS, name) ? TOPICS[name] : null;
+}
+
 function paramLine(name: string, pd: ParamDef): string {
   let d = pd.default;
   if (pd.type === 'graph') d = '{nodes, output}';
@@ -1037,7 +1043,8 @@ export function nodeDoc(def: NodeDef): string {
   return out.join('\n');
 }
 
-export function catalogText(defs: NodeDef[], filter?: { category?: string; search?: string; deprecated?: boolean }): string {
+/** The catalog by category; `cli` ends it with the command line's help flags instead of the MCP help tool. */
+export function catalogText(defs: NodeDef[], filter?: { category?: string; search?: string; deprecated?: boolean; cli?: boolean }): string {
   let list = defs;
   const hidden = filter?.deprecated ? 0 : list.filter((d) => d.deprecated).length;
   if (!filter?.deprecated) list = list.filter((d) => !d.deprecated);
@@ -1054,7 +1061,9 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     out.push(`[${c}]`);
     for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}`);
   }
-  out.push('(◦ = generator, no inputs). Use help {nodes:[...]} for params. Help topics: ' + topicList().join(', '));
+  out.push(filter?.cli
+    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ')
+    : '(◦ = generator, no inputs). Use help {nodes:[...]} for params. Help topics: ' + topicList().join(', '));
   if (hidden) out.push(`${hidden} deprecated node type(s) hidden (include_deprecated: true lists them).`);
   return out.join('\n');
 }
