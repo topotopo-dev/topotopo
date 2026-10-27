@@ -240,7 +240,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         },
       },
       run: async (a) => {
-        const cat = catalogText([...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)], { category: a.category, search: a.search, deprecated: a.include_deprecated });
+        const cat = catalogText([...allNodeDefs(), ...engine.assetsIn().map((x) => x.def)], { category: a.category, search: a.search, deprecated: a.include_deprecated });
         const nIn = ws.listInputs().length;
         return text(`${cat}\nHUMAN INPUT: ${nIn ? `${nIn} file${nIn === 1 ? '' : 's'} in` : 'nothing yet in'} the workspace inputs/ folder (meshes, guide curves and points, blockouts, PNG masks people drop in). Building a landscape or scene: inputs {action:"list"} first, then read them with file nodes (help topic "inputs").`);
       },
@@ -466,15 +466,16 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
       run: async (a) => {
         const assetOf = (n: string) => {
-          const x = engine.assets.get(n);
-          if (!x) { const s = didYouMean(String(n), [...engine.assets.keys()]); throw new Error(`no asset "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); }
+          const x = engine.asset(n);
+          if (!x) { const s = didYouMean(String(n), engine.assetsIn().map((x) => x.name)); throw new Error(`no asset "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); }
           return x;
         };
         switch (a.action) {
           case 'list': {
-            if (!engine.assets.size) return text('no assets yet');
+            const all = engine.assetsIn();
+            if (!all.length) return text('no assets yet');
             const line = (x: { name: string; def: any }) => `  ${x.name} — ${x.def.summary}; params: ${Object.keys(x.def.params).join(', ') || 'none'}; inputs: ${x.def.inputs.length}`;
-            const all = [...engine.assets.values()], mine = all.filter((x) => x.def.category !== 'shelf'), shelf = all.filter((x) => x.def.category === 'shelf');
+            const mine = all.filter((x) => x.def.category !== 'shelf'), shelf = all.filter((x) => x.def.category === 'shelf');
             const out: string[] = [];
             if (mine.length) out.push(`[asset] workspace assets (${mine.length})`, ...mine.map(line));
             if (shelf.length) out.push(`[shelf] shipped assets (${shelf.length}; read-only, fork to edit)`, ...shelf.map(line));
@@ -487,11 +488,12 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           case 'delete': {
             const x = assetOf(a.name);
             if (x.def.category === 'shelf') throw new Error(`"${a.name}" is a shelf asset and cannot be deleted; fork it to edit a copy: assets {action:"fork", name:"${a.name}"}`);
-            engine.assets.delete(a.name);
+            engine.root.assets.delete(a.name);
             const f = path.join(ws.assetDir, a.name + '.json');
             if (fs.existsSync(f)) fs.unlinkSync(f);
-            const shipped = engine.shelf.get(a.name);
-            if (shipped) { engine.registerAsset(a.name, shipped, { category: 'shelf' }); engine.cache.clear(); }
+            // the shelf asset of that name is seen again: results that used the deleted one are cached under unchanged keys
+            const shipped = engine.shelf.has(a.name);
+            if (shipped) engine.cache.clear();
             return text(`deleted asset "${a.name}"${shipped ? '; restored the shelf asset of that name' : ''}`);
           }
           case 'fork': {

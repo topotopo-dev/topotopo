@@ -140,7 +140,7 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
   let failed = res.errors.length;
   for (const f of files) {
     if (filter && !f.name.includes(filter)) continue;
-    if (!engine.assets.has(f.name)) continue;
+    if (!engine.shelf.has(f.name)) continue;
     const graph: GraphSpec = { nodes: { asset: { type: f.name } }, output: 'asset' };
     engine.cache.clear();
     const r = await engine.cook(graph);

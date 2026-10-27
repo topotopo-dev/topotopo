@@ -209,6 +209,8 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   // The bundled font makes the text node deterministic across machines; system fonts only serve explicit names.
   const bundledFont = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/fonts/DejaVuSans.ttf');
 
+  const resolveIn = (dir: string) => (p: string) => (/^https?:\/\//.test(p) || path.isAbsolute(p) ? p : path.resolve(dir, p));
+
   const findIn = (dir: string, pred: (f: string) => boolean, depth = 0): string | null => {
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
@@ -221,7 +223,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
     name: 'node',
     shelfPath: opts.shelf === false ? undefined : opts.shelf ?? SHELF_DIR,
     pool,
-    resolvePath: (p) => (/^https?:\/\//.test(p) || path.isAbsolute(p) ? p : path.resolve(baseDir, p)),
+    resolvePath: resolveIn(baseDir),
     async readFile(p) {
       const rp = this.resolvePath(p);
       if (/^https?:\/\//.test(rp)) {
@@ -278,6 +280,12 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
         conversions.set(key, job);
       }
       try { return await job; } finally { if (conversions.get(key) === job) conversions.delete(key); }
+    },
+    filesAt(dir) {
+      // every file method resolves its paths with this.resolvePath, so next to another resolvePath it reads that folder;
+      // conversions are still cached under baseDir
+      const { readFile, fileStamp, isDirectory, listDir, convertFile, findFont, fontCandidates } = this;
+      return { resolvePath: resolveIn(path.resolve(baseDir, dir)), readFile, fileStamp, isDirectory, listDir, convertFile, findFont, fontCandidates };
     },
     compile(source) {
       if (source === 'globalThis') return realmGlobal;

@@ -366,6 +366,8 @@ defineNode({
     name: nameParam('text'),
   },
   outputs: 'image <name>: C grey 0..1',
+  // it cooks a text node, which reads its font through the scope
+  usesScope: true,
   example: { type: 'tex_text', params: { resolution: [512, 128], text: 'EXIT', size: 0.7 } },
   async cook(ctx) {
     const { p, type } = ctx;
@@ -416,7 +418,9 @@ defineNode({
     layers: { type: 'enum', options: [...PNG_LAYERS], default: 'auto', desc: 'auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels', aliases: ['channels'] },
     srgb: { type: 'bool', default: true, desc: 'the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never)' },
   },
-  signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
+  // relative paths read the scope's folder
+  usesScope: true,
+  signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
   outputs: 'image <name>: C grey or RGBA 0..1; A grey (the file\'s alpha, for a grey image of a file with alpha)',
   example: {
     nodes: {
@@ -429,11 +433,11 @@ defineNode({
     output: 'out',
   },
   async cook(ctx) {
-    const { p, type, engine } = ctx;
+    const { p, type, scope } = ctx;
     if (!String(p.path ?? '').trim()) throw new NodeError(`${type}: path is empty`, 'a PNG relative to the workspace (people drop theirs into inputs/) or a URL');
     let img: Image;
     try {
-      img = await readImageFile((f) => engine.host.readFile(f), p.path, { name: String(p.name ?? '').trim(), layers: p.layers, srgb: !!p.srgb });
+      img = await readImageFile((f) => scope.files.readFile(f), p.path, { name: String(p.name ?? '').trim(), layers: p.layers, srgb: !!p.srgb });
     } catch (e: any) { throw new NodeError(`${type}: ${e?.message ?? e}`); }
     const g = ctx.hasInput(0) ? ctx.input(0).clone() : new Geometry();
     const before = g.volumes.length;

@@ -18,6 +18,10 @@
 // are validated (unknown names, cycles), cooked before the param is resolved, and their signatures
 // (or, for ch(), the referenced value) are mixed into the dependent node's signature.
 //
+// Scopes (src/graph/scope.ts): a cook runs in a scope, which gives it its node types, the graphs graph_ref reads and
+// the files nodes read; nested cooks inherit it. The cache is shared by all scopes: outside the root scope, a node
+// whose result depends on its scope (NodeDef.usesScope) has the scope's id in its signature.
+//
 // Concurrency: when the host has a worker pool (Engine.concurrent), the inputs of a node (and the nodes its
 // expressions reference) are pulled at once, so independent branches overlap wherever a cook awaits (a chunked
 // kernel on the pool, file I/O). Cooks of one signature that are in flight at the same time share one cook
@@ -39,6 +43,8 @@ import type { ExprRefs, ResolvedParams, TimeState } from './params.ts';
 import { migrateGraphDetailed } from './migrate.ts';
 import { parallelMap as runKernel } from './parallel.ts';
 import type { PoolStats } from './parallel.ts';
+import { scopeSig } from './scope.ts';
+import type { AssetEntry, Scope } from './scope.ts';
 import { NodeError, STOPPED } from './types.ts';
 import type { CookContext, GraphSpec, NodeDef, NodeSpec, ParamDef } from './types.ts';
 import { VAR_NAME_HINT, varNameError } from './vars.ts';
@@ -111,6 +117,11 @@ export interface CookOptions {
   target?: string;
   vars?: Record<string, any>;
   inputs?: SubInput[];
+  /**
+   * The scope to cook in (src/graph/scope.ts): node types, the graphs graph_ref reads and the files nodes read.
+   * Default: the engine's root scope. Nested cooks (subcook, inputAt) inherit it.
+   */
+  scope?: Scope;
   depth?: number;
   /** frame to cook at (default 1). frame 1 = time 0; frame = time * fps + 1 when only time is given */
   frame?: number;
@@ -143,8 +154,6 @@ export interface CookOptions {
 
 /** Frame range for cookFrames (end inclusive). */
 export interface FrameRange { start: number; end: number; step?: number }
-
-interface AssetEntry { name: string; graph: GraphSpec; def: NodeDef; hash: string }
 
 // ---------------------------------------------------------------- cache
 
@@ -358,6 +367,7 @@ interface CookSession {
   graph: GraphSpec;
   vars: Record<string, any>;
   opts: CookOptions;
+  scope: Scope;
   time: TimeState;
   depth: number;
   report: CookReport;
@@ -385,7 +395,8 @@ const PSUF = '\u0000params';
 export class Engine {
   host: Host;
   cache = new GeoCache();
-  assets = new Map<string, AssetEntry>();
+  /** the workspace's scope: the assets, graphs and files of every cook that is not given another (CookOptions.scope) */
+  readonly root: Scope;
   /** base signatures of nodes found to depend on time while cooking */
   timeDeps = new Set<string>();
   /** manifold-3d wasm module, loaded by init() */
@@ -405,14 +416,15 @@ export class Engine {
   /** cooks in progress by signature: a second cook of the same signature waits for the first */
   private inflight = new Map<string, Flight>();
 
-  /** shelf assets as shipped (name → graph), kept so that deleting a workspace override restores them */
-  shelf = new Map<string, GraphSpec>();
+  /** the shipped shelf's assets (loadShelf): every scope sees them after its own */
+  shelf = new Map<string, AssetEntry>();
   /** problems found while loading the shelf (unreadable index or files, invalid graphs) */
   shelfErrors: string[] = [];
   private shelfLoaded = false;
 
   constructor(host: Host) {
     this.host = host;
+    this.root = { id: '', assets: new Map(), files: host };
     this.concurrent = !!host.pool && host.pool.size > 0;
   }
 
@@ -427,10 +439,10 @@ export class Engine {
   }
 
   /**
-   * Register the shipped asset shelf as node types of category "shelf". `<base>/index.json` lists the asset files
-   * ({"assets": [{"name", "file"}]}, dependencies first); everything is read through the Host, so a browser host
-   * serves the same directory over HTTP. Workspace assets with the same name take precedence: they replace the shelf
-   * entry when registered, and a (re)load of the shelf never replaces them.
+   * Register the shipped asset shelf as node types of category "shelf", which every scope sees after its own assets.
+   * `<base>/index.json` lists the asset files ({"assets": [{"name", "file"}]}, dependencies first); everything is read
+   * through the Host, so a browser host serves the same directory over HTTP. A workspace asset with the same name takes
+   * precedence (Engine.asset), also over a later (re)load of the shelf.
    */
   async loadShelf(base: string): Promise<{ loaded: number; errors: string[] }> {
     this.shelfLoaded = true;
@@ -455,14 +467,11 @@ export class Engine {
     for (let pass = 0; pending.length; pass++) {
       const failed: { name: string; graph: GraphSpec; error: string }[] = [];
       for (const { name, graph } of pending) {
-        this.shelf.set(name, graph);
-        const cur = this.assets.get(name);
-        if (cur && cur.def.category !== 'shelf') continue; // a workspace asset overrides it
         try { this.registerAsset(name, graph, { category: 'shelf' }); loaded++; }
         catch (e: any) { failed.push({ name, graph, error: e.message }); }
       }
       if (failed.length === pending.length || pass > 8) {
-        for (const f of failed) { this.shelf.delete(f.name); errors.push(`${f.name}: ${f.error}`); }
+        for (const f of failed) errors.push(`${f.name}: ${f.error}`);
         break;
       }
       pending = failed;
@@ -471,26 +480,53 @@ export class Engine {
     return { loaded, errors };
   }
 
-  resolveDef(type: string): NodeDef | undefined {
+  /** A node type in a scope: its own assets, then the shelf, then the built-in nodes. */
+  resolveDef(type: string, scope: Scope = this.root): NodeDef | undefined {
     if (typeof type !== 'string') return undefined;
-    const a = this.assets.get(type) ?? this.assets.get(type.replace(/^asset:/, ''));
+    const a = this.asset(type, scope) ?? this.asset(type.replace(/^asset:/, ''), scope);
     if (a) return a.def;
     return getNodeDef(type);
   }
 
-  allTypeNames(): string[] {
-    return [...allAliases(), ...this.assets.keys()];
+  allTypeNames(scope: Scope = this.root): string[] {
+    return [...allAliases(), ...this.assetsIn(scope).map((a) => a.name)];
+  }
+
+  /**
+   * A scope for cooks of its own (CookOptions.scope): its id (not "", which is the root's), the folder its relative
+   * paths read (absolute, or relative to the host's own; default: the host's files) and the graphs graph_ref reads in
+   * it. Register its assets with registerAsset(name, graph, {scope}).
+   */
+  createScope(id: string, opts: { folder?: string; graphs?: (name: string) => GraphSpec | undefined } = {}): Scope {
+    if (!id) throw new Error('a scope needs an id ("" is the root scope\'s)');
+    if (opts.folder !== undefined && !this.host.filesAt) throw new Error(`scope "${id}": the ${this.host.name} host has no file access for other folders (Host.filesAt)`);
+    return { id, assets: new Map(), graphs: opts.graphs, files: opts.folder === undefined ? this.host : this.host.filesAt!(opts.folder) };
   }
 
   // ------------------------------------------------------------ assets
 
-  /** Register a graph as a node type. category "shelf" marks shipped assets (see loadShelf); default "asset". */
-  registerAsset(name: string, graph: GraphSpec, opts: { category?: string } = {}): NodeDef {
+  /** The asset a name refers to in a scope: the scope's own, else the shelf's. */
+  asset(name: string, scope: Scope = this.root): AssetEntry | undefined {
+    return scope.assets.get(name) ?? this.shelf.get(name);
+  }
+
+  /** The assets a scope sees: the shelf's in shelf order (an own asset of the same name in its place), then its others. */
+  assetsIn(scope: Scope = this.root): AssetEntry[] {
+    const own = scope.assets;
+    return [...[...this.shelf.values()].map((a) => own.get(a.name) ?? a), ...[...own.values()].filter((a) => !this.shelf.has(a.name))];
+  }
+
+  /**
+   * Register a graph as a node type: an asset of a scope (default: the root; category "asset"), or with category "shelf"
+   * a shipped asset of the shelf (see loadShelf). The graph is validated in that scope.
+   */
+  registerAsset(name: string, graph: GraphSpec, opts: { category?: string; scope?: Scope } = {}): NodeDef {
     if (!/^[A-Za-z_][\w]*$/.test(name)) throw new Error(`asset name must be an identifier, got "${name}"`);
-    if (getNodeDef(name) && !this.assets.has(name)) throw new Error(`"${name}" clashes with a built-in node type`);
+    const scope = opts.scope ?? this.root;
+    if (getNodeDef(name) && !this.asset(name, scope)) throw new Error(`"${name}" clashes with a built-in node type`);
     const category = opts.category ?? 'asset';
     graph = migrateGraphDetailed(graph).graph;
-    const issues = this.validate(graph);
+    const issues = this.validate(graph, '', scope);
     if (issues.errors.length) throw new Error(`asset graph invalid: ${issues.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
     const hash = String(hashString(stableStringify(graph)));
     const params: Record<string, ParamDef> = {};
@@ -519,6 +555,8 @@ export class Engine {
       ...(shelfDoc ? { description: shelfDoc[2] } : {}),
       inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })),
       params,
+      // the graph's node types resolve in the scope the asset cooks in
+      usesScope: true,
       signatureExtra: () => hash,
       // the asset's own nodes unpack what they need
       packed: 'keep',
@@ -533,21 +571,22 @@ export class Engine {
       },
     };
     // results of other graphs (and assets) that used the previous definition are cached under unchanged keys
-    if (this.assets.has(name) && this.assets.get(name)!.hash !== hash) this.cache.clear();
-    this.assets.set(name, { name, graph, def, hash });
+    const shelf = category === 'shelf', prev = shelf ? this.shelf.get(name) : this.asset(name, scope);
+    if (prev && prev.hash !== hash) this.cache.clear();
+    (shelf ? this.shelf : scope.assets).set(name, { name, graph, def, hash });
     return def;
   }
 
   // ------------------------------------------------------------ validation
 
-  findOutput(graph: GraphSpec): { name: string; note?: string } {
+  findOutput(graph: GraphSpec, scope: Scope = this.root): { name: string; note?: string } {
     const names = Object.keys(graph.nodes ?? {});
     if (graph.output && graph.nodes[graph.output]) return { name: graph.output };
     const named = names.find((n) => /^(out|output)$/i.test(n));
     if (named) return { name: named };
     const referenced = new Set<string>();
     for (const n of names) {
-      const def = this.resolveDef(graph.nodes[n].type);
+      const def = this.resolveDef(graph.nodes[n].type, scope);
       if (!def) continue;
       for (const r of wiringOf(graph.nodes[n], def).list) if (r) referenced.add(r);
       // nodes only read by expressions (npoints("x"), ch("x/p")) are not end nodes either
@@ -563,7 +602,7 @@ export class Engine {
     };
   }
 
-  validate(graph: GraphSpec, path = ''): { errors: Issue[]; warnings: Issue[] } {
+  validate(graph: GraphSpec, path = '', scope: Scope = this.root): { errors: Issue[]; warnings: Issue[] } {
     const errors: Issue[] = [], warnings: Issue[] = [];
     if (!graph || typeof graph !== 'object' || !graph.nodes || typeof graph.nodes !== 'object' || Array.isArray(graph.nodes)) {
       errors.push({ node: path || '(graph)', message: 'graph must be {"nodes": {"name": {"type": ..., "in": [...], "params": {...}}}, "output": "name"}' });
@@ -612,7 +651,7 @@ export class Engine {
           errors.push({ node: path + '(params)', message: `params "${k}": options must be a list of strings or numbers, got ${JSON.stringify(o)?.slice(0, 80)}` });
       }
     }
-    const typeNames = this.allTypeNames();
+    const typeNames = this.allTypeNames(scope);
     const refsOf = new Map<string, ExprRefs>();
     for (const name of names) {
       const spec = graph.nodes[name];
@@ -621,7 +660,7 @@ export class Engine {
         errors.push({ node: nm, message: 'node spec must be an object with a "type" string' });
         continue;
       }
-      const def = this.resolveDef(spec.type);
+      const def = this.resolveDef(spec.type, scope);
       if (!def) {
         const s = didYouMean(spec.type, typeNames);
         errors.push({ node: nm, message: `unknown node type "${spec.type}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`, hint: 'use the catalog tool to list node types' });
@@ -673,7 +712,7 @@ export class Engine {
           errors.push({ node: nm, message: `ch("${c.node}/${c.param}") references unknown node "${c.node}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`, hint: `nodes in this graph: ${names.join(', ')}` });
           continue;
         }
-        const tdef = typeof target === 'object' && target ? this.resolveDef(target.type) : undefined;
+        const tdef = typeof target === 'object' && target ? this.resolveDef(target.type, scope) : undefined;
         if (tdef && !resolveParamName(tdef, c.param)) {
           const s = didYouMean(c.param, Object.keys(tdef.params));
           errors.push({
@@ -689,7 +728,7 @@ export class Engine {
         const key = Object.keys(spec.params ?? {}).find((k) => resolveParamName(def, k) === pk);
         const sub = key ? spec.params![key] : undefined;
         if (sub) {
-          const r = this.validate(sub, `${nm}/`);
+          const r = this.validate(sub, `${nm}/`, scope);
           errors.push(...r.errors);
           warnings.push(...r.warnings);
         }
@@ -705,7 +744,7 @@ export class Engine {
       }
       const out: string[] = [];
       const spec = graph.nodes[v];
-      const def = spec && this.resolveDef(spec.type);
+      const def = spec && this.resolveDef(spec.type, scope);
       if (def) for (const r of wiringOf(spec, def).list) if (r && graph.nodes[r]) out.push(r);
       const rr = refsOf.get(v);
       if (rr && hasRefs(rr)) out.push(v + PSUF);
@@ -735,17 +774,17 @@ export class Engine {
   }
 
   /** Validate and resolve all params without cooking. */
-  dryRun(graph: GraphSpec, vars?: Record<string, any>): { errors: Issue[]; warnings: Issue[]; notes: string[]; output: string } {
+  dryRun(graph: GraphSpec, vars?: Record<string, any>, scope: Scope = this.root): { errors: Issue[]; warnings: Issue[]; notes: string[]; output: string } {
     const mig = migrateGraphDetailed(graph);
     graph = mig.graph;
-    const v = this.validate(graph);
+    const v = this.validate(graph, '', scope);
     const notes: string[] = [...mig.notes];
     const allVars = { ...(graph.vars ?? {}), ...(vars ?? {}) };
     if (!v.errors.length) {
       // reference functions need cooked nodes: their params are reported as deferred
       const deferred = Object.fromEntries(REF_FUNCS.map((f) => [f, () => { throw new DeferredExpr(f); }]));
       for (const [name, spec] of Object.entries(graph.nodes)) {
-        const def = this.resolveDef(spec.type)!;
+        const def = this.resolveDef(spec.type, scope)!;
         const r = resolveParams(def, spec.params, allVars, { fns: deferred, host: this.host, timeoutMs: this.scriptTimeoutMs });
         for (const e of r.errors) if (!e.startsWith('unknown param')) v.errors.push({ node: name, message: e });
         for (const w of r.warnings) v.warnings.push({ node: name, message: w });
@@ -754,7 +793,7 @@ export class Engine {
         if (def.deprecated) notes.push(`${name}: "${def.type}" is deprecated — ${def.deprecated}`);
       }
     }
-    const out = v.errors.length ? { name: graph.output ?? '' } : this.findOutput(graph);
+    const out = v.errors.length ? { name: graph.output ?? '' } : this.findOutput(graph, scope);
     if (out.note) notes.push(out.note);
     return { ...v, notes, output: out.name };
   }
@@ -793,7 +832,8 @@ export class Engine {
         return report;
       }
     }
-    const v = this.validate(graph);
+    const scope = opts.scope ?? this.root;
+    const v = this.validate(graph, '', scope);
     if (v.errors.length) {
       report.errors = v.errors;
       report.ms = now() - t0;
@@ -801,7 +841,7 @@ export class Engine {
     }
     let target = opts.target;
     if (target === undefined) {
-      const o = this.findOutput(graph);
+      const o = this.findOutput(graph, scope);
       target = o.name;
       if (o.note) report.notes.push(o.note);
     } else if (!graph.nodes[target]) {
@@ -813,7 +853,7 @@ export class Engine {
     const memo = new Map<string, Promise<NodeResult>>();
     const pmemo = new Map<string, Promise<NodeParams>>();
     const s: CookSession = {
-      graph, opts, time, depth, report, memo, pmemo, pdone: new Map(), shared: [],
+      graph, opts, scope, time, depth, report, memo, pmemo, pdone: new Map(), shared: [],
       vars: { ...(graph.vars ?? {}), ...(opts.vars ?? {}) },
       pull: (name) => {
         let pr = memo.get(name);
@@ -881,7 +921,7 @@ export class Engine {
   /** Resolve a node's params, cooking the nodes its expressions reference first. */
   private async nodeParams(s: CookSession, name: string): Promise<NodeParams> {
     const spec = s.graph.nodes[name];
-    const def = this.resolveDef(spec.type)!;
+    const def = this.resolveDef(spec.type, s.scope)!;
     const refs = scanNodeRefs(def, spec.params);
     if (!hasRefs(refs)) {
       const rp = resolveParams(def, spec.params, s.vars, { time: s.time, host: this.host, timeoutMs: this.scriptTimeoutMs });
@@ -906,7 +946,7 @@ export class Engine {
         const np = await s.paramsOf(c.node);
         const msg = np.error ?? np.rp.errors.join('; ');
         if (msg) return fail(`ch("${c.node}/${c.param}"): node "${c.node}" has param errors: ${msg}`);
-        chp.set(c.node, { def: this.resolveDef(s.graph.nodes[c.node].type)!, values: np.rp.values });
+        chp.set(c.node, { def: this.resolveDef(s.graph.nodes[c.node].type, s.scope)!, values: np.rp.values });
         usesTime ||= np.usesTime;
         depTime ||= np.depsTimeDependent;
       }
@@ -920,9 +960,9 @@ export class Engine {
 
   /** Cook a single node of a graph (pulling inputs and referenced nodes through the session). */
   private async cookOne(s: CookSession, name: string): Promise<NodeResult> {
-    const { graph, vars, opts, time, depth, report } = s;
+    const { graph, vars, opts, scope, time, depth, report } = s;
     const spec = graph.nodes[name];
-    const def = this.resolveDef(spec.type)!;
+    const def = this.resolveDef(spec.type, scope)!;
     const result: NodeResult = { node: name, geo: null, sig: '', ms: 0, cached: false, warnings: [], timeDependent: false };
     report.results.set(name, result);
     if (def.deprecated) result.warnings.push(`"${def.type}" is deprecated: ${def.deprecated}`);
@@ -992,7 +1032,7 @@ export class Engine {
 
     let extra = '';
     try {
-      extra = def.signatureExtra?.(rp.values, this) ?? '';
+      extra = def.signatureExtra?.(rp.values, scope) ?? '';
     } catch (e: any) {
       result.error = { node: name, message: e.message };
       return result;
@@ -1003,7 +1043,7 @@ export class Engine {
     const baseSig = String(
       hashString(
         def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' +
-        varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : ''),
+        varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : '') + (def.usesScope ? scopeSig(scope) : ''),
       ),
     );
     const timeSig = () => String(hashString(baseSig + '|' + timeKey(time)));
@@ -1075,6 +1115,7 @@ export class Engine {
       warn: (m) => result.warnings.push(m),
       vars,
       engine: this,
+      scope,
       inputSigs,
       depth,
       get frame() { mark(); return time.frame; },
@@ -1085,10 +1126,10 @@ export class Engine {
       signal: opts.signal,
       async subcook(g, o = {}) {
         const inherit = o.frame === undefined && o.time === undefined ? { frame: time.frame, time: time.time, timeInc: time.timeInc } : {};
-        // nested cooks report their nodes (inside this one) and stop with this cook
+        // nested cooks report their nodes (inside this one), stop with this cook and run in its scope unless given one
         const r = await engine.cook(g, {
           fps: time.fps, ...inherit, ...o, depth: depth + 1, ancestors: chain(),
-          onNode: opts.onNode, signal: opts.signal, within: [...(opts.within ?? []), name],
+          onNode: opts.onNode, signal: opts.signal, within: [...(opts.within ?? []), name], scope: o.scope ?? scope,
         });
         if (r.timeDependent) mark();
         return r;
@@ -1155,7 +1196,7 @@ export class Engine {
       if (!pseen.has(n)) {
         pseen.add(n);
         const spec = s.graph.nodes[n];
-        const def = this.resolveDef(spec.type)!;
+        const def = this.resolveDef(spec.type, s.scope)!;
         const refs = scanNodeRefs(def, spec.params);
         if (hasRefs(refs)) {
           let ok = true;
@@ -1181,7 +1222,7 @@ export class Engine {
       seen.add(n);
       order.push(n);
       const spec = s.graph.nodes[n];
-      const def = this.resolveDef(spec.type)!;
+      const def = this.resolveDef(spec.type, s.scope)!;
       const wiring = wiringOf(spec, def).list;
       const lazy = !!def.inputsUsed && !spec.bypass && def.type !== 'input';
       let used: boolean[] | null = null;

@@ -114,7 +114,7 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
         const bad = inputs[i] === undefined || inputs[i] === null ? '' : notGeometry(inputs[i]);
         if (bad) throw new Error(`lib.run(${type}): input ${i} is not a Geometry (got ${bad})`);
       }
-      const def = engine.resolveDef(type);
+      const def = engine.resolveDef(type, ctx.scope);
       if (!def) throw new Error(`lib.run: unknown node type "${type}"`);
       // ... and their params as plain data of this realm: json and graph params (a foreach body) are kept as given and
       // read later. The copy runs the params' getters now; a Proxy or a function is refused without running it.
@@ -126,7 +126,7 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
       const rp = resolveParams(def, params, ctx.vars, { time: ctx, host: engine.host, timeoutMs: engine.scriptTimeoutMs });
       if (rp.errors.length) throw new Error(`lib.run(${type}): ${rp.errors.join('; ')}`);
       for (const w of rp.warnings) ctx.warn(`lib.run(${type}): ${w}`);
-      // inherit from ctx through the prototype so its time getters stay lazy
+      // inherit from ctx through the prototype so its time getters stay lazy (and the node runs in the script's scope)
       const sub: CookContext = Object.assign(Object.create(ctx), {
         node: `${ctx.node}/${type}`, type: def.type, p: rp.values, inputs,
         input: (i: number) => inputs[i] ?? new Geometry(), hasInput: (i: number) => !!inputs[i], inputSigs: inputs.map(() => 'script'),
@@ -178,6 +178,8 @@ defineNode({
   },
   // every var: besides the ones its code names, the "=expr" params it hands to lib.run can read any of them
   usesVars: true,
+  // lib.run resolves node types in the scope, and the nodes it runs read the scope's files
+  usesScope: true,
   example: {
     type: 'script',
     params: { code: "const parts = [];\nfor (let i = 0; i < 5; i++) parts.push(await lib.run('box', { size: [1, i + 1, 1], center: [i * 1.5, (i + 1) / 2, 0] }));\nreturn lib.merge(parts);" },

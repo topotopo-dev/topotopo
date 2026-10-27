@@ -116,7 +116,7 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts
   const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
   await engine.init();
-  const defs = [...allNodeDefs(), ...[...engine.assets.values()].map((x) => x.def)];
+  const defs = [...allNodeDefs(), ...engine.assetsIn().map((x) => x.def)];
   if (argv.includes('--catalog')) console.log(catalogText(defs, { cli: true }));
   else {
     const d = defs.find((x) => x.type === opt('--help-node'));

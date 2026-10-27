@@ -337,14 +337,16 @@ defineNode({
     flip_z: { type: 'bool', default: false, desc: 'image row 0 at max Z instead of min Z' },
     name: { type: 'string', default: 'heightfield', desc: 'new field name' },
   },
-  signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
+  // relative paths read the scope's folder
+  usesScope: true,
+  signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
   outputs: 'the layer (a new field also gets height and mask)',
   example: { type: 'heightfield_from_image', params: { path: 'terrain.png', size: [100, 100], height_min: 0, height_max: 25 } },
   async cook(ctx) {
-    const { hasInput, input, p, engine, type } = ctx;
+    const { hasInput, input, p, scope, type } = ctx;
     if (!p.path) throw new NodeError(`${type}: path is empty`);
     checkName(p.layer, type);
-    const bytes = await engine.host.readFile(p.path).catch((e: any) => { throw new NodeError(`${type}: cannot read "${p.path}": ${e.message}`); });
+    const bytes = await scope.files.readFile(p.path).catch((e: any) => { throw new NodeError(`${type}: cannot read "${p.path}": ${e.message}`); });
     let img;
     try { img = decodePNG(bytes); } catch (e: any) { throw new NodeError(`${type}: ${e.message}`); }
     const v = pngChannel(img, p.channel as PngChannel);

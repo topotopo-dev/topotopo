@@ -192,7 +192,7 @@ export class Workspace {
     this.engine = engine;
     this.inputsAt = opts.inputs === undefined ? undefined : path.resolve(opts.inputs);
     this.exportsAt = opts.exports === undefined ? undefined : path.resolve(opts.exports);
-    (engine as any).graphResolver = (n: string) => this.graphs.get(n);
+    engine.root.graphs = (n) => this.graphs.get(n);
   }
 
   get graphDir() { return path.join(this.dir, 'graphs'); }
@@ -220,8 +220,8 @@ export class Workspace {
       try { this.graphs.set(path.basename(f, '.json'), migrateGraph(JSON.parse(fs.readFileSync(path.join(this.graphDir, f), 'utf8')))); }
       catch { /* skip unreadable */ }
     }
-    // workspace assets were registered over shelf assets of the same name (engine.init loads the shelf first)
-    const defs = [...this.engine.assets.values()].map((a) => a.def);
+    // workspace assets take the place of shelf assets of the same name
+    const defs = this.engine.assetsIn().map((a) => a.def);
     return {
       graphs: this.graphs.size, assets: defs.filter((d) => d.category !== 'shelf').length, shelf: defs.filter((d) => d.category === 'shelf').length,
       assetErrors: [...assetErrors, ...this.engine.shelfErrors.map((e) => `shelf ${e}`)],
@@ -667,9 +667,9 @@ export class Workspace {
     on(this.assetDir, (name, file) => {
       if (!fs.existsSync(file)) return;
       const spec = migrateGraph(JSON.parse(fs.readFileSync(file, 'utf8')));
-      const before = this.engine.assets.get(name)?.hash;
+      const before = this.engine.asset(name)?.hash;
       this.engine.registerAsset(name, spec);
-      if (this.engine.assets.get(name)?.hash === before) return;
+      if (this.engine.asset(name)?.hash === before) return;
       for (const g of this.graphs.keys()) { this.lastReport.delete(g); this.bump(g); }
     });
   }

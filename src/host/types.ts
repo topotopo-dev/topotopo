@@ -103,6 +103,12 @@ export interface Host {
   /** Convert a local source file to GLB (Node: .blend through headless Blender). Absent in browser/kernel hosts. */
   convertFile?(path: string, target: 'glb'): Promise<Uint8Array>;
   /**
+   * The file operations for another folder (absolute, or relative to this host's own): relative paths resolve against
+   * it, for a cook scope with a folder of its own (Engine.createScope). Converted files are still cached in this host's
+   * folder. Absent: no scope can have a folder of its own.
+   */
+  filesAt?(dir: string): HostFiles;
+  /**
    * Compile JS source inside the scripting realm (which has the snippet library
    * installed) and return the resulting value (usually a function). The realm is set up with
    * SCRIPT_REALM_SETUP (src/core/snippet-lib.ts) before any user code runs, so `compile(REALM_CONTROL)` returns its
@@ -143,3 +149,6 @@ export interface Host {
    */
   pool?: WorkerPool;
 }
+
+/** What nodes read files with (a cook scope's files, src/graph/scope.ts): relative paths resolve against one folder. */
+export type HostFiles = Pick<Host, 'readFile' | 'fileStamp' | 'resolvePath' | 'isDirectory' | 'listDir' | 'convertFile' | 'findFont' | 'fontCandidates'>;

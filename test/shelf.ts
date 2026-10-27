@@ -94,7 +94,7 @@ for (const f of files) {
   const name = f.name, graph = f.graph;
   if (filter && !name.includes(filter)) continue;
   const where = `shelf/${f.file}`;
-  const entry = engine.assets.get(name);
+  const entry = engine.asset(name);
   if (!entry) { fail(`${where}: not registered`); continue; }
   check(entry.def.category === 'shelf', `${where}: category "shelf" (got ${entry.def.category})`);
 
@@ -177,21 +177,21 @@ if (!filter || 'crate'.includes(filter)) {
   const ws = new Workspace(wsDir, e2);
   const loaded = ws.load();
   check(loaded.assets === 1 && loaded.shelf === files.length - 1, `workspace load counts (assets ${loaded.assets}, shelf ${loaded.shelf})`);
-  check(e2.assets.get('crate')?.def.category === 'asset' && e2.assets.get('crate')?.def.summary === 'my crate', 'a workspace asset overrides the shelf asset');
+  check(e2.asset('crate')?.def.category === 'asset' && e2.asset('crate')?.def.summary === 'my crate', 'a workspace asset overrides the shelf asset');
   const r1 = await e2.cook({ nodes: { c: { type: 'crate' } } });
   check(!!r1.geo && Math.abs(r1.geo.bbox().max[0] - 1) < 1e-9, 'the override cooks');
   await e2.loadShelf(e2.host.shelfPath!);
-  check(e2.assets.get('crate')?.def.category === 'asset', 'reloading the shelf keeps the workspace override');
+  check(e2.asset('crate')?.def.category === 'asset', 'reloading the shelf keeps the workspace override');
   const tools = makeTools(ws);
   const tool = (n: string) => tools.find((t) => t.name === n)!;
   const txt = async (n: string, a: any) => { const r = await tool(n).run(a); return { err: !!r.isError, text: r.content.map((c: any) => c.text ?? '').join('\n') }; };
   const list = await txt('assets', { action: 'list' });
   check(list.text.includes('[shelf]') && list.text.includes('stairs') && list.text.includes('crate — my crate'), 'assets list shows shelf and workspace assets');
   const del = await txt('assets', { action: 'delete', name: 'crate' });
-  check(!del.err && /restored the shelf/.test(del.text) && e2.assets.get('crate')?.def.category === 'shelf', `deleting the override restores the shelf asset: ${del.text}`);
+  check(!del.err && /restored the shelf/.test(del.text) && e2.asset('crate')?.def.category === 'shelf', `deleting the override restores the shelf asset: ${del.text}`);
   let threw = '';
   try { await tool('assets').run({ action: 'delete', name: 'stairs' }); } catch (e: any) { threw = e.message; }
-  check(/shelf/.test(threw) && e2.assets.has('stairs'), `shelf assets cannot be deleted: ${threw}`);
+  check(/shelf/.test(threw) && e2.shelf.has('stairs'), `shelf assets cannot be deleted: ${threw}`);
   const fork = await txt('assets', { action: 'fork', name: 'stairs', to: 'my_stairs' });
   check(!fork.err && ws.graphs.has('my_stairs') && !!ws.graphs.get('my_stairs')!.params?.steps, `fork copies the asset graph into the workspace: ${fork.text.split('\n')[0]}`);
   const rf = await ws.cook('my_stairs');

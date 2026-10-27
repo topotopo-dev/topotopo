@@ -1,6 +1,7 @@
 import type { Geometry } from '../core/geometry.ts';
 import type { CookOptions, CookReport, Engine, StopSignal } from './engine.ts';
 import type { KernelJob, ParallelOptions, ParallelRun } from './parallel.ts';
+import type { Scope } from './scope.ts';
 
 /** Current graph format version. Bump it together with a migration in migrate.ts. */
 export const GRAPH_VERSION = 1;
@@ -57,6 +58,13 @@ export interface NodeDef {
    * their cook reads ctx.frame / ctx.time / ctx.fps / ctx.timeInc.
    */
   usesTime?: boolean;
+  /**
+   * The result depends on the scope the node cooks in (CookContext.scope): the node reads files or graphs through it,
+   * or cooks nested graphs in it (subcook, lib.run), whose node types resolve there. Every node that reads ctx.scope,
+   * or calls ctx.subcook without naming a scope (CookOptions.scope), says so. Outside the root scope the scope's id is
+   * then part of its signature.
+   */
+  usesScope?: boolean;
   /** deprecation notice naming the replacement; hidden from the catalog, warned about on cook */
   deprecated?: string;
   /**
@@ -75,8 +83,8 @@ export interface NodeDef {
    * selected candidate). Inputs marked false are not cooked and appear as null. Default: all inputs.
    */
   inputsUsed?: (p: Record<string, any>, count: number) => boolean[];
-  /** extra cache-key material (e.g. file mtime) */
-  signatureExtra?: (p: Record<string, any>, engine: Engine) => string;
+  /** extra cache-key material (e.g. file mtime), from the scope the node cooks in */
+  signatureExtra?: (p: Record<string, any>, scope: Scope) => string;
   cook(ctx: CookContext): Geometry | Promise<Geometry>;
 }
 
@@ -142,6 +150,11 @@ export interface CookContext {
   warn(msg: string): void;
   vars: Record<string, any>;
   engine: Engine;
+  /**
+   * The scope the node cooks in (src/graph/scope.ts): the files it reads, the graphs graph_ref reads and the node
+   * types of nested cooks, which run in it too. A node that reads it sets NodeDef.usesScope.
+   */
+  scope: Scope;
   /** cache signatures of the inputs (for nested cooks) */
   inputSigs: string[];
   depth: number;
@@ -165,7 +178,10 @@ export interface CookContext {
    * among them), and throws NodeError(STOPPED) once the cook was asked to stop. Cheap when the cook has no signal.
    */
   checkpoint(): Promise<void>;
-  /** cook a nested graph (foreach body, asset, solver step) inheriting the time; propagates time dependence */
+  /**
+   * cook a nested graph (foreach body, asset, solver step) inheriting the time and the scope (unless opts.scope is
+   * given); propagates time dependence
+   */
   subcook(graph: GraphSpec, opts?: CookOptions): Promise<CookReport>;
   /** input i cooked at another frame (the current result if the input is not time-dependent) */
   inputAt(i: number, frame: number): Promise<{ geo: Geometry; sig: string; timeDependent: boolean }>;

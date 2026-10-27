@@ -30,7 +30,7 @@ const REF_GRAPH: GraphSpec = {
   nodes: { ground: { type: 'terrain', params: { size: [10, 10], divisions: [20, 20], seed: '=seed' } } },
   output: 'ground',
 };
-(engine as any).graphResolver = () => structuredClone(REF_GRAPH);
+engine.root.graphs = () => structuredClone(REF_GRAPH);
 
 const isGraph = (x: any): x is GraphSpec => !!x && typeof x === 'object' && !!x.nodes && typeof x.nodes === 'object';
 

@@ -239,10 +239,12 @@ defineNode({
     curve_segments: { type: 'int', default: 6, min: 1, max: 32, desc: 'segments per glyph curve' },
     center: P.center(),
   },
-  signatureExtra: (p, engine) => engine.host.findFont(p.font || undefined) ?? 'nofont',
+  // a font path reads the scope's folder
+  usesScope: true,
+  signatureExtra: (p, scope) => scope.files.findFont(p.font || undefined) ?? 'nofont',
   example: { type: 'text', params: { text: 'OPEN', size: 0.5, depth: 0.1 } },
-  async cook({ p, engine, warn }) {
-    const host = engine.host;
+  async cook({ p, scope, warn }) {
+    const host = scope.files;
     const name = p.font || undefined;
     const candidates = host.fontCandidates?.(name) ?? [host.findFont(name)].filter((f): f is string => !!f);
     if (!candidates.length) throw new NodeError(`font "${p.font || '(default)'}" not found; give a .ttf/.otf path`);

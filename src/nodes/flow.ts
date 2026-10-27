@@ -8,7 +8,8 @@ import type { CookReport } from '../graph/engine.ts';
 import { hashString } from '../core/random.ts';
 import { IMPORT_FORMATS, importFormatFromPath, importGeometryAsync } from '../io/import.ts';
 import { readImageFile } from '../io/textures.ts';
-import type { Host } from '../host/types.ts';
+import type { HostFiles } from '../host/types.ts';
+import { scopeSig } from '../graph/scope.ts';
 import { mergeMaterialTables, writeMaterials } from '../core/materials.ts';
 import { fusePoints } from './transform.ts';
 import { DEFAULT_TRANSFER, composePackedXforms, expandPacked } from '../core/packed.ts';
@@ -137,6 +138,8 @@ defineNode({
   },
   // the body's "=expr" params and code read the parent vars, so they are part of the cache key
   usesVars: true,
+  // the body's node types resolve in the scope
+  usesScope: true,
   example: {
     type: 'foreach',
     in: ['pieces'],
@@ -269,6 +272,8 @@ defineNode({
   usesTime: true,
   // the body's "=expr" params and code read the parent vars
   usesVars: true,
+  // the body's node types resolve in the scope
+  usesScope: true,
   example: {
     type: 'solver',
     in: ['seed'],
@@ -300,7 +305,7 @@ defineNode({
     // chained state signatures (see description)
     const chain: string[] = [];
     const extras: { geo: Geometry; sig: string }[][] = [];
-    let s = String(hashString('solver|' + stableStringify(p) + '|' + stableStringify(ctx.vars) + '|' + fps + '|' + init.sig));
+    let s = String(hashString('solver|' + stableStringify(p) + '|' + stableStringify(ctx.vars) + '|' + fps + '|' + init.sig + scopeSig(ctx.scope)));
     for (let f = start; f <= last; f++) {
       const ex = [await ctx.inputAt(1, f), await ctx.inputAt(2, f)];
       s = String(hashString(s + '|' + f + '|' + ex[0].sig + '|' + ex[1].sig));
@@ -362,17 +367,18 @@ defineNode({
     node: { type: 'string', default: '', desc: 'node in that graph ("" = its output)' },
     vars: { type: 'json', default: {}, desc: 'override that graph\'s vars' },
   },
-  signatureExtra: (p, engine) => {
-    const g = (engine as any).graphResolver?.(p.graph);
+  // the graph is the scope's, and its node types resolve there
+  usesScope: true,
+  signatureExtra: (p, scope) => {
+    const g = scope.graphs?.(p.graph);
     return g ? String(hashString(stableStringify(g))) : 'missing';
   },
   example: { type: 'graph_ref', params: { graph: 'island', node: 'ground', vars: { seed: 7 } } },
   async cook(ctx) {
-    const { p, engine } = ctx;
-    const resolver = (engine as any).graphResolver as ((n: string) => any) | undefined;
-    if (!resolver) throw new NodeError('graph_ref needs a workspace (not available in this host)');
-    const g = resolver(p.graph);
-    if (!g) throw new NodeError(`no graph named "${p.graph}" in the workspace`);
+    const { p, scope } = ctx;
+    if (!scope.graphs && !scope.id) throw new NodeError('graph_ref needs a workspace (not available in this host)');
+    const g = scope.graphs?.(p.graph);
+    if (!g) throw new NodeError(`no graph named "${p.graph}" in ${scope.id ? `"${scope.id}"` : 'the workspace'}`);
     const r = await ctx.subcook(g, { target: p.node || undefined, vars: p.vars });
     if (!r.ok || !r.geo) throw new NodeError(`graph "${p.graph}" failed: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
     return r.geo;
@@ -383,7 +389,7 @@ const folderError = 'folder import needs a host with isDirectory/listDir support
 const childPath = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, '')}/${name}`;
 
 /** null = a file; a directory listing includes unsupported files too, for signature invalidation. */
-function directoryFiles(path: string, host: Host): string[] | null {
+function directoryFiles(path: string, host: HostFiles): string[] | null {
   if (/^https?:\/\//i.test(path)) return null;
   if (!host.isDirectory) {
     if (/[\\/]$/.test(path)) throw new NodeError(folderError);
@@ -432,14 +438,16 @@ defineNode({
     weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances)' },
     instancing: { type: 'enum', options: ['packed', 'expand'], default: 'packed', desc: 'glTF shared meshes and EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry' },
   },
-  signatureExtra: (p, engine) => {
-    const host = engine.host, files = directoryFiles(p.path, host);
+  // relative paths read the scope's folder
+  usesScope: true,
+  signatureExtra: (p, scope) => {
+    const host = scope.files, files = directoryFiles(p.path, host);
     return files === null ? host.fileStamp(p.path) : JSON.stringify([host.fileStamp(p.path), files.map((f) => [f, host.fileStamp(childPath(p.path, f))])]);
   },
   example: { type: 'file', params: { path: 'props/chair.obj', up_axis: 'z', weld: true } },
-  async cook({ p, engine, warn }) {
+  async cook({ p, scope, warn }) {
     if (!p.path) throw new NodeError('path is empty');
-    const host = engine.host, files = directoryFiles(p.path, host);
+    const host = scope.files, files = directoryFiles(p.path, host);
     const read = async (file: string, format: string) => {
       if (format === 'png') {
         // an image, not a mesh: the image_file loader (its defaults), and no axis, scale or weld

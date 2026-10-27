@@ -699,7 +699,7 @@ section('two workspaces on one folder (Workspace.watch)');
     await b.edit('main', [{ op: 'set', node: 'box', params: { size: [2, 2, 2] } }]);
     check(await until(() => JSON.stringify(a.graphs.get('main')?.nodes.box.params) === JSON.stringify({ size: [2, 2, 2] }), 5000), 'and the other way round');
     fs.writeFileSync(path.join(dir, 'assets', 'peg.json'), JSON.stringify({ nodes: { c: { type: 'tube' } }, output: 'c' }));
-    check(await until(() => b.engine.assets.has('peg'), 5000), 'an asset written by another process is registered');
+    check(await until(() => b.engine.root.assets.has('peg'), 5000), 'an asset written by another process is registered');
     fs.rmSync(path.join(dir, 'graphs', 'main.json'));
     check(await until(() => !b.graphs.has('main'), 5000), 'a removed graph file removes the graph');
   } finally { a.unwatch(); b.unwatch(); }

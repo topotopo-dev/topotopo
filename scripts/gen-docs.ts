@@ -85,7 +85,7 @@ export async function shelfDefs(): Promise<NodeDef[]> {
   const engine = new Engine(createNodeHost({ shelf: false }));
   const r = await engine.loadShelf(SHELF_DIR);
   if (r.errors.length) throw new Error(`shelf: ${r.errors.join('; ')}`);
-  return [...engine.assets.values()].map((a) => a.def);
+  return [...engine.shelf.values()].map((a) => a.def);
 }
 
 /** docs/nodes.md as it should be: every node type and every shelf asset. */

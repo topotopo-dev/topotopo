@@ -526,7 +526,7 @@ section('enum options may be numbers: the value is the number');
   check(untyped.params.n.type === 'enum' && JSON.stringify(untyped.params.n.options) === '[1,2,3]', 'a declared var with options and no type is an enum');
   const badOpts = await e.cook({ vars: { k: 1 }, params: { k: { type: 'enum', options: [{ a: 1 }] as any, desc: 'k' } }, nodes: { b: { type: 'box' } } });
   check(!badOpts.ok && /options must be a list of strings or numbers/.test(badOpts.errors[0]?.message ?? ''), 'options that are neither strings nor numbers are rejected');
-  check(/\| `4`, `8`, `16` \|/.test(renderNodeReference([], [e.assets.get('test_res_box')!.def])), 'the node reference lists numeric options');
+  check(/\| `4`, `8`, `16` \|/.test(renderNodeReference([], [e.root.assets.get('test_res_box')!.def])), 'the node reference lists numeric options');
 }
 
 // ------------------------------------------------------------------ graph vars in code: one form, by their bare name

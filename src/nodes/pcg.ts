@@ -317,12 +317,14 @@ defineNode({
     class: { type: 'enum', options: ['point', 'vertex'], default: 'point', desc: 'write a point attribute or a vertex attribute' },
     group: P.group('point', 'points to write ("" = all)'),
   },
-  signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
+  // relative paths read the scope's folder
+  usesScope: true,
+  signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
   outputs: 'point (or vertex) float <name> (vec3 for channel rgb)',
   example: { type: 'attribute_from_map', in: ['ground_pts'], params: { path: 'density.png', projection: 'xz', size: [100, 100], name: 'density' } },
-  async cook({ input, p, engine, type, warn }) {
+  async cook({ input, p, scope, type, warn }) {
     if (!p.path) throw new NodeError(`${type}: path is empty`, 'a PNG file relative to the workspace, e.g. "maps/density.png"');
-    const bytes = await engine.host.readFile(p.path).catch((e: any) => { throw new NodeError(`${type}: cannot read "${p.path}": ${e.message}`); });
+    const bytes = await scope.files.readFile(p.path).catch((e: any) => { throw new NodeError(`${type}: cannot read "${p.path}": ${e.message}`); });
     let img;
     try { img = decodePNG(bytes); } catch (e: any) { throw new NodeError(`${type}: ${e.message}`); }
     const g = input(0).clone();
