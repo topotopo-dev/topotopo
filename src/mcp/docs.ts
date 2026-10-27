@@ -437,13 +437,21 @@ TILES: a big map (4 × 4 km at 2 m = 2001² samples) is previewed and processed 
 MASKS: every mask node combines with the existing mask (mode replace/add/subtract/multiply/max/min): chain them,
   multiply = and, max = or. Most layer nodes take mask_layer to blend their effect by a mask.
   e.g. rocks on steep slopes off the road: mask_by_feature slope 33° → heightfield_layer {layer:"mask", expression:"mask * (1 - path)"}.
-EROSION: droplets (rain_density per sample per iteration, rain_amount, erosion_rate, deposition_rate, sediment_capacity,
-  evaporation, inertia, gravity, max_lifetime) + thermal (thermal_talus_angle, thermal_rate); hardness_layer (1 = rock),
-  freeze_layer (1 = untouched); boundary closed conserves material. Deterministic per seed. Cost ≈ samples ×
-  rain_density × iterations × 30 steps (512² × 100 iterations ≈ 2–3 s). Stronger: more iterations or sediment_capacity.
+EROSION: droplets in metres, so the same params erode alike at any spacing (an 8 m preview like the 2 m map, finer
+  detail aside): rain_density droplets per m² per iteration, max_distance metres a droplet travels, erosion_radius the
+  brush radius in metres (about a gully's half-width). erosion_rate, deposition_rate, evaporation, inertia, gravity and
+  thermal_rate act per droplet step of erosion_radius / 3 and sediment_capacity is a volume in those steps cubed; the
+  node converts them to the field's cells (cells of erosion_radius / 3 take them as given: the defaults at 0.1 m).
+  Scale: for a terrain λ times larger multiply erosion_radius and max_distance by λ and divide rain_density by λ², the
+  rest unchanged (a 4 km map at 2 m: erosion_radius 6, max_distance 60, rain_density 0.005). Thermal:
+  thermal_talus_angle, thermal_rate; hardness_layer (1 = rock), freeze_layer (1 = untouched); boundary closed conserves
+  material. Deterministic per seed. Cost ≈ rain_density × area × iterations × max_distance / cell droplet steps
+  (512² × 100 iterations at the defaults ≈ 2–3 s). Stronger: more iterations, rain_density or sediment_capacity. Not
+  local: a tile erodes like the same area of the map only statistically (see TILES).
   method droplet / backend js is the unchanged default. backend kernel loads WASM; auto uses an already loaded
   kernel or falls back to js. method pipe and stream_power require the kernel. Pipe uses virtual pipes, CFL-limited
-  time_step (0 = automatic), rain_amount in metres/second, optional rain_layer multiplier, evaporation and thermal
+  time_step (0 = automatic, shorter on finer cells; a time_step below the limit of every spacing simulates the same
+  time per iteration), rain_amount in metres/second, optional rain_layer multiplier, evaporation and thermal
   talus relaxation. stream_power adds stream_power_k * drainage^stream_power_m * slope^stream_power_n incision.
   Kernel erosion also writes wear (cumulative eroded depth); pipe water is remaining water depth in metres.
   heightfield_flow {method:"dinf", log_scale:true} writes drainage and direction without erosion: drainage is

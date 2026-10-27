@@ -11,7 +11,8 @@
 // One iteration = erodeStep(field, params, rng): a rain pass of rain_density × samples droplets, then one thermal
 // pass. It reads and writes plain typed arrays only, so a native/WASM kernel can replace it: same arrays in, the
 // same arrays updated in place, the same parameter meanings (see ErosionField / ErosionParams). The rng is only
-// used to draw droplet start positions and the tile order.
+// used to draw droplet start positions and the tile order. ErosionParams count in samples (a droplet moves one cell
+// per step); dropletParams converts heightfield_erode's settings in metres to them for a field's cell size.
 //
 // Performance: the droplet pass is bound by memory latency, so droplets run tile by tile (32 × 32 samples, tiles
 // in a random order per pass) and the net change is recorded once per pass instead of per write. The thermal pass
@@ -77,6 +78,62 @@ export const DEFAULT_EROSION: ErosionParams = {
   inertia: 0.1, gravity: 4, minSlope: 0.01, erosionRadius: 3, maxLifetime: 30, talusAngle: 40, thermalRate: 0.1,
   boundary: 'closed',
 };
+
+// ---------------------------------------------------------------- settings in metres
+
+/**
+ * Droplet erosion settings in world units (heightfield_erode's params): rain per square metre, lengths in metres, and
+ * per-step settings defined for a droplet step of erosionRadius / 3 metres. dropletParams turns them into the
+ * per-sample ErosionParams the kernels take for one cell size.
+ */
+export interface DropletSettings extends Omit<ErosionParams, 'rainDensity' | 'erosionRadius' | 'maxLifetime'> {
+  /** droplets per square metre per iteration */
+  rainDensity: number;
+  /** erosion brush radius in metres; a third of it is the droplet step the per-step settings refer to */
+  erosionRadius: number;
+  /** the farthest a droplet travels, in metres */
+  maxDistance: number;
+}
+
+/** The kernel limits dropletParams applied, each with the value it used (in samples). */
+export interface DropletLimits { radius?: number; steps?: number; density?: number }
+
+/**
+ * The per-sample ErosionParams that erode like `s` on a field with cells of `cell` metres, so the same settings give
+ * the same erosion in metres at any spacing (within what the coarser grid can resolve).
+ *
+ * The kernels move a droplet one cell per step and count in samples. The settings are defined for steps of
+ * step = erosionRadius / 3 metres (the default radius of three cells runs them as given), and a cell of `cell` metres
+ * is r = cell / step of those steps: the per-step fractions compound (f → 1 − (1 − f)^r, inertia i → i^r), the speed²
+ * gained on a slope grows with the drop (gravity × r), the sediment a droplet carries keeps its volume in metres
+ * (sediment capacity is a volume in cells³: ÷ r³), and a thermal pass moves the same height per iteration (rate ÷ r,
+ * at most 1). Counts become samples: the brush erosionRadius / cell samples (1..64), maxDistance / cell steps
+ * (1..4096) and rainDensity × cell² droplets per sample (at most 1); `limited` reports the limits that applied.
+ * Ratios within 1e-9 of a whole number are that number, so the defaults at 0.1 m cells give the kernel defaults bit
+ * for bit.
+ */
+export function dropletParams(s: DropletSettings, cell: number): { params: ErosionParams; limited: DropletLimits } {
+  const snap = (x: number) => (Math.abs(x - Math.round(x)) < 1e-9 ? Math.round(x) : x);
+  const unit = (x: number) => Math.min(1, Math.max(0, x));
+  const r = snap(cell / (s.erosionRadius / 3));
+  const perStep = (f: number) => (r === 1 ? f : 1 - Math.pow(1 - unit(f), r));
+  const limited: DropletLimits = {};
+  let radius = Math.max(1, snap(s.erosionRadius / cell));
+  if (radius > 64) radius = limited.radius = 64;
+  let steps = Math.max(1, Math.round(s.maxDistance / cell));
+  if (steps > 4096) steps = limited.steps = 4096;
+  let density = s.rainDensity * cell * cell;
+  if (density > 1) density = limited.density = 1;
+  const params: ErosionParams = {
+    rainDensity: density, rainAmount: s.rainAmount,
+    erosionRate: perStep(s.erosionRate), depositionRate: perStep(s.depositionRate), evaporation: perStep(s.evaporation),
+    sedimentCapacity: Math.min(1e6, s.sedimentCapacity / (r * r * r)),
+    inertia: r === 1 ? s.inertia : Math.pow(unit(s.inertia), r),
+    gravity: Math.min(1e6, s.gravity * r), minSlope: s.minSlope, erosionRadius: radius, maxLifetime: steps,
+    talusAngle: s.talusAngle, thermalRate: Math.min(1, s.thermalRate / r), boundary: s.boundary,
+  };
+  return { params, limited };
+}
 
 /** A fresh field for erosion with zeroed accumulators (heights are copied). */
 export function makeErosionField(width: number, height: number, cellSize: number, h: ArrayLike<number>, hardness: Float32Array | null = null, freeze: Float32Array | null = null): ErosionField {

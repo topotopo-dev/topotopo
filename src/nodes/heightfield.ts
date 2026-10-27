@@ -8,8 +8,8 @@ import {
   Heightfield, MAX_SAMPLES, asHeightfield, bilinear, blurGrid, cropHeightfield, curvesOf, distanceTransform, heightfieldToMesh,
   heightfieldsOf, isHeightfield, layerStats, rasterizeMesh, slopeLayer, smoothstep, splatSegment, transformHeightfield,
 } from '../core/heightfield.ts';
-import { erodeStep, makeErosionField } from '../core/erosion.ts';
-import type { ErosionParams } from '../core/erosion.ts';
+import { dropletParams, erodeStep, makeErosionField } from '../core/erosion.ts';
+import type { DropletSettings } from '../core/erosion.ts';
 import { fractal, makeNoise, makeWarp } from '../core/noise.ts';
 import { rng } from '../core/random.ts';
 import { decodePNG, pngChannel } from '../io/png-decode.ts';
@@ -1024,7 +1024,7 @@ defineNode({
   type: 'heightfield_erode',
   category: 'heightfield',
   summary: 'Droplet or virtual-pipe hydraulic erosion with thermal talus relaxation and optional stream-power incision.',
-  description: 'Houdini: HeightField Erode. The default droplet/js path retains the original seeded droplet model and outputs. Droplets erode below carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Kernel droplet uses the same parameters and layer meanings. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. An existing lake layer supplies initial standing water to pipe/stream_power; lake is updated to the same final depth within its original footprint, while water includes every wet sample. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.',
+  description: 'Houdini: HeightField Erode. method droplet (the default; backend js, or kernel for the same model in WASM): seeded droplets erode below their carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Droplet settings are in metres, so the same params erode the same terrain alike at any spacing (an 8 m preview like the 2 m map, finer detail aside): rain_density counts droplets per m² per iteration, max_distance and erosion_radius are metres, and erosion_rate, deposition_rate, evaporation, inertia, gravity and thermal_rate act per droplet step of a third of erosion_radius, with sediment_capacity a volume in those steps cubed; the node converts them to the field\'s cells (a cell of a third of the radius takes them as given: the defaults at 0.1 m). For a terrain λ times larger keep the rest and multiply erosion_radius and max_distance by λ and divide rain_density by λ² (a 4 km map at 2 m: erosion_radius 6, max_distance 60, rain_density 0.005). Erosion is not local: droplets and water cross tile borders and start at seeded positions over the whole field, so a tile with a margin erodes like the same area of the map only statistically. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded; their rates are per second, and their iterations are time steps that the cell size limits (CFL), so finer fields simulate less time per iteration unless time_step is below the limit of every spacing. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1, normalised over the field: droplet on a log scale against its mean and 99th percentile, pipe by its maximum). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. An existing lake layer supplies initial standing water to pipe/stream_power; lake is updated to the same final depth within its original footprint, while water includes every wet sample. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.',
   aliases: ['hf_erode', 'erosion', 'heightfield_erosion', 'heightfield_hydro_erode'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1032,19 +1032,19 @@ defineNode({
     backend: { type: 'enum', options: ['auto', 'kernel', 'js'], default: 'js', desc: 'js preserves the original droplet result; kernel loads WASM; auto uses WASM only if already loaded, otherwise js (pipe methods require WASM)' },
     iterations: { type: 'int', default: 50, min: 0, max: 5000, desc: 'rain passes; pipe methods use thermal_interval to schedule thermal passes', aliases: ['iter', 'steps'] },
     seed: P.seed(),
-    erosion_rate: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'fraction of free capacity picked up per droplet step, or erosion rate per second for pipe', aliases: ['erodability', 'erode_rate', 'erosion'] },
-    deposition_rate: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'fraction of excess sediment deposited per droplet step, or deposition rate per second for pipe', aliases: ['deposit_rate', 'deposition'] },
-    sediment_capacity: { type: 'float', default: 1, min: 0, desc: 'how much sediment fast, steep water can carry (higher = deeper gullies, bigger fans)', aliases: ['capacity'] },
-    evaporation: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'water fraction lost per droplet step, or evaporation rate per second for pipe', aliases: ['evaporation_rate'] },
+    erosion_rate: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'droplet: fraction of the free capacity picked up per droplet step (a third of erosion_radius); pipe: erosion rate per second', aliases: ['erodability', 'erode_rate', 'erosion'] },
+    deposition_rate: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'droplet: fraction of the excess sediment dropped per droplet step; pipe: deposition rate per second', aliases: ['deposit_rate', 'deposition'] },
+    sediment_capacity: { type: 'float', default: 1, min: 0, desc: 'how much sediment fast, steep water can carry (higher = deeper gullies, bigger fans); droplet: a volume in droplet steps cubed, the same in metres at any spacing', aliases: ['capacity'] },
+    evaporation: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'droplet: water fraction lost per droplet step; pipe: evaporation rate per second', aliases: ['evaporation_rate'] },
     rain_amount: { type: 'float', default: 1, min: 0, desc: 'water per droplet; pipe rainfall depth in metres per second, multiplied by rain_layer if set', aliases: ['rain', 'water_amount'] },
-    rain_density: { type: 'float', default: 0.02, min: 0, max: 1, desc: 'droplet only: droplets per sample per iteration', aliases: ['droplets'] },
-    inertia: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'droplet only: momentum, 0 = always steepest descent, higher = smoother, longer channels' },
-    gravity: { type: 'float', default: 4, min: 0, desc: 'acceleration on slopes' },
+    rain_density: { type: 'float', default: 2, min: 0, desc: 'droplet only: droplets per square metre per iteration (at most one per sample: coarse fields cap it)', aliases: ['droplets'] },
+    inertia: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'droplet only: share of its heading a droplet keeps per droplet step; 0 = always steepest descent, higher = smoother, longer channels' },
+    gravity: { type: 'float', default: 4, min: 0, desc: 'acceleration on slopes (droplet: speed² gained per droplet step of drop at slope 1; pipe: m/s²)' },
     min_slope: { type: 'float', default: 0.01, min: 0, desc: 'droplet only: minimum capacity (as a slope), keeps flats eroding a little' },
-    erosion_radius: { type: 'int', default: 3, min: 1, max: 8, desc: 'droplet only: erosion footprint radius (samples)', aliases: ['brush_radius'] },
-    max_lifetime: { type: 'int', default: 30, min: 1, max: 256, desc: 'droplet only: maximum steps per particle', aliases: ['lifetime', 'max_steps'] },
+    erosion_radius: { type: 'float', default: 0.3, min: 0.001, desc: 'droplet only: erosion brush radius in metres (about a gully\'s half-width; at least one sample); a third of it is the droplet step the per-step settings refer to', aliases: ['brush_radius'] },
+    max_distance: { type: 'float', default: 3, min: 0, desc: 'droplet only: how far a droplet travels at most (metres; at least one step)', aliases: ['travel_distance', 'droplet_distance'] },
     thermal_talus_angle: { type: 'float', default: 40, min: 0, max: 89, desc: 'thermal: angle of repose in degrees (steeper slopes shed material)', aliases: ['talus_angle', 'repose_angle', 'cut_angle'] },
-    thermal_rate: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'thermal: fraction of the excess moved per thermal pass (0 = no thermal erosion)', aliases: ['thermal'] },
+    thermal_rate: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'thermal: fraction of the excess moved per thermal pass (droplet: on cells of a droplet step, scaled to the spacing; 0 = no thermal erosion)', aliases: ['thermal'] },
     thermal_interval: { type: 'int', default: 1, min: 1, max: 10000, desc: 'pipe/stream_power only: thermal pass every N iterations and on the final iteration; skips intervening relaxations without multiplying thermal_rate (1 preserves the default result)' },
     hardness_layer: { type: 'string', default: '', desc: 'optional 0..1 layer: 1 = rock that does not erode' },
     freeze_layer: { type: 'string', default: '', desc: 'optional 0..1 layer: 1 = frozen (unchanged), e.g. under buildings or roads' },
@@ -1072,20 +1072,27 @@ defineNode({
     let droplets = 0;
     // the time limit of long-running nodes: checked every iteration of the JS path; a big kernel run goes to a pool
     // worker that the limit can stop
-    const budget = simBudget(ctx, 'fewer iterations, a lower rain_density or max_lifetime, or a coarser field (heightfield_resample); or raise the limit');
+    const budget = simBudget(ctx, 'fewer iterations, a lower rain_density or max_distance, or a coarser field (heightfield_resample); or raise the limit');
+    // droplet settings in metres; dropletParams converts them to the kernels' per-sample params for each field's cells
+    const settings: DropletSettings = {
+      rainDensity: p.rain_density, rainAmount: p.rain_amount, erosionRate: p.erosion_rate, depositionRate: p.deposition_rate,
+      sedimentCapacity: p.sediment_capacity, evaporation: p.evaporation, inertia: p.inertia, gravity: p.gravity,
+      minSlope: p.min_slope, erosionRadius: p.erosion_radius, maxDistance: p.max_distance,
+      talusAngle: p.thermal_talus_angle, thermalRate: p.thermal_rate, boundary: p.boundary,
+    };
+    const m = (x: number) => +x.toPrecision(4);
     const out = await eachFieldAsync(ctx, async (hf) => {
       const H = layerOf(hf, 'height', ctx.type);
       const hard = maskOf(hf, p.hardness_layer, ctx.type), frz = maskOf(hf, p.freeze_layer, ctx.type);
+      const { params, limited } = dropletParams(settings, hf.cellSize);
       if (p.method === 'droplet') {
-        const work = hf.count * p.rain_density * p.iterations * p.max_lifetime;
-        if (work > 4e9) throw new NodeError(`${ctx.type}: ~${(work / 1e9).toFixed(1)}G droplet steps is too much; lower iterations, rain_density or max_lifetime, or resample the field`);
+        const c = hf.cellSize, on = `on "${hf.name}" (${m(c)} m cells)`;
+        if (limited.radius) ctx.warn(`erosion_radius ${m(p.erosion_radius)} m is more than 64 samples ${on}: the brush uses 64 samples (${m(64 * c)} m)`);
+        if (limited.steps) ctx.warn(`max_distance ${m(p.max_distance)} m is more than 4096 steps ${on}: droplets stop after ${m(4096 * c)} m`);
+        if (limited.density) ctx.warn(`rain_density ${m(p.rain_density)} per m² is more than one droplet per sample ${on}: using one per sample (${m(1 / (c * c))} per m²)`);
+        const work = hf.count * params.rainDensity * p.iterations * params.maxLifetime;
+        if (work > 4e9) throw new NodeError(`${ctx.type}: ~${(work / 1e9).toFixed(1)}G droplet steps is too much; lower iterations, rain_density or max_distance, or resample the field`);
       }
-      const params: ErosionParams = {
-        rainDensity: p.rain_density, rainAmount: p.rain_amount, erosionRate: p.erosion_rate, depositionRate: p.deposition_rate,
-        sedimentCapacity: p.sediment_capacity, evaporation: p.evaporation, inertia: p.inertia, gravity: p.gravity,
-        minSlope: p.min_slope, erosionRadius: p.erosion_radius, maxLifetime: p.max_lifetime,
-        talusAngle: p.thermal_talus_angle, thermalRate: p.thermal_rate, boundary: p.boundary,
-      };
       if (kernels) {
         const grid = { w: hf.width, h: hf.height, cell: hf.cellSize, seed: p.seed };
         const result: ErosionResult = await wasmCallUnderBudget(ctx, kernels, p.method === 'droplet'
@@ -1114,14 +1121,14 @@ defineNode({
           for (let k = 0; k < lake.length; k++) if (previous[k] > 0) lake[k] = result.water[k];
           hf.layers.set('lake', lake);
         }
-        if (p.method === 'droplet') droplets += Math.round(p.rain_density * hf.count) * p.iterations;
+        if (p.method === 'droplet') droplets += Math.round(params.rainDensity * hf.count) * p.iterations;
         return;
       }
       const field = makeErosionField(hf.width, hf.height, hf.cellSize, H, hard, frz);
       const r = rng(p.seed);
       // a stopped cook stops between iterations
       for (let it = 0; it < p.iterations; it++) { budget.check(); await ctx.checkpoint(); erodeStep(field, params, r); }
-      droplets += Math.round(p.rain_density * hf.count) * p.iterations;
+      droplets += Math.round(params.rainDensity * hf.count) * p.iterations;
       hf.layers.set('height', Float32Array.from(field.h));
       for (const [name, delta] of [['sediment', field.sediment], ['debris', field.debris]] as const) {
         const prev = hf.layer(name), o = new Float32Array(hf.count);

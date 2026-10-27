@@ -8,7 +8,7 @@
     "ridges": { "type": "heightfield_noise", "in": ["massif"], "params": { "fractal": "ridged", "amplitude": 14, "element_size": 50, "range": "positive", "seed": 11 } },
     "detail": { "type": "heightfield_noise", "in": ["ridges"], "params": { "amplitude": 2, "element_size": 15, "seed": 5 } },
     "falloff": { "type": "heightfield_layer", "in": ["detail"], "params": { "expression": "height * (0.35 + 0.65 * (1 - smoothstep(18, 63, sqrt(x * x + (z + 6) * (z + 6)))))" } },
-    "eroded": { "type": "heightfield_erode", "in": ["falloff"], "params": { "iterations": 60, "seed": 1, "erosion_radius": 2 } },
+    "eroded": { "type": "heightfield_erode", "in": ["falloff"], "params": { "iterations": 60, "seed": 1, "erosion_radius": 1, "max_distance": 15, "rain_density": 0.08, "sediment_capacity": 3 } },
     "road_curve": { "type": "curve", "params": { "points": [[-62, 0, 36], [-30, 0, 21], [0, 0, 33], [30, 0, 18], [62, 0, 39]], "smooth": true } },
     "road_cut": { "type": "heightfield_path", "in": ["eroded", "road_curve"], "params": { "width": 6, "shoulder": 5, "smooth": 12, "bank": 4 } },
     "steep": { "type": "heightfield_mask_by_feature", "in": ["road_cut"], "params": { "feature": "slope", "layer": "rock", "min_angle": 30, "angle_falloff": 6 } },

@@ -8,7 +8,7 @@
     "ridges": { "type": "heightfield_noise", "in": ["massif"], "params": { "fractal": "ridged", "amplitude": 2.4, "element_size": 8, "range": "positive", "seed": 11 } },
     "detail": { "type": "heightfield_noise", "in": ["ridges"], "params": { "amplitude": 0.35, "element_size": 2.5, "seed": 5 } },
     "falloff": { "type": "heightfield_layer", "in": ["detail"], "params": { "expression": "height * (0.35 + 0.65 * (1 - smoothstep(3, 10.5, sqrt(x * x + (z + 1) * (z + 1)))))" } },
-    "terrain": { "type": "heightfield_erode", "in": ["falloff"], "params": { "iterations": 30, "seed": 1 } },
+    "terrain": { "type": "heightfield_erode", "in": ["falloff"], "params": { "iterations": 30, "seed": 1, "erosion_radius": 0.6, "max_distance": 6, "rain_density": 0.5 } },
     "crest": { "type": "heightfield_mask_by_feature", "in": ["terrain"], "params": { "feature": "curvature", "curvature_type": "convex", "curvature_radius": 0.8 } },
     "high": { "type": "heightfield_mask_by_feature", "in": ["crest"], "params": { "feature": "height", "min_height": 2.4, "max_height": 10, "height_falloff": 0.4, "mode": "multiply" } },
     "ridge_pts": { "type": "heightfield_scatter", "in": ["high"], "params": { "count": 70, "seed": "=seed" } },

@@ -10,7 +10,7 @@ import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Heightfield, blurGrid, distanceTransform, heightfieldsOf } from '../src/core/heightfield.ts';
-import { DEFAULT_EROSION, erodeStep, makeErosionField } from '../src/core/erosion.ts';
+import { DEFAULT_EROSION, dropletParams, erodeStep, makeErosionField } from '../src/core/erosion.ts';
 import { fractal, makeNoise, makeWarp } from '../src/core/noise.ts';
 import { rng } from '../src/core/random.ts';
 import { decodePNG, inflateZlib, pngChannel } from '../src/io/png-decode.ts';
@@ -412,6 +412,53 @@ section('erosion');
   check(frozenOk, 'freeze_layer: frozen samples are never eroded');
   const hard = await field({ ...rough, f: { type: 'heightfield_layer', in: ['n'], params: { layer: 'rock', operation: 'fill', value: 1 } }, e: { type: 'heightfield_erode', in: ['f'], params: { iterations: 10, hardness_layer: 'rock', thermal_rate: 0 } } }, 'e');
   check(sum(hard.layer('sediment')!) < sum((await run({ iterations: 10, thermal_rate: 0 })).layer('sediment')!) * 0.2, 'hardness 1 stops hydraulic erosion');
+
+  // droplet settings are in metres: dropletParams turns them into the kernels' per-sample params
+  const metres = { rainDensity: 2, rainAmount: 1, erosionRate: 0.3, depositionRate: 0.3, sedimentCapacity: 1, evaporation: 0.1, inertia: 0.1, gravity: 4, minSlope: 0.01, erosionRadius: 0.3, maxDistance: 3, talusAngle: 40, thermalRate: 0.1, boundary: 'closed' as const };
+  const at01 = dropletParams(metres, 0.1).params;
+  check(Object.entries(DEFAULT_EROSION).every(([k, v]) => k === 'rainDensity' ? Math.abs(at01.rainDensity - v) < 1e-15 : (at01 as any)[k] === v), 'the default settings in metres at 0.1 m cells are the kernel defaults (3-sample brush, 30 steps, 0.02 droplets per sample) bit for bit');
+  const at04 = dropletParams(metres, 0.4).params;
+  check(at04.erosionRadius === 1 && at04.maxLifetime === 8 && Math.abs(at04.rainDensity - 0.32) < 1e-12 && Math.abs(at04.erosionRate - (1 - 0.7 ** 4)) < 1e-12 && Math.abs(at04.sedimentCapacity - 1 / 64) < 1e-12 && at04.gravity === 16 && Math.abs(at04.thermalRate - 0.025) < 1e-12,
+    'at 0.4 m cells (four droplet steps per cell): brush one sample, 8 steps, 0.32 droplets per sample, per-step fractions compounded, capacity ÷ 64, gravity × 4, thermal rate ÷ 4');
+  const capped = dropletParams({ ...metres, rainDensity: 1000, erosionRadius: 30, maxDistance: 1000 }, 0.1);
+  check(capped.params.rainDensity === 1 && capped.params.erosionRadius === 64 && capped.params.maxLifetime === 4096 && capped.limited.density === 1 && capped.limited.radius === 64 && capped.limited.steps === 4096, 'kernel limits: one droplet per sample, a 64-sample brush, 4096 steps (reported)');
+  const dense = await engine.cook({ nodes: { hf: { type: 'heightfield', params: { size: [8, 8], resolution: 0.5 } }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 1 } }, e: { type: 'heightfield_erode', in: ['n'], params: { iterations: 2, rain_density: 10 } } }, output: 'e' });
+  check(dense.ok && dense.warnings.some((w) => /rain_density 10 per m² is more than one droplet per sample .*using one per sample \(4 per m²\)/.test(w.message)), 'a rain_density above one droplet per sample warns and uses one per sample');
+
+  // the same terrain at 0.4, 0.2 and 0.1 m spacing erodes alike. Statistics: eroded volume per m², and gully depth as
+  // the 99th percentile of the lowering on the coarse 0.4 m grid (finer results averaged over each coarse cell). Why
+  // the tolerances: a coarser grid cannot resolve the terrain's smallest slopes, so it erodes a little less; its
+  // deposits spread over 2 × 2 of its cells and its brush cannot be narrower than one cell (0.4 m against 0.3 m); its
+  // droplets start at other random positions. Measured: about 5 % apart at twice the spacing, 10–20 % at four times;
+  // the old per-sample settings (the defaults read as 3 samples, 30 steps, 0.02 droplets per sample) erode twice as
+  // much at 0.4 m.
+  const TERRAIN = (resolution: number): Record<string, NodeSpec> => ({
+    hf: { type: 'heightfield', params: { size: [25.6, 25.6], resolution } },
+    massif: { type: 'heightfield_layer', in: ['hf'], params: { expression: '2.2 * (1 - smoothstep(1, 11, sqrt(x * x + z * z)))' } },
+    ridges: { type: 'heightfield_noise', in: ['massif'], params: { fractal: 'ridged', amplitude: 2.4, element_size: 8, octaves: 4, range: 'positive', seed: 11 } },
+    detail: { type: 'heightfield_noise', in: ['ridges'], params: { amplitude: 0.35, element_size: 2.5, octaves: 2, seed: 5 } },
+    ground: { type: 'heightfield_layer', in: ['detail'], params: { expression: 'height * (0.35 + 0.65 * (1 - smoothstep(3, 10.5, sqrt(x * x + z * z))))' } },
+  });
+  const erosionStats = async (resolution: number, params: Record<string, any> = {}) => {
+    const nodes = { ...TERRAIN(resolution), e: { type: 'heightfield_erode', in: ['ground'], params: { iterations: 40, seed: 1, ...params } } };
+    const before = await field(nodes, 'ground'), after = await field(nodes, 'e');
+    const n = before.width, c = before.cellSize, h0 = before.layer('height')!, h1 = after.layer('height')!;
+    const depth = Float64Array.from(h0, (v, k) => v - h1[k]);
+    let eroded = 0;
+    for (const d of depth) if (d > 0) eroded += d;
+    const ratio = 0.4 / c, avg = ratio > 1 ? blurGrid(depth, n, n, ratio / 2, 'box') : depth, coarse: number[] = [];
+    for (let j = 0; j <= 64; j++) for (let i = 0; i <= 64; i++) coarse.push(avg[Math.round(j * ratio) * n + Math.round(i * ratio)]);
+    coarse.sort((a, b) => a - b);
+    return { volume: (eroded * c * c) / (25.6 * 25.6), gully: coarse[Math.floor(0.99 * coarse.length)] };
+  };
+  const s1 = await erosionStats(0.1), s2 = await erosionStats(0.2), s4 = await erosionStats(0.4);
+  const old4 = await erosionStats(0.4, { erosion_radius: 1.2, max_distance: 12, rain_density: 0.125 });
+  const pct = (a: number, b: number) => `${a / b >= 1 ? '+' : ''}${((a / b - 1) * 100).toFixed(0)} %`;
+  console.log(`     eroded volume per m²: ${s1.volume.toFixed(4)} m at 0.1 m, ${s2.volume.toFixed(4)} at 0.2 m, ${s4.volume.toFixed(4)} at 0.4 m (old per-sample settings at 0.4 m: ${old4.volume.toFixed(4)}); gully depth ${s1.gully.toFixed(3)}, ${s2.gully.toFixed(3)}, ${s4.gully.toFixed(3)} m (old ${old4.gully.toFixed(3)})`);
+  const within = (a: number, b: number, t: number) => a / b > 1 - t && a / b < 1 + t;
+  check(within(s2.volume, s1.volume, 0.15) && within(s2.gully, s1.gully, 0.15), `the same settings at 0.2 and 0.1 m erode alike within 15 % (volume ${pct(s2.volume, s1.volume)}, gully depth ${pct(s2.gully, s1.gully)})`);
+  check(within(s4.volume, s1.volume, 0.3) && within(s4.gully, s1.gully, 0.3), `… at 0.4 and 0.1 m within 30 % (volume ${pct(s4.volume, s1.volume)}, gully depth ${pct(s4.gully, s1.gully)})`);
+  check(old4.volume / s1.volume > 1.6 && old4.gully / s1.gully > 1.6, `the old per-sample settings did not: at 0.4 m they erode ${pct(old4.volume, s1.volume)} volume, gullies ${pct(old4.gully, s1.gully)}`);
 
   // the kernel interface directly, and its speed target: 512² × 100 iterations
   const N = 512, cell = 0.1;
