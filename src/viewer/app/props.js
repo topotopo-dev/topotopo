@@ -10,6 +10,7 @@ import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
 import { isNum, same, HEX3, fmt, short, kindOf, blank, rangeOf, autoStep, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
 import { fmtDuration } from './cooking.js';
+import { kindLine, layerChoices, shownLayer } from './output-info.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const $ = (id) => document.getElementById(id);
@@ -126,6 +127,15 @@ export function createProps(ctx) {
     const g = group('output');
     const graph = ctx.graph.current();
     g.append(row('graph', graph?.name ?? ''), row('node', ctx.graph.shownNode() ?? ''), displayRow(DISPLAY_MODES, o.display, (m) => o.setDisplay(m)));
+    // what it is (the server's decision from the cooked geometry), and a heightfield's layer drawn in red
+    if (o.about) g.append(row('is', kindLine({ about: o.about.text, size: o.about.size })));
+    if (o.about?.heightfield && !ctx.isolated) {
+      const s = el('select');
+      for (const c of layerChoices(o.about.heightfield)) s.append(new Option(c.label, c.value));
+      s.value = shownLayer(o.about.heightfield, ctx.sceneLayer.get());
+      s.onchange = () => { ctx.sceneLayer.set(s.value); s.blur(); };
+      g.append(row('layer in red', s, 'the heightfield layer drawn in red over the terrain: 0..1 layers as they are, others from their minimum to their maximum'));
+    }
     if (o.report?.cooked) g.append(row('cook', `${fmtNum(o.report.ms, 0)} ms${o.report.ok ? '' : ' · failed'}`));
     const ec = o.mesh?.edgeCounts();
     if (ec) g.append(row('edges', `${fmtCount(ec.open)} open · ${fmtCount(ec.nonManifold)} non-manifold · ${fmtCount(ec.flipped)} flipped`, 'drawn as the render tool draws them: pink open, yellow non-manifold, violet winding flips'));

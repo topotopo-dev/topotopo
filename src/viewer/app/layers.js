@@ -148,17 +148,17 @@ export function createLayers(ctx) {
     L.list = list;
     const byPath = new Map(list.map((f) => [f.path, f]));
     if (!L.restored) { L.restored = true; for (const p of [...L.shown]) if (!byPath.has(p)) L.shown.delete(p); }
-    // a replaced file reloads; a removed one goes away
+    // a replaced file reloads; a removed one goes away; an export's sidecar (metadata) is never a layer
     for (const p of [...L.shown]) {
       const f = byPath.get(p);
-      if (!f) { L.shown.delete(p); drop(p); continue; }
+      if (!f || f.kind === 'metadata') { L.shown.delete(p); drop(p); continue; }
       const l = L.loaded.get(p);
       if (!l || l.stamp !== stampOf(f)) load(p);
     }
     for (const [p] of L.loaded) if (!byPath.has(p)) drop(p);
     for (const m of [L.info, L.errors]) for (const [p, v] of m) if (!byPath.has(p) || v.stamp !== stampOf(byPath.get(p))) m.delete(p);
-    for (const id of [...ctx.objects.keys()]) if (id.startsWith('layer:') && !byPath.has(id.slice(6))) ctx.objects.delete(id);
-    for (const f of list) entry(f.path);
+    for (const id of [...ctx.objects.keys()]) if (id.startsWith('layer:') && (!byPath.has(id.slice(6)) || byPath.get(id.slice(6)).kind === 'metadata')) ctx.objects.delete(id);
+    for (const f of list) if (f.kind !== 'metadata') entry(f.path);
     remember(); changed();
   });
   L.loadWhere = async () => {

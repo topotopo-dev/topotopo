@@ -1,9 +1,13 @@
-// The Outputs tab: each graph's published outputs as cards (click one to see it alone, its textures below it), one
-// Export button each, Export all for every output with a target, and the files saved in exports/. A first Export
-// asks for a format and file (export-popover.js) and stores that target in the graph; later clicks just write it.
+// The Outputs tab: each graph's published outputs as cards (click one to see it alone, its textures below it). A card
+// says what the output is (a mesh, a heightfield, packed instances … and its size: the server decides it from the
+// cooked geometry) and has two buttons: Download gets the export as a browser download (the file itself, or a zip of
+// its files) and Export writes it to its target in exports/, the files graph export targets and agents use. Both offer
+// the formats that write the output (export-popover.js); a first Export stores its target in the graph, later clicks
+// write it again. Export all writes every target. Files saved in exports/ are cards too, downloaded as they are.
 import { createImageView } from './image-view.js';
 import { fmtBytes } from './units.js';
-import { exportPopover, defaultPath } from './export-popover.js';
+import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
+import { kindLine, layerChoices, shownLayer } from './output-info.js';
 import { inputImageURL } from './layers.js';
 
 const url = (route, item, more = {}) => `/api/output/${route}?` + new URLSearchParams({ id: item.id, rev: item.revision, ...more });
@@ -14,6 +18,8 @@ const post = async (route, body) => {
   if (!r.ok || !j.ok) throw new Error(j.error ?? `${route} failed (${r.status})`);
   return j;
 };
+/** The browser saves `href` (a route, or a blob's URL) as `name`. */
+const save = (href, name) => { const a = document.createElement('a'); a.href = href; a.download = name; document.body.append(a); a.click(); a.remove(); };
 /** "just now", "5 min ago", "3 h ago", else the date */
 export function ago(ms, now = Date.now()) {
   const s = Math.max(0, (now - ms) / 1000);
@@ -30,13 +36,12 @@ export function targetSpec(item, choice, formats) {
   const custom = choice.path !== defaultPath(stem, choice.format, formats);
   return !custom && !Object.keys(keep).length ? choice.format : { format: choice.format, ...(custom ? { path: choice.path } : {}), ...keep };
 }
-
 export function createOutputPanel(ctx) {
   const host = document.getElementById('outputs'), details = document.getElementById('output-details');
   const image = createImageView(document.getElementById('viewport'), ctx.message);
   let list = [], formats = [], selected = null, directory = '', sequence = 0, lastList = '', initial = true, refreshing = null, refreshAgain = false, busy = false;
   const P = { active: null };
-  const bar = document.createElement('div'), all = text('button', 'Export all', 'primary'), barNote = text('span', '', 'dim');
+  const bar = document.createElement('div'), all = text('button', 'Export all'), barNote = text('span', '', 'dim');
   bar.className = 'outputs-bar'; bar.append(all, barNote);
   const live = document.createElement('div'), saved = document.createElement('details'), savedRows = document.createElement('div');
   saved.className = 'saved-outputs'; saved.open = ctx.store.get('outputs.savedOpen', false);
@@ -45,16 +50,37 @@ export function createOutputPanel(ctx) {
   const cards = new Map(), groups = new Map(); let input = null;
   host.append(bar, empty, live, saved);
   Object.defineProperty(P, 'count', { get: () => list.filter((v) => v.exportable).length });
+  // the heightfield layer each output shows in red, remembered in this browser
+  const chosenLayers = ctx.store.get('outputs.layers', {});
+  P.layerOf = (item) => shownLayer(item.heightfield, chosenLayers[item.id]);
 
+  /** Where an export target's files go, in full: the person finds them there. */
+  const targetFile = (item) => inFolder(directory, item.target.path);
   function showDetails(item) {
     details.replaceChildren(); details.hidden = !item;
     if (!item) return;
-    details.append(text('strong', item.label), text('p', item.error ?? item.summary ?? `${item.kind}${item.width ? ` · ${item.width} × ${item.height}` : ''}`, item.error ? 'err' : 'dim'));
-    if (item.exportable) details.append(text('p', item.target ? `exports to exports/${item.target.path} (${item.target.format})` : 'no export target yet: its Export button sets one', 'dim'));
-    if (item.files) for (const f of item.files) {
-      const a = text('a', `${f.name} · ${fmtBytes(f.size)}`); a.href = url('file', item, { file: f.id, download: '1' }); a.download = f.name; details.append(a);
+    details.append(text('strong', item.label));
+    const what = kindLine(item);
+    if (what) details.append(text('p', what, 'output-kind'));
+    if (item.heightfield && item.view === 'model' && !item.inputPath) {
+      // the terrain coloured by one of its layers, in red over the height ramp
+      const choice = document.createElement('select'); choice.setAttribute('aria-label', 'Layer drawn in red');
+      for (const o of layerChoices(item.heightfield)) choice.append(new Option(o.label, o.value));
+      choice.value = P.layerOf(item);
+      choice.onchange = () => { chosenLayers[item.id] = choice.value; ctx.store.set('outputs.layers', chosenLayers); choice.blur(); P.select(item.id, true); };
+      const row = document.createElement('label'); row.className = 'layer-pick'; row.title = 'the heightfield layer drawn in red over the terrain: 0..1 layers as they are, others from their minimum to their maximum';
+      row.append(text('span', 'Layer in red', 'dim'), choice);
+      details.append(row);
     }
-    if (item.files?.length > 1) { const a = text('a', 'Download ZIP'); a.href = url('zip', item); a.download = item.label + '.zip'; details.append(a); }
+    details.append(text('p', item.error ?? item.summary ?? '', item.error ? 'err' : 'dim'));
+    if (item.exportable) details.append(text('p', item.target ? `Export writes ${targetFile(item)} (${item.target.format})` : 'no export target yet: Export sets one; Download needs none', 'dim'));
+    if (item.files) {
+      if (item.origin === 'saved' && !item.parent) details.append(text('p', `in ${directory}`, 'dim'));
+      for (const f of item.files) {
+        const a = text('a', `${f.name} · ${f.about ? f.about + ' · ' : ''}${fmtBytes(f.size)}`); a.href = url('file', item, { file: f.id, download: '1' }); a.download = f.name; details.append(a);
+      }
+    }
+    if (item.files?.length > 1) { const a = text('a', `Download all as ${item.download?.zip ? item.download.name : item.label + '.zip'}`); a.href = url('zip', item); a.download = item.download?.name ?? item.label + '.zip'; details.append(a); }
   }
   const targetLine = (item) => !item.target ? 'no export target'
     : `${item.target.path}${item.saved ? ` · saved ${ago(item.saved.at)} · ${fmtBytes(item.saved.size)}` : ' · not exported yet'}`;
@@ -70,9 +96,28 @@ export function createOutputPanel(ctx) {
     ctx.message(`exporting ${item.label}…`, 'busy');
     try {
       const j = await post('export', { id: item.id, ...(choice ? { export: targetSpec(item, choice, formats) } : {}) });
-      ctx.message(`exported ${item.label} → exports/${j.path}${j.files > 1 ? ` (${j.files} files)` : ''}${j.warnings?.length ? ' · ' + j.warnings.join('; ') : ''}`, j.warnings?.length ? 'err' : 'ok', 7000);
+      ctx.message(`exported ${item.label} → ${j.file ?? 'exports/' + j.path}${j.files > 1 ? ` (${j.files} files)` : ''}${j.warnings?.length ? ' · ' + j.warnings.join('; ') : ''}`, j.warnings?.length ? 'err' : 'ok', 7000);
     } catch (e) { ctx.message(e.message, 'err', 10000); }
     finally { busy = false; await P.refresh(); render(); }
+  }
+  /** A card's Download: a published output in a format of choice, a texture as a PNG, a saved file as it is. */
+  async function downloadItem(item, button) {
+    if (!item.exportable) {
+      if (item.generated && item.view === 'image') save(url('image', item, { mode: 'RGBA', download: '1' }), item.label + '.png');
+      else if (item.download) save(item.download.zip ? url('zip', item) : url('file', item, { download: '1' }), item.download.name);
+      return;
+    }
+    const choice = await exportPopover({ anchor: button, item, formats, directory, mode: 'download' });
+    if (!choice) return;
+    ctx.message(`preparing the download of ${item.label}…`, 'busy');
+    try {
+      const r = await fetch('/api/output/download', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: item.id, export: downloadSpec(item, choice.format) }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `download failed (${r.status})`);
+      const blob = await r.blob(), name = filenameOf(r.headers.get('content-disposition')) ?? `${item.label}.zip`, n = Number(r.headers.get('x-file-count') ?? 1);
+      const href = URL.createObjectURL(blob);
+      save(href, name); setTimeout(() => URL.revokeObjectURL(href), 60000);
+      ctx.message(`downloaded ${name} · ${fmtBytes(blob.size)}${n > 1 ? ` · ${n} files` : ''}`, 'ok', 7000);
+    } catch (e) { ctx.message(e.message, 'err', 10000); }
   }
   async function clearTarget(item) {
     try { await post('export', { id: item.id, export: null }); ctx.message(`${item.label} has no export target now`); }
@@ -85,7 +130,7 @@ export function createOutputPanel(ctx) {
     try {
       const j = await post('export-all', {});
       const warnings = j.written.flatMap((w) => w.warnings ?? []);
-      ctx.message(`exported ${j.written.length} output${j.written.length === 1 ? '' : 's'}${j.skipped.length ? ` · ${j.skipped.length} without a target (their Export button sets one)` : ''}${warnings.length ? ' · ' + warnings.join('; ') : ''}`, warnings.length ? 'err' : 'ok', 8000);
+      ctx.message(`exported ${j.written.length} output${j.written.length === 1 ? '' : 's'} into ${directory}${j.skipped.length ? ` · ${j.skipped.length} without a target (their Export button sets one)` : ''}${warnings.length ? ' · ' + warnings.join('; ') : ''}`, warnings.length ? 'err' : 'ok', 8000);
     } catch (e) { ctx.message(e.message, 'err', 10000); }
     finally { busy = false; await P.refresh(); render(); }
   };
@@ -99,8 +144,8 @@ export function createOutputPanel(ctx) {
     const published = list.filter((v) => v.exportable), withTarget = published.filter((v) => v.target);
     all.disabled = busy || !withTarget.length;
     all.textContent = busy ? 'Exporting…' : 'Export all';
-    all.title = withTarget.length ? `write every output that has an export target (${withTarget.length}) into exports/` : 'export an output with its button first: that sets its target';
-    barNote.textContent = published.length ? `${withTarget.length} of ${published.length} with a target` : '';
+    all.title = withTarget.length ? `write every output that has an export target (${withTarget.length}) into ${directory}` : 'export an output with its button first: that sets its target';
+    barNote.textContent = published.length ? `${withTarget.length} of ${published.length} with an export target` : '';
     bar.hidden = !published.length; empty.hidden = !!list.length;
     for (const [name, entries] of grouped) {
       let group = groups.get(name);
@@ -123,10 +168,12 @@ export function createOutputPanel(ctx) {
           const row = document.createElement('div'); row.className = 'output-card'; row.tabIndex = 0; row.setAttribute('role', 'button'); row.dataset.output = item.id;
           const thumb = document.createElement('img'); thumb.loading = 'lazy'; thumb.alt = '';
           const icon = text('span', 'FILE', 'file-icon'), body = text('span', '', 'output-body'), label = text('span', '', 'output-label'), info = text('small', '', 'dim');
-          const target = text('button', '', 'output-target'), go = text('button', 'Export', 'output-export');
-          target.title = 'change where this output exports'; go.type = target.type = 'button';
-          body.append(label, info, target); row.append(thumb, icon, body, go);
-          card = { row, thumb, icon, label, info, target, go, item }; cards.set(item.id, card);
+          const target = text('button', '', 'output-target'), actions = text('span', '', 'output-actions');
+          const down = text('button', 'Download', 'primary output-download'), go = text('button', 'Export', 'output-export');
+          target.title = 'change where this output exports'; go.type = target.type = down.type = 'button';
+          actions.append(down, go); body.append(label, info, target, actions); row.append(thumb, icon, body);
+          card = { row, thumb, icon, label, info, target, down, go, item }; cards.set(item.id, card);
+          down.onclick = () => downloadItem(card.item, down);
           go.onclick = () => exportItem(card.item, go);
           target.onclick = () => exportItem(card.item, go, true);
           row.onclick = (e) => { if (!e.target.closest('input,button')) P.select(card.item.id); };
@@ -135,17 +182,25 @@ export function createOutputPanel(ctx) {
           thumb.onerror = () => { thumb.hidden = true; icon.hidden = false; };
         }
         card.item = item;
-        const { row, thumb, icon, label, info, target, go } = card;
+        const { row, thumb, icon, label, info, target, down, go } = card;
+        const what = kindLine(item);
         row.classList.toggle('selected', item.id === selected); row.classList.toggle('child', !!item.parent);
-        row.setAttribute('aria-label', `${item.label} — ${item.kind}`); row.setAttribute('aria-pressed', String(item.id === selected));
+        row.setAttribute('aria-label', `${item.label} — ${what || item.view}`); row.setAttribute('aria-pressed', String(item.id === selected));
         go.hidden = target.hidden = !item.exportable; go.disabled = busy || item.status === 'loading';
-        go.title = item.target ? `write exports/${item.target.path} again (overwrites it)` : 'choose a format and file, then export';
+        go.title = item.target ? `write ${targetFile(item)} again (overwrites it)` : `choose a format and a file in ${directory || 'exports/'}, then export`;
         go.setAttribute('aria-label', `Export ${item.label}`);
+        // Download: every card that has something to give (a published output, a texture, saved files)
+        down.hidden = !(item.exportable || (item.generated && item.view === 'image') || item.download);
+        down.disabled = item.exportable && (item.status !== 'ready' || !item.formats?.length);
+        down.title = item.exportable ? (item.formats?.length ? 'choose a format and download the export (its files as one zip when there are several)' : item.status === 'ready' ? 'no format writes this output' : 'cooking…')
+          : item.download ? `download ${item.download.name}` : `download ${item.label}.png`;
+        down.setAttribute('aria-label', `Download ${item.label}`);
         target.textContent = item.exportable ? targetLine(item) : ''; target.classList.toggle('unset', !item.target);
-        const src = ['geometry', 'image'].includes(item.kind) && item.status !== 'loading' ? item.kind === 'image' && !item.generated ? url('file', item) : url('thumb', item) : '';
+        const src = ['model', 'image'].includes(item.view) && item.status !== 'loading' ? item.view === 'image' && !item.generated ? url('file', item) : url('thumb', item) : '';
         if (thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
-        icon.textContent = item.kind === 'geometry' ? '3D' : item.kind === 'image' ? 'IMG' : item.kind.toUpperCase();
-        label.textContent = item.label; info.textContent = item.error ?? (item.status === 'loading' ? 'Cooking…' : `${item.kind}${item.width ? ` · ${item.width}×${item.height}` : ''}`); info.className = item.error ? 'err' : 'dim';
+        icon.textContent = item.view === 'model' ? '3D' : item.view === 'image' ? 'IMG' : (item.kind === 'metadata' ? 'JSON' : (item.files?.[0]?.name.split('.').pop() ?? 'file').toUpperCase().slice(0, 5));
+        label.textContent = item.label;
+        info.textContent = item.error ?? (item.status === 'loading' ? 'Cooking…' : what); info.className = item.error ? 'err' : 'dim'; info.title = item.error ?? what;
         const next = previous ? previous.nextSibling : group.rows.firstChild; if (row !== next) group.rows.insertBefore(row, next); previous = row;
       }
     }
@@ -165,16 +220,16 @@ export function createOutputPanel(ctx) {
     const close = () => { menu?.remove(); menu = null; removeEventListener('pointerdown', outside, true); removeEventListener('blur', close); previous?.focus(); };
     const outside = (e) => { if (!menu?.contains(e.target)) close(); }; dismissMenu = close;
     const add = (label, action) => { const button = text('button', label); button.setAttribute('role', 'menuitem'); button.onclick = () => { close(); action(); }; menu.append(button); };
-    const download = (href, name) => { const a = document.createElement('a'); a.href = href; a.download = name; a.click(); };
+    const card = cards.get(item.id);
     add(item.origin === 'saved' ? 'Open' : 'Preview', () => P.select(item.id));
-    if (item.kind === 'geometry') add('Frame', async () => { await P.select(item.id); ctx.frameOutput(); });
+    if (item.view === 'model') add('Frame', async () => { await P.select(item.id); ctx.frameOutput(); });
     if (item.exportable) {
-      const go = cards.get(item.id)?.go;
-      add(item.target ? `Export to ${item.target.path}` : 'Export…', () => exportItem(item, go));
-      add('Change export target…', () => exportItem(item, go, true));
+      if (item.formats?.length) add('Download…', () => downloadItem(item, card?.down));
+      add(item.target ? `Export to ${item.target.path}` : 'Export…', () => exportItem(item, card?.go));
+      add('Change export target…', () => exportItem(item, card?.go, true));
       if (item.target) add('Remove export target', () => clearTarget(item));
-    } else if (item.generated && item.kind === 'image') add('Download PNG', () => download(url('image', item, { mode: 'RGBA', download: '1' }), item.label + '.png'));
-    else if (item.files?.length) add(item.files.length > 1 ? 'Download ZIP' : 'Download', () => download(item.files.length > 1 ? url('zip', item) : url('file', item, { download: '1' }), item.label));
+    } else if (item.generated && item.view === 'image') add('Download PNG', () => downloadItem(item));
+    else if (item.download) add(item.download.zip ? `Download ${item.download.name}` : 'Download', () => downloadItem(item));
     document.body.append(menu); menu.style.left = Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4)) + 'px'; menu.style.top = Math.max(4, Math.min(y, innerHeight - menu.offsetHeight - 4)) + 'px';
     menu.onkeydown = (e) => { const buttons = [...menu.children], i = buttons.indexOf(document.activeElement); if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); close(); } else if (['ArrowDown', 'ArrowUp'].includes(e.key)) { e.preventDefault(); buttons[(i + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length].focus(); } };
     menu.firstChild.focus(); addEventListener('pointerdown', outside, true); addEventListener('blur', close);
@@ -191,11 +246,11 @@ export function createOutputPanel(ctx) {
     if (item.status === 'error') { ctx.message(item.error, 'err'); return; }
     await ctx.outputGraph?.(item);
     if (seq !== sequence) return;
-    if (item.kind === 'image') { ctx.hideModelPreview(); image.show(item); ctx.message(item.label); ctx.emit('output'); return; }
+    if (item.view === 'image') { ctx.hideModelPreview(); image.show(item); ctx.message(item.label); ctx.emit('output'); return; }
     image.hide();
-    if (item.kind !== 'geometry') { ctx.hideModelPreview(); return; }
+    if (item.view !== 'model') { ctx.hideModelPreview(); ctx.message(`${item.label}: ${kindLine(item) || 'a file'} · Download gets it`); return; }
     try {
-      const r = await fetch(url('geo', item));
+      const r = await fetch(url('geo', item, item.heightfield ? { heightfield_layer: P.layerOf(item) } : {}));
       if (!r.ok) throw new Error((await r.json()).error);
       const bytes = await r.arrayBuffer(); if (seq !== sequence) return;
       await ctx.previewOutput(item, bytes, update);
@@ -228,7 +283,7 @@ export function createOutputPanel(ctx) {
   document.getElementById('scene-view').onclick = P.scene;
   P.openInput = async (path, update = false) => {
     const f = ctx.layers.list.find((v) => v.path === path); if (!f) return;
-    input = { id: 'input:' + path, inputPath: path, label: path, kind: 'image', status: 'ready', revision: `${f.mtime}:${f.size}`, sourceURL: inputImageURL(f), summary: ctx.layers.info.get(path)?.summary ?? ctx.layers.fileText(f) };
+    input = { id: 'input:' + path, inputPath: path, label: path, view: 'image', kind: 'image', status: 'ready', revision: `${f.mtime}:${f.size}`, sourceURL: inputImageURL(f), summary: ctx.layers.info.get(path)?.summary ?? ctx.layers.fileText(f) };
     await P.select(input.id, update);
   };
   ctx.on('layers', () => {

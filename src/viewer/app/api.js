@@ -28,8 +28,9 @@ export const api = {
   async graphs() { const { status, j } = await json('/api/graphs'); return status === 200 && Array.isArray(j) ? j : null; },
   /** the last cook of a graph: {ok, ms, target, errors, warnings} */
   async report(graph) { const { status, j } = await json('/api/report?' + q({ graph })); return status === 200 ? j : null; },
-  geo: (graph, node) => glb('/api/geo?' + q({ graph, node })),
-  /** {target, summary, ms} or null */
+  /** the output (or a node) as a GLB; heightfields with `layer` in red (default the mask) */
+  geo: (graph, node, layer) => glb('/api/geo?' + q({ graph, node, ...(layer ? { heightfield_layer: layer } : {}) })),
+  /** {target, summary, ms, about: what it is (kind, text, size, heightfield)} or null */
   async info(graph, node) { const { status, j } = await json('/api/info?' + q({ graph, node })); return status === 200 ? j : null; },
   /** {ok, ms, errors, vars?, graphVars?, overrides?, stopped?}, once a cook has applied the values (or a stop ended it) */
   async vars(graph, vars) { const { status, j } = await json('/api/vars?' + q({ graph }), post({ vars })); return status ? j : { ok: false, ms: 0, errors: [offline] }; },

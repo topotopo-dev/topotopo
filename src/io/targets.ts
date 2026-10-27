@@ -7,7 +7,7 @@ import type { ExportTarget, GraphSpec } from '../graph/types.ts';
 
 /** Every export format with the label the viewer shows, in the order it offers them (a Record, so none is missing). */
 export const FORMAT_LABELS: Record<ExportFormat, string> = {
-  glb: 'GLB (one file, textures inside)', gltf: 'glTF + texture files', usda: 'USD (.usda)', obj: 'OBJ', geo: 'Houdini .geo',
+  glb: 'GLB (one file, textures inside)', gltf: 'glTF (JSON, textures inside)', usda: 'USD (.usda)', obj: 'OBJ', geo: 'Houdini .geo',
   unreal_landscape: 'Unreal Landscape bundle (folder)', csv: 'CSV points (Unreal PCG)', pointsjson: 'Points JSON',
   textures: 'PNG textures (folder)', png16: 'Heightmap, 16-bit PNG', r16: 'Heightmap, RAW .r16', mask_png: 'Masks, PNG',
   ply: 'PLY', stl: 'STL', json: 'TopoTopo JSON',

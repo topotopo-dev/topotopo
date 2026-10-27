@@ -56,6 +56,39 @@ export function sourceManifestPath(format: string, path: string): string {
   return format === 'textures' ? joinPath(texturesDir(path), 'source.json') : path.replace(/[\\/]+$/, '') + SOURCE_SUFFIX;
 }
 
+/** Formats whose one file carries the source block itself (asset.extras.source): the file alone tells how it was made. */
+export const SOURCE_INSIDE: readonly ExportFormat[] = ['glb', 'gltf'];
+
+/**
+ * What an export of each format writes (the files of formatFiles below, and the record exportFilesAsync adds), in a
+ * line for a person choosing a format: the viewer's export and download menus. `instances`: the geometry holds packed
+ * instances, which csv and points.json write as instance rows and obj, ply and stl expand into geometry; `images`: it
+ * carries images (textures), which usda writes as PNGs beside the stage.
+ */
+export function formatWrites(format: ExportFormat, o: { instances?: boolean; images?: boolean } = {}): string {
+  const rows = o.instances ? ', one row per instance + .meshes.json with how it was made + one GLB per source mesh' : '';
+  const expanded = o.instances ? ' (instances expanded)' : '';
+  const record = ' + .source.json with how it was made';
+  const lines: Record<ExportFormat, string> = {
+    glb: 'binary glTF with its textures and how it was made inside (+ .source.json in exports/)',
+    gltf: 'glTF JSON with its buffers, textures and how it was made inside (+ .source.json in exports/)',
+    usda: `USD stage${o.instances ? ' (instances as a PointInstancer)' : ''}${o.images ? ' + its textures as PNGs' : ''}${record}`,
+    obj: `OBJ with vertex colours, no materials${expanded}${record}`,
+    geo: `Houdini .geo with every attribute and group${record}`,
+    ply: `binary PLY with the point attributes${expanded}${record}`,
+    stl: `binary STL triangles, no colours${expanded}${record}`,
+    json: `TopoTopo JSON, everything lossless${record}`,
+    csv: rows ? `CSV for Unreal PCG${rows}` : `CSV, one row per point${record}`,
+    pointsjson: rows ? `points JSON${rows}` : `points JSON with every point attribute${record}`,
+    png16: '16-bit PNG + JSON sidecar with the height range and how it was made',
+    r16: 'RAW 16-bit heightmap + JSON sidecar with the height range and how it was made',
+    mask_png: `8-bit PNG of the mask layer (an Unreal weight layer)${record}`,
+    unreal_landscape: 'a folder: heightmap, weight layers, meshes and instances + landscape.json with the import settings and how it was made',
+    textures: 'a folder of PNGs, one per image + source.json with how it was made',
+  };
+  return lines[format];
+}
+
 /** Every file an export of `format` to `path` writes, plus a one-line summary. */
 export async function exportFilesAsync(g: Geometry, format: ExportFormat | 'unreal_landscape', path: string, o: FileExportOptions = {}): Promise<ExportFiles> {
   const res = await formatFiles(g, format, path, o);

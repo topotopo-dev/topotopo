@@ -222,6 +222,14 @@ $('graph').onchange = (e) => {
   loadGeo();
 };
 
+// the heightfield layer the scene's output shows in red (the picker in Properties), per graph and node
+const sceneLayers = local.get('scene.layers', {});
+const sceneKey = () => `${ctx.graph.name}/${ctx.graph.shownNode() ?? ''}`;
+ctx.sceneLayer = {
+  get: () => sceneLayers[sceneKey()] ?? null,
+  set(v) { sceneLayers[sceneKey()] = v; local.set('scene.layers', sceneLayers); loadGeo(); },
+};
+
 let firstFrame = !views.placed;
 const loadGeo = ctx.coalesce(async () => {
   if (ctx.outputs?.active) { await ctx.outputs.refresh(); return; }
@@ -229,7 +237,7 @@ const loadGeo = ctx.coalesce(async () => {
   if (!G.name) return;
   const graph = G.name, node = G.node ?? '';
   o.loading = true; ctx.emit('output');
-  const r = await api.geo(graph, node);
+  const r = await api.geo(graph, node, ctx.sceneLayer.get());
   o.loading = false;
   if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) { ctx.emit('output'); return; }
   if (!r.ok) {
@@ -257,13 +265,14 @@ const loadGeo = ctx.coalesce(async () => {
   const [info, report] = await Promise.all([api.info(graph, node), api.report(graph)]);
   if (graph !== G.name) return;
   o.summary = info?.summary ?? '';
+  o.about = info?.about ?? null;
   o.report = report;
   ctx.emit('output'); updateCook();
 });
 
 function updateCook() {
   const el = $('cook'), o = ctx.output, g = ctx.graph.current();
-  if (ctx.outputs?.active?.kind === 'image') {
+  if (ctx.outputs?.active?.view === 'image') {
     const image = ctx.outputs.active; el.textContent = image.width ? `${image.width} × ${image.height} · ${image.layers?.length ?? 1} layer(s)` : image.label; return;
   }
   if (!g) { el.textContent = ''; return; }
@@ -642,7 +651,7 @@ ctx.previewOutput = async (item, bytes, update) => {
   if (serial !== previewSerial || ctx.outputs.active?.id !== item.id) { new MeshObject('', src).dispose(); return; }
   const mesh = new MeshObject('out', src); mesh.onReady = () => ctx.requestRender();
   ctx.output.mesh?.dispose(); ctx.output.mesh = mesh; ctx.outputRoot.add(mesh.root); ctx.previewEmpty = false;
-  ctx.output.summary = item.summary ?? ''; ctx.output.error = item.error ?? null;
+  ctx.output.summary = item.summary ?? ''; ctx.output.error = item.error ?? null; ctx.output.about = null;
   ctx.outputGraph(item);
   outEntry(); ctx.selection.clear();
   if (!update || !outputViews.has(item.id)) {

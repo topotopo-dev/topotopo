@@ -154,28 +154,36 @@ export function createOutliner(ctx, panes) {
         };
       });
     }
-    // inputs: reference layers, in the Inputs tab
+    // inputs: reference layers, in the Inputs tab. An export's sidecar (kind "metadata": a heightmap's .json,
+    // <file>.source.json …) is listed on the card of the file it describes, not as a layer of its own.
     {
       const s = section('inputs', 'Inputs', panes.inputs, true);
       const L = ctx.layers;
-      tabCount('inputs', L.list.length);
+      const paths = new Set(L.list.map((f) => f.path));
+      const attached = (f) => f.kind === 'metadata' && !!f.sidecar?.of && paths.has(f.sidecar.of);
+      const cardsOf = L.list.filter((f) => !attached(f));
+      tabCount('inputs', cardsOf.length);
       const where = document.getElementById('inputs-where');
       where.textContent = L.where ? `inputs/ ${L.where}` : 'inputs/'; where.title = L.dir ?? '';
-      sync(s, L.list.map((f) => ({ key: f.path, f })), ({ f: first }) => {
-        const path = first.path, id = layerId(path);
+      // keyed by kind too: a file that turns into a sidecar (or back) gets the card that fits it
+      sync(s, cardsOf.map((f) => ({ key: `${f.path}\n${f.kind === 'metadata'}`, f, meta: L.list.filter((m) => attached(m) && m.sidecar.of === f.path) })), ({ f: first }) => {
+        const path = first.path, id = layerId(path), metadata = first.kind === 'metadata';
         const wrap = el('div', ''), row = el('div', 'row input-card'), ey = eye(() => L.show(path, !L.shown.has(path))), nm = el('span', 'nm', path), mt = el('span', 'mt'), er = el('div', 'rowerr');
         const ds = displaySelect(LAYER_MODES, (m) => L.setDisplay(path, m));
         const thumb = el('img', 'input-thumb'), body = el('div', 'input-body'), controls = el('div', 'input-controls'), icon = el('span', 'file-icon', first.ext?.toUpperCase() || 'FILE');
+        const meta = el('div', 'input-meta');
         thumb.alt = ''; thumb.loading = 'lazy'; thumb.onerror = () => { thumb.hidden = true; icon.hidden = false; };
-        controls.append(ey, ds, mt); body.append(nm, controls); row.append(thumb, icon, body);
+        // a sidecar without the file it describes is metadata, never a layer: no eye, no display mode
+        if (metadata) controls.append(mt); else controls.append(ey, ds, mt);
+        body.append(nm, controls, meta); row.append(thumb, icon, body);
         wrap.append(row, er);
-        selectRow(row, id);
+        if (!metadata) selectRow(row, id);
         row.onclick = (e) => { if (!e.target.closest('button,select,input') && isInputImage(path)) ctx.outputs.openInput(path); };
         row.addEventListener('pointerenter', () => setTimeout(() => L.fetchInfo(path), 150));
         return {
           el: wrap,
-          update({ f }) {
-            const canPreview = isInputImage(path) || ['mesh', 'geometry', 'points'].includes(f.kind) || /\.(obj|stl|ply|glb|gltf|blend|geo|bgeo|json|csv)$/i.test(path);
+          update({ f, meta: sidecars }) {
+            const canPreview = f.kind !== 'metadata' && (isInputImage(path) || ['mesh', 'geometry', 'points'].includes(f.kind) || /\.(obj|stl|ply|glb|gltf|blend|geo|bgeo|json|csv)$/i.test(path));
             const src = canPreview ? (isInputImage(path) ? inputImageURL(f) : '/api/input_thumb?' + new URLSearchParams({ path, rev: `${f.mtime}:${f.size}` })) : '';
             if (thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
             const on = L.shown.has(path), e = ctx.objects.get(id);
@@ -184,6 +192,10 @@ export function createOutliner(ctx, panes) {
             if (document.activeElement !== ds) ds.value = L.display.get(path) ?? 'view';
             mt.textContent = e?.loading ? 'loading…' : fmtBytes(f.size);
             row.title = `inputs/${path} · ${L.fileText(f)}`;
+            // what describes it (its sidecars), or what it is (a sidecar alone)
+            const lines = f.kind === 'metadata' ? [`${f.about ?? 'metadata'}${f.sidecar?.of ? ` of ${f.sidecar.of}/` : ''}`]
+              : sidecars.map((m) => `+ ${m.path.replace(/^.*\//, '')} · ${m.about ?? 'metadata'} · ${fmtBytes(m.size)}`);
+            meta.textContent = lines.join('\n'); meta.hidden = !lines.length;
             const err = L.errors.get(path);
             er.textContent = err?.msg ?? '';
             er.hidden = !err;

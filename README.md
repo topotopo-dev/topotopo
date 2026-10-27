@@ -117,14 +117,23 @@ npm run preview
 The viewer's left panel has three tabs: **Scene** (the graph's nodes and guides), **Outputs** and **Inputs**.
 **Outputs**, the default, shows all graphs' main results, named deliverables and their textures; click one to
 inspect it alone, and **Scene** in the top bar restores the scene. Publish extra results in graph JSON with
-`"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default. Each result
-has an **Export** button: the first click asks for a format and a file inside `exports/` and stores that target in
-the graph (`"export": "glb"`, or `{"format": "obj", "path": "parts/rotor.obj", "up_axis": "z"}`, on the graph or on an
-output); later clicks overwrite the same file, and **Export all** writes every target. MCP `export {output}` and the
-CLI's `--export-all` write the same targets. **Inputs** lists your files in `inputs/`, with **Add input** (or drop
-files anywhere on the page); the agent is told about new ones in its next tool answer. Images open in a 2D viewer
-with layers and channels (generated textures default to RGB; use A to inspect packed alpha/AO); JPEG/WebP are for
-viewing only. For `topotopo view graph.json`, `inputs/` and `exports/` are beside that graph.
+`"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default. Each card says
+what the result is, decided from what it cooks to (a mesh with its points and prims, a heightfield such as
+"heightfield 2049 × 2049, 2 m", packed instances, points, curves, an image, or several of these) and its size, and
+offers only the formats that write it, each with a line saying what it writes (a heightfield: 16-bit PNG or RAW
+heightmap with its JSON sidecar, mask PNGs, the Unreal Landscape bundle; a mesh: GLB, glTF, USD, OBJ …).
+**Download** gets the result in the format you pick as a browser download: the file itself, or one zip when the
+format writes several files (a heightmap and its sidecar, a textures folder). **Export** writes it into `exports/`:
+the first click asks for a format and a file there and stores that target in the graph (`"export": "glb"`, or
+`{"format": "obj", "path": "parts/rotor.obj", "up_axis": "z"}`, on the graph or on an output); later clicks overwrite
+the same file, the card's details give its full path, and **Export all** writes every target. MCP `export {output}`
+and the CLI's `--export-all` write the same targets. Downloads and exports both carry the record of how they were
+made (see below); in the Saved files and Inputs lists a sidecar or `.source.json` shows with the file it describes.
+A heightfield's details have a layer picker: the terrain shows that layer (the mask by default) in red. **Inputs**
+lists your files in `inputs/`, with **Add input** (or drop files anywhere on the page); the agent is told about new
+ones in its next tool answer. Images open in a 2D viewer with layers and channels (generated textures default to
+RGB; use A to inspect packed alpha/AO); JPEG/WebP are for viewing only. For `topotopo view graph.json`, `inputs/`
+and `exports/` are beside that graph.
 
 The **Controls** panel holds the graph's exposed vars. Above them, and in the status bar, the cook in progress: the
 node cooking and the time so far, then the last cook's time, or the failing node and its message. **Stop** ends a cook

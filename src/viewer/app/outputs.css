@@ -22,7 +22,9 @@ button:disabled { opacity: .45; cursor: default; }
 .input-body .nm { display: block; white-space: normal; overflow-wrap: anywhere; }
 .input-controls { display: flex; gap: 3px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 .input-controls .mt { margin-left: auto; }
-/* output cards: thumbnail, name, what it is, where it exports, and its Export button */
+/* an export's sidecar on the card of the file it describes (or a sidecar alone: what it is) */
+.input-meta { margin-top: 4px; color: var(--dim); font-size: 11px; white-space: pre-line; overflow-wrap: anywhere; }
+/* output cards: thumbnail, name, what it is, where it exports, and its Download and Export buttons */
 .output-group { padding: 12px 10px 5px; color: var(--dim); font-size: 11px; overflow-wrap: anywhere; }
 .output-card { display: flex; align-items: center; width: calc(100% - 8px); margin: 3px 4px; padding: 5px; gap: 8px; text-align: left; background: var(--bg); border: 1px solid transparent; min-height: calc(var(--thumb-size) + 12px); cursor: pointer; }
 .output-card:hover { background: var(--hover-bg); }
@@ -33,7 +35,8 @@ button:disabled { opacity: .45; cursor: default; }
 .output-card .output-body { display: flex; flex: 1; flex-direction: column; min-width: 0; justify-content: center; gap: 3px; }
 .output-card .output-label { overflow-wrap: anywhere; }
 .output-card small { overflow: hidden; text-overflow: ellipsis; max-height: 32px; }
-.output-export { flex: none; padding: 3px 10px; }
+.output-actions { display: flex; gap: 6px; margin-top: 2px; }
+.output-actions button { padding: 2px 10px; }
 .output-target { align-self: flex-start; max-width: 100%; padding: 0; border: 0; background: none; color: var(--dim); font-size: 11px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .output-target:hover { color: var(--text); text-decoration: underline; }
 .output-target.unset { font-style: italic; color: var(--faint); }
@@ -48,6 +51,15 @@ button:disabled { opacity: .45; cursor: default; }
 .export-field { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 8px; }
 .export-field select, .export-field input { width: 100%; min-width: 0; padding: 4px 6px; }
 .export-where { font: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.export-about { font-size: 11px; overflow-wrap: anywhere; }
+/* what the chosen format writes; a format that writes only part of the output says what it leaves out */
+.export-writes { font-size: 11px; color: var(--text); overflow-wrap: anywhere; }
+.export-writes.part { color: var(--sel); }
+.export-writes.err { color: var(--err); }
+/* the heightfield layer drawn in red, in the output's details */
+.layer-pick { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.layer-pick select { flex: 1; min-width: 0; }
+#output-details .output-kind { color: var(--text); }
 .export-error { color: var(--err); font-size: 11px; }
 .export-error:empty { display: none; }
 .export-actions { display: flex; justify-content: flex-end; gap: 8px; }

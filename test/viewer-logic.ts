@@ -1,7 +1,8 @@
 // The viewer page's browser-free logic (src/viewer/app/*.js): the keymap presets,
 // guide (marker) rules shared with the server, the grid step, selection set operations, the undo stack, mesh
 // topology (welding, pieces, the render tool's edge classes), the Controls rules, the status and cook state lines,
-// and the minimal edits the viewer makes to a graph file (src/viewer/json-edit.ts). Also checks that the page's
+// the output cards (kind line, heightfield layers, formats offered, download names) and the minimal edits the viewer
+// makes to a graph file (src/viewer/json-edit.ts). Also checks that the page's
 // modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
 import fs from 'node:fs';
@@ -18,6 +19,8 @@ import * as mesh from '../src/viewer/app/mesh.js';
 import * as vars from '../src/viewer/app/vars.js';
 import * as status from '../src/viewer/app/status.js';
 import * as cooking from '../src/viewer/app/cooking.js';
+import * as info from '../src/viewer/app/output-info.js';
+import * as pop from '../src/viewer/app/export-popover.js';
 import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -317,6 +320,32 @@ section('status line (section 4)');
     return [fetchFirst, openFirst];
   };
   check(ends(0).every((l) => l === status.NO_GRAPHS_LINE) && ends(1).every((l) => l === status.LIVE_LINE), 'either startup order ends on the line that fits the workspace');
+}
+
+section('output cards: what an output is, its formats and downloads');
+{
+  const hf = { name: 'heightfield', width: 21, height: 21, cell: 1, layers: [{ name: 'height', min: -1, max: 2 }, { name: 'flow', min: 0, max: 3.25 }, { name: 'mask', min: 0, max: 1 }] };
+  check(info.kindLine({ about: 'heightfield 21 × 21, 1 m', size: [20, 3, 20] }) === 'heightfield 21 × 21, 1 m · 20.0 × 3.00 × 20.0 m' && info.kindLine({ view: 'file' }) === 'file'
+    && info.kindLine({ kind: 'metadata' }) === 'metadata', 'a card says what it is and its size');
+  check(JSON.stringify(info.layerChoices(hf)) === JSON.stringify([{ value: 'mask', label: 'mask' }, { value: 'flow', label: 'flow (0 .. 3.25)' }, { value: 'none', label: 'none' }]),
+    'the layers a terrain shows in red: the mask first, others with their range, then none (never the height itself)');
+  check(info.shownLayer(hf, undefined) === 'mask' && info.shownLayer(hf, 'flow') === 'flow' && info.shownLayer(hf, 'gone') === 'mask' && info.shownLayer(hf, 'none') === 'none'
+    && info.shownLayer({ layers: [{ name: 'height', min: 0, max: 1 }] }, undefined) === 'none', 'the layer shown: the chosen one while the field has it, else the mask, else none');
+  const formats = [{ format: 'glb', label: 'GLB', extension: '.glb' }, { format: 'png16', label: 'Heightmap', extension: '.png' }];
+  const glb = { format: 'glb', label: 'GLB', extension: '.glb', writes: 'binary glTF', leaves: [], oneFile: true };
+  const png = { format: 'png16', label: 'Heightmap', extension: '.png', writes: '16-bit PNG + JSON sidecar', leaves: ['instances'], oneFile: false };
+  const card = { label: 'Main output', graph: 'land', output: null, formats: [glb], target: null };
+  check(pop.offeredFormats(card, formats).length === 1 && pop.offeredFormats({ ...card, target: { format: 'png16', path: 'land.png' } }, formats).at(-1).misfit
+    && pop.offeredFormats({ ...card, formats: undefined }, formats).length === 2, 'a card offers the formats that write it, and marks its target\'s format when that one does not (all of them before a first cook)');
+  check(pop.writesLine(png) === '16-bit PNG + JSON sidecar · not the instances' && pop.writesLine(glb) === 'binary glTF', 'a format\'s line: what it writes, and what it leaves out');
+  check(pop.downloadName(card, glb) === 'land.glb' && pop.downloadName(card, png) === 'land.zip' && pop.downloadName({ ...card, target: { format: 'glb', path: 'parts/rock.glb' } }, glb) === 'rock.glb'
+    && pop.downloadName({ ...card, output: 'trees', target: { format: 'csv', path: 'pcg/trees.points.json' } }, { ...png, format: 'csv' }) === 'trees.zip', 'download names: the target\'s file, else the output\'s stem; a zip unless one file');
+  check(pop.downloadSpec({ target: { format: 'obj', path: 'a/b.obj', options: { up_axis: 'z' } } }, 'obj').up_axis === 'z' && pop.downloadSpec({ target: { format: 'obj', path: 'a.obj', options: {} } }, 'glb') === 'glb',
+    'a download in the target\'s format keeps its path and options; another format is the format alone');
+  check(pop.filenameOf("attachment; filename*=UTF-8''terrain%20v2.zip") === 'terrain v2.zip' && pop.filenameOf(null) === null && pop.stemOf('pcg/trees.points.json') === 'trees' && pop.stemOf('level/') === 'level',
+    'file names from the server\'s Content-Disposition, stems as the server names its zips');
+  check(pop.inFolder('C:\\proj\\exports', 'parts/a.obj') === 'C:\\proj\\exports\\parts\\a.obj' && pop.inFolder('/home/p/exports/', 'a.glb') === '/home/p/exports/a.glb',
+    'where an export goes, in the exports folder\'s own separators');
 }
 
 section('the page\'s modules');

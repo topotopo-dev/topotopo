@@ -13,7 +13,7 @@ WORKFLOW
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
-OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references.
+OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, heightfield, instances, points, curves, image, mixed; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
@@ -128,6 +128,8 @@ board or concept pages, so the gallery page and the board link both ways.`,
   exports: a format ("glb" → exports/<graph or output id>.glb) or {"format":"obj","path":"parts/a.obj","up_axis":"z"}
   (the export tool's options), always inside exports/. The person's Export buttons in the viewer, export {output} /
   export {all:true} and the CLI's --export-all write these targets; set one with edit {op:"export", output?, export}.
+  The viewer's Download buttons need no target: they offer the formats that fit the output (a heightfield: png16,
+  r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
@@ -856,8 +858,8 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
   prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
   uncompressed GLB.
-SOURCE: every export (export tool, export targets and the viewer's Export buttons, the CLI's --export and --export-all)
-  records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
+SOURCE: every export (export tool, export targets and the viewer's Export and Download buttons, the CLI's --export and
+  --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
   cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
   (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
   export: {format, options}, topotopo (the version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
@@ -866,7 +868,8 @@ SOURCE: every export (export tool, export targets and the viewer's Export button
   it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
   graph, values and options give the same bytes. Replay on the command line: topotopo <graph>.json --output <output>
   (or --node <node>) --frame <frame> --fps <fps>, one --var <name>=<value as JSON> per var, and --export <path> with the
-  same options.
+  same options. These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
+  them with it (kind "metadata"), and a file node reading one says what to read instead.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or

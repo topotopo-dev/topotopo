@@ -1,6 +1,10 @@
 // Output catalogue, previews, downloads and exports. Geometry stays server-side; cards and previews are lazy.
-// A published output exports to its target in the graph (io/targets.ts): its Export button writes it, Export all
-// writes every target, and a first export sets the target in the graph so the next click just writes again.
+// A published output's card says what it is (io/kinds.ts: a mesh, a heightfield, packed instances, points, curves, an
+// image or several of these, and its size) and offers the formats that write it. Its Download gets the export as a
+// browser download (the file itself, or a zip of its files: a sidecar, a textures folder), with the record of how it
+// was made; its Export writes its target in the graph (io/targets.ts) into exports/, Export all every target, and a
+// first export sets the target in the graph so the next click just writes again. Saved files (exports/, renders) are
+// cards too: a sidecar or manifest beside an export (io/sidecars.ts) is metadata of it, not a card of its own.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -11,6 +15,7 @@ import { ArtifactStore, artifactId } from '../host/artifacts.ts';
 import type { Artifact } from '../host/artifacts.ts';
 import { prepareTarget, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
+import { sidecarFile } from '../host/sidecars.ts';
 import type { Workspace } from '../workspace.ts';
 import type { GraphSource } from './graph-file.ts';
 import type { Geometry } from '../core/geometry.ts';
@@ -20,25 +25,45 @@ import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { withImagePreview } from '../render/texview.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
-import { exportGeometryAsync } from '../io/export.ts';
+import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
+import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
+import { fittingFormats, outputKind } from '../io/kinds.ts';
+import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
+import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
+import type { SidecarRole } from '../io/sidecars.ts';
 import { STOPPED } from '../graph/engine.ts';
-import { FORMAT_LABELS, TARGET_FORMATS, publishedOutputs, targetError, targetExtension } from '../io/targets.ts';
+import { FORMAT_LABELS, TARGET_FORMATS, publishedOutputs, resolveTarget, targetError, targetExtension, targetFormat } from '../io/targets.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { summarize } from '../inspect.ts';
 
 const digest = (x: string) => createHash('sha256').update(x).digest('hex');
 const imageExt = /\.(png|jpe?g|webp)$/i;
-const meshExt = /\.(glb|gltf|obj|stl|ply|geo|bgeo|json|csv)$/i;
-const mime = (p: string) => ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.glb': 'model/gltf-binary' })[path.extname(p).toLowerCase()] ?? 'application/octet-stream';
+/** files the file node reads (io/import.ts): a saved one previews as a model */
+const modelExt = /\.(glb|gltf|obj|stl|ply|geo|bgeo|json|csv)$/i;
+const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.json': 'application/json', '.zip': 'application/zip' };
+const mime = (p: string) => MIME[path.extname(p).toLowerCase()] ?? 'application/octet-stream';
 const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
 const stamp = (p: string) => { const s = fs.statSync(p, { throwIfNoEntry: false }); return s ? `${s.size}:${s.mtimeMs}` : 'missing'; };
 function err(status: number, message: string): never { throw Object.assign(new Error(message), { status }); }
 const idFor = (...parts: string[]) => digest(JSON.stringify(parts)).slice(0, 24);
 const inside = (dir: string, p: string) => { const rel = path.relative(dir, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
+/** The folder every path shares, so zip entries named relative to it never climb out with "../". */
+const commonDir = (paths: string[]) => paths.map((p) => path.dirname(p)).reduce((a, b) => { while (a !== path.dirname(a) && path.relative(a, b).startsWith('..')) a = path.dirname(a); return a; });
+const fmt = (x: number) => String(+x.toFixed(Math.abs(x) >= 100 ? 1 : 2));
 
 export interface OutputEntry {
   origin?: 'published' | 'saved'; id: string; label: string; graph?: string; node?: string; parent?: string;
-  kind: 'geometry' | 'image' | 'file' | 'bundle'; status: 'loading' | 'ready' | 'error';
+  /** how the page shows it: as a 3D model, a 2D image, or only as files to download */
+  view: 'model' | 'image' | 'file';
+  /** what it is (io/kinds.ts) once cooked; "metadata" for a sidecar or manifest without its export */
+  kind?: OutputKind | 'metadata';
+  /** what it is in a few words ("heightfield 2049 × 2049, 2 m"), and its bounding size (x, y, z metres) */
+  about?: string; size?: [number, number, number] | null;
+  /** its heightfield (samples, spacing, layers with their ranges): the page colours the terrain by a layer */
+  heightfield?: HeightfieldInfo;
+  /** a published output: the formats that write it, best first (io/kinds.ts) */
+  formats?: FormatFit[];
+  status: 'loading' | 'ready' | 'error';
   revision: string; error?: string; summary?: string; width?: number; height?: number;
   layers?: string[]; layer?: string; image?: string; generated?: boolean;
   /** a published output's card has an Export button: `output` is its id (null = the graph's default output) */
@@ -47,7 +72,10 @@ export interface OutputEntry {
   target?: { format: string; path: string; options: Record<string, unknown> } | null;
   /** its last export to that target: newest file time (ms), total bytes, file count */
   saved?: { at: number; size: number; files: number };
-  files?: { id: string; name: string; size: number }[];
+  /** saved files, the main one first; a sidecar with what it is ("heightmap sidecar: height range, …") */
+  files?: { id: string; name: string; size: number; role?: SidecarRole; about?: string }[];
+  /** a saved output's Download: the one file, or a zip of them all (named so) */
+  download?: { name: string; zip: boolean };
 }
 interface Item {
   entry: OutputEntry; geo?: Geometry; file?: string; files?: string[]; img?: Image; owner?: Item; key?: string; pending?: Promise<void>;
@@ -61,6 +89,24 @@ export function outputZip(files: { name: string; bytes: Uint8Array }[]): Uint8Ar
   for (const f of [...files].sort((a, b) => a.name.localeCompare(b.name, 'en')))
     entries[f.name] = [f.bytes, { mtime: new Date(1980, 0, 1), level: 6 }];
   return zipSync(entries);
+}
+
+/**
+ * The files a download of an export carries: all it writes, except the standalone record of a format whose one file
+ * carries the record itself (glb, gltf: io/files.ts SOURCE_INSIDE), so a GLB downloads as itself.
+ */
+export function downloadFiles<T extends { path: string }>(format: string, files: T[], sourceManifest?: string): T[] {
+  return SOURCE_INSIDE.includes(format as any) && sourceManifest ? files.filter((f) => f.path !== sourceManifest) : files;
+}
+
+/** What a saved heightmap is, from its sidecar: "heightmap 2049 × 2049, 2 m · height 0 .. 350 m". */
+function heightmapAbout(sidecar: string): string | undefined {
+  try {
+    const j = JSON.parse(fs.readFileSync(sidecar, 'utf8'));
+    const [w, h] = j.resolution ?? [];
+    if (!(w > 0 && h > 0)) return undefined;
+    return `heightmap ${w} × ${h}${typeof j.cell_size === 'number' ? `, ${fmt(j.cell_size)} m` : ''}${typeof j.height_min === 'number' && typeof j.height_max === 'number' ? ` · height ${fmt(j.height_min)} .. ${fmt(j.height_max)} m` : ''}`;
+  } catch { return undefined; }
 }
 
 export interface OutputsOptions {
@@ -87,9 +133,17 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     for (const [name, img] of referenceableImages(item.geo)) {
       const id = idFor(item.entry.id, name);
       items.set(id, { owner: item, img, entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, node: item.entry.node,
-        label: name, kind: 'image', generated: true, status: 'ready', revision: item.entry.revision,
+        label: name, view: 'image', kind: 'image', about: `image ${img.width} × ${img.height}`, generated: true, status: 'ready', revision: item.entry.revision,
         width: img.width, height: img.height, layers: [...img.layers.keys()], layer: img.mainLayer, image: name } });
     }
+  };
+  /** What a cooked result is, on its card: kind, words, size, heightfield; a published one's fitting formats. */
+  const describe = (e: OutputEntry, g: Geometry) => {
+    const info = outputKind(g);
+    e.kind = info.kind; e.about = info.text; e.size = info.size;
+    if (info.heightfield) e.heightfield = info.heightfield; else delete e.heightfield;
+    if (e.exportable) e.formats = fittingFormats(info);
+    return info;
   };
   /**
    * A card whose cook a person stopped (Workspace.held) goes back to the card it replaced, with the last finished
@@ -122,11 +176,13 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         delete item.prev;
         item.geo = r.geo;
         e.status = 'ready'; delete e.error;
+        // a saved file that says what it is already (a heightmap by its sidecar) keeps that
+        const info = item.file && e.kind ? outputKind(r.geo) : describe(e, r.geo);
         const firstImage = referenceableImages(r.geo).values().next().value;
-        if (!r.geo.numPoints && !r.geo.numPrims && firstImage) {
-          item.img = firstImage; e.kind = 'image'; e.width = firstImage.width; e.height = firstImage.height;
+        if (info.kind === 'image' && firstImage) {
+          item.img = firstImage; e.view = 'image'; e.width = firstImage.width; e.height = firstImage.height;
           e.layers = [...firstImage.layers.keys()]; e.layer = firstImage.mainLayer;
-        }
+        } else if (!item.file) { e.view = 'model'; delete item.img; }
         if (!item.file) e.revision = digest(`${key}:${r.results.get(r.target)?.sig ?? ''}`);
         e.summary = summarize(r.geo);
         addImages(item);
@@ -152,6 +208,34 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     }
     return best;
   };
+  /** How a saved file shows: an image, a model the file node reads, or a file to download. */
+  const viewOf = (file: string): OutputEntry['view'] => (imageExt.test(file) ? 'image' : modelExt.test(file) && !/\.r16$/i.test(file) ? 'model' : 'file');
+  /** A saved output: its files (the main one first, each sidecar with its role), how it shows and downloads. */
+  const savedEntry = (a: Artifact, files: string[], id: string, revision: string): Item => {
+    const role = new Map<string, SidecarRole>();
+    for (const p of files) { const s = sidecarFile(p); if (s) role.set(p, s.role); }
+    const main = files.find((p) => !role.has(p)) ?? files[0];
+    const ordered = [main, ...files.filter((p) => p !== main)];
+    const format = a.format ?? exportFormatFromPath(main);
+    const heightmapSidecar = ordered.find((p) => role.get(p) === 'heightmap');
+    const meta = role.has(main);
+    const fileList = ordered.map((p) => {
+      const r = role.get(p);
+      return { id: artifactId(p), name: path.relative(path.dirname(main), p).split(path.sep).join('/'), size: fs.statSync(p, { throwIfNoEntry: false })?.size ?? 0,
+        ...(r ? { role: r, about: `${SIDECAR_NAMES[r]}: ${SIDECAR_TEXT[r]}` } : {}) };
+    });
+    // the record of a glb / gltf is inside it: its download is the file itself (downloadFiles)
+    const zip = downloadFiles(exportFormatFromPath(main), ordered.map((p) => ({ path: p })), `${main}.source.json`).length > 1;
+    const label = targetFormat(format) ? FORMAT_LABELS[targetFormat(format)!] : path.extname(main).slice(1).toUpperCase() || 'file';
+    return { file: main, files: ordered, entry: {
+      id, origin: 'saved', label: a.label, graph: a.graph, node: a.node, status: 'ready', revision,
+      view: meta ? 'file' : viewOf(main), ...(meta ? { kind: 'metadata' as const } : heightmapSidecar ? { kind: 'heightfield' as const } : imageExt.test(main) ? { kind: 'image' as const } : {}),
+      about: meta ? `${SIDECAR_NAMES[role.get(main)!]}: ${SIDECAR_TEXT[role.get(main)!]}` : (heightmapSidecar && heightmapAbout(heightmapSidecar)) || `${label}${ordered.length > 1 ? ` · ${ordered.length} files` : ''}`,
+      summary: a.format === 'reference' ? 'Reference image' : `Saved ${a.format ?? path.extname(main).slice(1)} output`,
+      files: fileList,
+      download: { name: zip ? `${path.basename(stripExtension(a.label.replace(/[\\/]+$/, ''))) || 'export'}.zip` : path.basename(main), zip },
+    } };
+  };
   const refresh = () => {
     const alive = new Set<string>();
     const inputStamp = JSON.stringify(ws.listInputs().map((f) => [f.path, f.size, f.mtime]));
@@ -175,10 +259,12 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         const meta = { label: p.label, output: p.output, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null, saved: lastSaved(records, graph, p) };
         // the same inputs, or a graph held after a stop (the card keeps what it shows until something changes)
         if (old?.key === key || (old && ws.held(graph))) { Object.assign(old.entry, meta); if (!meta.saved) delete old.entry.saved; continue; }
-        // while it cooks again, the card keeps its summary, so the details shown for it keep their size; the card it
-        // replaces comes back if a person stops the cook
+        // while it cooks again, the card keeps what it said (summary, kind, formats), so the details shown for it keep
+        // their size; the card it replaces comes back if a person stops the cook
         const prev = old?.prev ?? (old?.entry.status === 'ready' ? old : undefined);
-        const item: Item = { geo: old?.geo, key, prev, entry: { id, origin: 'published', graph, node: p.node, kind: 'geometry', generated: true, exportable: true, status: 'loading', revision: key, ...(old?.entry.summary ? { summary: old.entry.summary } : {}), ...meta } };
+        const kept: Partial<OutputEntry> = {};
+        if (old) for (const k of ['summary', 'kind', 'about', 'size', 'heightfield', 'formats', 'width', 'height', 'layers', 'layer'] as const) if (old.entry[k] !== undefined) (kept as any)[k] = old.entry[k];
+        const item: Item = { geo: old?.geo, img: old?.img, key, prev, entry: { id, origin: 'published', graph, node: p.node, view: old?.entry.view ?? 'model', generated: true, exportable: true, status: 'loading', revision: key, ...kept, ...meta } };
         if (!meta.saved) delete item.entry.saved;
         // Carry last valid images until the replacement cook completes.
         if (old) for (const v of items.values()) if (v.owner === old) { v.owner = item; v.entry.status = 'loading'; }
@@ -192,21 +278,22 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
       if (!files.length) { alive.delete(id); continue; }
       const revision = digest(files.map((p) => p + stamp(p)).join('|'));
       if (items.get(id)?.entry.revision === revision) continue;
-      const file = files[0];
-      const kind = files.length > 1 ? 'bundle' : imageExt.test(file) ? 'image' : meshExt.test(file) ? 'geometry' : 'file';
-      items.set(id, { file, files, entry: { id, origin: 'saved', label: a.label, graph: a.graph, node: a.node, kind, status: 'ready', revision,
-        summary: a.format === 'reference' ? 'Reference image' : `Saved ${a.format ?? path.extname(file).slice(1)} output`,
-        files: files.map((p) => ({ id: artifactId(p), name: path.relative(path.dirname(file), p).split(path.sep).join('/'), size: fs.statSync(p, { throwIfNoEntry: false })?.size ?? 0 })) } });
+      items.set(id, savedEntry(a, files, id, revision));
     }
-    // Bundle contents are individual inspectable outputs as well as downloads.
-    for (const item of [...items.values()]) if (alive.has(item.entry.id) && item.files && item.files.length > 1) for (const file of item.files) {
-      const stat = fs.statSync(file, { throwIfNoEntry: false }); if (!stat?.isFile()) continue;
-      const id = item.entry.id + '-' + artifactId(file); alive.add(id);
-      const revision = digest(stamp(file));
-      if (items.get(id)?.entry.revision === revision) continue;
-      items.set(id, { file, files: [file], entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, label: path.basename(file),
-        kind: imageExt.test(file) ? 'image' : meshExt.test(file) ? 'geometry' : 'file', status: 'ready', revision,
-        files: [{ id: artifactId(file), name: path.basename(file), size: stat.size }] } });
+    // A bundle's own files (not its sidecars) are individual inspectable outputs as well as downloads.
+    for (const item of [...items.values()]) {
+      if (!alive.has(item.entry.id) || item.entry.origin !== 'saved' || !item.files) continue;
+      const parts = item.files.filter((p, i) => !item.entry.files?.[i]?.role);
+      if (parts.length < 2) continue;
+      for (const file of parts) {
+        const stat = fs.statSync(file, { throwIfNoEntry: false }); if (!stat?.isFile()) continue;
+        const id = item.entry.id + '-' + artifactId(file); alive.add(id);
+        const revision = digest(stamp(file));
+        if (items.get(id)?.entry.revision === revision) continue;
+        items.set(id, { file, files: [file], entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, label: path.basename(file),
+          view: viewOf(file), ...(imageExt.test(file) ? { kind: 'image' as const } : { about: path.extname(file).slice(1).toUpperCase() }), status: 'ready', revision,
+          files: [{ id: artifactId(file), name: path.basename(file), size: stat.size }], download: { name: path.basename(file), zip: false } } });
+      }
     }
     for (const [id, item] of items) if (!alive.has(id) && !item.owner) { items.delete(id); for (const [child, v] of items) if (v.owner === item) items.delete(child); }
     const signature = JSON.stringify([...items.values()].filter((v) => v.files || v.entry.exportable).map((v) => [v.entry.id, v.entry.revision, v.entry.target, v.entry.saved]));
@@ -219,12 +306,15 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     const spec = ws.getGraph(entry.graph!);
     return publishedOutputs(entry.graph!, spec, ws.engine.findOutput(spec).name).find((p) => p.output === entry.output) ?? err(404, 'output no longer exists');
   };
-  /** Cook now and serialize to the target: the export writes the current graph, whatever the preview last showed. */
-  const prepare = async (graph: string, p: PublishedOutput): Promise<PreparedTarget> => {
+  /**
+   * Cook now and serialize to the target (nothing is written yet): the export writes the current graph, whatever the
+   * preview last showed, and its record names the time the cook ran at.
+   */
+  const prepare = async (graph: string, p: PublishedOutput & { target: ResolvedTarget }): Promise<PreparedTarget> => {
     const r = await ws.cook(graph, p.node, undefined, { kind: 'export' });
     if (r.stopped) err(409, `${p.label} (${graph}): the export was stopped at ${r.stopped}; nothing was written`);
     if (!r.ok || !r.geo) err(422, `${p.label} (${graph}): ` + (r.errors.map((e) => `${e.node}: ${e.message}`).join('; ') || 'no geometry'));
-    return prepareTarget(r.geo!, graph, p as PublishedOutput & { target: ResolvedTarget }, ws.exportDir, ws.engine.host);
+    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps });
   };
   /** One export at a time, so two clicks never interleave their writes. */
   const exclusive = async <T>(work: () => Promise<T>): Promise<T> => {
@@ -244,11 +334,11 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     close() { closed = true; clearInterval(timer); ws.listeners.delete(listener); items.clear(); previewCache.clear(); },
     async handle(req: http.IncomingMessage, res: http.ServerResponse, u: URL, readJSON: (r: http.IncomingMessage) => Promise<any>): Promise<boolean> {
       if (!u.pathname.startsWith('/api/output')) return false;
-      const send = (body: Uint8Array | string, type: string, name?: string) => {
-        res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(name ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` } : {}) }); res.end(body);
+      const send = (body: Uint8Array | string, type: string, name?: string, extra: Record<string, string> = {}) => {
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(name ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` } : {}), ...extra }); res.end(body);
       };
       const json = (j: unknown) => send(JSON.stringify(j), 'application/json');
-      const posts = ['/api/output/export', '/api/output/export-all'];
+      const posts = ['/api/output/export', '/api/output/export-all', '/api/output/download'];
       try {
         if (posts.includes(u.pathname) ? req.method !== 'POST' : req.method !== 'GET') err(405, posts.includes(u.pathname) ? 'POST required' : 'method not allowed');
         refresh();
@@ -277,18 +367,35 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
             }
             const p = published(item.entry);
             if (!p.target) err(400, 'no export target yet: choose a format');
-            const prepared = await prepare(graph, p);
+            const prepared = await prepare(graph, p as PublishedOutput & { target: ResolvedTarget });
             writeTargets([prepared], ws.exportDir);
             rescan(); changed();
-            json({ ok: true, path: p.target.path, files: prepared.files.length, summary: prepared.summary, warnings: prepared.warnings });
+            json({ ok: true, path: p.target.path, file: path.join(ws.exportDir, ...p.target.path.split('/')), files: prepared.files.length, summary: prepared.summary, warnings: prepared.warnings });
             return true;
           });
         }
+        if (u.pathname === '/api/output/download') {
+          // {id, export?}: the export (its target, or the format and options given) as a download; nothing is written
+          const body = await readJSON(req), item = get(body?.id);
+          if (!item.entry.exportable) err(400, 'only a published output downloads in a format of choice; a saved file downloads as it is');
+          const p = published(item.entry), spec = body.export ?? (p.target ? { format: p.target.format, path: p.target.path, ...p.target.options } : null);
+          if (!spec) err(400, 'choose a format to download');
+          if (targetError(spec)) err(400, targetError(spec)!);
+          const target = resolveTarget(spec, p.output ?? item.entry.graph!);
+          const prepared = await prepare(item.entry.graph!, { ...p, target });
+          const files = downloadFiles(target.format, prepared.files, prepared.sourceManifest);
+          const extra = { 'x-file-count': String(files.length) };
+          if (files.length === 1) { send(files[0].bytes, mime(files[0].path), path.basename(files[0].path), extra); return true; }
+          const root = commonDir(files.map((f) => f.path));
+          const zip = outputZip(files.map((f) => ({ name: path.relative(root, f.path).split(path.sep).join('/'), bytes: f.bytes })));
+          send(zip, 'application/zip', `${path.basename(stripExtension(target.path.replace(/[\\/]+$/, ''))) || 'export'}.zip`, extra);
+          return true;
+        }
         if (u.pathname === '/api/output/export-all') {
           return await exclusive(async () => {
-            const targets: { graph: string; p: PublishedOutput }[] = [], skipped: { graph: string; label: string }[] = [];
+            const targets: { graph: string; p: PublishedOutput & { target: ResolvedTarget } }[] = [], skipped: { graph: string; label: string }[] = [];
             for (const [graph, spec] of ws.graphs) for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name))
-              if (p.target) targets.push({ graph, p }); else skipped.push({ graph, label: p.label });
+              if (p.target) targets.push({ graph, p: p as PublishedOutput & { target: ResolvedTarget } }); else skipped.push({ graph, label: p.label });
             if (!targets.length) err(400, 'no output has an export target yet: export one with its Export button first');
             // every target cooks and serializes before any file is written
             const prepared: PreparedTarget[] = [];
@@ -309,9 +416,8 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         if (u.pathname === '/api/output/zip') {
           if (!item.files?.length) err(400, 'no saved files');
           // names relative to the folder every file shares, so no entry climbs out with "../"
-          const common = (a: string, b: string) => { while (a !== path.dirname(a) && path.relative(a, b).startsWith('..')) a = path.dirname(a); return a; };
-          const root = item.files.map((p) => path.dirname(p)).reduce(common);
-          send(outputZip(item.files.map((p) => ({ name: path.relative(root, p).split(path.sep).join('/'), bytes: fs.readFileSync(p) }))), 'application/zip', item.entry.label + '.zip'); return true;
+          const root = commonDir(item.files);
+          send(outputZip(item.files.map((p) => ({ name: path.relative(root, p).split(path.sep).join('/'), bytes: fs.readFileSync(p) }))), 'application/zip', item.entry.download?.zip ? item.entry.download.name : item.entry.label + '.zip'); return true;
         }
         if (u.pathname === '/api/output/image' || u.pathname === '/api/output/thumb' && item.img) {
           if (!item.img) err(400, 'this output is not a generated image');
@@ -349,9 +455,12 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         }
         if (u.pathname === '/api/output/geo' || u.pathname === '/api/output/thumb') {
           if (item.file && imageExt.test(item.file)) { send(fs.readFileSync(item.file), mime(item.file)); return true; }
+          if (item.entry.view === 'file') err(400, `${item.entry.label} is not geometry to show: download it`);
           const g = await geometry(item), thumb = u.pathname.endsWith('/thumb');
-          const bytes = await cache(`${item.entry.id}:${item.entry.revision}:${thumb}`, async () => {
-            if (!thumb) return exportGeometryAsync(withImagePreview(withHeightfieldPreview(g)), 'glb', { custom: false, splitByName: false, readFile: (p) => ws.engine.host.readFile(p) });
+          // heightfields: the layer drawn in red (the page's layer picker; the mask by default)
+          const tint = u.searchParams.get('heightfield_layer') || 'mask';
+          const bytes = await cache(`${item.entry.id}:${item.entry.revision}:${thumb}:${thumb ? '' : tint}`, async () => {
+            if (!thumb) return exportGeometryAsync(withImagePreview(withHeightfieldPreview(g, 256, tint)), 'glb', { custom: false, splitByName: false, readFile: (p) => ws.engine.host.readFile(p) });
             const r = renderGeometry(g, { size: 160, views: ['persp'], viewLabels: false });
             return encodePNG(r.rgba.subarray(0, r.width * 160 * 4), r.width, 160, deflate);
           });

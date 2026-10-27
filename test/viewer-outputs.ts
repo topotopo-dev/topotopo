@@ -1,4 +1,6 @@
-// Published results, persistence, export consistency, image channels and camera navigation contracts.
+// Published results, persistence, export consistency, image channels and camera navigation contracts; what each
+// output is and the formats that fit it (io/kinds.ts, checked against the exporters), downloads, export sidecars as
+// metadata of their export in the Outputs and Inputs lists (io/sidecars.ts), the heightfield layer drawn in red.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -13,8 +15,16 @@ import { createNodeHost } from '../src/host/node.ts';
 import { Workspace } from '../src/workspace.ts';
 import type { JSONEdit } from '../src/viewer/json-edit.ts';
 import { Image } from '../src/core/image.ts';
+import { GeoBuilder } from '../src/core/geometry.ts';
+import type { Geometry } from '../src/core/geometry.ts';
+import type { GraphSpec } from '../src/graph/types.ts';
 import { exportGeometry, EXPORT_FORMATS } from '../src/io/export.ts';
-import { FORMAT_LABELS, publishedOutputs, resolveTarget } from '../src/io/targets.ts';
+import type { ExportFormat } from '../src/io/export.ts';
+import { exportFilesAsync } from '../src/io/files.ts';
+import { importGeometry } from '../src/io/import.ts';
+import { fittingFormats, outputKind, sizeText } from '../src/io/kinds.ts';
+import { jsonFormat, sidecarOf } from '../src/io/sidecars.ts';
+import { FORMAT_LABELS, publishedOutputs, resolveTarget, targetExtension } from '../src/io/targets.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { imagePNG } from '../src/io/textures.ts';
 import { startViewer } from '../src/viewer/server.ts';
@@ -64,7 +74,12 @@ const post = async (body: any) => { const r = await fetch(viewer.url + 'api/outp
 const command = async (route: string, body: any) => { const r = await fetch(viewer.url + 'api/output/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, data: await r.json() as any }; };
 try {
   let items = await settled();
-  check(items.filter((x: any) => x.generated && x.kind === 'geometry').length === 3, 'all graphs and named outputs listed');
+  check(items.filter((x: any) => x.generated && x.view === 'model').length === 3, 'all graphs and named outputs listed');
+  // each card says what it is, decided from the cooked geometry, and offers the formats that write it
+  const cards = items.filter((x: any) => x.generated && x.view === 'model');
+  check(cards.every((x: any) => x.kind === 'mesh' && /^mesh \d+ points, \d+ prims$/.test(x.about) && x.size?.length === 3)
+    && cards.every((x: any) => x.formats[0].format === 'glb' && !x.formats.some((f: any) => ['png16', 'r16', 'mask_png', 'unreal_landscape', 'csv'].includes(f.format))),
+    `mesh cards say so ("${cards[0].about}") and offer mesh formats, GLB first, no heightmap`);
   fs.mkdirSync(ws.inputDir, { recursive: true });
   for (const ext of ['jpg', 'jpeg', 'webp', 'png']) {
     const bytes = ext === 'png' ? imagePNG(img) : Uint8Array.of(1, 2, 3);
@@ -79,7 +94,7 @@ try {
   check((await get('api/input_image?path=../asset.json')).status === 400, 'image routes reject traversal');
   items = await settled();
   check(!items.some((x: any) => x.label.startsWith('reference.')) && items.every((x: any) => x.origin === 'published'), 'input references do not enter the outputs catalogue');
-  const texture = items.find((x: any) => x.image === 'atlas'), model = items.find((x: any) => x.graph === 'asset' && x.node === 'model' && x.kind === 'geometry');
+  const texture = items.find((x: any) => x.image === 'atlas'), model = items.find((x: any) => x.graph === 'asset' && x.node === 'model' && x.view === 'model');
   check(texture.width === 2 && texture.layers.join() === 'C,AO', 'generated images include every named layer');
   const pixels = async (mode: string) => decodePNG(new Uint8Array(await (await fetch(viewer.url + `api/output/image?id=${texture.id}&mode=${mode}`)).arrayBuffer()));
   check((await pixels('RGB')).data[4] === 255 && (await pixels('RGB')).data[7] === 255, 'RGB preserves hidden colour and ignores packed alpha');
@@ -113,8 +128,15 @@ try {
   check(maps.status === 200 && maps.data.files === 3 && fs.existsSync(path.join(ws.exportDir, 'maps', 'source.json')), 'a textures target writes every image layer into its folder');
   items = await list(); const bundle = items.find((x: any) => x.origin === 'saved' && x.label === 'maps');
   check(bundle?.files.length === 3 && items.some((x: any) => x.parent === bundle.id && x.kind === 'image'), 'bundled images individually inspectable');
-  const zip = new Uint8Array(await (await fetch(viewer.url + `api/output/zip?id=${bundle.id}`)).arrayBuffer());
-  const entries = unzipSync(zip); check(Object.keys(entries).length === 3 && !!entries['atlas_AO.png'] && !!entries['source.json'], 'ZIP preserves companion files');
+  check(bundle.files.find((f: any) => f.name === 'source.json')?.role === 'source' && !items.some((x: any) => x.parent === bundle.id && x.label === 'source.json')
+    && bundle.view === 'image' && bundle.download.zip && bundle.download.name === 'maps.zip', 'a textures folder\'s source.json is metadata of the folder, not a card; the card is an image, downloaded as maps.zip');
+  const zipped = await fetch(viewer.url + `api/output/zip?id=${bundle.id}`);
+  const entries = unzipSync(new Uint8Array(await zipped.arrayBuffer()));
+  check(Object.keys(entries).length === 3 && !!entries['atlas_AO.png'] && !!entries['source.json'] && /filename\*=UTF-8''maps\.zip/.test(zipped.headers.get('content-disposition') ?? ''), 'ZIP preserves companion files');
+  const savedGlb = items.find((x: any) => x.origin === 'saved' && x.label === 'asset.glb');
+  check(savedGlb?.view === 'model' && savedGlb.files.map((f: any) => `${f.name}:${f.role ?? 'main'}`).join() === 'asset.glb:main,asset.glb.source.json:source'
+    && !savedGlb.download.zip && savedGlb.download.name === 'asset.glb' && !items.some((x: any) => x.parent === savedGlb.id),
+    'a saved GLB is one card (its .source.json is its record) and downloads as the GLB, which carries the record');
   check((await post({ id: model.id, export: 'glb' })).status === 200, 'a target changes back');
   const zinput = [{ name: 'a/file.png', bytes: Uint8Array.from([1, 2, 3]) }];
   check(Buffer.compare(outputZip(zinput), outputZip(zinput)) === 0, 'ZIP bytes deterministic');
@@ -146,6 +168,67 @@ try {
   items = await list(); const csvSaved = items.find((x: any) => x.origin === 'saved' && x.label === 'instances.csv');
   const packedZip = unzipSync(new Uint8Array(await (await fetch(viewer.url + `api/output/zip?id=${csvSaved.id}`)).arrayBuffer()));
   check(!!packedZip['instances.csv'] && !!packedZip['instances.meshes.json'] && Object.keys(packedZip).some((p) => /^instances_meshes\/.*\.glb$/.test(p)), 'ZIP retains nested mesh paths alongside the stream and sidecar');
+  check(packed.kind === 'instances' && /^\d+ instances? of 1 source$/.test(packed.about) && ['glb', 'usda', 'csv', 'pointsjson'].every((f) => packed.formats.some((x: any) => x.format === f))
+    && packed.formats.find((x: any) => x.format === 'csv').writes.includes('one row per instance'), `packed instances say so ("${packed.about}") and offer instance formats`);
+  check(csvSaved.files.find((f: any) => f.name === 'instances.meshes.json')?.role === 'meshes' && !items.some((x: any) => x.parent === csvSaved.id && /meshes\.json$/.test(x.label)),
+    'instance rows: the .meshes.json sidecar is metadata of the stream, not a card');
+
+  // a heightfield: what it is, the formats that write it, downloads with their sidecar, the layer drawn in red
+  ws.setGraph('terrain', { nodes: {
+    hf: { type: 'heightfield', params: { size: 20, resolution: 1 } },
+    hills: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 2 } },
+    flow: { type: 'heightfield_layer', in: ['hills'], params: { layer: 'flow', expression: 'x > 0 ? 3 : 0' } },
+  }, output: 'flow' }); ws.bump('terrain');
+  items = await settled();
+  const field = items.find((x: any) => x.graph === 'terrain' && !x.parent);
+  check(field.kind === 'heightfield' && field.about === 'heightfield 21 × 21, 1 m' && field.size[0] === 20 && field.heightfield.layers.some((l: any) => l.name === 'flow' && l.max === 3),
+    `a heightfield card says so ("${field.about}") with its size and layers`);
+  check(field.formats.map((f: any) => f.format).join() === 'png16,r16,mask_png,unreal_landscape,json' && field.formats[0].writes === '16-bit PNG + JSON sidecar with the height range and how it was made',
+    `a heightfield offers the heightmap formats and no mesh format, each saying what it writes (${field.formats.map((f: any) => f.format).join(', ')})`);
+  const dl = async (body: any) => {
+    const r = await fetch(viewer.url + 'api/output/download', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { r, name: decodeURIComponent(/filename\*=UTF-8''([^;]+)/.exec(r.headers.get('content-disposition') ?? '')?.[1] ?? ''), bytes: new Uint8Array(await r.arrayBuffer()) };
+  };
+  const hm = await dl({ id: field.id, export: 'png16' }), hmZip = hm.r.ok ? unzipSync(hm.bytes) : {};
+  const sidecar = hmZip['terrain.json'] ? JSON.parse(new TextDecoder().decode(hmZip['terrain.json'])) : null;
+  check(hm.r.ok && hm.name === 'terrain.zip' && Object.keys(hmZip).sort().join() === 'terrain.json,terrain.png' && decodePNG(hmZip['terrain.png']).width === 21
+    && sidecar?.source?.graph === 'terrain' && sidecar.source.frame === 1 && sidecar.source.fps === 24 && sidecar.height_max > sidecar.height_min,
+    'Download png16: terrain.zip with the 16-bit PNG and its sidecar (height range, how it was made)');
+  check(!fs.existsSync(path.join(ws.exportDir, 'terrain.png')) && ws.getGraph('terrain').export === undefined, 'a download writes nothing into exports/ and sets no target');
+  const glbDl = await dl({ id: model.id, export: 'glb' });
+  const glbJSON = JSON.parse(new TextDecoder().decode(glbDl.bytes.subarray(20, 20 + new DataView(glbDl.bytes.buffer, glbDl.bytes.byteOffset).getUint32(12, true))));
+  check(glbDl.r.ok && glbDl.name === 'asset.glb' && glbDl.r.headers.get('x-file-count') === '1' && glbJSON.asset?.extras?.source?.graph === 'asset',
+    'Download glb: the one file, which carries how it was made (asset.extras.source)');
+  const objDl = await dl({ id: model.id, export: { format: 'obj', up_axis: 'z' } });
+  const objZip = objDl.r.ok ? unzipSync(objDl.bytes) : {};
+  check(objDl.name === 'asset.zip' && Object.keys(objZip).sort().join() === 'asset.obj,asset.obj.source.json'
+    && JSON.parse(new TextDecoder().decode(objZip['asset.obj.source.json'])).source.export.options.up_axis === 'z', 'Download obj: a zip of the OBJ and its .source.json, with the options given');
+  check((await dl({ id: field.id, export: 'fbx' })).r.status === 400 && (await dl({ id: texture.id, export: 'png16' })).r.status === 400, 'downloads refuse unknown formats and outputs without formats of their own');
+  const geoOf = async (layer?: string) => Buffer.from(await (await fetch(viewer.url + `api/output/geo?id=${field.id}${layer ? `&heightfield_layer=${layer}` : ''}`)).arrayBuffer());
+  const plain = await geoOf();
+  check(plain.equals(await geoOf('mask')) && !plain.equals(await geoOf('flow')) && !(await geoOf('flow')).equals(await geoOf('none')), 'the preview colours the terrain by the layer chosen (the mask by default)');
+  // a heightmap saved by an agent, and files written beside the exports by hand: a sidecar is metadata of its file
+  await exportTool.run({ graph: 'terrain', path: path.join(ws.exportDir, 'land.png') });
+  fs.copyFileSync(path.join(ws.exportDir, 'asset.glb'), path.join(ws.exportDir, 'scan.glb'));
+  fs.copyFileSync(path.join(ws.exportDir, 'asset.glb.source.json'), path.join(ws.exportDir, 'scan.glb.source.json'));
+  items = await list();
+  const land = items.find((x: any) => x.origin === 'saved' && x.label === 'land.png'), scan = items.find((x: any) => x.origin === 'saved' && x.label === 'scan.glb');
+  check(land?.kind === 'heightfield' && /^heightmap 21 × 21, 1 m · height -?[\d.]+ \.\. [\d.]+ m$/.test(land.about) && land.view === 'image'
+    && land.files.map((f: any) => f.role ?? 'main').join() === 'main,heightmap' && land.download.name === 'land.zip' && !items.some((x: any) => /^land\.json/.test(x.label)),
+    `a saved heightmap says what it is from its sidecar ("${land?.about}"), which is no card of its own`);
+  check(scan?.files.map((f: any) => f.role ?? 'main').join() === 'main,source' && !items.some((x: any) => x.label === 'scan.glb.source.json') && scan.download.name === 'scan.glb',
+    'an unregistered export and its .source.json are one card');
+  // the same files dropped into inputs/: the sidecar is metadata of its heightmap, never cooked
+  fs.copyFileSync(path.join(ws.exportDir, 'land.png'), path.join(ws.inputDir, 'land.png'));
+  fs.copyFileSync(path.join(ws.exportDir, 'land.json'), path.join(ws.inputDir, 'land.json'));
+  const inputsList = (await get('api/inputs')).data, landJSON = inputsList.find((f: any) => f.path === 'land.json');
+  check(landJSON?.kind === 'metadata' && landJSON.sidecar?.role === 'heightmap' && landJSON.sidecar.of === 'land.png' && /^heightmap sidecar: height range/.test(landJSON.about)
+    && inputsList.find((f: any) => f.path === 'land.png')?.kind === 'image', 'Inputs: a heightmap\'s sidecar is metadata of the PNG beside it');
+  const sideInfo = await get('api/input_info?path=land.json');
+  check(sideInfo.status === 200 && sideInfo.data.metadata && /heightmap sidecar of inputs\/land\.png/.test(sideInfo.data.summary)
+    && (await fetch(viewer.url + 'api/input_thumb?path=land.json')).status === 400 && (await fetch(viewer.url + 'api/input?path=land.json')).status === 400,
+    'Inputs: a sidecar is described, not cooked (no thumbnail, no geometry)');
+  for (const f of ['land.png', 'land.json']) fs.rmSync(path.join(ws.inputDir, f));
   const ref = items.find((x: any) => x.graph === 'reference');
   await ws.edit('asset', [{ op: 'vars', vars: { size: 4 } }]);
   items = await settled();
@@ -214,6 +297,58 @@ fs.writeFileSync(cliGraph, JSON.stringify({ nodes: { b: { type: 'box' }, s: { ty
 cli('--export-all');
 check(fs.existsSync(path.join(cliExports, 'g.glb')) && fs.existsSync(path.join(cliExports, 'parts', 'ball.obj')), 'CLI --export-all writes every target into exports/ beside the graph');
 check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' && a.graph === 'g'), 'CLI target exports are registered like the viewer\'s');
+
+// What an output is and the formats that fit it (io/kinds.ts), checked against the exporters themselves: every format
+// offered for an output writes some of it (its export succeeds and differs from an export of nothing).
+{
+  const samples: Record<string, { spec: GraphSpec; kind: string; formats: string; text?: RegExp }> = {
+    mesh: { spec: { nodes: { b: { type: 'box' } } }, kind: 'mesh', formats: 'glb,gltf,usda,obj,ply,stl,geo,json', text: /^mesh 8 points, 6 prims$/ },
+    curves: { spec: { nodes: { c: { type: 'line' } } }, kind: 'curves', formats: 'glb,gltf,usda,obj,geo,json', text: /^1 curve, 2 points$/ },
+    points: { spec: { nodes: { g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 20 } } }, output: 's' }, kind: 'points', formats: 'csv,pointsjson,ply,geo,glb,gltf,usda,json', text: /^20 points$/ },
+    instances: { spec: { nodes: { g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 5 } }, b: { type: 'box' }, c: { type: 'copy_to_points', in: ['b', 's'], params: { pack: true } } }, output: 'c' },
+      kind: 'instances', formats: 'glb,usda,csv,pointsjson,gltf,geo,obj,ply,stl,json', text: /^5 instances of 1 source$/ },
+    heightfield: { spec: { nodes: { hf: { type: 'heightfield', params: { size: 8, resolution: 1 } }, n: { type: 'heightfield_noise', in: ['hf'] } }, output: 'n' },
+      kind: 'heightfield', formats: 'png16,r16,mask_png,unreal_landscape,json', text: /^heightfield 9 × 9, 1 m$/ },
+    scene: { spec: { nodes: { hf: { type: 'heightfield', params: { size: 8, resolution: 1 } }, g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 5 } }, b: { type: 'box' },
+      c: { type: 'copy_to_points', in: ['b', 's'], params: { pack: true } }, m: { type: 'merge', in: ['hf', 'c'] } }, output: 'm' },
+      kind: 'mixed', formats: 'unreal_landscape,png16,r16,mask_png,glb,usda,csv,pointsjson,gltf,geo,obj,ply,stl,json', text: /^heightfield 9 × 9, 1 m \+ 5 instances of 1 source$/ },
+    image: { spec: { nodes: { t: { type: 'tex_noise', params: { resolution: 8 } } } }, kind: 'image', formats: 'textures,json', text: /^image 8 × 8$/ },
+    textured: { spec: { nodes: { b: { type: 'box' }, t: { type: 'tex_noise', params: { resolution: 8 } }, m: { type: 'merge', in: ['b', 't'] } }, output: 'm' }, kind: 'mesh', formats: 'glb,gltf,usda,obj,ply,stl,geo,textures,json' },
+    grid: { spec: { nodes: { s: { type: 'sdf_shape' }, g: { type: 'sdf_grid', in: ['s'] } }, output: 'g' }, kind: 'volume', formats: 'json' },
+    sdf: { spec: { nodes: { s: { type: 'sdf_shape' } } }, kind: 'volume', formats: '' },
+    empty: { spec: { nodes: { b: { type: 'box' }, d: { type: 'delete', in: ['b'], params: { group: '*' } } }, output: 'd' }, kind: 'empty', formats: '' },
+  };
+  const nothing = new GeoBuilder().build(), bytesOf = (files: { path: string; bytes: Uint8Array }[]) => Buffer.concat(files.map((f) => Buffer.from(f.bytes)));
+  const exportsOf = async (g: Geometry, format: ExportFormat) => { try { return bytesOf((await exportFilesAsync(g, format, `out/x${targetExtension(format) || ''}`)).files); } catch { return null; } };
+  for (const [name, s] of Object.entries(samples)) {
+    const r = await engine.cook(s.spec);
+    if (!r.ok) { check(false, `${name}: the sample cooks (${r.errors.map((e) => e.message).join('; ')})`); continue; }
+    const info = outputKind(r.geo!), fits = fittingFormats(info);
+    check(info.kind === s.kind && (!s.text || s.text.test(info.text)) && fits.map((f) => f.format).join() === s.formats, `${name}: ${info.kind} "${info.text}" → ${fits.map((f) => f.format).join(', ') || 'no format'}`);
+    const silent: string[] = [];
+    for (const f of fits) {
+      const out = await exportsOf(r.geo!, f.format), none = await exportsOf(nothing, f.format);
+      if (!out || (none && out.equals(none))) silent.push(f.format);
+    }
+    check(!silent.length, `${name}: every format offered writes some of it${silent.length ? ` (not: ${silent.join(', ')})` : ''}`);
+  }
+  const big = await engine.cook({ nodes: { hf: { type: 'heightfield', params: { size: 4096, resolution: 2 } } } });
+  check(outputKind(big.geo!).text === 'heightfield 2049 × 2049, 2 m' && sizeText(outputKind(big.geo!).size!) === '4096 × 0 × 4096 m', 'a 4 km field at 2 m says "heightfield 2049 × 2049, 2 m"');
+  const scene = fittingFormats(outputKind((await engine.cook(samples.scene.spec)).geo!));
+  check(scene[0].leaves.length === 0 && scene.find((f) => f.format === 'glb')!.leaves.join() === 'heightfield' && scene.find((f) => f.format === 'png16')!.leaves.join() === 'instances'
+    && scene.find((f) => f.format === 'glb')!.oneFile && !scene.find((f) => f.format === 'png16')!.oneFile, 'mixed: each format says what it leaves out; GLB downloads as one file, the heightmap as a zip');
+  // sidecars (io/sidecars.ts): by the format they declare first, and the file beside them
+  const there = new Set(['t/terrain.png', 'h.r16', 'a.glb', 'maps', 'i.csv', 'level', 'rock.png']), at = (p: string) => there.has(p);
+  check(jsonFormat('{\n  "format": "png16",\n  "layer": "height"') === 'png16' && jsonFormat('{"version": 1, "format": "x"}') === null && jsonFormat('[1, 2]') === null, 'jsonFormat reads the format a JSON declares first');
+  check(JSON.stringify([sidecarOf('t/terrain.json', 'png16', at), sidecarOf('h.json', 'r16', at), sidecarOf('a.glb.source.json', 'topotopo-export-source', at), sidecarOf('maps/source.json', 'topotopo-export-source', at),
+    sidecarOf('i.meshes.json', 'topotopo-instance-meshes', at), sidecarOf('level/landscape.json', 'topotopo-unreal-landscape', at), sidecarOf('lost.json', 'png16', at)])
+    === JSON.stringify([{ role: 'heightmap', of: 't/terrain.png' }, { role: 'heightmap', of: 'h.r16' }, { role: 'source', of: 'a.glb' }, { role: 'source', of: 'maps' },
+      { role: 'meshes', of: 'i.csv' }, { role: 'landscape', of: 'level' }, { role: 'heightmap', of: null }]), 'sidecarOf: each sidecar and the file it describes (null when that is not there)');
+  check(sidecarOf('rock.json', 'topotopo-geo', at) === null && sidecarOf('rock.json', null, at) === null && sidecarOf('rock.png', 'png16', at) === null, 'a geometry JSON (or no JSON) is not a sidecar');
+  let readSidecar = '';
+  try { importGeometry(new TextEncoder().encode(JSON.stringify({ format: 'png16', layer: 'height', height_min: 0, height_max: 1 })), 'json'); } catch (e) { readSidecar = (e as Error).message; }
+  check(/an export's heightmap sidecar .*not geometry: read the heightmap PNG beside it with heightfield_from_image/.test(readSidecar), 'a file node reading a sidecar says what it is and what to read instead');
+}
 
 // The agent hears about new inputs: the first answer names what is there, later ones what is new, once.
 const listenTools = makeTools(ws), catalog = listenTools.find((t) => t.name === 'catalog')!;

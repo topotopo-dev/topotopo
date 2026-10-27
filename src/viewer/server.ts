@@ -33,6 +33,9 @@ import { createOutputs } from './outputs.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';
+import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
+import { outputKind } from '../io/kinds.ts';
+import { sidecarFile } from '../host/sidecars.ts';
 // the page's guide rules, shared so the page and this server check a marker list the same way
 import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList } from './app/markers.js';
 
@@ -232,7 +235,9 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   // ---------------------------------------------------------------- inputs/
   let inputsVersion = 0;
   const inputsChanged = () => broadcast({ inputs: ++inputsVersion });
-  const listInputs = () => ws.listInputs().filter((f) => !PART_RE.test(f.path));
+  // an export's sidecar (kind "metadata") says what it is: the page shows it with the file it describes
+  const listInputs = () => ws.listInputs().filter((f) => !PART_RE.test(f.path))
+    .map((f) => (f.sidecar ? { ...f, about: `${SIDECAR_NAMES[f.sidecar.role]}: ${SIDECAR_TEXT[f.sidecar.role]}` } : f));
   const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? 'in the workspace' : `in ${path.dirname(ws.inputDir)}`);
   // Files copied into inputs/ by other means (file manager, an agent) show up too, once the folder exists. The viewer
   // does not make it just to watch it (`topotopo view`'s inputs/ beside the graph file appears with the first drop):
@@ -564,6 +569,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         const { rel, abs } = inputPath(u.searchParams.get('path')), mime = imageType(abs);
         if (mime) return send(200, fs.readFileSync(abs), mime);
         if (u.pathname === '/api/input_image') throw new HttpError(400, 'choose a PNG, JPEG or WebP image');
+        if (sidecarFile(abs)) throw new HttpError(400, `inputs/${rel} is an export's sidecar (metadata), not geometry: it has no thumbnail`);
         const stat = fs.statSync(abs), key = `${abs}:${stat.size}:${stat.mtimeMs}`;
         if (!inputThumbs.has(key)) {
           if (inputThumbs.size >= 128) inputThumbs.delete(inputThumbs.keys().next().value!);
@@ -580,6 +586,13 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       }
       if (u.pathname === '/api/input' || u.pathname === '/api/input_info') {
         const { rel, abs } = inputPath(u.searchParams.get('path'));
+        // an export's sidecar (io/sidecars.ts) is metadata of the file beside it: described, never cooked
+        const side = sidecarFile(abs);
+        if (side) {
+          const what = `${SIDECAR_NAMES[side.role]} of ${side.of ? `inputs/${path.relative(ws.inputDir, side.of).split(path.sep).join('/')}` : 'an export that is not in inputs/'}: ${SIDECAR_TEXT[side.role]}`;
+          if (u.pathname === '/api/input_info') return json(200, { path: rel, summary: `${what} (metadata, not geometry)`, metadata: true });
+          throw new HttpError(400, `inputs/${rel} is ${what}: metadata, not geometry to show`);
+        }
         if (u.pathname === '/api/input_info' && imageType(abs)) {
           let summary = `${imageType(abs)} · ${fs.statSync(abs).size} bytes`;
           // Preserve the existing PNG summary contract without cooking a file-node graph.
@@ -604,8 +617,10 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         const r = !u.searchParams.get('node') && ws.held(name) && last?.ok && last.target === node ? last : await ws.cook(name, node, undefined, { kind: 'preview' });
         if (r.stopped) return send(409, JSON.stringify({ error: `${STOPPED} at ${r.stopped}`, stopped: r.stopped }), MIME['.json']);
         if (!r.ok || !r.geo) return send(500, JSON.stringify({ error: r.errors.map(issueText).join('\n') }), MIME['.json']);
-        if (u.pathname === '/api/info') return send(200, JSON.stringify({ target: r.target, summary: summarize(r.geo), ms: r.ms }), MIME['.json']);
-        return send(200, await toGLB(r.geo), MIME['.glb']);
+        // info: what it is (io/kinds.ts), for the properties and their heightfield layer picker
+        if (u.pathname === '/api/info') return send(200, JSON.stringify({ target: r.target, summary: summarize(r.geo), ms: r.ms, about: outputKind(r.geo) }), MIME['.json']);
+        // heightfields: the layer drawn in red (the page's layer picker; the mask by default)
+        return send(200, await previewGLB(r.geo, { heightfieldLayer: u.searchParams.get('heightfield_layer') || undefined }), MIME['.glb']);
       }
       send(404, 'not found');
     } catch (e: any) {
