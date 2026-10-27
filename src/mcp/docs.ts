@@ -202,6 +202,7 @@ READING OTHER NODES (n = a node of the same graph or body, named by a string lit
   centroid('n') → mean point position              (bbox('n').center is the box centre)
   detail('n', 'attr'[, comp])                      detail attribute value
   point('n', i, 'attr'[, comp])  prim('n', i, 'attr'[, comp])   (prim 'P' = centroid when no prim P exists)
+  primintrinsic('n', i, 'name'[, comp])            computed prim values (topic instancing): "=primintrinsic('rocks', 0, 'bounds', 3)" = ymax
   ch('n', 'param') or ch('n/param')               another node's resolved param value (defaults included)
   e.g. stack on top: "translate": [0, "=bbox('base').max.y", 0]    match a count: "count": "=npoints('pts')"
 Referenced nodes are dependencies: they cook first (even if not wired), changing them re-cooks this node, unknown
@@ -273,6 +274,9 @@ GEOMETRY QUERIES (input 0 = incoming geometry, 1..3 = other inputs):
   nearpoint(i,pos[,maxdist]) nearpoints(i,pos,maxdist,maxcount) xyzdist(i,pos) minpos(i,pos) closest(i,pos)→{dist,pos,prim}
   intersect(i,orig,dir)→{prim,pos,dist} (prim -1 = miss)  inpointgroup(i,"grp",pt) inprimgroup(i,"grp",pr)
   invertexgroup(i,"grp",v) inedgegroup(i,"grp",pt0,pt1)
+  primintrinsic(i,"name",pr): read-only values computed per prim: "bounds" [xmin,xmax,ymin,ymax,zmin,zmax], "typename"
+    ("Poly" | "PackedGeometry" | "BezierCurve" | "NURBCurve"), "vertexcount", "closed"; on packed prims "packedbounds" (the
+    source's own box), "transform" (3×3), "packedfulltransform" (4×4), "pivot" (topic instancing)
 EDITS (applied after the loop, geohandle 0 optional):
   addpoint(0,pos)→pt  addprim(0,"poly"|"polyline",[pts])→prim  removepoint(0,pt)  removeprim(0,pr,andpoints)
   setpointattrib(0,"name",pt,v) setprimattrib setvertexattrib setdetailattrib(0,"name",v) setpointgroup(0,"g",pt,1) setprimgroup
@@ -543,6 +547,12 @@ Every other node (boolean, subdivide, scatter, normal, measure, uv_*, …) gets 
   unpack {group, transfer_attributes:"name Cd material piece", limit, piece_attrib, recursive}.
   Anchor attributes are copied onto the unpacked geometry only where the source has none (Cd: in any class), so a
   source's own colours win and an anchor Cd tints colourless sources.
+Read them: primintrinsic(0, "bounds", pr) in a wrangle (or primintrinsic('n', pr, 'bounds') in an expression) is the
+  instance's world box [xmin, xmax, ymin, ymax, zmin, zmax], computed when read; "packedbounds" is the source's own box;
+  "transform" is the 3×3 rotation·scale and "packedfulltransform" the 4×4 with the anchor position as its last row, both
+  row-major for row vectors (p' = p · M + t); "typename" is "PackedGeometry". Sit every instance on the ground:
+  wrangle {run_over:"prims", code:"const b = primintrinsic(0, 'bounds', @primnum), pt = primpoints(0, @primnum)[0];
+  const p = point(0, 'P', pt); p[1] -= b[2]; setpointattrib(0, 'P', pt, p);"}
 See them: render draws instances (an evenly spread subset above 600k triangles, with a note "rendering 9.5k of 30k
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
 Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",

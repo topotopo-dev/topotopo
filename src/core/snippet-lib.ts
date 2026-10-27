@@ -15,7 +15,7 @@
  * (wrangle.ts runWrangleParallel); test/pool.ts checks this list against the functions installed below.
  */
 export const GEOMETRY_FUNCTIONS = [
-  'npoints', 'nprims', 'nvertices', 'point', 'prim', 'vertex', 'detail', 'haspointattrib', 'hasprimattrib', 'primpoints',
+  'npoints', 'nprims', 'nvertices', 'point', 'prim', 'primintrinsic', 'vertex', 'detail', 'haspointattrib', 'hasprimattrib', 'primpoints',
   'pointprims', 'neighbours', 'neighbors', 'neighbourcount', 'primvertexcount', 'nearpoint', 'nearpoints', 'xyzdist', 'minpos',
   'closest', 'intersect', 'inpointgroup', 'inprimgroup', 'invertexgroup', 'inedgegroup', 'pointattribtype', 'addpoint',
   'addprim', 'removepoint', 'removeprim', 'setpointattrib', 'setprimattrib', 'setvertexattrib', 'setdetailattrib',
@@ -251,6 +251,8 @@ export function installSnippetLib(g: any, host: any): (api: any) => void {
   L.nvertices = (i = 0) => C().nvertices(i);
   L.point = (i: number, name: string, pt: number) => toArr(C().attr(i, 'point', name, pt));
   L.prim = (i: number, name: string, pr: number) => toArr(C().attr(i, 'prim', name, pr));
+  // read-only values computed per prim: bounds, typename, vertexcount, closed; packed: packedbounds, transform, … (intrinsics.ts)
+  L.primintrinsic = (i: number, name: string, pr: number) => toArr(C().primintrinsic(i, name, pr));
   L.vertex = (i: number, name: string, v: number) => toArr(C().attr(i, 'vertex', name, v));
   L.detail = (i: number, name: string) => toArr(C().attr(i, 'detail', name, 0));
   L.haspointattrib = (i: number, name: string) => C().hasattr(i, 'point', name);

@@ -24,6 +24,7 @@
 // on the pool. Without a pool everything is pulled one input at a time, as before.
 import { Geometry, isGeometry } from '../core/geometry.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
+import { primIntrinsic } from '../core/intrinsics.ts';
 import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
 import type { Host } from '../host/types.ts';
@@ -270,6 +271,14 @@ function refFunctions(geo: Map<string, Geometry>, chp: ChParams): Record<string,
     },
     point: (n, i, attr, c) => elem('point', 'point', n, i, attr, c),
     prim: (n, i, attr, c) => elem('prim', 'prim', n, i, attr, c),
+    primintrinsic: (n, i, name, c) => {
+      const g = G('primintrinsic', n);
+      const call = `primintrinsic("${n}", ${i}, ${JSON.stringify(name)})`;
+      if (typeof name !== 'string') throw new Error(`${call}: the intrinsic name must be a string`);
+      let v: number | string | number[];
+      try { v = primIntrinsic(g, i, name); } catch (e: any) { throw new Error(`${call}: ${e.message}`); }
+      return comp(v, c, call);
+    },
     ch: (a, b) => {
       let node = a, param = b;
       if (b === undefined && typeof a === 'string') {

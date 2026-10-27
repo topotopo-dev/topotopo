@@ -35,7 +35,7 @@ export const TIME_KEYS = new Set(['frame', 'time', 'fps', 'timeInc']);
 export const DEFAULT_TIME: TimeState = { frame: 1, time: 0, fps: 24, timeInc: 1 / 24 };
 
 /** Functions of "=expr" params that read other nodes: upstream geometry, or another node's parameter. */
-export const REF_FUNCS = ['npoints', 'nprims', 'nvertices', 'bbox', 'centroid', 'detail', 'point', 'prim', 'ch'];
+export const REF_FUNCS = ['npoints', 'nprims', 'nvertices', 'bbox', 'centroid', 'detail', 'point', 'prim', 'primintrinsic', 'ch'];
 
 /** The helper names every expression can use besides graph vars, time and REF_FUNCS (documented in topic "expressions"). */
 export const EXPR_HELPERS = [

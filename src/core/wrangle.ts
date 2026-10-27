@@ -12,6 +12,7 @@
 import { Attribute, Geometry, defaultValueFor, isArrayType } from './geometry.ts';
 import type { AttribClass, AttribType } from './geometry.ts';
 import { primCentroid, primNormals, pointNeighbors, pointPrims } from './topology.ts';
+import { primIntrinsic } from './intrinsics.ts';
 import { KDTree, TriBVH } from './spatial.ts';
 import { GEOMETRY_FUNCTIONS, REALM_CONTROL } from './snippet-lib.ts';
 import type { TypedArray } from './kernels.ts';
@@ -516,6 +517,10 @@ export class WrangleAPI {
     return a.get(idx);
   }
   primpoints(i: number, p: number) { return this.geo(i).primPoints(p); }
+  primintrinsic(i: number, name: string, p: number) {
+    try { return primIntrinsic(this.geo(i), Number(p), String(name)); }
+    catch (e: any) { throw new Error(`primintrinsic(${i}, ${JSON.stringify(String(name))}, ${p}): ${e.message}`); }
+  }
   pointprims(i: number, pt: number) {
     let m = this.pp.get(i);
     if (!m) { m = pointPrims(this.geo(i)); this.pp.set(i, m); }

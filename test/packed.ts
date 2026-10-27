@@ -436,6 +436,78 @@ const SRC: Record<string, NodeSpec> = {
   check(/packed: 900 instances of 1 source \(1,152,000 triangles expanded\)/.test(sum) && /= 900 packed/.test(sum), `inspect summary reports the instances (${sum.split('\n')[1]})`);
 }
 
+// ---------------------------------------------------------------- prim intrinsics: computed bounds and transforms
+{
+  const nodes: Record<string, NodeSpec> = {
+    ...PTS, ...SRC,
+    pts0: { type: 'attrib_delete', in: ['pts'], params: { names: 'N', class: 'point' } },
+    attrs: { type: 'wrangle', in: ['pts0'], params: { code: '@orient = normalize([rand(@ptnum), rand(@ptnum + 1), rand(@ptnum + 2), 1]); @pscale = 0.5 + rand(@ptnum + 3); @scale = [1, 2, 0.5];' } },
+    inst: { type: 'copy_to_points', in: ['tree', 'attrs'], params: { pack: true } },
+    read: {
+      type: 'wrangle', in: ['inst'], params: {
+        run_over: 'prims',
+        code: 'f[]@b = primintrinsic(0, "bounds", @primnum); f[]@pb = primintrinsic(0, "packedbounds", @primnum); ' +
+          'f[]@m3 = primintrinsic(0, "transform", @primnum); f[]@m4 = primintrinsic(0, "packedfulltransform", @primnum); ' +
+          's@t = primintrinsic(0, "typename", @primnum); i@vc = primintrinsic(0, "vertexcount", @primnum); @pv = primintrinsic(0, "pivot", @primnum);',
+      },
+    },
+    back: { type: 'unpack', in: ['inst'], params: { transfer_attributes: '', piece_attrib: 'piece' } },
+  };
+  const g = await cook(nodes, 'read'), back = await cook(nodes, 'back');
+  const A = (name: string, p: number) => g.prims.get(name)!.get(p) as any;
+  const src = g.packedSources[0], sb = src.bbox();
+  // p' = [x, y, z, 1] · M (row-major, row vectors)
+  const xf = (m: number[], x: number, y: number, z: number) => [0, 1, 2].map((c) => x * m[c] + y * m[4 + c] + z * m[8 + c] + m[12 + c]);
+  const piece = back.prims.get('piece')!;
+  let worst = 0, boxErr = 0, same = true, inside = true;
+  for (let p = 0; p < g.numPrims; p++) {
+    const m4 = A('m4', p), b = A('b', p);
+    same &&= A('t', p) === 'PackedGeometry' && A('vc', p) === 1 && eq(A('pv', p), [0, 0, 0]) &&
+      eq(A('pb', p), [sb.min[0], sb.max[0], sb.min[1], sb.max[1], sb.min[2], sb.max[2]]) &&
+      eq(A('m3', p), [m4[0], m4[1], m4[2], m4[4], m4[5], m4[6], m4[8], m4[9], m4[10]]);
+    // bounds = the box of the transformed source box's corners
+    const c = [0, 1, 2, 3, 4, 5, 6, 7].map((k) => xf(m4, k & 1 ? sb.max[0] : sb.min[0], k & 2 ? sb.max[1] : sb.min[1], k & 4 ? sb.max[2] : sb.min[2]));
+    for (let k = 0; k < 3; k++) boxErr = Math.max(boxErr, Math.abs(b[k * 2] - Math.min(...c.map((q) => q[k]))), Math.abs(b[k * 2 + 1] - Math.max(...c.map((q) => q[k]))));
+    // the source points mapped by packedfulltransform are this instance's unpacked points
+    const mine = new Set<number>();
+    for (let q = 0; q < back.numPrims; q++) if (piece.get(q) === p) for (const pt of back.primPoints(q)) mine.add(pt);
+    for (let s = 0; s < src.numPoints; s++) {
+      const w = xf(m4, src.P[s * 3], src.P[s * 3 + 1], src.P[s * 3 + 2]);
+      let best = Infinity;
+      for (const pt of mine) best = Math.min(best, Math.hypot(back.P[pt * 3] - w[0], back.P[pt * 3 + 1] - w[1], back.P[pt * 3 + 2] - w[2]));
+      worst = Math.max(worst, best);
+      for (let k = 0; k < 3; k++) inside &&= w[k] >= b[k * 2] - 1e-9 && w[k] <= b[k * 2 + 1] + 1e-9;
+    }
+  }
+  check(g.numPacked === 40 && same, 'primintrinsic on packed prims: typename, vertexcount, pivot, packedbounds = the source box, transform = the 4×4 rotation part');
+  check(worst < 1e-9 && inside, `primintrinsic packedfulltransform maps each source point onto its unpacked point (worst ${worst.toExponential(1)}), inside "bounds"`);
+  check(boxErr < 1e-9, `primintrinsic bounds = the box of the transformed source box (max diff ${boxErr.toExponential(1)})`);
+
+  // polygons and curves; errors name what a prim has
+  const shapes = await cook({
+    box: { type: 'box', params: { size: [1, 2, 3] } },
+    line: { type: 'line' },
+    bez: { type: 'bezier' },
+    all: { type: 'merge', in: ['box', 'line', 'bez'] },
+    read: { type: 'wrangle', in: ['all'], params: { run_over: 'prims', code: 's@t = primintrinsic(0, "typename", @primnum); i@c = primintrinsic(0, "closed", @primnum); f[]@b = primintrinsic(0, "bounds", @primnum);' } },
+  }, 'read');
+  const last = shapes.numPrims - 1, pts0 = shapes.primPoints(0).map((q) => shapes.P[q * 3 + 1]);
+  check(shapes.prims.get('t')!.get(0) === 'Poly' && shapes.prims.get('c')!.get(0) === 1 && shapes.prims.get('t')!.get(last) === 'BezierCurve' &&
+    shapes.prims.get('c')!.get(last - 1) === 0 && eq((shapes.prims.get('b')!.get(0) as number[]).slice(2, 4), [Math.min(...pts0), Math.max(...pts0)]),
+    'primintrinsic on polygons and curves: typename Poly / BezierCurve, closed 1 / 0 (polyline), bounds of the prim\'s points');
+  const err = async (code: string) => (await engine.cook({ nodes: { box: { type: 'box' }, w: { type: 'wrangle', in: ['box'], params: { run_over: 'prims', code } } }, output: 'w' })).errors[0]?.message ?? '';
+  const e1 = await err('f[]@m = primintrinsic(0, "transform", @primnum);'), e2 = await err('f@x = primintrinsic(0, "area", @primnum);');
+  check(/is Poly: "transform" is only on packed prims \(this prim has bounds, typename, vertexcount, closed\)/.test(e1), `a packed-only intrinsic on a polygon says what the prim has (${e1.slice(0, 120)})`);
+  check(/no intrinsic "area" \(this prim has bounds/.test(e2), `an unknown intrinsic says what the prim has (${e2.slice(0, 90)})`);
+
+  // expressions read intrinsics of another node, which becomes a dependency
+  const lift = await cook({ ...nodes, cube: { type: 'box', params: { size: [0.1, 0.1, 0.1] } }, up: { type: 'transform', in: ['cube'], params: { translate: [0, "=primintrinsic('inst', 3, 'bounds', 3)", 0] } } }, 'up');
+  const ymax = (A('b', 3) as number[])[3], ly = lift.bbox();
+  check(Math.abs((ly.min[1] + ly.max[1]) / 2 - ymax) < 1e-12, `expression primintrinsic('inst', 3, 'bounds', 3) = instance 3's ymax (${ymax.toFixed(4)}), from an unwired node`);
+  const ex = await engine.cook({ nodes: { ...nodes, up: { type: 'transform', in: ['inst'], params: { translate: [0, "=primintrinsic('inst', 999, 'bounds', 3)", 0] } } }, output: 'up' });
+  check(!ex.ok && /primintrinsic\("inst", 999, "bounds"\): prim 999 is out of range \(40 prims\)/.test(ex.errors[0]?.message ?? ''), 'an out-of-range prim in an expression is an error naming the call');
+}
+
 // ---------------------------------------------------------------- every node type fed packed prims
 {
   const bad: string[] = [];
