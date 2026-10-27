@@ -469,10 +469,11 @@ DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise clos
   Protected outlets and retained lakes are exceptions to border drainage. Pipe/stream_power erosion initializes from lake and writes simulated water
   depth back to lake within that original lake footprint. Droplet water remains its legacy normalised resting mask.
   See examples/drainage.json: unfilled massif beside shallow fills, blue retained lakes and coloured accumulation.
-RENDER / INSPECT: render draws heightfields as a shaded grid (the mask in red); color_by any layer name. It draws at
-  most 256 quads per side, so a 513 × 513 field shows at 257 × 257 (the footer and a note say so); heightfield_res:
-  "full" (CLI --heightfield-res full) draws every sample. inspect and every cook summary list the grid and each
-  layer's min/max/mean.
+RENDER / INSPECT: render draws heightfields as a shaded grid with the mask in red; heightfield_layer:"flow" draws
+  another layer in red instead ("none": none; the viewer's layer picker does the same), color_by any layer name maps
+  it to colours. It draws at most 256 quads per side, so a 513 × 513 field shows at 257 × 257 (the footer and a note
+  say so); heightfield_res: "full" (CLI --heightfield-res full) draws every sample. inspect and every cook summary
+  list the grid and each layer's min/max/mean.
 UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with
   height_min / height_max and the import settings. Pixel column = X, row = Z (row 0 at min Z); Unreal X = X,
   Unreal Y = Z, Unreal Z = Y, centimetres.
@@ -829,12 +830,14 @@ QUESTION → OPTION
 Labels never overlap: ones without room are skipped (note says how many; raise size or lower max_labels).
 view_labels:false drops each view's name label and the persp axis gizmo (clean thumbnails, e.g. the shelf's).
 Heightfields draw at most heightfield_res quads per side (default 256; "full" = every sample): a larger field is
-  drawn decimated (a 513 × 513 field at 257 × 257) and the footer and a note say so.
+  drawn decimated (a 513 × 513 field at 257 × 257) and the footer and a note say so. They show the mask in red;
+  heightfield_layer:"flow" shows another layer (0..1 layers as they are, others from their min to their max, named
+  in the legend) and "none" none.
 Examples: render {views:["persp","section"], section_axis:"z", wireframe:"hard", label_groups:true}
           render {views:"turntable", shading:"matcap"} · render {glyphs:"N", clip:{axis:"x", offset:0.5}}
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
   --shading pbr --exposure 0.5
-  --no-view-labels --heightfield-res full`,
+  --no-view-labels --heightfield-res full --heightfield-layer flow`,
 
   export: `EXPORT
 export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic

@@ -21,7 +21,7 @@ import { PLANE_UV, sliceTriangles, windingGrid } from './section.ts';
 import type { Slice } from './section.ts';
 import { LabelPlacer, ambientOcclusion, dotOv, drawLabel, drawLegend, lineOv } from './overlay.ts';
 import type { DepthTol, LegendItem, RGB } from './overlay.ts';
-import { heightfieldPreviewStep, isHeightfield, withHeightfieldPreview } from '../core/heightfield.ts';
+import { heightfieldPreviewStep, isHeightfield, layerStats, withHeightfieldPreview } from '../core/heightfield.ts';
 import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler } from './texview.ts';
 import { pbrScene, preparePBR } from './pbr.ts';
@@ -69,6 +69,12 @@ export interface RenderOptions {
    * larger field is drawn decimated, and the footer and a note say so.
    */
   heightfieldRes?: number;
+  /**
+   * heightfields: the layer drawn in red over the height ramp (default "mask"; "none" draws none). The mask and layers
+   * within 0..1 show as they are, others from their minimum to their maximum. A layer given here is named in the
+   * footer's legend (unless colorBy is set); a missing one gets a note.
+   */
+  heightfieldLayer?: string;
   title?: string;
   /** shade 3D views with an 8×8 procedural checker from uv (stretch and flips become visible) */
   checker?: boolean;
@@ -237,7 +243,18 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const hfRes = o.heightfieldRes ?? HEIGHTFIELD_RENDER_RES;
   if (!(hfRes >= 1)) throw new Error(`heightfieldRes must be at least 1 (quads per side) or Infinity (every sample), got ${hfRes}`);
   const hfShown = g.volumes.filter(isHeightfield).map((v) => ({ v, ...heightfieldPreviewStep(v, hfRes) })).filter((x) => x.step > 1);
-  g = withHeightfieldPreview(g, hfRes);
+  const hfLayer = o.heightfieldLayer ?? 'mask', hfNotes: string[] = [];
+  let hfLegend = '';
+  if (o.heightfieldLayer !== undefined && hfLayer !== 'none') {
+    // a layer the person chose: said in the legend (with its range when it is not a 0..1 layer), or why it is not shown
+    if (!g.volumes.some(isHeightfield)) hfNotes.push('heightfield_layer: the geometry has no heightfield');
+    for (const v of g.volumes.filter(isHeightfield)) {
+      const a = v.layers.get(hfLayer), st = layerStats(a);
+      if (!st) hfNotes.push(`heightfield_layer: heightfield "${v.name}" has no layer "${hfLayer}" (layers: ${[...v.layers.keys()].join(', ') || 'none'})`);
+      else if (!hfLegend) hfLegend = `HEIGHTFIELD ${hfLayer.toUpperCase()} IN RED${hfLayer === 'mask' || (st.min >= 0 && st.max <= 1) ? '' : ` [${fmtNum(st.min)} .. ${fmtNum(st.max)}]`}`;
+    }
+  }
+  g = withHeightfieldPreview(g, hfRes, hfLayer);
   g = withSdfGridPreview(g); // sampled SDFs draw through the existing level-set mesher at preview resolution
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   // images and nothing else to draw in 3D: the texture view (render/texview.ts)
@@ -271,6 +288,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const outW = cols * tile + (cols - 1) * 2, outH = rows * tile + (rows - 1) * 2 + footerH;
   const notes: string[] = hfShown.map((x) =>
     `heightfield "${x.v.name}" shown at ${x.shown[0]}×${x.shown[1]} of ${x.v.width}×${x.v.height} samples (1 in ${x.step} per side); heightfield_res "full" (CLI --heightfield-res full) draws every sample`);
+  notes.push(...hfNotes);
 
   // --- scene data shared by all views
   const Pd = g.P, np = g.numPoints;
@@ -368,6 +386,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         return c[0] === 1 && c[1] === 1 && c[2] === 1 ? m.baseColor : c;
       };
     }
+    // the heightfield layer a person chose to see in red
+    if (hfLegend) { legend = hfLegend; if (o.legend) cbLegend = [{ color: [0.9, 0.12, 0.1], text: hfLegend.replace(' IN RED', '').toLowerCase() }]; }
   }
   const hl = o.highlight;
   if (hl) {

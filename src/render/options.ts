@@ -43,7 +43,8 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = bool(v);
   }
-  for (const [s, c] of [['color_by', 'colorBy'], ['label_attrib', 'labelAttrib'], ['glyph_attrib', 'glyphAttrib'], ['glyphs', 'glyphs'], ['shading', 'shading'], ['title', 'title'], ['texture', 'texture']] as const) {
+  for (const [s, c] of [['color_by', 'colorBy'], ['label_attrib', 'labelAttrib'], ['glyph_attrib', 'glyphAttrib'], ['glyphs', 'glyphs'], ['shading', 'shading'], ['title', 'title'], ['texture', 'texture'],
+    ['heightfield_layer', 'heightfieldLayer']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = String(v);
   }

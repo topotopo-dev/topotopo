@@ -459,6 +459,22 @@ export interface ToMeshOptions {
   uv?: boolean;
   /** point Cd: none, mask (white → red), height (low → high ramp), terrain (grass / rock / sediment / snow / road), preview */
   color?: 'none' | 'mask' | 'height' | 'terrain' | 'preview';
+  /**
+   * color "mask" and "preview": the layer drawn in red (default "mask"; "none" or null: none). The mask and any layer
+   * within 0..1 show as they are (clamped to 0..1), any other layer from its minimum (none) to its maximum (full red).
+   */
+  colorLayer?: string | null;
+}
+
+/** The layer a preview draws in red as a 0..1 value per sample, or null when it is missing or shows nothing. */
+export function layerTint(hf: Heightfield, name: string | null = 'mask'): ((k: number) => number) | null {
+  const a = name === null || name === 'none' ? undefined : hf.layer(name);
+  const st = layerStats(a);
+  if (!a || !st) return null;
+  const unit = name === 'mask' || (st.min >= 0 && st.max <= 1);
+  const lo = unit ? 0 : st.min, span = unit ? 1 : st.max - st.min;
+  if (!(st.max > lo) || !(span > 0)) return null;
+  return (k) => { const x = (a[k] - lo) / span; return x > 0 ? (x < 1 ? x : 1) : 0; };
 }
 
 const ramp = (stops: [number, number[]][], t: number): number[] => {
@@ -537,19 +553,18 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
     const Cd = g.points.add('Cd', 'float', 3).data as Float64Array;
     const st = layerStats(H)!;
     const span = st.max - st.min || 1;
-    const mask = hf.layer('mask');
-    const mst = layerStats(mask);
-    const showMask = !!mask && !!mst && mst.max > 0 && (color === 'mask' || color === 'preview');
+    // the layer drawn in red (the mask unless colorLayer names another)
+    const tint = color === 'mask' || color === 'preview' ? layerTint(hf, o.colorLayer === undefined ? 'mask' : o.colorLayer) : null;
     const slope = color === 'terrain' ? slopeLayer(hf, H) : null;
     const sed = hf.layer('sediment'), deb = hf.layer('debris'), flow = hf.layer('flow'), road = hf.layer('path'), water = hf.layer('water');
     for (let p = 0; p < np; p++) {
       const k = src[p], t = (H[k] - st.min) / span;
       let c: number[];
-      if (color === 'mask') { const m = mask ? Math.max(0, Math.min(1, mask[k])) : 0; c = [0.85 + 0.1 * m, 0.85 - 0.7 * m, 0.85 - 0.75 * m]; }
+      if (color === 'mask') { const m = tint ? tint(k) : 0; c = [0.85 + 0.1 * m, 0.85 - 0.7 * m, 0.85 - 0.75 * m]; }
       else if (color === 'height') c = ramp(HEIGHT_RAMP, t);
       else if (color === 'preview') {
         c = ramp(PREVIEW_RAMP, t);
-        if (showMask) { const m = Math.max(0, Math.min(1, mask![k])) * 0.7; c = [c[0] + (0.9 - c[0]) * m, c[1] + (0.12 - c[1]) * m, c[2] + (0.1 - c[2]) * m]; }
+        if (tint) { const m = tint(k) * 0.7; c = [c[0] + (0.9 - c[0]) * m, c[1] + (0.12 - c[1]) * m, c[2] + (0.1 - c[2]) * m]; }
       } else {
         // terrain: grass on gentle slopes, rock on steep ones, sand where sediment/debris settled, darker where water
         // flows, snow on the highest gentle ground, asphalt on a "path" layer
@@ -580,20 +595,23 @@ export function heightfieldPreviewStep(hf: HeightfieldVolume, maxRes = 256): { s
   return { step, shown: [steps(hf.width, step).length, steps(hf.height, step).length] };
 }
 
-/** The render preview of a heightfield: its grid decimated to at most maxRes quads per side, all layers as point attributes, height-ramp Cd with the mask in red. */
-export function heightfieldPreviewMesh(hf: HeightfieldVolume, maxRes = 256): Geometry {
-  return heightfieldToMesh(asHeightfield(hf), { step: heightfieldPreviewStep(hf, maxRes).step, layers: true, normals: true, color: 'preview' });
+/**
+ * The render preview of a heightfield: its grid decimated to at most maxRes quads per side, all layers as point
+ * attributes, height-ramp Cd with a layer in red: the mask, or `layer` ("none": none).
+ */
+export function heightfieldPreviewMesh(hf: HeightfieldVolume, maxRes = 256, layer = 'mask'): Geometry {
+  return heightfieldToMesh(asHeightfield(hf), { step: heightfieldPreviewStep(hf, maxRes).step, layers: true, normals: true, color: 'preview', colorLayer: layer });
 }
 
 /**
  * For rendering and viewing: a geometry whose heightfields are replaced by their preview meshes (merged with the
- * rest of the geometry). Returns g itself when it holds no heightfield.
+ * rest of the geometry), each with `layer` in red (default the mask). Returns g itself when it holds no heightfield.
  */
-export function withHeightfieldPreview(g: Geometry, maxRes = 256): Geometry {
+export function withHeightfieldPreview(g: Geometry, maxRes = 256, layer = 'mask'): Geometry {
   if (!g.volumes.some(isHeightfield)) return g;
   const rest = g.clone();
   rest.volumes = rest.volumes.filter((v) => !isHeightfield(v));
-  const previews = g.volumes.filter(isHeightfield).map((v) => heightfieldPreviewMesh(v, maxRes));
+  const previews = g.volumes.filter(isHeightfield).map((v) => heightfieldPreviewMesh(v, maxRes, layer));
   return Geometry.merge(rest.numPoints || rest.volumes.length ? [rest, ...previews] : previews);
 }
 

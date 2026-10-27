@@ -24,9 +24,11 @@ export function thumbnailPNG(geo: Geometry, g: GraphSpec, deflate: (d: Uint8Arra
 }
 
 /**
- * The GLB a viewer page shows: heightfields as meshes, images as textured quads, lines as lines, no custom
- * attributes. `compress: 'meshopt'` for files kept on disk (the page's loader decodes it).
+ * The GLB a viewer page shows: heightfields as meshes (with `heightfieldLayer` in red, default the mask), images as
+ * textured quads, lines as lines, no custom attributes. `compress: 'meshopt'` for files kept on disk (the page's
+ * loader decodes it).
  */
-export function previewGLB(g: Geometry, o: Pick<ExportOptions, 'compress'> = {}): Promise<Uint8Array> {
-  return exportGeometryAsync(withImagePreview(withHeightfieldPreview(g)), 'glb', { splitByName: false, lineMode: 'lines', custom: false, ...o });
+export function previewGLB(g: Geometry, o: Pick<ExportOptions, 'compress'> & { heightfieldLayer?: string } = {}): Promise<Uint8Array> {
+  const { heightfieldLayer, ...rest } = o;
+  return exportGeometryAsync(withImagePreview(withHeightfieldPreview(g, 256, heightfieldLayer)), 'glb', { splitByName: false, lineMode: 'lines', custom: false, ...rest });
 }

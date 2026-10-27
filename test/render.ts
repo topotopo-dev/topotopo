@@ -277,6 +277,31 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(quadNl.width === 2 * 160 + 2 && quadNl.height === 2 * 160 + 2 + FOOT && count(quadNl, white, 162, 0, 322, 20) === 0, 'view_labels:false on the quad view: same size, no ortho view labels');
 }
 
+// ---------------------------------------------------------------- heightfields: the layer drawn in red
+{
+  // a flat field (seen from the top: +X to the right): the mask on its -X half, a flow layer (0..3) on its +X half
+  const field = await cook({
+    hf: { type: 'heightfield', params: { size: 20, resolution: 1 } },
+    m: { type: 'heightfield_layer', in: ['hf'], params: { layer: 'mask', expression: 'x < -1 ? 1 : 0' } },
+    out: { type: 'heightfield_layer', in: ['m'], params: { layer: 'flow', expression: 'x > 1 ? 3 : 0' } },
+  });
+  const top: RenderOptions = { views: ['top'], size: T, viewLabels: false };
+  const red = ([r, g, b]: RGB) => r > 150 && r - g > 60 && r - b > 60;
+  const halves = (r: RenderResult) => [count(r, red, 0, 0, T / 2 - 10, T), count(r, red, T / 2 + 10, 0, T, T)];
+  const [dl, dr] = halves(render(field, top));
+  const flow = render(field, { ...top, heightfieldLayer: 'flow' }), [fl, fr] = halves(flow);
+  const [nl, nr] = halves(render(field, { ...top, heightfieldLayer: 'none' }));
+  check(dl > 4000 && dr === 0, `default: the mask in red (${dl} red px on its half, ${dr} on the other)`);
+  check(fl === 0 && fr > 4000, `heightfield_layer "flow": that layer in red instead (${fl} / ${fr} red px), from its min to its max`);
+  check(nl === 0 && nr === 0, 'heightfield_layer "none": no layer in red');
+  check(diff(render(field, { ...top, heightfieldLayer: 'mask' }), render(field, top), 0, 0, 0, T, T) === 0, 'heightfield_layer "mask" draws the default view (its legend aside)');
+  check(note(flow, /^heightfield flow in red \[0\.00 \.\. 3\.00\]$/) && !note(render(field, top), /in red/), `the legend names a chosen layer and its range (${flow.notes.find((x) => /in red/.test(x))})`);
+  check(note(render(field, { ...top, heightfieldLayer: 'flw' }), /heightfield "heightfield" has no layer "flw" \(layers: height, mask, flow\)/), 'a layer the field lacks gets a note naming its layers');
+  check(note(render(box, { views: ['persp'], size: 64, heightfieldLayer: 'flow' }), /no heightfield/), 'heightfield_layer without a heightfield gets a note');
+  check(renderArgs({ heightfield_layer: 'flow' }).heightfieldLayer === 'flow' && renderArgs({ heightfieldLayer: 'none' }).heightfieldLayer === 'none' && renderArgs({}).heightfieldLayer === undefined,
+    'renderArgs: heightfield_layer (MCP render, CLI --heightfield-layer)');
+}
+
 // ---------------------------------------------------------------- helpers: tool arguments, winding fill, label placement
 {
   const o = renderArgs({ views: 'turntable', section: 'z:0.25', wireframe: 'hard', hard_angle: '40', labels: 'groups,pieces,points,attrib:name', look_at: '1,2,3', clip: 'x:2:abs', shading: 'ao' });
