@@ -124,46 +124,13 @@ if (argv.includes('--catalog') || opt('--help-node')) {
 }
 
 if (argv[0] === 'view') {
-  // `topotopo view <graph.json> [--port 7341]`: cook the file, serve the live 3D viewer, re-cook on every save
+  // `topotopo view <graph.json> [--port 7341]`: cook the file, serve the live 3D viewer and follow its saves; the values
+  // tuned on the page are session values over the file, written into it on request (src/viewer/graph-file.ts)
   const file = argv[1];
   if (!file || file.startsWith('-')) fail(`usage: ${prog} view <graph.json> [--port 7341]`);
   if (!fs.existsSync(file)) fail(`${prog}: no such graph file "${file}"`);
-  const os = await import('node:os');
-  const { Workspace } = await import('./workspace.ts');
-  const { startViewer } = await import('./viewer/server.ts');
-  const dir = path.dirname(path.resolve(file));
-  const engine = new Engine(createNodeHost({ baseDir: dir }));
-  await engine.init();
-  // A scratch workspace holds the graph and assets: the graph file stays the only source. Files dropped on the
-  // page go to inputs/ beside the graph file instead, made on the first drop: its file nodes read them as
-  // "inputs/<name>" (the path an MCP workspace uses too), and they outlive the viewer.
-  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: path.join(dir, 'exports') });
-  ws.load();
-  const name = graphName(file);
-  const load = async () => {
-    let spec;
-    try { spec = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { console.error(`${file}: ${(e as Error).message} (keeping the last good version)`); return; }
-    ws.setGraph(name, spec);
-    const r = await ws.cook(name);
-    console.log(`${r.ok ? 'cooked' : 'FAILED'} ${name} in ${r.ms.toFixed(0)} ms${r.ok ? '' : ': ' + r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
-    ws.bump(name);
-  };
-  await load();
-  // an export target set on the page goes into the graph file, the only source here: only "export" keys change
-  const persistGraph = (g: string) => {
-    if (g !== name) return;
-    const spec = ws.getGraph(name), raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (spec.export === undefined) delete raw.export; else raw.export = spec.export;
-    for (const [id, o] of Object.entries(spec.outputs ?? {})) {
-      if (!raw.outputs?.[id]) continue;
-      if (o.export === undefined) delete raw.outputs[id].export; else raw.outputs[id].export = o.export;
-    }
-    fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n');
-  };
-  const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined, { inputsWhere: `beside ${path.basename(file)}`, persistGraph });
-  console.log(`view: ${v.url}  (watching ${file}; files dropped on the page go to ${path.join(path.dirname(file), 'inputs') + path.sep}; Ctrl+C to stop)`);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  fs.watch(file, () => { clearTimeout(timer); timer = setTimeout(() => { load().catch((e) => console.error(String(e))); }, 150); });
+  const { viewGraphFile } = await import('./viewer/graph-file.ts');
+  await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined });
 } else if (argv[0] === 'gallery' || argv[0] === 'library' || argv[0] === 'edit') {
   // the gallery website, its libraries and its editor (src/gallery/cli.ts)
   const g = await import('./gallery/cli.ts');

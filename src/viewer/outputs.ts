@@ -64,8 +64,6 @@ export function outputZip(files: { name: string; bytes: Uint8Array }[]): Uint8Ar
 }
 
 export interface OutputsOptions {
-  /** after a target is set in a graph (the hook of topotopo view before `source`: it writes the graph file) */
-  persistGraph?: (graph: string) => void;
   /** the graph file a graph comes from (topotopo view): a target set on the page goes into it as a minimal edit */
   source?: GraphSource;
 }
@@ -274,7 +272,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
                 const at = item.entry.output === null ? ['export'] : ['outputs', item.entry.output!, 'export'];
                 try { opts.source.save([{ path: at, value: body.export ?? undefined }]); }
                 catch (e) { err(500, `could not write ${opts.source.label}: ${(e as Error).message}`); }
-              } else opts.persistGraph?.(graph);
+              }
               if (body.export === null) { rescan(); changed(); json({ ok: true, cleared: true }); return true; }
             }
             const p = published(item.entry);

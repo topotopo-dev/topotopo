@@ -11,6 +11,7 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Workspace } from '../src/workspace.ts';
+import type { JSONEdit } from '../src/viewer/json-edit.ts';
 import { Image } from '../src/core/image.ts';
 import { exportGeometry, EXPORT_FORMATS } from '../src/io/export.ts';
 import { FORMAT_LABELS, publishedOutputs, resolveTarget } from '../src/io/targets.ts';
@@ -157,13 +158,13 @@ try {
   const conflict = await command('export-all', {});
   check(conflict.status === 409 && fs.readFileSync(path.join(ws.exportDir, 'asset.glb')).equals(assetBytes), 'two targets writing one file are refused before any write');
   ws.deleteGraph('twin'); ws.bump('twin');
-  const calls: string[] = [], spy = await startViewer(ws, 0, { persistGraph: (g) => calls.push(g) });
+  const saves: JSONEdit[][] = [], spy = await startViewer(ws, 0, { source: { graph: 'asset', label: 'asset.json', save: (edits) => { saves.push(edits); } } });
   try {
     const spyPost = (body: any) => fetch(spy.url + 'api/output/export', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     await spyPost({ id: model.id });
-    const quiet = calls.length;
+    const quiet = saves.length;
     await spyPost({ id: model.id, export: { format: 'glb', path: 'asset.glb', scale: 2 } });
-    check(quiet === 0 && calls.join() === 'asset', 'setting a target asks the host to persist the graph (topotopo view writes the file); exporting alone does not');
+    check(quiet === 0 && saves.length === 1 && saves[0][0].path.at(-1) === 'export' && (saves[0][0].value as any)?.scale === 2, 'setting a target writes it into the graph file (topotopo view); exporting alone does not');
   } finally { spy.close(); }
   const beforeFailure = fs.readFileSync(path.join(ws.exportDir, 'parts', 'nacelle.obj'));
   await ws.edit('asset', [{ op: 'set', node: 'model', params: { path: 'missing.obj' } }]);

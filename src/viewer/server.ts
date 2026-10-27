@@ -175,11 +175,6 @@ export interface ViewerOptions {
    * targets set on the page go into the file. Both are minimal edits of its text.
    */
   source?: GraphSource;
-  /**
-   * The hook of `topotopo view` before `source`: called after the page sets an export target, to write it into the
-   * graph file. Like `source` it makes the controls set session values; without `source` they cannot be saved.
-   */
-  persistGraph?: (graph: string) => void;
 }
 
 /** A running viewer: its URL, the open pages (SSE clients), a workspace swap, and close. */
@@ -204,14 +199,14 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   // a graph changed: after a stop the page keeps the geometry it has instead of fetching (and cooking) it again
   const graphChanged = (ev: { graph: string; version: number }) => broadcast({ ...ev, ...(ws.held(ev.graph) ? { stopped: true } : {}) });
   ws.listeners.add(graphChanged);
-  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { persistGraph: opts.persistGraph, source: opts.source });
+  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source });
   let outputs = makeOutputs();
 
   // ---------------------------------------------------------------- the state of the cooks
   // {cook: {graph, running, last}} events: each node of the graph as it starts (before it can hold the thread for
   // long: the workspace yields there), the rest of the progress at most every 100 ms, the end at once. A cook that
   // only finds cached results is announced only when it lasts past 120 ms.
-  const sessionMode = (graph: string) => (opts.source ? opts.source.graph === graph : !!opts.persistGraph);
+  const sessionMode = (graph: string) => opts.source?.graph === graph;
   const cookState = (graph: string) => {
     const last = ws.lastCook.get(graph);
     return { running: ws.activity(graph), last: last ? { ...last, error: last.error ? { node: last.error.node, message: last.error.message } : undefined } : null };
