@@ -242,6 +242,11 @@ section('Controls rules (section 8)');
     'slider ranges: declared, 0..4×default, −1..1 around 0');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
+  // a menu of numbers wrote the picked entry as text ("8"): an entry stands for its option
+  const nums = vars.menuOf({ options: [4, 8, 16] }, 8), texts = vars.menuOf({ options: ['low', 'high'] }, 'low'), idx = vars.menuOf({ options: ['low', 'high'] }, 1);
+  check(vars.kindOf({ type: 'enum', options: [4, 8, 16] }, 8) === 'select' && nums.valueOf('16') === 16 && nums.textOf(8) === '8' && !nums.byIndex && nums.valueOf('5') === undefined
+    && texts.valueOf('high') === 'high' && idx.byIndex && idx.valueOf('high') === 1 && idx.textOf(0) === 'low' && vars.blank({ type: 'enum', options: [4, 8] }) === 4,
+    'menus: numeric options give numbers (16, not "16"), text options their text, a number var with text options the index');
   // over a graph file ↺ goes back to the file's value; in a workspace to the declared default
   check(vars.baseValue('file', { default: 1 }, { s: 3 }, 's') === 3 && vars.baseValue('file', { default: 1 }, {}, 's') === 1 && vars.baseValue('file', { type: 'bool' }, {}, 'b') === false
     && vars.baseValue('workspace', { default: 1 }, { s: 3 }, 's') === 1 && vars.baseValue('workspace', null, { s: 3 }, 's') === undefined,

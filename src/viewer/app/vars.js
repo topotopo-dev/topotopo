@@ -26,6 +26,18 @@ export function kindOf(vd, v) {
   return k;
 }
 
+/**
+ * A menu's entries (a var with options): their texts, and the value an entry stands for: the option itself, so
+ * numeric options give numbers ([4, 8, 16] → 8, not "8"). A number var with text options only holds the option's
+ * index (byIndex). valueOf gives undefined for a text that is no option (an entry shown for a value outside them).
+ */
+export function menuOf(vd, value) {
+  const opts = vd.options, texts = opts.map(String);
+  const byIndex = isNum(value) && opts.every((o) => typeof o === 'string') && !texts.includes(String(value));
+  const valueOf = (text) => { const i = texts.indexOf(text); return byIndex ? (i >= 0 ? i : undefined) : i >= 0 ? opts[i] : undefined; };
+  return { texts, byIndex, valueOf, textOf: (v) => (byIndex ? texts[v] : String(v)) };
+}
+
 /** A value to show for a declared param that has neither a var nor a default. */
 export function blank(vd) {
   const t = vd?.type ?? '';

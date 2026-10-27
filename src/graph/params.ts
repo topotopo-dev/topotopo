@@ -205,6 +205,27 @@ function toNum(v: any): number | null {
 export class ParamError extends Error {}
 
 /**
+ * The option of an enum a value picks, or undefined: the option itself (===); for a numeric option the same number
+ * written as text ("8" → 8); for a text option its text, then its case- and underscore-insensitive form; with text
+ * options only, a whole number is an index into them.
+ */
+export function enumOption(opts: readonly (string | number)[], v: any): string | number | undefined {
+  const same = opts.find((o) => o === v);
+  if (same !== undefined) return same;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    const num = opts.find((o) => typeof o === 'number' && o === n);
+    if (num !== undefined) return num;
+  }
+  if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') return undefined;
+  const s = String(v);
+  const text = opts.find((o) => typeof o === 'string' && o === s) ?? opts.find((o) => typeof o === 'string' && norm(o) === norm(s));
+  if (text !== undefined) return text;
+  if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < opts.length && opts.every((o) => typeof o === 'string')) return opts[v];
+  return undefined;
+}
+
+/**
  * Coerce a raw value to the param's type. Numbers outside the declared min/max are clamped, and `note` (when given)
  * is told, so a cook can warn: a silent clamp hides mistakes such as an asset range narrower than its caller's.
  */
@@ -243,11 +264,10 @@ export function coerce(name: string, pd: ParamDef, v: any, note?: (msg: string) 
       if (typeof v !== 'string') throw bad('a code string');
       return v;
     case 'enum': {
-      const s = String(v);
+      // options are strings or numbers; the value is the option itself, so numeric options give numbers
       const opts = pd.options ?? [];
-      const hit = opts.find((o) => o === s) ?? opts.find((o) => norm(o) === norm(s));
-      if (hit) return hit;
-      if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < opts.length) return opts[v];
+      const hit = enumOption(opts, v);
+      if (hit !== undefined) return hit;
       throw new ParamError(`param "${name}" must be one of: ${opts.join(' | ')} (got ${JSON.stringify(v)})`);
     }
     case 'vec2': case 'vec3': case 'vec4': case 'ivec2': case 'ivec3': case 'color': {

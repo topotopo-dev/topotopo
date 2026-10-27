@@ -20,6 +20,7 @@ import type { Host } from '../src/host/types.ts';
 import { rand } from '../src/core/random.ts';
 import { clamp, fit, lerp, smoothstep } from '../src/core/math.ts';
 import { catalogText, nodeDoc, TOPICS } from '../src/mcp/docs.ts';
+import { renderNodeReference } from '../scripts/gen-docs.ts';
 import { Workspace } from '../src/workspace.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
@@ -500,6 +501,28 @@ section('expression conversions: Number, parseFloat, parseInt, String, Boolean, 
     'conversions are straight-line calls: they run without the timer (Number.<name> like Math.<name>)');
   const r = await engine.cook({ vars: { res: '8' }, nodes: { b: { type: 'box', params: { size: ['=Number(res)', '=parseInt(res) / 2', '=Number.isInteger(Number(res)) ? 1 : 0'] } } } });
   check(r.ok && size3(r.geo).join() === '8,4,1', 'in node params');
+}
+
+// ------------------------------------------------------------------ enum options that are numbers
+section('enum options may be numbers: the value is the number');
+{
+  const e = await newEngine();
+  e.registerAsset('test_res_box', {
+    vars: { res: 8, mode: 'b' },
+    params: { res: { type: 'enum', options: [4, 8, 16], desc: 'resolution' }, mode: { type: 'enum', options: ['a', 'b'], desc: 'mode' } },
+    nodes: { b: { type: 'box', params: { size: ['=res + 1', '=typeof res == "number" ? 1 : 0', '=mode == "b" ? 2 : 3'] } } }, output: 'b',
+  });
+  const run = async (params: Record<string, any>) => e.cook({ nodes: { a: { type: 'test_res_box', params } } });
+  const def = await run({}), sixteen = await run({ res: 16 }), text = await run({ res: '4' }), bad = await run({ res: 5 }), idx = await run({ mode: 0 }), byIdx = await run({ res: 1 });
+  check(def.ok && size3(def.geo).join() === '9,1,2' && sixteen.ok && size3(sixteen.geo).join() === '17,1,2', 'a numeric option is a number in the asset ("=res + 1" adds)');
+  check(text.ok && size3(text.geo).join() === '5,1,2', 'the same number written as text picks the numeric option ("4" → 4)');
+  check(!bad.ok && /param "res" must be one of: 4 \| 8 \| 16 \(got 5\)/.test(bad.errors[0]?.message ?? ''), `a number that is not an option is an error (${bad.errors[0]?.message})`);
+  check(idx.ok && size3(idx.geo)[2] === 3 && !byIdx.ok, 'a whole number is an index into text options only (mode 0 = "a"; res 1 is not an option)');
+  const untyped = e.registerAsset('test_untyped_options', { vars: { n: 2 }, params: { n: { options: [1, 2, 3], desc: 'n' } }, nodes: { b: { type: 'box', params: { size: '=n' } } }, output: 'b' });
+  check(untyped.params.n.type === 'enum' && JSON.stringify(untyped.params.n.options) === '[1,2,3]', 'a declared var with options and no type is an enum');
+  const badOpts = await e.cook({ vars: { k: 1 }, params: { k: { type: 'enum', options: [{ a: 1 }] as any, desc: 'k' } }, nodes: { b: { type: 'box' } } });
+  check(!badOpts.ok && /options must be a list of strings or numbers/.test(badOpts.errors[0]?.message ?? ''), 'options that are neither strings nor numbers are rejected');
+  check(/\| `4`, `8`, `16` \|/.test(renderNodeReference([], [e.assets.get('test_res_box')!.def])), 'the node reference lists numeric options');
 }
 
 // ------------------------------------------------------------------ param coercion

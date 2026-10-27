@@ -67,7 +67,7 @@ function nodeSection(def: NodeDef): string[] {
   else {
     out.push('| name | type | default | min..max | options | aliases | description |', '|---|---|---|---|---|---|---|');
     for (const [name, pd] of params) {
-      const opts = pd.options?.length ? pd.options.map(code).join(', ') : '';
+      const opts = pd.options?.length ? pd.options.map((o) => code(String(o))).join(', ') : '';
       const al = pd.aliases?.length ? pd.aliases.map(code).join(', ') : '';
       const desc = cell(pd.desc) + (pd.advanced ? ' *(advanced)*' : '');
       out.push(`| ${code(name)} | ${typeText(pd)} | ${defaultText(pd)} | ${rangeText(pd)} | ${opts} | ${al} | ${desc} |`);

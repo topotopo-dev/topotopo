@@ -239,6 +239,7 @@ export function wiringOf(spec: NodeSpec, def: NodeDef): { list: (string | null)[
 
 function inferParamType(meta: any, v: any): ParamDef['type'] {
   if (meta?.type) return meta.type;
+  if (Array.isArray(meta?.options) && meta.options.length) return 'enum';
   if (typeof v === 'boolean') return 'bool';
   if (typeof v === 'number') return 'float';
   if (typeof v === 'string') return 'string';
@@ -591,6 +592,13 @@ export class Engine {
             message: `var "${k}" uses a node reference function (${REF_FUNCS.join(', ')}); vars are graph constants and cannot read nodes`,
             hint: `put the expression in the node param that needs it, e.g. "height": "=bbox('base').size.y"`,
           });
+      }
+    }
+    if (graph.params && typeof graph.params === 'object') {
+      for (const [k, vd] of Object.entries(graph.params)) {
+        const o = vd && typeof vd === 'object' ? (vd as any).options : undefined;
+        if (o !== undefined && !(Array.isArray(o) && o.length && o.every((x: any) => typeof x === 'string' || (typeof x === 'number' && Number.isFinite(x)))))
+          errors.push({ node: path + '(params)', message: `params "${k}": options must be a list of strings or numbers, got ${JSON.stringify(o)?.slice(0, 80)}` });
       }
     }
     const typeNames = this.allTypeNames();

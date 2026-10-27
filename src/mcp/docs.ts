@@ -105,7 +105,8 @@ board or concept pages, so the gallery page and the board link both ways.`,
   "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks"}}
 }
 - "vars": graph constants that "=expr" params read. "params": one entry per var a person would tune (3–8 of them):
-  {type (float int bool string enum), desc, min, max, options (enum), label (control name), step (slider step)}.
+  {type (float int bool string enum), desc, min, max, options (enum: strings or numbers; the var holds the option,
+  so [4, 8, 16] gives numbers), label (control name), step (slider step)}.
   The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
   for bools. They are also the parameters when the graph is saved as an asset.
 - People change vars at any time (the viewer's controls edit the stored graph): read it with graphs {action:"get"}

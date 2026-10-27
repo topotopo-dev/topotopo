@@ -16,7 +16,8 @@ export interface ParamDef {
   default?: any;
   min?: number;
   max?: number;
-  options?: string[];
+  /** enum choices: strings or numbers; the param's value is the option itself (numeric options give numbers) */
+  options?: (string | number)[];
   aliases?: string[];
   /** for 'group' params: which element class the pattern selects */
   groupClass?: 'point' | 'prim' | 'vertex' | 'edge';
@@ -91,7 +92,8 @@ export interface VarDef {
   desc?: string;
   min?: number;
   max?: number;
-  options?: string[];
+  /** choices (type enum): strings or numbers, and the var holds the option itself */
+  options?: (string | number)[];
   /** control label for humans (default: the var name) */
   label?: string;
   /** slider step (default: 1 for ints, else derived from the range) */

@@ -8,7 +8,7 @@ import * as M from './markers.js';
 import { parseId } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
-import { isNum, same, HEX3, fmt, short, kindOf, blank, rangeOf, autoStep, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
+import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, autoStep, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
 import { fmtDuration } from './cooking.js';
 import { kindLine, layerChoices, shownLayer } from './output-info.js';
 
@@ -270,18 +270,19 @@ function createControls(ctx) {
       return { set, get };
     },
     select(name, vd, value, cw) {
-      const opts = vd.options.map(String);
-      // a number var with string options holds the option's index
-      const byIndex = isNum(value) && !opts.includes(String(value));
+      // an entry stands for its option (numeric options give numbers); a number var with text options holds the index
+      const menu = menuOf(vd, value), opts = menu.texts;
       const s = el('select');
       for (const o of opts) s.append(new Option(o, o));
-      const get = () => (byIndex ? opts.indexOf(s.value) : s.value);
+      // a value outside the options (set by an agent or by hand) is shown as an extra entry while it holds
+      let outside;
+      const get = () => { const v = menu.valueOf(s.value); return v === undefined ? outside : v; };
       const set = (v) => {
-        const k = byIndex ? opts[v] : String(v);
+        const k = menu.textOf(v);
         if (k === undefined) return;
-        // a value outside the options (set by an agent or by hand) is shown as an extra entry while it holds
         for (const o of [...s.options]) if (!opts.includes(o.value) && o.value !== k) o.remove();
         if (![...s.options].some((o) => o.value === k)) s.append(new Option(k, k));
+        outside = opts.includes(k) ? undefined : v;
         s.value = k;
       };
       s.onchange = () => { queueVar(name, get(), true); s.blur(); };
