@@ -1,8 +1,10 @@
 // Graph evaluation: validation, lazy pull-based cooking, content-addressed caching, time.
 //
 // Every node result is keyed by a signature = hash(type, resolved params, input
-// signatures[, vars][, expression references]). Editing one parameter therefore re-cooks only the nodes
-// downstream of it, and identical sub-results (e.g. loop iterations) are shared.
+// signatures[, the vars its code reads][, expression references]). Editing one parameter therefore re-cooks
+// only the nodes downstream of it, and identical sub-results (e.g. loop iterations) are shared. "=expr" params
+// are keyed by their values; code reads vars by their bare name, so a code node is keyed by the vars its code
+// names (NodeDef.usesVars), and changing another var leaves it cached.
 //
 // Time: a cook happens at a frame (frame 1 = time 0). A node is time-dependent when its def says so
 // (usesTime), when one of its "=expr" params reads frame/time/fps/timeInc, or when its cook reads
@@ -39,6 +41,8 @@ import { parallelMap as runKernel } from './parallel.ts';
 import type { PoolStats } from './parallel.ts';
 import { NodeError, STOPPED } from './types.ts';
 import type { CookContext, GraphSpec, NodeDef, NodeSpec, ParamDef } from './types.ts';
+import { VAR_NAME_HINT, varNameError } from './vars.ts';
+import { codeVarNames, pickVars } from '../core/usercode.ts';
 
 export type { TimeState } from './params.ts';
 
@@ -594,6 +598,13 @@ export class Engine {
           });
       }
     }
+    // var names: expressions and code read vars by their bare name
+    const declared = new Set<string>();
+    for (const o of [graph.vars, graph.params]) if (o && typeof o === 'object' && !Array.isArray(o)) for (const k of Object.keys(o)) declared.add(k);
+    for (const k of declared) {
+      const bad = varNameError(k);
+      if (bad) errors.push({ node: path + '(vars)', message: bad, hint: VAR_NAME_HINT });
+    }
     if (graph.params && typeof graph.params === 'object') {
       for (const [k, vd] of Object.entries(graph.params)) {
         const o = vd && typeof vd === 'object' ? (vd as any).options : undefined;
@@ -986,10 +997,13 @@ export class Engine {
       result.error = { node: name, message: e.message };
       return result;
     }
+    // vars read by the node's code: all of them (loop bodies, scripts), or those its code names
+    const varsSig = def.usesVars === true ? stableStringify(vars)
+      : typeof def.usesVars === 'function' ? stableStringify(pickVars(vars, codeVarNames(def.usesVars(rp.values), vars))) : '';
     const baseSig = String(
       hashString(
         def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' +
-        (def.usesVars ? stableStringify(vars) : '') + '|' + extra + (np.refSig ? '|R:' + np.refSig : ''),
+        varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : ''),
       ),
     );
     const timeSig = () => String(hashString(baseSig + '|' + timeKey(time)));

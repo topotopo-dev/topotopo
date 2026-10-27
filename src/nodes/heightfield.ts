@@ -23,6 +23,8 @@ import { connectivity } from '../core/topology.ts';
 import { minDistanceSelect } from '../core/pcg.ts';
 import { P, simBudget } from './util.ts';
 import { wasmCallUnderBudget } from './wasmcall.ts';
+import { codeVarDecl, codeVarNames, codeVarValues } from '../core/usercode.ts';
+import { scriptVarsGuard } from '../core/snippet-lib.ts';
 import { getLoadedKernels, loadHostKernels } from '../wasm/kernels.ts';
 import type { ErosionResult, FillSinksResult, FlowAccumulationResult, Kernels } from '../wasm/kernels.ts';
 
@@ -685,7 +687,7 @@ defineNode({
   type: 'heightfield_layer',
   category: 'heightfield',
   summary: 'Layer operations: compute a layer from an expression over layers ("height * mask + 2"), copy, rename, delete or fill.',
-  description: 'Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer\'s current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), vars.*, b_<layer> = a layer of the heightfield in input 1 sampled at x, z, and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too. Write expressions in x z (and layers) to get the same values on a tile as on the whole map: i j u v count from the field\'s own corner and extent.',
+  description: 'Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer\'s current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), b_<layer> = a layer of the heightfield in input 1 sampled at x, z, the graph vars by their bare name (a layer or sample variable of the same name comes first, with a warning), and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too. Write expressions in x z (and layers) to get the same values on a tile as on the whole map: i j u v count from the field\'s own corner and extent.',
   aliases: ['heightfield_copylayer', 'heightfield_layerclear', 'hf_layer', 'heightfield_wrangle', 'heightfield_expr'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }, { name: 'other', desc: 'optional second heightfield: its layers as b_<name>', optional: true }],
   params: {
@@ -696,7 +698,7 @@ defineNode({
     value: { type: 'float', default: 0, desc: 'fill value' },
     mask_layer: maskParam(),
   },
-  usesVars: true,
+  usesVars: (p) => (p.operation === 'expression' ? String(p.expression ?? '') : ''),
   outputs: 'the target layer',
   example: { nodes: { hf: { type: 'heightfield' }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 2, range: 'positive' } }, l: { type: 'heightfield_layer', in: ['n'], params: { layer: 'snow', expression: 'smoothstep(1.2, 1.8, height)' } } }, output: 'l' },
   cook: (ctx) => {
@@ -704,7 +706,8 @@ defineNode({
     checkName(p.layer, ctx.type);
     const other = hasInput(1) ? heightfieldsOf(input(1))[0] ?? null : null;
     if (hasInput(1) && !other) throw new NodeError(`${ctx.type}: input 1 has no heightfield`, NO_FIELD);
-    return eachField(ctx, (hf) => {
+    const hiddenVars = new Set<string>();
+    const out = eachField(ctx, (hf) => {
       const mask = maskOf(hf, p.mask_layer, ctx.type);
       switch (p.operation) {
         case 'delete':
@@ -736,6 +739,14 @@ defineNode({
         const id = 'b_' + name;
         if (ident.test(id) && used(id)) { const o = other; B[name] = (x, z) => o.sampleArray(a, x, z); decl.push(`const ${id} = __B[${JSON.stringify(name)}](x, z);`); }
       }
+      // the graph vars the expression names: constants around the per-sample function, so a layer or a sample
+      // variable of the same name comes first (and the cook says so)
+      const own = new Set([...reserved, ...Object.keys(L), ...Object.keys(B).map((n) => 'b_' + n)]);
+      const varNames: string[] = [];
+      for (const n of codeVarNames(code, vars)) {
+        if (own.has(n)) hiddenVars.add(n);
+        else varNames.push(n);
+      }
       const body = /\breturn\b/.test(code) ? code : `return (${code});`;
       // run like a wrangle: the body is parsed on its own first (a complete function body cannot close the wrapper
       // it is pasted into, so nothing runs while compiling), and the whole layer is computed under the host's time
@@ -744,11 +755,11 @@ defineNode({
       if (syntax) throw new NodeError(`${ctx.type}: expression syntax error: ${syntax.message}${code.includes('\n') ? ` (line ${syntax.line})` : ''}`);
       let make;
       try {
-        make = engine.host.compile(`(function(__L, __B, vars){ "use strict"; return function(k, i, j, x, z, u, v, cell, value){ ${decl.join(' ')}\n${body}\n}; })`);
+        make = engine.host.compile(`(function(__L, __B, __vars, __varsGuard){ "use strict"; ${codeVarDecl(varNames)}\nreturn function(k, i, j, x, z, u, v, cell, value){ ${decl.join(' ')}\n${body}\n}; })`);
       } catch (e: any) {
         throw new NodeError(`${ctx.type}: expression syntax error: ${e.message}`);
       }
-      const f = make(L, B, vars);
+      const f = make(L, B, codeVarValues(vars, varNames), scriptVarsGuard(engine.host));
       const old = hf.read(p.layer);
       const res = new Float32Array(hf.count);
       let bad = 0, failed: string | undefined;
@@ -773,12 +784,17 @@ defineNode({
       }
       if (failed !== undefined) {
         const missing = /^(\w+) is not defined$/.exec(failed);
-        if (missing) throw new NodeError(`${ctx.type}: "${missing[1]}" is not a layer of this heightfield (layers: ${[...hf.layers.keys()].join(', ')}) and not an expression variable`, 'Compute the layer upstream, or connect the heightfield that has it as input 1 and read it as b_' + missing[1] + '.');
+        if (missing) throw new NodeError(`${ctx.type}: "${missing[1]}" is not a layer of this heightfield (layers: ${[...hf.layers.keys()].join(', ')}), a graph var or an expression variable`, 'Compute the layer upstream, or connect the heightfield that has it as input 1 and read it as b_' + missing[1] + '.');
         throw new NodeError(`${ctx.type}: ${failed}`);
       }
       if (bad) ctx.warn(`${bad} sample(s) gave NaN or infinity; written as 0`);
       writeLayer(hf, p.layer, mask, (k) => res[k]);
     });
+    if (hiddenVars.size) {
+      const n = [...hiddenVars].sort(), one = n.length === 1;
+      ctx.warn(`${n.join(', ')} in the expression ${one ? 'is' : 'are'} this node's own (a layer or a sample variable), not the graph var${one ? '' : 's'} of that name; rename the var to read it here`);
+    }
+    return out;
   },
 });
 

@@ -20,7 +20,7 @@ CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); conver
 CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the floor, from pins (pin_group / input 2) and in wind; inflate {pressure} puffs a closed mesh into a cushion or balloon. See help topic "cloth".
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
-GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')).
+GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
 HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
@@ -104,7 +104,10 @@ board or concept pages, so the gallery page and the board link both ways.`,
   "vars": {"rock_count": 200},
   "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks"}}
 }
-- "vars": graph constants that "=expr" params read. "params": one entry per var a person would tune (3–8 of them):
+- "vars": graph constants that "=expr" params and code read by their bare name ("=rock_count * 2", @P.y += height).
+  Name them so code can: letters, digits and _, and not a JavaScript keyword (class, default …), a helper (noise,
+  rand, length, detail …), a built-in (Math, Number, JSON …), the time (frame, time, fps, timeInc) or a wrangle name
+  (ptnum, Frame …); the build says when a name is taken. "params": one entry per var a person would tune (3–8 of them):
   {type (float int bool string enum), desc, min, max, options (enum: strings or numbers; the var holds the option,
   so [4, 8, 16] gives numbers), label (control name), step (slider step)}.
   The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
@@ -201,6 +204,9 @@ Afterwards render it, and tell the person which of their guides you used for wha
   expressions: `PARAM EXPRESSIONS
 Any non-code param can be a string starting with "=": a JS expression evaluated with graph vars.
   "vars": {"floors": 6, "h": 3}   →   "height": "=floors*h",  "count": "=floors*4"
+ONE FORM: expressions and code (wrangle, script, sdf_expr, heightfield_layer, parametric curves and surfaces, group and
+  assert expressions, loop bodies) read graph vars by their bare name: height, not vars.height (an error says so).
+  Vars are read-only; in code a local of the same name comes first.
 Helpers: sin cos tan asin acos atan atan2 sqrt pow exp log abs floor ceil round min max sign hypot PI TAU E
          clamp fit lerp smoothstep frac mod radians degrees rand(x, seed) pick(array, i)
 Conversions: Number(x) parseFloat(s) parseInt(s, radix) String(x) Boolean(x) isFinite(x) isNaN(x), Number.isInteger …
@@ -247,7 +253,8 @@ SOLVER (Houdini SOP Solver): feedback over frames.
   Body inputs: 0 = previous frame's result (initial geometry on start_frame), 1 = initial, 2/3 = solver inputs 2/3 at that frame.
   Cooking frame N runs the body for frames start_frame..N (substeps times each); before start_frame the input passes through.
   Each frame's state is cached, so stepping 10 → 11 runs the body once; jumping back is a cache hit.
-  Body vars: iteration (frames since start_frame, from 0), substep, and frame/time/timeInc = the step's time (fractional between substeps).
+  Body vars (by their bare name in "=expr" params and code): iteration (frames since start_frame, from 0), substep, and
+  frame/time/timeInc = the step's time (fractional between substeps).
 SOLVER vs FOREACH: foreach feedback:true is count-based (N iterations in one cook, no time, cached as a whole);
   the solver's result depends on the frame you cook at and is advanced frame by frame.
 PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_frame) × substeps steps, every frame's state is
@@ -295,7 +302,9 @@ EDITS (applied after the loop, geohandle 0 optional):
   setpointattrib(0,"name",pt,v) setprimattrib setvertexattrib setdetailattrib(0,"name",v) setpointgroup(0,"g",pt,1) setprimgroup
   setvertexgroup(0,"g",v,1) setedgegroup(0,"g",pt0,pt1,1)  (0 removes)
 DEBUG: print(...) (shows as warnings), error("msg") aborts. Use 'return' to skip the rest for the current element.
-Vars: vars.name (graph vars), iteration/numiterations inside foreach.
+VARS: graph vars by their bare name, as in "=expr" params: @P.y += height * 0.5; rand(@ptnum, seed). Read-only (writing
+  one is an error); a local of the same name comes first. Inside foreach also iteration numiterations value attr, inside
+  solver iteration substep frame time timeInc. A wrangle re-cooks when a var it names changes, not for other vars.
 SPEED: a point wrangle over 64k+ points that calls no geometry query/edit/print function runs in parallel on worker threads (same result).
 SDF helpers are also available (see topic sdf).`,
 
@@ -390,7 +399,8 @@ Volumes are signed distance functions (negative inside) carried in geometry; nod
   smooth_* with blend k) → sdf_modify (offset shell noise twist bend repeat) → sdf_to_mesh (watertight triangles, smooth N).
   sdf_from_mesh turns closed meshes into volumes (blend meshes, offsets); remesh = voxel remesh (remesh_isotropic keeps
   sharp edges, boundaries and attributes).
-sdf_expr: write the distance in JS: p = [x,y,z]; return a number. Inputs via sdf(0, p), sdf(1, p).
+sdf_expr: write the distance in JS: p = [x,y,z]; return a number. Inputs via sdf(0, p), sdf(1, p); graph vars by their
+  bare name (sdSphere(p, radius)).
   IQ-style helpers: sdSphere(p,r) sdBox(p,[hx,hy,hz]) sdRoundBox(p,b,r) sdTorus(p,R,r) sdCapsule(p,a,b,r) sdCylinder(p,h,r)
   sdCone(p,h,r) sdEllipsoid(p,[rx,ry,rz]) sdPlane(p,n,h) sdOctahedron(p,s) sdHexPrism(p,[r,h]) sdSegment(p,a,b,r)
   opUnion opSubtract(a,b) opIntersect smin/opSmoothUnion(a,b,k) smax opSmoothSubtract(a,b,k) opRound(d,r) opOnion(d,t)
@@ -420,7 +430,8 @@ WORKFLOW
     {min_distance: 12} for lots that never overlap; heightfield_project {level: "mean"} levels the pads under them)
   → heightfield_to_mesh {color: "terrain"} for polygons (layers become point attributes), or export png16.
   Other sources: heightfield_from_mesh (project polygons along Y), heightfield_from_image (8/16-bit PNG).
-  Layer tools: heightfield_layer (expression over layers "height * mask + 2", or copy/rename/delete/fill), remap
+  Layer tools: heightfield_layer (expression over layers and graph vars "height * mask + lift", or copy/rename/delete/
+  fill; a layer named like a var comes first, with a warning, so name terrain vars apart from layers: relief, not height), remap
   (input_min..input_max → output range), blur, terrace (levels at base + n × step_height), clip, cutout, mask_noise,
   mask_blur, mask_expand, resample (e.g. samples [505, 505]), crop (a tile or world bounds, samples kept exactly),
   transform (translate, scale, 90° turns; the generic transform node works too), to_sdf (solid terrain for
@@ -565,7 +576,8 @@ RECIPE (brick wall + worn crate: examples/textures.json):
    "output": "bldg"}}}
 Modes: pieces (by piece_attrib or connectivity) · prims · points · count (N times; feedback:true chains results).
 Body input index 0 = current element/piece (or the previous result with feedback); 1 = whole input; 2 = foreach input 2.
-Vars in the body: iteration, numiterations, value, attr (the element's attributes, e.g. "=attr.height"), parent vars.
+Vars in the body, by their bare name in "=expr" params and code: iteration, numiterations, value, attr (the element's
+attributes, e.g. "=attr.height"), parent vars.
 Results are merged (or the last one with feedback). Identical iterations are cached.
 For feedback over animation frames (growth, accumulation) use solver instead (help topic "time").`,
 
@@ -976,7 +988,8 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    null), min_edge_length, no_degenerate (zero-area faces, coincident points within tolerance), no_self_intersections
    (BVH, stops after max_tests candidate pairs and says so), attrib (must exist; attrib_min/attrib_max bound its first
    component; attrib_class), group (exists and is non-empty), expr (JS over npoints nprims nvertices npolys nlines
-   bbox.min/.max/.size/.center (.x .y .z) volume area pieces open_pieces genus closed boundary_edges).
+   bbox.min/.max/.size/.center (.x .y .z) volume area pieces open_pieces genus closed boundary_edges, and the graph
+   vars by their bare name: "npoints == count * 8").
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
 2. EXPLAIN AFTER A BUILD/EDIT: explain {graph, node?} describes the result in words, e.g.

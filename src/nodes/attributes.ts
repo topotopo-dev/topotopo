@@ -636,7 +636,7 @@ defineNode({
     name: { type: 'string', default: 'group1', desc: 'group name' },
     class: { type: 'enum', options: ['prim', 'point', 'vertex', 'edge'], default: 'prim', desc: 'element class (edge = point pairs)' },
     pattern: { type: 'group', default: '', desc: 'base pattern ("" = no pattern filter): names, ranges, "@P.y>0", "!grp"; edges also "boundary", "angle>30", "p3-7", "border:grp"' },
-    expr: { type: 'code', default: '', desc: 'JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9" (vertex class runs over vertices; edge class: the expression must hold for both points of the edge)' },
+    expr: { type: 'code', default: '', desc: 'JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9" or "@P.y > height" with a graph var (vertex class runs over vertices; edge class: the expression must hold for both points of the edge)' },
     bbox_min: { type: 'vec3', default: [-1e9, -1e9, -1e9], desc: 'keep elements inside this box (points; prims use centroid; vertices their point; edges their midpoint)' },
     bbox_max: { type: 'vec3', default: [1e9, 1e9, 1e9], desc: 'box max' },
     normal: { type: 'vec3', default: [0, 0, 0], desc: 'keep elements whose normal is within spread_angle of this direction ([0,0,0] = off; vertices use vertex normals, edges the mean of their polygons)' },
@@ -646,6 +646,8 @@ defineNode({
     mode: { type: 'enum', options: ['replace', 'union', 'intersect', 'subtract'], default: 'replace', desc: 'combine with an existing group of the same name' },
     invert: { type: 'bool', default: false, desc: 'invert the selection' },
   },
+  // the expression runs as a wrangle: the graph vars it names key the cache
+  usesVars: (p) => String(p.expr ?? ''),
   example: { type: 'group', params: { name: 'top', class: 'prim', normal: [0, 1, 0], spread_angle: 20 } },
   cook: (ctx) => {
     const { input, p, engine, vars, inputs } = ctx;

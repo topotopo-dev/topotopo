@@ -27,15 +27,15 @@
     "lamps": { "type": "copy_to_points", "in": ["lamp", "lamp_pts"], "params": { "pack": true } },
     "sign": { "type": "sign_post", "params": { "text": "ELM ST", "cross_text": "MILL RD" } },
     "sign_at": { "type": "transform", "in": ["sign"], "params": { "translate": [-22, 0, 4.4] } },
-    "a_front": { "type": "wall_segment", "params": { "length": 8, "windows": 2, "door": true } },
+    "a_front": { "type": "wall_segment", "params": { "wall_length": 8, "windows": 2, "door": true } },
     "a_front_xf": {
       "type": "transform",
       "in": ["a_front"],
       "params": { "rotate": [0, 180, 0], "translate": [8, 0, 0] }
     },
-    "a_back": { "type": "wall_segment", "params": { "length": 8, "windows": 2 } },
+    "a_back": { "type": "wall_segment", "params": { "wall_length": 8, "windows": 2 } },
     "a_back_xf": { "type": "transform", "in": ["a_back"], "params": { "translate": [0, 0, 7] } },
-    "a_side": { "type": "wall_segment", "params": { "length": 7.25, "windows": 1 } },
+    "a_side": { "type": "wall_segment", "params": { "wall_length": 7.25, "windows": 1 } },
     "a_left": {
       "type": "transform",
       "in": ["a_side"],
@@ -50,8 +50,8 @@
     "a_roof_xf": { "type": "transform", "in": ["a_roof"], "params": { "translate": [4, 3, 3.5] } },
     "house_a": { "type": "merge", "in": ["a_front_xf", "a_back_xf", "a_left", "a_right", "a_roof_xf"] },
     "house_a_at": { "type": "transform", "in": ["house_a"], "params": { "translate": [-20, 0, 9] } },
-    "b_front0": { "type": "wall_segment", "params": { "length": 10, "windows": 2, "door": true } },
-    "b_front1": { "type": "wall_segment", "params": { "length": 10, "windows": 3, "sill_height": 0.8 } },
+    "b_front0": { "type": "wall_segment", "params": { "wall_length": 10, "windows": 2, "door": true } },
+    "b_front1": { "type": "wall_segment", "params": { "wall_length": 10, "windows": 3, "sill_height": 0.8 } },
     "b_front1_up": { "type": "transform", "in": ["b_front1"], "params": { "translate": [0, 3, 0] } },
     "b_front": { "type": "merge", "in": ["b_front0", "b_front1_up"] },
     "b_front_xf": {
@@ -59,14 +59,14 @@
       "in": ["b_front"],
       "params": { "rotate": [0, 180, 0], "translate": [10, 0, 0] }
     },
-    "b_back_floor": { "type": "wall_segment", "params": { "length": 10, "windows": 3 } },
+    "b_back_floor": { "type": "wall_segment", "params": { "wall_length": 10, "windows": 3 } },
     "b_back": {
       "type": "copy_xform",
       "in": ["b_back_floor"],
       "params": { "count": 2, "translate": [0, 3, 0], "copy_attrib": "" }
     },
     "b_back_xf": { "type": "transform", "in": ["b_back"], "params": { "translate": [0, 0, 8] } },
-    "b_side_floor": { "type": "wall_segment", "params": { "length": 8.25, "windows": 2 } },
+    "b_side_floor": { "type": "wall_segment", "params": { "wall_length": 8.25, "windows": 2 } },
     "b_side": {
       "type": "copy_xform",
       "in": ["b_side_floor"],
@@ -86,15 +86,15 @@
     "b_roof_xf": { "type": "transform", "in": ["b_roof"], "params": { "translate": [5, 6, 4] } },
     "house_b": { "type": "merge", "in": ["b_front_xf", "b_back_xf", "b_left", "b_right", "b_roof_xf"] },
     "house_b_at": { "type": "transform", "in": ["house_b"], "params": { "translate": [-8.5, 0, 9] } },
-    "c_front": { "type": "wall_segment", "params": { "length": 7, "height": 3.4, "windows": 2, "door": true } },
+    "c_front": { "type": "wall_segment", "params": { "wall_length": 7, "height": 3.4, "windows": 2, "door": true } },
     "c_front_xf": {
       "type": "transform",
       "in": ["c_front"],
       "params": { "rotate": [0, 180, 0], "translate": [7, 0, 0] }
     },
-    "c_back": { "type": "wall_segment", "params": { "length": 7, "height": 3.4, "windows": 1 } },
+    "c_back": { "type": "wall_segment", "params": { "wall_length": 7, "height": 3.4, "windows": 1 } },
     "c_back_xf": { "type": "transform", "in": ["c_back"], "params": { "translate": [0, 0, 9] } },
-    "c_side": { "type": "wall_segment", "params": { "length": 9.25, "height": 3.4, "windows": 3 } },
+    "c_side": { "type": "wall_segment", "params": { "wall_length": 9.25, "height": 3.4, "windows": 3 } },
     "c_left": {
       "type": "transform",
       "in": ["c_side"],
@@ -123,9 +123,9 @@
       "in": ["c_front_xf", "c_back_xf", "c_left", "c_right", "c_roof_xf", "c_scaffold_xf"]
     },
     "house_c_at": { "type": "transform", "in": ["house_c"], "params": { "translate": [6.5, 0, 9] } },
-    "fence_l": { "type": "fence", "params": { "length": 3.4, "style": "picket" } },
+    "fence_l": { "type": "fence", "params": { "run_length": 3.4, "style": "picket" } },
     "fence_l_at": { "type": "transform", "in": ["fence_l"], "params": { "translate": [-20, 0, 6.7] } },
-    "fence_r": { "type": "fence", "params": { "length": 3.4, "style": "picket" } },
+    "fence_r": { "type": "fence", "params": { "run_length": 3.4, "style": "picket" } },
     "fence_r_at": { "type": "transform", "in": ["fence_r"], "params": { "translate": [-15.4, 0, 6.7] } },
     "hedge_pts": {
       "type": "points",
@@ -156,7 +156,7 @@
     "yard_trees": { "type": "copy_to_points", "in": ["yard_tree", "yard_trees_pts"] },
     "gate": { "type": "arch", "params": { "width": 3, "height": 3.2, "thickness": 0.45, "depth": 0.5 } },
     "gate_at": { "type": "transform", "in": ["gate"], "params": { "translate": [0, 0, -6.7] } },
-    "garden_wall": { "type": "brick_wall", "params": { "length": 15.6, "height": 0.9, "seed": "=seed" } },
+    "garden_wall": { "type": "brick_wall", "params": { "wall_length": 15.6, "height": 0.9, "seed": "=seed" } },
     "wall_w": { "type": "transform", "in": ["garden_wall"], "params": { "translate": [-17.55, 0, -6.7] } },
     "wall_e": { "type": "transform", "in": ["garden_wall"], "params": { "translate": [1.95, 0, -6.7] } },
     "bench_pts": { "type": "points", "params": { "positions": [[-9, 0, -5.55], [9, 0, -5.55]] } },

@@ -9,10 +9,10 @@
 //   results and error messages are copied out, so an expression never holds an object of the engine's realm (whose
 //   `.constructor.constructor` would be the engine's Function, i.e. process, require, fetch …).
 // - Scope: every free identifier resolves through a proxy that claims every name, so nothing reaches the realm's
-//   global scope. Names are looked up in graph vars, then the helpers (sin … pick, the conversions Number … isNaN,
-//   Math, the reference functions), then frame/time/fps/timeInc; anything else is a ReferenceError naming it. The
-//   expression itself runs in a strict function whose `this` throws when read, and `import` is rejected before
-//   compiling.
+//   global scope. Names are looked up in graph vars (by their bare name: `height`), then the helpers (sin … pick, the
+//   conversions Number … isNaN, Math, the reference functions), then frame/time/fps/timeInc; `vars` is a guard whose
+//   every use says to read vars by their bare name, anything else is a ReferenceError naming it. The expression
+//   itself runs in a strict function whose `this` throws when read, and `import` is rejected before compiling.
 // - Time limit: an expression that isSimpleExpr() cannot prove short (function literals, loops, regular
 //   expressions, method calls, object literals, templates, assignments) runs inside a timed host call
 //   (Host.exprSandbox.run, engine.scriptTimeoutMs). The others are straight-line arithmetic over vars and up to
@@ -25,6 +25,7 @@
 //   `new Function` in the engine's own realm: the same names are hidden, but there is NO timeout and NO realm
 //   isolation (an expression can reach the engine realm's Function through any function's .constructor).
 import type { Host } from '../host/types.ts';
+import { makeVarsGuard } from '../core/snippet-lib.ts';
 
 export class ExprError extends Error {}
 /** Thrown by reference functions while validating without cooking (dry run): the value is only known at cook time. */
@@ -317,6 +318,8 @@ interface Runtime {
   lib: any;
   /** the `this` expressions run with */
   noThis: any;
+  /** what `vars` is: the old way of reading graph vars, a guard that says to read them by their bare name */
+  varsGuard: any;
   copyIn: (v: any) => any;
   error: (kind: string, msg: string) => any;
   compileSource: (source: string) => any;
@@ -362,8 +365,10 @@ function runtimeFor(host: Host | undefined): Runtime {
     },
   };
   const realm = sb ? sb.compile(`(${exprRealmSetup.toString()})`)(bridge) : exprRealmSetup(bridge);
+  // made inside the (now locked down) realm, like the library: its errors are that realm's
+  const varsGuard = sb ? sb.compile(`(${makeVarsGuard.toString()})()`) : makeVarsGuard();
   rt = {
-    lib: realm.lib, noThis: realm.noThis, copyIn: realm.copyIn, error: realm.error,
+    lib: realm.lib, noThis: realm.noThis, varsGuard, copyIn: realm.copyIn, error: realm.error,
     compileSource: sb ? (s) => sb.compile(s) : (s) => new Function(`return ${s}`)(),
     checkBody: sb ? (b) => sb.checkSyntax(b) : fallbackCheck,
     run: sb ? (job, ms) => sb.run(job, ms) : (job) => job(),
@@ -568,6 +573,7 @@ const SCOPE: ProxyHandler<ScopeState> = {
       s.onTime?.();
       return (s.time as any)[k];
     }
+    if (k === 'vars') return s.rt.varsGuard;
     throw s.rt.error('ReferenceError', unknownName(k));
   },
   set(s, k) {

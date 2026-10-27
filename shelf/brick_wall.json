@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "description": "Brick wall from x = 0 to x = length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core. One wythe deep (headers are drawn as half bricks). Pivot at the start of the wall, on the ground, centred in thickness. Pieces: brick_wall_bricks (brick), brick_wall_mortar (mortar). Every piece is a closed box.",
+  "description": "Brick wall from x = 0 to x = wall_length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core. One wythe deep (headers are drawn as half bricks). Pivot at the start of the wall, on the ground, centred in thickness. Pieces: brick_wall_bricks (brick), brick_wall_mortar (mortar). Every piece is a closed box.",
   "params": {
-    "length": { "type": "float", "default": 3, "min": 0.3, "max": 40, "desc": "length along X (m)" },
+    "wall_length": { "type": "float", "default": 3, "min": 0.3, "max": 40, "desc": "length along X (m)" },
     "height": { "type": "float", "default": 1.8, "min": 0.1, "max": 5, "desc": "height (m)" },
     "brick_length": {
       "type": "float",
@@ -29,7 +29,7 @@
     "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed" }
   },
   "vars": {
-    "length": 3,
+    "wall_length": 3,
     "height": 1.8,
     "brick_length": 0.215,
     "brick_height": 0.065,
@@ -43,10 +43,10 @@
     "brick_pts": {
       "type": "wrangle",
       "in": ["none"],
-      "note": "lay each course left to right from the bond's unit sequence and start offset, clipping bricks at x = 0, x = length and the top",
+      "note": "lay each course left to right from the bond's unit sequence and start offset, clipping bricks at x = 0, x = wall_length and the top",
       "params": {
         "run_over": "detail",
-        "code": "const L = vars.length, H = vars.height, S = vars.brick_length, bh = vars.brick_height, m = vars.mortar, d = (S - m) / 2, hd = (S - m) / 2, s = vars.seed, j = vars.jitter;\nconst rows = Math.ceil((H + m) / (bh + m));\nfor (let r = 0; r < rows; r++) {\n  const y0 = r * (bh + m), y1 = Math.min(H, y0 + bh);\n  if (y1 - y0 < 0.004) break;\n  const odd = r % 2 === 1;\n  let units, off;\n  if (vars.bond === 'stack') { units = [S]; off = 0; }\n  else if (vars.bond === 'english') { units = odd ? [hd] : [S]; off = odd ? -(hd + m) / 2 : 0; }\n  else if (vars.bond === 'flemish') { units = [S, hd]; off = odd ? -((S + m) / 2 + (hd + m) / 2) : 0; }\n  else { units = [S]; off = odd ? -(S + m) / 2 : 0; }\n  let x = off, k = 0;\n  while (x < L) {\n    const u = units[k % units.length], x0 = Math.max(0, x), x1 = Math.min(L, x + u);\n    if (x1 - x0 > 0.01) {\n      const id = r * 1000 + k;\n      const q = addpoint(0, [(x0 + x1) / 2, (y0 + y1) / 2, (rand(id, s, 1) - 0.5) * 0.004 * j]);\n      setpointattrib(0, 'scale', q, [x1 - x0, y1 - y0, d]);\n      setpointattrib(0, 'orient', q, quaternion(radians((rand(id, s, 2) - 0.5) * 1.6 * j), [0, 1, 0]));\n      setpointattrib(0, 'tint', q, 0.78 + 0.4 * rand(id, s, 3));\n    }\n    x += u + m; k++;\n  }\n}"
+        "code": "const L = wall_length, H = height, S = brick_length, bh = brick_height, m = mortar, d = (S - m) / 2, hd = (S - m) / 2, s = seed, j = jitter;\nconst rows = Math.ceil((H + m) / (bh + m));\nfor (let r = 0; r < rows; r++) {\n  const y0 = r * (bh + m), y1 = Math.min(H, y0 + bh);\n  if (y1 - y0 < 0.004) break;\n  const odd = r % 2 === 1;\n  let units, off;\n  if (bond === 'stack') { units = [S]; off = 0; }\n  else if (bond === 'english') { units = odd ? [hd] : [S]; off = odd ? -(hd + m) / 2 : 0; }\n  else if (bond === 'flemish') { units = [S, hd]; off = odd ? -((S + m) / 2 + (hd + m) / 2) : 0; }\n  else { units = [S]; off = odd ? -(S + m) / 2 : 0; }\n  let x = off, k = 0;\n  while (x < L) {\n    const u = units[k % units.length], x0 = Math.max(0, x), x1 = Math.min(L, x + u);\n    if (x1 - x0 > 0.01) {\n      const id = r * 1000 + k;\n      const q = addpoint(0, [(x0 + x1) / 2, (y0 + y1) / 2, (rand(id, s, 1) - 0.5) * 0.004 * j]);\n      setpointattrib(0, 'scale', q, [x1 - x0, y1 - y0, d]);\n      setpointattrib(0, 'orient', q, quaternion(radians((rand(id, s, 2) - 0.5) * 1.6 * j), [0, 1, 0]));\n      setpointattrib(0, 'tint', q, 0.78 + 0.4 * rand(id, s, 3));\n    }\n    x += u + m; k++;\n  }\n}"
       }
     },
     "unit": { "type": "box" },
@@ -64,8 +64,8 @@
     "mortar_geo": {
       "type": "box",
       "params": {
-        "size": ["=Math.max(0.001, length - 0.004)", "=Math.max(0.001, height - 0.004)", "=(brick_length - mortar) / 2 - 0.012"],
-        "center": ["=length / 2", "=height / 2", 0]
+        "size": ["=Math.max(0.001, wall_length - 0.004)", "=Math.max(0.001, height - 0.004)", "=(brick_length - mortar) / 2 - 0.012"],
+        "center": ["=wall_length / 2", "=height / 2", 0]
       }
     },
     "mortar_name": {

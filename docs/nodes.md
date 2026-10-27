@@ -165,7 +165,7 @@ category: `generate`
 
 Surface from a JS expression of (u, v) returning [x,y,z]; optional wrapping for closed surfaces.
 
-The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
+The expression runs sandboxed like a wrangle and reads graph vars by their bare name; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
 
 **Inputs**
 
@@ -1340,7 +1340,7 @@ category: `curve`
 
 Curve from a JS expression of t returning [x,y,z] (e.g. helices, knots, Lissajous).
 
-The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
+The expression runs sandboxed like a wrangle and reads graph vars by their bare name ([cos(t*TAU) * radius, t, sin(t*TAU) * radius]); all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).
 
 **Inputs**
 
@@ -3581,7 +3581,7 @@ category: `measure` · aliases: `expect`, `check`, `verify`
 
 Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression) and fail, warn or mark when a check fails. Passes the geometry through.
 
-Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges. Each cook records stats checks and failed.
+Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first). Each cook records stats checks and failed.
 
 **Inputs**
 
@@ -3614,7 +3614,7 @@ Every check is off by default; enable the ones that express what the graph must 
 | `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of its first component (null = off) |
 | `attrib_max` | json | `null` |  |  |  | attrib: largest allowed value of its first component (null = off) |
 | `group` | string | `""` |  |  |  | group name (any class) that must exist and be non-empty ("" = off) |
-| `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges; e.g. "volume > 1 && pieces == 1" |
+| `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first); e.g. "volume > 1 && pieces == 1" |
 | `tolerance` | float | `0.000001` | 0.. |  |  | distance tolerance for bbox_min/max and duplicate points *(advanced)* |
 
 **Writes:** passes geometry through; mark: detail int assert_failed, detail string assert_report, point/prim group assert_fail
@@ -3991,7 +3991,7 @@ Edge groups are sets of point pairs. Edge patterns add selectors: "boundary" (un
 | `name` | string | `"group1"` |  |  |  | group name |
 | `class` | enum | `"prim"` |  | `prim`, `point`, `vertex`, `edge` |  | element class (edge = point pairs) |
 | `pattern` | group | `""` |  |  |  | base pattern ("" = no pattern filter): names, ranges, "@P.y>0", "!grp"; edges also "boundary", "angle>30", "p3-7", "border:grp" |
-| `expr` | code | `""` |  |  |  | JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9" (vertex class runs over vertices; edge class: the expression must hold for both points of the edge) |
+| `expr` | code | `""` |  |  |  | JS wrangle-style boolean expression per element, e.g. "@P.y > 0.5 && @N.y > 0.9" or "@P.y > height" with a graph var (vertex class runs over vertices; edge class: the expression must hold for both points of the edge) |
 | `bbox_min` | vec3 | `[-1000000000,-1000000000,-1000000000]` |  |  |  | keep elements inside this box (points; prims use centroid; vertices their point; edges their midpoint) |
 | `bbox_max` | vec3 | `[1000000000,1000000000,1000000000]` |  |  |  | box max |
 | `normal` | vec3 | `[0,0,0]` |  |  |  | keep elements whose normal is within spread_angle of this direction ([0,0,0] = off; vertices use vertex normals, edges the mean of their polygons) |
@@ -6530,7 +6530,7 @@ category: `sdf` · aliases: `sdf_code`, `sdf_wrangle`, `implicit`
 
 SDF from JS code: return a signed distance for point p ([x,y,z]). IQ helpers built in (sdSphere, sdBox, smin, opTwist…). sdf(i, p) samples input i.
 
-The code runs sandboxed like a wrangle, under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s). This node only probes the field at the origin; the nodes that sample it later (sdf_to_mesh, sdf_grid, also after transform, sdf_modify or sdf_combine) run all of their sampling under that limit, so the whole mesh or grid must be computed within it: a field that loops anywhere, or is too slow for the resolution, fails the sampling node with "SDF code (sdf_expr) exceeded N ms".
+The code runs sandboxed like a wrangle, under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s), and reads graph vars by their bare name (sdSphere(p, radius)). This node only probes the field at the origin; the nodes that sample it later (sdf_to_mesh, sdf_grid, also after transform, sdf_modify or sdf_combine) run all of their sampling under that limit, so the whole mesh or grid must be computed within it: a field that loops anywhere, or is too slow for the resolution, fails the sampling node with "SDF code (sdf_expr) exceeded N ms".
 
 **Inputs**
 
@@ -7497,7 +7497,7 @@ category: `heightfield` · aliases: `heightfield_copylayer`, `heightfield_layerc
 
 Layer operations: compute a layer from an expression over layers ("height * mask + 2"), copy, rename, delete or fill.
 
-Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer's current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), vars.*, b_<layer> = a layer of the heightfield in input 1 sampled at x, z, and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too. Write expressions in x z (and layers) to get the same values on a tile as on the whole map: i j u v count from the field's own corner and extent.
+Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer's current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), b_<layer> = a layer of the heightfield in input 1 sampled at x, z, the graph vars by their bare name (a layer or sample variable of the same name comes first, with a warning), and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too. Write expressions in x z (and layers) to get the same values on a tile as on the whole map: i j u v count from the field's own corner and extent.
 
 **Inputs**
 
@@ -8872,7 +8872,7 @@ category: `code` · aliases: `python`, `js`, `javascript`, `python_sop`
 
 Arbitrary JS over the whole geometry with the engine library (builder, math, noise, BVH, manifold, lib.run any node). Return a Geometry.
 
-The body of `async function(geo, inputs, lib, vars)`. geo is a writable clone of input 0; inputs[i] are the raw inputs. lib: Geometry, GeoBuilder, math, topology, random, noise, KDTree, TriBVH, manifold, merge(geos), run(type, params, ...inputs), warn(msg), frame, time, fps, timeInc (reading them makes the script re-cook per frame). Must return a Geometry (e.g. `return geo;`).
+The body of `async function(geo, inputs, lib)`. geo is a writable clone of input 0; inputs[i] are the raw inputs. lib: Geometry, GeoBuilder, math, topology, random, noise, KDTree, TriBVH, manifold, merge(geos), run(type, params, ...inputs), warn(msg), frame, time, fps, timeInc (reading them makes the script re-cook per frame). Graph vars by their bare name, read-only, as in "=expr" params (e.g. `lib.run('box', { size: height })`). Must return a Geometry (e.g. `return geo;`).
 
 **Inputs**
 
@@ -8906,7 +8906,7 @@ category: `code` · aliases: `attribwrangle`, `pointwrangle`, `primwrangle`, `ve
 
 Run a JS snippet per point / prim / vertex (or once) with VEX-style @attributes. The universal escape hatch.
 
-Code runs once per element with @attr bound to the current element. Read/write any attribute: @P, @N, @Cd, @pscale, @orient... New attributes are created on write (type from prefix f@ i@ v@ p@ u@ s@, a known name, or the first assigned value). Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.
+Code runs once per element with @attr bound to the current element. Read/write any attribute: @P, @N, @Cd, @pscale, @orient... New attributes are created on write (type from prefix f@ i@ v@ p@ u@ s@, a known name, or the first assigned value). Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). Graph vars by their bare name, read-only, as in "=expr" params: @P.y += height * 0.5 (iteration, value … inside a foreach). Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.
 
 **Inputs**
 
@@ -8945,7 +8945,7 @@ category: `flow` · aliases: `for_each`, `loop`, `foreach_piece`, `for_loop`
 
 Loop a subgraph over connected pieces, attribute values, points, prims, or N times (with optional feedback).
 
-The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} node yields the current piece (or the previous iteration's result in feedback mode); index 1 yields the whole input; index 2 the foreach's second input. Vars available to "=expr" params and code: iteration, numiterations, value (piece attribute value / element number), attr (object of the element's attributes, e.g. attr.height), plus all parent vars. feedback:true is count-based and runs all iterations in one cook at the current time; for feedback over frames use solver.
+The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} node yields the current piece (or the previous iteration's result in feedback mode); index 1 yields the whole input; index 2 the foreach's second input. Vars the body's "=expr" params and code read by their bare name: iteration, numiterations, value (piece attribute value / element number), attr (object of the element's attributes, e.g. attr.height), plus all parent vars. feedback:true is count-based and runs all iterations in one cook at the current time; for feedback over frames use solver.
 
 **Inputs**
 
@@ -9189,7 +9189,7 @@ category: `flow` · aliases: `sop_solver`, `sopsolver`
 
 Feedback over frames (Houdini SOP Solver): run a body graph once per frame on the previous frame's result, for growth, accumulation and settling.
 
-Cooking at frame N runs the body for every frame from start_frame to N (once per substep). Inside the body, {"type":"input","params":{"index":0}} is the previous frame's result (the initial geometry on start_frame), index 1 the initial geometry, 2 and 3 the extra inputs cooked at that frame. Before start_frame the initial geometry passes through. The body sees the vars iteration (frames since start_frame, from 0), substep, frame, time and timeInc (the step's time; frames are fractional between substeps), plus parent vars; wrangles also get @Frame @Time @TimeInc. Caching: the state after frame f has the signature S(f) = hash(S(f-1), f, extra-input signatures at f), starting from S(start_frame-1) = hash(params, vars, initial input at start_frame). Every frame's state is cached under S(f), so cooking frame 11 after frame 10 runs the body once, and going back to an earlier frame is a cache hit. foreach with feedback:true is different: it is count-based (N iterations in one cook, no notion of time) and is cached as a whole.
+Cooking at frame N runs the body for every frame from start_frame to N (once per substep). Inside the body, {"type":"input","params":{"index":0}} is the previous frame's result (the initial geometry on start_frame), index 1 the initial geometry, 2 and 3 the extra inputs cooked at that frame. Before start_frame the initial geometry passes through. The body sees the vars iteration (frames since start_frame, from 0), substep, frame, time and timeInc (the step's time; frames are fractional between substeps), plus parent vars, by their bare name; wrangles also get @Frame @Time @TimeInc. Caching: the state after frame f has the signature S(f) = hash(S(f-1), f, extra-input signatures at f), starting from S(start_frame-1) = hash(params, vars, initial input at start_frame). Every frame's state is cached under S(f), so cooking frame 11 after frame 10 runs the body once, and going back to an earlier frame is a cache hit. foreach with feedback:true is different: it is count-based (N iterations in one cook, no notion of time) and is cached as a whole.
 
 **Inputs**
 
@@ -9952,7 +9952,7 @@ Planar truss in the XY plane: top and bottom chords, verticals and diagonals in 
 
 ![beam_truss](../shelf/thumbs/beam_truss.png)
 
-Spans x = -length/2 … length/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.
+Spans x = -span/2 … span/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.
 
 **Inputs**
 
@@ -9962,7 +9962,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `8` | 1..40 |  |  | span along X (m) |
+| `span` | float | `8` | 1..40 |  |  | span along X (m) |
 | `height` | float | `1.2` | 0.2..6 |  |  | depth of the truss, chord centre to chord centre (m) |
 | `panels` | int | `6` | 2..30 |  |  | panels along the span (even counts are symmetric) |
 | `member_size` | float | `0.12` | 0.03..0.6 |  |  | member section size (m) |
@@ -9987,7 +9987,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `1.8` | 0.6..5 |  |  | length along X (m) |
+| `bench_length` | float | `1.8` | 0.6..5 |  |  | length along X (m) |
 | `seat_height` | float | `0.45` | 0.25..0.8 |  |  | seat height (m) |
 | `depth` | float | `0.45` | 0.25..0.8 |  |  | seat depth along Z (m) |
 | `slats` | int | `5` | 2..10 |  |  | seat slats |
@@ -10021,7 +10021,7 @@ None (generator).
 
 category: `shelf`
 
-Brick wall from x = 0 to x = length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core.
+Brick wall from x = 0 to x = wall_length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core.
 
 ![brick_wall](../shelf/thumbs/brick_wall.png)
 
@@ -10035,7 +10035,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `3` | 0.3..40 |  |  | length along X (m) |
+| `wall_length` | float | `3` | 0.3..40 |  |  | length along X (m) |
 | `height` | float | `1.8` | 0.1..5 |  |  | height (m) |
 | `brick_length` | float | `0.215` | 0.1..0.5 |  |  | brick length (m); depth is half of it |
 | `brick_height` | float | `0.065` | 0.03..0.3 |  |  | brick height (m) |
@@ -10173,7 +10173,7 @@ None (generator).
 
 category: `shelf`
 
-Fence along a curve (input 0; without one, a straight run of `length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails).
+Fence along a curve (input 0; without one, a straight run of `run_length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails).
 
 ![fence](../shelf/thumbs/fence.png)
 
@@ -10189,7 +10189,7 @@ Posts at even spacing including both ends. Sits on the curve (pivot = the curve)
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `6` | 0.5..40 |  |  | run length along +X when no curve is connected (m) |
+| `run_length` | float | `6` | 0.5..40 |  |  | run length along +X when no curve is connected (m) |
 | `height` | float | `1.1` | 0.4..2.5 |  |  | fence height (m) |
 | `style` | enum | `"picket"` |  | `picket`, `plank`, `rail` |  | infill style |
 | `post_spacing` | float | `2` | 0.5..5 |  |  | maximum distance between posts (m) |
@@ -10351,7 +10351,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `2.4` | 0.4..8 |  |  | length along X (m) |
+| `log_length` | float | `2.4` | 0.4..8 |  |  | length along X (m) |
 | `radius` | float | `0.2` | 0.05..0.8 |  |  | radius at the thick end (m) |
 | `taper` | float | `0.2` | 0..0.6 |  |  | how much thinner the other end is (fraction of radius) |
 | `roughness` | float | `0.12` | 0..0.3 |  |  | bark displacement as a fraction of radius |
@@ -10439,7 +10439,7 @@ Pivot = the curve (the default run starts at the origin, 0.5 m up). Pieces: pipe
 
 category: `shelf`
 
-Railing along a curve (input 0; without one, a straight run of `length` along +X from the origin): posts at even spacing including both ends, a handrail on top, lower rails and balusters.
+Railing along a curve (input 0; without one, a straight run of `run_length` along +X from the origin): posts at even spacing including both ends, a handrail on top, lower rails and balusters.
 
 ![railing](../shelf/thumbs/railing.png)
 
@@ -10455,7 +10455,7 @@ Sits on the curve (pivot = the curve). Pieces: railing_posts, railing_rails, rai
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `4` | 0.5..30 |  |  | run length along +X when no curve is connected (m) |
+| `run_length` | float | `4` | 0.5..30 |  |  | run length along +X when no curve is connected (m) |
 | `height` | float | `1` | 0.4..2 |  |  | handrail height above the curve (m) |
 | `post_spacing` | float | `1.5` | 0.3..6 |  |  | maximum distance between posts (m) |
 | `baluster_spacing` | float | `0.15` | 0..1 |  |  | distance between balusters (m); 0 = none |
@@ -10510,7 +10510,7 @@ None (generator).
 | `size` | float | `1` | 0.1..6 |  |  | approximate width (m) |
 | `roughness` | float | `0.35` | 0..0.8 |  |  | displacement as a fraction of the size |
 | `flatness` | float | `0.65` | 0.2..1 |  |  | height / width |
-| `detail` | int | `2` | 1..4 |  |  | icosphere subdivision level (2 = 162 points) |
+| `level` | int | `2` | 1..4 |  |  | icosphere subdivision level (2 = 162 points) |
 | `sink` | float | `0` | 0..0.5 |  |  | part of the height below y = 0 |
 | `seed` | int | `0` | 0..1000 |  |  | shape seed |
 
@@ -10593,7 +10593,7 @@ Without input it uses a width by depth rectangle. Negative offset distance adds 
 
 category: `shelf`
 
-Sandbag wall from x = 0 to x = length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint.
+Sandbag wall from x = 0 to x = wall_length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint.
 
 ![sandbag_wall](../shelf/thumbs/sandbag_wall.png)
 
@@ -10607,7 +10607,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `3` | 0.6..15 |  |  | length along X (m) |
+| `wall_length` | float | `3` | 0.6..15 |  |  | length along X (m) |
 | `rows` | int | `5` | 1..10 |  |  | number of rows |
 | `bag_length` | float | `0.6` | 0.3..1.2 |  |  | bag length (m) |
 | `bag_height` | float | `0.16` | 0.06..0.4 |  |  | bag height (m) |
@@ -10796,7 +10796,7 @@ None (generator).
 
 category: `shelf`
 
-Straight wall from x = 0 to x = length with window (and an optional door) openings cut by a boolean, filled with the window_frame and door_frame shelf assets.
+Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with the window_frame and door_frame shelf assets.
 
 ![wall_segment](../shelf/thumbs/wall_segment.png)
 
@@ -10810,7 +10810,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `length` | float | `4` | 0.5..60 |  |  | length along X (m) |
+| `wall_length` | float | `4` | 0.5..60 |  |  | length along X (m) |
 | `height` | float | `3` | 1..10 |  |  | height (m) |
 | `thickness` | float | `0.25` | 0.05..1 |  |  | thickness along Z (m) |
 | `windows` | int | `2` | 0..24 |  |  | number of window openings |

@@ -117,7 +117,7 @@
                     "ground": {
                       "type": "wall_segment",
                       "params": {
-                        "length": "=prim('piece', 0, 'len')",
+                        "wall_length": "=prim('piece', 0, 'len')",
                         "height": "=floor_height",
                         "windows": "=max(0, floor(prim('piece', 0, 'len') / window_spacing))",
                         "door": "=door && iteration == 0"
@@ -126,7 +126,7 @@
                     "upper": {
                       "type": "wall_segment",
                       "params": {
-                        "length": "=prim('piece', 0, 'len')",
+                        "wall_length": "=prim('piece', 0, 'len')",
                         "height": "=floor_height",
                         "windows": "=max(0, floor(prim('piece', 0, 'len') / window_spacing))",
                         "door": false

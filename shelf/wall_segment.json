@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "description": "Straight wall from x = 0 to x = length with window (and an optional door) openings cut by a boolean, filled with the window_frame and door_frame shelf assets. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
+  "description": "Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with the window_frame and door_frame shelf assets. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
   "params": {
-    "length": { "type": "float", "default": 4, "min": 0.5, "max": 60, "desc": "length along X (m)" },
+    "wall_length": { "type": "float", "default": 4, "min": 0.5, "max": 60, "desc": "length along X (m)" },
     "height": { "type": "float", "default": 3, "min": 1, "max": 10, "desc": "height (m)" },
     "thickness": { "type": "float", "default": 0.25, "min": 0.05, "max": 1, "desc": "thickness along Z (m)" },
     "windows": { "type": "int", "default": 2, "min": 0, "max": 24, "desc": "number of window openings" },
@@ -31,7 +31,7 @@
     "frames": { "type": "bool", "default": true, "desc": "fill the openings with window_frame / door_frame" }
   },
   "vars": {
-    "length": 4,
+    "wall_length": 4,
     "height": 3,
     "thickness": 0.25,
     "windows": 2,
@@ -44,7 +44,7 @@
   "nodes": {
     "wall": {
       "type": "box",
-      "params": { "size": ["=length", "=height", "=thickness"], "center": ["=length / 2", "=height / 2", 0] }
+      "params": { "size": ["=wall_length", "=height", "=thickness"], "center": ["=wall_length / 2", "=height / 2", 0] }
     },
     "none": { "type": "points", "params": { "positions": [] } },
     "openings": {
@@ -53,7 +53,7 @@
       "note": "cutter boxes (group cut, with scale) and frame anchors at the bottom centre of each opening (groups win_at, door_at)",
       "params": {
         "run_over": "detail",
-        "code": "const L = vars.length, H = vars.height, T = vars.thickness, nw = Math.round(vars.windows), bays = nw + (vars.door ? 1 : 0);\nconst z = addpoint(0, [0, 0, 0]);\nfor (const g of ['cut', 'win_at', 'door_at']) setpointgroup(0, g, z, 0);\nif (!bays) return;\nconst bw = L / bays, dbay = vars.door ? Math.floor(bays / 2) : -1;\nconst ww = Math.min(vars.window_width, bw - 0.2), sill = Math.min(vars.sill_height, H - 0.45), wh = Math.min(vars.window_height, H - sill - 0.15);\nconst dw = Math.min(1, bw - 0.2), dh = Math.min(2.1, H - 0.15);\nfor (let i = 0; i < bays; i++) {\n  const x = bw * (i + 0.5), door = i === dbay;\n  if ((door ? dw : ww) <= 0.05 || (door ? dh : wh) <= 0.05) continue;\n  const c = addpoint(0, door ? [x, (dh - 0.05) / 2, 0] : [x, sill + wh / 2, 0]);\n  setpointattrib(0, 'scale', c, door ? [dw, dh + 0.05, T + 0.2] : [ww, wh, T + 0.2]);\n  setpointgroup(0, 'cut', c, 1);\n  const a = addpoint(0, [x, door ? 0 : sill, 0]);\n  setpointgroup(0, door ? 'door_at' : 'win_at', a, 1);\n}"
+        "code": "const L = wall_length, H = height, T = thickness, nw = Math.round(windows), bays = nw + (door ? 1 : 0);\nconst z = addpoint(0, [0, 0, 0]);\nfor (const g of ['cut', 'win_at', 'door_at']) setpointgroup(0, g, z, 0);\nif (!bays) return;\nconst bw = L / bays, dbay = door ? Math.floor(bays / 2) : -1;\nconst ww = Math.min(window_width, bw - 0.2), sill = Math.min(sill_height, H - 0.45), wh = Math.min(window_height, H - sill - 0.15);\nconst dw = Math.min(1, bw - 0.2), dh = Math.min(2.1, H - 0.15);\nfor (let i = 0; i < bays; i++) {\n  const x = bw * (i + 0.5), isDoor = i === dbay;\n  if ((isDoor ? dw : ww) <= 0.05 || (isDoor ? dh : wh) <= 0.05) continue;\n  const c = addpoint(0, isDoor ? [x, (dh - 0.05) / 2, 0] : [x, sill + wh / 2, 0]);\n  setpointattrib(0, 'scale', c, isDoor ? [dw, dh + 0.05, T + 0.2] : [ww, wh, T + 0.2]);\n  setpointgroup(0, 'cut', c, 1);\n  const a = addpoint(0, [x, isDoor ? 0 : sill, 0]);\n  setpointgroup(0, isDoor ? 'door_at' : 'win_at', a, 1);\n}"
       }
     },
     "unit": { "type": "box" },
@@ -73,7 +73,7 @@
     "window": {
       "type": "window_frame",
       "params": {
-        "width": "=Math.min(window_width, length / Math.max(1, windows + (door ? 1 : 0)) - 0.2)",
+        "width": "=Math.min(window_width, wall_length / Math.max(1, windows + (door ? 1 : 0)) - 0.2)",
         "height": "=Math.min(window_height, height - Math.min(sill_height, height - 0.45) - 0.15)",
         "depth": "=Math.min(0.12, thickness * 0.6)",
         "sill_depth": "=thickness / 2 - Math.min(0.12, thickness * 0.6) / 2 + 0.05"
@@ -83,7 +83,7 @@
     "door_geo": {
       "type": "door_frame",
       "params": {
-        "width": "=Math.min(1, length / Math.max(1, windows + 1) - 0.2)",
+        "width": "=Math.min(1, wall_length / Math.max(1, windows + 1) - 0.2)",
         "height": "=Math.min(2.1, height - 0.15)",
         "depth": "=thickness + 0.02"
       }

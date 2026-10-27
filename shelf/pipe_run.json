@@ -46,7 +46,7 @@
       "note": "replace every corner by a circular arc tangent to both segments (radius clamped to half the shorter segment)",
       "params": {
         "run_over": "detail",
-        "code": "const R = vars.bend_radius;\nfor (let pr = 0; pr < nprims(0); pr++) {\n  const ids = primpoints(0, pr); if (ids.length < 2) continue;\n  const P = ids.map((i) => point(0, 'P', i)), out = [P[0]];\n  for (let i = 1; i < P.length - 1; i++) {\n    const u = sub(P[i - 1], P[i]), v = sub(P[i + 1], P[i]), lu = length(u), lv = length(v);\n    if (R <= 0 || lu < 1e-9 || lv < 1e-9) { out.push(P[i]); continue; }\n    const a = normalize(u), b = normalize(v), th = Math.acos(clamp(dot(a, b), -1, 1));\n    if (th > PI - 1e-3 || th < 1e-3) { out.push(P[i]); continue; }\n    let d = R / Math.tan(th / 2); d = Math.min(d, lu / 2, lv / 2); const r = d * Math.tan(th / 2);\n    const t1 = add(P[i], mul(a, d)), t2 = add(P[i], mul(b, d)), c = add(P[i], mul(normalize(add(a, b)), r / Math.sin(th / 2)));\n    const e1 = sub(t1, c), e2 = sub(t2, c), phi = PI - th, n = Math.max(2, Math.ceil(phi / radians(10)));\n    for (let k = 0; k <= n; k++) { const s = k / n; out.push(add(c, mul(add(mul(e1, Math.sin((1 - s) * phi)), mul(e2, Math.sin(s * phi))), 1 / Math.sin(phi)))); }\n  }\n  out.push(P[P.length - 1]);\n  addprim(0, 'polyline', out.map((p) => addpoint(0, p)));\n  removeprim(0, pr, true);\n}"
+        "code": "const R = bend_radius;\nfor (let pr = 0; pr < nprims(0); pr++) {\n  const ids = primpoints(0, pr); if (ids.length < 2) continue;\n  const P = ids.map((i) => point(0, 'P', i)), out = [P[0]];\n  for (let i = 1; i < P.length - 1; i++) {\n    const u = sub(P[i - 1], P[i]), v = sub(P[i + 1], P[i]), lu = length(u), lv = length(v);\n    if (R <= 0 || lu < 1e-9 || lv < 1e-9) { out.push(P[i]); continue; }\n    const a = normalize(u), b = normalize(v), th = Math.acos(clamp(dot(a, b), -1, 1));\n    if (th > PI - 1e-3 || th < 1e-3) { out.push(P[i]); continue; }\n    let d = R / Math.tan(th / 2); d = Math.min(d, lu / 2, lv / 2); const r = d * Math.tan(th / 2);\n    const t1 = add(P[i], mul(a, d)), t2 = add(P[i], mul(b, d)), c = add(P[i], mul(normalize(add(a, b)), r / Math.sin(th / 2)));\n    const e1 = sub(t1, c), e2 = sub(t2, c), phi = PI - th, n = Math.max(2, Math.ceil(phi / radians(10)));\n    for (let k = 0; k <= n; k++) { const s = k / n; out.push(add(c, mul(add(mul(e1, Math.sin((1 - s) * phi)), mul(e2, Math.sin(s * phi))), 1 / Math.sin(phi)))); }\n  }\n  out.push(P[P.length - 1]);\n  addprim(0, 'polyline', out.map((p) => addpoint(0, p)));\n  removeprim(0, pr, true);\n}"
       }
     },
     "pipe": {
@@ -108,7 +108,7 @@
       "in": ["support_pts"],
       "note": "keep points on near-horizontal stretches above the floor; drop them to y = 0 with the stand height as scale",
       "params": {
-        "code": "const t = v@tangent; const top = @P.y - vars.radius; if (Math.abs(t.y) > 0.3 || top < 0.05) { removepoint(0, @ptnum); return; } v@scale = [vars.radius * 1.2, top, vars.radius * 1.2]; p@orient = [0, 0, 0, 1]; @P.y = 0;"
+        "code": "const t = v@tangent; const top = @P.y - radius; if (Math.abs(t.y) > 0.3 || top < 0.05) { removepoint(0, @ptnum); return; } v@scale = [radius * 1.2, top, radius * 1.2]; p@orient = [0, 0, 0, 1]; @P.y = 0;"
       }
     },
     "stand": { "type": "box", "params": { "center": [0, 0.5, 0] } },

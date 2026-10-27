@@ -34,7 +34,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const W = vars.width, H = vars.height, D = vars.depth, f = Math.min(vars.frame_width, W / 4, H / 4), m = f * 0.6;\nconst mx = Math.round(vars.mullions_x), my = Math.round(vars.mullions_y), iw = W - 2 * f, ih = H - 2 * f;\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([-(W - f) / 2, H / 2, 0], [f, H, D]); add([(W - f) / 2, H / 2, 0], [f, H, D]);\nadd([0, f / 2, 0], [iw, f, D]); add([0, H - f / 2, 0], [iw, f, D]);\nfor (let i = 1; i <= mx; i++) add([-iw / 2 + iw * i / (mx + 1), H / 2, 0], [m, ih, D * 0.7]);\nfor (let j = 1; j <= my; j++) add([0, f + ih * j / (my + 1), 0], [iw, m, D * 0.6]);"
+        "code": "const W = width, H = height, D = depth, f = Math.min(frame_width, W / 4, H / 4), m = f * 0.6;\nconst mx = Math.round(mullions_x), my = Math.round(mullions_y), iw = W - 2 * f, ih = H - 2 * f;\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([-(W - f) / 2, H / 2, 0], [f, H, D]); add([(W - f) / 2, H / 2, 0], [f, H, D]);\nadd([0, f / 2, 0], [iw, f, D]); add([0, H - f / 2, 0], [iw, f, D]);\nfor (let i = 1; i <= mx; i++) add([-iw / 2 + iw * i / (mx + 1), H / 2, 0], [m, ih, D * 0.7]);\nfor (let j = 1; j <= my; j++) add([0, f + ih * j / (my + 1), 0], [iw, m, D * 0.6]);"
       }
     },
     "unit": { "type": "box" },

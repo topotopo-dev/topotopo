@@ -45,8 +45,12 @@ export interface NodeDef {
   outputs?: string;
   /** a minimal example node spec (or small graph) for docs */
   example?: any;
-  /** the node's code can read graph vars directly (wrangles, scripts) */
-  usesVars?: boolean;
+  /**
+   * The node's code reads graph vars by their bare name, so they key its cache: a function giving the code it runs
+   * (from the resolved params; only the vars named in it count, src/core/usercode.ts codeVarNames), or true for any
+   * var (loop bodies, and scripts, whose lib.run "=expr" params can read every var).
+   */
+  usesVars?: true | ((p: Record<string, any>) => string);
   /**
    * the node always depends on the cook time (e.g. solver): frame/time are mixed into its signature.
    * Other nodes become time-dependent per cook when their "=expr" params read frame/time/fps or when

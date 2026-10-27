@@ -23,7 +23,7 @@
       "note": "sawtooth side profile in the ZY plane (x = 0)",
       "params": {
         "run_over": "detail",
-        "code": "const n = Math.round(vars.steps), r = vars.rise, d = vars.run, pts = [addpoint(0, [0, 0, 0])];\nfor (let i = 0; i < n; i++) { pts.push(addpoint(0, [0, (i + 1) * r, i * d])); pts.push(addpoint(0, [0, (i + 1) * r, (i + 1) * d])); }\npts.push(addpoint(0, [0, 0, n * d]));\naddprim(0, 'poly', pts);"
+        "code": "const n = Math.round(steps), r = rise, d = run, pts = [addpoint(0, [0, 0, 0])];\nfor (let i = 0; i < n; i++) { pts.push(addpoint(0, [0, (i + 1) * r, i * d])); pts.push(addpoint(0, [0, (i + 1) * r, (i + 1) * d])); }\npts.push(addpoint(0, [0, 0, n * d]));\naddprim(0, 'poly', pts);"
       }
     },
     "flight": {
@@ -46,7 +46,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const n = Math.round(vars.steps), r = vars.rise, d = vars.run;\nfor (let i = 0; i < n; i++) { const q = addpoint(0, [0, (i + 1) * r - 0.025, i * d + d / 2]); setpointattrib(0, 'scale', q, [vars.width - 0.1, 0.05, d + 0.02]); setpointattrib(0, 'tint', q, 0.85 + 0.25 * rand(i, 3)); }"
+        "code": "const n = Math.round(steps), r = rise, d = run;\nfor (let i = 0; i < n; i++) { const q = addpoint(0, [0, (i + 1) * r - 0.025, i * d + d / 2]); setpointattrib(0, 'scale', q, [width - 0.1, 0.05, d + 0.02]); setpointattrib(0, 'tint', q, 0.85 + 0.25 * rand(i, 3)); }"
       }
     },
     "unit": { "type": "box" },
@@ -67,7 +67,7 @@
       "note": "board under the tread ends: top edge through the tread noses, 0.3 m deep, cut at the ground",
       "params": {
         "run_over": "detail",
-        "code": "const n = Math.round(vars.steps), r = vars.rise, d = vars.run, L = n * d, k = r / d;\nconst z0 = Math.max(0, L - (n * r - 0.3) / k);\nconst P = [[0, 0, 0], [0, r, 0], [0, n * r, Math.max(0, L - d)], [0, n * r, L], [0, Math.max(0, n * r - 0.3), L], [0, 0, z0]];\nconst out = [];\nfor (const p of P) if (!out.length || distance(out[out.length - 1], p) > 1e-6) out.push(p);\nif (out.length > 3 && distance(out[0], out[out.length - 1]) <= 1e-6) out.pop();\naddprim(0, 'poly', out.map((p) => addpoint(0, p)));"
+        "code": "const n = Math.round(steps), r = rise, d = run, L = n * d, k = r / d;\nconst z0 = Math.max(0, L - (n * r - 0.3) / k);\nconst P = [[0, 0, 0], [0, r, 0], [0, n * r, Math.max(0, L - d)], [0, n * r, L], [0, Math.max(0, n * r - 0.3), L], [0, 0, z0]];\nconst out = [];\nfor (const p of P) if (!out.length || distance(out[out.length - 1], p) > 1e-6) out.push(p);\nif (out.length > 3 && distance(out[0], out[out.length - 1]) <= 1e-6) out.pop();\naddprim(0, 'poly', out.map((p) => addpoint(0, p)));"
       }
     },
     "stringer": {
@@ -103,7 +103,7 @@
       "note": "posts every third step and at the top, on both sides; the rail runs through their tops",
       "params": {
         "run_over": "detail",
-        "code": "const n = Math.round(vars.steps), r = vars.rise, d = vars.run, x = vars.width / 2 - 0.04;\nconst idx = []; for (let i = 0; i < n; i += 3) idx.push(i); if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);\nfor (const sx of [-1, 1]) for (const i of idx) { const q = addpoint(0, [sx * x, (i + 1) * r, i * d + d / 2]); setpointattrib(0, 'scale', q, [0.04, 0.9, 0.04]); }"
+        "code": "const n = Math.round(steps), r = rise, d = run, x = width / 2 - 0.04;\nconst idx = []; for (let i = 0; i < n; i += 3) idx.push(i); if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);\nfor (const sx of [-1, 1]) for (const i of idx) { const q = addpoint(0, [sx * x, (i + 1) * r, i * d + d / 2]); setpointattrib(0, 'scale', q, [0.04, 0.9, 0.04]); }"
       }
     },
     "post_unit": { "type": "box", "params": { "center": [0, 0.5, 0] } },
@@ -113,7 +113,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const n = Math.round(vars.steps), r = vars.rise, d = vars.run, x = vars.width / 2 - 0.04, h = 0.9 + 0.02;\nfor (const sx of [-1, 1]) {\n  const a = addpoint(0, [sx * x, r + h - 0.15 * r / d, d / 2 - 0.15]), b = addpoint(0, [sx * x, n * r + h + 0.15 * r / d, (n - 1) * d + d / 2 + 0.15]);\n  addprim(0, 'polyline', [a, b]);\n}"
+        "code": "const n = Math.round(steps), r = rise, d = run, x = width / 2 - 0.04, h = 0.9 + 0.02;\nfor (const sx of [-1, 1]) {\n  const a = addpoint(0, [sx * x, r + h - 0.15 * r / d, d / 2 - 0.15]), b = addpoint(0, [sx * x, n * r + h + 0.15 * r / d, (n - 1) * d + d / 2 + 0.15]);\n  addprim(0, 'polyline', [a, b]);\n}"
       }
     },
     "rails": { "type": "sweep", "in": ["rail_path"], "params": { "radius": 0.025, "divisions": 10 } },

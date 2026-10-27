@@ -1,8 +1,38 @@
-// Var overrides for one cook without editing the graph (the CLI's --var name=value): values are parsed from text, and
-// a name the graph does not know is an error that lists the ones it does. An export's source block (io/source.ts)
-// records the vars as cooked, so passing them back as overrides cooks the same graph again.
+// Graph var names, and var overrides for one cook without editing the graph (the CLI's --var name=value).
+//
+// Names: "=expr" params and code (wrangle, script, sdf_expr, heightfield_layer …) read a graph var by its bare name
+// (`height`), so a graph cannot declare a var that code could not read by name or that would hide one of code's own
+// names: a keyword, a helper (noise, rand, length …), a JavaScript built-in (Math, Number …), the cook time (frame,
+// time …) or a wrangle's @ptnum … names. Engine.validate reports such names.
+//
+// Overrides: values are parsed from text, and a name the graph does not know is an error that lists the ones it
+// does. An export's source block (io/source.ts) records the vars as cooked, so passing them back as overrides cooks
+// the same graph again.
 import type { GraphSpec } from './types.ts';
 import { didYouMean } from './params.ts';
+import { EXPR_HELPERS, REF_FUNCS, TIME_KEYS } from './expr.ts';
+import { SNIPPET_LIB_NAMES } from '../core/snippet-lib.ts';
+import { JS_GLOBALS, RESERVED_WORDS } from '../core/usercode.ts';
+import { WRANGLE_NAMES } from '../core/wrangle.ts';
+
+const HELPERS = new Set([...EXPR_HELPERS, ...REF_FUNCS, ...SNIPPET_LIB_NAMES]);
+
+/** What a var-name error says about reading vars (the hint of the validation error). */
+export const VAR_NAME_HINT = 'expressions and code read graph vars by their bare name ("=height * 0.5", @P.y += height), so a var needs a name of its own';
+
+/** Why a graph cannot declare a var of this name, or null when it can. */
+export function varNameError(name: string): string | null {
+  const rename = 'rename the var';
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return `var "${name}" is not a name code can read: use letters, digits and _ (not starting with a digit)`;
+  if (name.startsWith('__')) return `var "${name}": names starting with __ belong to the engine; ${rename}`;
+  if (name === 'vars') return 'var "vars": code reads graph vars by their bare name and has no vars object; rename the var';
+  if (RESERVED_WORDS.has(name)) return `var "${name}" is a JavaScript keyword, which code cannot read as a name; ${rename}`;
+  if (TIME_KEYS.has(name)) return `var "${name}" would hide the cook time (frame, time, fps, timeInc) from expressions; ${rename}`;
+  if (HELPERS.has(name)) return `var "${name}" would hide the helper ${name} from expressions and code; ${rename}`;
+  if (WRANGLE_NAMES.has(name)) return `var "${name}" would hide @${name} in wrangles; ${rename}`;
+  if (JS_GLOBALS.has(name)) return `var "${name}" would hide JavaScript's ${name} from code; ${rename}`;
+  return null;
+}
 
 const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i;
 

@@ -3,7 +3,8 @@ import { GeoBuilder, Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
-import { runUserCode } from '../core/usercode.ts';
+import { codeVarDecl, codeVarNames, codeVarValues, runUserCode } from '../core/usercode.ts';
+import { scriptVarsGuard } from '../core/snippet-lib.ts';
 import type { Vec3 } from '../core/math.ts';
 import { orientOutward, pointNormals, primNewell } from '../core/topology.ts';
 import { rng } from '../core/random.ts';
@@ -483,20 +484,23 @@ function runExpr<T>(ctx: CookContext, fn: () => T, what = ''): T {
 /**
  * Compile the expression of a parametric node into a function of `args`. The body is parsed on its own first (a
  * complete function body cannot close the wrapper it is pasted into, so nothing runs while compiling); compiling
- * runs under the script timeout all the same (a host without checkSyntax relies on that).
+ * runs under the script timeout all the same (a host without checkSyntax relies on that). The graph vars the code
+ * names are constants of a function around it, so `args` and the code's own names come first.
  */
 function compileFn(ctx: CookContext, args: string[], code: string) {
   const body = /\breturn\b/.test(code) ? code : `return (${code});`;
   const syntax = ctx.engine.host.checkSyntax?.(`"use strict";${body}`);
   if (syntax) throw new NodeError(`${ctx.type}: expression syntax error: ${syntax.message}${code.includes('\n') ? ` (line ${syntax.line})` : ''}`);
-  return runExpr(ctx, () => ctx.engine.host.compile(`(function(${args.join(',')}){"use strict";\n${body}\n})`), 'expression syntax error: ');
+  const names = codeVarNames(code, ctx.vars), values = codeVarValues(ctx.vars, names);
+  const host = ctx.engine.host;
+  return runExpr(ctx, () => host.compile(`(function(__vars, __varsGuard){"use strict"; ${codeVarDecl(names)}\nreturn function(${args.join(',')}){"use strict";\n${body}\n}; })`)(values, scriptVarsGuard(host)), 'expression syntax error: ');
 }
 
 defineNode({
   type: 'parametric_curve',
   category: 'curve',
   summary: 'Curve from a JS expression of t returning [x,y,z] (e.g. helices, knots, Lissajous).',
-  description: 'The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).',
+  description: 'The expression runs sandboxed like a wrangle and reads graph vars by their bare name ([cos(t*TAU) * radius, t, sin(t*TAU) * radius]); all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).',
   inputs: [],
   params: {
     expr: { type: 'code', default: '[cos(t*TAU), t, sin(t*TAU)]', desc: 'JS expression (or body with return) of t (and i) returning [x,y,z]. Snippet helpers available.' },
@@ -504,7 +508,7 @@ defineNode({
     count: { type: 'int', default: 100, min: 2, max: 1000000, desc: 'number of points', aliases: ['points', 'segments'] },
     closed: { type: 'bool', default: false, desc: 'closed curve (polygon)' },
   },
-  usesVars: true,
+  usesVars: (p) => String(p.expr ?? ''),
   example: { type: 'parametric_curve', params: { expr: '[(2+cos(3*t))*cos(2*t), sin(3*t), (2+cos(3*t))*sin(2*t)]', range: [0, 6.2832], count: 400, closed: true } },
   cook: (ctx) => {
     const { p } = ctx;
@@ -526,7 +530,7 @@ defineNode({
   type: 'parametric_surface',
   category: 'generate',
   summary: 'Surface from a JS expression of (u, v) returning [x,y,z]; optional wrapping for closed surfaces.',
-  description: 'The expression runs sandboxed like a wrangle; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).',
+  description: 'The expression runs sandboxed like a wrangle and reads graph vars by their bare name; all points together must be computed within the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s).',
   inputs: [],
   params: {
     expr: { type: 'code', default: '[(1+0.5*cos(v*TAU))*cos(u*TAU), 0.5*sin(v*TAU), (1+0.5*cos(v*TAU))*sin(u*TAU)]', desc: 'JS expression of u, v returning [x,y,z]' },
@@ -537,7 +541,7 @@ defineNode({
     wrap_v: { type: 'bool', default: false, desc: 'v is periodic' },
     flip: { type: 'bool', default: false, desc: 'reverse face winding' },
   },
-  usesVars: true,
+  usesVars: (p) => String(p.expr ?? ''),
   outputs: 'vertex uv',
   example: { type: 'parametric_surface', params: { expr: '[(u - 0.5) * 4, 0.25 * sin(u * TAU * 2), (v - 0.5) * 2]', divisions: [64, 16] } },
   cook: (ctx) => {

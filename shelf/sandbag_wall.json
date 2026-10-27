@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "description": "Sandbag wall from x = 0 to x = length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint. Pivot at the start of the wall, on the ground, centred in depth. Piece: sandbags (burlap). Every bag is closed.",
+  "description": "Sandbag wall from x = 0 to x = wall_length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint. Pivot at the start of the wall, on the ground, centred in depth. Piece: sandbags (burlap). Every bag is closed.",
   "params": {
-    "length": { "type": "float", "default": 3, "min": 0.6, "max": 15, "desc": "length along X (m)" },
+    "wall_length": { "type": "float", "default": 3, "min": 0.6, "max": 15, "desc": "length along X (m)" },
     "rows": { "type": "int", "default": 5, "min": 1, "max": 10, "desc": "number of rows" },
     "bag_length": { "type": "float", "default": 0.6, "min": 0.3, "max": 1.2, "desc": "bag length (m)" },
     "bag_height": { "type": "float", "default": 0.16, "min": 0.06, "max": 0.4, "desc": "bag height (m)" },
     "jitter": { "type": "float", "default": 0.5, "min": 0, "max": 1, "desc": "random yaw and offset (0 = neat)" },
     "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed" }
   },
-  "vars": { "length": 3, "rows": 5, "bag_length": 0.6, "bag_height": 0.16, "jitter": 0.5, "seed": 0 },
+  "vars": { "wall_length": 3, "rows": 5, "bag_length": 0.6, "bag_height": 0.16, "jitter": 0.5, "seed": 0 },
   "nodes": {
     "block": { "type": "box", "params": { "divisions": [2, 1, 1] } },
     "pillow": { "type": "subdivide", "in": ["block"], "params": { "levels": 2 } },
@@ -32,7 +32,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const L = vars.length, bl = vars.bag_length, bh = vars.bag_height, bd = bl * 0.55, j = vars.jitter, s = vars.seed;\nfor (let r = 0; r < Math.round(vars.rows); r++) {\n  const off = r % 2 ? bl / 2 : 0, n = Math.max(1, Math.floor((L - off + 1e-6) / bl));\n  for (let i = 0; i < n; i++) {\n    const id = r * 100 + i;\n    const q = addpoint(0, [off + bl * (i + 0.5) + (rand(id, s, 1) - 0.5) * 0.04 * j, bh * 0.5 + r * bh * 0.82, (rand(id, s, 2) - 0.5) * 0.06 * j]);\n    setpointattrib(0, 'scale', q, [bl * (0.96 + 0.06 * rand(id, s, 3)), bh, bd]);\n    setpointattrib(0, 'orient', q, quaternion(radians((rand(id, s, 4) - 0.5) * 12 * j), [0, 1, 0]));\n    setpointattrib(0, 'tint', q, 0.85 + 0.25 * rand(id, s, 5));\n  }\n}"
+        "code": "const L = wall_length, bl = bag_length, bh = bag_height, bd = bl * 0.55, j = jitter, s = seed;\nfor (let r = 0; r < Math.round(rows); r++) {\n  const off = r % 2 ? bl / 2 : 0, n = Math.max(1, Math.floor((L - off + 1e-6) / bl));\n  for (let i = 0; i < n; i++) {\n    const id = r * 100 + i;\n    const q = addpoint(0, [off + bl * (i + 0.5) + (rand(id, s, 1) - 0.5) * 0.04 * j, bh * 0.5 + r * bh * 0.82, (rand(id, s, 2) - 0.5) * 0.06 * j]);\n    setpointattrib(0, 'scale', q, [bl * (0.96 + 0.06 * rand(id, s, 3)), bh, bd]);\n    setpointattrib(0, 'orient', q, quaternion(radians((rand(id, s, 4) - 0.5) * 12 * j), [0, 1, 0]));\n    setpointattrib(0, 'tint', q, 0.85 + 0.25 * rand(id, s, 5));\n  }\n}"
       }
     },
     "bags": { "type": "copy_to_points", "in": ["squash", "bag_pts"] },

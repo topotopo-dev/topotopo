@@ -30,7 +30,7 @@
       "note": "the slab cross-section (a thick Λ) in the ZY plane; its underside passes through the wall-top edges",
       "params": {
         "run_over": "detail",
-        "code": "const B = vars.depth / 2 + vars.overhang, s = Math.tan(radians(vars.pitch)), tc = vars.thickness / Math.cos(radians(vars.pitch));\nconst h = vars.depth / 2 * s, ye = -vars.overhang * s;\nconst P = [[0, ye, -B], [0, ye + tc, -B], [0, h + tc, 0], [0, ye + tc, B], [0, ye, B], [0, h, 0]];\naddprim(0, 'poly', P.map((p) => addpoint(0, p)));"
+        "code": "const B = depth / 2 + overhang, s = Math.tan(radians(pitch)), tc = thickness / Math.cos(radians(pitch));\nconst h = depth / 2 * s, ye = -overhang * s;\nconst P = [[0, ye, -B], [0, ye + tc, -B], [0, h + tc, 0], [0, ye + tc, B], [0, ye, B], [0, h, 0]];\naddprim(0, 'poly', P.map((p) => addpoint(0, p)));"
       }
     },
     "slab": {

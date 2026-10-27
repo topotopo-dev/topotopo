@@ -31,7 +31,7 @@
       "note": "m = 0 at the base so it stays flat on the ground; the corners are pulled in a little",
       "params": {
         "run_over": "points",
-        "code": "f@m = clamp(@P.y / (0.12 * vars.height), 0, 1);\nconst cx = Math.abs(@P.x) / (vars.width / 2), cz = Math.abs(@P.z) / (vars.depth / 2), k = 1 - 0.2 * Math.pow(cx * cz, 2);\n@P.x *= k; @P.z *= k;"
+        "code": "f@m = clamp(@P.y / (0.12 * height), 0, 1);\nconst cx = Math.abs(@P.x) / (width / 2), cz = Math.abs(@P.z) / (depth / 2), k = 1 - 0.2 * Math.pow(cx * cz, 2);\n@P.x *= k; @P.z *= k;"
       }
     },
     "rough": {
@@ -53,7 +53,7 @@
       "note": "strata: each layer is pushed in or out by its own random amount, with a slope inside the layer; the base stays flat",
       "params": {
         "run_over": "points",
-        "code": "const H = vars.height, n = Math.max(0, Math.round(vars.strata)), s = Math.min(vars.width, vars.depth);\nf@band = 0.5;\nif (n > 0) {\n  const t = @P.y / H * n + 0.3 * noise([@P.x * 0.35, 0, @P.z * 0.35], vars.seed), k = Math.floor(t), f = t - k;\n  const off = ((rand(k, vars.seed) - 0.5) * 0.14 + (f - 0.5) * 0.06) * s * (0.4 + vars.roughness) * @m;\n  const d = [@P.x / vars.width, 0, @P.z / vars.depth], l = Math.hypot(d[0], d[2]);\n  if (l > 1e-6) @P = add(@P, mul(d, off / l));\n  f@band = rand(k, vars.seed, 7);\n}\nif (@m <= 0) @P.y = 0;"
+        "code": "const H = height, n = Math.max(0, Math.round(strata)), s = Math.min(width, depth);\nf@band = 0.5;\nif (n > 0) {\n  const t = @P.y / H * n + 0.3 * noise([@P.x * 0.35, 0, @P.z * 0.35], seed), k = Math.floor(t), f = t - k;\n  const off = ((rand(k, seed) - 0.5) * 0.14 + (f - 0.5) * 0.06) * s * (0.4 + roughness) * @m;\n  const d = [@P.x / width, 0, @P.z / depth], l = Math.hypot(d[0], d[2]);\n  if (l > 1e-6) @P = add(@P, mul(d, off / l));\n  f@band = rand(k, seed, 7);\n}\nif (@m <= 0) @P.y = 0;"
       }
     },
     "facets": { "type": "normal", "in": ["ledges"], "params": { "cusp_angle": 30 } },

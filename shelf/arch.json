@@ -45,7 +45,7 @@
       "note": "the opening outline in the XY plane, starting below the ground so the cut is open at the bottom",
       "params": {
         "run_over": "detail",
-        "code": "const w = vars.width, h = vars.height, n = Math.max(2, Math.round(vars.segments)), st = vars.style;\nconst P = [[-w / 2, -0.05, 0]];\nif (st === 'pointed') {\n  const sh = Math.max(0, h - w * Math.sqrt(3) / 2);\n  P.push([-w / 2, sh, 0]);\n  for (let i = 1; i < n; i++) { const a = PI - (PI / 3) * i / n; P.push([w / 2 + w * Math.cos(a), sh + w * Math.sin(a), 0]); }\n  P.push([0, sh + w * Math.sqrt(3) / 2, 0]);\n  for (let i = n - 1; i >= 1; i--) { const a = (PI / 3) * i / n; P.push([-w / 2 + w * Math.cos(a), sh + w * Math.sin(a), 0]); }\n  P.push([w / 2, sh, 0]);\n} else if (st === 'flat') {\n  P.push([-w / 2, h, 0], [w / 2, h, 0]);\n} else {\n  const sh = Math.max(0, h - w / 2);\n  for (let i = 0; i <= n; i++) { const a = PI - PI * i / n; P.push([Math.cos(a) * w / 2, sh + Math.sin(a) * w / 2, 0]); }\n}\nP.push([w / 2, -0.05, 0]);\naddprim(0, 'poly', P.map((p) => addpoint(0, p)));"
+        "code": "const w = width, h = height, n = Math.max(2, Math.round(segments)), st = style;\nconst P = [[-w / 2, -0.05, 0]];\nif (st === 'pointed') {\n  const sh = Math.max(0, h - w * Math.sqrt(3) / 2);\n  P.push([-w / 2, sh, 0]);\n  for (let i = 1; i < n; i++) { const a = PI - (PI / 3) * i / n; P.push([w / 2 + w * Math.cos(a), sh + w * Math.sin(a), 0]); }\n  P.push([0, sh + w * Math.sqrt(3) / 2, 0]);\n  for (let i = n - 1; i >= 1; i--) { const a = (PI / 3) * i / n; P.push([-w / 2 + w * Math.cos(a), sh + w * Math.sin(a), 0]); }\n  P.push([w / 2, sh, 0]);\n} else if (st === 'flat') {\n  P.push([-w / 2, h, 0], [w / 2, h, 0]);\n} else {\n  const sh = Math.max(0, h - w / 2);\n  for (let i = 0; i <= n; i++) { const a = PI - PI * i / n; P.push([Math.cos(a) * w / 2, sh + Math.sin(a) * w / 2, 0]); }\n}\nP.push([w / 2, -0.05, 0]);\naddprim(0, 'poly', P.map((p) => addpoint(0, p)));"
       }
     },
     "face": {
@@ -73,7 +73,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const w = vars.width, h = vars.height, t = vars.thickness, D = vars.depth;\nconst sh = vars.style === 'pointed' ? Math.max(0, h - w * Math.sqrt(3) / 2) : vars.style === 'flat' ? h : Math.max(0, h - w / 2);\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([0, h + t * 0.55, 0], [Math.min(t * 0.8, w * 0.3), t * 1.1, D + 0.04]);\nif (vars.style !== 'flat') for (const sx of [-1, 1]) add([sx * (w / 2 + t / 2), sh - 0.06, 0], [t + 0.08, 0.12, D + 0.04]);"
+        "code": "const w = width, h = height, t = thickness, D = depth;\nconst sh = style === 'pointed' ? Math.max(0, h - w * Math.sqrt(3) / 2) : style === 'flat' ? h : Math.max(0, h - w / 2);\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([0, h + t * 0.55, 0], [Math.min(t * 0.8, w * 0.3), t * 1.1, D + 0.04]);\nif (style !== 'flat') for (const sx of [-1, 1]) add([sx * (w / 2 + t / 2), sh - 0.06, 0], [t + 0.08, 0.12, D + 0.04]);"
       }
     },
     "unit": { "type": "box" },

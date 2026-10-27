@@ -6,6 +6,7 @@ import type { AttribClass } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { evalExpr, vecOut } from '../graph/params.ts';
+import { codeVarNames, pickVars } from '../core/usercode.ts';
 import { pointNormals, primArea } from '../core/topology.ts';
 import { halfEdges } from '../core/halfedge.ts';
 import {
@@ -279,7 +280,7 @@ export function assertScope(g: Geometry, pr: PieceReport): Record<string, any> {
   };
 }
 
-const EXPR_NAMES = 'npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges';
+const EXPR_NAMES = 'npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first)';
 
 defineNode({
   type: 'assert',
@@ -321,6 +322,7 @@ defineNode({
     tolerance: { type: 'float', default: 1e-6, min: 0, desc: 'distance tolerance for bbox_min/max and duplicate points', advanced: true },
   },
   outputs: 'passes geometry through; mark: detail int assert_failed, detail string assert_report, point/prim group assert_fail',
+  usesVars: (p) => String(p.expr ?? ''),
   example: {
     nodes: {
       body: { type: 'box', params: { size: [1, 2, 1], center: [0, 1, 0] } },
@@ -328,7 +330,7 @@ defineNode({
     },
     output: 'check',
   },
-  cook: ({ input, p, warn, stat, engine }) => {
+  cook: ({ input, p, warn, stat, engine, vars }) => {
     const src = input(0);
     const g = src;
     const fails: string[] = [];
@@ -480,7 +482,8 @@ defineNode({
     if (String(p.expr ?? '').trim()) {
       checks++;
       const src = String(p.expr).trim();
-      const scope = assertScope(g, pieces());
+      // the measurements, over the graph vars the expression names
+      const scope: Record<string, any> = { ...pickVars(vars, codeVarNames(src, vars)), ...assertScope(g, pieces()) };
       let res: any;
       try { res = evalExpr(src, scope, { host: engine.host, timeoutMs: engine.scriptTimeoutMs }); }
       catch (e: any) {

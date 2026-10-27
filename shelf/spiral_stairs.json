@@ -25,7 +25,7 @@
       "note": "taper the tread to the step angle: its width grows linearly from the column to the rim",
       "params": {
         "run_over": "points",
-        "code": "const a = radians(vars.turn) * 1.08, w = (x) => 2 * Math.max(0.03, x) * Math.tan(a / 2);\n@P.z *= w(@P.x);"
+        "code": "const a = radians(turn) * 1.08, w = (x) => 2 * Math.max(0.03, x) * Math.tan(a / 2);\n@P.z *= w(@P.x);"
       }
     },
     "treads": {

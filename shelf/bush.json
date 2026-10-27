@@ -22,7 +22,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const S = vars.size, H = vars.height, n = Math.max(1, Math.round(vars.blobs)), s = vars.seed;\nfor (let i = 0; i < n; i++) {\n  const a = TAU * (i / n + 0.3 * rand(i, s, 1)), d = n === 1 ? 0 : S * (0.12 + 0.18 * rand(i, s, 2)) * (i === 0 ? 0 : 1);\n  const r = S * (0.22 + 0.12 * rand(i, s, 3)) * (i === 0 ? 1.25 : 1);\n  const ry = Math.min(r, H * (i === 0 ? 0.62 : 0.5));\n  const q = addpoint(0, [Math.cos(a) * d, ry * 0.75, Math.sin(a) * d]);\n  setpointattrib(0, 'scale', q, [r, ry, r]);\n  setpointattrib(0, 'orient', q, quaternion(radians(360 * rand(i, s, 5)), [0, 1, 0]));\n  setpointattrib(0, 'tint', q, 0.8 + 0.35 * rand(i, s, 4));\n}"
+        "code": "const S = size, H = height, n = Math.max(1, Math.round(blobs)), s = seed;\nfor (let i = 0; i < n; i++) {\n  const a = TAU * (i / n + 0.3 * rand(i, s, 1)), d = n === 1 ? 0 : S * (0.12 + 0.18 * rand(i, s, 2)) * (i === 0 ? 0 : 1);\n  const r = S * (0.22 + 0.12 * rand(i, s, 3)) * (i === 0 ? 1.25 : 1);\n  const ry = Math.min(r, H * (i === 0 ? 0.62 : 0.5));\n  const q = addpoint(0, [Math.cos(a) * d, ry * 0.75, Math.sin(a) * d]);\n  setpointattrib(0, 'scale', q, [r, ry, r]);\n  setpointattrib(0, 'orient', q, quaternion(radians(360 * rand(i, s, 5)), [0, 1, 0]));\n  setpointattrib(0, 'tint', q, 0.8 + 0.35 * rand(i, s, 4));\n}"
       }
     },
     "ball": { "type": "sphere", "params": { "type": "ico", "level": 1, "radius": 1 } },

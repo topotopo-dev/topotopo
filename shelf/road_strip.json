@@ -107,7 +107,7 @@
       "note": "copy each dash point sideways onto every lane boundary (local +X is the left of the direction of travel)",
       "params": {
         "run_over": "detail",
-        "code": "const n = Math.round(vars.lanes), W = vars.width;\nfor (let i = 0; i < npoints(0); i++) {\n  const P = point(0, 'P', i), q = point(0, 'orient', i), side = qrotate(q, [1, 0, 0]);\n  for (let k = 1; k < n; k++) {\n    const off = -W / 2 + k * W / n, p = addpoint(0, add(P, mul(side, off), [0, 0.01, 0]));\n    setpointattrib(0, 'orient', p, q);\n  }\n  removepoint(0, i);\n}"
+        "code": "const n = Math.round(lanes), W = width;\nfor (let i = 0; i < npoints(0); i++) {\n  const P = point(0, 'P', i), q = point(0, 'orient', i), side = qrotate(q, [1, 0, 0]);\n  for (let k = 1; k < n; k++) {\n    const off = -W / 2 + k * W / n, p = addpoint(0, add(P, mul(side, off), [0, 0.01, 0]));\n    setpointattrib(0, 'orient', p, q);\n  }\n  removepoint(0, i);\n}"
       }
     },
     "dash": { "type": "box", "params": { "size": [0.12, 0.004, "=dash_length"], "center": [0, 0.002, 0] } },

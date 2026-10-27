@@ -45,12 +45,15 @@ let kernelsHost: Host | null = null;
 async function wrangleChunk(a: any, arrays: Record<string, any>, start: number, end: number) {
   if (!realm) realm = (await import('./node.ts')).createNodeHost({ workers: 0 });
   const { wrangleRunError } = await import('../core/wrangle.ts');
-  const { runUserCode } = await import('../core/usercode.ts');
+  const { deepFreeze, runUserCode } = await import('../core/usercode.ts');
+  const { scriptVarsGuard } = await import('../core/snippet-lib.ts');
   const kernel = realm.compile(a.source);
   const B = Array.from({ length: a.bindings }, (_, i) => ({ data: arrays['b' + i] }));
   const env = {
     n: a.n, s: start, e: end, mask: arrays.mask ?? null, vp: null, vprim: null, B,
-    numpt: a.numpt, numprim: a.numprim, numvtx: a.numvtx, frame: a.frame, time: a.time, timeInc: a.timeInc, vars: a.vars,
+    numpt: a.numpt, numprim: a.numprim, numvtx: a.numvtx, frame: a.frame, time: a.time, timeInc: a.timeInc,
+    // the graph vars the snippet reads, read-only as on the cooking thread
+    vars: deepFreeze(a.vars), varsGuard: scriptVarsGuard(realm),
     centroid: () => { throw new Error('centroid is not available in a point wrangle'); },
   };
   // the geometry API stays null in workers (point wrangles that call geometry functions run on the cooking thread)

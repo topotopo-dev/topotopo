@@ -24,7 +24,7 @@
       "note": "half profile in the XY plane from the bottom centre around to the top centre, with a recessed lid",
       "params": {
         "run_over": "detail",
-        "code": "const H = vars.height, R = vars.radius, b = vars.bulge, n = 12, rim = Math.min(0.03, H * 0.04), rec = 0.92;\nconst r = (y) => R * (1 + b * (1 - Math.pow(2 * y / H - 1, 2)));\nconst pts = [addpoint(0, [0, 0, 0])];\nfor (let i = 0; i <= n; i++) { const y = H * i / n; pts.push(addpoint(0, [r(y), y, 0])); }\npts.push(addpoint(0, [R * rec, H, 0]), addpoint(0, [R * rec, H - rim, 0]), addpoint(0, [0, H - rim, 0]));\naddprim(0, 'polyline', pts);"
+        "code": "const H = height, R = radius, b = bulge, n = 12, rim = Math.min(0.03, H * 0.04), rec = 0.92;\nconst r = (y) => R * (1 + b * (1 - Math.pow(2 * y / H - 1, 2)));\nconst pts = [addpoint(0, [0, 0, 0])];\nfor (let i = 0; i <= n; i++) { const y = H * i / n; pts.push(addpoint(0, [r(y), y, 0])); }\npts.push(addpoint(0, [R * rec, H, 0]), addpoint(0, [R * rec, H - rim, 0]), addpoint(0, [0, H - rim, 0]));\naddprim(0, 'polyline', pts);"
       }
     },
     "body": { "type": "revolve", "in": ["profile"], "params": { "segments": "=staves" } },
@@ -46,7 +46,7 @@
       "note": "Cd = the material's base colour, tinted per stave",
       "params": {
         "run_over": "prims",
-        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (!m) return; const a = Math.atan2(@P.z, @P.x); const k = 0.75 + 0.4 * rand(Math.floor((a + PI) / TAU * vars.staves + 0.5), vars.seed); @Cd = mul(m.baseColor, k);"
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (!m) return; const a = Math.atan2(@P.z, @P.x); const k = 0.75 + 0.4 * rand(Math.floor((a + PI) / TAU * staves + 0.5), seed); @Cd = mul(m.baseColor, k);"
       }
     },
     "hoop_pts": {
@@ -54,7 +54,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const H = vars.height, R = vars.radius, b = vars.bulge, n = Math.round(vars.hoops), hh = Math.min(0.035, H * 0.04);\nconst r = (y) => R * (1 + b * (1 - Math.pow(2 * y / H - 1, 2)));\nfor (let i = 0; i < n; i++) {\n  const f = n === 1 ? 0.5 : i < n / 2 ? 0.08 + 0.3 * i / Math.max(1, Math.ceil(n / 2) - 1 || 1) : 0.92 - 0.3 * (n - 1 - i) / Math.max(1, Math.ceil(n / 2) - 1 || 1);\n  const y = H * Math.min(0.94, Math.max(0.06, f));\n  const q = addpoint(0, [0, y, 0]);\n  setpointattrib(0, 'scale', q, [r(y) + 0.006, hh, r(y) + 0.006]);\n}"
+        "code": "const H = height, R = radius, b = bulge, n = Math.round(hoops), hh = Math.min(0.035, H * 0.04);\nconst r = (y) => R * (1 + b * (1 - Math.pow(2 * y / H - 1, 2)));\nfor (let i = 0; i < n; i++) {\n  const f = n === 1 ? 0.5 : i < n / 2 ? 0.08 + 0.3 * i / Math.max(1, Math.ceil(n / 2) - 1 || 1) : 0.92 - 0.3 * (n - 1 - i) / Math.max(1, Math.ceil(n / 2) - 1 || 1);\n  const y = H * Math.min(0.94, Math.max(0.06, f));\n  const q = addpoint(0, [0, y, 0]);\n  setpointattrib(0, 'scale', q, [r(y) + 0.006, hh, r(y) + 0.006]);\n}"
       }
     },
     "hoop_unit": { "type": "tube", "params": { "radius": 1, "height": 1, "cols": "=staves", "caps": true } },

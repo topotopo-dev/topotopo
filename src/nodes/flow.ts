@@ -120,7 +120,7 @@ defineNode({
   description:
     'The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} node yields the current piece ' +
     '(or the previous iteration\'s result in feedback mode); index 1 yields the whole input; index 2 the foreach\'s second input. ' +
-    'Vars available to "=expr" params and code: iteration, numiterations, value (piece attribute value / element number), ' +
+    'Vars the body\'s "=expr" params and code read by their bare name: iteration, numiterations, value (piece attribute value / element number), ' +
     'attr (object of the element\'s attributes, e.g. attr.height), plus all parent vars. ' +
     'feedback:true is count-based and runs all iterations in one cook at the current time; for feedback over frames use solver.',
   inputs: [
@@ -135,7 +135,7 @@ defineNode({
     body: { type: 'graph', desc: 'subgraph {nodes, output} run per iteration' },
     max_iterations: { type: 'int', default: 10000, min: 1, max: 1000000, desc: 'safety limit' },
   },
-  // the body's "=expr" params read the parent vars, so they are part of the cache key
+  // the body's "=expr" params and code read the parent vars, so they are part of the cache key
   usesVars: true,
   example: {
     type: 'foreach',
@@ -247,7 +247,7 @@ defineNode({
     'Cooking at frame N runs the body for every frame from start_frame to N (once per substep). Inside the body, {"type":"input","params":{"index":0}} ' +
     'is the previous frame\'s result (the initial geometry on start_frame), index 1 the initial geometry, 2 and 3 the extra inputs cooked at that frame. ' +
     'Before start_frame the initial geometry passes through. The body sees the vars iteration (frames since start_frame, from 0), substep, ' +
-    'frame, time and timeInc (the step\'s time; frames are fractional between substeps), plus parent vars; wrangles also get @Frame @Time @TimeInc. ' +
+    'frame, time and timeInc (the step\'s time; frames are fractional between substeps), plus parent vars, by their bare name; wrangles also get @Frame @Time @TimeInc. ' +
     'Caching: the state after frame f has the signature S(f) = hash(S(f-1), f, extra-input signatures at f), starting from ' +
     'S(start_frame-1) = hash(params, vars, initial input at start_frame). Every frame\'s state is cached under S(f), so cooking frame 11 after frame 10 ' +
     'runs the body once, and going back to an earlier frame is a cache hit. ' +
@@ -267,7 +267,7 @@ defineNode({
     max_frames: { type: 'int', default: 1000, min: 1, max: 1000000, desc: 'safety limit: most frames simulated from start_frame' },
   },
   usesTime: true,
-  // the body's "=expr" params read the parent vars
+  // the body's "=expr" params and code read the parent vars
   usesVars: true,
   example: {
     type: 'solver',
@@ -327,7 +327,7 @@ defineNode({
         const fr = r9(f - 1 + (sub + 1) / n), time = r9((fr - 1) / fps);
         const r = await ctx.subcook(p.body, {
           frame: fr, time, timeInc, fps,
-          // also as vars, so code can read vars.frame / vars.time / vars.timeInc like vars.iteration
+          // also as vars, so code reads frame / time / timeInc by name like iteration
           vars: { ...ctx.vars, iteration: j, substep: sub, frame: fr, time, timeInc },
           inputs: [
             { geo: state, sig: stateSig },

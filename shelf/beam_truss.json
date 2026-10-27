@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "description": "Planar truss in the XY plane: top and bottom chords, verticals and diagonals in Warren, Pratt or Howe layout, swept with a steel I-section or a square timber section. Spans x = -length/2 … length/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.",
+  "description": "Planar truss in the XY plane: top and bottom chords, verticals and diagonals in Warren, Pratt or Howe layout, swept with a steel I-section or a square timber section. Spans x = -span/2 … span/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.",
   "params": {
-    "length": { "type": "float", "default": 8, "min": 1, "max": 40, "desc": "span along X (m)" },
+    "span": { "type": "float", "default": 8, "min": 1, "max": 40, "desc": "span along X (m)" },
     "height": {
       "type": "float",
       "default": 1.2,
@@ -26,7 +26,7 @@
     },
     "steel": { "type": "bool", "default": true, "desc": "steel I-sections (false = square timber)" }
   },
-  "vars": { "length": 8, "height": 1.2, "panels": 6, "member_size": 0.12, "layout": "warren", "steel": true },
+  "vars": { "span": 8, "height": 1.2, "panels": 6, "member_size": 0.12, "layout": "warren", "steel": true },
   "nodes": {
     "none": { "type": "points", "params": { "positions": [] } },
     "chord_lines": {
@@ -34,7 +34,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const L = vars.length, H = vars.height, y0 = vars.member_size / 2;\nfor (const y of [y0, y0 + H]) addprim(0, 'polyline', [addpoint(0, [-L / 2, y, 0]), addpoint(0, [L / 2, y, 0])]);"
+        "code": "const L = span, H = height, y0 = member_size / 2;\nfor (const y of [y0, y0 + H]) addprim(0, 'polyline', [addpoint(0, [-L / 2, y, 0]), addpoint(0, [L / 2, y, 0])]);"
       }
     },
     "web_lines": {
@@ -43,7 +43,7 @@
       "note": "warren: alternating diagonals; pratt: verticals + diagonals sloping down to the middle; howe: verticals + diagonals sloping up to the middle",
       "params": {
         "run_over": "detail",
-        "code": "const L = vars.length, H = vars.height, n = Math.max(2, Math.round(vars.panels)), y0 = vars.member_size / 2, y1 = y0 + H, p = L / n;\nconst line = (x0, ya, x1, yb) => addprim(0, 'polyline', [addpoint(0, [x0, ya, 0]), addpoint(0, [x1, yb, 0])]);\nconst X = (i) => -L / 2 + i * p;\nif (vars.layout === 'warren') {\n  for (let i = 0; i < n; i++) i % 2 === 0 ? line(X(i), y0, X(i + 1), y1) : line(X(i), y1, X(i + 1), y0);\n} else {\n  for (let i = 0; i <= n; i++) line(X(i), y0, X(i), y1);\n  for (let i = 0; i < n; i++) {\n    const left = X(i) + p / 2 < 0;\n    const downToMiddle = vars.layout === 'pratt';\n    if (left === downToMiddle) line(X(i), y1, X(i + 1), y0); else line(X(i), y0, X(i + 1), y1);\n  }\n}"
+        "code": "const L = span, H = height, n = Math.max(2, Math.round(panels)), y0 = member_size / 2, y1 = y0 + H, p = L / n;\nconst line = (x0, ya, x1, yb) => addprim(0, 'polyline', [addpoint(0, [x0, ya, 0]), addpoint(0, [x1, yb, 0])]);\nconst X = (i) => -L / 2 + i * p;\nif (layout === 'warren') {\n  for (let i = 0; i < n; i++) i % 2 === 0 ? line(X(i), y0, X(i + 1), y1) : line(X(i), y1, X(i + 1), y0);\n} else {\n  for (let i = 0; i <= n; i++) line(X(i), y0, X(i), y1);\n  for (let i = 0; i < n; i++) {\n    const left = X(i) + p / 2 < 0;\n    const downToMiddle = layout === 'pratt';\n    if (left === downToMiddle) line(X(i), y1, X(i + 1), y0); else line(X(i), y0, X(i + 1), y1);\n  }\n}"
       }
     },
     "i_section": {

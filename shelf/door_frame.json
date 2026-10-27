@@ -29,7 +29,7 @@
       "in": ["none"],
       "params": {
         "run_over": "detail",
-        "code": "const W = vars.width, H = vars.height, D = vars.depth, f = Math.min(vars.frame_width, W / 4);\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([-(W - f) / 2, H / 2, 0], [f, H, D]); add([(W - f) / 2, H / 2, 0], [f, H, D]); add([0, H - f / 2, 0], [W - 2 * f, f, D]);"
+        "code": "const W = width, H = height, D = depth, f = Math.min(frame_width, W / 4);\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([-(W - f) / 2, H / 2, 0], [f, H, D]); add([(W - f) / 2, H / 2, 0], [f, H, D]); add([0, H - f / 2, 0], [W - 2 * f, f, D]);"
       }
     },
     "leaf_pts": {
@@ -38,7 +38,7 @@
       "note": "the leaf, then raised panels on both faces",
       "params": {
         "run_over": "detail",
-        "code": "const W = vars.width, H = vars.height, f = Math.min(vars.frame_width, W / 4), t = 0.045;\nconst lw = W - 2 * f - 0.006, lh = H - f - 0.012, n = Math.round(vars.panels), mx = Math.min(0.12, lw * 0.15), my = 0.12;\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([0, 0.008 + lh / 2, 0], [lw, lh, t]);\nconst ph = (lh - my * (n + 1)) / Math.max(1, n);\nfor (let i = 0; i < n; i++) for (const sz of [-1, 1]) add([0, 0.008 + my + i * (ph + my) + ph / 2, sz * (t / 2 + 0.006)], [lw - 2 * mx, ph, 0.012]);"
+        "code": "const W = width, H = height, f = Math.min(frame_width, W / 4), t = 0.045;\nconst lw = W - 2 * f - 0.006, lh = H - f - 0.012, n = Math.round(panels), mx = Math.min(0.12, lw * 0.15), my = 0.12;\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([0, 0.008 + lh / 2, 0], [lw, lh, t]);\nconst ph = (lh - my * (n + 1)) / Math.max(1, n);\nfor (let i = 0; i < n; i++) for (const sz of [-1, 1]) add([0, 0.008 + my + i * (ph + my) + ph / 2, sz * (t / 2 + 0.006)], [lw - 2 * mx, ph, 0.012]);"
       }
     },
     "unit": { "type": "box" },

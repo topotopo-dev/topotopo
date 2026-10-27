@@ -19,7 +19,8 @@ import { EdgeSet } from '../core/edges.ts';
 import { convertSelection } from '../core/groupconvert.ts';
 import { appendElements } from '../core/wrangle.ts';
 import { composePackedXforms, expandPacked, packedInfo } from '../core/packed.ts';
-import { describeGuarded, runUserCode } from '../core/usercode.ts';
+import { codeVarDecl, codeVarNames, codeVarValues, describeGuarded, runUserCode } from '../core/usercode.ts';
+import { scriptVarsGuard } from '../core/snippet-lib.ts';
 import { mask, wrangleTime } from './util.ts';
 
 /** points below which a wrangle stays on the cooking thread (copying the attributes would cost more than it saves) */
@@ -38,6 +39,7 @@ defineNode({
     'Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). ' +
     'Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. ' +
     'Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). ' +
+    'Graph vars by their bare name, read-only, as in "=expr" params: @P.y += height * 0.5 (iteration, value … inside a foreach). ' +
     'Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… ' +
     'Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.',
   inputs: [
@@ -51,7 +53,7 @@ defineNode({
     run_over: { type: 'enum', options: ['points', 'prims', 'vertices', 'detail'], default: 'points', desc: 'element class to iterate', aliases: ['class', 'runover'] },
     group: { type: 'group', default: '', desc: 'only run on elements in this group (point, prim or vertex pattern, matching run_over)' },
   },
-  usesVars: true,
+  usesVars: (p) => String(p.code ?? ''),
   example: { type: 'wrangle', params: { run_over: 'points', code: '@P.y += sin(@P.x * 4) * 0.2;\n@Cd = hsv2rgb(fit(@P.y, -0.2, 0.2, 0.6, 0), 0.7, 1);' } },
   cook: (ctx) => {
     const { input, inputs, p, vars, engine, warn } = ctx;
@@ -160,9 +162,10 @@ defineNode({
   summary: 'Arbitrary JS over the whole geometry with the engine library (builder, math, noise, BVH, manifold, lib.run any node). Return a Geometry.',
   aliases: ['python', 'js', 'javascript', 'python_sop'],
   description:
-    'The body of `async function(geo, inputs, lib, vars)`. geo is a writable clone of input 0; inputs[i] are the raw inputs. ' +
+    'The body of `async function(geo, inputs, lib)`. geo is a writable clone of input 0; inputs[i] are the raw inputs. ' +
     'lib: Geometry, GeoBuilder, math, topology, random, noise, KDTree, TriBVH, manifold, merge(geos), run(type, params, ...inputs), warn(msg), ' +
     'frame, time, fps, timeInc (reading them makes the script re-cook per frame). ' +
+    'Graph vars by their bare name, read-only, as in "=expr" params (e.g. `lib.run(\'box\', { size: height })`). ' +
     'Must return a Geometry (e.g. `return geo;`).',
   inputs: [
     { name: 'geo', desc: 'main input (optional)', optional: true },
@@ -173,6 +176,7 @@ defineNode({
   params: {
     code: { type: 'code', default: 'return geo;', desc: 'async function body; may use await lib.run(...)' },
   },
+  // every var: besides the ones its code names, the "=expr" params it hands to lib.run can read any of them
   usesVars: true,
   example: {
     type: 'script',
@@ -181,14 +185,21 @@ defineNode({
   async cook(ctx) {
     const { inputs, p, engine } = ctx;
     const ms = engine.scriptTimeoutMs;
+    const code = String(p.code ?? '');
+    // the graph vars the code names: constants of a function around it, so its own names come first
+    const names = codeVarNames(code, ctx.vars);
+    const values = codeVarValues(ctx.vars, names);
     let fn;
     try {
       // The realm's AsyncFunction constructor parses the body on its own: code that would close the function it is
-      // pasted into (and run while compiling, outside any time limit) is a syntax error. Looked up, called and its
-      // error read under the time limit all the same (earlier code may have changed the realm).
+      // pasted into (and run while compiling, outside any time limit) is a syntax error. Only a body that parses is
+      // compiled inside the function that binds the vars. Looked up, called and its error read under the time limit
+      // all the same (earlier code may have changed the realm).
       fn = runUserCode(engine.host, () => {
         const AsyncFunction = engine.host.compile('(async function () {}).constructor');
-        return new AsyncFunction('geo', 'inputs', 'lib', 'vars', `"use strict";\n${p.code}`);
+        new AsyncFunction('geo', 'inputs', 'lib', `"use strict";\n${code}`);
+        const make = engine.host.compile(`(function (__vars, __varsGuard) { "use strict"; ${codeVarDecl(names)}\nreturn async function (geo, inputs, lib) { "use strict";\n${code}\n}; })`);
+        return make(values, scriptVarsGuard(engine.host));
       }, ms);
     } catch (e: any) {
       if (e.timedOut) throw new NodeError(`script exceeded ${ms} ms (infinite loop?)`);
@@ -200,7 +211,7 @@ defineNode({
     const t0 = Date.now();
     try {
       // the host limits the whole run, awaited continuations included (an `await` must not escape the timeout)
-      res = await engine.host.runGuardedAsync((wake) => fn(geo, inputs.map((g) => g ?? new Geometry()), scriptLib(ctx, wake, run), ctx.vars), ms);
+      res = await engine.host.runGuardedAsync((wake) => fn(geo, inputs.map((g) => g ?? new Geometry()), scriptLib(ctx, wake, run)), ms);
     } catch (e: any) {
       // what the script threw is user code too (a message getter, toString): read it within the rest of the time limit
       const d = describeGuarded(engine.host, e, Math.max(ms - (Date.now() - t0), Math.min(ms, 100)));

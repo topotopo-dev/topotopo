@@ -6,7 +6,8 @@ import type { SdfVolume as Volume, Volume as AnyVolume } from '../core/geometry.
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
-import { runUserCode } from '../core/usercode.ts';
+import { codeVarDecl, codeVarNames, codeVarValues, runUserCode } from '../core/usercode.ts';
+import { scriptVarsGuard } from '../core/snippet-lib.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { triangulate } from '../core/topology.ts';
@@ -168,7 +169,8 @@ defineNode({
   category: 'sdf',
   summary: 'SDF from JS code: return a signed distance for point p ([x,y,z]). IQ helpers built in (sdSphere, sdBox, smin, opTwist…). sdf(i, p) samples input i.',
   description:
-    'The code runs sandboxed like a wrangle, under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s). ' +
+    'The code runs sandboxed like a wrangle, under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s), and ' +
+    'reads graph vars by their bare name (sdSphere(p, radius)). ' +
     'This node only probes the field at the origin; the nodes that sample it later (sdf_to_mesh, sdf_grid, also after ' +
     'transform, sdf_modify or sdf_combine) run all of their sampling under that limit, so the whole mesh or grid must ' +
     'be computed within it: a field that loops anywhere, or is too slow for the resolution, fails the sampling node ' +
@@ -185,7 +187,7 @@ defineNode({
     auto_bounds: { type: 'bool', default: false, desc: 'use the union of input volume bounds (padded) instead' },
     name: { type: 'string', default: 'sdf', desc: 'volume name' },
   },
-  usesVars: true,
+  usesVars: (p) => String(p.code ?? ''),
   example: { type: 'sdf_expr', params: { code: 'const q = opTwist(p, 2.0);\nreturn sdTorus(q, 0.8, 0.2);' } },
   cook: ({ inputs, p, engine, vars }) => {
     const ins = inputs.map((g) => (g && sdfsOf(g).length ? unionVolumes(g, 'sdf_expr').sample : null));
@@ -195,13 +197,16 @@ defineNode({
     // continuations and reading the message of whatever the code throws
     const syntax = engine.host.checkSyntax?.(`"use strict";${body}`);
     if (syntax) throw new NodeError(`sdf_expr syntax error: ${syntax.message}${p.code.includes('\n') ? ` (line ${syntax.line})` : ''}`);
+    // the graph vars the code names: constants of the outermost function, so sdf, p, x y z and the code's own names
+    // come first
+    const varNames = codeVarNames(p.code, vars);
     let make;
     try {
-      make = engine.host.compile(`(function(__in, vars){ "use strict"; const sdf = (i, q) => { const f = __in[i]; if (!f) throw new Error('sdf input ' + i + ' has no volume'); return f(q[0], q[1], q[2]); };\nreturn function(x, y, z){ const p = [x, y, z];\n${body}\n}; })`);
+      make = engine.host.compile(`(function(__in, __vars, __varsGuard){ "use strict"; ${codeVarDecl(varNames)}\nreturn (function(){ const sdf = (i, q) => { const f = __in[i]; if (!f) throw new Error('sdf input ' + i + ' has no volume'); return f(q[0], q[1], q[2]); };\nreturn function(x, y, z){ const p = [x, y, z];\n${body}\n}; })(); })`);
     } catch (e: any) {
       throw new NodeError(`sdf_expr syntax error: ${e.message}`);
     }
-    const f = make(ins, vars);
+    const f = make(ins, codeVarValues(vars, varNames), scriptVarsGuard(engine.host));
     let t: any, failed: string | undefined;
     try {
       engine.host.runGuarded(() => {

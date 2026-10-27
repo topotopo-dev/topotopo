@@ -11,7 +11,7 @@
       "desc": "displacement as a fraction of the size"
     },
     "flatness": { "type": "float", "default": 0.65, "min": 0.2, "max": 1, "desc": "height / width" },
-    "detail": {
+    "level": {
       "type": "int",
       "default": 2,
       "min": 1,
@@ -21,9 +21,9 @@
     "sink": { "type": "float", "default": 0, "min": 0, "max": 0.5, "desc": "part of the height below y = 0" },
     "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "shape seed" }
   },
-  "vars": { "size": 1, "roughness": 0.35, "flatness": 0.65, "detail": 2, "sink": 0, "seed": 0 },
+  "vars": { "size": 1, "roughness": 0.35, "flatness": 0.65, "level": 2, "sink": 0, "seed": 0 },
   "nodes": {
-    "ball": { "type": "sphere", "params": { "type": "ico", "level": "=detail", "radius": "=size / 2" } },
+    "ball": { "type": "sphere", "params": { "type": "ico", "level": "=level", "radius": "=size / 2" } },
     "shape": {
       "type": "noise_displace",
       "in": ["ball"],

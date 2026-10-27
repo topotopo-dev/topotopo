@@ -239,11 +239,17 @@ cycles are reported before cooking. Node names must be string literals; these fu
 Expressions run in a sandbox that sees only these names, `Math`, the conversions (`Number`, `parseFloat`, `parseInt`,
 `String`, `Boolean`, `isFinite`, `isNaN`) and the helpers listed by `help {topic: "expressions"}`.
 
-Group patterns look like `top`, `!top`, `0-10` or `@P.y>0.5`. A wrangle snippet looks like this:
+Code reads graph vars the same way, by their bare name: `wrangle`, `script`, `sdf_expr`, `heightfield_layer`, the
+parametric nodes and the expressions of `group` and `assert` (`@P.y += height`, not `vars.height`). Vars are read-only,
+and a node re-cooks when a var its code names changes. A var's name must be one code can read: not a JavaScript
+keyword, a helper (`noise`, `rand`, `length` …), a built-in or the time (`frame`, `time`); validation names the clash.
+
+Group patterns look like `top`, `!top`, `0-10` or `@P.y>0.5`. A wrangle snippet looks like this (`amplitude` and `seed`
+are graph vars):
 
 ```js
-@P.y += noise(mul(@P, 2)) * 0.1;
-@Cd = hsv2rgb(rand(@ptnum), 0.6, 1);
+@P.y += noise(mul(@P, 2)) * amplitude;
+@Cd = hsv2rgb(rand(@ptnum, seed), 0.6, 1);
 if (@P.y < 0) removepoint(0, @ptnum);
 ```
 

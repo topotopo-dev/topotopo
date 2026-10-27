@@ -6,18 +6,20 @@
 //   i[]@nbrs = nearpoints(0, @P, 0.5); // array attributes: f[] i[] s[] (read = copy, written back)
 //   if (@P.y < 0) removepoint(0, @ptnum);
 //   @group_top = @N.y > 0.9;          // group membership
+//   @P.y += height * 0.5;             // graph vars by their bare name, read-only
 //
 // The snippet is compiled into a kernel that loops over elements, binding each
-// referenced attribute to a local variable and writing it back afterwards.
+// referenced attribute to a local variable and writing it back afterwards. The graph vars
+// the snippet names are constants of a scope around the kernel, so its own names come first.
 import { Attribute, Geometry, defaultValueFor, isArrayType } from './geometry.ts';
 import type { AttribClass, AttribType } from './geometry.ts';
 import { primCentroid, primNormals, pointNeighbors, pointPrims } from './topology.ts';
 import { primIntrinsic } from './intrinsics.ts';
 import { KDTree, TriBVH } from './spatial.ts';
-import { GEOMETRY_FUNCTIONS, REALM_CONTROL } from './snippet-lib.ts';
+import { GEOMETRY_FUNCTIONS, REALM_CONTROL, scriptVarsGuard } from './snippet-lib.ts';
 import type { TypedArray } from './kernels.ts';
 import type { Host } from '../host/types.ts';
-import { runUserCode } from './usercode.ts';
+import { codeVarDecl, codeVarNames, codeVarValues, runUserCode } from './usercode.ts';
 import type { UserCodeError } from './usercode.ts';
 
 export type RunOver = 'points' | 'prims' | 'vertices' | 'detail';
@@ -45,6 +47,8 @@ const KNOWN: Record<string, { type: AttribType; size: number }> = {
 
 const SPECIAL = new Set(['ptnum', 'primnum', 'vtxnum', 'elemnum', 'numpt', 'numprim', 'numvtx', 'numelem', 'Frame', 'Time', 'TimeInc']);
 const TIME_REFS = ['Frame', 'Time', 'TimeInc'];
+/** The names every wrangle defines (@ptnum … @TimeInc, also readable without the @): a graph var cannot take one. */
+export const WRANGLE_NAMES: ReadonlySet<string> = SPECIAL;
 
 const REF = /(?<![\w$.@])([fivpus](?:\[\])?)?@([A-Za-z_][A-Za-z0-9_]*)/g;
 
@@ -90,7 +94,10 @@ export function referencesTime(code: string): boolean {
 export interface WrangleTime { frame: number; time: number; timeInc: number }
 
 export interface WrangleOptions {
-  code: string; runOver: RunOver; mask: Uint8Array | null; inputs: Geometry[]; vars: Record<string, any>; host: Host; timeoutMs: number;
+  code: string; runOver: RunOver; mask: Uint8Array | null; inputs: Geometry[];
+  /** the cook's graph vars: those the snippet names are bound by their bare name (frozen copies) */
+  vars: Record<string, any>;
+  host: Host; timeoutMs: number;
   /** values of @Frame @Time @TimeInc (pass them only when referencesTime(code), so other wrangles stay time-independent) */
   time?: WrangleTime;
 }
@@ -121,7 +128,8 @@ export function runWrangle(geo: Geometry, opts: WrangleOptions): WrangleResult {
  * The work of a point wrangle as a kernel job for the worker pool (CookContext.parallelMap('wrangle', …)), or null
  * when the snippet cannot run in chunks: it must run over points, bind only numeric attributes and groups, and call
  * nothing that reads other elements or edits the geometry (point(), neighbours(), nearpoints(), addpoint(),
- * setpointattrib(), print() … see GEOMETRY_FUNCTIONS), nor touch shared state (globalThis, writes to vars).
+ * setpointattrib(), print() … see GEOMETRY_FUNCTIONS), nor touch shared state (globalThis). Graph vars are frozen
+ * constants in every chunk: writing one fails the same way on any thread.
  */
 export interface WrangleJob {
   count: number;
@@ -131,7 +139,6 @@ export interface WrangleJob {
 }
 
 const CROSS_ELEMENT = new RegExp(String.raw`\b(${GEOMETRY_FUNCTIONS.join('|')}|globalThis|this|eval|Function)\b`);
-const WRITES_VARS = /\bvars\b[^;\n]*?((?<![=!<>])=(?!=)|\+\+|--)/;
 
 /**
  * Run a wrangle, letting `par` execute a point wrangle in chunks: par(job, serial) runs the job on worker threads
@@ -153,7 +160,7 @@ export function runWrangleParallel(
 
 function wrangleJob(w: WrangleRun, opts: WrangleOptions): WrangleJob | null {
   if (w.runOver !== 'points' || w.n < 2) return null;
-  if (CROSS_ELEMENT.test(w.body) || WRITES_VARS.test(w.body)) return null;
+  if (CROSS_ELEMENT.test(w.body)) return null;
   const inputs: Record<string, TypedArray> = {}, outputs: Record<string, TypedArray> = {};
   for (let i = 0; i < w.bindings.length; i++) {
     const b = w.bindings[i];
@@ -162,15 +169,14 @@ function wrangleJob(w: WrangleRun, opts: WrangleOptions): WrangleJob | null {
     if (b.readonly || b.kind === 'input') inputs['b' + i] = b.data as TypedArray;
     else outputs['b' + i] = b.data as TypedArray;
   }
-  let vars: any;
-  try { vars = structuredClone(opts.vars); } catch { return null; }
   if (opts.mask) inputs.mask = opts.mask;
   const e = w.env;
   return {
     count: w.n, inputs, outputs,
     args: {
       source: w.source, bindings: w.bindings.length, n: w.n, numpt: e.numpt, numprim: e.numprim, numvtx: e.numvtx,
-      frame: e.frame, time: e.time, timeInc: e.timeInc, vars, timeoutMs: opts.timeoutMs, bodyLine: w.bodyLine, code: opts.code,
+      // the vars the snippet reads (plain data; the worker freezes its copy)
+      frame: e.frame, time: e.time, timeInc: e.timeInc, vars: e.vars, timeoutMs: opts.timeoutMs, bodyLine: w.bodyLine, code: opts.code,
     },
   };
 }
@@ -273,12 +279,16 @@ function prepareWrangle(geo: Geometry, opts: WrangleOptions): WrangleRun {
   }
 
   // ---- generate kernel source
+  // the graph vars the snippet names (iteration, numiterations in a loop body …): constants of the outer function,
+  // so the kernel's own names and the snippet's locals come first
+  const varNames = codeVarNames(opts.code, opts.vars);
   const src: string[] = [];
   src.push('(function(__env){', '"use strict";');
+  src.push(codeVarDecl(varNames, '__env.vars', '__env.varsGuard'));
+  src.push('return (function(){');
   // __s/__e: the element range of a chunk (the whole range when absent); numelem stays the total
   src.push('const __n=__env.n, __s=__env.s|0, __e=__env.e===undefined?__env.n:__env.e, __mask=__env.mask, __vp=__env.vp, __vprim=__env.vprim, __B=__env.B;');
   src.push('const numpt=__env.numpt, numprim=__env.numprim, numvtx=__env.numvtx, numelem=__n, Frame=__env.frame, Time=__env.time, TimeInc=__env.timeInc;');
-  src.push('const vars=__env.vars, iteration=vars.iteration, numiterations=vars.numiterations;');
   src.push('let ptnum=0, primnum=0, vtxnum=0, elemnum=0;');
   bindings.forEach((b, i) => src.push(`const __d${i}=__B[${i}].data; let ${b.local};`));
   // user code inside a closure so `return` exits just this element
@@ -315,7 +325,7 @@ function prepareWrangle(geo: Geometry, opts: WrangleOptions): WrangleRun {
     else if (b.size === 1) src.push(`__d${i}[${ix}]=(typeof ${b.local}==='number'?${b.local}:+(${b.local}?.[0]??${b.local}));`);
     else src.push(`__wf(__d${i},${ix},${b.size},${b.local});`);
   });
-  src.push('}', '})');
+  src.push('}', '})();', '})');
   const source = src.join('\n');
 
   let kernelCache = kernelCaches.get(opts.host);
@@ -342,7 +352,8 @@ function prepareWrangle(geo: Geometry, opts: WrangleOptions): WrangleRun {
     n, mask: runOver === 'detail' ? null : opts.mask, vp: g.vertexPoint, vprim,
     B: bindings, numpt: g.numPoints, numprim: g.numPrims, numvtx: g.numVertices,
     frame: opts.time?.frame ?? opts.vars.frame ?? 1, time: opts.time?.time ?? opts.vars.time ?? 0,
-    timeInc: opts.time?.timeInc ?? opts.vars.timeInc ?? 1 / 24, vars: opts.vars,
+    timeInc: opts.time?.timeInc ?? opts.vars.timeInc ?? 1 / 24,
+    vars: codeVarValues(opts.vars, varNames), varsGuard: scriptVarsGuard(opts.host),
     centroid: (p: number) => primCentroid(g, p),
   };
   return { g, n, runOver, bindings, log, kernel, source, body, bodyLine, env, api };

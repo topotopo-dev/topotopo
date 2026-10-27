@@ -20,6 +20,8 @@ import type { Host } from '../src/host/types.ts';
 import { rand } from '../src/core/random.ts';
 import { clamp, fit, lerp, smoothstep } from '../src/core/math.ts';
 import { catalogText, nodeDoc, TOPICS } from '../src/mcp/docs.ts';
+import { SNIPPET_LIB_NAMES } from '../src/core/snippet-lib.ts';
+import { JS_GLOBALS } from '../src/core/usercode.ts';
 import { renderNodeReference } from '../scripts/gen-docs.ts';
 import { Workspace } from '../src/workspace.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -131,11 +133,11 @@ section('"=expr" params reading time');
   const r5 = await cook(g, { frame: 5 }, e);
   check(res(r5, 't').timeDependent && res(r5, 't').sig !== res(r1, 't').sig, 'node whose expression reads frame is time-dependent');
   check(near(bboxOf(r5.geo).min[1], 1.25 - 0.5) && near(bboxOf(r5.geo).min[2], 4 / 24 - 0.5), 'frame and time values in expressions');
-  // a var named "frame" shadows the time identifier: no time dependence
+  // a graph var cannot be named like the time: it would hide it from every expression (a solver body's own frame var is
+  // the step's time, see "solver")
   const gv: GraphSpec = { ...g, vars: { frame: 2 }, output: 'shadow' };
-  const s1 = await cook(gv, { frame: 1 }, e);
-  const s9 = await cook(gv, { frame: 9 }, e);
-  check(!res(s9, 'shadow').timeDependent && res(s9, 'shadow').sig === res(s1, 'shadow').sig && near(bboxOf(s9.geo).min[1], 1.5), 'a graph var named frame shadows time');
+  const s1 = await e.cook(gv, { frame: 1 });
+  check(!s1.ok && s1.errors.some((x) => x.node === '(vars)' && /var "frame" would hide the cook time/.test(x.message)), 'a graph var named frame is rejected: it would hide the time');
 }
 
 section('script lib.frame and foreach/asset bodies propagate time dependence');
@@ -181,7 +183,7 @@ section('script lib.frame and foreach/asset bodies propagate time dependence');
   const v1 = await cook(vg(1), {}, e), v5 = await cook(vg(5), {}, e);
   check(near(bboxOf(v1.geo).max[1], 1.5) && near(bboxOf(v5.geo).max[1], 5.5), 'foreach body sees changed parent vars (cache keyed on vars)');
 
-  e.registerAsset('test_bob', { vars: { amp: 1 }, nodes: { i: { type: 'input' }, w: { type: 'wrangle', in: ['i'], params: { code: '@P.y += @Frame * vars.amp;' } } }, output: 'w' });
+  e.registerAsset('test_bob', { vars: { amp: 1 }, nodes: { i: { type: 'input' }, w: { type: 'wrangle', in: ['i'], params: { code: '@P.y += @Frame * amp;' } } }, output: 'w' });
   const ag: GraphSpec = { nodes: { b: { type: 'box' }, a: { type: 'test_bob', in: ['b'] } } };
   const a1 = await cook(ag, { frame: 1 }, e), a2 = await cook(ag, { frame: 2 }, e);
   check(res(a2, 'a').timeDependent && near(bboxOf(a2.geo).max[1] - bboxOf(a1.geo).max[1], 1), 'asset with a time-dependent body is time-dependent');
@@ -248,7 +250,7 @@ section('solver');
           body: {
             nodes: {
               prev: { type: 'input', params: { index: 0 } },
-              w: { type: 'wrangle', in: ['prev'], params: { run_over: 'detail', code: 'f@runs = (@runs || 0) + 1; f@f = @Frame; f@dt = @TimeInc; f@it = iteration; f@sub = vars.substep; f@vf = vars.frame; f@vt = vars.time;' } },
+              w: { type: 'wrangle', in: ['prev'], params: { run_over: 'detail', code: 'f@runs = (@runs || 0) + 1; f@f = @Frame; f@dt = @TimeInc; f@it = iteration; f@sub = substep; f@vf = frame; f@vt = time;' } },
             },
             output: 'w',
           },
@@ -443,9 +445,11 @@ section('expression sandbox');
     const b = await cook(g(2, 1), {}, e);
     const runsB = timedRuns - runsA;
     const c = await cook(g(3, 4), { frame: 5 }, e);
-    const d = await cook(g(3, 4, { sin: () => 0 }), { frame: 5 }, e);
     check(runsA === 3 && runsB === 0 && center(a) === '4,0.5,1' && center(b) === '4,0.5,1' && res(b, 't').timeDependent, `same inputs: remembered results, no timed call (${runsA} then ${runsB}), still time-dependent`);
-    check(center(c) === '6,2,5' && !d.ok, `changed var, geometry and frame re-evaluate (${center(c)}); a var shadowing a helper is not served from memory`);
+    // graphs cannot declare a var named like a helper, but a scope can have one (assert's bbox, a solver body's frame)
+    const shadow = '(() => typeof sin + typeof frame)()';
+    const s0 = evalExpr(shadow, {}, { host: e.host }), s1 = evalExpr(shadow, { sin: 5, frame: 2 }, { host: e.host });
+    check(center(c) === '6,2,5' && s0 === 'functionnumber' && s1 === 'numbernumber', `changed var, geometry and frame re-evaluate (${center(c)}); a var shadowing a helper is not served from memory (${s0}, ${s1})`);
     const rnd = async () => (await cook({ nodes: { t: { type: 'box', params: { size: '=(() => 1 + Math.random())()' } } } }, {}, e)).geo!.bbox().max[0];
     e.cache.clear();
     const r1 = await rnd();
@@ -523,6 +527,129 @@ section('enum options may be numbers: the value is the number');
   const badOpts = await e.cook({ vars: { k: 1 }, params: { k: { type: 'enum', options: [{ a: 1 }] as any, desc: 'k' } }, nodes: { b: { type: 'box' } } });
   check(!badOpts.ok && /options must be a list of strings or numbers/.test(badOpts.errors[0]?.message ?? ''), 'options that are neither strings nor numbers are rejected');
   check(/\| `4`, `8`, `16` \|/.test(renderNodeReference([], [e.assets.get('test_res_box')!.def])), 'the node reference lists numeric options');
+}
+
+// ------------------------------------------------------------------ graph vars in code: one form, by their bare name
+section('graph vars: expressions and code read them by their bare name');
+{
+  const e = await newEngine();
+  const hf = { type: 'heightfield', params: { size: [4, 4], resolution: 1 } };
+  const top = (r: CookReport) => +bboxOf(r.geo).max[1].toFixed(6);
+  // every place user code runs reads the same var the same way
+  const reads: [string, GraphSpec, (r: CookReport) => boolean][] = [
+    ['"=expr" param', { nodes: { b: { type: 'box', params: { size: '=h * 2' } } } }, (r) => top(r) === 0.75],
+    ['wrangle', { nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P.y += h;' } } } }, (r) => top(r) === 1.25],
+    ['script', { nodes: { s: { type: 'script', params: { code: "return await lib.run('box', { size: h * 4 });" } } } }, (r) => top(r) === 1.5],
+    ['heightfield_layer', { nodes: { f: hf, l: { type: 'heightfield_layer', in: ['f'], params: { expression: 'height + h' } }, m: { type: 'heightfield_to_mesh', in: ['l'] } } }, (r) => top(r) === 0.75],
+    ['sdf_expr', { nodes: { s: { type: 'sdf_expr', params: { code: 'sdSphere(p, h)' } }, m: { type: 'sdf_to_mesh', in: ['s'], params: { divisions: 16 } } } }, (r) => Math.abs(top(r) - 0.75) < 0.05],
+    ['parametric_curve', { nodes: { c: { type: 'parametric_curve', params: { expr: '[t, t * h, 0]', count: 3 } } } }, (r) => top(r) === 0.75],
+    ['parametric_surface', { nodes: { c: { type: 'parametric_surface', params: { expr: '[u, h, v]', divisions: [2, 2] } } } }, (r) => top(r) === 0.75],
+    ['group expr', { nodes: { b: { type: 'box' }, g: { type: 'group', in: ['b'], params: { class: 'point', name: 'up', expr: '@P.y > h - 0.5' } }, d: { type: 'delete', in: ['g'], params: { class: 'point', group: 'up' } } } }, (r) => top(r) === -0.5],
+    ['assert expr', { nodes: { b: { type: 'box' }, a: { type: 'assert', in: ['b'], params: { expr: 'npoints == 8 && h == 0.75' } } } }, (r) => top(r) === 0.5],
+    ['foreach body wrangle', { nodes: { b: { type: 'box' }, f: { type: 'foreach', in: ['b'], params: { mode: 'count', count: 2, body: { nodes: { i: { type: 'input' }, w: { type: 'wrangle', in: ['i'], params: { code: '@P.y += h * iteration + value;' } } }, output: 'w' } } } } }, (r) => top(r) === 2.25],
+  ];
+  const bad: string[] = [];
+  for (const [label, g, ok] of reads) {
+    const r = await e.cook({ ...g, vars: { h: 0.75 } });
+    if (!r.ok || !ok(r)) bad.push(`${label}: ${r.ok ? `top ${top(r)}` : r.errors.map((x) => x.message).join('; ')}`);
+  }
+  check(!bad.length, `"=expr" params, wrangle, script, heightfield_layer, sdf_expr, parametric curves and surfaces, group and assert expressions and loop bodies read h${bad.length ? ': ' + bad.join(' | ') : ''}`);
+
+  // the old form fails everywhere, saying what to write instead
+  const old: [string, GraphSpec, string][] = [
+    ['"=expr" param', { nodes: { b: { type: 'box', params: { size: '=vars.h * 2' } } } }, 'param "size": expression "=vars.h * 2" failed: vars.h: read graph vars by their bare name: h'],
+    ['wrangle', { nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P.y += vars.h;' } } } }, 'wrangle error: vars.h: read graph vars by their bare name: h (line 1: @P.y += vars.h;)'],
+    ['script', { nodes: { s: { type: 'script', params: { code: "return await lib.run('box', { size: vars.h });" } } } }, 'script error: vars.h: read graph vars by their bare name: h'],
+    ['heightfield_layer', { nodes: { f: hf, l: { type: 'heightfield_layer', in: ['f'], params: { expression: 'height + vars.h' } } } }, 'heightfield_layer: vars.h: read graph vars by their bare name: h'],
+    ['sdf_expr', { nodes: { s: { type: 'sdf_expr', params: { code: 'sdSphere(p, vars.h)' } } } }, 'sdf_expr: vars.h: read graph vars by their bare name: h'],
+    ['parametric_curve', { nodes: { c: { type: 'parametric_curve', params: { expr: '[t, vars.h, 0]' } } } }, 'parametric_curve: vars.h: read graph vars by their bare name: h'],
+    ['assert expr', { nodes: { b: { type: 'box' }, a: { type: 'assert', in: ['b'], params: { expr: 'vars.h > 0' } } } }, 'assert expr "vars.h > 0" cannot be evaluated: vars.h: read graph vars by their bare name: h'],
+    ['destructuring', { nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: 'const { h } = vars;' } } } }, 'wrangle error: vars.h: read graph vars by their bare name: h'],
+    ['the whole object', { nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: 'Object.keys(vars);' } } } }, 'wrangle error: vars: read graph vars by their bare name (height, not vars.height)'],
+  ];
+  const unclear: string[] = [];
+  for (const [label, g, want] of old) {
+    const r = await e.cook({ ...g, vars: { h: 0.75 } });
+    const msg = r.errors[0]?.message ?? '';
+    if (r.ok || !msg.startsWith(want)) unclear.push(`${label}: ${r.ok ? 'cooked' : msg}`);
+  }
+  check(!unclear.length, `vars.h fails in every realm with what to write instead${unclear.length ? ': ' + unclear.join(' | ') : ''}`);
+
+  // the code's own names come first; vars are read-only copies
+  const local = await e.cook({ vars: { h: 0.75, list: [1, 2] }, nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: 'const h = 2; @P.y += h;' } } } });
+  const own = await e.cook({ vars: { ptnum: 5 } as any, nodes: { b: { type: 'box' } } });
+  check(local.ok && top(local) === 2.5 && !own.ok, 'a local of the code hides the var of the same name (and a graph cannot declare a wrangle\'s own names such as ptnum)');
+  const vv = { h: 0.75, list: [1, 2] };
+  const write = await e.cook({ vars: vv, nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: 'h = 2;' } } } });
+  const push = await e.cook({ vars: vv, nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: 'list.push(3);' } } } });
+  const scriptPush = await e.cook({ vars: vv, nodes: { s: { type: 'script', params: { code: 'list[0] = 9; return geo;' } } } });
+  check(/Assignment to constant variable/.test(write.errors[0]?.message ?? '') && /not extensible/.test(push.errors[0]?.message ?? '') && /read only/.test(scriptPush.errors[0]?.message ?? '') && vv.list.join() === '1,2',
+    'assigning a var or changing its value fails, and the graph\'s own value stays');
+
+  // heightfield_layer: a layer of the same name comes first, with a warning
+  const layerVar = await e.cook({ vars: { height: 5 }, nodes: { f: hf, l: { type: 'heightfield_layer', in: ['f'], params: { expression: 'height + 1' } }, m: { type: 'heightfield_to_mesh', in: ['l'] } } });
+  check(layerVar.ok && top(layerVar) === 1 && layerVar.warnings.some((w) => /^height in the expression is this node's own \(a layer or a sample variable\), not the graph var of that name/.test(w.message)),
+    `heightfield_layer: the layer named height comes first, and the cook says the var is hidden (${layerVar.warnings.map((w) => w.message).join('; ')})`);
+
+  // names a graph cannot declare: code could not read them, or they would hide one of code's own names
+  const names: [string, RegExp][] = [
+    ['class', /is a JavaScript keyword/], ['default', /is a JavaScript keyword/], ['noise', /would hide the helper noise/],
+    ['rand', /would hide the helper rand/], ['length', /would hide the helper length/], ['bbox', /would hide the helper bbox/],
+    ['Number', /would hide the helper Number/], ['JSON', /would hide JavaScript's JSON/], ['time', /would hide the cook time/],
+    ['Frame', /would hide @Frame in wrangles/], ['vars', /has no vars object/], ['__env', /belong to the engine/], ['2d', /not a name code can read/],
+    ['my-var', /not a name code can read/],
+  ];
+  const wrong: string[] = [];
+  for (const [n, want] of names) {
+    const r = await e.cook({ vars: { [n]: 1 }, nodes: { b: { type: 'box' } } });
+    const err = r.errors.find((x) => x.node === '(vars)');
+    if (r.ok || !err || !want.test(err.message) || !/bare name/.test(err.hint ?? '')) wrong.push(`${n}: ${r.ok ? 'accepted' : r.errors.map((x) => x.message).join('; ')}`);
+  }
+  const declared = await e.cook({ vars: {}, params: { rand: { type: 'float', desc: 'r' } }, nodes: { b: { type: 'box' } } });
+  const nested = await e.cook({ nodes: { b: { type: 'box' }, f: { type: 'foreach', in: ['b'], params: { mode: 'count', count: 1, body: { vars: { noise: 1 }, nodes: { i: { type: 'input' } }, output: 'i' } } } } });
+  const fine = await e.cook({ vars: { height: 1, seed: 2, wall_length: 3, _x: 4, $k: 5, value: 6 }, nodes: { b: { type: 'box' } } });
+  check(!wrong.length && !declared.ok && nested.errors.some((x) => x.node === 'f/(vars)') && fine.ok, `var names that code cannot read by name, or that would hide its own names, are rejected where the graph declares them (vars, params, a body)${wrong.length ? ': ' + wrong.join(' | ') : ''}`);
+  const realmGlobals = Object.getOwnPropertyNames(e.host.compile('globalThis')).filter((k) => !SNIPPET_LIB_NAMES.includes(k) && !k.startsWith('__') && !JS_GLOBALS.has(k));
+  check(!realmGlobals.length, `every global of the scripting realm is a name a var cannot take${realmGlobals.length ? '; not listed in JS_GLOBALS: ' + realmGlobals.join(', ') : ''}`);
+
+  // caching: code is keyed by the vars it names, so changing another var leaves it cached
+  const keyed = (h: number, k: number): GraphSpec => ({
+    vars: { h, k },
+    nodes: {
+      b: { type: 'box' },
+      w: { type: 'wrangle', in: ['b'], params: { code: '@P.y += h;' } },
+      g: { type: 'group', in: ['b'], params: { class: 'point', name: 'up', expr: '@P.y > h' } },
+      a: { type: 'assert', in: ['b'], params: { expr: 'h < 10' } },
+      l: { type: 'heightfield_layer', in: ['f'], params: { expression: 'height + h' } }, f: hf,
+      s: { type: 'sdf_expr', params: { code: 'sdSphere(p, h)' } },
+      c: { type: 'parametric_curve', params: { expr: '[t, h, 0]', count: 3 } },
+      sc: { type: 'script', params: { code: 'return geo;' } },
+      out: { type: 'merge', in: ['w', 'g', 'a', 'l', 's', 'c', 'sc'] },
+    },
+    output: 'out',
+  });
+  const codeNodes = ['w', 'g', 'a', 'l', 's', 'c'];
+  const k1 = await cook(keyed(0.5, 1), {}, e), k2 = await cook(keyed(0.5, 2), {}, e), k3 = await cook(keyed(0.25, 2), {}, e);
+  check(k1.ok && codeNodes.every((n) => res(k2, n).cached && res(k2, n).sig === res(k1, n).sig) && !res(k2, 'sc').cached,
+    'changing a var the code does not name leaves wrangle, group, assert, heightfield_layer, sdf_expr and parametric nodes cached (a script, whose lib.run params can read any var, re-cooks)');
+  check(codeNodes.every((n) => !res(k3, n).cached && res(k3, n).sig !== res(k2, n).sig) && top(k3) !== top(k2), 'changing a var the code names re-cooks it');
+}
+
+// ------------------------------------------------------------------ the one form everywhere we ship and teach
+section('shipped graphs, help topics and node docs read vars by their bare name');
+{
+  const oldForm = /(?<![\w$.])vars(\.[A-Za-z_$]|\[)/;
+  const hits: string[] = [];
+  const walk = (where: string, v: any) => {
+    // ("height, not vars.height" says what not to write)
+    if (typeof v === 'string') { if (oldForm.test(v.replace(/not `?vars\.height/g, ''))) hits.push(where); }
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(`${where}.${k}`, x);
+  };
+  for (const dir of ['examples', 'shelf']) for (const f of fs.readdirSync(path.join(root, dir))) if (f.endsWith('.json')) walk(`${dir}/${f}`, JSON.parse(fs.readFileSync(path.join(root, dir, f), 'utf8')));
+  for (const [k, t] of Object.entries(TOPICS)) walk(`topic ${k}`, t);
+  for (const d of allNodeDefs()) walk(`node ${d.type}`, nodeDoc(d));
+  walk('README.md', fs.readFileSync(path.join(root, 'README.md'), 'utf8'));
+  check(!hits.length, `no vars.name anywhere${hits.length ? ': ' + hits.join(', ') : ''}`);
 }
 
 // ------------------------------------------------------------------ param coercion

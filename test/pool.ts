@@ -260,7 +260,7 @@ section('ported nodes: pool on = pool off, bit for bit');
   const w = (code: string, extra: any = {}) => ({ nodes: { g: grid, w: { type: 'wrangle', in: ['g'], params: { code, ...extra } } }, output: 'w' });
   await same('wrangle (bench snippet)', w('@P.y += sin(@P.x * 3) * 0.1;\n@Cd = [@P.x, @P.y, 0.5];'), { expectParallel: true });
   await same('wrangle with noise, rand, groups, typed new attributes', w('f@h = noise(mul(@P, 2));\n@group_top = @P.y + @h > 0.1;\n@pscale = rand(@ptnum) * 0.5;\ni@k = @ptnum % 7;\nif (@P.x > 1) return;\n@P.z += fit(@h, -1, 1, 0, 0.2);'), { expectParallel: true });
-  await same('wrangle on a group, with vars and @Frame', { ...w('@P.y += @Frame * 0.01 + vars.k;', { group: '@P.x>0' }), vars: { k: 0.25 } }, { frame: 3, expectParallel: true });
+  await same('wrangle on a group, with vars and @Frame', { ...w('@P.y += @Frame * 0.01 + k + list[1];', { group: '@P.x>0' }), vars: { k: 0.25, list: [1, 2] } }, { frame: 3, expectParallel: true });
   await same('wrangle reading another input', {
     nodes: { g: grid, t: { type: 'transform', in: ['g'], params: { translate: [0, 1, 0] } }, w: { type: 'wrangle', in: ['g', 't'], params: { code: 'v@d = sub(@opinput1_P, @P);' } } }, output: 'w',
   }, { expectParallel: true });
@@ -268,7 +268,15 @@ section('ported nodes: pool on = pool off, bit for bit');
   check(/wrangle error: boom 2000 \(line 2:/.test(err.b.errors[0]?.message ?? ''), `  the error names the snippet line: ${err.b.errors[0]?.message}`);
   await same('wrangle with addpoint stays on the cooking thread', w('if (@ptnum % 500 == 0) addpoint(0, add(@P, [0, 1, 0]));'), { expectParallel: false });
   await same('wrangle with a string attribute stays on the cooking thread', w('s@name = "p" + @ptnum;'), { expectParallel: false });
-  await same('wrangle writing vars stays on the cooking thread', w('vars.n = (vars.n || 0) + 1; @P.y += vars.n * 0;'), { expectParallel: false });
+  // graph vars are frozen constants in every chunk: writing one fails the same way on the pool as here (a failed pool
+  // job is not counted as a parallel run: the pool's task count shows the chunks ran there)
+  const tasks0 = on.host.pool!.stats().tasks;
+  const wv = await same('wrangle assigning a var (same error on the pool)', { ...w('n = n + 1; @P.y += n * 0;'), vars: { n: 1 } });
+  const wl = await same('wrangle changing a var\'s value (same error on the pool)', { ...w('list.push(@ptnum); @P.y += list.length * 0;'), vars: { list: [1] } });
+  const wo = await same('wrangle reading vars.k (the old form) fails the same way', { ...w('@P.y += vars.k;'), vars: { k: 1 } });
+  const ranOnPool = on.host.pool!.stats().tasks - tasks0;
+  check(/Assignment to constant variable/.test(wv.b.errors[0]?.message ?? '') && /not extensible/.test(wl.b.errors[0]?.message ?? '') && /vars\.k: read graph vars by their bare name: k/.test(wo.b.errors[0]?.message ?? '') && ranOnPool >= 3,
+    `  vars are read-only in workers too, and the old form fails there the same way (${ranOnPool} chunks on the pool): ${wv.b.errors[0]?.message} | ${wl.b.errors[0]?.message}`);
   await same('prim wrangle stays on the cooking thread', w('@Cd = [1, 0, 0];', { run_over: 'prims' }), { expectParallel: false });
   // the geometry-function list covers every library function that goes through the wrangle API
   const realm = createNodeHost({ workers: 0 }).compile('globalThis');

@@ -49,7 +49,7 @@
       "note": "one arm leaving the pole 0.6 m below the top, curving up and out to the head",
       "params": {
         "run_over": "detail",
-        "code": "const H = vars.height, L = vars.arm_length, n = 10, pts = [];\nfor (let i = 0; i <= n; i++) { const t = i / n; pts.push(addpoint(0, [L * (1 - Math.cos(t * PI / 2)) * 0 + L * Math.sin(t * PI / 2) * 0.15 + L * 0.85 * t, H - 0.6 + 0.6 * Math.sin(t * PI / 2) + 0.12 * Math.sin(t * PI), 0])); }\naddprim(0, 'polyline', pts);"
+        "code": "const H = height, L = arm_length, n = 10, pts = [];\nfor (let i = 0; i <= n; i++) { const t = i / n; pts.push(addpoint(0, [L * (1 - Math.cos(t * PI / 2)) * 0 + L * Math.sin(t * PI / 2) * 0.15 + L * 0.85 * t, H - 0.6 + 0.6 * Math.sin(t * PI / 2) + 0.12 * Math.sin(t * PI), 0])); }\naddprim(0, 'polyline', pts);"
       }
     },
     "arm": {

@@ -310,6 +310,12 @@ const EXPR_CASES: { expr: string; want: RegExp; loop?: boolean }[] = [
   { expr: '=Number({ valueOf() { while (true) {} } })', want: /exceeded \d+ ms/, loop: true },
   { expr: '=String({ toString() { while (true) {} } })', want: /exceeded \d+ ms/, loop: true },
   { expr: '=isNaN({ valueOf() { for (;;) {} } }) ? 1 : 0', want: /exceeded \d+ ms/, loop: true },
+  // the old way of reading vars is a guard of the realm: it says what to write, and its errors are the realm's
+  { expr: "=vars.constructor.constructor('return process')().pid", want: /vars\.constructor: read graph vars by their bare name: constructor/ },
+  { expr: "=(() => { try { return vars.list } catch (e) { return e.constructor.constructor('return process')().pid } })()", want: /the Function constructor is not available/ },
+  { expr: '=vars.__proto__.polluted = 1', want: /vars\.__proto__: read graph vars by their bare name/ },
+  { expr: '=Object.keys(vars).length', want: /Object is not available in expressions/ },
+  { expr: "=(() => { for (const k in vars) return 1; return 0 })()", want: /vars: read graph vars by their bare name/ },
   { expr: '=(() => { while (true) {} })()', want: /exceeded \d+ ms/, loop: true },
   { expr: '=(() => { for (;;) {} })()', want: /exceeded \d+ ms/, loop: true },
   { expr: '=(async () => { await 0; while (true) {} })() ? 1 : 1', want: /exceeded \d+ ms/, loop: true },
@@ -383,6 +389,9 @@ const CODE_CASES: { code: string; want: RegExp; loop?: boolean; only?: CodeType 
   { code: 't > 0.5 ? (() => { throw { get message() { while (true) {} } } })() : [t, 0, 0]', want: /exceeded \d+ ms/, loop: true, only: 'parametric_curve' },
   { code: '(() => { throw { toString() { while (true) {} } } })()', want: /exceeded \d+ ms/, loop: true },
   { code: '(() => { throw new Error("boom") })()', want: /: boom$/ },
+  // the old way of reading graph vars fails with what to write instead
+  { code: 'vars.height', want: /: vars\.height: read graph vars by their bare name: height$/ },
+  { code: '(() => { const o = {}; for (const k in vars) o[k] = 1; return 0; })()', want: /: vars: read graph vars by their bare name \(height, not vars\.height\)$/ },
 ];
 const codeGraph = (type: CodeType, code: string): GraphSpec => type === 'sdf_expr'
   ? { nodes: { t: { type: 'sdf_expr', params: { code } } }, output: 't' }
@@ -629,6 +638,51 @@ for (const poison of THEN_POISONS) {
 }
 console.log(`poisoned Promise.prototype.then: ${THEN_POISONS.length} poisons × (the poisoning script, a later script), ${thenFail} failed (${((performance.now() - tt) / 1000).toFixed(1)}s)`);
 
+// ------------------------------------------------------------------ the vars guard in a poisoned realm
+current = 'the vars guard in a poisoned realm';
+
+/**
+ * Code that still reads `vars.k` gets the realm's vars guard, made when the realm was set up: replacing the realm's
+ * ReferenceError, Proxy, Object or String afterwards (with functions that never return) changes neither its message nor
+ * how fast it fails, and code reading vars by their bare name keeps working. Pool off and on (point wrangles in the
+ * workers' realms, poisoned by a point wrangle there).
+ */
+// Object last: the loop itself calls Object.defineProperty; once per realm (a point wrangle runs it per element)
+const GUARD_POISON = `const G = ${"[].constructor.constructor('return glob' + 'alThis')()"};
+if (!G.poisoned) { G.poisoned = 1; for (const k of ['ReferenceError', 'Proxy', 'String', 'TypeError', 'Object']) Object.defineProperty(G, k, { get() { for (;;) {} }, configurable: true }); }`;
+let guardFail = 0;
+const tg = performance.now();
+for (const workers of [0, 2]) {
+  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  e.manifold = engine.manifold;
+  e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
+  const mode = workers ? 'pool on' : 'pool off';
+  const problems: string[] = [];
+  const poisoners = [throwGraph({ node: 'script', code: `${GUARD_POISON}\nreturn geo;` }), throwGraph({ node: 'wrangle', code: GUARD_POISON })];
+  for (const g of poisoners) {
+    const r = await e.cook(g);
+    if (!r.ok) problems.push(`poisoning the realm failed: ${r.errors.map((x) => x.message).join('; ')}`);
+  }
+  const cases: { label: string; graph: GraphSpec; want: RegExp | null }[] = [
+    { label: 'a point wrangle reading vars.k', graph: { ...throwGraph({ node: 'wrangle', code: '@P.y += vars.k;' }), vars: { k: 1 } }, want: /^wrangle error: vars\.k: read graph vars by their bare name: k/ },
+    { label: 'a detail wrangle reading vars.k', graph: { vars: { k: 1 }, nodes: { g: { type: 'grid' }, t: { type: 'wrangle', in: ['g'], params: { run_over: 'detail', code: 'f@x = vars.k;' } } }, output: 't' }, want: /^wrangle error: vars\.k: read graph vars by their bare name: k/ },
+    { label: 'a script reading vars.k', graph: { ...throwGraph({ node: 'script', code: 'return vars.k;' }), vars: { k: 1 } }, want: /^script error: vars\.k: read graph vars by their bare name: k$/ },
+    { label: 'a point wrangle reading k', graph: { ...throwGraph({ node: 'wrangle', code: '@P.y += k;' }), vars: { k: 1 } }, want: null },
+  ];
+  for (const c of cases) {
+    e.cache.clear();
+    const t = performance.now();
+    const r = await e.cook(c.graph);
+    const ms = performance.now() - t;
+    const err = r.errors.find((x) => x.node === 't');
+    if (c.want ? r.ok || !err || !c.want.test(err.message) : !r.ok || r.geo!.bbox().max[1] !== 1) problems.push(`${c.label}: ${r.ok ? 'cooked' : r.errors.map((x) => x.message).join('; ')}`);
+    if (ms > 2000) problems.push(`${c.label}: took ${ms.toFixed(0)} ms`);
+  }
+  await e.host.pool?.close();
+  for (const p of problems) { guardFail++; console.log(`FAIL vars guard in a poisoned realm, ${mode}: ${p}`); }
+}
+console.log(`vars guard in a poisoned realm: pool off/on, ${guardFail} failed (${((performance.now() - tg) / 1000).toFixed(1)}s)`);
+
 // ------------------------------------------------------------------ realm slots and values handed back
 current = 'the realm slots and returned values';
 
@@ -729,4 +783,4 @@ await new Promise((r) => setTimeout(r, TIMEOUT_MS + 200));
 const late = strayProblems();
 for (const p of late) console.log(`FAIL ${p}`);
 console.log(`stray rejections: ${stray.length} (each reported as a failure above)`);
-process.exit(fail || exprFail || codeFail || laterFail || poisonFail || thenFail || slotFail || resultFail || late.length ? 1 : 0);
+process.exit(fail || exprFail || codeFail || laterFail || poisonFail || thenFail || guardFail || slotFail || resultFail || late.length ? 1 : 0);

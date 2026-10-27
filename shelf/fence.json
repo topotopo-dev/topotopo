@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "description": "Fence along a curve (input 0; without one, a straight run of `length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails). Posts at even spacing including both ends. Sits on the curve (pivot = the curve). Pieces: fence_posts, fence_infill (paint_white, wood or wood_dark by style).",
+  "description": "Fence along a curve (input 0; without one, a straight run of `run_length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails). Posts at even spacing including both ends. Sits on the curve (pivot = the curve). Pieces: fence_posts, fence_infill (paint_white, wood or wood_dark by style).",
   "params": {
-    "length": {
+    "run_length": {
       "type": "float",
       "default": 6,
       "min": 0.5,
@@ -33,7 +33,7 @@
     "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed of the board tint" }
   },
   "vars": {
-    "length": 6,
+    "run_length": 6,
     "height": 1.1,
     "style": "picket",
     "post_spacing": 2,
@@ -44,7 +44,7 @@
     "curve_in": { "type": "input", "params": { "index": 0, "label": "curve to follow (polyline); optional" } },
     "straight": {
       "type": "line",
-      "params": { "origin": [0, 0, 0], "direction": [1, 0, 0], "length": "=length", "points": 2 }
+      "params": { "origin": [0, 0, 0], "direction": [1, 0, 0], "length": "=run_length", "points": 2 }
     },
     "path": {
       "type": "switch",
@@ -94,7 +94,7 @@
       "type": "wrangle",
       "in": ["picket_pts"],
       "params": {
-        "code": "const t = [v@tangentu.x, 0, v@tangentu.z]; if (length(t) > 1e-6) p@orient = lookat(normalize(t), [0, 1, 0]); f@tint = 0.9 + 0.15 * rand(@ptnum, vars.seed);"
+        "code": "const t = [v@tangentu.x, 0, v@tangentu.z]; if (length(t) > 1e-6) p@orient = lookat(normalize(t), [0, 1, 0]); f@tint = 0.9 + 0.15 * rand(@ptnum, seed);"
       }
     },
     "pickets": { "type": "copy_to_points", "in": ["picket", "picket_orient"] },
@@ -128,7 +128,7 @@
     "plank_tint": {
       "type": "wrangle",
       "in": ["planks"],
-      "params": { "run_over": "prims", "code": "f@tint = 0.85 + 0.25 * rand(i@copynum, vars.seed);" }
+      "params": { "run_over": "prims", "code": "f@tint = 0.85 + 0.25 * rand(i@copynum, seed);" }
     },
     "rail_profile": {
       "type": "curve",

@@ -8,6 +8,7 @@
 // (noise, hashing). Geometry query/edit functions dispatch through the current wrangle's
 // geometry API, a closure variable of the library that the engine sets for each wrangle run
 // through the realm's control object (see SCRIPT_REALM_SETUP).
+import type { Host } from '../host/types.ts';
 
 /**
  * Library functions that go through the wrangle's geometry API (`C()` below): they read other elements or
@@ -388,16 +389,52 @@ export function installSnippetLib(g: any, host: any): (api: any) => void {
   return (api: any) => { cur = api; };
 }
 
+/** The names the snippet library installs (the helpers of the scripting realm), read off a stand-in global object. */
+export const SNIPPET_LIB_NAMES: readonly string[] = (() => {
+  const g: any = { Array: { prototype: {} } };
+  installSnippetLib(g, {});
+  return Object.freeze(g.__snippetLibNames.slice() as string[]);
+})();
+
+/**
+ * What code that still reads graph vars as `vars.height` gets for `vars`: an object whose every use fails with what to
+ * write instead ("vars.height: read graph vars by their bare name: height"). Graph vars are bound by their bare name
+ * (src/core/usercode.ts). Self-contained like installSnippetLib: each realm compiles it from its source text and calls
+ * it before any user code, so it holds that realm's ReferenceError and Proxy.
+ */
+export function makeVarsGuard(): object {
+  'use strict';
+  const RE = ReferenceError;
+  const fail = (k: any): never => {
+    throw new RE(typeof k === 'string'
+      ? 'vars.' + k + ': read graph vars by their bare name: ' + k
+      : 'vars: read graph vars by their bare name (height, not vars.height)');
+  };
+  const any = () => fail(undefined);
+  const byKey = (_t: any, k: any) => fail(k);
+  const handler = Object.freeze({
+    get: byKey, has: byKey, set: byKey, deleteProperty: byKey, defineProperty: byKey, getOwnPropertyDescriptor: byKey,
+    ownKeys: any, getPrototypeOf: any, setPrototypeOf: any, isExtensible: any, preventExtensions: any,
+  });
+  return new Proxy(Object.freeze(Object.create(null)), handler);
+}
+
 /** Name of the scripting realm's control object (a global `const` declared by SCRIPT_REALM_SETUP). */
 export const REALM_CONTROL = '__topotopo';
+
+/** The scripting realm's `vars` guard (makeVarsGuard), for code that binds graph vars by name. */
+export function scriptVarsGuard(host: Host): object {
+  return host.compile(REALM_CONTROL).varsGuard;
+}
 
 /**
  * The script a host runs once in a new scripting realm, before any user code, with its primitives (rand, noise, curl)
  * on the realm's global `__hostApi` (deleted again). It installs the snippet library and declares the realm's control
- * object as a global `const` (REALM_CONTROL), a frozen object of realm functions:
+ * object as a global `const` (REALM_CONTROL), a frozen object of realm functions and values:
  *   run()        calls the current job: the host's timed script is `__topotopo.run()` (Host.runGuarded)
  *   setJob(f)    sets the current job
  *   setCur(api)  sets the current wrangle's geometry API (wrangle.ts; null after the run)
+ *   varsGuard    what code gets for `vars` (makeVarsGuard)
  * The host keeps the object and calls setJob/setCur directly, outside the time limit, so they must not run user code:
  * the job and the API are closure variables, the object is frozen (own data properties only) and a global `const`
  * can be neither reassigned nor redefined by later code (user code never runs at the realm's top level, and a
@@ -407,6 +444,7 @@ export const REALM_CONTROL = '__topotopo';
 export const SCRIPT_REALM_SETUP = `const ${REALM_CONTROL} = (() => {
   let job;
   const setCur = (${installSnippetLib.toString()})(globalThis, __hostApi);
-  return Object.freeze({ run: () => job(), setJob: (f) => { job = f; }, setCur });
+  const varsGuard = (${makeVarsGuard.toString()})();
+  return Object.freeze({ run: () => job(), setJob: (f) => { job = f; }, setCur, varsGuard });
 })();
 delete globalThis.__hostApi;`;
