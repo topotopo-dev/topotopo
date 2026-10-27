@@ -230,8 +230,14 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   check(!xg.isError && !land.isError && /packed: \d+ instances of 1 source/.test(land.txt) && /point: .*\bpath f1/.test(land.txt), `help inputs example cooks on inputs/guides.glb: ${land.txt.split('\n')[0]}`);
   const lsg = await call('inputs', { action: 'list' });
   check(/guides\.glb {2}geometry .*1 polyline.*name: path\.road, zone\.park/.test(lsg.txt), 'inputs list shows the exported glb');
-  check(/guides\.glb\.source\.json {2}geometry .*export source: how guides\.glb was made \(graph "guides_src", frame 1\), not geometry/.test(lsg.txt),
-    'inputs list names the export\'s source manifest instead of a failed cook');
+  check(/guides\.glb\.source\.json {2}metadata .*export source: how guides\.glb was made \(graph "guides_src", frame 1\), not geometry/.test(lsg.txt)
+    && /\(\d+ geometry, 1 image, 1 metadata, 1 other\)/.test(lsg.txt), 'inputs list names the export\'s source manifest as metadata instead of a failed cook');
+  // a heightmap and its sidecar, as an export writes them: the sidecar is metadata of the PNG, not geometry
+  const hx = await call('export', { graph: 'land', node: 'ground', path: 'inputs/terrain.png' });
+  const lsh = await call('inputs', { action: 'list' });
+  const dsh = await call('inputs', { action: 'describe', path: 'terrain.json' });
+  check(!hx.isError && /terrain\.json {2}metadata .*heightmap sidecar of inputs\/terrain\.png: height range, Unreal import settings, how it was made, not geometry/.test(lsh.txt)
+    && /terrain\.png {2}image /.test(lsh.txt) && !dsh.isError && /heightfield_from_image/.test(dsh.txt), `a heightmap's sidecar is metadata of its PNG: ${lsh.txt.split('\n').find((l) => l.includes('terrain.json'))}`);
   const lg = JSON.parse((await call('graphs', { action: 'get', name: 'land' })).txt);
   check(lg.params?.relief?.label === 'Hill height (m)' && lg.params?.tree_density?.step === 0.005, 'exposed params keep label and step');
 

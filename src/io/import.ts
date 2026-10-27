@@ -9,6 +9,7 @@ import { importGLTFAsync } from './gltf.ts';
 import { importHoudiniBgeo, importHoudiniGeo, isBinaryJSON } from './hgeo.ts';
 import { importCSV, importPointsJSON, isPointsJSON } from './points.ts';
 import { imageFromPNGFile } from './textures.ts';
+import { SIDECAR_FORMATS, SIDECAR_NAMES, SIDECAR_TEXT } from './sidecars.ts';
 
 export { importGLTFAsync } from './gltf.ts';
 export { importHoudiniBgeo, importHoudiniGeo } from './hgeo.ts';
@@ -41,6 +42,14 @@ export function importFormatFromPath(path: string): string {
 function importAnyJSON(j: any, warn?: (m: string) => void): Geometry {
   if (Array.isArray(j)) return importHoudiniGeo(j, warn);
   if (isPointsJSON(j)) return importPointsJSON(j);
+  // an export's sidecar (io/sidecars.ts) is metadata of the file beside it: say so instead of "not a topotopo-geo file"
+  const role = typeof j?.format === 'string' ? SIDECAR_FORMATS[j.format] : undefined;
+  if (role) throw new Error(`this JSON is an export's ${SIDECAR_NAMES[role]} (${SIDECAR_TEXT[role]}), not geometry: ${{
+    source: 'read the exported file it sits beside',
+    heightmap: j.format === 'png16' ? 'read the heightmap PNG beside it with heightfield_from_image (height_min / height_max from this sidecar)' : 'the RAW heightmap beside it is for Unreal; export png16 to read it back',
+    meshes: 'read the instance stream (.csv / .points.json) beside it',
+    landscape: 'read the files of its folder (heightmap.png, objects.glb)',
+  }[role]}`);
   return geoFromJSON(j);
 }
 

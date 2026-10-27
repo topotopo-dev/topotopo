@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { sidecarFile } from './sidecars.ts';
 
 export interface Artifact {
   id: string;
@@ -37,10 +38,15 @@ export class ArtifactStore {
     fs.renameSync(temp, this.manifest);
     return a;
   }
-  /** Discover unregistered agent-written files too. Never follow symlinks/junctions while scanning. */
+  /**
+   * Discover unregistered agent-written files too, one output each; an export's sidecar among them (a heightmap's
+   * .json, <file>.source.json …: io/sidecars.ts) joins the output of the file it describes. Never follow
+   * symlinks/junctions while scanning.
+   */
   list(): Artifact[] {
     const all = this.records().filter((a) => a.files.some((p) => fs.statSync(p, { throwIfNoEntry: false })?.isFile()));
     const known = new Set(all.flatMap((a) => a.files.map((p) => path.resolve(p))));
+    const found: Artifact[] = [];
     const walk = (dir: string) => {
       // a folder can be missing, or vanish between listing its parent and reading it
       const entries = (() => { try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; } })();
@@ -48,10 +54,17 @@ export class ArtifactStore {
         if (e.name.startsWith('.') || e.isSymbolicLink()) continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) walk(p);
-        else if (e.isFile() && !known.has(p)) all.push({ id: artifactId(p), label: path.relative(this.dir, p).split(path.sep).join('/'), files: [p] });
+        else if (e.isFile() && !known.has(p)) found.push({ id: artifactId(p), label: path.relative(this.dir, p).split(path.sep).join('/'), files: [p] });
       }
     };
     walk(this.dir);
+    const owner = new Map<string, Artifact>();
+    for (const a of [...all, ...found]) for (const p of a.files) if (!owner.has(path.resolve(p))) owner.set(path.resolve(p), a);
+    for (const a of found) {
+      const s = sidecarFile(a.files[0]), of = s?.of ? owner.get(path.resolve(s.of)) : undefined;
+      if (of && of !== a) of.files.push(a.files[0]);
+      else all.push(a);
+    }
     return all;
   }
 }

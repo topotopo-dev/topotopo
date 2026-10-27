@@ -11,6 +11,9 @@ import type { CookReport, Issue, NodeProgress, StopSignal } from './graph/engine
 import type { ExportTarget, GraphSpec, NodeSpec } from './graph/types.ts';
 import { didYouMean, renameExprRefs } from './graph/params.ts';
 import { migrateGraph } from './graph/migrate.ts';
+import { maybeSidecar, sidecarOf } from './io/sidecars.ts';
+import type { Sidecar } from './io/sidecars.ts';
+import { fileFormat } from './host/sidecars.ts';
 
 export interface EditOp {
   op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert' | 'export';
@@ -37,12 +40,15 @@ export const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 export interface InputFile {
   /** posix path relative to inputs/ (a file node reads it as "inputs/" + path) */
   path: string;
-  kind: 'geometry' | 'image' | 'other';
+  /** metadata: an export's sidecar (io/sidecars.ts), which describes the file beside it and is not read as geometry */
+  kind: 'geometry' | 'image' | 'metadata' | 'other';
   /** lower-case extension without the dot ("points.json" counts as one) */
   ext: string;
   size: number;
   /** modification time, ms since the epoch */
   mtime: number;
+  /** metadata: what it is, and the path (relative to inputs/) of the file or folder it describes, null when that is not there */
+  sidecar?: Sidecar;
 }
 
 const GEOMETRY_EXTS = new Set(['obj', 'stl', 'ply', 'glb', 'gltf', 'geo', 'bgeo', 'blend', 'csv', 'json', 'points.json']);
@@ -373,7 +379,10 @@ export class Workspace {
     return new Promise<void>((resolve) => setImmediate(resolve));
   }
 
-  /** Every file under inputs/, recursively: posix paths relative to it, sorted. Dot-files and dot-folders are skipped. */
+  /**
+   * Every file under inputs/, recursively: posix paths relative to it, sorted. Dot-files and dot-folders are skipped.
+   * An export's sidecar (a heightmap's .json, <file>.source.json …) is kind "metadata", with the file it describes.
+   */
   listInputs(): InputFile[] {
     const out: InputFile[] = [];
     const walk = (dir: string, rel: string, depth: number) => {
@@ -392,6 +401,13 @@ export class Workspace {
       }
     };
     walk(this.inputDir, '', 0);
+    // sidecars: the files and folders here are what they can describe
+    const there = new Set(out.flatMap((f) => f.path.split('/').map((_, i, s) => s.slice(0, i + 1).join('/'))));
+    for (const f of out) {
+      if (!maybeSidecar(f.path)) continue;
+      const s = sidecarOf(f.path, fileFormat(path.join(this.inputDir, ...f.path.split('/'))), (p) => there.has(p));
+      if (s) { f.kind = 'metadata'; f.sidecar = s; }
+    }
     return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 

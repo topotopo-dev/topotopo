@@ -7,6 +7,8 @@ import type { Workspace, InputFile } from '../workspace.ts';
 import { inputExt, inputKind } from '../workspace.ts';
 import type { Geometry, Attribute } from '../core/geometry.ts';
 import { decodePNG } from '../io/png-decode.ts';
+import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
+import type { Sidecar, SidecarRole } from '../io/sidecars.ts';
 import { imageNameOf } from '../io/textures.ts';
 import { readMaterials, MATERIAL_ATTRIB } from '../core/materials.ts';
 import { didYouMean } from '../graph/params.ts';
@@ -63,7 +65,8 @@ export class InputDescriber {
     const stamp = this.ws.engine.host.fileStamp(rel);
     const hit = this.cache.get(f.path);
     if (hit && hit.stamp === stamp) return hit.d;
-    const d = (f.kind === 'geometry' ? this.geometry(rel, f.ext) : f.kind === 'image' ? this.image(rel) : Promise.resolve(other(f.ext)))
+    const d = (f.kind === 'geometry' ? this.geometry(rel, f.ext) : f.kind === 'image' ? this.image(rel) : f.kind === 'metadata' && f.sidecar ? this.metadata(rel, f.sidecar)
+      : Promise.resolve(other(f.ext)))
       .catch((e: any): Described => ({ short: `cannot read: ${e?.message ?? e}`, long: `cannot read: ${e?.message ?? e}`, failed: true }));
     this.cache.set(f.path, { stamp, d });
     return d;
@@ -103,6 +106,27 @@ export class InputDescriber {
       return { short: `cook failed: ${err}`, long: `the file node failed: ${err}${why}${warnings.length ? '\nwarnings:\n  ' + warnings.join('\n  ') : ''}`, failed: true };
     }
     return geometryText(r.geo, rel, ext, warnings);
+  }
+
+  /** An export's sidecar (io/sidecars.ts): what it records and the file it describes, without cooking it. */
+  private async metadata(rel: string, s: Sidecar): Promise<Described> {
+    const of = s.of === null ? 'an export that is not in inputs/' : `inputs/${s.of}`;
+    if (s.role === 'source') {
+      try {
+        const j = JSON.parse(new TextDecoder().decode(await this.ws.engine.host.readFile(rel)));
+        const what = `how ${Array.isArray(j.files) ? j.files.join(', ') : 'an export'} was made (graph "${j.source?.graph}", frame ${j.source?.frame})`;
+        return { short: `export source: ${what}, not geometry`, long: `an export's source manifest, not geometry: ${what}. help topic "export" (SOURCE) tells how to make it again.`, failed: false };
+      } catch { /* unreadable: said as for the other sidecars */ }
+    }
+    const read: Record<SidecarRole, string> = {
+      source: 'help topic "export" (SOURCE) tells how to make it again',
+      heightmap: s.of?.endsWith('.r16') ? 'the RAW heightmap beside it is for Unreal (a file node reads PNG heightmaps)'
+        : 'read the heightmap with heightfield_from_image (height_min / height_max are in this sidecar)',
+      meshes: 'read the instance stream (.csv / .points.json) beside it; its Mesh column names these meshes',
+      landscape: 'the files it lists are in its folder (help topic "export", UNREAL LANDSCAPE BUNDLE)',
+    };
+    const what = `${SIDECAR_NAMES[s.role]} of ${of}: ${SIDECAR_TEXT[s.role]}`;
+    return { short: `${what}, not geometry`, long: `${what}. Not geometry: ${read[s.role]}.`, failed: false };
   }
 
   private async image(rel: string): Promise<Described> {
@@ -308,7 +332,7 @@ export function inputsTool(ws: Workspace): ToolDef {
   const describer = new InputDescriber(ws);
   return {
     name: 'inputs',
-    description: 'The human\'s own material: files people drop into the workspace inputs/ folder (meshes, guide curves and points from Blender/Houdini/Unreal, blockouts, PNG masks and heightmaps). list: every file with kind (geometry/image/other), size, date and a summary (counts, curves vs meshes, bbox, object names; PNG size and bit depth). describe {path}: what a file node reads from it: polygons vs open polylines vs loose points vs packed prims, bbox in metres, attributes, groups, every name and role value, materials, warnings. Call list FIRST when building a landscape or scene: guides mark sites, paths, zones, volumes and blockouts (help topic "inputs"). Read a file with {type:"file", params:{path:"inputs/<path>"}}.',
+    description: 'The human\'s own material: files people drop into the workspace inputs/ folder (meshes, guide curves and points from Blender/Houdini/Unreal, blockouts, PNG masks and heightmaps). list: every file with kind (geometry/image/metadata/other; metadata = an export\'s sidecar such as a heightmap\'s .json or <file>.source.json), size, date and a summary (counts, curves vs meshes, bbox, object names; PNG size and bit depth). describe {path}: what a file node reads from it: polygons vs open polylines vs loose points vs packed prims, bbox in metres, attributes, groups, every name and role value, materials, warnings. Call list FIRST when building a landscape or scene: guides mark sites, paths, zones, volumes and blockouts (help topic "inputs"). Read a file with {type:"file", params:{path:"inputs/<path>"}}.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -334,11 +358,11 @@ export function inputsTool(ws: Workspace): ToolDef {
       let skipped = 0;
       for (const f of files) {
         let summary: string;
-        if (f.kind === 'other' || describer.cached(f) || Date.now() - t0 < LIST_BUDGET_MS) summary = (await describer.describe(f)).short;
+        if (f.kind === 'other' || f.kind === 'metadata' || describer.cached(f) || Date.now() - t0 < LIST_BUDGET_MS) summary = (await describer.describe(f)).short;
         else { summary = 'not summarised yet (list time budget): inputs describe reads it'; skipped++; }
         rows.push(`  ${f.path}  ${f.kind}  ${sizeText(f.size)}  ${dateText(f.mtime)}  ${summary}`);
       }
-      const kinds = (['geometry', 'image', 'other'] as const).map((k) => [k, files.filter((f) => f.kind === k).length] as const).filter(([, c]) => c);
+      const kinds = (['geometry', 'image', 'metadata', 'other'] as const).map((k) => [k, files.filter((f) => f.kind === k).length] as const).filter(([, c]) => c);
       return text([
         `inputs/ (${ws.inputDir}): ${plural(files.length, 'file')} (${kinds.map(([k, c]) => `${c} ${k}`).join(', ')})`,
         ...rows,
