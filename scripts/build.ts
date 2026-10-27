@@ -61,7 +61,7 @@ for (const f of js) {
   for (const m of fs.readFileSync(f, 'utf8').matchAll(tsSpecifier)) problems.push(`${rel(f)} still refers to ${m[2]}`);
 }
 
-// module-relative files (src/host/node.ts, src/wasm/kernels.ts, src/host/pool.ts, src/viewer/server.ts)
+// module-relative files (src/host/node.ts, src/wasm/kernels.ts, src/host/pool.ts, src/host/version.ts, src/viewer/server.ts)
 for (const [from, target] of [
   ['host/node.js', '../../shelf/index.json'],
   ['host/node.js', '../../assets/fonts/DejaVuSans.ttf'],
@@ -71,6 +71,7 @@ for (const [from, target] of [
   ['wasm/kernels.js', '../../kernels/pkg-simd/topotopo_kernels_bg.wasm'],
   ['wasm/kernels.js', '../../kernels/pkg-simd/topotopo_kernels.js'],
   ['host/pool.js', './worker.js'],
+  ['host/version.js', '../../package.json'],
   ['viewer/server.js', './index.html'],
   ['viewer/server.js', './app/main.js'],
   ['viewer/server.js', './app/style.css'],

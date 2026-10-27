@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 // Command line: cook a graph JSON file, then render / export / inspect.
-//   node src/cli.ts <graph.json> [--node name] [--frame N | --frames A-B[:step]] [--fps 24]
+//   node src/cli.ts <graph.json> [--node name | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
 //                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800] [--render-scale 2] [--heightfield-res 256|full] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
 //                   [--inspect summary|attributes|topology|all|uv [--uv-resolution 1024] [--json]]
+//   --output picks a named output (the graph's "outputs"); --var overrides a graph var for this run (src/graph/vars.ts).
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   Packed instances to .csv/.points.json: one row per instance + <name>.meshes.json + <name>_meshes/<Mesh>.glb.
 //   Heightfields: --export terrain.png (16-bit heightmap + terrain.json sidecar for Unreal), .r16/.raw, or
 //                 --format mask_png --layers mask,flow; --layer picks the layer;
 //                 --format unreal_landscape --export out/level (a directory: heightmap, layers, manifest, objects.glb,
 //                 instance stream).
+//   Every export records how it was made (src/io/source.ts) in its sidecar or manifest, or in <file>.source.json.
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter | --help-topic export | --version
@@ -37,14 +39,16 @@ import { renderArgs } from './render/options.ts';
 import { encodePNG } from './render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
-import { exportFilesAsync } from './io/files.ts';
+import { exportSource } from './io/source.ts';
 import { ArtifactStore } from './host/artifacts.ts';
-import { prepareTarget, writeTargets } from './host/export-targets.ts';
+import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
+import { TOPOTOPO_VERSION } from './host/version.ts';
 import { publishedOutputs } from './io/targets.ts';
 import { inspect } from './inspect.ts';
 import { uvReport } from './core/uvreport.ts';
 import { didYouMean } from './graph/params.ts';
+import { parseVarArg, withVars } from './graph/vars.ts';
 import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
 
 const argv = process.argv.slice(2);
@@ -56,15 +60,15 @@ const graphName = (file: string) => path.basename(file).replace(/\.json$/i, '').
 const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo';
 
 if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
-  // package.json sits one level above both src/cli.ts and dist/cli.js
-  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  console.log(`topotopo ${pkg.version}`);
+  console.log(`topotopo ${TOPOTOPO_VERSION}`);
   process.exit(0);
 }
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
-    `usage: ${prog} <graph.json> [--node n] [--frame N | --frames A-B[:step]] [--fps 24]`,
+    `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
     '         [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all|topology|uv] [--uv-resolution 1024] [--json] (uv: overlaps, utilization, texel density; --json: the report as JSON)',
+    '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
+    '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
@@ -81,6 +85,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json; heightfields .png (png16) .r16,',
     '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle; --tile-size 1008 for tiled Landscape);',
     '                       images: --format textures --export out/maps (one PNG per image; --layers a,b or * for extra layers)',
+    '       every export records how it was made (graph, graph hash, output, node, frame, fps, vars, seeds, options, version) in its sidecar',
+    '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version`,
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
@@ -205,9 +211,26 @@ async function cook() {
   let graph;
   try { graph = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (e) { fail(`${prog}: ${file} is not valid JSON: ${(e as Error).message}`); }
+  // --var name=value (repeatable): the graph's vars for this run; exports record the result, so a manifest replays
+  const varArgs = argv.flatMap((x, i) => (x === '--var' ? [argv[i + 1]] : []));
+  if (varArgs.some((v) => v === undefined || v.startsWith('--'))) fail('--var needs name=value (e.g. --var relief=8)');
+  try { graph = withVars(graph, varArgs.map(parseVarArg)); } catch (e) { fail(`--var: ${(e as Error).message}`); }
+  // --output name: a named output (graph.outputs) instead of the default output
+  const outputName = opt('--output');
+  if (argv.includes('--output') && (outputName === undefined || outputName.startsWith('--'))) fail('--output needs the name of one of the graph\'s outputs');
+  if (outputName !== undefined && opt('--node') !== undefined) fail('use either --node or --output, not both');
+  let target = opt('--node');
+  if (outputName !== undefined) {
+    const outs: Record<string, any> = graph?.outputs && typeof graph.outputs === 'object' ? graph.outputs : {};
+    const o = Object.hasOwn(outs, outputName) ? outs[outputName] : undefined;
+    if (!o || typeof o.node !== 'string') {
+      const names = Object.keys(outs), s = didYouMean(outputName, names);
+      fail(`--output: ${file} has no output "${outputName}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; ${names.length ? `its outputs: ${names.join(', ')}` : 'it publishes no "outputs" (--node picks any node)'}`);
+    }
+    target = o.node;
+  }
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
   await engine.init();
-  const target = opt('--node');
   const fps = opt('--fps') !== undefined ? Number(opt('--fps')) : undefined;
   const framesArg = opt('--frames');
   const frameArg = opt('--frame');
@@ -275,38 +298,36 @@ async function cook() {
       const raw = (opt('--format') ?? exportFormatFromPath(ex)).toLowerCase();
       const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
       if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
-      const up = opt('--up-axis');
       if (argv.includes('--tile-size') && opt('--tile-size') === undefined) fail('--tile-size requires a number of quads (e.g. 1008)');
       if (opt('--tangents') !== undefined && !['auto', 'preserve', 'none'].includes(opt('--tangents')!)) fail(`--tangents must be auto, preserve or none (got "${opt('--tangents')}")`);
-      const outDir = fmt === 'unreal_landscape' && !/\.json$/i.test(p) ? path.resolve(p) : path.dirname(path.resolve(p));
-      const host = engine.host;
-      const { files, summary } = await exportFilesAsync(geo, fmt, p, {
-        splitByName: true,
-        compress: opt('--compress') as any,
-        quantize: argv.includes('--quantize') || undefined,
-        tangents: opt('--tangents') as any,
-        pcg: argv.includes('--pcg') || argv.includes('--pcg-struct') || undefined,
-        pcgStruct: argv.includes('--pcg-struct') || undefined,
-        attributes: opt('--attributes'),
-        upAxis: up === 'z' || up === 'y' ? up : undefined,
-        scale: opt('--scale') !== undefined ? Number(opt('--scale')) : undefined,
-        instancing: opt('--instancing') === 'expand' ? 'expand' : undefined,
-        instances: opt('--instances') === 'expand' ? 'expand' : undefined,
-        meshes: argv.includes('--no-meshes') ? false : undefined,
-        layer: opt('--layer'), layers: opt('--layers')?.split(','),
-        tile_size: opt('--tile-size') !== undefined ? Number(opt('--tile-size')) : undefined,
-        deflate: (d) => zlib.deflateSync(d),
-        readFile: (t) => host.readFile(t),
-        texturePath: (t) => { const abs = host.resolvePath(t); return /^[a-z][a-z0-9+.-]*:\/\//i.test(abs) ? abs : path.relative(outDir, abs).split(path.sep).join('/'); },
-        warn: (m) => console.warn(`warning: ${m}`),
-      });
-      for (const f of files) {
-        fs.mkdirSync(path.dirname(path.resolve(f.path)), { recursive: true });
-        fs.writeFileSync(f.path, f.bytes);
-      }
-      if (files.length) record(files.map((f) => f.path), fmt);
-      console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${summary}` : ''}`);
+      // the export tool's options (the MCP export tool and export targets use the same names and code)
+      const a = exportArgs();
+      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, version: TOPOTOPO_VERSION });
+      const res = await serializeExport(geo, fmt, p, a, engine.host, source);
+      for (const w of res.warnings) console.warn(`warning: ${w}`);
+      writeExportFiles(res.files);
+      if (res.files.length) record(res.files.map((f) => f.path), fmt);
+      const files = res.files.filter((f) => f.path !== res.sourceManifest);
+      console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${res.summary}` : ''}${res.sourceFile ? `; source: ${res.sourceFile}` : ''}`);
     }
+  }
+
+  /** The export flags given, as the export tool's options (snake_case, as export targets and the MCP export tool name them). */
+  function exportArgs(): Record<string, unknown> {
+    const a: Record<string, unknown> = {};
+    const up = opt('--up-axis');
+    if (up === 'y' || up === 'z') a.up_axis = up;
+    for (const [f, k] of [['--compress', 'compress'], ['--tangents', 'tangents'], ['--layer', 'layer']]) if (opt(f) !== undefined) a[k] = opt(f);
+    for (const [f, k] of [['--scale', 'scale'], ['--tile-size', 'tile_size']]) if (opt(f) !== undefined) a[k] = Number(opt(f));
+    if (opt('--attributes') !== undefined) a.attributes = opt('--attributes')!.split(/[\s,]+/).filter(Boolean);
+    if (opt('--layers') !== undefined) a.layers = opt('--layers')!.split(',');
+    if (argv.includes('--quantize')) a.quantize = true;
+    if (argv.includes('--pcg') || argv.includes('--pcg-struct')) a.pcg = true;
+    if (argv.includes('--pcg-struct')) a.pcg_struct = true;
+    if (opt('--instancing') === 'expand') a.instancing = 'expand';
+    if (opt('--instances') === 'expand') a.instances = 'expand';
+    if (argv.includes('--no-meshes')) a.meshes = false;
+    return a;
   }
 
   if (framesArg) {
@@ -325,7 +346,8 @@ async function cook() {
     const r = await engine.cook(graph, { target, frame: single, fps });
     report(r);
     if (!r.ok || !r.geo) process.exit(1);
-    console.log(`cooked ${file} → ${r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''} in ${r.ms.toFixed(0)} ms`);
+    const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
+    console.log(`cooked ${file} → ${outputName !== undefined ? `output "${outputName}" (${r.target})` : r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''}${vars} in ${r.ms.toFixed(0)} ms`);
     if (opt('--inspect') === 'uv' && argv.includes('--json')) console.log(JSON.stringify(uvReport(r.geo, { resolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }), null, 2));
     else console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary', uvResolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }));
     await writeOutputs(r);
@@ -343,10 +365,11 @@ async function cook() {
       const r = await engine.cook(graph, { target: p.node, frame: single, fps });
       report(r);
       if (!r.ok || !r.geo) fail(`--export-all: "${p.label}" did not cook; nothing was written`);
-      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host));
+      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host, { frame: r.frame, fps: r.fps }));
     }
     writeTargets(prepared, exportsDir);
-    for (const p of prepared) console.log(`exported ${p.label} → ${path.join('exports', ...p.target.path.split('/'))} — ${p.summary}`);
+    const rel = (f: string) => path.join('exports', path.relative(exportsDir, f));
+    for (const p of prepared) console.log(`exported ${p.label} → ${path.join('exports', ...p.target.path.split('/'))} — ${p.summary}${p.sourceFile ? `; source: ${rel(p.sourceFile)}` : ''}`);
     const skipped = published.filter((p) => !p.target).map((p) => p.label);
     if (skipped.length) console.log(`no export target (skipped): ${skipped.join(', ')}`);
   }

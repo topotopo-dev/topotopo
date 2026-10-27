@@ -43,6 +43,7 @@
 //   a map replaces its factor (baseColorFactor white, roughnessFactor 1). Without readFile the maps are skipped.
 //   "image:<name>" paths are image volumes of the geometry (texture nodes), encoded to PNG in memory; an "orm" map is
 //   both the metallicRoughness and the occlusion texture (metallicFactor 1).
+//   options.source (how the export was made, io/source.ts) → asset.extras.source.
 //
 // Import
 //   node hierarchy flattened with world transforms (nodes without a mesh → scene empties: points with scene_empty 1,
@@ -387,6 +388,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   }
   const doc = new Document();
   doc.getRoot().getAsset().generator = 'topotopo';
+  // how the export was made (io/source.ts): the graph, its vars and seeds, the frame, the version
+  if (o.source) doc.getRoot().getAsset().extras = { source: o.source };
   const buffer = doc.createBuffer();
   const scene = doc.createScene('scene');
   doc.getRoot().setDefaultScene(scene);

@@ -90,7 +90,10 @@ try {
   const first = await post({ id: model.id, export: 'glb' });
   check(first.status === 200 && fs.existsSync(path.join(ws.exportDir, 'asset.glb')) && ws.getGraph('asset').export === 'glb', 'a first export stores its target in the graph and writes exports/<graph>.glb');
   items = await list(); const targeted = items.find((x: any) => x.id === model.id);
-  check(targeted.target?.path === 'asset.glb' && targeted.saved?.files === 1 && targeted.saved.size > 0, 'the card reads its target and its last save');
+  // the GLB and asset.glb.source.json, the record of how it was made (io/source.ts)
+  check(targeted.target?.path === 'asset.glb' && targeted.saved?.files === 2 && targeted.saved.size > 0, 'the card reads its target and its last save');
+  const source = JSON.parse(fs.readFileSync(path.join(ws.exportDir, 'asset.glb.source.json'), 'utf8')).source;
+  check(source.graph === 'asset' && source.output === null && source.node === targeted.node && source.frame === 1 && source.export.format === 'glb', 'a target export records its source through the shared export code');
   const again = await post({ id: model.id });
   const mainReceipts = new ArtifactStore(ws.exportDir).records().filter((a) => a.graph === 'asset' && a.output === '');
   check(again.status === 200 && !fs.readdirSync(ws.exportDir).some((f) => /^asset_\d+\.glb$/.test(f)) && mainReceipts.length === 1, 'exporting again overwrites the same file and receipt');
@@ -105,11 +108,12 @@ try {
   const png = await fetch(viewer.url + `api/output/image?id=${texture.id}&mode=RGBA&download=1`);
   check(png.ok && /attachment/.test(png.headers.get('content-disposition') ?? '') && decodePNG(new Uint8Array(await png.arrayBuffer())).width === 2, 'a texture downloads as a PNG');
   const maps = await post({ id: model.id, export: { format: 'textures', path: 'maps', layers: ['*'] } });
-  check(maps.status === 200 && maps.data.files === 2, 'a textures target writes every image layer into its folder');
+  // two image layers and the folder's source.json
+  check(maps.status === 200 && maps.data.files === 3 && fs.existsSync(path.join(ws.exportDir, 'maps', 'source.json')), 'a textures target writes every image layer into its folder');
   items = await list(); const bundle = items.find((x: any) => x.origin === 'saved' && x.label === 'maps');
-  check(bundle?.files.length === 2 && items.some((x: any) => x.parent === bundle.id && x.kind === 'image'), 'bundled images individually inspectable');
+  check(bundle?.files.length === 3 && items.some((x: any) => x.parent === bundle.id && x.kind === 'image'), 'bundled images individually inspectable');
   const zip = new Uint8Array(await (await fetch(viewer.url + `api/output/zip?id=${bundle.id}`)).arrayBuffer());
-  const entries = unzipSync(zip); check(Object.keys(entries).length === 2 && !!entries['atlas_AO.png'], 'ZIP preserves companion files');
+  const entries = unzipSync(zip); check(Object.keys(entries).length === 3 && !!entries['atlas_AO.png'] && !!entries['source.json'], 'ZIP preserves companion files');
   check((await post({ id: model.id, export: 'glb' })).status === 200, 'a target changes back');
   const zinput = [{ name: 'a/file.png', bytes: Uint8Array.from([1, 2, 3]) }];
   check(Buffer.compare(outputZip(zinput), outputZip(zinput)) === 0, 'ZIP bytes deterministic');

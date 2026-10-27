@@ -93,6 +93,11 @@ export class InputDescriber {
           const j = JSON.parse(new TextDecoder().decode(await this.ws.engine.host.readFile(rel)));
           if (j && typeof j === 'object' && !Array.isArray(j) && j.nodes && typeof j.nodes === 'object')
             why = '\nThis JSON is a topotopo graph, not geometry: build it (build {graph}) instead of reading it with a file node.';
+          else if (j?.format === 'topotopo-export-source' && j.source && typeof j.source === 'object') {
+            // the record an export writes next to its file (io/source.ts): say what it is instead of a cook failure
+            const what = `how ${Array.isArray(j.files) ? j.files.join(', ') : 'an export'} was made (graph "${j.source.graph}", frame ${j.source.frame})`;
+            return { short: `export source: ${what}, not geometry`, long: `an export's source manifest, not geometry: ${what}. help topic "export" (SOURCE) tells how to make it again.`, failed: false };
+          }
         } catch { /* not JSON at all: the error says so */ }
       }
       return { short: `cook failed: ${err}`, long: `the file node failed: ${err}${why}${warnings.length ? '\nwarnings:\n  ' + warnings.join('\n  ') : ''}`, failed: true };

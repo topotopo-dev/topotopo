@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine, resolveTime } from '../src/graph/engine.ts';
@@ -627,6 +628,77 @@ section('CLI arguments');
   const badTopic = cli('--help-topic', 'exprt');
   check(badTopic.status === 1 && /unknown topic "exprt" \(did you mean export\?\); topics: overview, library, graph, /.test(badTopic.stderr) && !badTopic.stdout,
     '--help-topic: an unknown name fails and lists the topics');
+}
+
+section('CLI --output, --var and export sources (replay from the manifest)');
+{
+  // tuning a terrain from the command line: vars for one run, a named output, and a record that makes it again
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const sha = (f: string) => createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+  const dir = path.join(tmp, 'replay');
+  fs.mkdirSync(dir, { recursive: true });
+  const g = path.join(dir, 'land.json');
+  fs.writeFileSync(g, JSON.stringify({
+    nodes: {
+      hf: { type: 'heightfield', params: { size: [20, 20], resolution: 0.5 } },
+      hills: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: '=relief', element_size: 8, seed: '=seed' } },
+      ground: { type: 'heightfield_to_mesh', in: ['hills'] },
+      pts: { type: 'scatter', in: ['ground'], params: { count: '=count', seed: 2 } },
+      out: { type: 'merge', in: ['ground', 'pts'] },
+    },
+    output: 'out',
+    outputs: { mesh: { node: 'ground', label: 'Ground mesh', export: 'glb' }, field: { node: 'hills' } },
+    vars: { relief: 2, seed: 1, count: 10 },
+  }, null, 2));
+  const first = cli(g, '--output', 'mesh', '--var', 'relief=5', '--var', 'seed=3', '--export', path.join(dir, 'a', 'land.glb'));
+  check(first.status === 0 && /cooked .*land\.json → output "mesh" \(ground\) with relief=5, seed=3/.test(first.stdout) && /; source: .*land\.glb\.source\.json/.test(first.stdout),
+    `--output and --var: the named output cooked with the overrides (${first.status ? first.stderr.slice(0, 200) : first.stdout.split('\n')[0]})`);
+  const manifestFile = path.join(dir, 'a', 'land.glb.source.json');
+  const man = fs.existsSync(manifestFile) ? JSON.parse(fs.readFileSync(manifestFile, 'utf8')) : null;
+  const s = man?.source;
+  check(man?.format === 'topotopo-export-source' && JSON.stringify(man.files) === '["land.glb"]' && s.graph === 'land' && s.output === 'mesh' && s.node === 'ground'
+    && s.frame === 1 && s.fps === 24 && JSON.stringify(s.vars) === '{"count":10,"relief":5,"seed":3}' && JSON.stringify(s.seeds) === '{"hills":"=seed","pts":2}'
+    && JSON.stringify(s.export) === '{"format":"glb","options":{}}' && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
+    'the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format, graph hash, version');
+  const glb = fs.readFileSync(path.join(dir, 'a', 'land.glb'));
+  const asset = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')).asset;
+  check(JSON.stringify(asset.extras?.source) === JSON.stringify(s), 'the GLB carries the same block in asset.extras.source');
+  // replay: the manifest's output, frame, fps and vars on the command line give the same bytes
+  const replay = [...(s.output ? ['--output', s.output] : ['--node', s.node]), '--frame', String(s.frame), '--fps', String(s.fps),
+    ...Object.entries(s.vars).flatMap(([k, v]) => ['--var', `${k}=${JSON.stringify(v)}`])];
+  const again = cli(g, ...replay, '--export', path.join(dir, 'b', 'land.glb'));
+  check(again.status === 0 && sha(path.join(dir, 'b', 'land.glb')) === sha(path.join(dir, 'a', 'land.glb'))
+    && fs.readFileSync(path.join(dir, 'b', 'land.glb.source.json'), 'utf8') === fs.readFileSync(manifestFile, 'utf8'),
+    `replaying the manifest (${replay.join(' ')}) writes the same GLB and a byte-identical manifest`);
+  const plain = cli(g, '--output', 'mesh', '--export', path.join(dir, 'c', 'land.glb'));
+  const plainSource = JSON.parse(fs.readFileSync(path.join(dir, 'c', 'land.glb.source.json'), 'utf8')).source;
+  check(plain.status === 0 && sha(path.join(dir, 'c', 'land.glb')) !== sha(path.join(dir, 'a', 'land.glb')) && plainSource.graph_sha256 !== s.graph_sha256 && plainSource.vars.relief === 2,
+    'without the overrides the export and its graph hash differ (the file\'s own vars)');
+  // the same output through its export target writes the same bytes
+  const all = cli(g, '--var', 'relief=5', '--var', 'seed=3', '--export-all');
+  check(all.status === 0 && sha(path.join(dir, 'exports', 'mesh.glb')) === sha(path.join(dir, 'a', 'land.glb'))
+    && JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'exports', 'mesh.glb.source.json'), 'utf8')).source) === JSON.stringify(s),
+    '--export-all with the same vars writes the same GLB and source through the output\'s export target');
+  // a heightmap keeps the source in its sidecar
+  const field = cli(g, '--output', 'field', '--var', 'relief=5', '--export', path.join(dir, 'h', 'field.png'));
+  const side = JSON.parse(fs.readFileSync(path.join(dir, 'h', 'field.json'), 'utf8'));
+  check(field.status === 0 && side.source.output === 'field' && side.source.node === 'hills' && side.source.export.format === 'png16' && side.height_max > 0
+    && fs.readdirSync(path.join(dir, 'h')).sort().join() === 'field.json,field.png', 'png16: the sidecar records the source, no separate manifest');
+  // --output renders and inspects the named output
+  const look = cli(g, '--output', 'field', '--views', 'top', '--size', '128', '--render', path.join(dir, 'field_top.png'));
+  check(look.status === 0 && /heightfield "heightfield": 41×41 samples/.test(look.stdout) && fs.existsSync(path.join(dir, 'field_top.png')), '--output renders and inspects the named output');
+  // mistakes are named
+  const badOut = cli(g, '--output', 'mesj');
+  check(badOut.status === 1 && /no output "mesj" \(did you mean mesh\?\); its outputs: mesh, field/.test(badOut.stderr), `--output: an unknown name lists the outputs (${badOut.stderr.trim()})`);
+  const noOuts = path.join(dir, 'plain.json');
+  fs.writeFileSync(noOuts, JSON.stringify({ nodes: { b: { type: 'box' } } }));
+  check(/publishes no "outputs"/.test(cli(noOuts, '--output', 'x').stderr), '--output on a graph without outputs says so');
+  const badVar = cli(g, '--var', 'relif=3');
+  check(badVar.status === 1 && /unknown var "relif" \(did you mean relief\?\); the graph's vars: relief, seed, count/.test(badVar.stderr), `--var: an unknown var names the known ones (${badVar.stderr.trim()})`);
+  check(/not valid JSON/.test(cli(g, '--var', 'relief=[1,').stderr) && /name=value/.test(cli(g, '--var', 'relief').stderr) && /name=value/.test(cli(g, '--var').stderr),
+    '--var: malformed values fail with a plain message');
+  check(/either --node or --output/.test(cli(g, '--node', 'ground', '--output', 'mesh').stderr), '--node and --output together are refused');
 }
 
 section('CLI heightfield render resolution');

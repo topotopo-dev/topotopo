@@ -3,6 +3,7 @@ import type { Attribute, Geometry } from '../core/geometry.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { qFromMat } from '../core/math.ts';
 import type { Quat } from '../core/math.ts';
+import type { ExportSource } from './source.ts';
 
 export interface ExportOptions {
   /** multiply positions (e.g. 100 for metres → centimetres) */
@@ -72,6 +73,11 @@ export interface ExportOptions {
   deflate?: (data: Uint8Array) => Uint8Array;
   /** receives non-fatal notes (instances expanded for a format without instancing, shear dropped, …) */
   warn?: (msg: string) => void;
+  /**
+   * How the export was made (io/source.ts). glb / gltf write it to asset.extras.source; exportFilesAsync (io/files.ts)
+   * also puts it in the format's sidecar or manifest, or in <file>.source.json next to the export.
+   */
+  source?: ExportSource;
 }
 
 // ---------------------------------------------------------------- packed instances: names, prims, anchor attributes

@@ -17,11 +17,14 @@ import { renderArgs } from '../render/options.ts';
 import { encodePNG } from '../render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
-import { publishedOutputs } from '../io/targets.ts';
+import { exportToolOptions, publishedOutputs } from '../io/targets.ts';
+import { exportSource } from '../io/source.ts';
+import type { ExportSource } from '../io/source.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
 import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Host } from '../host/types.ts';
+import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 import { verifyTools } from './verify.ts';
@@ -78,22 +81,27 @@ async function pngContent(g: Geometry, o: RenderOptions, host: Host): Promise<{ 
 
 /**
  * Write every file of an export (heightmap sidecars and layers, instance-stream sidecar and mesh GLBs, the Unreal
- * Landscape bundle, or the single file of other formats). Textures are read through the host; USD texture paths are
- * written relative to the output file. Returns the report text.
+ * Landscape bundle, or the single file of other formats) and the record of how it was made (`source`, io/source.ts).
+ * Textures are read through the host; USD texture paths are written relative to the output file. Returns the report
+ * text.
  */
-export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host, record?: (files: string[]) => void): Promise<string> {
-  const res = await serializeExport(geo, format, p, a, host);
+export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host, record?: (files: string[]) => void, source?: ExportSource): Promise<string> {
+  const res = await serializeExport(geo, format, p, a, host, source);
   writeExportFiles(res.files);
   if (res.files.length) record?.(res.files.map((f) => f.path));
-  return exportReport(res.files, res.outDir, format, res.summary, res.warnings);
+  return exportReport(res.files, res.outDir, format, res.summary, res.warnings, res.sourceFile, res.sourceManifest);
 }
 
-/** "wrote <file or N files in dir> (format, KB): summary", then any warnings. */
-function exportReport(files: { path: string; bytes: Uint8Array }[], outDir: string, format: string, summary: string, warnings: string[]): string {
+/**
+ * "wrote <file or N files in dir> (format, KB): summary", where the export's source is recorded, then any warnings. A
+ * standalone <file>.source.json is named on its own line, not in the file list.
+ */
+function exportReport(all: { path: string; bytes: Uint8Array }[], outDir: string, format: string, summary: string, warnings: string[], sourceFile?: string, sourceManifest?: string): string {
+  const files = all.filter((f) => f.path !== sourceManifest);
   const total = files.reduce((s, f) => s + f.bytes.byteLength, 0);
   const rel = (f: string) => path.relative(outDir, f).split(path.sep).join('/');
   const list = files.length === 1 ? files[0].path : `${files.length} files in ${outDir}: ${files.slice(0, 12).map((f) => rel(f.path)).join(', ')}${files.length > 12 ? ', …' : ''}`;
-  return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${summary}${warnings.length ? '\nwarnings:\n  ' + warnings.join('\n  ') : ''}`;
+  return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${summary}${sourceFile ? `\nsource recorded in ${rel(sourceFile)} (graph, vars, seeds, frame; help topic "export")` : ''}${warnings.length ? '\nwarnings:\n  ' + warnings.join('\n  ') : ''}`;
 }
 function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
@@ -210,11 +218,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     for (const p of targets) {
       const r = await ws.cook(name, p.node, a.frame);
       if (!r.ok || !r.geo) return text(reportText(name, r), true);
-      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host));
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps }));
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
-    return text(prepared.map((p) => exportReport(p.files, ws.exportDir, p.target.format, `${p.label}: ${p.summary}`, p.warnings)).join('\n')
+    return text(prepared.map((p) => exportReport(p.files, ws.exportDir, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
       + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : ''));
   };
 
@@ -364,7 +372,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]).',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the workspace. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]). Every export records how it was made (graph, vars, seeds, frame, version) in its sidecar or in <file>.source.json next to it (help topic "export").',
       inputSchema: {
         type: 'object',
         properties: {
@@ -404,7 +412,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
         const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt0] ?? fmt0) as ExportFormat;
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
-        const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }));
+        const source = exportSource({
+          graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
+          format: ext, options: exportToolOptions(a), version: TOPOTOPO_VERSION,
+        });
+        const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
         return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)`);
       },
     },

@@ -11,6 +11,7 @@
 import type { Geometry } from '../core/geometry.ts';
 import { heightfieldsOf, layerStats } from '../core/heightfield.ts';
 import type { Heightfield } from '../core/heightfield.ts';
+import type { ExportSource } from './source.ts';
 
 export type HeightmapFormat = 'png16' | 'r16' | 'mask_png';
 export const HEIGHTMAP_FORMATS: HeightmapFormat[] = ['png16', 'r16', 'mask_png'];
@@ -27,6 +28,8 @@ export interface HeightmapOptions {
   heightfield?: number;
   /** zlib compressor for PNG data (default: stored, uncompressed blocks) */
   deflate?: (data: Uint8Array) => Uint8Array;
+  /** png16 / r16: how the export was made (io/source.ts), written into the sidecar as "source" */
+  source?: ExportSource;
 }
 
 export interface HeightmapFile { kind: 'main' | 'sidecar' | 'layer'; layer?: string; bytes: Uint8Array }
@@ -192,6 +195,7 @@ export function heightmapExport(g: Geometry, format: HeightmapFormat, o: Heightm
       : 'RAW little-endian uint16, row-major, no header; h = height_min + value / 65535 * (height_max - height_min)',
     clipped: min > st.min || max < st.max,
     unreal,
+    ...(o.source ? { source: o.source } : {}),
   };
   const sidecar = new TextEncoder().encode(JSON.stringify(info, null, 2) + '\n');
   return {

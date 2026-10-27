@@ -11,7 +11,7 @@ WORKFLOW
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs; overlays for specific questions: wireframe "hard"/"boundary", views "section", glyphs "N", label_groups, shading "matcap", see help topic "render"). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
-6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal.
+6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
 OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
@@ -111,6 +111,10 @@ board or concept pages, so the gallery page and the board link both ways.`,
 - People change vars at any time (the viewer's controls edit the stored graph): read it with graphs {action:"get"}
   before assuming a var's value, and edit {op:"vars"} rather than rebuilding to change one. When a person asks to
   keep a value, keep it.
+- Command line: --var name=value sets a var for one run without editing the file (repeat it; numbers, true/false and
+  JSON values are parsed, other text is a string; an unknown name lists the graph's vars), and --output <id> renders,
+  exports and inspects a named output instead of the default: topotopo terrain.json --output land --var relief=8
+  --render r.png --export land.glb. Exports record the vars they were made with (help topic "export", SOURCE).
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
 - Output node: "output", else a node named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
@@ -818,6 +822,17 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
   prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
   uncompressed GLB.
+SOURCE: every export (export tool, export targets and the viewer's Export buttons, the CLI's --export and --export-all)
+  records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
+  cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
+  (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
+  export: {format, options}, topotopo (the version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
+  instance rows in <name>.meshes.json, unreal_landscape in landscape.json; every other export writes <file>.source.json
+  next to the file ({format:"topotopo-export-source", version, files, source}; a textures folder: source.json inside
+  it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
+  graph, values and options give the same bytes. Replay on the command line: topotopo <graph>.json --output <output>
+  (or --node <node>) --frame <frame> --fps <fps>, one --var <name>=<value as JSON> per var, and --export <path> with the
+  same options.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or

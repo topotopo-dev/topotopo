@@ -250,7 +250,8 @@ function rowGeometry(g: Geometry, o: ExportOptions, format: string, space: Expor
 /**
  * Sidecar for an instance stream (<name>.meshes.json): the sources, in source order, with the GLB file each one is
  * written to (meshDir/<Mesh>.glb, one mesh at the origin in metres, Y-up), instance counts, local bounds, triangles
- * and materials, so a consumer (the Unreal PCG plugin, a script) can map the Mesh column to a mesh asset.
+ * and materials, so a consumer (the Unreal PCG plugin, a script) can map the Mesh column to a mesh asset; with
+ * o.source, also how the export was made (io/source.ts).
  */
 export function instanceMeshesJSON(g: Geometry, o: ExportOptions & { meshDir?: string; stream?: string; scene?: string } = {}): string {
   const names = packedSourceNames(g);
@@ -275,6 +276,7 @@ export function instanceMeshesJSON(g: Geometry, o: ExportOptions & { meshDir?: s
     stream: o.stream ?? null, scene: o.scene ?? null, mesh_column: 'Mesh', instances: counts.reduce((a, b) => a + b, 0),
     units: 'mesh files: metres, Y-up, mesh at its own origin (the instance transform places it); PCG CSV rows: centimetres, Unreal axes X = x, Y = z, Z = y',
     meshes,
+    ...(o.source ? { source: o.source } : {}),
   }, null, 2) + '\n';
 }
 

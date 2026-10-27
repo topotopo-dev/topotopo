@@ -1,9 +1,12 @@
-// Export → import round trips for the mesh formats (glTF, .geo, CSV and points JSON details: test/interop.ts).
+// Export → import round trips for the mesh formats (glTF, .geo, CSV and points JSON details: test/interop.ts), tiled
+// Landscape bundles, and export sources (io/source.ts: the record of how an export was made) with var overrides.
 //   node test/io.ts
 import '../src/nodes/index.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { exportGeometry, exportGeometryAsync } from '../src/io/export.ts';
@@ -11,13 +14,22 @@ import { importGeometryAsync } from '../src/io/import.ts';
 import { topologyReport } from '../src/core/topology.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Heightfield, heightfieldsOf } from '../src/core/heightfield.ts';
+import { Image } from '../src/core/image.ts';
 import { m4identity } from '../src/core/math.ts';
 import { packedFromMatrices } from '../src/core/packed.ts';
+import { sha256Hex } from '../src/core/sha256.ts';
 import { exportFilesAsync } from '../src/io/files.ts';
 import { unrealLandscapeBundle } from '../src/io/unreal.ts';
 import { heightmapExport } from '../src/io/heightmap.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { importCSV } from '../src/io/points.ts';
+import { canonicalJSON, exportSource, graphSha256 } from '../src/io/source.ts';
+import { publishedOutputs } from '../src/io/targets.ts';
+import { parseVarArg, parseVarValue, withVars } from '../src/graph/vars.ts';
+import type { GraphSpec } from '../src/graph/types.ts';
+import { prepareTarget, writeTargets } from '../src/host/export-targets.ts';
+import { ArtifactStore } from '../src/host/artifacts.ts';
+import { TOPOTOPO_VERSION } from '../src/host/version.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -192,5 +204,106 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   let rejected = false;
   try { await unrealLandscapeBundle(terrain, { tile_size: tileSize }); } catch (error) { rejected = /tile_size/.test(String(error)); }
   check(rejected, `tiled export: rejects invalid/non-fitting tile_size ${tileSize}`);
+}
+
+// ---------------------------------------------------------------- export sources (io/source.ts) and var overrides
+{
+  const nodeSha = (b: Uint8Array | string) => createHash('sha256').update(b).digest('hex');
+  let shaOK = true;
+  for (const n of [0, 1, 55, 56, 63, 64, 65, 119, 1000, 70000]) {
+    const b = Uint8Array.from({ length: n }, (_, i) => (i * 131 + 7) & 255);
+    shaOK &&= sha256Hex(b) === nodeSha(b);
+  }
+  check(shaOK && sha256Hex('héllo ✓') === nodeSha('héllo ✓'), 'sha256 (pure TypeScript) matches node:crypto across block boundaries and for UTF-8 text');
+  check(canonicalJSON({ b: 1, a: { d: [1, { y: 2, x: 1 }], c: null, u: undefined } }) === '{"a":{"c":null,"d":[1,{"x":1,"y":2}]},"b":1}', 'canonicalJSON sorts keys at every level and drops undefined');
+
+  const spec: GraphSpec = {
+    nodes: {
+      hills: { type: 'heightfield_noise', params: { seed: '=seed', amplitude: '=relief' } },
+      loop: { type: 'foreach', params: { body: { nodes: { pts: { type: 'scatter', params: { Seed: 4 } } } } } },
+      box: { type: 'box' },
+    },
+    vars: { seed: 3, relief: 6 },
+  };
+  const src = exportSource({ graph: 'terrain', spec, node: 'hills', format: 'glb', options: { up_axis: 'z', scale: undefined }, version: '9.9.9' });
+  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'export', 'topotopo']), 'source block: fields in a fixed order');
+  check(src.output === null && src.frame === 1 && src.fps === 24 && JSON.stringify(src.vars) === '{"relief":6,"seed":3}' && JSON.stringify(src.seeds) === '{"hills":"=seed","loop/pts":4}'
+    && JSON.stringify(src.export) === '{"format":"glb","options":{"up_axis":"z"}}' && src.topotopo === '9.9.9',
+    `source block: the engine's time defaults, sorted vars, seeds by node path as written (nested bodies too), the options given (${JSON.stringify(src)})`);
+  const reordered: GraphSpec = { vars: { relief: 6, seed: 3 }, nodes: { box: { type: 'box' }, loop: spec.nodes.loop, hills: { type: 'heightfield_noise', params: { amplitude: '=relief', seed: '=seed' } } } };
+  check(src.graph_sha256 === nodeSha(canonicalJSON({ version: 1, ...spec })) && graphSha256(reordered) === src.graph_sha256,
+    'graph_sha256: SHA-256 of the canonical, version-stamped graph JSON; key order does not change it');
+
+  // --var values and overrides (src/graph/vars.ts)
+  const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test((e as Error).message); } };
+  check(parseVarValue('8') === 8 && parseVarValue('-0.5') === -0.5 && parseVarValue('.5') === 0.5 && parseVarValue('1e3') === 1000
+    && parseVarValue('true') === true && parseVarValue('false') === false && parseVarValue('null') === null
+    && JSON.stringify(parseVarValue('[1, 2]')) === '[1,2]' && JSON.stringify(parseVarValue('{"a": 1}')) === '{"a":1}'
+    && parseVarValue('"8"') === '8' && parseVarValue('ridged') === 'ridged' && parseVarValue('') === '', 'var values: numbers, booleans, JSON, other text as a string');
+  check(throws(() => parseVarValue('[1, 2'), /not valid JSON/) && throws(() => parseVarArg('relief'), /name=value/) && throws(() => parseVarArg('=3'), /name=value/)
+    && JSON.stringify(parseVarArg('label=a=b')) === '["label","a=b"]', 'var arguments: malformed values and missing names fail; a value may contain "="');
+  const tuned = withVars(spec, [['relief', 9]]);
+  check(tuned.vars!.relief === 9 && tuned.vars!.seed === 3 && spec.vars!.relief === 6 && withVars(spec, []) === spec, 'withVars sets vars on a copy of the graph');
+  check(throws(() => withVars(spec, [['relif', 1]]), /unknown var "relif" \(did you mean relief\?\); the graph's vars: seed, relief/)
+    && throws(() => withVars({ nodes: {} }, [['x', 1]]), /the graph has no vars/) && withVars({ nodes: {}, params: { k: { type: 'float' } } }, [['k', 2]]).vars!.k === 2,
+    'withVars: an unknown var names the known ones; a var declared in params counts');
+  check(exportSource({ graph: 'terrain', spec: tuned, node: 'hills', format: 'glb', version: '9.9.9' }).graph_sha256 !== src.graph_sha256, 'graph_sha256 changes with a var value');
+
+  // where each format records it (io/files.ts)
+  const s = (format: string) => exportSource({ graph: 'g', spec: { nodes: { b: { type: 'box' } }, vars: { k: 1 } }, node: 'b', format, version: '9.9.9' });
+  const json = (b: Uint8Array) => JSON.parse(text(b));
+  const glbJSON = (b: Uint8Array) => json(b.subarray(20, 20 + new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(12, true)));
+  const glbA = await exportFilesAsync(g, 'glb', 'out/b.glb', { source: s('glb') });
+  const glbB = await exportFilesAsync(g, 'glb', 'out/b.glb', { source: s('glb') });
+  const manifest = json(glbA.files[1].bytes);
+  check(glbA.files.map((f) => f.path).join() === 'out/b.glb,out/b.glb.source.json' && glbA.sourceFile === 'out/b.glb.source.json' && glbA.sourceManifest === glbA.sourceFile
+    && manifest.format === 'topotopo-export-source' && manifest.version === 1 && JSON.stringify(manifest.files) === '["b.glb"]' && JSON.stringify(manifest.source) === JSON.stringify(s('glb')),
+    'glb: <file>.source.json next to it names the file and holds the source block');
+  check(glbA.files.length === glbB.files.length && glbA.files.every((f, i) => same(f.bytes, glbB.files[i].bytes)), 'the same export with the same source is byte-identical, manifest included');
+  const asset = glbJSON(glbA.files[0].bytes).asset;
+  const validation = await createRequire(import.meta.url)('gltf-validator').validateBytes(glbA.files[0].bytes, { maxIssues: 20, writeTimestamp: false });
+  check(JSON.stringify(asset.extras?.source) === JSON.stringify(s('glb')) && asset.generator === 'topotopo' && validation.issues.numErrors === 0,
+    `glb: asset.extras.source holds the same block; the glTF validator reports ${validation.issues.numErrors} errors`);
+  const unrecorded = await exportFilesAsync(g, 'glb', 'out/b.glb', {});
+  check(unrecorded.files.length === 1 && !('extras' in glbJSON(unrecorded.files[0].bytes).asset) && unrecorded.sourceFile === undefined, 'without a source an export writes no record');
+  const gltf = await exportFilesAsync(g, 'gltf', 'out/b.gltf', { source: s('gltf') });
+  check(JSON.stringify(json(gltf.files[0].bytes).asset.extras.source) === JSON.stringify(s('gltf')) && gltf.files[1].path === 'out/b.gltf.source.json', 'gltf: asset.extras.source and the manifest');
+  const hm = await exportFilesAsync(terrain, 'png16', 'out/h.png', { source: s('png16') });
+  const hmPlain = await exportFilesAsync(terrain, 'png16', 'out/h.png', {});
+  check(hm.files.map((f) => f.path).join() === 'out/h.png,out/h.json' && hm.sourceFile === 'out/h.json' && hm.sourceManifest === undefined
+    && JSON.stringify(json(hm.files[1].bytes).source) === JSON.stringify(s('png16')) && !('source' in json(hmPlain.files[1].bytes)) && same(hm.files[0].bytes, hmPlain.files[0].bytes),
+    'png16: the .json sidecar records the source, no extra manifest; the heightmap itself is unchanged');
+  const rows = await exportFilesAsync(scene, 'csv', 'out/i.csv', { pcg: true, source: s('csv'), warn: () => {} });
+  check(rows.sourceFile === 'out/i.meshes.json' && !rows.files.some((f) => f.path.endsWith('.source.json')) && json(rows.files.find((f) => f.path === 'out/i.meshes.json')!.bytes).source.export.format === 'csv',
+    'csv instance rows: <name>.meshes.json records the source');
+  const points = await exportFilesAsync(g, 'csv', 'out/p.csv', { source: s('csv') });
+  check(points.files.map((f) => f.path).join() === 'out/p.csv,out/p.csv.source.json', 'csv without instances: the manifest next to it');
+  const level = await exportFilesAsync(scene, 'unreal_landscape', 'out/level', { source: s('unreal_landscape'), warn: () => {} });
+  check(level.sourceFile === 'out/level/landscape.json' && json(level.files.find((f) => f.path === 'out/level/landscape.json')!.bytes).source.graph === 'g'
+    && !('source' in json(level.files.find((f) => f.path === 'out/level/heightmap.json')!.bytes)) && !level.files.some((f) => f.path.endsWith('.source.json')),
+    'unreal_landscape: landscape.json records the source (the bundle\'s heightmap.json does not repeat it)');
+  const masks = await exportFilesAsync(terrain, 'mask_png', 'out/w.png', { layers: ['grass', 'soil depth'], source: s('mask_png') });
+  check(JSON.stringify(json(masks.files.find((f) => f.path === 'out/w.png.source.json')!.bytes).files) === '["w_grass.png","w_soil_depth.png"]', 'mask_png: the manifest names every layer file');
+  const images = new Geometry();
+  images.volumes.push(new Image(2, 2, 'atlas').set('C', new Float32Array(4).fill(0.5)));
+  const maps = await exportFilesAsync(images, 'textures', 'out/maps', { source: s('textures') });
+  check(maps.sourceFile === 'out/maps/source.json' && JSON.stringify(json(maps.files[maps.files.length - 1].bytes).files) === '["atlas.png"]', 'textures: source.json inside the folder');
+
+  // an export target (the viewer's Export button, MCP export {output}, CLI --export-all) builds its own from the graph
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-io-targets-'));
+  try {
+    const gs: GraphSpec = { nodes: { b: { type: 'box' } }, vars: { k: 1 }, outputs: { part: { node: 'b', export: { format: 'obj', path: 'parts/b.obj', up_axis: 'z' } } } };
+    const part = publishedOutputs('g', gs, 'b')[1];
+    const prepared = await prepareTarget(g, 'g', part as typeof part & { target: NonNullable<typeof part.target> }, dir, engine.host, { frame: 5 });
+    const man = json(prepared.files.find((f) => f.path === prepared.sourceManifest)!.bytes).source;
+    check(prepared.sourceManifest === path.join(dir, 'parts', 'b.obj.source.json') && man.graph === 'g' && man.output === 'part' && man.node === 'b' && man.frame === 5 && man.fps === 24
+      && JSON.stringify(man.export) === '{"format":"obj","options":{"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
+      'an export target records its source from the graph it is published from');
+    writeTargets([prepared], dir);
+    check(fs.existsSync(path.join(dir, 'parts', 'b.obj.source.json')) && new ArtifactStore(dir).records()[0].files.length === 2, 'writeTargets writes the manifest with the export and records both');
+  } finally {
+    // mkdtemp returns the exact owned directory
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 process.exit(fail ? 1 : 0);

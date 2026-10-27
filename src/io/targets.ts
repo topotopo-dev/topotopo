@@ -32,6 +32,11 @@ const NUMBER = ['scale', 'height_min', 'height_max', 'tile_size', 'heightfield']
 const NAMES = ['attributes', 'layers'];
 const OPTIONS = [...BOOLEAN, ...Object.keys(CHOICES), ...NUMBER, ...NAMES, 'layer'];
 
+/** The export tool's options among `a` (the tool's arguments), those that are set: what an export's source records. */
+export function exportToolOptions(a: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(OPTIONS.filter((k) => a[k] !== undefined && a[k] !== null).map((k) => [k, a[k]]));
+}
+
 /** A path segment Windows and POSIX both accept, and that cannot climb out of exports/. */
 const segmentOk = (s: string) => !!s && s !== '.' && s !== '..' && !/[<>:"|?*\x00-\x1f]/.test(s) && !/[. ]$/.test(s) && !/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(s);
 const pathOk = (p: unknown) => typeof p === 'string' && p.length <= 240 && !/^[A-Za-z]:|^[\\/]/.test(p) && p.replace(/\\/g, '/').split('/').every(segmentOk);
@@ -79,6 +84,8 @@ export interface PublishedOutput {
   node: string;
   label: string;
   target: ResolvedTarget | null;
+  /** the graph it is published from: a target export records it in its source block (io/source.ts) */
+  spec: GraphSpec;
 }
 
 /** A graph's default output (its files named after the graph) and its named outputs, each with its target if valid. */
@@ -86,10 +93,10 @@ export function publishedOutputs(graph: string, spec: GraphSpec, defaultNode: st
   const valid = (t: unknown) => (t !== undefined && t !== null && !targetError(t) ? (t as ExportTarget) : null);
   const main = valid(spec.export);
   return [
-    { output: null, node: defaultNode, label: 'Main output', target: main ? resolveTarget(main, graph) : null },
+    { output: null, node: defaultNode, label: 'Main output', target: main ? resolveTarget(main, graph) : null, spec },
     ...Object.entries(spec.outputs ?? {}).map(([id, o]) => {
       const t = valid(o?.export);
-      return { output: id, node: o.node, label: o.label ?? id, target: t ? resolveTarget(t, id) : null };
+      return { output: id, node: o.node, label: o.label ?? id, target: t ? resolveTarget(t, id) : null, spec };
     }),
   ];
 }

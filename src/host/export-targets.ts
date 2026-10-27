@@ -1,6 +1,8 @@
 // Writing exports for the CLI, the MCP server and the viewer: serialize with the export tool's options, then write
 // each file through a .part beside it, renamed into place. Published targets (io/targets.ts) write inside exports/
 // only, and every target is serialized before any file is written, so a failed cook or format changes nothing.
+// Every export records how it was made (io/source.ts): the caller passes the source block, and a target builds its own
+// from the graph it is published from.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -8,12 +10,15 @@ import type { Geometry } from '../core/geometry.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
 import type { ExportFile } from '../io/files.ts';
+import { exportSource } from '../io/source.ts';
+import type { ExportSource } from '../io/source.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
+import { TOPOTOPO_VERSION } from './version.ts';
 
 /** The files an export writes, nothing written yet; `a` holds the export tool's snake_case options. */
-export async function serializeExport(geo: Geometry, format: ExportFormat, p: string, a: Record<string, any>, host: Host) {
+export async function serializeExport(geo: Geometry, format: ExportFormat, p: string, a: Record<string, any>, host: Host, source?: ExportSource) {
   const warnings: string[] = [];
   const outDir = format === 'unreal_landscape' && !/\.json$/i.test(p) ? p : path.dirname(p);
   const res = await exportFilesAsync(geo, format, p, {
@@ -28,8 +33,9 @@ export async function serializeExport(geo: Geometry, format: ExportFormat, p: st
       return /^[a-z][a-z0-9+.-]*:\/\//i.test(abs) ? abs : path.relative(outDir, abs).split(path.sep).join('/');
     },
     warn: (m) => warnings.push(m),
+    source,
   });
-  return { files: res.files, summary: res.summary, warnings: [...new Set(warnings)], outDir };
+  return { files: res.files, summary: res.summary, warnings: [...new Set(warnings)], outDir, sourceFile: res.sourceFile, sourceManifest: res.sourceManifest };
 }
 
 /** `p` resolved inside `root`, crossing no symbolic link or junction on the way; throws otherwise. */
@@ -69,14 +75,31 @@ export interface PreparedTarget {
   files: ExportFile[];
   summary: string;
   warnings: string[];
+  /** the file that records the export's source (a sidecar, the bundle manifest or <file>.source.json) */
+  sourceFile?: string;
+  /** the standalone <file>.source.json among files, when the format has no sidecar of its own */
+  sourceManifest?: string;
 }
 
-/** Serialize one published output to its target inside `exportsDir` (nothing is written yet). */
-export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, host: Host): Promise<PreparedTarget> {
+/** When a target's output was cooked: the engine's defaults (frame 1, 24 fps) unless the cook used others. */
+export interface TargetCook { frame?: number; fps?: number }
+
+/**
+ * Serialize one published output to its target inside `exportsDir` (nothing is written yet). The export records its
+ * source: the graph it is published from (p.spec), its vars and seeds, the node, `cook`'s frame and fps.
+ */
+export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, host: Host, cook: TargetCook = {}): Promise<PreparedTarget> {
   const dest = insideRoot(exportsDir, path.join(exportsDir, ...p.target.path.split('/')));
-  const r = await serializeExport(geo, p.target.format, dest, p.target.options, host);
+  const source = exportSource({
+    graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
+    format: p.target.format, options: p.target.options, version: TOPOTOPO_VERSION,
+  });
+  const r = await serializeExport(geo, p.target.format, dest, p.target.options, host, source);
   for (const f of r.files) insideRoot(exportsDir, f.path);
-  return { graph, output: p.output, label: p.label, node: p.node, target: p.target, files: r.files, summary: r.summary, warnings: r.warnings };
+  return {
+    graph, output: p.output, label: p.label, node: p.node, target: p.target, files: r.files, summary: r.summary, warnings: r.warnings,
+    sourceFile: r.sourceFile, sourceManifest: r.sourceManifest,
+  };
 }
 
 /** Write prepared targets and record their receipts; two targets writing one file are refused before any write. */

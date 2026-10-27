@@ -118,6 +118,20 @@ check(dfBad.isError && /nope/.test(dfBad.txt), 'diff reports an unknown node');
 for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'csv', 'points.json']) {
   const x = await call('export', { path: `exports/scene.${fmt}` });
   check(!x.isError && fs.existsSync(path.join(wsDir, 'exports', `scene.${fmt}`)), `export ${fmt}: ${x.txt.split('\n')[0].slice(0, 90)}`);
+  if (fmt === 'glb') {
+    // every export records how it was made: the graph, its vars (after the edit above), seeds, frame, version
+    const man = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'scene.glb.source.json'), 'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    check(JSON.stringify(man.files) === '["scene.glb"]' && man.source.graph === 'main' && man.source.node === 'out' && man.source.output === null && man.source.frame === 1
+      && JSON.stringify(man.source.vars) === '{"n":300}' && man.source.seeds.terrain === 4 && man.source.seeds.pts === 2 && man.source.topotopo === pkg.version
+      && /^wrote \S*scene\.glb \(glb/.test(x.txt) && /source recorded in scene\.glb\.source\.json/.test(x.txt),
+      `export records its source next to the file (${x.txt.split('\n').find((l) => l.startsWith('source')) ?? 'no source line'})`);
+  }
+}
+{
+  const x = await call('export', { path: 'exports/scene_z.obj', up_axis: 'z', scale: 100, frame: 3 });
+  const s = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'scene_z.obj.source.json'), 'utf8')).source;
+  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"scale":100,"up_axis":"z"}}', 'the source records the frame and the export options given');
 }
 {
   const x = await call('export', { path: 'exports/scene_meshopt.glb', compress: 'meshopt' });
@@ -142,6 +156,12 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
   const b2 = await call('export', { graph: 'ue', node: 'inst', path: 'exports/shrubs.csv', pcg: true });
   check(!b2.isError && fs.existsSync(path.join(wsDir, 'exports', 'shrubs.meshes.json')) && fs.existsSync(path.join(wsDir, 'exports', 'shrubs_meshes', 'shrub.glb'))
     && fs.readFileSync(path.join(wsDir, 'exports', 'shrubs.csv'), 'utf8').trim().split('\n').length === 26, `export instance rows + meshes sidecar: ${b2.txt.split('\n')[0].slice(0, 120)}`);
+  // formats with a sidecar or manifest keep the source there
+  const bundleSource = JSON.parse(fs.readFileSync(man, 'utf8')).source;
+  const rowsSource = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'shrubs.meshes.json'), 'utf8')).source;
+  check(bundleSource?.graph === 'ue' && bundleSource.export.format === 'unreal_landscape' && rowsSource?.node === 'inst' && JSON.stringify(rowsSource.export.options) === '{"pcg":true}'
+    && !fs.existsSync(path.join(wsDir, 'exports', 'shrubs.csv.source.json')) && /source recorded in shrubs\.meshes\.json/.test(b2.txt),
+    'unreal_landscape records the source in landscape.json, instance rows in <name>.meshes.json');
 }
 
 const gl = await call('graphs', { action: 'list' });
@@ -210,6 +230,8 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   check(!xg.isError && !land.isError && /packed: \d+ instances of 1 source/.test(land.txt) && /point: .*\bpath f1/.test(land.txt), `help inputs example cooks on inputs/guides.glb: ${land.txt.split('\n')[0]}`);
   const lsg = await call('inputs', { action: 'list' });
   check(/guides\.glb {2}geometry .*1 polyline.*name: path\.road, zone\.park/.test(lsg.txt), 'inputs list shows the exported glb');
+  check(/guides\.glb\.source\.json {2}geometry .*export source: how guides\.glb was made \(graph "guides_src", frame 1\), not geometry/.test(lsg.txt),
+    'inputs list names the export\'s source manifest instead of a failed cook');
   const lg = JSON.parse((await call('graphs', { action: 'get', name: 'land' })).txt);
   check(lg.params?.relief?.label === 'Hill height (m)' && lg.params?.tree_density?.step === 0.005, 'exposed params keep label and step');
 

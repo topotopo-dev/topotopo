@@ -15,6 +15,7 @@
 //   instances.meshes.json    Mesh → meshes/<Mesh>.glb, one GLB per packed source (metres, Y-up, at the origin)
 //   tiles/<x>_<y>/          opt-in tile_size (quads): overlapping heightmaps, weight layers and instance CSVs;
 //                            version 2 adds tiles and tile_grid; root source files and shared meshes are retained
+//   With options.source the manifest also records how the export was made ("source", io/source.ts).
 //
 // Unreal's import picks the component layout with FLandscapeImportHelper's rule (unrealComponents below): the
 // largest section size (7, 15, 31, 63, 127, 255 quads) and sections per component (2, then 1) that divide the
@@ -196,6 +197,8 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
     manual_import: LANDSCAPE_IMPORT_STEPS,
   };
   if (tileComp) addTiles(g, hf, tileSize, tileComp, manifest, files, weightBytes, o);
+  // how the export was made (io/source.ts); the heightmap sidecar and objects.glb inside the bundle do not repeat it
+  if (o.source) manifest.source = o.source;
   const name = o.manifestName || 'landscape.json';
   files.unshift({ path: name, bytes: new TextEncoder().encode(JSON.stringify(manifest, null, 2) + '\n') });
   const layoutSummary = tileComp
