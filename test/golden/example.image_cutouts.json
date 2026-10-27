@@ -1,0 +1,89 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["copynum:int:1", "material:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.9, 4.1107, 0.1583],
+      "min": [0.0357, 0.0268, -0.2862]
+    },
+    "counts": {
+      "points": 928,
+      "prims": 440,
+      "vertices": 1760,
+      "volumes": 3
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "45fae7662ee3eaf0",
+      "attributes": {
+        "detail.materials": "caaf5f7b5e603365",
+        "point.N": "d6240f99df609823",
+        "prim.copynum": "6cb17905749a079f",
+        "prim.material": "ca088ae5b765f97f",
+        "vertex.uv": "343ab9d9d98a802b"
+      },
+      "topology": "a20bfad6aa04795c"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 256,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "56c77435f7ce6b3f"
+        },
+        "name": "cutouts_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 256,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "0c9666a35b5f4661"
+        },
+        "name": "cutouts_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 256,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "54174ff7dcc2c77d"
+        },
+        "name": "cutouts_roughness"
+      }
+    ]
+  },
+  "name": "example.image_cutouts",
+  "ok": true,
+  "source": "examples/image_cutouts.json",
+  "warnings": []
+}

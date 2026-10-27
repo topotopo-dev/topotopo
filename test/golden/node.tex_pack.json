@@ -1,0 +1,59 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["atlas_size:int:2"],
+      "point": ["P:float:3", "name:string:1", "rect:int:4", "uv_offset:float:2", "uv_scale:float:2"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.2813, 0.7188, 0],
+      "min": [0.2813, 0.2813, 0]
+    },
+    "counts": {
+      "points": 2,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "1c95a0418d91d33f",
+      "attributes": {
+        "detail.atlas_size": "8af868057010a71f",
+        "point.name": "cae2ca50401d9c3e",
+        "point.rect": "4922182dace52c37",
+        "point.uv_offset": "a30dd59e91429944",
+        "point.uv_scale": "cafe4acb6b82c1a9"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 128,
+          "width": 128
+        },
+        "kind": "image",
+        "layers": {
+          "C": "8acb030878020892"
+        },
+        "name": "atlas_C"
+      }
+    ]
+  },
+  "name": "node.tex_pack",
+  "ok": true,
+  "source": "fixture for node type \"tex_pack\" (test/fixtures.ts)",
+  "warnings": []
+}

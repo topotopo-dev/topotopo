@@ -1,0 +1,51 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 10,
+          "width": 20
+        },
+        "kind": "image",
+        "layers": {
+          "C": "0446fe3e49239f0c",
+          "id": "f6829fb1d1a7c463"
+        },
+        "name": "pattern"
+      }
+    ]
+  },
+  "name": "node.tex_crop",
+  "ok": true,
+  "source": "fixture for node type \"tex_crop\" (test/fixtures.ts)",
+  "warnings": []
+}

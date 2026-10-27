@@ -484,6 +484,17 @@ MATERIALS: texture_to_material {material, base_color, normal, roughness, metalli
   with uv) + input 1 (merged images): writes "image:<name>" slots into the material table, assigns the material (all
   prims when new, else group) and carries the images. occlusion/metallic images are packed into "<material>_orm".
   The material node's *_map paths accept "image:<name>" as well.
+CUTOUTS: tex_crop extracts a top-left pixel rectangle (all layers), optionally resizes. trace_image reads alpha
+  or a selected channel into closed XY curves, including holes; fill builds faces. Restore UVs after fill using
+  uv_project {method:"planar",axis:"z",scale:[width,width*imageHeight/imageWidth]} BEFORE deforming.
+  tex_pack items:[{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}] creates aligned atlas images and
+  placement points: name, rect [x,y,w,h], uv_offset, uv_scale. In a vertex wrangle, read these from input 1:
+  atlasUV = localUV * uv_scale + uv_offset. Output points follow items order. No rotation or automatic downscale.
+  tex_dilate pads nearest valid pixels; alpha stays unchanged by default. For grey/data maps supply an explicit
+  validity mask (same size). Pack padding reserves empty gutters; dilate supplies the edge values.
+  material {alpha_mode:"mask",alpha_cutoff:0.5,double_sided:true} BEFORE texture_to_material enables cutouts.
+  Omitted/auto alpha mode retains legacy behaviour; explicit opaque/mask/blend overrides scalar/vertex auto mode.
+  Complete example: examples/image_cutouts.json; workflow and layout contract: docs/image-cutouts.md.
 SEE IT: render of a geometry holding only images shows the "texture" view; render {texture:"<image>"|"image/layer"|
   "<material>"} adds the view (a material shows its maps as a labelled strip); render {textures:true} samples base
   colour maps on the mesh (texture × Cd, like glTF). inspect lists every image with size and per-layer ranges.

@@ -688,11 +688,11 @@ export function minAreaRectAngle(hull: number[]): number {
   return best;
 }
 
-interface Rect { w: number; h: number; id: number }
-interface Placed { x: number; y: number; rot: boolean; bin: number }
+export interface Rect { w: number; h: number; id: number }
+export interface Placed { x: number; y: number; rot: boolean; bin: number }
 
 /** Skyline bottom-left packing of rects into `bins` squares of side W. Returns placements or null if they don't fit. */
-function skylinePack(rects: Rect[], W: number, bins: number, allowRotate: boolean): Placed[] | null {
+export function skylinePack(rects: Rect[], W: number, bins: number, allowRotate: boolean, H = W): Placed[] | null {
   const out: Placed[] = new Array(rects.length);
   let bin = 0;
   let sky: { x: number; y: number; w: number }[] = [{ x: 0, y: 0, w: W }];
@@ -703,13 +703,13 @@ function skylinePack(rects: Rect[], W: number, bins: number, allowRotate: boolea
       let best: { i: number; y: number; top: number; x: number; rot: boolean; w: number; h: number } | null = null;
       for (const rot of allowRotate && Math.abs(r.w - r.h) > eps ? [false, true] : [false]) {
         const w = rot ? r.h : r.w, h = rot ? r.w : r.h;
-        if (w > W + eps || h > W + eps) continue;
+        if (w > W + eps || h > H + eps) continue;
         for (let i = 0; i < sky.length; i++) {
           const x = sky[i].x;
           if (x + w > W + eps) break;
           let y = 0, rem = w, j = i;
           while (rem > eps && j < sky.length) { y = Math.max(y, sky[j].y); rem -= sky[j].w; j++; }
-          if (y + h > W + eps) continue;
+          if (y + h > H + eps) continue;
           const top = y + h;
           if (!best || top < best.top - eps || (Math.abs(top - best.top) <= eps && x < best.x)) best = { i, y, top, x, rot, w, h };
         }

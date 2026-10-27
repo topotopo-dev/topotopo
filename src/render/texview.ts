@@ -143,7 +143,7 @@ export function withImagePreview(g: Geometry, max = 16): Geometry {
 
 interface Mip { w: number; h: number; ch: number; data: Float32Array }
 
-/** Base colour maps per prim for persp/ortho views: sample(prim, u, v, lod, out) fills out with RGB and returns true. */
+/** Base colour maps per prim for persp/ortho views: sample fills out with RGBA (grey has alpha 1). */
 export interface TextureSampler {
   /** true when prim p shows a base colour map */
   has(p: number): boolean;
@@ -194,7 +194,8 @@ export function textureSampler(g: Geometry, notes: string[]): TextureSampler | n
       const x0 = Math.floor(x), y0 = Math.floor(y), tx = x - x0, ty = y - y0;
       const i0 = wrap(x0, m.w), i1 = wrap(x0 + 1, m.w), j0 = wrap(y0, m.h), j1 = wrap(y0 + 1, m.h);
       const d = m.data, ch = m.ch;
-      for (let c = 0; c < 3; c++) {
+      for (let c = 0; c < 4; c++) {
+        if (ch === 1 && c === 3) { out[c] = 1; continue; }
         const cc = ch === 4 ? c : 0;
         const a = d[(j0 * m.w + i0) * ch + cc], b = d[(j0 * m.w + i1) * ch + cc], e = d[(j1 * m.w + i0) * ch + cc], f = d[(j1 * m.w + i1) * ch + cc];
         const t = a + (b - a) * tx, s = e + (f - e) * tx;

@@ -67,7 +67,7 @@ import type { AttribClass, AttribType } from '../core/geometry.ts';
 import { resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { TANGENT_ATTRIB, cornerTangents, loadMikkTSpace, tangentProblem, transformTangents, vertexUV } from '../core/tangents.ts';
 import { gltfV } from '../core/texcoord.ts';
-import { DEFAULT_MATERIAL, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
+import { DEFAULT_MATERIAL, materialAlphaMode, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
 import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4invert, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
 import { EMPTY_ATTRIB, PARENT_ATTRIB, sceneEmpties } from '../core/scene.ts';
@@ -338,7 +338,8 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
     const ext = st.doc.createExtension(KHRMaterialsEmissiveStrength);
     m.setExtension('KHR_materials_emissive_strength', ext.createEmissiveStrength().setEmissiveStrength(emax));
   } else m.setEmissiveFactor([toLinear(mat.emissive[0]), toLinear(mat.emissive[1]), toLinear(mat.emissive[2])]);
-  if (mat.alpha < 1 || blend) m.setAlphaMode('BLEND');
+  m.setAlphaMode(materialAlphaMode(mat, blend));
+  if (mat.alphaMode === 'MASK') m.setAlphaCutoff(mat.alphaCutoff ?? 0.5);
   if (mat.unlit) m.setExtension('KHR_materials_unlit', st.doc.createExtension(KHRMaterialsUnlit).createUnlit());
   m.setExtras({ topotopo: isDefault ? { default: true } : { material: mat } });
   st.cache.set(key, m);
@@ -974,6 +975,7 @@ function materialEntry(m: GMaterial, base = '', index: (t: Texture) => number = 
     baseColor: [toDisplay(bc[0]), toDisplay(bc[1]), toDisplay(bc[2])], metallic: m.getMetallicFactor(), roughness: m.getRoughnessFactor(),
     emissive: [toDisplay(em[0]) * strength, toDisplay(em[1]) * strength, toDisplay(em[2]) * strength], alpha: bc[3],
     doubleSided: m.getDoubleSided(), unlit: !!m.getExtension('KHR_materials_unlit'),
+    alphaMode: m.getAlphaMode(), alphaCutoff: m.getAlphaCutoff(),
     textures: {
       baseColor: texturePathOf(m.getBaseColorTexture(), base, index),
       normal: texturePathOf(m.getNormalTexture(), base, index),

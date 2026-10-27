@@ -20,6 +20,9 @@ export interface Material {
   roughness: number;
   emissive: [number, number, number];
   alpha: number;
+  /** Absent = legacy auto (blend only for scalar / vertex opacity). */
+  alphaMode?: 'OPAQUE' | 'MASK' | 'BLEND';
+  alphaCutoff?: number;
   doubleSided: boolean;
   unlit: boolean;
   /**
@@ -62,10 +65,22 @@ export function normalizeMaterial(m: any): Material {
     roughness: num(m?.roughness, d.roughness),
     emissive: vec3(m?.emissive, d.emissive),
     alpha: num(m?.alpha, d.alpha),
+    ...alphaFields(m),
     doubleSided: typeof m?.doubleSided === 'boolean' ? m.doubleSided : d.doubleSided,
     unlit: typeof m?.unlit === 'boolean' ? m.unlit : d.unlit,
     ...textureField(m?.textures),
   };
+}
+
+/** Keep auto materials byte-compatible with existing graphs and fingerprints. */
+function alphaFields(m: any): Pick<Material, 'alphaMode' | 'alphaCutoff'> {
+  const mode = typeof m?.alphaMode === 'string' ? m.alphaMode.toUpperCase() : '';
+  if (mode !== 'OPAQUE' && mode !== 'MASK' && mode !== 'BLEND') return {};
+  return { alphaMode: mode, ...(mode === 'MASK' ? { alphaCutoff: Math.max(0, Math.min(1, num(m?.alphaCutoff, 0.5))) } : {}) };
+}
+
+export function materialAlphaMode(m: Material, vertexAlpha = false): 'OPAQUE' | 'MASK' | 'BLEND' {
+  return m.alphaMode ?? (m.alpha < 1 || vertexAlpha ? 'BLEND' : 'OPAQUE');
 }
 
 /** { textures } with the non-empty string slots, or {} when there is none (keeps texture-free tables unchanged). */

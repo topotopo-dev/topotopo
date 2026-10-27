@@ -26,6 +26,7 @@ import './uv.ts';
 import './measure.ts';
 import './pcg.ts';
 import './texture.ts';
+import './imageops.ts';
 import './bake.ts';
 import './particles.ts';
 import './rbd.ts';

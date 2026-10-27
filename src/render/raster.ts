@@ -405,15 +405,21 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   for (let i = 0; i < out.length; i += 3) { out[i] = 0.12; out[i + 1] = 0.12; out[i + 2] = 0.13; }
 
   // --- uv data (uv view, checker shading)
-  const uvd = views.includes('uv') || o.checker || o.textures ? readUV(g) : null;
+  const materialNames = primMaterials(g), materialTable = readMaterials(g);
+  const hasMasks = Object.values(materialTable).some((m) => m.alphaMode === 'MASK');
+  const uvd = views.includes('uv') || o.checker || o.textures || hasMasks ? readUV(g) : null;
   const checkerOn = !!(o.checker && uvd);
   if (o.checker && !uvd) notes.push('checker: no uv attribute (run uv_project, uv_unwrap or uv_flatten first)');
   // base colour maps (image textures) on the mesh: texture × Cd (as glTF multiplies COLOR_0), off under checker / colour-by
-  const texS = o.textures && uvd && !checkerOn && !o.colorBy && !o.highlight ? textureSampler(g, notes) : null;
+  const showTextureColor = !!(o.textures && !checkerOn && !o.colorBy && !o.highlight);
+  const texS = uvd && (showTextureColor || hasMasks) ? textureSampler(g, notes) : null;
   if (o.textures && !uvd && nTri) notes.push('textures: no uv attribute, maps not shown');
   else if (o.textures && uvd && !texS && !checkerOn) notes.push('textures: no material with an image base colour (texture_to_material)');
   const texCd = !!(texS && g.findAttrib('Cd', ['vertex', 'point', 'prim', 'detail']));
-  const texRGB = [0, 0, 0];
+  const texRGB = [0, 0, 0, 1];
+  const alphaAttr = resolveAttr('Alpha');
+  const alphaOf = (v: number): number => alphaAttr && alphaAttr.attr.type !== 'string' && !alphaAttr.attr.isArray
+    ? (alphaAttr.attr.data as Float64Array | Int32Array)[elemIndex(alphaAttr.cls, v) * alphaAttr.attr.size] : 1;
 
   // ---------------------------------------------------------------- opt-in overlays, shared by all views
   const ovDesc: string[] = []; // footer line 2: what is switched on
@@ -815,7 +821,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const fnw = cross3(e1, e2);
       const toCam = cam.persp ? [cam.eye[0] - Pd[a * 3], cam.eye[1] - Pd[a * 3 + 1], cam.eye[2] - Pd[a * 3 + 2]] : [-cam.f[0], -cam.f[1], -cam.f[2]];
       const back = dot3(fnw, toCam) < 0;
-      const suspicious = back && conn !== null && closedPiece[conn.primClass[triPrim[t]]] === 1;
+      const material = materialNames ? materialTable[materialNames[triPrim[t]]] : undefined;
+      const alphaMask = material?.alphaMode === 'MASK';
+      const suspicious = back && !material?.doubleSided && conn !== null && closedPiece[conn.primClass[triPrim[t]]] === 1;
       if (flatN) {
         const p = triPrim[t] * 3;
         na[0] = nb[0] = nc[0] = flatN[p]; na[1] = nb[1] = nc[1] = flatN[p + 1]; na[2] = nb[2] = nc[2] = flatN[p + 2];
@@ -857,10 +865,18 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             if (cam.persp) { const s = w0 * za + w1 * zb2 + w2 * zc; p0 = (w0 * za) / s; p1 = (w1 * zb2) / s; p2 = 1 - p0 - p1; }
             if ((p0 * qa + p1 * qb + p2 * qc - cC) * cS > 0) continue;
           }
-          zb[zi] = depth;
-          if (bf) bf[zi] = suspicious ? 1 : 0;
           const aw0 = w0, aw1 = w1;
           if (cam.persp) { const s = w0 * za + w1 * zb2 + w2 * zc; w0 = (w0 * za) / s; w1 = (w1 * zb2) / s; w2 = 1 - w0 - w1; }
+          if (alphaMask) {
+            let alpha = material!.alpha * (alphaOf(va) * w0 + alphaOf(vb) * w1 + alphaOf(vc) * w2);
+            if (texP >= 0) {
+              texS!.sample(texP, uvd![va * 2] * w0 + uvd![vb * 2] * w1 + uvd![vc * 2] * w2, uvd![va * 2 + 1] * w0 + uvd![vb * 2 + 1] * w1 + uvd![vc * 2 + 1] * w2, texLod, texRGB);
+              alpha *= texRGB[3];
+            }
+            if (alpha < (material!.alphaCutoff ?? 0.5)) continue;
+          }
+          zb[zi] = depth;
+          if (bf) bf[zi] = suspicious ? 1 : 0;
           if (pbrS) {
             let dudx = 0, dvdx = 0, dudy = 0, dvdy = 0;
             if (pbrS.hasUV) {
@@ -911,7 +927,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             checkerColor(uvd![va * 2] * w0 + uvd![vb * 2] * w1 + uvd![vc * 2] * w2, uvd![va * 2 + 1] * w0 + uvd![vb * 2 + 1] * w1 + uvd![vc * 2 + 1] * w2, chk);
             fr = chk[0]; fg = chk[1]; fb = chk[2];
             if (suspicious) { fr = fr * 0.35 + 0.12; fg = fg * 0.35 + 0.22; fb = fb * 0.35 + 0.6; }
-          } else if (texP >= 0) {
+          } else if (texP >= 0 && showTextureColor) {
             texS!.sample(texP, uvd![va * 2] * w0 + uvd![vb * 2] * w1 + uvd![vc * 2] * w2, uvd![va * 2 + 1] * w0 + uvd![vb * 2 + 1] * w1 + uvd![vc * 2 + 1] * w2, texLod, texRGB);
             if (texCd) { fr *= texRGB[0]; fg *= texRGB[1]; fb *= texRGB[2]; } else { fr = texRGB[0]; fg = texRGB[1]; fb = texRGB[2]; }
             if (suspicious) { fr = fr * 0.35 + 0.12; fg = fg * 0.35 + 0.22; fb = fb * 0.35 + 0.6; }

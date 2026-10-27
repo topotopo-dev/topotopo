@@ -41,6 +41,8 @@ export function nudge(material) {
 
 /** Backfaces tinted blue as the render tool tints them (src/render/raster.ts): colour × 0.35 + (0.12, 0.22, 0.6). */
 export function backTint(material) {
+  // Authored two-sided surfaces (cards, cloth, etc.) have intentional backfaces.
+  if (material.side === THREE.DoubleSide) return material;
   if (material.userData.backTint) return material;
   material.userData.backTint = true;
   material.side = THREE.DoubleSide;

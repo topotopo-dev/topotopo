@@ -1,0 +1,632 @@
+{
+  "version": 1,
+  "meta": {
+    "description": "General image cutout and atlas workflow: perforation, disconnected islands and thin strips. Procedural source images; no external files.",
+    "render": {
+      "views": [
+        "persp",
+        "front",
+        "uv",
+        "texture"
+      ],
+      "textures": true,
+      "texture": "cutouts_color",
+      "azimuth": 25,
+      "elevation": 15,
+      "wireframe": false,
+      "grid": false
+    }
+  },
+  "nodes": {
+    "perforated_source": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": 128,
+        "shape": "ring",
+        "size": 0.82,
+        "inner_radius": 0.38,
+        "falloff": 0,
+        "name": "perforated_source"
+      }
+    },
+    "perforated_crop": {
+      "type": "tex_crop",
+      "in": [
+        "perforated_source"
+      ],
+      "params": {
+        "origin": [
+          8,
+          8
+        ],
+        "size": [
+          112,
+          112
+        ],
+        "name": "perforated_mask"
+      }
+    },
+    "perforated_color": {
+      "type": "tex_channel",
+      "in": [
+        null,
+        null,
+        null,
+        "perforated_crop"
+      ],
+      "params": {
+        "fill": [
+          0.18,
+          0.58,
+          0.24,
+          1
+        ],
+        "name": "perforated_color"
+      }
+    },
+    "perforated_normal": {
+      "type": "tex_normal_from_height",
+      "in": [
+        "perforated_crop"
+      ],
+      "params": {
+        "strength": 0.04,
+        "tileable": false,
+        "name": "perforated_normal"
+      }
+    },
+    "perforated_roughness": {
+      "type": "tex_levels",
+      "in": [
+        "perforated_crop"
+      ],
+      "params": {
+        "out_low": 0.8,
+        "out_high": 0.65,
+        "name": "perforated_roughness"
+      }
+    },
+    "perforated_trace": {
+      "type": "trace_image",
+      "in": [
+        "perforated_color"
+      ],
+      "params": {
+        "width": 1,
+        "tolerance": 0.8
+      },
+      "note": "Trace alpha, preserving the original crop canvas and its margins."
+    },
+    "perforated_fill": {
+      "type": "fill",
+      "in": [
+        "perforated_trace"
+      ],
+      "params": {
+        "plane": "xy"
+      }
+    },
+    "perforated_uv": {
+      "type": "uv_project",
+      "in": [
+        "perforated_fill"
+      ],
+      "params": {
+        "method": "planar",
+        "axis": "z",
+        "scale": [
+          1,
+          1
+        ]
+      },
+      "note": "fill rebuilds topology. Restore UVs from full canvas dimensions, not the silhouette bbox."
+    },
+    "perforated_deform": {
+      "type": "wrangle",
+      "in": [
+        "perforated_uv"
+      ],
+      "params": {
+        "code": "@P.z += 0.16 * sin(@P.y * 5) * cos(@P.x * 3);"
+      }
+    },
+    "perforated_remap": {
+      "type": "wrangle",
+      "in": [
+        "perforated_deform",
+        "atlas"
+      ],
+      "params": {
+        "run_over": "vertices",
+        "code": "const off = point(1, \"uv_offset\", 0);\nconst scale = point(1, \"uv_scale\", 0);\n@uv = [@uv.x * scale[0] + off[0], @uv.y * scale[1] + off[1], 0];"
+      },
+      "note": "Placement points remain on a second input; only the mesh is output."
+    },
+    "perforated_copies": {
+      "type": "copy_xform",
+      "in": [
+        "perforated_remap"
+      ],
+      "params": {
+        "count": 2,
+        "translate": [
+          0,
+          2.2,
+          0
+        ],
+        "rotate": [
+          0,
+          8,
+          0
+        ]
+      }
+    },
+    "perforated_placed": {
+      "type": "transform",
+      "in": [
+        "perforated_copies"
+      ],
+      "params": {
+        "translate": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "islands_source": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": 128,
+        "shape": "disc",
+        "size": 0.66,
+        "tile": [
+          2,
+          2
+        ],
+        "falloff": 0,
+        "name": "islands_source"
+      }
+    },
+    "islands_crop": {
+      "type": "tex_crop",
+      "in": [
+        "islands_source"
+      ],
+      "params": {
+        "origin": [
+          8,
+          8
+        ],
+        "size": [
+          112,
+          112
+        ],
+        "name": "islands_mask"
+      }
+    },
+    "islands_color": {
+      "type": "tex_channel",
+      "in": [
+        null,
+        null,
+        null,
+        "islands_crop"
+      ],
+      "params": {
+        "fill": [
+          0.56,
+          0.72,
+          0.16,
+          1
+        ],
+        "name": "islands_color"
+      }
+    },
+    "islands_normal": {
+      "type": "tex_normal_from_height",
+      "in": [
+        "islands_crop"
+      ],
+      "params": {
+        "strength": 0.04,
+        "tileable": false,
+        "name": "islands_normal"
+      }
+    },
+    "islands_roughness": {
+      "type": "tex_levels",
+      "in": [
+        "islands_crop"
+      ],
+      "params": {
+        "out_low": 0.8,
+        "out_high": 0.65,
+        "name": "islands_roughness"
+      }
+    },
+    "islands_trace": {
+      "type": "trace_image",
+      "in": [
+        "islands_color"
+      ],
+      "params": {
+        "width": 1,
+        "tolerance": 0.8
+      },
+      "note": "Trace alpha, preserving the original crop canvas and its margins."
+    },
+    "islands_fill": {
+      "type": "fill",
+      "in": [
+        "islands_trace"
+      ],
+      "params": {
+        "plane": "xy"
+      }
+    },
+    "islands_uv": {
+      "type": "uv_project",
+      "in": [
+        "islands_fill"
+      ],
+      "params": {
+        "method": "planar",
+        "axis": "z",
+        "scale": [
+          1,
+          1
+        ]
+      },
+      "note": "fill rebuilds topology. Restore UVs from full canvas dimensions, not the silhouette bbox."
+    },
+    "islands_deform": {
+      "type": "wrangle",
+      "in": [
+        "islands_uv"
+      ],
+      "params": {
+        "code": "@P.z += 0.16 * sin(@P.y * 5) * cos(@P.x * 3);"
+      }
+    },
+    "islands_remap": {
+      "type": "wrangle",
+      "in": [
+        "islands_deform",
+        "atlas"
+      ],
+      "params": {
+        "run_over": "vertices",
+        "code": "const off = point(1, \"uv_offset\", 1);\nconst scale = point(1, \"uv_scale\", 1);\n@uv = [@uv.x * scale[0] + off[0], @uv.y * scale[1] + off[1], 0];"
+      },
+      "note": "Placement points remain on a second input; only the mesh is output."
+    },
+    "islands_copies": {
+      "type": "copy_xform",
+      "in": [
+        "islands_remap"
+      ],
+      "params": {
+        "count": 2,
+        "translate": [
+          0,
+          2.2,
+          0
+        ],
+        "rotate": [
+          0,
+          8,
+          0
+        ]
+      }
+    },
+    "islands_placed": {
+      "type": "transform",
+      "in": [
+        "islands_copies"
+      ],
+      "params": {
+        "translate": [
+          1.45,
+          0,
+          0
+        ]
+      }
+    },
+    "strips_source": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": [
+          64,
+          128
+        ],
+        "shape": "square",
+        "size": 0.8,
+        "tile": [
+          8,
+          1
+        ],
+        "falloff": 0,
+        "name": "strips_source"
+      }
+    },
+    "strips_crop": {
+      "type": "tex_crop",
+      "in": [
+        "strips_source"
+      ],
+      "params": {
+        "origin": [
+          4,
+          8
+        ],
+        "size": [
+          56,
+          112
+        ],
+        "name": "strips_mask"
+      }
+    },
+    "strips_color": {
+      "type": "tex_channel",
+      "in": [
+        null,
+        null,
+        null,
+        "strips_crop"
+      ],
+      "params": {
+        "fill": [
+          0.72,
+          0.44,
+          0.13,
+          1
+        ],
+        "name": "strips_color"
+      }
+    },
+    "strips_normal": {
+      "type": "tex_normal_from_height",
+      "in": [
+        "strips_crop"
+      ],
+      "params": {
+        "strength": 0.04,
+        "tileable": false,
+        "name": "strips_normal"
+      }
+    },
+    "strips_roughness": {
+      "type": "tex_levels",
+      "in": [
+        "strips_crop"
+      ],
+      "params": {
+        "out_low": 0.8,
+        "out_high": 0.65,
+        "name": "strips_roughness"
+      }
+    },
+    "strips_trace": {
+      "type": "trace_image",
+      "in": [
+        "strips_color"
+      ],
+      "params": {
+        "width": 1,
+        "tolerance": 0.8
+      },
+      "note": "Trace alpha, preserving the original crop canvas and its margins."
+    },
+    "strips_fill": {
+      "type": "fill",
+      "in": [
+        "strips_trace"
+      ],
+      "params": {
+        "plane": "xy"
+      }
+    },
+    "strips_uv": {
+      "type": "uv_project",
+      "in": [
+        "strips_fill"
+      ],
+      "params": {
+        "method": "planar",
+        "axis": "z",
+        "scale": [
+          1,
+          2
+        ]
+      },
+      "note": "fill rebuilds topology. Restore UVs from full canvas dimensions, not the silhouette bbox."
+    },
+    "strips_deform": {
+      "type": "wrangle",
+      "in": [
+        "strips_uv"
+      ],
+      "params": {
+        "code": "@P.z += 0.16 * sin(@P.y * 5) * cos(@P.x * 3);"
+      }
+    },
+    "strips_remap": {
+      "type": "wrangle",
+      "in": [
+        "strips_deform",
+        "atlas"
+      ],
+      "params": {
+        "run_over": "vertices",
+        "code": "const off = point(1, \"uv_offset\", 2);\nconst scale = point(1, \"uv_scale\", 2);\n@uv = [@uv.x * scale[0] + off[0], @uv.y * scale[1] + off[1], 0];"
+      },
+      "note": "Placement points remain on a second input; only the mesh is output."
+    },
+    "strips_copies": {
+      "type": "copy_xform",
+      "in": [
+        "strips_remap"
+      ],
+      "params": {
+        "count": 2,
+        "translate": [
+          0,
+          2.2,
+          0
+        ],
+        "rotate": [
+          0,
+          8,
+          0
+        ]
+      }
+    },
+    "strips_placed": {
+      "type": "transform",
+      "in": [
+        "strips_copies"
+      ],
+      "params": {
+        "translate": [
+          2.9,
+          0,
+          0
+        ]
+      }
+    },
+    "maps": {
+      "type": "merge",
+      "in": [
+        "perforated_color",
+        "perforated_normal",
+        "perforated_roughness",
+        "islands_color",
+        "islands_normal",
+        "islands_roughness",
+        "strips_color",
+        "strips_normal",
+        "strips_roughness"
+      ]
+    },
+    "atlas": {
+      "type": "tex_pack",
+      "in": [
+        "maps"
+      ],
+      "params": {
+        "resolution": [
+          512,
+          256
+        ],
+        "padding": 8,
+        "name": "cutouts",
+        "items": [
+          {
+            "name": "perforated",
+            "maps": {
+              "color": "perforated_color",
+              "normal": "perforated_normal",
+              "roughness": "perforated_roughness"
+            }
+          },
+          {
+            "name": "islands",
+            "maps": {
+              "color": "islands_color",
+              "normal": "islands_normal",
+              "roughness": "islands_roughness"
+            }
+          },
+          {
+            "name": "strips",
+            "maps": {
+              "color": "strips_color",
+              "normal": "strips_normal",
+              "roughness": "strips_roughness"
+            }
+          }
+        ]
+      }
+    },
+    "color_padding": {
+      "type": "tex_dilate",
+      "in": [
+        "atlas"
+      ],
+      "params": {
+        "image": "cutouts_color",
+        "radius": 8
+      }
+    },
+    "normal_padding": {
+      "type": "tex_dilate",
+      "in": [
+        "color_padding",
+        "color_padding"
+      ],
+      "params": {
+        "image": "cutouts_normal",
+        "mask_image": "cutouts_color",
+        "mask_channel": "alpha",
+        "radius": 8
+      }
+    },
+    "padded_maps": {
+      "type": "tex_dilate",
+      "in": [
+        "normal_padding",
+        "normal_padding"
+      ],
+      "params": {
+        "image": "cutouts_roughness",
+        "mask_image": "cutouts_color",
+        "mask_channel": "alpha",
+        "radius": 8
+      }
+    },
+    "meshes": {
+      "type": "merge",
+      "in": [
+        "perforated_placed",
+        "islands_placed",
+        "strips_placed"
+      ]
+    },
+    "normals": {
+      "type": "normal",
+      "in": [
+        "meshes"
+      ],
+      "params": {
+        "class": "point"
+      }
+    },
+    "material": {
+      "type": "material",
+      "in": [
+        "normals"
+      ],
+      "params": {
+        "name": "cutouts",
+        "alpha_mode": "mask",
+        "alpha_cutoff": 0.5,
+        "double_sided": true
+      }
+    },
+    "out": {
+      "type": "texture_to_material",
+      "in": [
+        "material",
+        "padded_maps"
+      ],
+      "params": {
+        "material": "cutouts",
+        "base_color": "cutouts_color",
+        "normal": "cutouts_normal",
+        "roughness": "cutouts_roughness"
+      }
+    }
+  },
+  "output": "out"
+}

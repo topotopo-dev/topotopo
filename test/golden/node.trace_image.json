@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["image_size:int:2", "image_width:float:1"],
+      "point": ["P:float:3", "uv:float:3"],
+      "prim": ["class:int:1", "contour_id:int:1", "hole:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.7813, 0.7813, 0],
+      "min": [0.1875, 0.1875, 0]
+    },
+    "counts": {
+      "points": 10,
+      "prims": 1,
+      "vertices": 10,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "d70f81cd9585436f",
+      "attributes": {
+        "detail.image_size": "a10545456102aa1f",
+        "detail.image_width": "8e4d77f8dec18066",
+        "point.uv": "86760b880f26fda2",
+        "prim.class": "9be171658ea4219f",
+        "prim.contour_id": "9be171658ea4219f",
+        "prim.hole": "9be171658ea4219f"
+      },
+      "topology": "66974746dd163e9c"
+    }
+  },
+  "name": "node.trace_image",
+  "ok": true,
+  "source": "fixture for node type \"trace_image\" (test/fixtures.ts)",
+  "warnings": []
+}

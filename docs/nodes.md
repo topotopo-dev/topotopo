@@ -2,14 +2,14 @@
 
 # TopoTopo node reference
 
-226 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+230 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
 - [generate](#generate-nodes): [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
-- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
+- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [roof_skeleton](#roof_skeleton) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_curves](#tex_curves) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_crop](#tex_crop) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -1924,6 +1924,64 @@ Sweep a cross-section along curves using rotation-minimising frames (tubes, ribb
 }
 ```
 
+### trace_image
+
+category: `curve`
+
+Trace a thresholded image into closed XY contours, with holes and disconnected components.
+
+Traces pixel-cell boundaries (not a bounding rectangle). Foreground is 4-connected: diagonal contacts stay separate. Simplification is conservative, topology-preserving, and bounded by tolerance in pixels. min_area filters entire foreground components by pixel area, retaining their holes. The full canvas maps to [0,width] × [0,width*height/widthPixels] in XY, including transparent margins. After fill use uv_project {method:"planar",axis:"z",scale:[width,width*heightPixels/widthPixels]}; fill does not preserve contour attributes. More than 1,000,000 boundary edges fails with a hint.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `image` | no | no | geometry carrying the image to trace |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `image` | string | `""` |  |  |  | image name (empty selects the first image) |
+| `layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
+| `channel` | enum | `"alpha"` |  | `alpha`, `luminance`, `r`, `g`, `b` |  | channel to read; alpha requires RGBA, luminance/R/G/B accept grey |
+| `threshold` | float | `0.5` |  |  |  | values at least this threshold are foreground |
+| `tolerance` | float | `0.5` | 0..8192 |  |  | maximum contour simplification error in source pixels; 0 only removes collinear points |
+| `min_area` | float | `0` | 0..16777216 |  |  | minimum connected foreground component area in pixels; 0 retains all components |
+| `width` | float | `1` | 0.000001.. |  |  | full image canvas width in metres; height follows image aspect |
+
+**Writes:** closed curves; point uv; prim class (component ID), contour_id and hole (0/1); detail image_size and image_width
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "img": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": [
+          64,
+          32
+        ],
+        "shape": "disc",
+        "falloff": 0
+      }
+    },
+    "out": {
+      "type": "trace_image",
+      "in": [
+        "img"
+      ],
+      "params": {
+        "channel": "luminance"
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### triangulate2d
 
 category: `curve` · aliases: `delaunay`, `triangulate_2d`
@@ -3458,6 +3516,8 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 |
 | `emissive` | color | `[0,0,0]` |  |  | `emission`, `emit` | emitted colour; components above 1 export with KHR_materials_emissive_strength |
 | `alpha` | float | `1` | 0..1 |  | `opacity`, `opac` | opacity; below 1 exports with alphaMode BLEND |
+| `alpha_mode` | enum | `"auto"` |  | `auto`, `opaque`, `mask`, `blend` |  | auto preserves legacy scalar/vertex opacity; mask cuts out pixels below alpha_cutoff; explicit modes override auto |
+| `alpha_cutoff` | float | `0.5` | 0..1 |  |  | mask: discard where material alpha × texture alpha × vertex Alpha is below this value |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
 | `base_color_map` | path | `""` |  |  | `basecolor_map`, `albedo_map`, `diffuse_map`, `color_map`, `basecolor_texture`, `base_color_texture` | base colour texture (sRGB PNG/JPEG path, or "image:<name>" for an image the geometry carries; "" = none); uses the uv attribute |
@@ -12363,6 +12423,68 @@ Substance: Gradient Map; Houdini COP: Ramp lookup. ramp keys [[pos, colour], …
 }
 ```
 
+### tex_crop
+
+category: `texture`
+
+Extract an exact pixel rectangle, optionally resize it; all image layers stay aligned.
+
+Origin is [x,y] from the top left. Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. Other geometry/images pass through.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `image` | no | no | geometry carrying an image |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `image` | string | `""` |  |  |  | image name (empty selects the first image) |
+| `name` | string | `""` |  |  |  | output image name (empty keeps the source name) |
+| `origin` | ivec2 | `[0,0]` | -1000000..1000000 |  |  | crop origin in pixels, from the top left; negative origins add zero padding |
+| `size` | ivec2 | `[0,0]` | 0..8192 |  |  | crop width/height in pixels; 0 = source extent minus origin |
+| `resolution` | ivec2 | `[0,0]` | 0..8192 |  |  | output width/height; 0 = cropped size on that axis |
+| `filter` | enum | `"filtered"` |  | `filtered`, `nearest` |  | resampling filter (no resampling when the crop and output sizes match) |
+
+**Writes:** selected image replaced by its cropped/resized layers
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "img": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": [
+          64,
+          32
+        ]
+      }
+    },
+    "out": {
+      "type": "tex_crop",
+      "in": [
+        "img"
+      ],
+      "params": {
+        "origin": [
+          8,
+          4
+        ],
+        "size": [
+          32,
+          16
+        ]
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
 ### tex_curves
 
 category: `texture` · aliases: `tone_curve`, `cop_lookup`, `lookup_texture`, `texture_curve`
@@ -12421,6 +12543,64 @@ Substance: Curve; Houdini COP: Lookup. ramp keys [[in, out], …] interpolated l
             1
           ]
         ]
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
+### tex_dilate
+
+category: `texture`
+
+Extend nearest valid image values into an invalid band, preserving opacity by default.
+
+Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond radius are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `image` | no | no | image to pad |
+| 1 | `mask` | yes | no | optional explicit validity mask (same dimensions) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `image` | string | `""` |  |  |  | image name (empty selects the first image) |
+| `layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
+| `name` | string | `""` |  |  |  | output image name (empty keeps the source name) |
+| `radius` | int | `8` | 0..8192 |  |  | maximum Euclidean distance in pixels from a valid source |
+| `mask_image` | string | `""` |  |  |  | image name (empty selects the first image) |
+| `mask_layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
+| `mask_channel` | enum | `"luminance"` |  | `alpha`, `luminance`, `r`, `g`, `b` |  | channel to read; alpha requires RGBA, luminance/R/G/B accept grey |
+| `mask_threshold` | float | `0` |  |  |  | mask values strictly greater than this are valid |
+| `preserve_alpha` | bool | `true` |  |  |  | keep original alpha at every RGBA pixel while padding RGB |
+
+**Writes:** selected image layer padded; original mask/alpha preserved
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "img": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": 32,
+        "falloff": 0
+      }
+    },
+    "out": {
+      "type": "tex_dilate",
+      "in": [
+        "img",
+        "img"
+      ],
+      "params": {
+        "radius": 3
       }
     }
   },
@@ -12855,6 +13035,75 @@ Substance: Output node; Houdini COP: Null / Output. With layer "" the image is r
       "params": {
         "name": "brick_id",
         "layer": "id"
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
+### tex_pack
+
+category: `texture`
+
+Pack named images into aligned atlases and output per-item UV placement attributes.
+
+items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `images` | no | no | geometry carrying named source images (combine with merge) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `items` | json | `[]` |  |  |  | array of {name, maps:{channel:imageName}}; empty = each image becomes one item in channel C |
+| `resolution` | ivec2 | `[2048,2048]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `padding` | int | `8` | 0..8192 |  |  | empty gutter on every side of each item, in pixels |
+| `name` | string | `"atlas"` |  |  |  | atlas image name prefix; images are named <name>_<channel> |
+
+**Writes:** atlas images; points with name, rect, uv_offset and uv_scale; detail atlas_size
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "a": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": 32,
+        "name": "disc"
+      }
+    },
+    "b": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": [
+          32,
+          16
+        ],
+        "name": "pattern"
+      }
+    },
+    "images": {
+      "type": "merge",
+      "in": [
+        "a",
+        "b"
+      ]
+    },
+    "out": {
+      "type": "tex_pack",
+      "in": [
+        "images"
+      ],
+      "params": {
+        "resolution": 128,
+        "padding": 4
       }
     }
   },
