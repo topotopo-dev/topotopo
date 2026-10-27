@@ -1,8 +1,10 @@
 // Live viewer tests (src/viewer/server.ts): the routes behind the human's control surface. The page (a shell and its
 // ES modules under /app/), exposed vars in /api/graphs, POST /api/vars (and how it coalesces bursts), the last cook in
-// /api/report, the inputs/ drop target (under `topotopo view`, beside the graph file), reference-layer GLBs (a PNG as
-// a textured quad), markers (POST /api/markers → inputs/markers.json, read back through a file node), and the
-// Host/Origin checks. The page's browser-free logic is tested in test/viewer-logic.ts.
+// /api/report, tuned values over a graph file (`topotopo view`: session values that survive exports and reloads, Save
+// values as minimal edits of the file), cook progress events, Stop and the latest value winning, the inputs/ drop
+// target (under `topotopo view`, beside the graph file), reference-layer GLBs (a PNG as a textured quad), markers
+// (POST /api/markers → inputs/markers.json, read back through a file node), and the Host/Origin checks. The page's
+// browser-free logic is tested in test/viewer-logic.ts.
 //   node test/viewer.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -12,12 +14,16 @@ import zlib from 'node:zlib';
 import { spawn } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
+import { defineNode } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { GeoBuilder } from '../src/core/geometry.ts';
 import { primNormals } from '../src/core/topology.ts';
 import { encodePNG } from '../src/render/png.ts';
-import { Workspace } from '../src/workspace.ts';
+import { summarize } from '../src/inspect.ts';
+import { Workspace, varDeclaration } from '../src/workspace.ts';
 import type { EditOp } from '../src/workspace.ts';
 import { inputFileName, startViewer } from '../src/viewer/server.ts';
+import { viewGraphFile } from '../src/viewer/graph-file.ts';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-viewer-'));
@@ -162,6 +168,227 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       await stream;
     }
   } finally { proc.kill(); }
+}
+
+section('topotopo view: tuned values survive an export and reloads of the graph file');
+{
+  // the reported loss: the first Export wrote a target into the graph file, the file watch read it again and the
+  // controls went back to the file's vars. Values a person tunes are session values over the file now.
+  const gfile = path.join(tmp, 'tuned.json');
+  const write = (max: number, t: number) => fs.writeFileSync(gfile,
+    `{\n  "nodes": { "b": { "type": "box", "params": { "size": "=s" } } },\n  "vars": { "s": 2.0, "t": ${t} },\n  "params": { "s": { "type": "float", "min": 0.1, "max": ${max}, "desc": "box size" } }\n}\n`);
+  write(10, 1);
+  const proc = spawn(process.execPath, [path.join(root, 'src', 'cli.ts'), 'view', gfile, '--port', '0'], { cwd: root });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += d; });
+  proc.stderr.on('data', (d) => { out += d; });
+  const cooked = () => (out.match(/cooked tuned/g) ?? []).length;
+  try {
+    const up = await until(() => /view: http:\/\/127\.0\.0\.1:\d+\//.test(out), 30000);
+    check(up, 'view starts');
+    if (up) {
+      const url = /view: (http:\/\/127\.0\.0\.1:\d+)\//.exec(out)![1];
+      const getJSON = async (p: string) => (await (await fetch(url + p)).json()) as any;
+      const post = async (p: string, body: unknown) => { const r = await fetch(url + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, j: await r.json() as any }; };
+      const graph = async () => (await getJSON('/api/graphs'))[0];
+      const set = await post('/api/vars?graph=tuned', { vars: { s: 5 } });
+      const g1 = await graph();
+      check(set.status === 200 && set.j.ok && g1.mode === 'file' && g1.vars.s === 5 && g1.graphVars.s === 2 && JSON.stringify(g1.overrides) === '["s"]',
+        `a tuned value is a session value: shown 5, the file's 2, marked (${JSON.stringify({ vars: g1.vars, graphVars: g1.graphVars, overrides: g1.overrides })})`);
+      const main = (await getJSON('/api/outputs')).items.find((x: any) => x.exportable && x.output === null);
+      const exp = await post('/api/output/export', { id: main.id, export: 'glb' });
+      const written = await until(() => /"export"/.test(fs.readFileSync(gfile, 'utf8')), 5000);
+      await sleep(900); // the file watch reads the file again (or sees its own write)
+      const g2 = await graph();
+      check(exp.status === 200 && written && g2.vars.s === 5 && g2.graphVars.s === 2 && JSON.stringify(g2.overrides) === '["s"]' && (await box()).join() === '5,5,5',
+        `the first Export writes its target into the file and the tuned value stays: 5 shown and cooked (${JSON.stringify(g2.vars)})`);
+      // a save of the file by hand: another value changes, the tuned one stays
+      const before = cooked();
+      write(10, 3);
+      const reloaded = await until(() => cooked() > before, 15000);
+      const g3 = await graph();
+      check(reloaded && g3.vars.s === 5 && g3.vars.t === 3 && JSON.stringify(g3.overrides) === '["s"]', `a reload of the file keeps the session value and takes the file's others (${JSON.stringify(g3.vars)})`);
+      // a new declaration of the var (its range): the session value goes, the file's applies
+      const before2 = cooked();
+      write(20, 3);
+      const reloaded2 = await until(() => cooked() > before2, 15000);
+      const g4 = await graph();
+      check(reloaded2 && g4.vars.s === 2 && !g4.overrides.length && (await box()).join() === '2,2,2', `a changed declaration (max 10 → 20) resets the value to the file's (${JSON.stringify(g4.vars)})`);
+      async function box() { return sizeOf((await getJSON('/api/info?graph=tuned')).summary); }
+    }
+  } finally { proc.kill(); }
+}
+
+section('viewGraphFile: the viewer\'s writes change only what they change');
+{
+  const gfile = path.join(tmp, 'minimal.json');
+  const original = '{\n  "nodes": { "b": { "type": "box", "params": { "size": "=s" } } },\n  "vars": { "s": 2.0, "t": 1.50, "label": "x\\u2026y" },\n' +
+    '  "params": { "s": { "type": "float", "min": 0.1, "max": 10, "desc": "box size" }, "t": { "type": "float", "desc": "unused" } }\n}\n';
+  fs.writeFileSync(gfile, original);
+  const lines: string[] = [];
+  const v = await viewGraphFile(gfile, { name: 'minimal', port: 0, log: (l) => lines.push(l) });
+  const post = async (p: string, body: unknown) => { const r = await fetch(v.url + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, j: await r.json() as any }; };
+  const graph = async () => ((await (await fetch(v.url + 'api/graphs')).json()) as any[])[0];
+  try {
+    check(/^cooked minimal in \d+ ms$/.test(lines[0] ?? '') && /^view: http:\/\/127\.0\.0\.1:\d+\/ {2}\(watching /.test(lines[1] ?? ''), `it prints what topotopo view prints (${lines.join(' | ')})`);
+    await post('api/vars?graph=minimal', { vars: { s: 5 } });
+    const main = ((await (await fetch(v.url + 'api/outputs')).json()) as any).items.find((x: any) => x.exportable && x.output === null);
+    const exp = await post('api/output/export', { id: main.id, export: 'glb' });
+    const withTarget = original.replace('\n}\n', ',\n  "export": "glb"\n}\n');
+    await sleep(700);
+    check(exp.status === 200 && fs.readFileSync(gfile, 'utf8') === withTarget, 'an export target set on the page is one more line in the file: 2.0, 1.50, \\u2026 and the inline objects stay');
+    const g1 = await graph();
+    check(g1.vars.s === 5 && g1.file === 'minimal.json' && lines.filter((l) => l.startsWith('cooked')).length === 1, `the viewer's own write is no reload: the session value stays, nothing cooks again (${lines.length} lines)`);
+    const saved = await post('api/vars/save?graph=minimal', {});
+    await sleep(700);
+    const g2 = await graph();
+    check(saved.status === 200 && JSON.stringify(saved.j.saved) === '["s"]' && fs.readFileSync(gfile, 'utf8') === withTarget.replace('"s": 2.0', '"s": 5') && g2.graphVars.s === 5 && !g2.overrides.length,
+      'Save values writes the session values into "vars", in place: only "s": 2.0 → "s": 5 changes, and the marks go');
+    // a value saved with the request (still on its way from the page) is set first
+    const saved2 = await post('api/vars/save?graph=minimal', { vars: { t: 2.25 } });
+    check(saved2.status === 200 && fs.readFileSync(gfile, 'utf8') === withTarget.replace('"s": 2.0', '"s": 5').replace('"t": 1.50', '"t": 2.25'), 'a save carries the values the page shows');
+    const unknown = await post('api/vars?graph=minimal', { vars: { nope: 1 } });
+    check(unknown.status === 400 && /has no var "nope"/.test(unknown.j.errors.join()), `only the graph's own vars are set (${unknown.j.errors})`);
+    // a hand edit that breaks the JSON keeps the last good graph; saving into it is refused rather than guessed
+    await post('api/vars?graph=minimal', { vars: { s: 6 } });
+    fs.writeFileSync(gfile, '{ "nodes": ');
+    await until(() => lines.some((l) => /keeping the last good version/.test(l)), 5000);
+    const g3 = await graph();
+    const refused = await post('api/vars/save?graph=minimal', {});
+    check(g3.vars.s === 6 && refused.status === 500 && /not valid JSON now/.test(refused.j.error) && fs.readFileSync(gfile, 'utf8') === '{ "nodes": ',
+      `a file that is not JSON: the last good graph stays and Save says why it cannot write (${refused.j.error})`);
+  } finally { v.close(); }
+}
+
+section('session values: kept by var name, dropped when their declaration changes');
+{
+  const engine = new Engine(createNodeHost({ baseDir: tmp, workers: 0 }));
+  await engine.init();
+  const ws = new Workspace(path.join(tmp, 'session_ws'), engine);
+  ws.load();
+  const spec = (over: any = {}): any => ({
+    nodes: { b: { type: 'box', params: { size: '=s' } } },
+    vars: { s: 1, n: 2, c: [1, 0, 0], ...over.vars },
+    params: { s: { type: 'float', min: 0, max: 10, label: 'size', desc: 'box size' }, n: { type: 'int', min: 0, max: 5, desc: 'count' }, ...over.params },
+  });
+  ws.setGraph('g', spec());
+  ws.setSessionVars('g', { s: 4, n: 3, c: [0, 1, 0] });
+  check(JSON.stringify(ws.sessionVars('g')) === '{"s":4,"n":3,"c":[0,1,0]}' && ws.effectiveGraph('g').vars!.s === 4 && ws.getGraph('g').vars!.s === 1, 'session values shadow the vars; the graph keeps its own');
+  const r = await ws.cook('g');
+  check(r.ok && /size 4\.00 × 4\.00 × 4\.00/.test(summarize(r.geo!)) && ws.lastReport.get('g') === r && ws.lastCook.get('g')?.ok, 'cooks use them (a 4 m box)');
+  ws.setGraph('g', spec({ params: { s: { type: 'float', min: 0, max: 10, label: 'Size', desc: 'the size of the box', step: 0.5 } } }));
+  check(JSON.stringify(ws.sessionVars('g')) === '{"s":4,"n":3,"c":[0,1,0]}', 'a reload with a new label, desc or step keeps them');
+  ws.setGraph('g', spec({ params: { n: { type: 'int', min: 0, max: 9, desc: 'count' } } }));
+  check(!('n' in ws.sessionVars('g')) && ws.sessionVars('g').s === 4, 'a new range drops that one');
+  ws.setGraph('g', spec({ vars: { c: [1, 0, 0, 1] } }));
+  check(!('c' in ws.sessionVars('g')), 'an undeclared var whose value changes kind (3 → 4 numbers) drops');
+  ws.setGraph('g', spec({ vars: { s: 4 } }));
+  check(!('s' in ws.sessionVars('g')), 'a value the graph now holds itself is no session value');
+  ws.setSessionVars('g', { n: 4 });
+  const { s: _s, ...noS } = spec().vars;
+  ws.setGraph('g', { ...spec(), vars: { ...noS }, params: { n: spec().params.n } });
+  check(JSON.stringify(ws.sessionVars('g')) === '{"n":4}', 'other vars stay when one goes');
+  ws.setGraph('g', { nodes: { b: { type: 'box' } } });
+  check(!Object.keys(ws.sessionVars('g')).length, 'a var the graph no longer has drops');
+  check(varDeclaration(spec(), 'zz') === null && varDeclaration(spec(), 's') !== varDeclaration(spec({ params: { s: { type: 'int', min: 0, max: 10 } } }), 's'), 'varDeclaration: none for a missing var, a new type is a new declaration');
+}
+
+section('cooks over HTTP: progress events, Stop, the latest value wins');
+{
+  // test-only nodes: "hold" keeps the thread (a node cannot be interrupted), "steps" waits in steps that check for a stop
+  const counts = { steps: 0, stepsDone: 0 };
+  defineNode({
+    type: 'test_view_hold', category: 'flow', summary: 'test only: holds the thread for ms', inputs: [],
+    params: { ms: { type: 'int', default: 100, desc: 'ms' }, tag: { type: 'float', default: 0, desc: 'signature tag' } },
+    cook: (ctx) => { const t = performance.now(); while (performance.now() - t < ctx.p.ms); return new GeoBuilder().build(); },
+  });
+  defineNode({
+    type: 'test_view_steps', category: 'flow', summary: 'test only: waits for ms in 20 ms steps, then makes a box of size tag', inputs: [{ name: 'in', desc: 'geometry', optional: true }],
+    params: { ms: { type: 'int', default: 100, desc: 'ms' }, tag: { type: 'float', default: 1, desc: 'box size' } },
+    cook: async (ctx) => {
+      counts.steps++;
+      for (let t = 0; t < ctx.p.ms; t += 20) { await ctx.checkpoint(); await sleep(20); }
+      counts.stepsDone++;
+      const b = new GeoBuilder();
+      for (const [x, y, z] of [[0, 0, 0], [ctx.p.tag, ctx.p.tag, ctx.p.tag]]) b.addPoint(x, y, z);
+      return b.build();
+    },
+  });
+  const gfile = path.join(tmp, 'slow.json');
+  fs.writeFileSync(gfile, JSON.stringify({
+    nodes: { a: { type: 'test_view_hold', params: { ms: 400, tag: '=s' } }, b: { type: 'test_view_steps', in: ['a'], params: { ms: 1200, tag: '=s' } } },
+    output: 'b', vars: { s: 1 }, params: { s: { type: 'float', min: 0, max: 100, desc: 'size' } },
+  }, null, 2));
+  const v = await viewGraphFile(gfile, { name: 'slow', port: 0, log: () => {} });
+  const ac = new AbortController();
+  const events: any[] = [];
+  const stream = fetch(`${v.url}api/events`, { signal: ac.signal }).then(async (r) => {
+    const rd = r.body!.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await rd.read();
+      if (done) break;
+      buf += dec.decode(value);
+      for (let i; (i = buf.indexOf('\n\n')) >= 0;) { const m = buf.slice(0, i); buf = buf.slice(i + 2); if (m.startsWith('data: ')) events.push({ at: performance.now(), ...JSON.parse(m.slice(6)) }); }
+    }
+  }).catch(() => { /* aborted */ });
+  const postVars = (vars: object) => fetch(`${v.url}api/vars?graph=slow`, { method: 'POST', body: JSON.stringify({ vars }) }).then(async (r) => ({ status: r.status, j: await r.json() as any }));
+  const stop = () => fetch(`${v.url}api/cook/stop?graph=slow`, { method: 'POST' }).then((r) => r.json() as Promise<any>);
+  const cookEvents = () => events.filter((e) => e.cook);
+  const runningOn = (node: string) => cookEvents().some((e) => e.cook.running?.node === node);
+  try {
+    await until(() => events.length > 0 || v.viewer.clients() > 0, 3000);
+    // progress: the node cooking and the time, then how it ended
+    const t0 = performance.now();
+    const one = await postVars({ s: 2 });
+    const took = performance.now() - t0;
+    check(one.j.ok && one.j.vars.s === 2 && runningOn('a') && runningOn('b'), `a cook is reported node by node while it runs (${[...new Set(cookEvents().map((e) => e.cook.running?.node).filter(Boolean))].join(' → ')})`);
+    await until(() => !cookEvents().at(-1)?.cook.running, 3000);
+    const end = cookEvents().at(-1)?.cook;
+    check(end && !end.running && end.last.ok && end.last.ms > 1000 && end.last.ms <= took, `and its end: ok, the cook time (${Math.round(end?.last.ms)} ms of ${Math.round(took)} ms for the request)`);
+    // latest wins: a value that comes while a cook runs stops it at the next node boundary; both are answered by the newer cook
+    events.length = 0;
+    const done0 = counts.stepsDone;
+    const first = postVars({ s: 3 });
+    await until(() => runningOn('b'), 5000);
+    const second = postVars({ s: 4 });
+    const [r1, r2] = await Promise.all([first, second]);
+    check(r1.j.ok && r2.j.ok && r1.j.vars.s === 4 && r2.j.vars.s === 4 && counts.stepsDone - done0 === 1, `a newer value supersedes the cook: one cook runs through, with the latest value, and answers both (${counts.stepsDone - done0} finished)`);
+    check(!cookEvents().some((e) => e.cook.last?.stopped) && cookEvents().some((e) => e.cook.running?.superseded || e.cook.running?.elapsed > 0),
+      'a superseded cook is not reported as stopped');
+    const info = await (await fetch(`${v.url}api/info?graph=slow`)).json() as any;
+    check(/size 4\.00 × 4\.00 × 4\.00/.test(info.summary), 'the latest value is what the view shows');
+    // Stop while a node that checks between its steps cooks: it ends at once
+    events.length = 0;
+    const third = postVars({ s: 5 });
+    await until(() => runningOn('b'), 5000);
+    const tStop = performance.now();
+    const st = await stop();
+    const r3 = await third;
+    const tookStop = performance.now() - tStop;
+    const g = ((await (await fetch(`${v.url}api/graphs`)).json()) as any[])[0];
+    check(st.stopping && r3.j.stopped === 'b' && tookStop < 600 && g.cook.last.stopped === 'b' && g.vars.s === 5 && JSON.stringify(g.overrides) === '["s"]',
+      `Stop ends the cook (in ${tookStop.toFixed(0)} ms, at b); the value stays set (${g.vars.s})`);
+    // after a stop nothing cooks it again on its own; the output asked for is the last finished one
+    const steps0 = counts.steps;
+    const info2 = await (await fetch(`${v.url}api/info?graph=slow`)).json() as any;
+    await sleep(1800); // the outputs panel's refresh
+    check(/size 4\.00 × 4\.00 × 4\.00/.test(info2.summary) && counts.steps === steps0, `after a stop, the view's output is the last finished cook and nothing cooks on its own (${counts.steps - steps0} cooks)`);
+    // Stop while a node holds the thread: it runs to its end, the cook stops at the next node
+    events.length = 0;
+    const fourth = postVars({ s: 6 });
+    await until(() => runningOn('a'), 5000);
+    const st2 = await stop();
+    const r4 = await fourth;
+    check(st2.stopping && r4.j.stopped === 'b' && cookEvents().some((e) => e.cook.running?.node === 'a'), `a node that holds the thread runs to its end; the cook stops at the next node (${r4.j.stopped})`);
+    // the next value cooks again
+    const fifth = await postVars({ s: 7 });
+    check(fifth.j.ok && !fifth.j.stopped && /size 7\.00/.test(((await (await fetch(`${v.url}api/info?graph=slow`)).json()) as any).summary), 'a value after a stop cooks as usual');
+  } finally {
+    ac.abort();
+    await stream;
+    v.close();
+  }
 }
 
 section('topotopo view: drops go to inputs/ beside the graph file');

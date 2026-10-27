@@ -12,6 +12,7 @@ import type { Artifact } from '../host/artifacts.ts';
 import { prepareTarget, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Workspace } from '../workspace.ts';
+import type { GraphSource } from './graph-file.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { Image, referenceableImages, imageToBytes, resizeLayer } from '../core/image.ts';
 import { expandPacked } from '../core/packed.ts';
@@ -20,6 +21,7 @@ import { withImagePreview } from '../render/texview.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { exportGeometryAsync } from '../io/export.ts';
+import { STOPPED } from '../graph/engine.ts';
 import { FORMAT_LABELS, TARGET_FORMATS, publishedOutputs, targetError, targetExtension } from '../io/targets.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { summarize } from '../inspect.ts';
@@ -47,7 +49,11 @@ export interface OutputEntry {
   saved?: { at: number; size: number; files: number };
   files?: { id: string; name: string; size: number }[];
 }
-interface Item { entry: OutputEntry; geo?: Geometry; file?: string; files?: string[]; img?: Image; owner?: Item; key?: string; pending?: Promise<void> }
+interface Item {
+  entry: OutputEntry; geo?: Geometry; file?: string; files?: string[]; img?: Image; owner?: Item; key?: string; pending?: Promise<void>;
+  /** the card this one replaces while it cooks (shown again when a person stops that cook) */
+  prev?: Item;
+}
 
 /** Predictable ZIP bytes, retaining the bundle directory structure. */
 export function outputZip(files: { name: string; bytes: Uint8Array }[]): Uint8Array {
@@ -58,8 +64,10 @@ export function outputZip(files: { name: string; bytes: Uint8Array }[]): Uint8Ar
 }
 
 export interface OutputsOptions {
-  /** after a target is set in a graph (topotopo view writes it back into the graph file) */
+  /** after a target is set in a graph (the hook of topotopo view before `source`: it writes the graph file) */
   persistGraph?: (graph: string) => void;
+  /** the graph file a graph comes from (topotopo view): a target set on the page goes into it as a minimal edit */
+  source?: GraphSource;
 }
 
 export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsOptions = {}) {
@@ -85,6 +93,16 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         width: img.width, height: img.height, layers: [...img.layers.keys()], layer: img.mainLayer, image: name } });
     }
   };
+  /**
+   * A card whose cook a person stopped (Workspace.held) goes back to the card it replaced, with the last finished
+   * result; one that never finished says it was stopped.
+   */
+  const unstop = (item: Item, at?: string) => {
+    const prev = item.prev, e = item.entry;
+    if (!prev) { e.status = 'error'; e.error = `${STOPPED}${at ? ` at ${at}` : ''}: change a value (or the graph) to cook it`; return; }
+    items.set(e.id, prev);
+    for (const v of items.values()) if (v.owner === item) { v.owner = prev; v.entry.status = 'ready'; delete v.entry.error; }
+  };
   const cook = (item: Item) => {
     if (item.pending) return item.pending;
     const key = item.key, e = item.entry;
@@ -93,11 +111,17 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
       await new Promise<void>((resolve) => setImmediate(resolve));
       if (closed || items.get(e.id) !== item) return;
       try {
+        // a graph whose cooks the person stopped is not cooked again on its own: the card waits for a change
+        if (!item.file && ws.held(e.graph!)) { unstop(item); return; }
         const r = item.file
           ? await ws.engine.cook({ nodes: { file: { type: 'file', params: { path: item.file } } }, output: 'file' })
-          : await ws.cook(e.graph!, e.node);
+          : await ws.cook(e.graph!, e.node, undefined, { kind: 'preview' });
         if (item.key !== key || items.get(e.id) !== item) return;
+        // stopped for a newer value: the next refresh (after that value's cook) cooks the card again
+        if (r.stopped && !ws.held(e.graph!)) { item.key = undefined; return; }
+        if (r.stopped) { unstop(item, r.stopped); return; }
         if (!r.ok || !r.geo) throw new Error(r.errors.map((x) => `${x.node}: ${x.message}`).join('\n') || 'no geometry');
+        delete item.prev;
         item.geo = r.geo;
         e.status = 'ready'; delete e.error;
         const firstImage = referenceableImages(r.geo).values().next().value;
@@ -143,15 +167,20 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         const child = path.join(p, f); sourceFiles.set(child, ws.engine.host.fileStamp(child));
       } } catch { /* a disappearing file is reported by the next cook */ }
     }
-    const workspaceRevision = digest(JSON.stringify([...ws.graphs]) + inputStamp + JSON.stringify([...sourceFiles]));
+    // the session values (a person tuning a graph file in the viewer) are part of what each output shows
+    const workspaceRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]));
     const records = store.records();
     for (const [graph, spec] of ws.graphs) {
       for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name)) {
         const id = idFor('graph', graph, p.output === null ? 'default' : 'named', p.output ?? 'main'); alive.add(id);
         const key = workspaceRevision, old = items.get(id);
         const meta = { label: p.label, output: p.output, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null, saved: lastSaved(records, graph, p) };
-        if (old?.key === key) { Object.assign(old.entry, meta); if (!meta.saved) delete old.entry.saved; continue; }
-        const item: Item = { geo: old?.geo, key, entry: { id, origin: 'published', graph, node: p.node, kind: 'geometry', generated: true, exportable: true, status: 'loading', revision: key, ...meta } };
+        // the same inputs, or a graph held after a stop (the card keeps what it shows until something changes)
+        if (old?.key === key || (old && ws.held(graph))) { Object.assign(old.entry, meta); if (!meta.saved) delete old.entry.saved; continue; }
+        // while it cooks again, the card keeps its summary, so the details shown for it keep their size; the card it
+        // replaces comes back if a person stops the cook
+        const prev = old?.prev ?? (old?.entry.status === 'ready' ? old : undefined);
+        const item: Item = { geo: old?.geo, key, prev, entry: { id, origin: 'published', graph, node: p.node, kind: 'geometry', generated: true, exportable: true, status: 'loading', revision: key, ...(old?.entry.summary ? { summary: old.entry.summary } : {}), ...meta } };
         if (!meta.saved) delete item.entry.saved;
         // Carry last valid images until the replacement cook completes.
         if (old) for (const v of items.values()) if (v.owner === old) { v.owner = item; v.entry.status = 'loading'; }
@@ -194,7 +223,8 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
   };
   /** Cook now and serialize to the target: the export writes the current graph, whatever the preview last showed. */
   const prepare = async (graph: string, p: PublishedOutput): Promise<PreparedTarget> => {
-    const r = await ws.cook(graph, p.node);
+    const r = await ws.cook(graph, p.node, undefined, { kind: 'export' });
+    if (r.stopped) err(409, `${p.label} (${graph}): the export was stopped at ${r.stopped}; nothing was written`);
     if (!r.ok || !r.geo) err(422, `${p.label} (${graph}): ` + (r.errors.map((e) => `${e.node}: ${e.message}`).join('; ') || 'no geometry'));
     return prepareTarget(r.geo!, graph, p as PublishedOutput & { target: ResolvedTarget }, ws.exportDir, ws.engine.host);
   };
@@ -239,7 +269,12 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
               if (body.export !== null && targetError(body.export)) err(400, targetError(body.export)!);
               try { await ws.edit(graph, [{ op: 'export', ...(item.entry.output === null ? {} : { output: item.entry.output! }), export: body.export }]); }
               catch (e) { err(400, (e as Error).message); }
-              opts.persistGraph?.(graph);
+              // a graph from a file: the target goes into the file (only that key changes), the session values stay
+              if (opts.source?.graph === graph) {
+                const at = item.entry.output === null ? ['export'] : ['outputs', item.entry.output!, 'export'];
+                try { opts.source.save([{ path: at, value: body.export ?? undefined }]); }
+                catch (e) { err(500, `could not write ${opts.source.label}: ${(e as Error).message}`); }
+              } else opts.persistGraph?.(graph);
               if (body.export === null) { rescan(); changed(); json({ ok: true, cleared: true }); return true; }
             }
             const p = published(item.entry);

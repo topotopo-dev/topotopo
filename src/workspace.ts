@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Engine, wiringOf } from './graph/engine.ts';
-import type { CookReport, Issue } from './graph/engine.ts';
+import type { CookReport, Issue, NodeProgress, StopSignal } from './graph/engine.ts';
 import type { ExportTarget, GraphSpec, NodeSpec } from './graph/types.ts';
 import { didYouMean, renameExprRefs } from './graph/params.ts';
 import { migrateGraph } from './graph/migrate.ts';
@@ -72,6 +72,75 @@ export interface WorkspaceOptions {
   exports?: string;
 }
 
+/**
+ * Who a workspace cook is for (Workspace.cook): "edit" a person's change in the viewer, "preview" what the viewer shows
+ * (a node, an output card), "export" an export, "cook" anything else (a reload, an agent's tool). A stop or a newer
+ * value stops cooks by kind (Workspace.stop).
+ */
+export type CookKind = 'cook' | 'edit' | 'preview' | 'export';
+
+/** The cooks of one graph in progress (Workspace.activity). */
+export interface CookActivity {
+  /** cooks in progress, and their kinds */
+  cooks: number;
+  kinds: CookKind[];
+  /** ms the graph has been cooking: since the oldest of them started, or the cook a newer value's cook followed */
+  elapsed: number;
+  /** the graph's node that has been cooking longest (null between nodes), ms since it started */
+  node: string | null;
+  nodeElapsed: number;
+  /** the node a nested cook inside it is on (an asset's, a foreach body's, a solver step's) */
+  inner: string | null;
+  /** a person stopped every one of them and they have not ended yet: a node runs to its end, the cook stops after it */
+  stopping: boolean;
+  /** one of them is stopping for a newer value, which cooks once it has ended */
+  superseded: boolean;
+}
+
+/** How the last cook of a whole graph (no target) ended (Workspace.lastCook). */
+export interface CookOutcome {
+  ok: boolean;
+  ms: number;
+  /** it was stopped at this node */
+  stopped?: string;
+  /** its first error: the failing node and the message */
+  error?: Issue;
+  /** when it ended (ms since the epoch) */
+  at: number;
+}
+
+interface RunningCook {
+  kind: CookKind;
+  ac: AbortController;
+  /** stopped for a newer value: its outcome is not the graph's (lastCook) */
+  superseded?: boolean;
+  t0: number;
+  /** graph nodes cooking now, and since when */
+  nodes: Map<string, number>;
+  /** graph node → the node of a nested cook inside it */
+  inner: Map<string, string>;
+}
+
+const now = () => performance.now();
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** A var's value in a graph: its "vars" entry, else the default its "params" entry declares. */
+export function graphVarValue(g: GraphSpec, k: string): unknown {
+  return g.vars && Object.hasOwn(g.vars, k) ? g.vars[k] : g.params?.[k]?.default;
+}
+
+/**
+ * What a session value of var `k` depends on in a graph: the declared type, range and options, and the kind of the
+ * graph's value (a number, a string, a 3-vector …). null when the graph has no such var (neither in vars nor params).
+ */
+export function varDeclaration(g: GraphSpec, k: string): string | null {
+  const vd = g.params?.[k];
+  if (!vd && !(g.vars && Object.hasOwn(g.vars, k))) return null;
+  const v = graphVarValue(g, k);
+  const kind = Array.isArray(v) ? `array${v.length}` : v === null || v === undefined ? 'none' : typeof v;
+  return JSON.stringify([vd?.type ?? null, vd?.min ?? null, vd?.max ?? null, vd?.options ?? null, kind]);
+}
+
 /** Thrown by Workspace.edit when the edited graph does not validate; the stored graph is unchanged. */
 export class EditRejected extends Error {
   errors: Issue[];
@@ -88,7 +157,26 @@ export class Workspace {
   graphs = new Map<string, GraphSpec>();
   versions = new Map<string, number>();
   lastReport = new Map<string, CookReport>();
+  /** how the last cook of each whole graph ended, stopped ones included (lastReport keeps the last one that ran through) */
+  lastCook = new Map<string, CookOutcome>();
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
+  /** told when the cooks of a graph start, move to another node (with that node's event), are asked to stop and end (see activity) */
+  activityListeners = new Set<(graph: string, ev?: NodeProgress) => void>();
+  /**
+   * Session values: var values a person set in the live viewer over a graph file (`topotopo view`). They shadow the
+   * graph's vars in this workspace's cooks without changing the graph, and stay when the graph is replaced (a reload
+   * of the file) unless the var's declaration changed (varDeclaration), the var is gone, or the graph now holds the
+   * same value itself. graph → var → value and the declaration it was set under.
+   */
+  private sessions = new Map<string, Map<string, { value: unknown; decl: string | null }>>();
+  private running = new Map<string, Set<RunningCook>>();
+  /** per graph: since when it has been cooking, through cooks that follow one another (a newer value's), and when it last fell idle */
+  private busy = new Map<string, { since: number; idleAt: number | null }>();
+  private holds = new Map<string, string>();
+  /** per graph: the last whole-graph cook started, and the newest one whose outcome was recorded */
+  private cookSeq = new Map<string, number>();
+  private recordedSeq = new Map<string, number>();
+  private lastYield = 0;
   /** the inputs folder given to the constructor (WorkspaceOptions.inputs), if any */
   private inputsAt: string | undefined;
   private exportsAt: string | undefined;
@@ -159,13 +247,130 @@ export class Workspace {
   setGraph(name: string, spec: GraphSpec) {
     if (!NAME_RE.test(name)) throw new Error(`graph name must match ${NAME_RE}`);
     this.graphs.set(name, migrateGraph(spec));
+    this.settleSession(name);
     this.persist(name);
   }
 
   deleteGraph(name: string) {
     this.getGraph(name);
     this.graphs.delete(name);
+    this.sessions.delete(name);
     this.persist(name);
+  }
+
+  // ------------------------------------------------------------ session values
+
+  /** The session values of a graph (the vars that differ from the graph's own), {} when there are none. */
+  sessionVars(name: string): Record<string, any> {
+    return Object.fromEntries([...(this.sessions.get(name) ?? [])].map(([k, e]) => [k, e.value]));
+  }
+
+  /**
+   * Set session values of a graph (null: back to the graph's value). They are not checked here: validate the graph
+   * with them first (Engine.validate on effectiveGraph). A value the graph holds itself is no session value.
+   */
+  setSessionVars(name: string, vars: Record<string, any>) {
+    const g = this.getGraph(name);
+    let s = this.sessions.get(name);
+    if (!s) this.sessions.set(name, s = new Map());
+    for (const [k, v] of Object.entries(vars)) {
+      if (v === null) s.delete(k);
+      else s.set(k, { value: structuredClone(v), decl: varDeclaration(g, k) });
+    }
+    this.settleSession(name);
+  }
+
+  /** The graph as its cooks see it: its vars with the session values over them. */
+  effectiveGraph(name: string): GraphSpec {
+    const g = this.getGraph(name), s = this.sessions.get(name);
+    return s?.size ? { ...g, vars: { ...(g.vars ?? {}), ...this.sessionVars(name) } } : g;
+  }
+
+  /** Keep the session values that still apply to the graph as it is now (see sessions). */
+  private settleSession(name: string) {
+    const s = this.sessions.get(name);
+    if (!s) return;
+    const g = this.graphs.get(name);
+    for (const [k, e] of s) {
+      const decl = g ? varDeclaration(g, k) : null;
+      if (!g || decl === null || decl !== e.decl || sameValue(graphVarValue(g, k), e.value)) s.delete(k);
+    }
+    if (!s.size) this.sessions.delete(name);
+  }
+
+  // ------------------------------------------------------------ cooks in progress
+
+  /** What is cooking for a graph now, or null. */
+  activity(name: string): CookActivity | null {
+    const runs = this.running.get(name);
+    if (!runs?.size) return null;
+    const t = now();
+    let t0 = this.busy.get(name)?.since ?? Infinity, node: string | null = null, nodeT0 = Infinity, inner: string | null = null, stopping = true, superseded = false;
+    const kinds = new Set<CookKind>();
+    for (const r of runs) {
+      t0 = Math.min(t0, r.t0);
+      stopping &&= r.ac.signal.aborted && !r.superseded;
+      superseded ||= r.ac.signal.aborted && !!r.superseded;
+      kinds.add(r.kind);
+      for (const [n, since] of r.nodes) if (since < nodeT0) { nodeT0 = since; node = n; inner = r.inner.get(n) ?? null; }
+    }
+    return { cooks: runs.size, kinds: [...kinds], elapsed: t - t0, node, nodeElapsed: node ? t - nodeT0 : 0, inner, stopping, superseded };
+  }
+
+  /**
+   * Stop the cooks of a graph in progress (all, or those of the given kinds) at their next node boundary; returns how
+   * many were asked to. `superseded`: they stop for a newer value, and how they end is not the graph's last outcome.
+   */
+  stop(name: string, kinds?: CookKind[], opts: { superseded?: boolean } = {}): number {
+    let n = 0;
+    for (const r of this.running.get(name) ?? []) {
+      if (kinds && !kinds.includes(r.kind)) continue;
+      // a person's stop of a cook already stopping for a newer value: now it is theirs
+      if (r.ac.signal.aborted) { if (r.superseded && !opts.superseded) { r.superseded = false; n++; } continue; }
+      r.superseded = !!opts.superseded;
+      r.ac.abort();
+      n++;
+    }
+    if (n) this.notifyActivity(name);
+    return n;
+  }
+
+  /**
+   * Hold a graph as it is now (a person stopped its cooks): held() is true until the graph or its session values
+   * change, and what cooks on its own (the viewer's previews) waits for that change instead of cooking it again.
+   */
+  hold(name: string) {
+    if (this.graphs.has(name)) this.holds.set(name, JSON.stringify(this.effectiveGraph(name)));
+  }
+
+  held(name: string): boolean {
+    const h = this.holds.get(name);
+    if (h === undefined) return false;
+    if (this.graphs.has(name) && h === JSON.stringify(this.effectiveGraph(name))) return true;
+    this.holds.delete(name);
+    return false;
+  }
+
+  private notifyActivity(name: string, ev?: NodeProgress) {
+    for (const l of this.activityListeners) try { l(name, ev); } catch { /* ignore */ }
+  }
+
+  /**
+   * The progress hook of one cook: tracks its nodes, and lets the event loop turn (requests, a stop, the progress the
+   * listeners send) before each of the graph's nodes cooks, which may hold the thread for long, and at least every
+   * 15 ms between the nodes of nested cooks and the steps of long nodes.
+   */
+  private onNode(name: string, run: RunningCook, ev: NodeProgress): Promise<void> | void {
+    if (ev.phase !== 'step') {
+      if (ev.depth === 0) {
+        if (ev.phase === 'start') run.nodes.set(ev.node, now());
+        else { run.nodes.delete(ev.node); run.inner.delete(ev.node); }
+      } else if (ev.phase === 'start' && ev.within.length) run.inner.set(ev.within[0], ev.node);
+      this.notifyActivity(name, ev);
+    }
+    if (ev.phase === 'end' || (ev.depth > 0 || ev.phase === 'step') && now() - this.lastYield <= 15) return;
+    this.lastYield = now();
+    return new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   /** Every file under inputs/, recursively: posix paths relative to it, sorted. Dot-files and dot-folders are skipped. */
@@ -340,24 +545,58 @@ export class Workspace {
    * The one path for an edit, whoever makes it (the MCP edit tool, the viewer's controls): apply the ops, validate
    * (an invalid result throws EditRejected listing the per-node errors and stores nothing), store, cook at `frame`,
    * then notify the listeners. They hear after the cook so that what they read (lastReport, cached geometry) is the
-   * new version's; a cook that throws still notifies, since the graph was stored.
+   * new version's; a cook that throws still notifies, since the graph was stored. A cook that was stopped (`signal`,
+   * Workspace.stop) does not: whoever stopped it cooks again or tells the listeners.
    */
-  async edit(name: string, ops: EditOp[], opts: { frame?: number } = {}): Promise<{ graph: GraphSpec; notes: string[]; report: CookReport }> {
+  async edit(name: string, ops: EditOp[], opts: { frame?: number; kind?: CookKind; signal?: StopSignal } = {}): Promise<{ graph: GraphSpec; notes: string[]; report: CookReport }> {
     const { graph, notes } = this.applyEdits(name, ops);
     const v = this.engine.validate(graph);
     if (v.errors.length) throw new EditRejected(v.errors);
     this.setGraph(name, graph);
-    let report: CookReport;
-    try { report = await this.cook(name, undefined, opts.frame); }
-    finally { this.bump(name); }
+    let report: CookReport | undefined;
+    try { report = await this.cook(name, undefined, opts.frame, { kind: opts.kind, signal: opts.signal }); }
+    finally { if (!report?.stopped) this.bump(name); }
     return { graph: this.getGraph(name), notes, report };
   }
 
-  async cook(name: string, target?: string, frame?: number) {
+  /**
+   * Cook a graph (its output, or `target`) with its session values, as a cook of `kind`. Workspace.stop and `signal`
+   * stop it at a node boundary; activity() reports it while it runs. A cook of the whole graph records its outcome
+   * (lastCook) and, unless it was stopped, its report (lastReport), when no cook started after it has done so first.
+   */
+  async cook(name: string, target?: string, frame?: number, opts: { kind?: CookKind; signal?: StopSignal } = {}) {
     const g = this.getGraph(name);
-    const r = await this.engine.cook(g, { target, frame });
-    if (!target) this.lastReport.set(name, r);
-    return r;
+    const run: RunningCook = { kind: opts.kind ?? 'cook', ac: new AbortController(), t0: now(), nodes: new Map(), inner: new Map() };
+    const outer = opts.signal;
+    const signal: StopSignal = { get aborted() { return run.ac.signal.aborted || !!outer?.aborted; } };
+    const seq = target ? 0 : (this.cookSeq.get(name) ?? 0) + 1;
+    if (seq) this.cookSeq.set(name, seq);
+    let runs = this.running.get(name);
+    if (!runs) this.running.set(name, runs = new Set());
+    runs.add(run);
+    // the cook of a newer value that follows the one it stopped within 100 ms continues its busy time
+    const b = this.busy.get(name);
+    if (b && (b.idleAt === null || (run.t0 - b.idleAt <= 100 && run.kind === 'edit'))) b.idleAt = null;
+    else this.busy.set(name, { since: run.t0, idleAt: null });
+    this.notifyActivity(name);
+    try {
+      const s = this.sessions.get(name);
+      const r = await this.engine.cook(g, { target, frame, signal, onNode: (ev) => this.onNode(name, run, ev), ...(s?.size ? { vars: this.sessionVars(name) } : {}) });
+      if (seq && !(r.stopped && run.superseded) && seq > (this.recordedSeq.get(name) ?? 0)) {
+        this.recordedSeq.set(name, seq);
+        if (!r.stopped) this.lastReport.set(name, r);
+        // a cook that found every result cached (a target set, a reload without change) keeps the outcome of the
+        // cook that made them: its time is what the graph takes
+        const fresh = [...r.results.values()].some((x) => !x.cached);
+        if (!r.ok || fresh || !this.lastCook.get(name)?.ok)
+          this.lastCook.set(name, { ok: r.ok, ms: r.ms, at: Date.now(), ...(r.stopped ? { stopped: r.stopped } : {}), ...(r.errors[0] ? { error: r.errors[0] } : {}) });
+      }
+      return r;
+    } finally {
+      runs.delete(run);
+      if (!runs.size) { this.running.delete(name); this.busy.get(name)!.idleAt = now(); }
+      this.notifyActivity(name);
+    }
   }
 
   private watchers: fs.FSWatcher[] = [];
@@ -405,6 +644,7 @@ export class Workspace {
       const cur = this.graphs.get(name);
       if (cur && JSON.stringify(cur) === JSON.stringify(spec)) return;
       this.graphs.set(name, spec);
+      this.settleSession(name);
       this.lastReport.delete(name);
       this.bump(name);
     });

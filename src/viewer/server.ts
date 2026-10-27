@@ -5,6 +5,10 @@
 // `topotopo view`, the inputs/ beside the graph file) and shown as reference layers, the graph's exposed vars are set
 // from generated controls (POST /api/vars), and markers clicked into the view (sites, paths, zones, volumes) become
 // inputs/markers.json (POST /api/markers).
+// Cooks report their progress (the node cooking, the time) as {cook} events, and POST /api/cook/stop stops them at
+// the next node boundary. A new value supersedes the cook of the one before: the latest value wins.
+// Over a graph file (`topotopo view`, ViewerOptions.source) the controls set session values over the graph, which
+// survive reloads of the file; POST /api/vars/save writes them into its vars.
 // Bound to 127.0.0.1 only; requests must name this server as their Host, and writes must come from its own page.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -13,7 +17,9 @@ import zlib from 'node:zlib';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { varDeclaration, graphVarValue } from '../workspace.ts';
 import type { Workspace } from '../workspace.ts';
+import type { GraphSource } from './graph-file.ts';
 import { GeoBuilder } from '../core/geometry.ts';
 import type { Geometry } from '../core/geometry.ts';
 import type { GraphSpec } from '../graph/types.ts';
@@ -21,7 +27,8 @@ import { exportGeometry } from '../io/export.ts';
 import { previewGLB } from '../render/preview.ts';
 import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
-import { wiringOf } from '../graph/engine.ts';
+import { STOPPED, wiringOf } from '../graph/engine.ts';
+import type { NodeProgress } from '../graph/engine.ts';
 import { createOutputs } from './outputs.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
@@ -145,7 +152,14 @@ export function markersGeometry(list: Marker[]): Geometry {
   return b.build();
 }
 
-interface VarsReply { status: number; body: { ok: boolean; ms: number; errors: string[]; vars?: Record<string, any> } }
+interface VarsBody {
+  ok: boolean; ms: number; errors: string[];
+  /** the values the controls show (the graph's vars with the session's over them), the graph's own, the session's names */
+  vars?: Record<string, any>; graphVars?: Record<string, any>; overrides?: string[];
+  /** the cook was stopped (POST /api/cook/stop) at this node */
+  stopped?: string;
+}
+interface VarsReply { status: number; body: VarsBody }
 interface VarsBatch { vars: Record<string, any>; waiters: ((r: VarsReply) => void)[] }
 
 export interface ViewerOptions {
@@ -155,8 +169,15 @@ export interface ViewerOptions {
    */
   inputsWhere?: string;
   /**
-   * Called after the page sets an export target in a graph: `topotopo view` writes it back into the graph file, which
-   * is the only source there (an MCP workspace stores the graph itself).
+   * The graph file a graph comes from when it is not the workspace's own (`topotopo view`: viewGraphFile). The
+   * controls then set session values over that graph (Workspace.sessionVars) instead of editing it: they survive
+   * reloads of the file, show where they differ from it, and POST /api/vars/save writes them into its vars. Export
+   * targets set on the page go into the file. Both are minimal edits of its text.
+   */
+  source?: GraphSource;
+  /**
+   * The hook of `topotopo view` before `source`: called after the page sets an export target, to write it into the
+   * graph file. Like `source` it makes the controls set session values; without `source` they cannot be saved.
    */
   persistGraph?: (graph: string) => void;
 }
@@ -180,9 +201,38 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
     for (const c of clients) c.write(msg);
   };
-  ws.listeners.add(broadcast);
-  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { persistGraph: opts.persistGraph });
+  // a graph changed: after a stop the page keeps the geometry it has instead of fetching (and cooking) it again
+  const graphChanged = (ev: { graph: string; version: number }) => broadcast({ ...ev, ...(ws.held(ev.graph) ? { stopped: true } : {}) });
+  ws.listeners.add(graphChanged);
+  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { persistGraph: opts.persistGraph, source: opts.source });
   let outputs = makeOutputs();
+
+  // ---------------------------------------------------------------- the state of the cooks
+  // {cook: {graph, running, last}} events: each node of the graph as it starts (before it can hold the thread for
+  // long: the workspace yields there), the rest of the progress at most every 100 ms, the end at once. A cook that
+  // only finds cached results is announced only when it lasts past 120 ms.
+  const sessionMode = (graph: string) => (opts.source ? opts.source.graph === graph : !!opts.persistGraph);
+  const cookState = (graph: string) => {
+    const last = ws.lastCook.get(graph);
+    return { running: ws.activity(graph), last: last ? { ...last, error: last.error ? { node: last.error.node, message: last.error.message } : undefined } : null };
+  };
+  const cookTimers = new Map<string, ReturnType<typeof setTimeout>>(), cookSent = new Map<string, { at: number; running: boolean; last: string }>();
+  const sendCook = (graph: string) => {
+    cookTimers.delete(graph);
+    const state = cookState(graph), sent = cookSent.get(graph), last = JSON.stringify(state.last);
+    if (!state.running && !sent?.running && sent?.last === last) return;
+    cookSent.set(graph, { at: performance.now(), running: !!state.running, last });
+    broadcast({ cook: { graph, ...state } });
+  };
+  const onActivity = (graph: string, ev?: NodeProgress) => {
+    if (closed) return;
+    if (ev?.phase === 'start' && ev.depth === 0) { clearTimeout(cookTimers.get(graph)); sendCook(graph); return; }
+    if (cookTimers.has(graph)) return;
+    const sent = cookSent.get(graph), running = !!ws.activity(graph);
+    const wait = !running ? 0 : sent?.running ? Math.max(0, 100 - (performance.now() - sent.at)) : 120;
+    cookTimers.set(graph, setTimeout(() => sendCook(graph), wait));
+  };
+  ws.activityListeners.add(onActivity);
 
   // ---------------------------------------------------------------- inputs/
   let inputsVersion = 0;
@@ -305,26 +355,57 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   };
 
   // ---------------------------------------------------------------- POST /api/vars
-  // One edit + cook at a time per graph. Requests that arrive while one runs are merged (the latest value of each
-  // var wins) and applied by a single further cook; every request is answered once its values are applied.
+  // One cook at a time per graph. A request that arrives while one runs stops it at its next node boundary (the
+  // latest value wins; values in between may never cook); the waiting requests are merged (the latest value of each
+  // var wins) and applied by a single further cook. Every request is answered once its values are applied, or when a
+  // stop (POST /api/cook/stop) ends the cook. Over a graph file the values are session values, set at once; in a
+  // workspace they edit the stored graph (an agent reads them there).
   const varQueues = new Map<string, { busy: boolean; next: VarsBatch | null }>();
+  const varsState = (name: string) => {
+    const g = ws.graphs.get(name);
+    return { vars: g ? ws.effectiveGraph(name).vars ?? {} : {}, graphVars: g?.vars ?? {}, overrides: Object.keys(ws.sessionVars(name)) };
+  };
+  const reply = (name: string, report: { ok: boolean; ms: number; errors: { node: string; message: string }[]; stopped?: string }): VarsReply =>
+    ({ status: 200, body: { ok: report.ok, ms: report.ms, errors: report.errors.map(issueText), ...varsState(name), ...(report.stopped ? { stopped: report.stopped } : {}) } });
+  /** Session values a request sets, checked against the graph: its own vars only, and a graph that still validates. */
+  const sessionErrors = (name: string, vars: Record<string, any>): string[] => {
+    const g = ws.getGraph(name);
+    const unknown = Object.keys(vars).filter((k) => varDeclaration(g, k) === null);
+    if (unknown.length) return [`graph ${name} has no var ${unknown.map((k) => JSON.stringify(k)).join(', ')}: the controls set the graph's own vars`];
+    const trial = { ...(ws.effectiveGraph(name).vars ?? {}) };
+    for (const [k, v] of Object.entries(vars)) {
+      const back = graphVarValue(g, k);
+      if (v !== null) trial[k] = v; else if (back === undefined) delete trial[k]; else trial[k] = back;
+    }
+    return ws.engine.validate({ ...g, vars: trial }).errors.map(issueText);
+  };
   const applyBatch = async (name: string, b: VarsBatch): Promise<VarsReply> => {
-    const prev = ws.graphs.get(name);
-    if (!prev) return { status: 404, body: { ok: false, ms: 0, errors: [`no graph ${name}`] } };
+    if (!ws.graphs.get(name)) return { status: 404, body: { ok: false, ms: 0, errors: [`no graph ${name}`] } };
+    if (sessionMode(name)) {
+      const report = await ws.cook(name, undefined, undefined, { kind: 'edit' });
+      if (!report.stopped) ws.bump(name);
+      return reply(name, report);
+    }
     try {
-      const { graph, report } = await ws.edit(name, [{ op: 'vars', vars: b.vars }]);
-      return { status: 200, body: { ok: report.ok, ms: report.ms, errors: report.errors.map(issueText), vars: graph.vars ?? {} } };
+      const { report } = await ws.edit(name, [{ op: 'vars', vars: b.vars }], { kind: 'edit' });
+      return reply(name, report);
     } catch (e: any) {
       // rejected edits carry their issues (one string each); op errors are plain messages
       return { status: 400, body: { ok: false, ms: 0, errors: Array.isArray(e?.errors) ? e.errors.map(issueText) : [String(e?.message ?? e)] } };
     }
   };
   const applyVars = (name: string, vars: Record<string, any>) => new Promise<VarsReply>((resolve) => {
+    if (sessionMode(name)) {
+      const errors = sessionErrors(name, vars);
+      if (errors.length) return resolve({ status: 400, body: { ok: false, ms: 0, errors } });
+      ws.setSessionVars(name, vars);
+    }
     let q = varQueues.get(name);
     if (!q) varQueues.set(name, q = { busy: false, next: null });
     if (q.next) { Object.assign(q.next.vars, vars); q.next.waiters.push(resolve); }
     else q.next = { vars: { ...vars }, waiters: [resolve] };
-    if (q.busy) return;
+    // the latest value wins: the cook of the values before (and the previews of them) stop at their next node boundary
+    if (q.busy) { ws.stop(name, ['edit', 'preview'], { superseded: true }); return; }
     q.busy = true;
     (async () => {
       try {
@@ -332,11 +413,42 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
           const b = q.next;
           q.next = null;
           const r = await applyBatch(name, b).catch((e: any): VarsReply => ({ status: 500, body: { ok: false, ms: 0, errors: [String(e?.message ?? e)] } }));
+          // superseded: its values are in the batch that came after it, and that cook answers its requests too
+          const later = q.next as VarsBatch | null;
+          if (r.body.stopped && later) { later.vars = { ...b.vars, ...later.vars }; later.waiters.unshift(...b.waiters); continue; }
           for (const w of b.waiters) w(r);
         }
       } finally { q.busy = false; }
     })();
   });
+  /** POST /api/cook/stop: stop every cook of the graph, and the values waiting to cook (they stay set). */
+  const stopCooks = (name: string) => {
+    const n = ws.stop(name);
+    const q = varQueues.get(name), waiting = q?.next;
+    if (q) q.next = null;
+    if (waiting) {
+      const at = ws.activity(name)?.node ?? ws.engine.findOutput(ws.getGraph(name)).name;
+      const r: VarsReply = { status: 200, body: { ok: false, ms: 0, errors: [], ...varsState(name), stopped: at } };
+      for (const w of waiting.waiters) w(r);
+    }
+    // nothing cooks it again on its own until the graph or a value changes
+    if (n || waiting) ws.hold(name);
+    return { ok: true, stopping: n > 0 };
+  };
+  /** POST /api/vars/save: the session values into the graph file's vars; the graph holds them from now on. */
+  const saveVars = (name: string) => {
+    const src = opts.source;
+    if (!src || src.graph !== name) throw new HttpError(400, sessionMode(name)
+      ? 'this viewer cannot write the graph file: start it with `topotopo view <graph.json>` to save values'
+      : `graph ${name} is stored in the workspace: its values are saved as they change`);
+    const values = ws.sessionVars(name), names = Object.keys(values);
+    if (names.length) {
+      try { src.save(names.map((k) => ({ path: ['vars', k], value: values[k] }))); }
+      catch (e: any) { throw new HttpError(500, `could not write ${src.label}: ${e?.message ?? e}`); }
+      ws.bump(name);
+    }
+    return { ok: true, saved: names, file: src.label, ...varsState(name) };
+  };
   const readJSON = (req: http.IncomingMessage, max = 4 << 20) => new Promise<any>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let n = 0;
@@ -391,7 +503,12 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
           const last = ws.lastReport.get(name);
           return {
             name, output: last?.target ?? g.output ?? null, version: ws.versions.get(name) ?? 0,
-            vars: g.vars ?? {}, params: g.params ?? {},
+            // vars: what the controls show; graphVars: the graph's own; overrides: the session values among them
+            ...varsState(name), params: g.params ?? {},
+            // "file": the controls set session values over a graph file (saveable when it names the file); "workspace":
+            // they edit the stored graph
+            mode: sessionMode(name) ? 'file' : 'workspace', file: opts.source?.graph === name ? opts.source.label : null,
+            cook: cookState(name),
             nodes: Object.entries(g.nodes).map(([n, spec]) => {
               const def = ws.engine.resolveDef(spec.type);
               const r = last?.results.get(n);
@@ -418,6 +535,22 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         if (!ws.graphs.has(name)) return json(404, { ok: false, ms: 0, errors: [`no graph ${name}`] });
         const r = await applyVars(name, vars);
         return json(r.status, r.body);
+      }
+      if (u.pathname === '/api/vars/save' || u.pathname === '/api/cook/stop') {
+        if (req.method !== 'POST') throw new HttpError(405, 'POST required');
+        const name = u.searchParams.get('graph') ?? 'main';
+        const body = await readJSON(req);
+        if (!ws.graphs.has(name)) throw new HttpError(404, `no graph ${name}`);
+        if (u.pathname === '/api/cook/stop') return json(200, stopCooks(name));
+        // the save may carry the values the page shows (some may still be on their way): they are set first
+        const vars = body?.vars;
+        if (vars !== undefined && (!vars || typeof vars !== 'object' || Array.isArray(vars))) throw new HttpError(400, '"vars" must be an object {name: value}');
+        if (vars && Object.keys(vars).length && sessionMode(name)) {
+          const errors = sessionErrors(name, vars);
+          if (errors.length) throw new HttpError(400, errors.join('; '));
+          ws.setSessionVars(name, vars);
+        }
+        return json(200, saveVars(name));
       }
       if (u.pathname === '/api/inputs') {
         if (req.method === 'POST') { const r = await upload(req, u); return json(r.status, r.body); }
@@ -467,10 +600,14 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       }
       if (u.pathname === '/api/geo' || u.pathname === '/api/info') {
         const name = u.searchParams.get('graph') ?? 'main';
-        const node = u.searchParams.get('node') || undefined;
         const g = ws.graphs.get(name);
         if (!g) return send(404, JSON.stringify({ error: `no graph ${name}` }), MIME['.json']);
-        const r = await ws.engine.cook(g, { target: node });
+        // a preview with the session values; the output by name, so it never counts as the graph's own cook (lastCook).
+        // After a stop the output is the last finished cook's: asking for it does not cook again what was stopped.
+        const last = ws.lastReport.get(name);
+        const node = u.searchParams.get('node') || ws.engine.findOutput(g).name;
+        const r = !u.searchParams.get('node') && ws.held(name) && last?.ok && last.target === node ? last : await ws.cook(name, node, undefined, { kind: 'preview' });
+        if (r.stopped) return send(409, JSON.stringify({ error: `${STOPPED} at ${r.stopped}`, stopped: r.stopped }), MIME['.json']);
         if (!r.ok || !r.geo) return send(500, JSON.stringify({ error: r.errors.map(issueText).join('\n') }), MIME['.json']);
         if (u.pathname === '/api/info') return send(200, JSON.stringify({ target: r.target, summary: summarize(r.geo), ms: r.ms }), MIME['.json']);
         return send(200, await toGLB(r.geo), MIME['.glb']);
@@ -501,14 +638,18 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     clients: () => clients.size,
     setWorkspace: (next: Workspace) => {
       if (next === ws || closed) return;
-      ws.listeners.delete(broadcast);
+      ws.listeners.delete(graphChanged);
+      ws.activityListeners.delete(onActivity);
       outputs.close();
       clearTimeout(watchTimer);
+      for (const t of cookTimers.values()) clearTimeout(t);
+      cookTimers.clear(); cookSent.clear();
       unwatch();
       varQueues.clear();
       inputThumbs.clear();
       ws = next;
-      ws.listeners.add(broadcast);
+      ws.listeners.add(graphChanged);
+      ws.activityListeners.add(onActivity);
       outputs = makeOutputs();
       watchInputs();
       // the pages reconnect (EventSource retries) and reload graphs, layers and guides from the new workspace
@@ -520,8 +661,10 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       outputs.close();
       clearInterval(keepAlive);
       clearTimeout(watchTimer);
+      for (const t of cookTimers.values()) clearTimeout(t);
       unwatch();
-      ws.listeners.delete(broadcast);
+      ws.listeners.delete(graphChanged);
+      ws.activityListeners.delete(onActivity);
       for (const c of clients) c.end();
       server.close();
     },
