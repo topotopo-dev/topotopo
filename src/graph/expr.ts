@@ -9,13 +9,14 @@
 //   results and error messages are copied out, so an expression never holds an object of the engine's realm (whose
 //   `.constructor.constructor` would be the engine's Function, i.e. process, require, fetch …).
 // - Scope: every free identifier resolves through a proxy that claims every name, so nothing reaches the realm's
-//   global scope. Names are looked up in graph vars, then the helpers (sin … pick, Math, the reference functions),
-//   then frame/time/fps/timeInc; anything else is a ReferenceError naming it. The expression itself runs in a
-//   strict function whose `this` throws when read, and `import` is rejected before compiling.
+//   global scope. Names are looked up in graph vars, then the helpers (sin … pick, the conversions Number … isNaN,
+//   Math, the reference functions), then frame/time/fps/timeInc; anything else is a ReferenceError naming it. The
+//   expression itself runs in a strict function whose `this` throws when read, and `import` is rejected before
+//   compiling.
 // - Time limit: an expression that isSimpleExpr() cannot prove short (function literals, loops, regular
 //   expressions, method calls, object literals, templates, assignments) runs inside a timed host call
 //   (Host.exprSandbox.run, engine.scriptTimeoutMs). The others are straight-line arithmetic over vars and up to
-//   32 calls of the helpers and Math: they cannot loop, and run without the timer, which costs ~0.15 ms per call
+//   32 calls of the helpers, Math and Number: they cannot loop, and run without the timer, which costs ~0.15 ms per call
 //   (a watchdog thread per vm timeout). A timed expression's result is remembered with everything it read (vars,
 //   time, reference calls); a re-cook whose reads all give the same values reuses it without a timed call.
 // - Cost: straight-line expressions of a node are compiled in one script (precompileExprs); compiled functions
@@ -41,7 +42,8 @@ export const REF_FUNCS = ['npoints', 'nprims', 'nvertices', 'bbox', 'centroid', 
 export const EXPR_HELPERS = [
   'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'sqrt', 'pow', 'exp', 'log', 'abs', 'floor', 'ceil', 'round',
   'min', 'max', 'sign', 'hypot', 'PI', 'E', 'TAU', 'clamp', 'fit', 'lerp', 'smoothstep', 'frac', 'mod', 'radians',
-  'degrees', 'rand', 'pick', 'Math', 'NaN', 'Infinity', 'undefined',
+  'degrees', 'rand', 'pick', 'Number', 'parseFloat', 'parseInt', 'String', 'Boolean', 'isFinite', 'isNaN', 'Math', 'NaN',
+  'Infinity', 'undefined',
 ];
 
 /** Per-evaluation context for expressions: the cook time, node-reference functions and where they run. */
@@ -178,6 +180,9 @@ export function exprRealmSetup(bridge: any): any {
     degrees: (r: number) => (r * 180) / M.PI,
     rand: (x: number, seed = 0) => hash32(hashNumber(x) ^ hash32(M.floor(seed * 7919) + 0x632be5ab)) / 4294967296,
     pick: (arr: any, i: number) => arr[((M.floor(i) % arr.length) + arr.length) % arr.length],
+    // conversions: the realm's own (frozen) functions
+    Number: G.Number, parseFloat: G.parseFloat, parseInt: G.parseInt, String: G.String, Boolean: G.Boolean,
+    isFinite: G.isFinite, isNaN: G.isNaN,
     Math: M, NaN: NaN, Infinity: Infinity, undefined: undefined,
   };
   for (const k of O.keys(helpers)) lib[k] = helpers[k];
@@ -236,9 +241,10 @@ const SIMPLE_MAX_CALLS = 32;
 /**
  * True when an expression is straight-line code that cannot run long, so it may run without the host's timer:
  * numbers, plain strings, names, operators, member reads, array literals, and up to SIMPLE_MAX_CALLS calls whose
- * callee is a bare name (a helper or reference function; vars hold data) or Math.<name>. Anything else (function
- * literals, loops and other statements, regular expressions, templates, comments, object literals, assignments,
- * spread, `new`, method calls, longer sources) is "not simple" and runs timed.
+ * callee is a bare name (a helper or reference function; vars hold data), Math.<name> or Number.<name> (both frozen,
+ * their functions pure). Anything else (function literals, loops and other statements, regular expressions,
+ * templates, comments, object literals, assignments, spread, `new`, method calls, longer sources) is "not simple"
+ * and runs timed.
  */
 export function isSimpleExpr(src: string): boolean {
   if (src.length > SIMPLE_MAX_LENGTH) return false;
@@ -267,10 +273,10 @@ export function isSimpleExpr(src: string): boolean {
       if (member) return false; // ?.( ?.[ and friends
       if (tok === '/' && (!operand || src[i] === '/' || src[i] === '*')) return false; // regular expression or comment
       if (tok === '(' && operand) {
-        // a call: only of a bare name, or of Math.<name>
+        // a call: only of a bare name, or of Math.<name> / Number.<name>
         const callee = before, p2 = prev[prev.length - 2], p3 = prev[prev.length - 3], p4 = prev[prev.length - 4];
         const bare = /^[A-Za-z_$]/.test(callee) && !LITERAL_WORDS.has(callee) && p2 !== '.' && p2 !== '?.';
-        const math = /^[A-Za-z_$]/.test(callee) && p2 === '.' && p3 === 'Math' && p4 !== '.' && p4 !== '?.';
+        const math = /^[A-Za-z_$]/.test(callee) && p2 === '.' && (p3 === 'Math' || p3 === 'Number') && p4 !== '.' && p4 !== '?.';
         if (!(bare || math) || ++calls > SIMPLE_MAX_CALLS) return false;
       }
       operand = tok === ')' || tok === ']';

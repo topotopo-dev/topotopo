@@ -202,6 +202,8 @@ Any non-code param can be a string starting with "=": a JS expression evaluated 
   "vars": {"floors": 6, "h": 3}   →   "height": "=floors*h",  "count": "=floors*4"
 Helpers: sin cos tan asin acos atan atan2 sqrt pow exp log abs floor ceil round min max sign hypot PI TAU E
          clamp fit lerp smoothstep frac mod radians degrees rand(x, seed) pick(array, i)
+Conversions: Number(x) parseFloat(s) parseInt(s, radix) String(x) Boolean(x) isFinite(x) isNaN(x), Number.isInteger …
+  e.g. a menu var holding text: "=Number(res) * 2".
 Time: frame, time (seconds), fps, timeInc. "=sin(time*2)" animates; the node then re-cooks per frame (see topic time).
 Inside foreach bodies: iteration, numiterations, value, attr (e.g. "=attr.height"), plus parent vars.
 Inside solver bodies: iteration (frames since start_frame), substep, and frame/time/timeInc are the step's time.
@@ -219,10 +221,11 @@ names get did-you-mean errors, and reading a node downstream of yourself is a cy
 Not supported: dynamic names (npoints(name) with a variable), and these functions inside graph "vars".
 Assets: their vars become node parameters.
 Expressions are per-node constants. For per-element logic use wrangle.
-SANDBOX: an expression sees only graph vars (read-only copies), frame/time/fps/timeInc, Math, the helpers above and the
-  reference functions; any other name (process, require, globalThis, fetch, Number, JSON …) is an error, and so are
-  import, \`this\` and assigning to a name. Errors name the param and the expression: param "size": expression "=…" failed: ….
-  Straight-line expressions (operators, helper and Math calls) run directly; ones with functions, loops, regular
+SANDBOX: an expression sees only graph vars (read-only copies), frame/time/fps/timeInc, Math, the helpers and
+  conversions above and the reference functions; any other name (process, require, globalThis, fetch, JSON …) is an
+  error, and so are import, \`this\` and assigning to a name. Errors name the param and the expression: param "size":
+  expression "=…" failed: ….
+  Straight-line expressions (operators, helper, conversion and Math calls) run directly; ones with functions, loops, regular
   expressions or method calls run under the script timeout (TOPOTOPO_SCRIPT_TIMEOUT_MS, default 30 s), ~0.5 ms more
   each the first time (the result is reused while the vars, time and nodes it read stay the same).
 SECURITY: a graph is code. Expressions and wrangles run sandboxed with a timeout on Node, but can still allocate

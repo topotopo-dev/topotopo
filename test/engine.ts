@@ -482,6 +482,24 @@ section('expression sandbox');
   check(fbMsgs.every((m) => /is not available in expressions/.test(m)), `fallback hides host names${fbMsgs.some((m) => !/is not available/.test(m)) ? ': ' + fbMsgs.join(' | ') : ''}`);
   const fbOk = await fb.cook({ vars: { h: 2 }, nodes: { b: { type: 'box', params: { size: ['=h * sin(PI / 2)', "=[1, 2].map((x) => x * h)[1]", '=rand(3) * 0 + 1'] } } } });
   check(fbOk.ok && size3(fbOk.geo).join() === '2,4,1', 'fallback evaluates plain and timed forms');
+  const fbConv = await fb.cook({ vars: { n: '3' }, nodes: { b: { type: 'box', params: { size: ['=Number(n)', '=parseFloat("1.5m")', '=String(n).length'] } } } });
+  check(fbConv.ok && size3(fbConv.geo).join() === '3,1.5,1', 'fallback has the conversions too');
+}
+
+// ------------------------------------------------------------------ conversions in expressions
+section('expression conversions: Number, parseFloat, parseInt, String, Boolean, isFinite, isNaN');
+{
+  const host = engine.host;
+  const ev = (src: string, vars: Record<string, any> = {}) => evalExpr(src, vars, { host });
+  // a terrain graph's menu var holds text ("8") and Number() failed in "=" expressions (+x worked)
+  check(ev('Number(res) * 2', { res: '8' }) === 16 && ev('+res * 2', { res: '8' }) === 16, 'Number(x) converts like +x');
+  check(ev('parseFloat(s)', { s: '2.5 m' }) === 2.5 && ev('parseInt(s, 10)', { s: '42px' }) === 42 && ev('parseInt("ff", 16)') === 255, 'parseFloat, parseInt (with a radix)');
+  check(ev('String(n) + "x"', { n: 3 }) === '3x' && ev('Boolean(0)') === false && ev('Boolean(s)', { s: 'no' }) === true, 'String, Boolean');
+  check(ev('isFinite(Number(s))', { s: '1e3' }) === true && ev('isNaN(Number(s))', { s: 'abc' }) === true && ev('Number.isInteger(n)', { n: 4 }) === true, 'isFinite, isNaN, Number.isInteger');
+  check(['Number(x)', 'parseInt(s, 10) + 1', 'String(n)', 'Boolean(b)', 'isNaN(Number(s))', 'Number.isInteger(n)', 'Number.parseFloat(s)'].every(isSimpleExpr) && !isSimpleExpr('Number.prototype.toFixed.call(1, 2)'),
+    'conversions are straight-line calls: they run without the timer (Number.<name> like Math.<name>)');
+  const r = await engine.cook({ vars: { res: '8' }, nodes: { b: { type: 'box', params: { size: ['=Number(res)', '=parseInt(res) / 2', '=Number.isInteger(Number(res)) ? 1 : 0'] } } } });
+  check(r.ok && size3(r.geo).join() === '8,4,1', 'in node params');
 }
 
 // ------------------------------------------------------------------ param coercion

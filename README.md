@@ -236,7 +236,8 @@ graph: `npoints('pts')`, `nprims`, `nvertices`, `bbox('base').size.y` (also `min
 `detail('n', 'attr')`, `point('n', i, 'P')`, `prim('n', i, 'attr')` and `ch('box1/size')` for another node's param.
 Referenced nodes become dependencies: they are cooked first, editing them re-cooks the reader, and unknown names or
 cycles are reported before cooking. Node names must be string literals; these functions are not available in `vars`.
-Expressions run in a sandbox that sees only these names, `Math` and the helpers listed by `help {topic: "expressions"}`.
+Expressions run in a sandbox that sees only these names, `Math`, the conversions (`Number`, `parseFloat`, `parseInt`,
+`String`, `Boolean`, `isFinite`, `isNaN`) and the helpers listed by `help {topic: "expressions"}`.
 
 Group patterns look like `top`, `!top`, `0-10` or `@P.y>0.5`. A wrangle snippet looks like this:
 
