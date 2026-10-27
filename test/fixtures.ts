@@ -133,7 +133,7 @@ export const INPUTS: Record<string, string[]> = {
   heightfield_clip: ['HFN'], heightfield_cutout: ['HFN', 'CIRCLE'], heightfield_layer: ['HFN'],
   heightfield_mask_by_feature: ['HFN'], heightfield_mask_by_object: ['HFN', 'HF_CURVE'], heightfield_mask_expand: ['HFM'],
   heightfield_erode: ['HFN'], heightfield_flow: ['HFN'], heightfield_fill_sinks: ['HFN'], heightfield_project: ['HFN', 'HF_STAMP'], heightfield_path: ['HFN', 'HF_CURVE'],
-  heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'],
+  heightfield_scatter: ['HFM'], heightfield_resample: ['HFN'], heightfield_transform: ['HFN'], heightfield_crop: ['HFM'],
   remesh_isotropic: ['BOX'], remesh_quad: ['BOX'], mesh_repair: ['BROKEN'],
   // PCG: masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
@@ -188,6 +188,9 @@ export const PARAMS: Record<string, any> = {
   edge_collapse: { group: '0-40:8' },
   polybridge: { source: '@P.y>0.4', target: '@P.y<-0.4', divisions: 2, blend: 0.5, delete_inner_faces: true },
   heightfield_from_mesh: { resolution: 0.05 },
+  heightfield_terrace: { step_height: 0.2, base: 0.05 },
+  heightfield_remap: { input_min: -0.8, input_max: 0.8, output_min: 0, output_max: 2, ramp: [[0, 0], [0.5, 0.2], [1, 1]] },
+  heightfield_to_tex: { input_min: -0.8, input_max: 0.8 },
   heightfield_layer: { layer: 'combo', expression: 'height * 2 + sin(x * 3) * 0.1 + mask' },
   heightfield_cutout: { value: -0.5, feather: 0.2 },
   heightfield_mask_by_object: { distance: 0.3, falloff: 0.3 },
@@ -197,6 +200,7 @@ export const PARAMS: Record<string, any> = {
   heightfield_scatter: { density: 4 },
   heightfield_resample: { factor: 0.5 },
   heightfield_transform: { translate: [1, 0.5, 0], rotate: 90, height_scale: 1.5 },
+  heightfield_crop: { tiles: [2, 2], tile: [1, 0], margin: 0.3 },
   // heightfield_from_image: { path } is filled in by createFixtureEngine() (a 16-bit PNG written to the temp dir)
   remesh_isotropic: { target_length: 0.2, iterations: 4 },
   remesh_quad: { target_length: 0.2, smooth_iterations: 4 },

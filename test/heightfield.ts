@@ -147,9 +147,11 @@ section('remap, blur, terrace, clip, cutout, layer');
   const nodes: Record<string, NodeSpec> = { hf: HF, n: NOISE(5) };
   const n = await field(nodes, 'n');
   const H = n.layer('height')!;
-  const r = await field({ ...nodes, r: { type: 'heightfield_remap', in: ['n'], params: { output_min: 2, output_max: 4 } } }, 'r');
-  const rs = r.layer('height')!;
-  check(Math.abs(Math.min(...rs) - 2) < 1e-5 && Math.abs(Math.max(...rs) - 4) < 1e-5, 'remap fits the layer to the output range');
+  const r = await field({ ...nodes, r: { type: 'heightfield_remap', in: ['n'], params: { input_min: -1, input_max: 1, output_min: 2, output_max: 4, clamp: false } } }, 'r');
+  check(maxDiff(r.layer('height')!, Array.from(H, (v) => 3 + v)) < 1e-5, 'remap fits the explicit input range to the output range (-1..1 → 2..4)');
+  const ra = await field({ ...nodes, r: { type: 'heightfield_remap', in: ['n'], params: { auto_range: true, output_min: 2, output_max: 4 } } }, 'r');
+  const rs = ra.layer('height')!;
+  check(Math.abs(Math.min(...rs) - 2) < 1e-5 && Math.abs(Math.max(...rs) - 4) < 1e-5, 'remap auto_range fits the layer\'s own min..max to the output range');
   const b = await field({ ...nodes, b: { type: 'heightfield_blur', in: ['n'], params: { radius: 0.4 } } }, 'b');
   check(variance(b.layer('height')!) < variance(H) * 0.95, `blur reduces variance (${variance(H).toFixed(4)} → ${variance(b.layer('height')!).toFixed(4)})`);
   check(Math.abs(sum(b.layer('height')!) / H.length - sum(H) / H.length) < 0.02, 'blur keeps the mean');
@@ -161,6 +163,14 @@ section('remap, blur, terrace, clip, cutout, layer');
   check(quant, 'terrace rounding 0 quantises heights to multiples of the step');
   const levels = new Set(Array.from(t.layer('height')!, (v) => Math.round(v * 1000)));
   check(levels.size >= 3 && levels.size <= 12, `terrace makes a few levels (${levels.size})`);
+  const tb = await field({ ...nodes, t: { type: 'heightfield_terrace', in: ['n'], params: { step_height: 0.25, base: 0.1, rounding: 0 } } }, 't');
+  check(Array.from(tb.layer('height')!).every((v, k) => Math.abs((v - 0.1) / 0.25 - Math.round((v - 0.1) / 0.25)) < 1e-4 && v <= H[k] + 1e-6 && v > H[k] - 0.25 - 1e-6), 'terrace levels sit at base + n × step_height, each sample on the level at or below it');
+  const tr = await field({ ...nodes, t: { type: 'heightfield_terrace', in: ['n'], params: { levels: 'range', range_min: -1, range_max: 1, steps: 8, rounding: 0 } } }, 't');
+  check(Array.from(tr.layer('height')!).every((v) => Math.abs((v + 1) / 0.25 - Math.round((v + 1) / 0.25)) < 1e-4), 'terrace levels range: steps equal terraces from range_min to range_max (8 over -1..1 = 0.25 m)');
+  const st = { lo: Math.min(...H), hi: Math.max(...H) }, sl = (st.hi - st.lo) / 4;
+  const tl = await field({ ...nodes, t: { type: 'heightfield_terrace', in: ['n'], params: { levels: 'layer', steps: 4, rounding: 0 } } }, 't');
+  check(Array.from(tl.layer('height')!).every((v) => Math.abs((v - st.lo) / sl - Math.round((v - st.lo) / sl)) < 1e-3), 'terrace levels layer: steps terraces between the layer\'s own min and max');
+  check(/step_height is 0/.test((await engine.cook({ nodes: { ...nodes, t: { type: 'heightfield_terrace', in: ['n'], params: { step_height: 0 } } }, output: 't' })).warnings.map((w) => w.message).join()), 'terrace with step_height 0 warns and leaves the layer');
   const c = await field({ ...nodes, c: { type: 'heightfield_clip', in: ['n'], params: { min: -0.1, max: 0.2 } } }, 'c');
   check(c.layer('height')!.every((v) => v >= -0.1 - 1e-6 && v <= 0.2 + 1e-6), 'clip clamps to [min, max]');
   const cut = await field({ ...nodes, circ: { type: 'circle', params: { radius: 1, segments: 48 } }, cut: { type: 'heightfield_cutout', in: ['n', 'circ'], params: { value: -5 } } }, 'cut');
@@ -180,6 +190,108 @@ section('remap, blur, terrace, clip, cutout, layer');
   check(/no heightfield/.test(await cookErr({ s: { type: 'sphere' }, b: { type: 'heightfield_blur', in: ['s'] } }, 'b')), 'a non-heightfield input fails with a hint');
   // immutability: the noise result is untouched by everything downstream
   check(same(n.layer('height')!, (await field(nodes, 'n')).layer('height')!) && n.layer('height') === H, 'inputs are never written');
+}
+
+// ---------------------------------------------------------------- crop, tiles
+section('crop and tiles: a tile cooked on its own matches the same area of the whole map');
+{
+  // a 10 × 6 m map at 0.5 m: 21 × 13 samples, 20 × 12 cells
+  const MAP: Record<string, NodeSpec> = {
+    hf: { type: 'heightfield', params: { size: [10, 6], resolution: 0.5 } },
+    n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 2, element_size: 3, seed: 4 } },
+    m: { type: 'heightfield_mask_noise', in: ['n'], params: { seed: 2 } },
+  };
+  const src = await field(MAP, 'm');
+  const crop = (params: any, input = 'm') => geo({ ...MAP, c: { type: 'heightfield_crop', in: [input], params } }, 'c');
+  const detail = (g: Geometry, name: string) => g.detail.get(name)?.get(0);
+  const covered = new Uint8Array(src.count);
+  let exact = true, grid = true;
+  const ranges: number[][][] = [[], []];
+  for (let tj = 0; tj < 2; tj++) for (let ti = 0; ti < 3; ti++) {
+    const g = await crop({ tiles: [3, 2], tile: [ti, tj] });
+    const t = heightfieldsOf(g)[0], [oi, oj] = detail(g, 'crop_offset') as number[];
+    if (t.cellSize !== src.cellSize || t.origin[0] !== src.x(oi) || t.origin[1] !== src.z(oj) || t.layers.size !== src.layers.size) grid = false;
+    for (const [name, a] of src.layers) for (let j = 0; j < t.height; j++) for (let i = 0; i < t.width; i++) {
+      if (t.layer(name)![j * t.width + i] !== a[(oj + j) * src.width + oi + i]) exact = false;
+      covered[(oj + j) * src.width + oi + i] = 1;
+    }
+    if (tj === 0) ranges[0].push([oi, oi + t.width - 1]);
+    if (ti === 0) ranges[1].push([oj, oj + t.height - 1]);
+  }
+  check(grid && exact, 'crop tiles keep the cell size, the sample positions and every layer\'s values exactly (no resampling)');
+  check(covered.every((v) => v === 1) && JSON.stringify(ranges) === '[[[0,6],[6,13],[13,20]],[[0,6],[6,12]]]', `3 × 2 tiles split the 20 × 12 cells evenly, neighbours sharing their border samples (${JSON.stringify(ranges)})`);
+  const mt = await crop({ tiles: [3, 2], tile: [0, 1], margin: 1 });
+  const mf = heightfieldsOf(mt)[0];
+  check(mf.width === 7 + 2 && mf.height === 7 + 2 && JSON.stringify(detail(mt, 'crop_margin')) === '[0,2,2,0]' && JSON.stringify(detail(mt, 'crop_offset')) === '[0,4]',
+    `margin 1 m = 2 samples on each side, fewer at the map border (margin ${JSON.stringify(detail(mt, 'crop_margin'))}, ${mf.width} × ${mf.height})`);
+  check(JSON.stringify(detail(mt, 'crop_core_min')) === '[-5,0]' && JSON.stringify(detail(mt, 'crop_core_max')) === '[-2,3]' && JSON.stringify(detail(mt, 'crop_tile')) === '[0,1]'
+    && JSON.stringify(detail(mt, 'crop_tiles')) === '[3,2]' && JSON.stringify(detail(mt, 'crop_source_samples')) === '[21,13]', 'detail attributes record the core bounds, tile, tile count and source grid');
+  const ms = await crop({ tiles: [3, 2], tile: [1, 0], margin: 3, margin_unit: 'samples' });
+  check(JSON.stringify(detail(ms, 'crop_margin')) === '[3,3,0,3]' && heightfieldsOf(ms)[0].width === 8 + 6, 'margin in samples');
+  const back = await geo({ ...MAP, c: { type: 'heightfield_crop', in: ['m'], params: { tiles: [3, 2], tile: [0, 1], margin: 1 } }, core: { type: 'heightfield_crop', in: ['c'], params: { mode: 'bounds', min: [-5, 0], max: [-2, 3] } } }, 'core');
+  const plain = heightfieldsOf(await crop({ tiles: [3, 2], tile: [0, 1] }))[0], bf = heightfieldsOf(back)[0];
+  check(bf.width === plain.width && bf.height === plain.height && bf.origin.join() === plain.origin.join() && [...plain.layers].every(([k, a]) => same(bf.layer(k)!, a)) && JSON.stringify(detail(back, 'crop_tile')) === '[0,1]',
+    'cropping a margin tile to its core bounds gives the tile without margin (and keeps the tile index)');
+  const cov = heightfieldsOf(await crop({ mode: 'bounds', min: [-1.2, -0.1], max: [2.1, 10] }))[0];
+  check(cov.origin[0] === -1.5 && cov.origin[1] === -0.5 && cov.sizeX === 4 && cov.z(cov.height - 1) === 3, `bounds: the samples covering them, clamped to the field (X ${cov.origin[0]}..${cov.x(cov.width - 1)}, Z ${cov.origin[1]}..${cov.z(cov.height - 1)})`);
+  check(/cover no samples/.test(await cookErr({ ...MAP, c: { type: 'heightfield_crop', in: ['m'], params: { mode: 'bounds', min: [20, 20], max: [30, 30] } } }, 'c')), 'bounds off the field fail clearly');
+  check(/more than the 20 × 12 cells/.test(await cookErr({ ...MAP, c: { type: 'heightfield_crop', in: ['m'], params: { tiles: [21, 2] } } }, 'c'))
+    && /outside the 3 × 2 tiles/.test(await cookErr({ ...MAP, c: { type: 'heightfield_crop', in: ['m'], params: { tiles: [3, 2], tile: [3, 0] } } }, 'c')), 'too many tiles or a tile index past the grid fail clearly');
+
+  // the whole map against one tile cooked on its own: crop the flat map first, build the tile, compare the same samples.
+  // A dyadic cell (0.25 m) puts both grids' samples at bit-identical positions.
+  const BASE: Record<string, NodeSpec> = { map: { type: 'heightfield', params: { size: [32, 24], resolution: 0.25 } } };
+  const CHAIN = (input: string, extra: Record<string, any> = {}): Record<string, NodeSpec> => ({
+    noise: { type: 'heightfield_noise', in: [input], params: { fractal: 'ridged', amplitude: 6, element_size: 9, range: 'positive', seed: 3 } },
+    hills: { type: 'heightfield_noise', in: ['noise'], params: { amplitude: 0.8, element_size: 2.5, seed: 8 } },
+    terrace: { type: 'heightfield_terrace', in: ['hills'], params: { step_height: 0.75, base: 0.2, rounding: 0.4, ...extra.terrace } },
+    remap: { type: 'heightfield_remap', in: ['terrace'], params: { input_min: 0, input_max: 7, output_min: -1, output_max: 9, ramp: [[0, 0], [0.5, 0.3], [1, 1]], ...extra.remap } },
+    rock: { type: 'heightfield_layer', in: ['remap'], params: { layer: 'rock', expression: 'smoothstep(2, 5, height) * (0.5 + 0.5 * sin(x * 0.7 + z * 0.3))' } },
+    high: { type: 'heightfield_mask_by_feature', in: ['rock'], params: { feature: 'height', min_height: 3, max_height: 6 } },
+    mnoise: { type: 'heightfield_mask_noise', in: ['high'], params: { layer: 'grass', element_size: 4, seed: 6 } },
+    clip: { type: 'heightfield_clip', in: ['mnoise'], params: { min: 0, max: 7.5 } },
+    local: { type: 'heightfield_to_tex', in: ['clip'], params: { input_min: -1, input_max: 9, keep: true } },
+  });
+  const FILTERS: Record<string, NodeSpec> = {
+    blur: { type: 'heightfield_blur', in: ['local'], params: { radius: 0.6 } },
+    slope: { type: 'heightfield_mask_by_feature', in: ['blur'], params: { feature: 'slope', min_angle: 25, mode: 'max' } },
+    curv: { type: 'heightfield_mask_by_feature', in: ['slope'], params: { layer: 'valley', feature: 'curvature', curvature_radius: 0.5 } },
+    out: { type: 'heightfield_mask_blur', in: ['curv'], params: { layer: 'valley', radius: 0.4 } },
+  };
+  const TILE = { tiles: [4, 3], tile: [2, 1] };
+  const whole = await geo({ ...BASE, ...CHAIN('map'), ...FILTERS, cut: { type: 'heightfield_crop', in: ['out'], params: TILE } }, 'cut');
+  const ref = heightfieldsOf(whole)[0];
+  const compare = (t: Heightfield) => {
+    if (t.width !== ref.width || t.height !== ref.height || t.origin.join() !== ref.origin.join() || t.layers.size !== ref.layers.size) return Infinity;
+    let d = 0;
+    for (const [k, a] of ref.layers) d = Math.max(d, maxDiff(t.layer(k)!, a));
+    return d;
+  };
+  // the world-position nodes (noise, terrace, remap, expressions in x z, height masks, clip, to_tex): exact without margin
+  const localRef = heightfieldsOf(await geo({ ...BASE, ...CHAIN('map'), cut: { type: 'heightfield_crop', in: ['local'], params: TILE } }, 'cut'))[0];
+  const tileGeo = await geo({ ...BASE, tile: { type: 'heightfield_crop', in: ['map'], params: TILE }, ...CHAIN('tile') }, 'local');
+  const localTile = heightfieldsOf(tileGeo)[0];
+  let localSame = localTile.width === localRef.width && localTile.height === localRef.height && localTile.origin.join() === localRef.origin.join();
+  for (const [k, a] of localRef.layers) localSame &&= same(localTile.layer(k)!, a);
+  // to_tex images: the tile's pixels are the map's pixels at the tile's offset
+  const localImg = tileGeo.volumes.find((v) => v.kind === 'image') as any, wholeImg = (await geo({ ...BASE, ...CHAIN('map') }, 'local')).volumes.find((v) => v.kind === 'image') as any;
+  const [oi, oj] = tileGeo.detail.get('crop_offset')!.get(0) as number[];
+  let imgSame = !!localImg && !!wholeImg;
+  if (imgSame) for (let j = 0; j < localImg.height; j++) for (let i = 0; i < localImg.width; i++) if (localImg.layers.get('C')[j * localImg.width + i] !== wholeImg.layers.get('C')[(oj + j) * wholeImg.width + oi + i]) imgSame = false;
+  check(localSame && imgSame, `noise, terrace (step), remap (input range), x z expressions, height masks, mask noise, clip and to_tex: the tile equals the map's samples bit for bit (${localTile.width} × ${localTile.height} samples, ${localTile.layers.size} layers)`);
+  // filters read neighbours: with a margin of their reach the core matches, without one the tile edges differ
+  const tiled = (margin: number) => geo({ ...BASE, tile: { type: 'heightfield_crop', in: ['map'], params: { ...TILE, margin } }, ...CHAIN('tile'), ...FILTERS,
+    core: { type: 'heightfield_crop', in: ['out'], params: { mode: 'bounds', min: [ref.origin[0], ref.origin[1]], max: [ref.x(ref.width - 1), ref.z(ref.height - 1)] } } }, 'core');
+  const withMargin = compare(heightfieldsOf(await tiled(1.5))[0]), noMargin = compare(heightfieldsOf(await tiled(0))[0]);
+  check(withMargin < 1e-5 && noMargin > 1e-3, `blur, slope and curvature masks, mask blur: with a 1.5 m margin the tile core matches the map (max difference ${withMargin.toExponential(1)}; without a margin ${noMargin.toFixed(3)})`);
+  // the extent-dependent options, when asked for, do depend on the extent: that is what the defaults avoid
+  const extent = async (extra: Record<string, any>) => {
+    const a = heightfieldsOf(await geo({ ...BASE, ...CHAIN('map', extra), cut: { type: 'heightfield_crop', in: ['remap'], params: TILE } }, 'cut'))[0];
+    const b = heightfieldsOf(await geo({ ...BASE, tile: { type: 'heightfield_crop', in: ['map'], params: TILE }, ...CHAIN('tile', extra) }, 'remap'))[0];
+    return maxDiff(a.layer('height')!, b.layer('height')!);
+  };
+  const dLayer = await extent({ terrace: { levels: 'layer', steps: 8 } }), dAuto = await extent({ remap: { auto_range: true } });
+  check(dLayer > 0.01 && dAuto > 0.01, `terrace levels layer and remap auto_range follow the field's own range: tile and map differ (by ${dLayer.toFixed(3)} and ${dAuto.toFixed(3)} m)`);
 }
 
 // ---------------------------------------------------------------- masks
@@ -592,8 +704,20 @@ section('heightmap export and PNG decoding');
   fs.writeFileSync(file, res.files[0].bytes);
   const back = await field({ im: { type: 'heightfield_from_image', params: { path: file, resolution: hf.cellSize, height_min: side.height_min, height_max: side.height_max } } }, 'im');
   check(back.width === hf.width && back.height === hf.height && maxDiff(back.layer('height')!, H) <= span / 65535 + 1e-5, 'heightfield_from_image(export png16) reproduces the field');
-  const into = await field({ hf: HF, im: { type: 'heightfield_from_image', in: ['hf'], params: { path: file, layer: 'snow', height_min: 0, height_max: 1 } } }, 'im');
-  check(into.layer('snow')!.length === into.count && into.layers.has('height') && Math.abs(into.layer('snow')![5] - (H[5] - st.min) / span) < 1e-4, 'from_image into an existing field writes the named layer');
+  const into = await field({ hf: HF, im: { type: 'heightfield_from_image', in: ['hf'], params: { path: file, layer: 'snow', height_min: 0, height_max: 1, size: [4, 4] } } }, 'im');
+  check(into.layer('snow')!.length === into.count && into.layers.has('height') && maxDiff(into.layer('snow')!, Array.from(H, (v) => (v - st.min) / span)) < 1e-4, 'from_image into an existing field writes the named layer (the image lying at size/center: here exactly over the field)');
+  const stretched = await field({ hf: HF, im: { type: 'heightfield_from_image', in: ['hf'], params: { path: file, layer: 'snow', height_min: 0, height_max: 1, fit: 'field' } } }, 'im');
+  check(maxDiff(stretched.layer('snow')!, into.layer('snow')!) < 1e-6, 'from_image fit field stretches the image over the connected field whatever size says');
+  // a field larger than the image: samples outside it keep the layer, inside they read the image at their world X/Z
+  const wide = await field({ hf: { type: 'heightfield', params: { size: [6, 6], resolution: 0.1 } }, base: { type: 'heightfield_layer', in: ['hf'], params: { layer: 'snow', operation: 'fill', value: 7 } }, im: { type: 'heightfield_from_image', in: ['base'], params: { path: file, layer: 'snow', height_min: 0, height_max: 1, size: [4, 4], center: [0.5, 0, 0] } } }, 'im');
+  let placedErr = 0, kept = true;
+  for (let j = 0; j < wide.height; j++) for (let i = 0; i < wide.width; i++) {
+    const x = wide.x(i), z = wide.z(j), v = wide.layer('snow')![j * wide.width + i];
+    if (Math.abs(x - 0.5) <= 2 + 1e-9 && Math.abs(z) <= 2 + 1e-9) placedErr = Math.max(placedErr, Math.abs(v - (hf.sample(x - 0.5, z) - st.min) / span));
+    else if (v !== 7) kept = false;
+  }
+  check(placedErr < 1e-3 && kept, `from_image fit world: inside the image each sample reads it at its X/Z (max error ${placedErr.toExponential(1)}), outside the layer is kept`);
+  check(/does not overlap/.test((await engine.cook({ nodes: { hf: HF, im: { type: 'heightfield_from_image', in: ['hf'], params: { path: file, layer: 'snow', center: [100, 0, 0], size: [4, 4] } } }, output: 'im' })).warnings.map((w) => w.message).join()), 'from_image warns when the image lies off the field');
   check(/cannot read/.test(await cookErr({ im: { type: 'heightfield_from_image', params: { path: path.join(tmp, 'missing.png') } } }, 'im')), 'from_image: a missing file is a clear error');
 }
 

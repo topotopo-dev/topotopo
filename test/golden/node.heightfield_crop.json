@@ -1,0 +1,69 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [
+        "crop_core_max:float:2",
+        "crop_core_min:float:2",
+        "crop_margin:int:4",
+        "crop_offset:int:2",
+        "crop_source_samples:int:2",
+        "crop_tile:int:2",
+        "crop_tiles:int:2"
+      ],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {
+        "detail.crop_core_max": "90f9376b9e489c31",
+        "detail.crop_core_min": "f14b2c2cd1810046",
+        "detail.crop_margin": "f24599a500722b7f",
+        "detail.crop_offset": "7ac5bad44708578e",
+        "detail.crop_source_samples": "298472e5f094165f",
+        "detail.crop_tile": "350d96c4e060839e",
+        "detail.crop_tiles": "175d5f454ba0cf9f"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [2, 0.4701, 0.3],
+          "min": [-0.3, -0.5265, -2]
+        },
+        "grid": {
+          "cellSize": 0.1,
+          "height": 24,
+          "origin": [-0.3, -2],
+          "width": 24
+        },
+        "kind": "heightfield",
+        "layers": {
+          "height": "a783bdc4ef9031c6",
+          "mask": "f0f80663e88f06ed"
+        },
+        "name": "heightfield"
+      }
+    ]
+  },
+  "name": "node.heightfield_crop",
+  "ok": true,
+  "source": "fixture for node type \"heightfield_crop\" (test/fixtures.ts)",
+  "warnings": []
+}

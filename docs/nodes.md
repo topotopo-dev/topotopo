@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-230 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+231 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -19,7 +19,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
-- [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_fill_sinks](#heightfield_fill_sinks) · [heightfield_flow](#heightfield_flow) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
+- [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_crop](#heightfield_crop) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_fill_sinks](#heightfield_fill_sinks) · [heightfield_flow](#heightfield_flow) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
 - [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
@@ -7000,6 +7000,98 @@ Houdini: HeightField Clip.
 }
 ```
 
+### heightfield_crop
+
+category: `heightfield` · aliases: `hf_crop`, `heightfield_tile`, `heightfield_cut_tile`
+
+Crop heightfields (every layer) to world bounds or to one tile of a grid, with an optional margin; the samples stay exactly where they were (no resampling).
+
+Cut a tile out of a whole map to preview or process it at full resolution, then build on the tile: nodes that work at world positions (noise, terrace, remap, masks by height or slope …) give the tile the same values as the same area of the map. mode tile: the field's cells are split evenly into tiles (nx, nz), tile (i, j) counting from min X / min Z, and neighbouring tiles share their border samples (as Unreal landscape tiles do). mode bounds: the samples covering min..max in X and Z (bounds between samples grow to the next sample; parts outside the field are dropped). margin keeps extra samples on every side (metres, rounded up to whole samples, or samples; less at the field's own border) for filters that read neighbours, such as blur, curvature, path and project. The crop is recorded in detail attributes: crop_core_min / crop_core_max (world X, Z of the tile or bounds without the margin: crop to them in mode bounds to drop the margin again), crop_margin (samples kept beyond the core on the −X, +X, −Z, +Z sides), crop_offset (the first sample's index in the input grid), crop_source_samples (the input's sample counts) and, in mode tile, crop_tile and crop_tiles (bounds mode keeps those of an earlier tile crop). With several heightfields each is cropped (tiles by its own grid) and the attributes describe the first. Other geometry passes through.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `heightfield` | no | no | geometry with a heightfield |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `mode` | enum | `"tile"` |  | `tile`, `bounds` |  | tile = one tile of a tiles grid over the field; bounds = the samples covering min..max |
+| `tiles` | ivec2 | `[2,2]` | 1..4096 |  | `grid`, `tile_count` | tile mode: number of tiles along X and Z |
+| `tile` | ivec2 | `[0,0]` | 0..4095 |  | `index`, `tile_index` | tile mode: tile index [column along X, row along Z], counting from 0 at min X / min Z |
+| `min` | vec2 | `[-5,-5]` |  |  | `bounds_min` | bounds mode: world X and Z of the min corner (metres) |
+| `max` | vec2 | `[5,5]` |  |  | `bounds_max` | bounds mode: world X and Z of the max corner (metres) |
+| `margin` | float | `0` | 0.. |  | `padding`, `overlap` | extra border kept on every side, in margin_unit (less at the field's own border): the reach of the filters that follow |
+| `margin_unit` | enum | `"metres"` |  | `metres`, `samples` | `margin_units` | margin in metres (rounded up to whole samples) or in samples |
+
+**Writes:** the cropped heightfields with all their layers; detail crop_core_min, crop_core_max, crop_margin, crop_offset, crop_source_samples (tile mode also crop_tile, crop_tiles)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "map": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          40,
+          40
+        ],
+        "resolution": 0.25
+      }
+    },
+    "tile": {
+      "type": "heightfield_crop",
+      "in": [
+        "map"
+      ],
+      "params": {
+        "tiles": [
+          4,
+          4
+        ],
+        "tile": [
+          1,
+          2
+        ],
+        "margin": 2
+      }
+    },
+    "hills": {
+      "type": "heightfield_noise",
+      "in": [
+        "tile"
+      ],
+      "params": {
+        "amplitude": 3,
+        "element_size": 12
+      }
+    },
+    "core": {
+      "type": "heightfield_crop",
+      "in": [
+        "hills"
+      ],
+      "params": {
+        "mode": "bounds",
+        "min": [
+          -10,
+          0
+        ],
+        "max": [
+          0,
+          10
+        ]
+      }
+    }
+  },
+  "output": "core"
+}
+```
+
 ### heightfield_cutout
 
 category: `heightfield` · aliases: `heightfield_cutoutbyobject`, `hf_cutout`, `heightfield_cut`
@@ -7228,7 +7320,7 @@ category: `heightfield` · aliases: `hf_flow`, `heightfield_drainage`
 
 Compute downhill drainage accumulation and flow direction for river masks.
 
-Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. By default local minima retain drainage. fill_sinks routes over a priority-flood filled surface and resolves flats with stable receivers, without modifying the stored height or lake layers. The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Without normalise or log_scale, drainage is contributing area in square metres. Loads the erosion WASM kernel.
+Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. By default local minima retain drainage. fill_sinks routes over a priority-flood filled surface and resolves flats with stable receivers, without modifying the stored height or lake layers. The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Drainage is contributing area in square metres, ln(1 + area) with log_scale (the default), so thresholds are absolute; normalise divides by the field's largest value instead, which depends on the field's extent. Drainage only counts area inside the field: a tile sees rivers that enter it as starting at its border, so route the whole map (or a tile with a margin that holds the catchments) and crop. Loads the erosion WASM kernel.
 
 **Inputs**
 
@@ -7242,8 +7334,8 @@ Routes contributing cell area downhill without modifying height. D8 sends it to 
 |---|---|---|---|---|---|---|
 | `method` | enum | `"dinf"` |  | `d8`, `dinf` |  | D8 chooses one steepest receiver; D-infinity splits contributing area between two downslope receivers |
 | `fill_sinks` | bool | `false` |  |  |  | route over a priority-flood filled surface with stable flat receivers, preserving the original height; false leaves local minima as sinks |
-| `normalise` | bool | `true` |  |  | `normalize` | scale drainage to 0..1 after applying log_scale |
-| `log_scale` | bool | `true` |  |  |  | apply log(1 + drainage) to reveal small tributaries alongside main rivers |
+| `normalise` | bool | `false` |  |  | `normalize` | divide drainage by its largest value on the field (0..1, after log_scale); depends on the field's extent |
+| `log_scale` | bool | `true` |  |  |  | write ln(1 + area in m²) to reveal small tributaries alongside main rivers |
 
 **Writes:** layers drainage and direction; all existing layers preserved
 
@@ -7289,13 +7381,13 @@ category: `heightfield` · aliases: `heightfield_file`, `heightmap_import`, `hf_
 
 Load a heightmap or mask from an 8/16-bit PNG (grey or colour) into a heightfield layer.
 
-Houdini: HeightField File. One sample per pixel; image column = X, row = Z with row 0 at the field's min Z (the layout export png16 writes, so a round trip lines up). Values 0..1 map to height_min..height_max (use the numbers from the export sidecar; 0 and 1 for masks). With a heightfield connected, the image is stretched over that field and written into `layer` instead of creating a new field.
+Houdini: HeightField File. One sample per pixel; image column = X, row = Z with row 0 at the field's min Z (the layout export png16 writes, so a round trip lines up). Values 0..1 map to height_min..height_max (use the numbers from the export sidecar; 0 and 1 for masks). The image covers size.x metres along X (or (pixels − 1) × resolution) around center, Z following its aspect. With a heightfield connected, the image is written into `layer` of that field instead of creating one: placed in the world the same way (fit world: every sample reads the image at its own X/Z, bilinear, so a tile reads the same values as the whole map; samples outside the image keep the layer), or stretched over the connected field (fit field, which depends on that field's extent).
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `heightfield` | yes | no | optional: write the image into this field (stretched over its extent) |
+| 0 | `heightfield` | yes | no | optional: write the image into this field |
 
 **Parameters**
 
@@ -7306,9 +7398,10 @@ Houdini: HeightField File. One sample per pixel; image column = X, row = Z with 
 | `height_min` | float | `0` |  |  | `min`, `low` | value for black (0) |
 | `height_max` | float | `10` |  |  | `max`, `high` | value for white (1) |
 | `channel` | enum | `"luminance"` |  | `luminance`, `average`, `r`, `g`, `b`, `a` |  | which channel of a colour image |
-| `size` | vec2 | `[20,20]` |  |  |  | new field: extent in X and Z (metres) |
-| `resolution` | float | `0` | 0.. |  |  | new field: cell size; > 0 overrides size (extent = (pixels - 1) × resolution) |
+| `size` | vec2 | `[20,20]` |  |  |  | image extent along X (metres; Z follows the image aspect): a new field's size, or where the image lies over a connected field (fit world) |
+| `resolution` | float | `0` | 0.. |  |  | pixel spacing (metres); > 0 overrides size (extent = (pixels - 1) × resolution) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos` | field centre: X and Z place the grid, Y is added to the initial height |
+| `fit` | enum | `"world"` |  | `world`, `field` | `placement` | with a heightfield connected: world = the image lies at center/size in the world and each sample reads it at its X/Z; field = stretch the image over the connected field (depends on its extent) |
 | `flip_z` | bool | `false` |  |  |  | image row 0 at max Z instead of min Z |
 | `name` | string | `"heightfield"` |  |  |  | new field name |
 
@@ -7404,7 +7497,7 @@ category: `heightfield` · aliases: `heightfield_copylayer`, `heightfield_layerc
 
 Layer operations: compute a layer from an expression over layers ("height * mask + 2"), copy, rename, delete or fill.
 
-Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer's current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), vars.*, b_<layer> = a layer of the heightfield in input 1 sampled at x, z, and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too.
+Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer's current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), vars.*, b_<layer> = a layer of the heightfield in input 1 sampled at x, z, and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too. Write expressions in x z (and layers) to get the same values on a tile as on the whole map: i j u v count from the field's own corner and extent.
 
 **Inputs**
 
@@ -8018,9 +8111,9 @@ Houdini: HeightField Project. Polygons stamp the Y of their surface straight abo
 
 category: `heightfield` · aliases: `hf_remap`
 
-Remap a layer's values: fit an input range to an output range through a ramp (normalise, invert, shape heights or masks).
+Remap a layer's values: fit an input range to an output range through a ramp (invert, shape heights or masks).
 
-Houdini: HeightField Remap. t = (value − input_min) / (input_max − input_min) (auto_range uses the layer's own min/max), then value = output_min + ramp(t) × (output_max − output_min). A ramp like [[0,0],[0.5,0.2],[1,1]] flattens valleys and sharpens peaks.
+Houdini: HeightField Remap. t = (value − input_min) / (input_max − input_min), then value = output_min + ramp(t) × (output_max − output_min). The input range is absolute, so a tile remaps exactly like the same area of the whole map; auto_range uses the layer's own min/max instead, which depend on the field's extent (a tile or a cropped field remaps differently). A ramp like [[0,0],[0.5,0.2],[1,1]] flattens valleys and sharpens peaks.
 
 **Inputs**
 
@@ -8033,9 +8126,9 @@ Houdini: HeightField Remap. t = (value − input_min) / (input_max − input_min
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `layer` | string | `"height"` |  |  |  | layer to modify |
-| `auto_range` | bool | `true` |  |  |  | use the layer's min/max as the input range |
-| `input_min` | float | `0` |  |  |  | input range start (when auto_range is off) |
-| `input_max` | float | `1` |  |  |  | input range end (when auto_range is off) |
+| `input_min` | float | `0` |  |  |  | input value for t = 0 (e.g. the lowest height in metres) |
+| `input_max` | float | `1` |  |  |  | input value for t = 1 |
+| `auto_range` | bool | `false` |  |  |  | use the layer's own min/max as the input range instead (depends on the field's extent) |
 | `output_min` | float | `0` |  |  | `min` | output for t = 0 |
 | `output_max` | float | `1` |  |  | `max` | output for t = 1 |
 | `ramp` | ramp | `[[0,0],[1,1]]` |  |  |  | shape: [[t, value], ...] with t and value 0..1 |
@@ -8067,6 +8160,8 @@ Houdini: HeightField Remap. t = (value − input_min) / (input_max − input_min
         "n"
       ],
       "params": {
+        "input_min": -3,
+        "input_max": 3,
         "output_min": 0,
         "output_max": 6,
         "ramp": [
@@ -8096,7 +8191,7 @@ category: `heightfield` · aliases: `hf_resample`, `heightfield_resize`
 
 Change a heightfield's resolution over the same extent (all layers, bilinear; pre-blurred when shrinking), e.g. to an Unreal size like 505 × 505.
 
-Houdini: HeightField Resample. Give the new cell size (resolution), exact sample counts (samples), or a factor on the sample count (2 = twice as many per side). The X extent is kept exactly; Z follows the new cell size.
+Houdini: HeightField Resample. Give the new cell size (resolution), exact sample counts (samples), or a factor on the sample count (2 = twice as many per side). The X extent is kept exactly; Z follows the new cell size. The new grid starts at the field's corner and its cell is the X extent divided evenly, so tiles of a map resample onto one shared grid only when the resolution divides each tile's extent (heightfield_crop tiles of equal size do); shrinking pre-blurs, which needs a margin at tile borders.
 
 **Inputs**
 
@@ -8152,7 +8247,7 @@ category: `heightfield` · aliases: `hf_scatter`, `heightfield_scatter_points`
 
 Scatter points on a heightfield by a mask layer's density: P on the surface, N from the slope (or straight up), height/slope/mask attributes, optional minimum distance. Feed copy_to_points.
 
-Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field's surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field's heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point). N is the surface normal, and copy_to_points aims a copy's +Z along N (Houdini convention), which lays a Y-up tree down: align upright writes orient = identity so trees, houses and posts stand as modelled, align slope writes an orient that turns +Y onto the normal so rocks and shrubs lean with the terrain (orient wins over N in copy_to_points; random yaw goes on top with copy_to_points rotate_attrib). min_distance keeps every pair of points at least that far apart in XZ (exact dart throwing over the drawn candidates, replacing relax): building lots that never overlap; the count can come out lower when the masked area is full.
+Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field's surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field's heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point). N is the surface normal, and copy_to_points aims a copy's +Z along N (Houdini convention), which lays a Y-up tree down: align upright writes orient = identity so trees, houses and posts stand as modelled, align slope writes an orient that turns +Y onto the normal so rocks and shrubs lean with the terrain (orient wins over N in copy_to_points; random yaw goes on top with copy_to_points rotate_attrib). min_distance keeps every pair of points at least that far apart in XZ (exact dart throwing over the drawn candidates, replacing relax): building lots that never overlap; the count can come out lower when the masked area is full. Points are drawn over the whole field (density is per m², but the seeded draw, relax and min_distance see every sample), so a tile gets other points than the same area of the whole map: scatter on the whole map and keep the points inside the tile when tiles must match.
 
 **Inputs**
 
@@ -8221,9 +8316,9 @@ Houdini: HeightField Scatter. Count = density × area weighted by the mask (or c
 
 category: `heightfield` · aliases: `hf_terrace`
 
-Terrace a heightfield: quantise heights into flat steps (rice terraces, mesas, strata), with rounded risers.
+Terrace a heightfield: quantise heights into flat steps at absolute levels (rice terraces, mesas, strata), with rounded risers.
 
-Houdini: HeightField Terrace. Levels are base + n × step (step = (max − min) / steps unless step_height is set). rounding 0 = flat steps with vertical risers, 1 = smooth S-shaped risers across the whole step.
+Houdini: HeightField Terrace. levels step (default): terraces at base + n × step_height, absolute heights, so a tile gets the same levels as the whole map. levels range: steps equal terraces from range_min to range_max (also absolute). levels layer: steps terraces between the layer's own min and max, which depend on the field's extent (a tile or a cropped field gets other levels than the whole map). rounding 0 = flat steps with vertical risers, 1 = smooth S-shaped risers across the whole step.
 
 **Inputs**
 
@@ -8236,9 +8331,12 @@ Houdini: HeightField Terrace. Levels are base + n × step (step = (max − min) 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `layer` | string | `"height"` |  |  |  | layer to modify |
-| `steps` | int | `8` | 1..1000 |  | `count`, `levels` | number of terraces between the layer's min and max |
-| `step_height` | float | `0` | 0.. |  | `height`, `spacing` | terrace height (metres); > 0 overrides steps |
-| `offset` | float | `0` |  |  | `shift` | shift the terrace levels (metres) |
+| `levels` | enum | `"step"` |  | `step`, `range`, `layer` | `mode` | where the terraces sit: step = base + n × step_height; range = steps terraces from range_min to range_max; layer = steps terraces between the layer's own min and max (depends on the field's extent) |
+| `step_height` | float | `1` | 0.. |  | `height`, `spacing` | levels step: terrace height (metres) |
+| `base` | float | `0` |  |  |  | levels step: the height of one terrace level (metres); the others are base ± n × step_height |
+| `steps` | int | `8` | 1..1000 |  | `count` | levels range and layer: number of terraces |
+| `range_min` | float | `0` |  |  |  | levels range: height of the lowest terrace level (metres) |
+| `range_max` | float | `10` |  |  |  | levels range: height the steps reach (metres) |
 | `rounding` | float | `0.2` | 0..1 |  | `smoothness`, `sharpness` | riser width as a fraction of the step: 0 = sharp, 1 = smooth |
 | `mask_layer` | string | `""` |  |  | `mask` | optional 0..1 layer that blends the result in ("" = everywhere), e.g. "mask" |
 
@@ -8298,7 +8396,7 @@ Houdini: HeightField Convert to polygons. Points are row-major like the layers (
 | `step` | int | `1` | 1..64 |  | `decimate`, `lod` | use every Nth sample (2 = a quarter of the quads) |
 | `layers` | bool | `true` |  |  |  | copy every layer to a point float attribute |
 | `normals` | bool | `true` |  |  |  | point N from the field gradient |
-| `uv` | bool | `true` |  |  |  | point uv 0..1 over the field |
+| `uv` | bool | `true` |  |  |  | point uv 0..1 over the field (over its own extent: a tile gets its own 0..1) |
 | `color` | enum | `"none"` |  | `none`, `mask`, `height`, `terrain` |  | point Cd from the layers |
 | `keep_heightfield` | bool | `false` |  |  |  | keep the heightfield volume alongside the mesh |
 
@@ -8353,7 +8451,7 @@ Houdini: Convert HeightField to VDB (SDF). Distance = (y − h(x, z)) / sqrt(1 +
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `depth` | float | `1` | 0.. |  | `thickness` | solid thickness below the lowest point (metres) |
+| `depth` | float | `1` | 0.. |  | `thickness` | solid thickness below the field's lowest point (metres; that point depends on the field's extent, so tiles get their own bottoms) |
 | `closed` | bool | `true` |  |  |  | cap the sides and the bottom (a finite block); false = an infinite slab clipped by the bounds |
 | `keep_heightfield` | bool | `false` |  |  |  | keep the heightfield volume |
 | `name` | string | `"terrain_sdf"` |  |  |  | SDF volume name |
@@ -8410,7 +8508,7 @@ category: `heightfield` · aliases: `heightfield_xform`, `hf_transform`, `height
 
 Move, scale, raise or turn (by 90° steps) heightfields: translate X/Z moves the grid, Y raises the heights; scale resizes the cells.
 
-Houdini: HeightField Transform. Heightfields stay axis-aligned grids: rotation snaps to multiples of 90°, scale is uniform in X/Z (it changes the cell size), height_scale multiplies heights about pivot Y. The generic transform node applies the same rules.
+Houdini: HeightField Transform. Heightfields stay axis-aligned grids: rotation snaps to multiples of 90°, scale is uniform in X/Z (it changes the cell size), height_scale multiplies heights about pivot Y. Scale and rotation turn about pivot, a world point, so the tiles of a map move together; pivot_at_center turns each field about its own centre instead. The generic transform node applies the same rules.
 
 **Inputs**
 
@@ -8427,7 +8525,7 @@ Houdini: HeightField Transform. Heightfields stay axis-aligned grids: rotation s
 | `height_scale` | float | `1` |  |  | `scale_y`, `vertical_scale` | multiply heights about pivot Y |
 | `rotate` | float | `0` |  |  | `r`, `rot` | rotation about Y in degrees (snapped to 90° steps) |
 | `pivot` | vec3 | `[0,0,0]` |  |  |  | pivot for scale and rotation (X/Z ignored when pivot_at_center) |
-| `pivot_at_center` | bool | `true` |  |  |  | use the field centre as the X/Z pivot |
+| `pivot_at_center` | bool | `false` |  |  |  | use the field's own centre as the X/Z pivot (depends on its extent: a tile turns about its own centre) |
 
 **Writes:** transformed heightfields
 
@@ -12011,9 +12109,9 @@ Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1
 
 category: `texture` · aliases: `heightfield_to_image`, `hf2tex`, `heightfield_texture`
 
-Bridge: a heightfield layer becomes a grey image of the same sample count (normalised to 0..1 by default).
+Bridge: a heightfield layer becomes a grey image of the same sample count (input_min..input_max fitted to 0..1 by default).
 
-Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits the layer's min..max to 0..1 (the range is recorded as the stats range_min / range_max); off writes raw values. Feed tex_normal_from_height or tex_height_to_ao for terrain maps, or bake terrain masks into textures.
+Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits input_min..input_max to 0..1 (absolute, so every tile of a map gets the same grey for the same height; values outside the range fall outside 0..1); auto_range fits the layer's own min..max instead, which depend on the field's extent; off writes raw values. The range used is recorded as the stats range_min / range_max. Feed tex_normal_from_height or tex_height_to_ao for terrain maps, or bake terrain masks into textures.
 
 **Inputs**
 
@@ -12026,7 +12124,10 @@ Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits the lay
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `layer` | string | `"height"` |  |  |  | heightfield layer |
-| `normalize` | bool | `true` |  |  | `fit` | fit min..max to 0..1 |
+| `normalize` | bool | `true` |  |  | `fit` | fit the input range to 0..1 (off writes raw values) |
+| `input_min` | float | `0` |  |  |  | layer value that becomes 0 (e.g. the lowest height in metres) |
+| `input_max` | float | `1` |  |  |  | layer value that becomes 1 |
+| `auto_range` | bool | `false` |  |  |  | use the layer's own min..max as the input range instead (depends on the field's extent) |
 | `keep` | bool | `false` |  |  |  | keep the input (heightfield and all) and add the image; off outputs only the image |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = the layer name) |
 
@@ -12055,7 +12156,9 @@ Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits the lay
         "hills"
       ],
       "params": {
-        "name": "height"
+        "name": "height",
+        "input_min": -3,
+        "input_max": 3
       }
     }
   },

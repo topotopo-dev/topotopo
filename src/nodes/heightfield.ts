@@ -5,7 +5,7 @@
 import { Geometry } from '../core/geometry.ts';
 import type { SdfVolume } from '../core/geometry.ts';
 import {
-  Heightfield, MAX_SAMPLES, asHeightfield, bilinear, blurGrid, curvesOf, distanceTransform, heightfieldToMesh,
+  Heightfield, MAX_SAMPLES, asHeightfield, bilinear, blurGrid, cropHeightfield, curvesOf, distanceTransform, heightfieldToMesh,
   heightfieldsOf, isHeightfield, layerStats, rasterizeMesh, slopeLayer, smoothstep, splatSegment, transformHeightfield,
 } from '../core/heightfield.ts';
 import { erodeStep, makeErosionField } from '../core/erosion.ts';
@@ -304,25 +304,27 @@ defineNode({
   type: 'heightfield_from_image',
   category: 'heightfield',
   summary: 'Load a heightmap or mask from an 8/16-bit PNG (grey or colour) into a heightfield layer.',
-  description: 'Houdini: HeightField File. One sample per pixel; image column = X, row = Z with row 0 at the field\'s min Z (the layout export png16 writes, so a round trip lines up). Values 0..1 map to height_min..height_max (use the numbers from the export sidecar; 0 and 1 for masks). With a heightfield connected, the image is stretched over that field and written into `layer` instead of creating a new field.',
+  description: 'Houdini: HeightField File. One sample per pixel; image column = X, row = Z with row 0 at the field\'s min Z (the layout export png16 writes, so a round trip lines up). Values 0..1 map to height_min..height_max (use the numbers from the export sidecar; 0 and 1 for masks). The image covers size.x metres along X (or (pixels − 1) × resolution) around center, Z following its aspect. With a heightfield connected, the image is written into `layer` of that field instead of creating one: placed in the world the same way (fit world: every sample reads the image at its own X/Z, bilinear, so a tile reads the same values as the whole map; samples outside the image keep the layer), or stretched over the connected field (fit field, which depends on that field\'s extent).',
   aliases: ['heightfield_file', 'heightmap_import', 'hf_from_image', 'heightfield_image'],
-  inputs: [{ name: 'heightfield', desc: 'optional: write the image into this field (stretched over its extent)', optional: true }],
+  inputs: [{ name: 'heightfield', desc: 'optional: write the image into this field', optional: true }],
   params: {
     path: { type: 'path', default: '', desc: 'PNG file (relative to the workspace) or URL', aliases: ['file', 'filename'] },
     layer: layerParam('height', 'layer to write'),
     height_min: { type: 'float', default: 0, desc: 'value for black (0)', aliases: ['min', 'low'] },
     height_max: { type: 'float', default: 10, desc: 'value for white (1)', aliases: ['max', 'high'] },
     channel: { type: 'enum', options: ['luminance', 'average', 'r', 'g', 'b', 'a'], default: 'luminance', desc: 'which channel of a colour image' },
-    size: { type: 'vec2', default: [20, 20], desc: 'new field: extent in X and Z (metres)' },
-    resolution: { type: 'float', default: 0, min: 0, desc: 'new field: cell size; > 0 overrides size (extent = (pixels - 1) × resolution)' },
+    size: { type: 'vec2', default: [20, 20], desc: 'image extent along X (metres; Z follows the image aspect): a new field\'s size, or where the image lies over a connected field (fit world)' },
+    resolution: { type: 'float', default: 0, min: 0, desc: 'pixel spacing (metres); > 0 overrides size (extent = (pixels - 1) × resolution)' },
     center: centerParam(),
+    fit: { type: 'enum', options: ['world', 'field'], default: 'world', desc: 'with a heightfield connected: world = the image lies at center/size in the world and each sample reads it at its X/Z; field = stretch the image over the connected field (depends on its extent)', aliases: ['placement'] },
     flip_z: { type: 'bool', default: false, desc: 'image row 0 at max Z instead of min Z' },
     name: { type: 'string', default: 'heightfield', desc: 'new field name' },
   },
   signatureExtra: (p, engine) => engine.host.fileStamp(p.path),
   outputs: 'the layer (a new field also gets height and mask)',
   example: { type: 'heightfield_from_image', params: { path: 'terrain.png', size: [100, 100], height_min: 0, height_max: 25 } },
-  async cook({ hasInput, input, p, engine, type }) {
+  async cook(ctx) {
+    const { hasInput, input, p, engine, type } = ctx;
     if (!p.path) throw new NodeError(`${type}: path is empty`);
     checkName(p.layer, type);
     const bytes = await engine.host.readFile(p.path).catch((e: any) => { throw new NodeError(`${type}: cannot read "${p.path}": ${e.message}`); });
@@ -333,26 +335,39 @@ defineNode({
     const iw = img.width, ih = img.height;
     const at = (fx: number, fz: number) => lo + (hi - lo) * bilinear(v, iw, ih, fx, p.flip_z ? ih - 1 - fz : fz);
     if (iw < 2 || ih < 2) throw new NodeError(`${type}: image is ${iw} × ${ih}; need at least 2 × 2 pixels`);
+    // where the image lies in the world: pixel (0, 0) at x0, z0, pixels `cell` metres apart (a new field's grid)
+    const cell = p.resolution > 0 ? p.resolution : p.size[0] / (iw - 1);
+    if (!(cell > 0)) throw new NodeError(`${type}: size must be > 0`);
+    const x0 = p.center[0] - ((iw - 1) * cell) / 2, z0 = p.center[2] - ((ih - 1) * cell) / 2;
     if (hasInput(0)) {
       const g = input(0).clone();
-      let n = 0;
+      let n = 0, missed = 0;
+      const eps = 1e-6;
       for (let k = 0; k < g.volumes.length; k++) {
         const vol = g.volumes[k];
         if (!isHeightfield(vol)) continue;
         const hf = asHeightfield(vol);
         const out = hf.writable(p.layer);
+        let inside = 0;
         for (let j = 0; j < hf.height; j++)
-          for (let i = 0; i < hf.width; i++) out[j * hf.width + i] = at((i / (hf.width - 1)) * (iw - 1), (j / (hf.height - 1)) * (ih - 1));
+          for (let i = 0; i < hf.width; i++) {
+            if (p.fit === 'field') { out[j * hf.width + i] = at((i / (hf.width - 1)) * (iw - 1), (j / (hf.height - 1)) * (ih - 1)); continue; }
+            const fx = (hf.x(i) - x0) / cell, fz = (hf.z(j) - z0) / cell;
+            if (fx < -eps || fz < -eps || fx > iw - 1 + eps || fz > ih - 1 + eps) continue;
+            out[j * hf.width + i] = at(fx, fz);
+            inside++;
+          }
+        if (p.fit !== 'field' && !inside) missed++;
         g.volumes[k] = hf;
         n++;
       }
       if (!n) throw new NodeError(`${type}: input has no heightfield`, NO_FIELD);
+      const m = (x: number) => +x.toPrecision(6);
+      if (missed) ctx.warn(`the image (${m((iw - 1) * cell)} × ${m((ih - 1) * cell)} m around ${m(p.center[0])}, ${m(p.center[2])}) does not overlap ${missed === n ? 'the heightfield' : `${missed} of ${n} heightfields`}; set size/center to where it lies, or fit field to stretch it over the field`);
       return g;
     }
     checkGrid(iw, ih, type);
-    const cell = p.resolution > 0 ? p.resolution : p.size[0] / (iw - 1);
-    if (!(cell > 0)) throw new NodeError(`${type}: size must be > 0`);
-    const hf = new Heightfield(iw, ih, cell, [p.center[0] - ((iw - 1) * cell) / 2, p.center[2] - ((ih - 1) * cell) / 2], undefined, p.name || 'heightfield');
+    const hf = new Heightfield(iw, ih, cell, [x0, z0], undefined, p.name || 'heightfield');
     const out = new Float32Array(iw * ih);
     for (let j = 0; j < ih; j++) for (let i = 0; i < iw; i++) out[j * iw + i] = at(i, j) + (p.layer === 'height' ? p.center[1] : 0);
     hf.layers.set('height', p.layer === 'height' ? out : new Float32Array(iw * ih).fill(p.center[1]));
@@ -384,7 +399,7 @@ defineNode({
     step: { type: 'int', default: 1, min: 1, max: 64, desc: 'use every Nth sample (2 = a quarter of the quads)', aliases: ['decimate', 'lod'] },
     layers: { type: 'bool', default: true, desc: 'copy every layer to a point float attribute' },
     normals: { type: 'bool', default: true, desc: 'point N from the field gradient' },
-    uv: { type: 'bool', default: true, desc: 'point uv 0..1 over the field' },
+    uv: { type: 'bool', default: true, desc: 'point uv 0..1 over the field (over its own extent: a tile gets its own 0..1)' },
     color: { type: 'enum', options: ['none', 'mask', 'height', 'terrain'], default: 'none', desc: 'point Cd from the layers' },
     keep_heightfield: { type: 'bool', default: false, desc: 'keep the heightfield volume alongside the mesh' },
   },
@@ -408,7 +423,7 @@ defineNode({
   aliases: ['heightfield_convert_sdf', 'hf_to_sdf', 'sdf_from_heightfield'],
   inputs: [{ name: 'heightfield', desc: 'geometry with heightfields' }],
   params: {
-    depth: { type: 'float', default: 1, min: 0, desc: 'solid thickness below the lowest point (metres)', aliases: ['thickness'] },
+    depth: { type: 'float', default: 1, min: 0, desc: 'solid thickness below the field\'s lowest point (metres; that point depends on the field\'s extent, so tiles get their own bottoms)', aliases: ['thickness'] },
     closed: { type: 'bool', default: true, desc: 'cap the sides and the bottom (a finite block); false = an infinite slab clipped by the bounds' },
     keep_heightfield: { type: 'bool', default: false, desc: 'keep the heightfield volume' },
     name: { type: 'string', default: 'terrain_sdf', desc: 'SDF volume name' },
@@ -453,15 +468,15 @@ function heightfieldSdf(hf: Heightfield, depth: number, closed: boolean, name: s
 defineNode({
   type: 'heightfield_remap',
   category: 'heightfield',
-  summary: 'Remap a layer\'s values: fit an input range to an output range through a ramp (normalise, invert, shape heights or masks).',
-  description: 'Houdini: HeightField Remap. t = (value − input_min) / (input_max − input_min) (auto_range uses the layer\'s own min/max), then value = output_min + ramp(t) × (output_max − output_min). A ramp like [[0,0],[0.5,0.2],[1,1]] flattens valleys and sharpens peaks.',
+  summary: 'Remap a layer\'s values: fit an input range to an output range through a ramp (invert, shape heights or masks).',
+  description: 'Houdini: HeightField Remap. t = (value − input_min) / (input_max − input_min), then value = output_min + ramp(t) × (output_max − output_min). The input range is absolute, so a tile remaps exactly like the same area of the whole map; auto_range uses the layer\'s own min/max instead, which depend on the field\'s extent (a tile or a cropped field remaps differently). A ramp like [[0,0],[0.5,0.2],[1,1]] flattens valleys and sharpens peaks.',
   aliases: ['hf_remap'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
     layer: layerParam(),
-    auto_range: { type: 'bool', default: true, desc: 'use the layer\'s min/max as the input range' },
-    input_min: { type: 'float', default: 0, desc: 'input range start (when auto_range is off)' },
-    input_max: { type: 'float', default: 1, desc: 'input range end (when auto_range is off)' },
+    input_min: { type: 'float', default: 0, desc: 'input value for t = 0 (e.g. the lowest height in metres)' },
+    input_max: { type: 'float', default: 1, desc: 'input value for t = 1' },
+    auto_range: { type: 'bool', default: false, desc: 'use the layer\'s own min/max as the input range instead (depends on the field\'s extent)' },
     output_min: { type: 'float', default: 0, desc: 'output for t = 0', aliases: ['min'] },
     output_max: { type: 'float', default: 1, desc: 'output for t = 1', aliases: ['max'] },
     ramp: { type: 'ramp', default: [[0, 0], [1, 1]], desc: 'shape: [[t, value], ...] with t and value 0..1' },
@@ -469,13 +484,13 @@ defineNode({
     mask_layer: maskParam(),
   },
   outputs: 'the layer',
-  example: { nodes: { hf: { type: 'heightfield' }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3 } }, r: { type: 'heightfield_remap', in: ['n'], params: { output_min: 0, output_max: 6, ramp: [[0, 0], [0.6, 0.25], [1, 1]] } } }, output: 'r' },
+  example: { nodes: { hf: { type: 'heightfield' }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3 } }, r: { type: 'heightfield_remap', in: ['n'], params: { input_min: -3, input_max: 3, output_min: 0, output_max: 6, ramp: [[0, 0], [0.6, 0.25], [1, 1]] } } }, output: 'r' },
   cook: (ctx) => {
     const { p } = ctx;
     return eachField(ctx, (hf) => {
       const a = layerOf(hf, p.layer, ctx.type);
-      const st = layerStats(a)!;
-      const lo = p.auto_range ? st.min : p.input_min, hi = p.auto_range ? st.max : p.input_max;
+      const st = p.auto_range ? layerStats(a)! : null;
+      const lo = st ? st.min : p.input_min, hi = st ? st.max : p.input_max;
       const span = hi - lo;
       const mask = maskOf(hf, p.mask_layer, ctx.type);
       writeLayer(hf, p.layer, mask, (_k, old) => {
@@ -537,15 +552,18 @@ defineNode({
 defineNode({
   type: 'heightfield_terrace',
   category: 'heightfield',
-  summary: 'Terrace a heightfield: quantise heights into flat steps (rice terraces, mesas, strata), with rounded risers.',
-  description: 'Houdini: HeightField Terrace. Levels are base + n × step (step = (max − min) / steps unless step_height is set). rounding 0 = flat steps with vertical risers, 1 = smooth S-shaped risers across the whole step.',
+  summary: 'Terrace a heightfield: quantise heights into flat steps at absolute levels (rice terraces, mesas, strata), with rounded risers.',
+  description: 'Houdini: HeightField Terrace. levels step (default): terraces at base + n × step_height, absolute heights, so a tile gets the same levels as the whole map. levels range: steps equal terraces from range_min to range_max (also absolute). levels layer: steps terraces between the layer\'s own min and max, which depend on the field\'s extent (a tile or a cropped field gets other levels than the whole map). rounding 0 = flat steps with vertical risers, 1 = smooth S-shaped risers across the whole step.',
   aliases: ['hf_terrace'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
     layer: layerParam(),
-    steps: { type: 'int', default: 8, min: 1, max: 1000, desc: 'number of terraces between the layer\'s min and max', aliases: ['count', 'levels'] },
-    step_height: { type: 'float', default: 0, min: 0, desc: 'terrace height (metres); > 0 overrides steps', aliases: ['height', 'spacing'] },
-    offset: { type: 'float', default: 0, desc: 'shift the terrace levels (metres)', aliases: ['shift'] },
+    levels: { type: 'enum', options: ['step', 'range', 'layer'], default: 'step', desc: 'where the terraces sit: step = base + n × step_height; range = steps terraces from range_min to range_max; layer = steps terraces between the layer\'s own min and max (depends on the field\'s extent)', aliases: ['mode'] },
+    step_height: { type: 'float', default: 1, min: 0, desc: 'levels step: terrace height (metres)', aliases: ['height', 'spacing'] },
+    base: { type: 'float', default: 0, desc: 'levels step: the height of one terrace level (metres); the others are base ± n × step_height' },
+    steps: { type: 'int', default: 8, min: 1, max: 1000, desc: 'levels range and layer: number of terraces', aliases: ['count'] },
+    range_min: { type: 'float', default: 0, desc: 'levels range: height of the lowest terrace level (metres)' },
+    range_max: { type: 'float', default: 10, desc: 'levels range: height the steps reach (metres)' },
     rounding: { type: 'float', default: 0.2, min: 0, max: 1, desc: 'riser width as a fraction of the step: 0 = sharp, 1 = smooth', aliases: ['smoothness', 'sharpness'] },
     mask_layer: maskParam(),
   },
@@ -555,10 +573,19 @@ defineNode({
     const { p } = ctx;
     return eachField(ctx, (hf) => {
       const a = layerOf(hf, p.layer, ctx.type);
-      const st = layerStats(a)!;
-      const step = p.step_height > 0 ? p.step_height : (st.max - st.min) / p.steps;
-      if (!(step > 0)) return;
-      const base = (p.step_height > 0 ? 0 : st.min) + p.offset;
+      let base: number, step: number;
+      if (p.levels === 'layer') {
+        const st = layerStats(a)!;
+        base = st.min; step = (st.max - st.min) / p.steps;
+      } else if (p.levels === 'range') {
+        base = p.range_min; step = (p.range_max - p.range_min) / p.steps;
+      } else {
+        base = p.base; step = p.step_height;
+      }
+      if (!(step > 0)) {
+        if (p.levels !== 'layer') ctx.warn(p.levels === 'range' ? `range_max (${p.range_max}) must be above range_min (${p.range_min}); the layer is unchanged` : 'step_height is 0; the layer is unchanged');
+        return;
+      }
       const w = p.rounding;
       writeLayer(hf, p.layer, maskOf(hf, p.mask_layer, ctx.type), (_k, old) => {
         const s = (old - base) / step, f = Math.floor(s), t = s - f;
@@ -643,7 +670,7 @@ defineNode({
   type: 'heightfield_layer',
   category: 'heightfield',
   summary: 'Layer operations: compute a layer from an expression over layers ("height * mask + 2"), copy, rename, delete or fill.',
-  description: 'Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer\'s current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), vars.*, b_<layer> = a layer of the heightfield in input 1 sampled at x, z, and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too.',
+  description: 'Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for heightfields. Expression variables: every layer by name (height, mask, flow …), value (the target layer\'s current value), x z (world position), i j (sample indices), u v (0..1 over the field), cell (cell size), vars.*, b_<layer> = a layer of the heightfield in input 1 sampled at x, z, and all wrangle helpers (clamp fit smoothstep noise min max pow …). A body with "return" works too. Write expressions in x z (and layers) to get the same values on a tile as on the whole map: i j u v count from the field\'s own corner and extent.',
   aliases: ['heightfield_copylayer', 'heightfield_layerclear', 'hf_layer', 'heightfield_wrangle', 'heightfield_expr'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }, { name: 'other', desc: 'optional second heightfield: its layers as b_<name>', optional: true }],
   params: {
@@ -1130,14 +1157,14 @@ defineNode({
   type: 'heightfield_flow',
   category: 'heightfield',
   summary: 'Compute downhill drainage accumulation and flow direction for river masks.',
-  description: 'Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. By default local minima retain drainage. fill_sinks routes over a priority-flood filled surface and resolves flats with stable receivers, without modifying the stored height or lake layers. The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Without normalise or log_scale, drainage is contributing area in square metres. Loads the erosion WASM kernel.',
+  description: 'Routes contributing cell area downhill without modifying height. D8 sends it to the steepest of eight neighbours; D-infinity splits flow between receivers on the steepest triangular facet. By default local minima retain drainage. fill_sinks routes over a priority-flood filled surface and resolves flats with stable receivers, without modifying the stored height or lake layers. The direction layer records the dominant receiver: E, SE, S, SW, W, NW, N, NE = 0..7, and 255 for a sink. Drainage is contributing area in square metres, ln(1 + area) with log_scale (the default), so thresholds are absolute; normalise divides by the field\'s largest value instead, which depends on the field\'s extent. Drainage only counts area inside the field: a tile sees rivers that enter it as starting at its border, so route the whole map (or a tile with a margin that holds the catchments) and crop. Loads the erosion WASM kernel.',
   aliases: ['hf_flow', 'heightfield_drainage'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a height layer' }],
   params: {
     method: { type: 'enum', options: ['d8', 'dinf'], default: 'dinf', desc: 'D8 chooses one steepest receiver; D-infinity splits contributing area between two downslope receivers' },
     fill_sinks: { type: 'bool', default: false, desc: 'route over a priority-flood filled surface with stable flat receivers, preserving the original height; false leaves local minima as sinks' },
-    normalise: { type: 'bool', default: true, desc: 'scale drainage to 0..1 after applying log_scale', aliases: ['normalize'] },
-    log_scale: { type: 'bool', default: true, desc: 'apply log(1 + drainage) to reveal small tributaries alongside main rivers' },
+    normalise: { type: 'bool', default: false, desc: 'divide drainage by its largest value on the field (0..1, after log_scale); depends on the field\'s extent', aliases: ['normalize'] },
+    log_scale: { type: 'bool', default: true, desc: 'write ln(1 + area in m²) to reveal small tributaries alongside main rivers' },
   },
   outputs: 'layers drainage and direction; all existing layers preserved',
   example: { nodes: { hf: { type: 'heightfield', params: { size: [20, 20], resolution: 0.5 } }, n: { type: 'heightfield_noise', in: ['hf'], params: { fractal: 'ridged', amplitude: 4 } }, f: { type: 'heightfield_flow', in: ['n'] } }, output: 'f' },
@@ -1368,7 +1395,7 @@ defineNode({
   type: 'heightfield_scatter',
   category: 'heightfield',
   summary: 'Scatter points on a heightfield by a mask layer\'s density: P on the surface, N from the slope (or straight up), height/slope/mask attributes, optional minimum distance. Feed copy_to_points.',
-  description: 'Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field\'s surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field\'s heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point). N is the surface normal, and copy_to_points aims a copy\'s +Z along N (Houdini convention), which lays a Y-up tree down: align upright writes orient = identity so trees, houses and posts stand as modelled, align slope writes an orient that turns +Y onto the normal so rocks and shrubs lean with the terrain (orient wins over N in copy_to_points; random yaw goes on top with copy_to_points rotate_attrib). min_distance keeps every pair of points at least that far apart in XZ (exact dart throwing over the drawn candidates, replacing relax): building lots that never overlap; the count can come out lower when the masked area is full.',
+  description: 'Houdini: HeightField Scatter. Count = density × area weighted by the mask (or count). Candidates are drawn by the mask (seeded), then thinned to even blue-noise spacing with relax (weighted sample elimination, as scatter, in chunks on the worker pool). Points sit exactly on the field\'s surface: bilinear between the samples (default), or with sample unreal_triangles the surface of an Unreal Landscape imported from this field\'s heightmap (export png16/r16): each cell split along its (0,0)–(1,1) diagonal in heightmap index space, column = X, row = Z (row 0 = min Z), which is how the Landscape triangulates its quads (vertex (x, y) = (column, row), Unreal Y = our Z), so instance bases land on the Landscape exactly. The modes agree at the samples and along cell edges and differ inside a cell by up to a quarter of its twist |h00 + h11 − h10 − h01|. N and slope come from central differences over one cell of the same surface; mask stays bilinear (Unreal samples weightmaps as textures). Attributes: height (Y), slope (degrees), mask (the density layer value at the point). N is the surface normal, and copy_to_points aims a copy\'s +Z along N (Houdini convention), which lays a Y-up tree down: align upright writes orient = identity so trees, houses and posts stand as modelled, align slope writes an orient that turns +Y onto the normal so rocks and shrubs lean with the terrain (orient wins over N in copy_to_points; random yaw goes on top with copy_to_points rotate_attrib). min_distance keeps every pair of points at least that far apart in XZ (exact dart throwing over the drawn candidates, replacing relax): building lots that never overlap; the count can come out lower when the masked area is full. Points are drawn over the whole field (density is per m², but the seeded draw, relax and min_distance see every sample), so a tile gets other points than the same area of the whole map: scatter on the whole map and keep the points inside the tile when tiles must match.',
   aliases: ['hf_scatter', 'heightfield_scatter_points'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1470,7 +1497,7 @@ defineNode({
   type: 'heightfield_resample',
   category: 'heightfield',
   summary: 'Change a heightfield\'s resolution over the same extent (all layers, bilinear; pre-blurred when shrinking), e.g. to an Unreal size like 505 × 505.',
-  description: 'Houdini: HeightField Resample. Give the new cell size (resolution), exact sample counts (samples), or a factor on the sample count (2 = twice as many per side). The X extent is kept exactly; Z follows the new cell size.',
+  description: 'Houdini: HeightField Resample. Give the new cell size (resolution), exact sample counts (samples), or a factor on the sample count (2 = twice as many per side). The X extent is kept exactly; Z follows the new cell size. The new grid starts at the field\'s corner and its cell is the X extent divided evenly, so tiles of a map resample onto one shared grid only when the resolution divides each tile\'s extent (heightfield_crop tiles of equal size do); shrinking pre-blurs, which needs a margin at tile borders.',
   aliases: ['hf_resample', 'heightfield_resize'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1520,7 +1547,7 @@ defineNode({
   type: 'heightfield_transform',
   category: 'heightfield',
   summary: 'Move, scale, raise or turn (by 90° steps) heightfields: translate X/Z moves the grid, Y raises the heights; scale resizes the cells.',
-  description: 'Houdini: HeightField Transform. Heightfields stay axis-aligned grids: rotation snaps to multiples of 90°, scale is uniform in X/Z (it changes the cell size), height_scale multiplies heights about pivot Y. The generic transform node applies the same rules.',
+  description: 'Houdini: HeightField Transform. Heightfields stay axis-aligned grids: rotation snaps to multiples of 90°, scale is uniform in X/Z (it changes the cell size), height_scale multiplies heights about pivot Y. Scale and rotation turn about pivot, a world point, so the tiles of a map move together; pivot_at_center turns each field about its own centre instead. The generic transform node applies the same rules.',
   aliases: ['heightfield_xform', 'hf_transform', 'heightfield_move'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1529,7 +1556,7 @@ defineNode({
     height_scale: { type: 'float', default: 1, desc: 'multiply heights about pivot Y', aliases: ['scale_y', 'vertical_scale'] },
     rotate: { type: 'float', default: 0, desc: 'rotation about Y in degrees (snapped to 90° steps)', aliases: ['r', 'rot'] },
     pivot: { type: 'vec3', default: [0, 0, 0], desc: 'pivot for scale and rotation (X/Z ignored when pivot_at_center)' },
-    pivot_at_center: { type: 'bool', default: true, desc: 'use the field centre as the X/Z pivot' },
+    pivot_at_center: { type: 'bool', default: false, desc: 'use the field\'s own centre as the X/Z pivot (depends on its extent: a tile turns about its own centre)' },
   },
   outputs: 'transformed heightfields',
   example: { nodes: { hf: { type: 'heightfield' }, n: { type: 'heightfield_noise', in: ['hf'] }, t: { type: 'heightfield_transform', in: ['n'], params: { translate: [20, 0, 0], height_scale: 2 } } }, output: 't' },
@@ -1542,5 +1569,85 @@ defineNode({
       const pv = p.pivot_at_center ? [c[0], p.pivot[1], c[1]] : p.pivot;
       return transformHeightfield(hf, fieldMatrix(p.translate, p.scale, p.height_scale, snapped, pv));
     });
+  },
+});
+
+// ---------------------------------------------------------------- crop
+
+/** Inclusive sample range of tile t of n along an axis of `samples` samples: the cells split evenly, borders shared. */
+function tileRange(samples: number, n: number, t: number): [number, number] {
+  const cells = samples - 1;
+  return [Math.floor((t * cells) / n), Math.floor(((t + 1) * cells) / n)];
+}
+
+defineNode({
+  type: 'heightfield_crop',
+  category: 'heightfield',
+  summary: 'Crop heightfields (every layer) to world bounds or to one tile of a grid, with an optional margin; the samples stay exactly where they were (no resampling).',
+  description: 'Cut a tile out of a whole map to preview or process it at full resolution, then build on the tile: nodes that work at world positions (noise, terrace, remap, masks by height or slope …) give the tile the same values as the same area of the map. mode tile: the field\'s cells are split evenly into tiles (nx, nz), tile (i, j) counting from min X / min Z, and neighbouring tiles share their border samples (as Unreal landscape tiles do). mode bounds: the samples covering min..max in X and Z (bounds between samples grow to the next sample; parts outside the field are dropped). margin keeps extra samples on every side (metres, rounded up to whole samples, or samples; less at the field\'s own border) for filters that read neighbours, such as blur, curvature, path and project. The crop is recorded in detail attributes: crop_core_min / crop_core_max (world X, Z of the tile or bounds without the margin: crop to them in mode bounds to drop the margin again), crop_margin (samples kept beyond the core on the −X, +X, −Z, +Z sides), crop_offset (the first sample\'s index in the input grid), crop_source_samples (the input\'s sample counts) and, in mode tile, crop_tile and crop_tiles (bounds mode keeps those of an earlier tile crop). With several heightfields each is cropped (tiles by its own grid) and the attributes describe the first. Other geometry passes through.',
+  aliases: ['hf_crop', 'heightfield_tile', 'heightfield_cut_tile'],
+  inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
+  params: {
+    mode: { type: 'enum', options: ['tile', 'bounds'], default: 'tile', desc: 'tile = one tile of a tiles grid over the field; bounds = the samples covering min..max' },
+    tiles: { type: 'ivec2', default: [2, 2], min: 1, max: 4096, desc: 'tile mode: number of tiles along X and Z', aliases: ['grid', 'tile_count'] },
+    tile: { type: 'ivec2', default: [0, 0], min: 0, max: 4095, desc: 'tile mode: tile index [column along X, row along Z], counting from 0 at min X / min Z', aliases: ['index', 'tile_index'] },
+    min: { type: 'vec2', default: [-5, -5], desc: 'bounds mode: world X and Z of the min corner (metres)', aliases: ['bounds_min'] },
+    max: { type: 'vec2', default: [5, 5], desc: 'bounds mode: world X and Z of the max corner (metres)', aliases: ['bounds_max'] },
+    margin: { type: 'float', default: 0, min: 0, desc: 'extra border kept on every side, in margin_unit (less at the field\'s own border): the reach of the filters that follow', aliases: ['padding', 'overlap'] },
+    margin_unit: { type: 'enum', options: ['metres', 'samples'], default: 'metres', desc: 'margin in metres (rounded up to whole samples) or in samples', aliases: ['margin_units'] },
+  },
+  outputs: 'the cropped heightfields with all their layers; detail crop_core_min, crop_core_max, crop_margin, crop_offset, crop_source_samples (tile mode also crop_tile, crop_tiles)',
+  example: {
+    nodes: {
+      map: { type: 'heightfield', params: { size: [40, 40], resolution: 0.25 } },
+      tile: { type: 'heightfield_crop', in: ['map'], params: { tiles: [4, 4], tile: [1, 2], margin: 2 } },
+      hills: { type: 'heightfield_noise', in: ['tile'], params: { amplitude: 3, element_size: 12 } },
+      core: { type: 'heightfield_crop', in: ['hills'], params: { mode: 'bounds', min: [-10, 0], max: [0, 10] } },
+    },
+    output: 'core',
+  },
+  cook: (ctx) => {
+    const { p, type } = ctx;
+    const g = ctx.input(0).clone();
+    const eps = 1e-6;
+    let first: { i0: number; i1: number; j0: number; j1: number; c: number[]; hf: Heightfield } | null = null;
+    for (let k = 0; k < g.volumes.length; k++) {
+      const v = g.volumes[k];
+      if (!isHeightfield(v)) continue;
+      const hf = asHeightfield(v);
+      // the core (tile or bounds) as inclusive sample ranges
+      let i0: number, i1: number, j0: number, j1: number;
+      if (p.mode === 'bounds') {
+        if (!(p.max[0] > p.min[0] && p.max[1] > p.min[1])) throw new NodeError(`${type}: max [${p.max.join(', ')}] must be above min [${p.min.join(', ')}] in X and Z`);
+        i0 = Math.max(0, Math.floor(hf.fx(p.min[0]) + eps)); i1 = Math.min(hf.width - 1, Math.ceil(hf.fx(p.max[0]) - eps));
+        j0 = Math.max(0, Math.floor(hf.fz(p.min[1]) + eps)); j1 = Math.min(hf.height - 1, Math.ceil(hf.fz(p.max[1]) - eps));
+        if (i1 - i0 < 1 || j1 - j0 < 1) {
+          const b = hf.bounds, f = (x: number) => +x.toPrecision(6);
+          throw new NodeError(`${type}: bounds [${p.min.join(', ')}] .. [${p.max.join(', ')}] cover ${i1 < i0 || j1 < j0 ? 'no' : 'fewer than 2 × 2'} samples of heightfield "${hf.name}"`, `the field spans X ${f(b.min[0])} .. ${f(b.max[0])}, Z ${f(b.min[2])} .. ${f(b.max[2])}`);
+        }
+      } else {
+        const [nx, nz] = p.tiles as number[], [ti, tj] = p.tile as number[];
+        if (nx > hf.width - 1 || nz > hf.height - 1) throw new NodeError(`${type}: tiles [${nx}, ${nz}] are more than the ${hf.width - 1} × ${hf.height - 1} cells of heightfield "${hf.name}"`, 'every tile needs at least one cell');
+        if (ti >= nx || tj >= nz) throw new NodeError(`${type}: tile [${ti}, ${tj}] is outside the ${nx} × ${nz} tiles (indices count from 0)`);
+        [i0, i1] = tileRange(hf.width, nx, ti);
+        [j0, j1] = tileRange(hf.height, nz, tj);
+      }
+      const m = p.margin > 0 ? Math.ceil((p.margin_unit === 'samples' ? p.margin : p.margin / hf.cellSize) - eps) : 0;
+      const c = [Math.max(0, i0 - m), Math.min(hf.width - 1, i1 + m), Math.max(0, j0 - m), Math.min(hf.height - 1, j1 + m)];
+      g.volumes[k] = cropHeightfield(hf, c[0], c[1], c[2], c[3]);
+      if (!first) first = { i0, i1, j0, j1, c, hf };
+    }
+    if (!first) throw new NodeError(`${type}: input has no heightfield`, NO_FIELD);
+    const { i0, i1, j0, j1, c, hf } = first;
+    g.detail.add('crop_core_min', 'float', 2).set(0, [hf.x(i0), hf.z(j0)]);
+    g.detail.add('crop_core_max', 'float', 2).set(0, [hf.x(i1), hf.z(j1)]);
+    g.detail.add('crop_margin', 'int', 4).set(0, [i0 - c[0], c[1] - i1, j0 - c[2], c[3] - j1]);
+    g.detail.add('crop_offset', 'int', 2).set(0, [c[0], c[2]]);
+    g.detail.add('crop_source_samples', 'int', 2).set(0, [hf.width, hf.height]);
+    if (p.mode === 'tile') {
+      g.detail.add('crop_tile', 'int', 2).set(0, p.tile);
+      g.detail.add('crop_tiles', 'int', 2).set(0, p.tiles);
+    }
+    return g;
   },
 });

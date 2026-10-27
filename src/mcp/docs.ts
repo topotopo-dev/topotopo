@@ -25,7 +25,7 @@ HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k":
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
-TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
+TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
 LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".`;
 
@@ -186,7 +186,8 @@ ROLES AND RECIPES
             place. A footprint polygon feeds the house asset directly (its input 0).
 IMAGES: PNG masks and heightmaps. heightfield_from_image {path:"inputs/height.png", size:[x, z], height_min, height_max}
   makes a terrain (16-bit greys keep the detail); with a heightfield connected it writes into layer (e.g. "mask",
-  height_min 0, height_max 1). attribute_from_map {path, projection:"xz", size, center, name:"mask"} samples it onto
+  height_min 0, height_max 1), the image lying at size/center in the world (fit "field" stretches it over the
+  connected heightfield instead). attribute_from_map {path, projection:"xz", size, center, name:"mask"} samples it onto
   points (scatter density_mask, prune {mode:"density"}). Textures: image_file {path:"inputs/albedo.png"} (or a file
   node) loads it as an image named "albedo" for the texture nodes and texture_to_material {base_color:"albedo"}.
 EXAMPLE: inputs/guides.glb holds path.* curves and zone.* areas: roads cut into hills, trees in the zones off the road,
@@ -411,9 +412,26 @@ WORKFLOW
     {min_distance: 12} for lots that never overlap; heightfield_project {level: "mean"} levels the pads under them)
   → heightfield_to_mesh {color: "terrain"} for polygons (layers become point attributes), or export png16.
   Other sources: heightfield_from_mesh (project polygons along Y), heightfield_from_image (8/16-bit PNG).
-  Layer tools: heightfield_layer (expression over layers "height * mask + 2", or copy/rename/delete/fill), remap, blur,
-  terrace, clip, cutout, mask_noise, mask_blur, mask_expand, resample (e.g. samples [505, 505]), transform (translate,
-  scale, 90° turns; the generic transform node works too), to_sdf (solid terrain for caves/overhangs with sdf_combine).
+  Layer tools: heightfield_layer (expression over layers "height * mask + 2", or copy/rename/delete/fill), remap
+  (input_min..input_max → output range), blur, terrace (levels at base + n × step_height), clip, cutout, mask_noise,
+  mask_blur, mask_expand, resample (e.g. samples [505, 505]), crop (a tile or world bounds, samples kept exactly),
+  transform (translate, scale, 90° turns; the generic transform node works too), to_sdf (solid terrain for
+  caves/overhangs with sdf_combine).
+TILES: a big map (4 × 4 km at 2 m = 2001² samples) is previewed and processed one tile at a time at full resolution:
+  heightfield {size:[4000, 4000], resolution:2} → heightfield_crop {tiles:[8, 8], tile:[3, 5], margin:40} → the chain.
+  Everything that works at world positions gives the tile the same samples as the whole map: noise (and its warp),
+  terrace levels step/range, remap's input range, layer expressions in x z, masks by height and by object distance,
+  mask_noise, clip, from_image (fit world). Cell sizes exact in binary (0.25, 0.5, 1, 2 m) make the positions
+  bit-identical. Filters read neighbours: crop with a margin of their reach (a sample for slope and direction masks;
+  blur radius, curvature and occlusion radius, mask_expand and footprint distance + falloff, cutout feather, path
+  shoulder + smooth, project radius and whole pieces for its level mean) and crop the margin off again
+  (heightfield_crop {mode:"bounds"} to the crop_core_min / crop_core_max detail attributes). Not local, so a tile only
+  matches statistically: erosion (droplets and water cross tile borders: erode the whole map, or a tile with a margin),
+  heightfield_flow / fill_sinks (catchments), heightfield_scatter (points drawn over the field; scatter on the map and
+  keep the tile's points). Tied to the field's own extent: the options terrace levels "layer", remap and
+  heightfield_to_tex auto_range, heightfield_flow normalise, transform pivot_at_center and from_image fit "field" (all
+  off by default), and layer variables i j u v, to_mesh uv and its height / terrain colours, to_sdf's bottom.
+  Exports: pass the same height_min / height_max to every tile.
 MASKS: every mask node combines with the existing mask (mode replace/add/subtract/multiply/max/min): chain them,
   multiply = and, max = or. Most layer nodes take mask_layer to blend their effect by a mask.
   e.g. rocks on steep slopes off the road: mask_by_feature slope 33° → heightfield_layer {layer:"mask", expression:"mask * (1 - path)"}.
@@ -426,8 +444,9 @@ EROSION: droplets (rain_density per sample per iteration, rain_amount, erosion_r
   time_step (0 = automatic), rain_amount in metres/second, optional rain_layer multiplier, evaporation and thermal
   talus relaxation. stream_power adds stream_power_k * drainage^stream_power_m * slope^stream_power_n incision.
   Kernel erosion also writes wear (cumulative eroded depth); pipe water is remaining water depth in metres.
-  heightfield_flow {method:"dinf", normalise:true, log_scale:true} writes drainage and direction without erosion.
-  Raw drainage is contributing area (m²); direction E/SE/S/SW/W/NW/N/NE = 0..7, sink = 255. D8 routes one receiver,
+  heightfield_flow {method:"dinf", log_scale:true} writes drainage and direction without erosion: drainage is
+  ln(1 + contributing area in m²) (raw area without log_scale; normalise:true divides by the field's largest value,
+  which depends on its extent); direction E/SE/S/SW/W/NW/N/NE = 0..7, sink = 255. D8 routes one receiver,
   D-infinity splits across two downhill receivers; local pits retain flow unless fill_sinks:true routes over a
   virtually filled surface (height stays unchanged). stream_power accepts the same opt-in fill_sinks flag.
   See examples/erosion_models.json for all four erosion methods on the same ridged terrain.

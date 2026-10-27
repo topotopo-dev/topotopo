@@ -1108,13 +1108,16 @@ defineNode({
 defineNode({
   type: 'heightfield_to_tex',
   category: 'texture',
-  summary: 'Bridge: a heightfield layer becomes a grey image of the same sample count (normalised to 0..1 by default).',
-  description: 'Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits the layer\'s min..max to 0..1 (the range is recorded as the stats range_min / range_max); off writes raw values. Feed tex_normal_from_height or tex_height_to_ao for terrain maps, or bake terrain masks into textures.',
+  summary: 'Bridge: a heightfield layer becomes a grey image of the same sample count (input_min..input_max fitted to 0..1 by default).',
+  description: 'Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits input_min..input_max to 0..1 (absolute, so every tile of a map gets the same grey for the same height; values outside the range fall outside 0..1); auto_range fits the layer\'s own min..max instead, which depend on the field\'s extent; off writes raw values. The range used is recorded as the stats range_min / range_max. Feed tex_normal_from_height or tex_height_to_ao for terrain maps, or bake terrain masks into textures.',
   aliases: ['heightfield_to_image', 'hf2tex', 'heightfield_texture'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
     layer: { type: 'string', default: 'height', desc: 'heightfield layer' },
-    normalize: { type: 'bool', default: true, desc: 'fit min..max to 0..1', aliases: ['fit'] },
+    normalize: { type: 'bool', default: true, desc: 'fit the input range to 0..1 (off writes raw values)', aliases: ['fit'] },
+    input_min: { type: 'float', default: 0, desc: 'layer value that becomes 0 (e.g. the lowest height in metres)' },
+    input_max: { type: 'float', default: 1, desc: 'layer value that becomes 1' },
+    auto_range: { type: 'bool', default: false, desc: 'use the layer\'s own min..max as the input range instead (depends on the field\'s extent)' },
     keep: { type: 'bool', default: false, desc: 'keep the input (heightfield and all) and add the image; off outputs only the image' },
     name: nameParam('', 'image name ("" = the layer name)'),
   },
@@ -1123,7 +1126,7 @@ defineNode({
     nodes: {
       hf: { type: 'heightfield' },
       hills: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3 } },
-      out: { type: 'heightfield_to_tex', in: ['hills'], params: { name: 'height' } },
+      out: { type: 'heightfield_to_tex', in: ['hills'], params: { name: 'height', input_min: -3, input_max: 3 } },
     },
     output: 'out',
   },
@@ -1134,11 +1137,14 @@ defineNode({
     const hf = hfs[0];
     const a = hf.layer(p.layer);
     if (!a) throw new NodeError(`${type}: heightfield "${hf.name}" has no layer "${p.layer}"`, `layers: ${[...hf.layers.keys()].join(', ')}`);
-    let lo = Infinity, hi = -Infinity;
-    for (let k = 0; k < a.length; k++) { if (a[k] < lo) lo = a[k]; if (a[k] > hi) hi = a[k]; }
+    let lo = p.input_min, hi = p.input_max;
+    if (p.auto_range) {
+      lo = Infinity; hi = -Infinity;
+      for (let k = 0; k < a.length; k++) { if (a[k] < lo) lo = a[k]; if (a[k] > hi) hi = a[k]; }
+    }
     const out = new Float32Array(a.length);
     const span = hi - lo;
-    for (let k = 0; k < a.length; k++) out[k] = p.normalize ? (span > 0 ? (a[k] - lo) / span : 0) : a[k];
+    for (let k = 0; k < a.length; k++) out[k] = p.normalize ? (span !== 0 ? (a[k] - lo) / span : 0) : a[k];
     const img = new Image(hf.width, hf.height, imgName(p, p.layer)).set(MAIN_LAYER, out);
     if (p.normalize) { ctx.stat('range_min', lo); ctx.stat('range_max', hi); }
     if (!p.keep) return imageGeo(img);

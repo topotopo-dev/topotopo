@@ -9,8 +9,8 @@
 // Cooked geometry is immutable: Geometry.clone() gives each heightfield its own layer map but shares the arrays,
 // so a node writes through `writable(name)` (a private copy) and never into an array it did not allocate.
 // This module holds the volume class, sampling (bilinear, or over Unreal Landscape triangles), grid filters (blur,
-// distance transforms), rasterising meshes and curves onto the grid, conversion to polygons, the render preview and
-// the inspect summary.
+// distance transforms), rasterising meshes and curves onto the grid, transforms and crops, conversion to polygons, the
+// render preview and the inspect summary.
 import { AttribTable, Geometry } from './geometry.ts';
 import type { HeightfieldVolume, Volume } from './geometry.ts';
 import type { Vec3 } from './math.ts';
@@ -423,6 +423,24 @@ export function transformHeightfield(src: HeightfieldVolume, m: ArrayLike<number
     if (!map) b = name === 'height' && (sy !== 1 || ty !== 0) ? a.slice() : a;
     else { b = new Float32Array(nw * nh); for (let k = 0; k < b.length; k++) b[k] = a[map[k]]; }
     if (name === 'height' && (sy !== 1 || ty !== 0)) for (let k = 0; k < b.length; k++) b[k] = b[k] * sy + ty;
+    out.layers.set(name, b);
+  }
+  return out;
+}
+
+/**
+ * The samples i0..i1 × j0..j1 (inclusive) of a heightfield as a new field with every layer: the same cell size and the
+ * same sample positions (origin moved to sample (i0, j0)), no resampling. Needs at least 2 × 2 samples in range.
+ */
+export function cropHeightfield(src: HeightfieldVolume, i0: number, i1: number, j0: number, j1: number): Heightfield {
+  const hf = asHeightfield(src);
+  if (!(Number.isInteger(i0) && Number.isInteger(i1) && Number.isInteger(j0) && Number.isInteger(j1)) || i0 < 0 || j0 < 0 || i1 >= hf.width || j1 >= hf.height || i1 - i0 < 1 || j1 - j0 < 1)
+    throw new Error(`crop ${i0}..${i1} × ${j0}..${j1} is not a range of at least 2 × 2 samples inside ${hf.width} × ${hf.height}`);
+  const w = i1 - i0 + 1, h = j1 - j0 + 1;
+  const out = new Heightfield(w, h, hf.cellSize, [hf.x(i0), hf.z(j0)], undefined, hf.name);
+  for (const [name, a] of hf.layers) {
+    const b = new Float32Array(w * h);
+    for (let j = 0; j < h; j++) b.set(a.subarray((j0 + j) * hf.width + i0, (j0 + j) * hf.width + i1 + 1), j * w);
     out.layers.set(name, b);
   }
   return out;

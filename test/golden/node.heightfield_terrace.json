@@ -28,8 +28,8 @@
     "volumes": [
       {
         "bounds": {
-          "max": [2, 0.5659, 2],
-          "min": [-2, -0.5265, -2]
+          "max": [2, 0.45, 2],
+          "min": [-2, -0.55, -2]
         },
         "grid": {
           "cellSize": 0.1,
@@ -39,7 +39,7 @@
         },
         "kind": "heightfield",
         "layers": {
-          "height": "e04375c849a1acaa",
+          "height": "2a8c36d0ef15bb66",
           "mask": "fd9f539e6509b32c"
         },
         "name": "heightfield"
