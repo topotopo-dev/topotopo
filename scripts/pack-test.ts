@@ -14,9 +14,10 @@
 //   bundled font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location,
 //   and rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
 // - The MCP server over stdio as a client starts it (`npm exec --no -- topotopo mcp --workspace …`, which is what
-//   `npx -y topotopo mcp` runs once the package is installed): catalog (TopoTopo's own packages too), a build that uses
-//   sdf_grid, one in a workspace that is no project naming a kit's output (it says how to make it one), library init and
-//   the same build, which copies the kit in, and the preview page with three.js served from the installed dependencies.
+//   `npx -y topotopo mcp` runs once the package is installed) on a new workspace folder, which it makes a project:
+//   catalog (TopoTopo's own packages too), a build that names a kit's output and copies the kit in from the installed
+//   built-in library, a build that uses sdf_grid, and the preview page with three.js served from the installed
+//   dependencies.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -227,13 +228,11 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     check(client.getServerVersion()?.name === NAME && client.getServerVersion()?.version === pkg.version, `server ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
     const cat = await call('catalog', {});
     check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('topotopo/nature/rock'), 'catalog lists the nodes and the installed packages of TopoTopo\'s own');
-    const rock = { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' };
-    const outside = await call('build', rock);
-    check(outside.isError && /this graph is in no project/.test(outside.txt) && /library \{action:"init"\}/.test(outside.txt), 'in a workspace that is no project, naming a kit\'s output says how to make it one');
-    const init = await call('library', { action: 'init' });
-    const inside = await call('build', rock);
-    check(!init.isError && !inside.isError && /note: added topotopo\/nature 1\.0/.test(inside.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', '1.0', 'version.json')),
-      `library init, then the build copies topotopo/nature in from the installed built-in library: ${inside.txt.split('\n')[0]}`);
+    // the documented setup: a new workspace folder, which the server made a project, so the first build that names a
+    // kit's output copies the kit in
+    const rock = await call('build', { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' });
+    check(fs.existsSync(path.join(ws, 'project.json')) && !rock.isError && /note: added topotopo\/nature 1\.0/.test(rock.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', '1.0', 'version.json')),
+      `a new workspace is a project: the first build copies topotopo/nature in from the installed built-in library: ${rock.txt.split('\n')[0]}`);
     const b = await call('build', { graph: { nodes: { b: { type: 'box' }, g: { type: 'sdf_grid', in: ['b'], params: { voxel_size: 0.1 } }, m: { type: 'grid_to_mesh', in: ['g'] } } } });
     check(!b.isError && b.txt.includes('✓'), `build with sdf_grid (WASM kernels in the server): ${b.txt.split('\n')[0].slice(0, 80)}`);
     const pv = await call('preview', {});
@@ -244,7 +243,8 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
   } finally {
     await client.close().catch(() => {});
   }
-  check(/ready \(stdio\)/.test(serverLog) && /workspace .*: \d+ graphs, \d+ assets; in no project/.test(serverLog), `server log: ${serverLog.split('\n').find((l) => l.includes('workspace'))?.trim()}`);
+  check(/ready \(stdio\)/.test(serverLog) && /made the workspace .* a project \(project\.json\)/.test(serverLog) && /workspace .*: \d+ graphs, \d+ assets; project /.test(serverLog),
+    `server log: ${serverLog.split('\n').filter((l) => l.includes('workspace')).map((l) => l.trim()).join(' | ')}`);
 } catch (e: any) {
   failures++;
   console.log(`FAIL ${e?.stack ?? e}`);
