@@ -403,7 +403,7 @@ const kindsGraph: any = {
     textures: { node: 'tex' }, volume: { node: 'sdf' }, scene: { node: 'street' },
   },
 };
-project(KINDS_DIR, { package: 'studio/kinds', tags: ['showcase'], description: 'every kind of output' }, { main: kindsGraph });
+project(KINDS_DIR, { package: 'studio/kinds', tags: ['showcase'], description: 'A sampler: every kind of output' }, { main: kindsGraph });
 
 section('kinds: publishing records what each output cooks to; an output that cooks to nothing blocks');
 {
@@ -974,9 +974,13 @@ section('search: every library, by words, kind and tag; what the project can use
   check(where(find(FINDER, { query: 'conifer', kind: 'instances' })) === '../lib:listed: topotopo:builtin:topotopo/woods/grove game:unlisted: other:unlisted:', 'kind matches exactly');
   check(where(find(FINDER, { tag: 'conifer' })) === '../lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:'
     && !find(FINDER, { tag: 'conif' }).libraries.some((l) => l.hits.length) && where(find(FINDER, { tag: 'rock' })) === '../lib:listed: topotopo:builtin:topotopo/woods/stone game:unlisted: other:unlisted:', 'tag matches exactly');
-  const show = find(FINDER, { query: 'showcase every' });
+  const show = find(FINDER, { query: 'showcase' });
   check(show.libraries[0].hits.length === 8 && show.libraries[0].hits.every((h) => h.package === 'studio/kinds' && h.version === '2.1') && show.libraries[0].hits.find((h) => h.type === 'studio/kinds/mesh')?.alias === 'studio/kinds',
-    `the package's project tags and description match too: every output of its newest version (${show.libraries[0].hits.map((h) => h.type).join(', ')})`);
+    `the package's project tags match too: every output of its newest version (${show.libraries[0].hits.map((h) => h.type).join(', ')})`);
+  check(!find(FINDER, { query: 'sampler' }).libraries.some((l) => l.hits.some((h) => h.package === 'studio/kinds')),
+    'the package\'s description does not: it lists its contents, which would match every output');
+  check(where(find(FINDER, { query: 'conif' })) === where(s) && !find(FINDER, { query: 'onifer' }).libraries.some((l) => l.hits.length) && !find(FINDER, { query: 'ree' }).libraries.some((l) => l.hits.length),
+    'a word matches the start of a word ("conif" finds conifers; "onifer" and "ree" find nothing)');
   check(where(find(FINDER, { query: 'nordic boulder' })) === '../lib:listed:nordic/rocks/boulder topotopo:builtin: game:unlisted: other:unlisted:', 'every word must match');
   check(throws(() => find(FINDER, { kind: 'material' }), /^"material" is not a kind: mesh, instances, points, curves, terrain, textures, volume, scene$/), 'a kind not on the list says the list');
   // a project that lists the library, uses the package; the package itself; a folder in no project

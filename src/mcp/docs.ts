@@ -871,9 +871,9 @@ and library {action:"init"} (CLI: topotopo init) makes it a project.
 
 SEARCH: library {action:"search", query?, kind?, tag?} (CLI: topotopo search [words] [--kind k] [--tag t]) looks through
 the newest version of every package in TopoTopo's built-in library, the libraries the project lists and every library
-registered on the machine. Every word of query must be in an output's full name, label, description or tags, or its
-package's title, description or project tags; kind and tag match exactly: {query:"conifer"}, {kind:"terrain"},
-{query:"brick", tag:"masonry"}. Results come by library, the project's own first (those it lists, then TopoTopo's
+registered on the machine. Every word of query must start a word of an output's full name, label, description or
+tags, or of its package's title or project tags ("tree" finds trees, not topotopo/street); kind and tag match exactly:
+{query:"conifer"}, {kind:"terrain"}, {query:"brick", tag:"masonry"}. Results come by library, the project's own first (those it lists, then TopoTopo's
 built-in library), each with its full name, kind, tags, label, version and description, and say whether the project can
 use it: TopoTopo's own packages and those of a library it lists, yes (a graph that names one adds it); another library's
 only once its project.json lists it, and the result says which "libraries" entry to add. The person adds it: the tools

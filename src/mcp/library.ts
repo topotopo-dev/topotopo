@@ -74,7 +74,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         library: { type: 'string', description: 'library name (list shows them)' },
         id: { type: 'string', description: 'project id' },
         path: { type: 'string', description: 'create: folder below the library ("props/lantern"); open/get: a project folder on disk instead of {library, id}' },
-        query: { type: 'string', description: 'list: words to match in title, id, collection, description, tags; search: words each published output found must match (its full name, label, description, tags, or its package\'s title, description, tags)' },
+        query: { type: 'string', description: 'list: words to match in title, id, collection, description, tags; search: words each of which must start a word of a published output\'s full name, label, description or tags, or of its package\'s title or project tags' },
         tag: { type: 'string', description: 'list: only projects with this tag; search: only outputs with this tag' },
         kind: { type: 'string', enum: [...KINDS], description: 'search: only outputs of this kind' },
         check: { type: 'boolean', description: 'publish: a dry run, which writes nothing: every check, every output cooked, the version number it would get, the changes, blocks and warnings' },

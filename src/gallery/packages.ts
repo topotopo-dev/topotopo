@@ -1784,7 +1784,7 @@ export function packagesText(pk: ProjectPackages): string {
 // ---------------------------------------------------------------------------------------------------------- search
 
 export interface SearchQuery {
-  /** words, each of which must be in the output's full name, label, description or tags, or its package's title, description or project tags */
+  /** words, each of which must start a word of the output's full name, label, description or tags, or of its package's title or project tags */
   query?: string;
   /** only outputs of this kind */
   kind?: string;
@@ -1854,7 +1854,11 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
     for (const l of [...loadConfig().libraries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
       if (!seen.has(key(l.path))) { seen.add(key(l.path)); libs.push({ name: l.name, root: l.path, standing: 'unlisted' }); }
   } catch (e: any) { problems.add(e.message); }
-  const words = String(q.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  // each word of the query starts a word of what an output says about itself or of its package's title and project
+  // tags: "tree" finds trees, not every output of topotopo/street; a package's description, which lists its contents,
+  // would match every output of the package
+  const wordsOf = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const words = wordsOf(String(q.query ?? ''));
   // a library that holds TopoTopo's built-in library (its repository, say) holds none of its packages again
   const builtinFolders = builtinPackages(builtin, problems), builtinDirs = new Set(builtinFolders.map((f) => key(f.dir)));
   const libraries: SearchLibrary[] = libs.map((lib) => {
@@ -1871,7 +1875,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
       if (!place) continue;
       let pm: ProjectManifest | null = null;
       try { pm = readManifest(place.dir); } catch (e: any) { problems.add(e.message); }
-      const v = place.info, about = [pm?.title ?? '', pm?.description ?? '', ...(pm?.tags ?? [])];
+      const v = place.info, about = [pm?.title ?? '', ...(pm?.tags ?? [])];
       const isDefault = (o: OutputInfo) => o.graph === v.default.graph && o.node === v.default.node;
       const found: [string, OutputInfo, string | undefined][] = Object.entries(v.outputs).map(([k, o]) => [`${f.package}/${k}`, o, isDefault(o) ? f.package : undefined]);
       if (!Object.values(v.outputs).some(isDefault)) found.unshift([f.package, v.default, undefined]);
@@ -1879,8 +1883,8 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
         const tags = o.tags ?? [];
         if (q.kind !== undefined && o.kind !== q.kind) continue;
         if (q.tag !== undefined && !tags.includes(q.tag)) continue;
-        const hay = [type, alias ?? '', o.label ?? '', o.description ?? '', ...tags, ...about].join(' ').toLowerCase();
-        if (!words.every((w) => hay.includes(w))) continue;
+        const hay = wordsOf([type, alias ?? '', o.label ?? '', o.description ?? '', ...tags, ...about].join(' '));
+        if (!words.every((w) => hay.some((h) => h.startsWith(w)))) continue;
         const used = manifest?.uses[f.package];
         hits.push({
           type, ...(alias ? { alias } : {}), package: f.package, version: v.version, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags,
