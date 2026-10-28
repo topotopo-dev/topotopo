@@ -27,6 +27,8 @@ export function didYouMean(word: string, candidates: string[], max = 3): string[
       const nc = norm(c);
       let d = levenshtein(w, nc);
       if (nc.includes(w) || w.includes(nc)) d = Math.min(d, 1);
+      // a package output by its own name ("stairs" for "topotopo/architecture/stairs") comes first
+      if (c.includes('/') && norm(c.slice(c.lastIndexOf('/') + 1)) === w) d = 0;
       return { c, d };
     })
     .filter((x) => x.d <= Math.max(2, Math.floor(w.length / 3)))

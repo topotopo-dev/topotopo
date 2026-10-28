@@ -231,6 +231,18 @@ if (!filter || 'stairs house'.includes(filter)) {
   const help = await txt('help', { nodes: ['topotopo/architecture/stairs', 'topotopo/nature/rock'] });
   check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this workspace: package topotopo\/nature is not in this project's uses/.test(help.text),
     'help documents an output, and says when the project does not use its kit yet');
+  // a bare name is no node type, and nothing makes it one: the error names the output of that name, used or not
+  const bareType = (await e2.cook({ nodes: { r: { type: 'rock' } }, output: 'r' })).errors.map((e) => e.message).join('; ');
+  check(/^unknown node type "rock" — did you mean topotopo\/nature\/rock[,?]/.test(bareType), `a bare name suggests the output of that name first: ${bareType}`);
+  const helpBare = await txt('help', { nodes: ['crate'] });
+  check(/unknown node "crate" — did you mean topotopo\/props\/crate[,?]/.test(helpBare.text), `and so does help: ${helpBare.text.split('\n')[0]}`);
+  const looseDir = path.join(tmp, 'loose');
+  fs.mkdirSync(looseDir);
+  const loose = new Engine(createNodeHost({ baseDir: looseDir, workers: 0 }));
+  await loose.init();
+  openPackages(loose, looseDir);
+  const outside = (await loose.cook({ nodes: { s: { type: 'stairs' } }, output: 's' })).errors.map((e) => e.message).join('; ');
+  check(/^unknown node type "stairs" — did you mean topotopo\/architecture\/stairs[,?]/.test(outside), `outside a project as well: ${outside}`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

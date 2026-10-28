@@ -30,7 +30,7 @@ export interface PackageResolver {
   names(): string[];
   /**
    * the node types of package outputs the scope does not use yet but a graph may name, which its first use adds
-   * (TopoTopo's own packages): for the catalog and help, never for cooking
+   * (TopoTopo's own packages): for the catalog, help and did-you-mean, never for cooking
    */
   offered?(): NodeDef[];
 }

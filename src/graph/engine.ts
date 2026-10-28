@@ -481,8 +481,12 @@ export class Engine {
     return { error: `"${type}" is an output of package ${n.package}, and this cook has no packages`, hint: 'packages are used by projects (project.json "uses"), cooked by the TopoTopo CLI, viewer or MCP server' };
   }
 
+  /**
+   * The names a did-you-mean offers in a scope: node types and their aliases, its assets, the package outputs it uses,
+   * and those its packages offer (PackageResolver.offered), which a graph's first use adds.
+   */
   allTypeNames(scope: Scope = this.root): string[] {
-    return [...allAliases(), ...this.assetsIn(scope).map((a) => a.name), ...(scope.packages?.names() ?? [])];
+    return [...allAliases(), ...this.assetsIn(scope).map((a) => a.name), ...(scope.packages?.names() ?? []), ...(scope.packages?.offered?.() ?? []).map((d) => d.type)];
   }
 
   /**
