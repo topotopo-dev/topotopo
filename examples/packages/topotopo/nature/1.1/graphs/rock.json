@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "description": "Low-poly rock: a noise-displaced icosphere, flattened, with faceted shading and a mottled tint. Pivot at the centre of the base (sink lowers it into the ground). Piece: rock (rock). Closed (watertight).",
+  "params": {
+    "size": { "type": "float", "default": 1, "min": 0.1, "max": 6, "desc": "approximate width (m)" },
+    "roughness": {
+      "type": "float",
+      "default": 0.35,
+      "min": 0,
+      "max": 0.8,
+      "desc": "displacement as a fraction of the size"
+    },
+    "flatness": { "type": "float", "default": 0.65, "min": 0.2, "max": 1, "desc": "height / width" },
+    "level": {
+      "type": "int",
+      "default": 2,
+      "min": 1,
+      "max": 4,
+      "desc": "icosphere subdivision level (2 = 162 points)"
+    },
+    "sink": { "type": "float", "default": 0, "min": 0, "max": 0.5, "desc": "part of the height below y = 0" },
+    "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "shape seed" }
+  },
+  "vars": { "size": 1, "roughness": 0.35, "flatness": 0.65, "level": 2, "sink": 0, "seed": 0 },
+  "nodes": {
+    "ball": { "type": "sphere", "params": { "type": "ico", "level": "=level", "radius": "=size / 2" } },
+    "shape": {
+      "type": "noise_displace",
+      "in": ["ball"],
+      "params": {
+        "amplitude": "=size * roughness * 0.5",
+        "frequency": "=1.3 / size",
+        "octaves": 3,
+        "seed": "=seed"
+      }
+    },
+    "squash": {
+      "type": "transform",
+      "in": ["shape"],
+      "params": { "scale": [1, "=flatness", 0.85], "rotate": [0, "=seed * 47", 0] }
+    },
+    "ground": {
+      "type": "transform",
+      "in": ["squash"],
+      "params": { "translate": [0, "=-bbox('squash').min.y - sink * bbox('squash').size.y", 0] }
+    },
+    "facets": { "type": "normal", "in": ["ground"], "params": { "cusp_angle": 1 } },
+    "mottle": {
+      "type": "attrib_noise",
+      "in": ["facets"],
+      "params": { "name": "tint", "range": [0.7, 1.15], "frequency": "=2.5 / size", "seed": "=seed" }
+    },
+    "name": {
+      "type": "attrib_create",
+      "in": ["mottle"],
+      "params": { "name": "name", "class": "prim", "value": "rock" }
+    },
+    "mat": {
+      "type": "material",
+      "in": ["name"],
+      "params": { "name": "rock", "base_color": "#8d877e", "roughness": 0.9 }
+    },
+    "paint": {
+      "type": "wrangle",
+      "in": ["mat"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (!m) return; const k = haspointattrib(0, 'tint') ? point(0, 'tint', primpoints(0, @primnum)[0]) : 1; @Cd = mul(m.baseColor, k);"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint rest" } }
+  },
+  "output": "out",
+  "outputs": { "rock": { "node": "out", "label": "Rock", "kind": "mesh", "tags": ["rock", "stone", "boulder", "lowpoly"] } },
+  "meta": { "watertight": true }
+}
