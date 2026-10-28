@@ -30,7 +30,7 @@ import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Workspace } from '../src/workspace.ts';
 import { parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
-import { compareInterfaces, lockFile, openPackages, packagesText, publishPackage, readLock, versionHash } from '../src/gallery/packages.ts';
+import { compareInterfaces, lockFile, openPackages, packagesText, publishPackage, readLock, startsBigVersion, versionHash } from '../src/gallery/packages.ts';
 import type { ProjectPackages, PublishResult } from '../src/gallery/packages.ts';
 import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/gallery/update.ts';
 import { ROOT } from './fixtures.ts';
@@ -338,6 +338,7 @@ section('publishing: the version rule');
   check(!over.ok && over.blocks.some((b) => /is there already: a version is never written over/.test(b)), `a version folder that is there is never written over: ${over.blocks}`);
   check(compareInterfaces({ outputs: {}, default: { graph: 'a', node: 'n', sliders: {}, inputs: [] } }, { outputs: {}, default: { graph: 'b', node: 'n', sliders: {}, inputs: [] } }).small.some((s) => /the default output now cooks/.test(s)),
     'a default output moved to another graph is a small change');
+  check(['2.0', '7.0', '10.0'].every(startsBigVersion) && !['1.0', '1.1', '1.10', '2.20'].some(startsBigVersion), 'a version that starts a big version: 2.0 and 10.0, never 1.0 or 1.10');
 }
 
 section('publishing: blocks and warnings');

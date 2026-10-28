@@ -16,7 +16,7 @@ import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { galleryDir, graphNames, isStale, listFiles, loadConfig, readBakeState, readGraph, scanLibrary } from './library.ts';
 import type { BakeState, GalleryConfig, LibraryScan, Project } from './library.ts';
-import { compareVersions, copyRecord, publishedVersions } from './packages.ts';
+import { compareVersions, copyRecord, publishedVersions, startsBigVersion } from './packages.ts';
 import type { VersionInfo } from './packages.ts';
 import { BakeQueue } from './bake.ts';
 import { embedPage, galleryPage, projectPage } from './pages.ts';
@@ -235,7 +235,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       share: { link: abs(urls.project(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
       package: m.package ? {
         name: m.package,
-        versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: v.version.endsWith('.0') && v.version !== '1.0', marked: v.big })),
+        versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big })),
         outputs: versions.length ? outputsOf(m.package, versions.at(-1)!) : [],
       } : null,
       uses,

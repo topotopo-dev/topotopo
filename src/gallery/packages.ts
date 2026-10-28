@@ -76,6 +76,8 @@ export interface VersionInfo {
 
 const versionParts = (v: string) => v.split('.').map(Number);
 export const compareVersions = (a: string, b: string) => { const [x, y] = versionParts(a), [u, w] = versionParts(b); return x - u || y - w; };
+/** A version that starts a big version: 2.0, 3.0, 10.0 (1.0 is the first one, 1.10 a small one). */
+export const startsBigVersion = (v: string) => { const [big, small] = versionParts(v); return small === 0 && big > 1; };
 const newestOf = (vs: Iterable<string>) => [...vs].sort(compareVersions).at(-1);
 
 /** A package name "owner/name" (no output). */

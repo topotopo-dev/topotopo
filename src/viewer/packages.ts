@@ -25,7 +25,7 @@ import { diffOverlay } from '../explain.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
 import type { Scope } from '../graph/scope.ts';
 import { readManifest } from '../gallery/library.ts';
-import { ProjectPackages, compareVersions, loadProject } from '../gallery/packages.ts';
+import { ProjectPackages, compareVersions, loadProject, startsBigVersion } from '../gallery/packages.ts';
 import type { VersionInfo } from '../gallery/packages.ts';
 import { applyUpdate, beforeAfter, setText } from '../gallery/update.ts';
 import type { BeforeAfter, CookedSide, UsePlace } from '../gallery/update.ts';
@@ -101,7 +101,7 @@ function asked<T>(f: () => T): T {
   try { return f(); } catch (e: any) { if (typeof e?.status === 'number') throw e; return err(400, String(e?.message ?? e)); }
 }
 const sameDir = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
-const versionRow = (v: VersionInfo): VersionRow => ({ version: v.version, note: v.note, published: v.published, big: v.version.endsWith('.0') && v.version !== '1.0', marked: !!v.big });
+const versionRow = (v: VersionInfo): VersionRow => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: !!v.big });
 const byName = <T extends { package: string }>(a: T, b: T) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0);
 
 export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
