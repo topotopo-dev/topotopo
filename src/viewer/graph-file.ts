@@ -2,7 +2,9 @@
 // loads the file into a scratch workspace, follows its saves (the person's editor, an agent) and writes what the page
 // changes back into it as minimal edits (json-edit.ts): an export target, the values "Save values to graph" keeps.
 // The rest of the file stays as it was written. The values a person tunes are session values over the graph
-// (Workspace.sessionVars): they survive every reload of the file, the viewer's own writes included.
+// (Workspace.sessionVars): they survive every reload of the file, the viewer's own writes included. The graph uses the
+// packages of the project the file belongs to; one it names for the first time is added to the project, and a package
+// followed with --follow re-cooks the graph whenever its working folder changes.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +12,7 @@ import '../nodes/index.ts';
 import { Engine } from '../graph/engine.ts';
 import { migrateGraph } from '../graph/migrate.ts';
 import { createNodeHost } from '../host/node.ts';
+import { openPackages } from '../gallery/packages.ts';
 import { Workspace } from '../workspace.ts';
 import { startViewer } from './server.ts';
 import type { Viewer } from './server.ts';
@@ -76,8 +79,14 @@ export class GraphFile implements GraphSource {
     const cur = this.ws.graphs.get(this.graph);
     try {
       if (cur && JSON.stringify(migrateGraph(spec)) === JSON.stringify(cur)) return;
+      for (const n of this.ws.packages?.addFor(migrateGraph(spec)) ?? []) this.log(n);
       this.ws.setGraph(this.graph, spec);
     } catch (e) { this.log(`${this.file}: ${errorText(e)} (keeping the last good version)`); return; }
+    await this.cook();
+  }
+
+  /** Cook the graph as it is, say how it went, and have the page read it again. */
+  async cook() {
     const r = await this.ws.cook(this.graph);
     const what = r.ok ? 'cooked' : r.stopped ? 'stopped' : 'FAILED';
     this.log(`${what} ${this.graph} in ${r.ms.toFixed(0)} ms${r.ok ? '' : r.stopped ? ` at ${r.stopped}` : ': ' + r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
@@ -131,6 +140,8 @@ export interface ViewGraphFileOptions {
   port?: number;
   /** where status lines go (default: stdout) */
   log?: (line: string) => void;
+  /** packages ("owner/name") whose working folders the graph uses instead of their copies, for this session */
+  follow?: string[];
 }
 
 /**
@@ -142,12 +153,18 @@ export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): P
   const dir = path.dirname(path.resolve(file));
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
+  const packages = openPackages(engine, dir, { follow: opts.follow });
   const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: path.join(dir, 'exports') });
+  ws.packages = packages;
   ws.load();
+  for (const p of packages.check()) log(`warning: ${p}`);
+  for (const f of packages.following()) log(`following ${f.package}: its working folder ${f.dir} instead of its copy`);
   const source = new GraphFile(ws, file, opts.name, log);
   await source.load();
+  // a save in a followed working folder re-cooks the graph
+  packages.watch(() => { source.cook().catch((e) => log(errorText(e))); });
   const viewer = await startViewer(ws, opts.port, { inputsWhere: `beside ${path.basename(file)}`, source });
   log(`view: ${viewer.url}  (watching ${file}; files dropped on the page go to ${path.join(path.dirname(file), 'inputs') + path.sep}; Ctrl+C to stop)`);
   source.watch();
-  return { url: viewer.url, viewer, ws, source, close: () => { source.close(); viewer.close(); } };
+  return { url: viewer.url, viewer, ws, source, close: () => { source.close(); packages.unwatch(); viewer.close(); } };
 }

@@ -1,6 +1,8 @@
-// The `library` tool: the person's libraries of projects (src/gallery/library.ts). An agent
-// lists and searches every library, reads a project, makes new ones, edits their project.json, bakes previews, and
-// opens a project: the server's workspace becomes that project folder, so build/edit/render/export work on it.
+// The `library` tool: the person's libraries of projects (src/gallery/library.ts) and the packages of the open project
+// (src/gallery/packages.ts). An agent lists and searches every library, reads a project, makes new ones, edits their
+// project.json, bakes previews, and opens a project: the server's workspace becomes that project folder, so
+// build/edit/render/export work on it. In the open project it publishes a version of its package, lists and adds the
+// packages it uses, and follows a package's working folder for the session.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Workspace } from '../workspace.ts';
@@ -10,12 +12,16 @@ import {
   scanAll, writeManifest,
 } from '../gallery/library.ts';
 import type { GalleryConfig, LibraryScan, Project } from '../gallery/library.ts';
+import { packagesText, publishPackage, publishText } from '../gallery/packages.ts';
+import type { ProjectPackages } from '../gallery/packages.ts';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) });
 
 export interface LibraryToolHost {
   /** the workspace the other tools use now */
   workspace(): Workspace;
+  /** the packages of the project the workspace belongs to */
+  packages(): ProjectPackages;
   /** make a folder the workspace of every tool (and of the live viewer) */
   open(dir: string): Promise<{ graphs: number; assets: number }>;
 }
@@ -51,12 +57,13 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
     description: 'The person\'s libraries of projects (the TopoTopo Gallery website shows them; a board links to them). A library is a folder; a project is a folder in it with project.json (title, description, tags, links to concept art/board pages) and is a workspace of its own (graphs/, assets/, inputs/, exports/, attachments/ for concept art and references). ' +
       'list {query?, tag?, library?}: every project with status and gallery URL. get {library, id} (or the open project): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
       'open {library, id} | {path}: make that project the workspace of every tool and the live viewer, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new project, opened. ' +
-      'update {library?, id?, title?, description?, tags?, links?, graph?, bake?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). See help topic "library".',
+      'update {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the package the project is, set once by its author). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). ' +
+      'Packages of the open project: packages (what it uses, and the packages in the libraries it lists, with their newest version, note and outputs); use {package:"owner/name"} adds one (a graph that names "owner/name/output" adds it too); follow {package, on} uses a package\'s working folder instead of its copy for this session; publish {note, big?} publishes the next version of the project\'s package. See help topics "library" and "packages".',
     inputSchema: {
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'update', 'bake'] },
+        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'update', 'bake', 'packages', 'use', 'follow', 'publish'] },
         library: { type: 'string', description: 'library name (list shows them)' },
         id: { type: 'string', description: 'project id' },
         path: { type: 'string', description: 'create: folder below the library ("props/lantern"); open/get: a project folder on disk instead of {library, id}' },
@@ -70,10 +77,16 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         bake: { type: 'object', properties: { graph: { type: 'string' }, node: { type: 'string' }, frame: { type: 'number' } }, description: 'update: what the preview shows instead of the graph output' },
         thumbnail: { type: 'boolean', description: 'get: include the baked thumbnail image' },
         open: { type: 'boolean', description: 'create: open the new project (default true)' },
+        package: { type: 'string', description: 'use / follow: a package, "owner/name"; update: the package the project is' },
+        on: { type: 'boolean', description: 'follow: true to follow the package\'s working folder (default), false to go back to its copy' },
+        note: { type: 'string', description: 'publish: one line on what changed (required)' },
+        big: { type: 'boolean', description: 'publish: mark the version big (its meaning changed in a way the tools cannot see)' },
       },
     },
     run: async (a) => {
       const { cfg, scans } = scan();
+      // the packages of the open project as its files are now (a person may have edited project.json)
+      if (['packages', 'use', 'follow', 'publish'].includes(a.action)) host.packages().refresh();
       switch (a.action) {
         case 'list': {
           if (!cfg.libraries.length) return text(`no libraries configured (${cfg.file}). The person adds one with \`topotopo library add <name> <folder>\`.`);
@@ -136,10 +149,28 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         case 'update': {
           const p = pick(a, scans);
           const m = { ...p.manifest };
-          for (const k of ['title', 'description', 'tags', 'links', 'graph', 'bake'] as const) if (a[k] !== undefined) (m as any)[k] = a[k];
+          for (const k of ['title', 'description', 'tags', 'links', 'graph', 'bake', 'package'] as const) if (a[k] !== undefined) (m as any)[k] = a[k];
           const checked = parseManifest(m, p.id);
           writeManifest(p.dir, checked);
           return text(`updated ${p.lib ? `${p.lib}/` : ''}${p.id}: ${JSON.stringify(checked)}`);
+        }
+        case 'packages': return text(packagesText(host.packages()));
+        case 'use': {
+          if (!a.package) throw new Error('"package" is required: "owner/name"');
+          const r = host.packages().use(String(a.package));
+          return text(`${r.text}. Its outputs are node types now: help {nodes:["${a.package}"]}, catalog {category:"package"}`);
+        }
+        case 'follow': {
+          if (!a.package) throw new Error('"package" is required: "owner/name"');
+          const said = host.packages().follow(String(a.package), a.on !== false);
+          // every graph may use it: they cook again, and the viewer shows it
+          const ws = host.workspace();
+          for (const g of ws.graphs.keys()) { ws.lastReport.delete(g); ws.bump(g); }
+          return text(said);
+        }
+        case 'publish': {
+          const r = await publishPackage(host.workspace(), host.packages(), { note: a.note, big: a.big });
+          return text(publishText(r), !r.ok);
         }
         case 'bake': {
           const p = pick(a, scans);
@@ -151,7 +182,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           return { content };
         }
       }
-      return text(`unknown action "${a.action}": list, get, open, create, update or bake`, true);
+      return text(`unknown action "${a.action}": list, get, open, create, update, bake, packages, use, follow or publish`, true);
     },
   };
 }

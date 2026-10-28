@@ -150,11 +150,22 @@ export function varDeclaration(g: GraphSpec, k: string): string | null {
 /** Thrown by Workspace.edit when the edited graph does not validate; the stored graph is unchanged. */
 export class EditRejected extends Error {
   errors: Issue[];
-  constructor(errors: Issue[]) {
-    super(`✗ edits rejected (graph unchanged) — ${errors.length} error(s):\n` + errors.map((e) => `  [${e.node}] ${e.message}`).join('\n'));
+  constructor(errors: Issue[], notes: string[] = []) {
+    super(`✗ edits rejected (graph unchanged) — ${errors.length} error(s):\n` + errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + notes.map((n) => `\nnote: ${n}`).join(''));
     this.name = 'EditRejected';
     this.errors = errors;
   }
+}
+
+/**
+ * The packages of the project a workspace belongs to (src/gallery/packages.ts), attached by whoever opens it: a graph
+ * set or edited through the workspace that names a package the project does not use yet adds it (first use).
+ */
+export interface WorkspacePackages {
+  /** add the packages a graph names that the project does not use yet; says what was added */
+  addFor(graph: GraphSpec): string[];
+  /** read again what changed on disk (project.json, the lock, working folders followed this session); true if anything did */
+  refresh(): boolean;
 }
 
 export class Workspace {
@@ -168,6 +179,8 @@ export class Workspace {
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
   /** told when the cooks of a graph start, move to another node (with that node's event), are asked to stop and end (see activity) */
   activityListeners = new Set<(graph: string, ev?: NodeProgress) => void>();
+  /** the packages of the project the workspace belongs to, when whoever opened it attached them (src/gallery/packages.ts) */
+  packages: WorkspacePackages | null = null;
   /**
    * Session values: var values a person set in the live viewer over a graph file (`topotopo view`). They shadow the
    * graph's vars in this workspace's cooks without changing the graph, and stay when the graph is replaced (a reload
@@ -558,16 +571,18 @@ export class Workspace {
   }
 
   /**
-   * The one path for an edit, whoever makes it (the MCP edit tool, the viewer's controls): apply the ops, validate
-   * (an invalid result throws EditRejected listing the per-node errors and stores nothing), store, cook at `frame`,
-   * then notify the listeners. They hear after the cook so that what they read (lastReport, cached geometry) is the
-   * new version's; a cook that throws still notifies, since the graph was stored. A cook that was stopped (`signal`,
-   * Workspace.stop) does not: whoever stopped it cooks again or tells the listeners.
+   * The one path for an edit, whoever makes it (the MCP edit tool, the viewer's controls): apply the ops, add the
+   * packages the graph now names to the project (first use), validate (an invalid result throws EditRejected listing
+   * the per-node errors and stores nothing), store, cook at `frame`, then notify the listeners. They hear after the
+   * cook so that what they read (lastReport, cached geometry) is the new version's; a cook that throws still notifies,
+   * since the graph was stored. A cook that was stopped (`signal`, Workspace.stop) does not: whoever stopped it cooks
+   * again or tells the listeners.
    */
   async edit(name: string, ops: EditOp[], opts: { frame?: number; kind?: CookKind; signal?: StopSignal } = {}): Promise<{ graph: GraphSpec; notes: string[]; report: CookReport }> {
     const { graph, notes } = this.applyEdits(name, ops);
+    notes.push(...(this.packages?.addFor(graph) ?? []));
     const v = this.engine.validate(graph);
-    if (v.errors.length) throw new EditRejected(v.errors);
+    if (v.errors.length) throw new EditRejected(v.errors, notes);
     this.setGraph(name, graph);
     let report: CookReport | undefined;
     try { report = await this.cook(name, undefined, opts.frame, { kind: opts.kind, signal: opts.signal }); }
@@ -582,6 +597,8 @@ export class Workspace {
    */
   async cook(name: string, target?: string, frame?: number, opts: { kind?: CookKind; signal?: StopSignal } = {}) {
     const g = this.getGraph(name);
+    // a followed working folder edited since the last cook resolves to its new files
+    this.packages?.refresh();
     const run: RunningCook = { kind: opts.kind ?? 'cook', ac: new AbortController(), t0: now(), nodes: new Map(), inner: new Map() };
     const outer = opts.signal;
     const signal: StopSignal = { get aborted() { return run.ac.signal.aborted || !!outer?.aborted; } };

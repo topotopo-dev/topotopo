@@ -28,6 +28,7 @@ import { encodePNG } from '../render/png.ts';
 import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
 import { fittingFormats, outputKind } from '../io/kinds.ts';
+import { packagesUsed } from '../graph/packages.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
 import type { SidecarRole } from '../io/sidecars.ts';
@@ -314,7 +315,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     const r = await ws.cook(graph, p.node, undefined, { kind: 'export' });
     if (r.stopped) err(409, `${p.label} (${graph}): the export was stopped at ${r.stopped}; nothing was written`);
     if (!r.ok || !r.geo) err(422, `${p.label} (${graph}): ` + (r.errors.map((e) => `${e.node}: ${e.message}`).join('; ') || 'no geometry'));
-    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps });
+    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(ws.engine, p.spec) });
   };
   /** One export at a time, so two clicks never interleave their writes. */
   const exclusive = async <T>(work: () => Promise<T>): Promise<T> => {

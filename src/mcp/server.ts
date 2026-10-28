@@ -19,6 +19,8 @@ import { libraryTool } from './library.ts';
 import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
+import { openPackages } from '../gallery/packages.ts';
+import type { ProjectPackages } from '../gallery/packages.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
@@ -28,31 +30,39 @@ const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + 
 
 // The workspace can change while the server runs (library {action:"open"} opens a gallery project): every tool and
 // the live viewer then work on the new folder. Each workspace has its own engine (asset registry, base directory,
-// cache); the worker pool is shared by the process. Workspaces follow what other processes write into them
-// (Workspace.watch: the gallery's editor, a person editing JSON).
-let engine: Engine, ws: Workspace, tools: ToolDef[];
+// packages, cache); the worker pool is shared by the process. Workspaces follow what other processes write into them
+// (Workspace.watch: the gallery's editor, a person editing JSON), and the packages a session follows (library
+// {action:"follow"}) re-cook when their working folders change.
+let engine: Engine, ws: Workspace, packages: ProjectPackages, tools: ToolDef[];
 let viewer: Viewer | null = null;
 const ensureViewer = async () => {
   if (!viewer) { viewer = await startViewer(ws); log('preview at', viewer.url); }
   return viewer.url;
 };
-const library = libraryTool({ workspace: () => ws, open: (dir) => openWorkspace(dir) });
+const library = libraryTool({ workspace: () => ws, packages: () => packages, open: (dir) => openWorkspace(dir) });
 async function openWorkspace(dir: string) {
   const e = new Engine(createNodeHost({ baseDir: dir }));
   if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) e.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
   if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) e.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
   await e.init();
+  // the project the folder belongs to: its packages resolve before its assets register (they may use them)
+  const pk = openPackages(e, dir);
   const w = new Workspace(dir, e);
+  w.packages = pk;
   const loaded = w.load();
   w.watch();
-  log(`workspace ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets, ${loaded.shelf} shelf assets`);
+  pk.watch(() => { for (const g of w.graphs.keys()) { w.lastReport.delete(g); w.bump(g); } });
+  log(`workspace ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets, ${loaded.shelf} shelf assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.manifest?.uses ?? {}).length} packages used` : ''}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
-  const prev = ws as Workspace | undefined;
+  for (const x of pk.check()) log('package problem:', x);
+  const prev = ws as Workspace | undefined, prevPackages = packages as ProjectPackages | undefined;
   engine = e;
   ws = w;
+  packages = pk;
   tools = [...makeTools(w, { onPreview: ensureViewer }), library];
   viewer?.setWorkspace(w);
   prev?.unwatch();
+  prevPackages?.unwatch();
   return loaded;
 }
 await openWorkspace(wsDir);

@@ -19,6 +19,7 @@ import { EXPORT_FORMATS, exportFormatFromPath } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportToolOptions, publishedOutputs } from '../io/targets.ts';
 import { exportSource } from '../io/source.ts';
+import { packagesUsed } from '../graph/packages.ts';
 import type { ExportSource } from '../io/source.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
 import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
@@ -219,7 +220,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     for (const p of targets) {
       const r = await ws.cook(name, p.node, a.frame);
       if (!r.ok || !r.geo) return text(reportText(name, r), true);
-      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps }));
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec) }));
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
@@ -230,7 +231,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the workspace.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets, package = the outputs of the packages the project uses, "owner/name/output"). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the workspace.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -240,20 +241,21 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         },
       },
       run: async (a) => {
-        const cat = catalogText([...allNodeDefs(), ...engine.assetsIn().map((x) => x.def)], { category: a.category, search: a.search, deprecated: a.include_deprecated });
+        const cat = catalogText([...allNodeDefs(), ...engine.assetsIn().map((x) => x.def), ...engine.packageDefs()], { category: a.category, search: a.search, deprecated: a.include_deprecated });
         const nIn = ws.listInputs().length;
         return text(`${cat}\nHUMAN INPUT: ${nIn ? `${nIn} file${nIn === 1 ? '' : 's'} in` : 'nothing yet in'} the workspace inputs/ folder (meshes, guide curves and points, blockouts, PNG masks people drop in). Building a landscape or scene: inputs {action:"list"} first, then read them with file nodes (help topic "inputs").`);
       },
     },
     {
       name: 'help',
-      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
+      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its sliders, inputs, version and note) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
       inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` } } },
       run: async (a) => {
         const out: string[] = [];
         if (a.topic) out.push(topicText(String(a.topic)) ?? `unknown topic "${a.topic}". Topics: overview, ${topicList().join(', ')}`);
         for (const n of a.nodes ?? []) {
           const d = engine.resolveDef(n);
+          if (!d && String(n).includes('/')) { const p = engine.packageIssue(String(n)); out.push(`${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`); continue; }
           if (!d) { const s = didYouMean(n, engine.allTypeNames()); out.push(`unknown node "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); continue; }
           out.push(nodeDoc(d));
         }
@@ -268,7 +270,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not part of the project\'s package)}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
           name: { type: 'string', description: 'graph name (default "main")' },
           mode: { type: 'string', enum: ['replace', 'merge'] },
           dry_run: { type: 'boolean' },
@@ -288,10 +290,12 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
             ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n')
             : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : ''), d.errors.length > 0);
         }
+        // packages the graph names for the first time join the project (a dry run changes nothing)
+        const added = ws.packages?.addFor(spec) ?? [];
         const v = engine.validate(spec);
-        if (v.errors.length) return text(`✗ graph not saved — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n'), true);
+        if (v.errors.length) return text(`✗ graph not saved — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + added.map((n) => `\nnote: ${n}`).join(''), true);
         ws.setGraph(name, spec);
-        return cookAndReport(name, a);
+        return cookAndReport(name, a, added);
       },
     },
     {
@@ -415,7 +419,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
         const source = exportSource({
           graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
-          format: ext, options: exportToolOptions(a), version: TOPOTOPO_VERSION,
+          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name)), version: TOPOTOPO_VERSION,
         });
         const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
         return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)`);
@@ -509,9 +513,10 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
             const g: GraphSpec = migrateGraph(structuredClone(a.graph ?? ws.getGraph(a.from_graph ?? 'main')));
             if (a.description) g.description = a.description;
             if (a.params) g.params = { ...(g.params ?? {}), ...a.params };
+            const added = ws.packages?.addFor(g) ?? [];
             const def = engine.registerAsset(a.name, g);
             fs.writeFileSync(path.join(ws.assetDir, a.name + '.json'), JSON.stringify(g, null, 2));
-            return text(`saved asset "${a.name}" (use {"type": "${a.name}"})\n\n${nodeDoc(def)}`);
+            return text(`saved asset "${a.name}" (use {"type": "${a.name}"})${added.map((n) => `\nnote: ${n}`).join('')}\n\n${nodeDoc(def)}`);
           }
         }
         return text('unknown action', true);
@@ -541,6 +546,8 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   for (const t of tools) {
     const run = t.run;
     t.run = async (args) => {
+      // what changed on disk since the last call (a followed working folder, project.json): every tool sees it
+      ws.packages?.refresh();
       const result = await run(args);
       const note = inputsNote(t.name);
       if (note) result.content.push({ type: 'text', text: note });

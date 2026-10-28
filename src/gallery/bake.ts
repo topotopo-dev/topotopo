@@ -15,6 +15,7 @@ import { Workspace } from '../workspace.ts';
 import { thumbnailPNG, previewGLB } from '../render/preview.ts';
 import { bakeKey, galleryDir, readBakeState, readManifest, writeAtomic } from './library.ts';
 import type { BakeState } from './library.ts';
+import { openPackages } from './packages.ts';
 
 export const THUMB_SIZE = 512;
 /** a preview.glb above this is not written (the page shows the thumbnail instead) */
@@ -41,6 +42,8 @@ export async function bakeProject(dir: string): Promise<BakeState> {
     if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) engine.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
     if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
     await engine.init();
+    // the packages the project uses, from its copies (a bake adds none)
+    openPackages(engine, dir);
     const ws = new Workspace(dir, engine);
     ws.load();
     const name = m.bake.graph ?? m.graph;

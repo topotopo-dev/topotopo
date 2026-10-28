@@ -304,6 +304,67 @@ if (url) {
   check(found.txt.includes('barrel (open)') && found.txt.includes('baked'), 'library list finds it by words, marks the open one and its status');
 }
 
+// packages: a project publishes a version of its package; another lists the library, uses it and cooks its output
+{
+  const kit = path.join(libDir, 'lib', 'kits', 'crates');
+  await call('library', { action: 'create', library: 'game', path: 'kits/crates', title: 'Crates' });
+  const named = await call('library', { action: 'update', package: 'studio/crates' });
+  check(!named.isError && JSON.parse(fs.readFileSync(path.join(kit, 'project.json'), 'utf8')).package === 'studio/crates', 'library update names the package');
+  await call('build', { graph: {
+    nodes: { c: { type: 'box', params: { size: '=s' } }, peek: { type: 'sphere' } }, output: 'c',
+    vars: { s: 1 }, params: { s: { type: 'float', min: 0.1, max: 5, label: 'Size' } },
+    outputs: { crate: { node: 'c', label: 'Crate' }, peek: { node: 'peek', publish: false } },
+  } });
+  const noNote = await call('library', { action: 'publish' });
+  check(noNote.isError && /a version needs a note/.test(noNote.txt), 'library publish needs a note');
+  const pub = await call('library', { action: 'publish', note: 'first crates' });
+  check(!pub.isError && /✓ published studio\/crates 1\.0 \(the first version\): "first crates"/.test(pub.txt) && fs.existsSync(path.join(kit, 'versions', '1.0', 'version.json')), `library publish: ${pub.txt.split('\n')[0]}`);
+  const again = await call('library', { action: 'publish', note: 'again' });
+  check(again.isError && /nothing changed since 1\.0/.test(again.txt), 'publishing again without a change is refused');
+
+  const yard = path.join(libDir, 'lib', 'levels', 'yard');
+  await call('library', { action: 'create', library: 'game', path: 'levels/yard', title: 'Yard' });
+  // the person lists the library the project finds packages in
+  const pj = JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8'));
+  fs.writeFileSync(path.join(yard, 'project.json'), JSON.stringify({ ...pj, libraries: ['game'] }, null, 2));
+  const listed = await call('library', { action: 'packages' });
+  check(!listed.isError && /studio\/crates {2}1\.0 "first crates" {2}\[library "game"\]/.test(listed.txt) && /outputs: crate/.test(listed.txt), `library packages lists the packages in the project's libraries: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
+  const b = await call('build', { graph: { nodes: { a: { type: 'studio/crates/crate', params: { s: 2 } }, d: { type: 'studio/crates', params: { s: 0.5 } }, t: { type: 'transform', in: ['d'], params: { translate: [3, 0, 0] } }, out: { type: 'merge', in: ['a', 't'] } }, output: 'out' } });
+  check(!b.isError && /note: added studio\/crates 1\.0 to project yard from library "game"/.test(b.txt) && /✓ graph "main"/.test(b.txt) && fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.0', 'version.json')),
+    `a build that names a package adds it on first use and cooks its outputs: ${b.txt.split('\n').filter((l) => /✓|note:|✗|\[/.test(l)).join(' | ')}`);
+  const used = await call('library', { action: 'use', package: 'studio/crates' });
+  check(!used.isError && /already uses studio\/crates 1\.0/.test(used.txt), 'library use: already in use');
+  const h = await call('help', { nodes: ['studio/crates/crate', 'studio/crates/peek'] });
+  check(/## studio\/crates\/crate \(package\)/.test(h.txt) && /studio\/crates 1\.0: first crates/.test(h.txt) && /s float = 1 \[0\.1\.\.5\]/.test(h.txt) && /has no output "peek"/.test(h.txt),
+    'help gives a package output\'s sliders, version and note; a "publish": false output is not one');
+  const c = await call('catalog', { category: 'package' });
+  check(/\[package\]/.test(c.txt) && /studio\/crates\/crate ◦ — output "crate" of package studio\/crates 1\.0 \(Crate\)/.test(c.txt) && /studio\/crates ◦ — the default output/.test(c.txt), 'catalog lists the project\'s package outputs');
+  const x = await call('export', { path: 'exports/yard.glb' });
+  const rec = JSON.parse(fs.readFileSync(path.join(yard, 'exports', 'yard.glb.source.json'), 'utf8')).source;
+  const lock = JSON.parse(fs.readFileSync(path.join(yard, 'packages', 'lock.json'), 'utf8'));
+  check(!x.isError && JSON.stringify(rec.packages) === JSON.stringify({ 'studio/crates@1.0': lock.packages['studio/crates']['1.0'].hash }), `the export records the package version it used: ${JSON.stringify(rec.packages)}`);
+  // following the kit's working folder for the session: an edit there re-cooks here; publishing is refused meanwhile
+  const kitGraph = JSON.parse(fs.readFileSync(path.join(kit, 'graphs', 'main.json'), 'utf8'));
+  kitGraph.nodes.c.params.size = '=s * 3';
+  fs.writeFileSync(path.join(kit, 'graphs', 'main.json'), JSON.stringify(kitGraph, null, 2));
+  const before = await call('inspect', { node: 'a' });
+  const fol = await call('library', { action: 'follow', package: 'studio/crates', on: true });
+  check(!fol.isError && /following studio\/crates for this session: its working folder/.test(fol.txt), `library follow: ${fol.txt.slice(0, 100)}`);
+  const ins = await call('inspect', { node: 'a' });
+  check(/size 2\.00 × 2\.00 × 2\.00/.test(before.txt) && /size 6\.00 × 6\.00 × 6\.00/.test(ins.txt), 'the followed package cooks from its working folder (an edit there shows here)');
+  kitGraph.nodes.c.params.size = '=s * 4';
+  fs.writeFileSync(path.join(kit, 'graphs', 'main.json'), JSON.stringify(kitGraph, null, 2));
+  const ins2 = await call('inspect', { node: 'a' });
+  check(/size 8\.00 × 8\.00 × 8\.00/.test(ins2.txt), 'a later edit there re-cooks it');
+  const xf = await call('export', { path: 'exports/yard_followed.glb' });
+  const frec = JSON.parse(fs.readFileSync(path.join(yard, 'exports', 'yard_followed.glb.source.json'), 'utf8')).source;
+  check(!xf.isError && typeof frec.packages?.['studio/crates@working'] === 'string' && !frec.packages['studio/crates@1.0'], `an export while following records the working folder: ${JSON.stringify(frec.packages)}`);
+  const blocked = await call('library', { action: 'publish', note: 'while following' });
+  check(blocked.isError && /this session follows studio\/crates from its working folder/.test(blocked.txt), 'publishing while following is refused');
+  const off = await call('library', { action: 'follow', package: 'studio/crates', on: false });
+  check(!off.isError && /it resolves to its copy \(1\.0\) again/.test(off.txt), 'library follow on:false goes back to the copy');
+}
+
 await client.close();
 console.log(`\n${failures ? failures + ' FAILURES' : 'ALL PASSED'} — workspace ${wsDir}`);
 process.exit(failures ? 1 : 0);

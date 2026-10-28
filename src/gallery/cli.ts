@@ -5,9 +5,14 @@
 //   topotopo library new <library> <folder/name> [--title t] [--tags a,b] [--description d]
 //   topotopo library bake <project folder> | --stale | --all          bake previews in this process
 //   topotopo edit <project folder> [--port 7341] [--json]             the live viewer on a project (the gallery's editor)
+// and a project's packages (src/gallery/packages.ts):
+//   topotopo init [folder] [--package owner/name]                     make a folder a project (project.json)
+//   topotopo use owner/name [folder]                                  add a package from the libraries the project lists
+//   topotopo packages [folder]                                        what it uses, and the packages in its libraries
+//   topotopo publish [folder] --note "..." [--big]                    publish the next version of the project's package
 import fs from 'node:fs';
 import path from 'node:path';
-import { addLibrary, createProject, isStale, loadConfig, projectDirOf, readBakeState, scanAll, slugify } from './library.ts';
+import { addLibrary, createProject, initProject, isStale, loadConfig, projectDirOf, readBakeState, scanAll, slugify } from './library.ts';
 import type { GalleryConfig } from './library.ts';
 
 const fail = (msg: string): never => { console.error(msg); process.exit(1); };
@@ -104,9 +109,11 @@ export async function editCommand(argv: string[], prog: string) {
   const { createNodeHost } = await import('../host/node.ts');
   const { Workspace } = await import('../workspace.ts');
   const { startViewer } = await import('../viewer/server.ts');
+  const { openPackages } = await import('./packages.ts');
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
   const ws = new Workspace(dir, engine);
+  ws.packages = openPackages(engine, dir);
   ws.load();
   ws.watch();
   const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined);
@@ -119,4 +126,64 @@ export async function editCommand(argv: string[], prog: string) {
       else if (Date.now() - idleSince > 10 * 60_000) { v.close(); process.exit(0); }
     }, 30_000);
   } else console.log(`edit: ${v.url}  (${dir}; Ctrl+C to stop)`);
+}
+
+/** The folder a package command acts on: the argument that is not an option (or its value), else the current one. */
+function folderArg(argv: string[], valued: string[], skip = 0): string {
+  const rest = argv.filter((x, i) => !x.startsWith('--') && !valued.includes(argv[i - 1]));
+  return path.resolve(rest[skip] ?? '.');
+}
+
+/** `init [folder] [--package owner/name]`: make a folder a project. */
+export async function initCommand(argv: string[], prog: string) {
+  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
+  if (argv.includes('--package') && (opt('--package') === undefined || opt('--package')!.startsWith('--'))) fail(`usage: ${prog} init [folder] [--package owner/name]`);
+  try {
+    const { dir, manifest } = initProject(folderArg(argv, ['--package']), { package: opt('--package') });
+    console.log(`project ${manifest.id} → ${dir}${manifest.package ? ` (package ${manifest.package})` : ''}`);
+    console.log(`  graphs go in graphs/ ("graph": "${manifest.graph}" is the one it shows); list the libraries it finds packages in under "libraries" in project.json`);
+  } catch (e: any) { fail(e.message); }
+}
+
+/** The packages of the project a folder belongs to, in an engine of their own. */
+async function projectPackages(dir: string, prog: string) {
+  const { Engine } = await import('../graph/engine.ts');
+  const { createNodeHost } = await import('../host/node.ts');
+  const { openPackages } = await import('./packages.ts');
+  const project = projectDirOf(dir) ?? fail(`${dir} is in no project: ${prog} init <folder> makes a folder a project (project.json)`);
+  const engine = new Engine(createNodeHost({ baseDir: project }));
+  await engine.init();
+  return { engine, project, pk: openPackages(engine, project) };
+}
+
+/** `use owner/name [folder]`: add a package to the project from the libraries it lists. */
+export async function useCommand(argv: string[], prog: string) {
+  const [pkg] = argv.filter((x) => !x.startsWith('--'));
+  if (!pkg) fail(`usage: ${prog} use owner/name [folder]`);
+  const { pk } = await projectPackages(folderArg(argv, [], 1), prog);
+  try { console.log(pk.use(pkg).text); } catch (e: any) { fail(e.message); }
+  for (const p of pk.check()) console.error(`warning: ${p}`);
+}
+
+/** `packages [folder]`: what the project uses, and the packages in the libraries it lists. */
+export async function packagesCommand(argv: string[], prog: string) {
+  const { packagesText } = await import('./packages.ts');
+  const { pk } = await projectPackages(folderArg(argv, []), prog);
+  console.log(packagesText(pk));
+}
+
+/** `publish [folder] --note "..." [--big]`: publish the next version of the project's package. */
+export async function publishCommand(argv: string[], prog: string) {
+  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
+  if (argv.includes('--note') && (opt('--note') === undefined || opt('--note')!.startsWith('--'))) fail(`usage: ${prog} publish [folder] --note "what changed" [--big]`);
+  const { publishPackage, publishText } = await import('./packages.ts');
+  const { Workspace } = await import('../workspace.ts');
+  const { engine, project, pk } = await projectPackages(folderArg(argv, ['--note']), prog);
+  const ws = new Workspace(project, engine);
+  ws.packages = pk;
+  ws.load();
+  const r = await publishPackage(ws, pk, { note: opt('--note'), big: argv.includes('--big') });
+  console.log(publishText(r));
+  await engine.host.pool?.close();
+  process.exit(r.ok ? 0 : 1);
 }

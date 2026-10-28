@@ -24,6 +24,9 @@
 //                                                         files dropped on the page go to inputs/ beside the graph file
 //   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/gallery/cli.ts)
 //   node src/cli.ts library add|list|new|bake …           libraries and projects; edit <project> opens the live viewer
+//   node src/cli.ts init|use|packages|publish …           a project and its packages (src/gallery/packages.ts);
+//                                                         --follow owner/name on a cook or view uses a package's
+//                                                         working folder instead of its copy, for that run
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,6 +44,8 @@ import { encodePNG } from './render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { exportSource } from './io/source.ts';
+import { packagesUsed } from './graph/packages.ts';
+import { openPackages } from './gallery/packages.ts';
 import { ArtifactStore } from './host/artifacts.ts';
 import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
@@ -71,6 +76,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
+    '         [--follow owner/name] (use that package\'s working folder in the project\'s libraries instead of its copy, for this run; repeat it)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
@@ -90,12 +96,16 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '       every export records how it was made (graph, graph hash, output, node, frame, fps, vars, seeds, options, version) in its sidecar',
     '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
-    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version`,
+    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a project: its packages' outputs too, --help-node owner/name/output)`,
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
-    `       ${prog} view <graph.json> [--port 7341]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
+    `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
     `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's projects, stable links for a board)`,
     `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <project>|--stale|--all`,
     `       ${prog} edit <project folder> [--port 7341]   (the live viewer on a gallery project)`,
+    `       ${prog} init [folder] [--package owner/name]   (make a folder a project: project.json)`,
+    `       ${prog} use owner/name [folder]   (add a package to the project: its newest version in the libraries project.json lists, copied into packages/)`,
+    `       ${prog} packages [folder]   (what the project uses, and the packages in its libraries with their newest version, note and outputs)`,
+    `       ${prog} publish [folder] --note "what changed" [--big]   (publish the next version of the project's package into versions/; --help-topic packages)`,
   ].join('\n'));
   process.exit(0);
 }
@@ -113,30 +123,39 @@ if (argv.includes('--help-topic')) {
   process.exit(0);
 }
 if (argv.includes('--catalog') || opt('--help-node')) {
-  // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts
+  // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts, and the outputs of
+  // the packages the current folder's project uses
   const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
   await engine.init();
-  const defs = [...allNodeDefs(), ...engine.assetsIn().map((x) => x.def)];
+  openPackages(engine, process.cwd());
+  const defs = [...allNodeDefs(), ...engine.assetsIn().map((x) => x.def), ...engine.packageDefs()];
   if (argv.includes('--catalog')) console.log(catalogText(defs, { cli: true }));
   else {
-    const d = defs.find((x) => x.type === opt('--help-node'));
-    console.log(d ? nodeDoc(d) : `unknown node "${opt('--help-node')}" (see --catalog)`);
+    const name = opt('--help-node')!;
+    const d = defs.find((x) => x.type === name) ?? (name.includes('/') ? engine.resolveDef(name) : undefined);
+    const why = !d && name.includes('/') ? engine.packageIssue(name) : null;
+    console.log(d ? nodeDoc(d) : why ? `${why.error}${why.hint ? ` (${why.hint})` : ''}` : `unknown node "${name}" (see --catalog)`);
   }
   process.exit(0);
 }
+
+/** --follow owner/name (repeatable): packages whose working folders a cook uses instead of their copies. */
+const followArgs = argv.flatMap((x, i) => (x === '--follow' ? [argv[i + 1]] : []));
+if (followArgs.some((f) => f === undefined || f.startsWith('--'))) fail('--follow needs a package: --follow owner/name');
 
 if (argv[0] === 'view') {
   // `topotopo view <graph.json> [--port 7341]`: cook the file, serve the live 3D viewer and follow its saves; the values
   // tuned on the page are session values over the file, written into it on request (src/viewer/graph-file.ts)
   const file = argv[1];
-  if (!file || file.startsWith('-')) fail(`usage: ${prog} view <graph.json> [--port 7341]`);
+  if (!file || file.startsWith('-')) fail(`usage: ${prog} view <graph.json> [--port 7341] [--follow owner/name]`);
   if (!fs.existsSync(file)) fail(`${prog}: no such graph file "${file}"`);
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
-  await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined });
-} else if (argv[0] === 'gallery' || argv[0] === 'library' || argv[0] === 'edit') {
-  // the gallery website, its libraries and its editor (src/gallery/cli.ts)
+  try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
+  catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
+} else if (argv[0] === 'gallery' || argv[0] === 'library' || argv[0] === 'edit' || argv[0] === 'init' || argv[0] === 'use' || argv[0] === 'packages' || argv[0] === 'publish') {
+  // the gallery website, its libraries and its editor; a project's packages (src/gallery/cli.ts)
   const g = await import('./gallery/cli.ts');
-  const run = { gallery: g.galleryCommand, library: g.libraryCommand, edit: g.editCommand }[argv[0]];
+  const run = { gallery: g.galleryCommand, library: g.libraryCommand, edit: g.editCommand, init: g.initCommand, use: g.useCommand, packages: g.packagesCommand, publish: g.publishCommand }[argv[0]];
   await run(argv.slice(1), prog);
 } else if (argv[0] === 'mcp') {
   // `topotopo mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
@@ -200,6 +219,13 @@ async function cook() {
   }
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
   await engine.init();
+  // the packages of the project the file belongs to: one the graph names for the first time is added, and --follow
+  // uses a package's working folder for this run
+  let pk: ReturnType<typeof openPackages>;
+  try { pk = openPackages(engine, path.dirname(path.resolve(file)), { follow: followArgs }); } catch (e) { fail(`--follow: ${(e as Error).message}`); }
+  for (const n of pk!.addFor(graph)) console.log(n);
+  for (const p of pk!.check()) console.error(`warning: ${p}`);
+  for (const f of pk!.following()) console.log(`following ${f.package}: its working folder ${f.dir} instead of its copy`);
   const fps = opt('--fps') !== undefined ? Number(opt('--fps')) : undefined;
   const framesArg = opt('--frames');
   const frameArg = opt('--frame');
@@ -271,7 +297,7 @@ async function cook() {
       if (opt('--tangents') !== undefined && !['auto', 'preserve', 'none'].includes(opt('--tangents')!)) fail(`--tangents must be auto, preserve or none (got "${opt('--tangents')}")`);
       // the export tool's options (the MCP export tool and export targets use the same names and code)
       const a = exportArgs();
-      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, version: TOPOTOPO_VERSION });
+      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph), version: TOPOTOPO_VERSION });
       const res = await serializeExport(geo, fmt, p, a, engine.host, source);
       for (const w of res.warnings) console.warn(`warning: ${w}`);
       writeExportFiles(res.files);
@@ -334,7 +360,7 @@ async function cook() {
       const r = await engine.cook(graph, { target: p.node, frame: single, fps });
       report(r);
       if (!r.ok || !r.geo) fail(`--export-all: "${p.label}" did not cook; nothing was written`);
-      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host, { frame: r.frame, fps: r.fps }));
+      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, graph) }));
     }
     writeTargets(prepared, exportsDir);
     const rel = (f: string) => path.join('exports', path.relative(exportsDir, f));

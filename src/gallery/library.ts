@@ -1,6 +1,8 @@
 // Libraries of projects. A library is a folder listed in the user's config; a project is any
 // folder below it holding a project.json, and is itself a TopoTopo workspace (graphs/ assets/ inputs/ exports/) plus
 // attachments/ (concept art, references, source files) and .gallery/ (thumb.png, preview.glb, bake.json: derived).
+// A project that is a package also holds its published versions/ and, when it uses packages, their copies in packages/
+// (src/gallery/packages.ts).
 //   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], gallery: {port, cors: [origins]}}
 //   $TOPOTOPO_LIBRARIES                              more libraries: name=path entries separated by path.delimiter
 // Scanning reads project.json files only: it never creates folders and never cooks.
@@ -8,16 +10,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { ID_RE, parsePackageName } from '../graph/scope.ts';
 import { NAME_RE } from '../workspace.ts';
 
 /** Bumped when the baked files change shape (render options, GLB options), so every project bakes again. */
 export const BAKE_VERSION = 1;
 export const DEFAULT_PORT = 7340;
-/** a library name or project id: lower-case letters, digits, "-" and "_", starting with a letter or digit */
-export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** a library name or project id: lower-case letters, digits, "-" and "_", starting with a letter or digit (the package name rule) */
+export { ID_RE };
+/** a package version: big.small, from 1.0 */
+export const VERSION_RE = /^[1-9]\d*\.(0|[1-9]\d*)$/;
 const MAX_DEPTH = 8;
-/** folders a scan never enters (besides dot-folders); a project's own folders are never entered either */
-const SKIP = new Set(['node_modules', 'graphs', 'assets', 'inputs', 'exports', 'attachments']);
+/**
+ * folders a scan never enters (besides dot-folders); a project's own folders are never entered either, nor its
+ * published versions and package copies, whose project.json files are not projects
+ */
+const SKIP = new Set(['node_modules', 'graphs', 'assets', 'inputs', 'exports', 'attachments', 'versions', 'packages']);
 const PKG_VERSION = (() => {
   // package.json sits two levels above both src/gallery/library.ts and dist/gallery/library.js
   try { return String(JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version); } catch { return '0'; }
@@ -45,6 +53,12 @@ export interface ProjectManifest {
   links: ProjectLink[];
   /** ISO date */
   created: string;
+  /** the package the project is, "owner/name": set by the author before the first publish, never derived */
+  package?: string;
+  /** the packages its graphs use, with the version in use: {"owner/name": "1.3"} (written by the tools) */
+  uses: Record<string, string>;
+  /** where it finds packages to add: paths relative to the project (a library in the same repository) or registered library names */
+  libraries: string[];
 }
 
 export interface BakeState {
@@ -159,6 +173,19 @@ export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
   if (b.graph !== undefined) { bake.graph = str(b.graph, 'bake.graph'); if (!NAME_RE.test(bake.graph)) throw new Error(`"bake.graph" must be a graph name`); }
   if (b.node !== undefined) bake.node = str(b.node, 'bake.node');
   if (b.frame !== undefined) { if (!Number.isFinite(b.frame)) throw new Error('"bake.frame" must be a number'); bake.frame = b.frame; }
+  const pkg = raw.package === undefined ? undefined : str(raw.package, 'package');
+  const isPackage = (s: string) => { const n = parsePackageName(s); return typeof n !== 'string' && n.output === null; };
+  if (pkg !== undefined && !isPackage(pkg)) throw new Error(`"package" "${pkg}" must be "owner/name": each part lower-case letters, digits, - and _, starting with a letter or digit`);
+  const uses = raw.uses ?? {};
+  if (!uses || typeof uses !== 'object' || Array.isArray(uses)) throw new Error('"uses" must be {"owner/name": "1.3"}');
+  for (const [k, v] of Object.entries(uses)) {
+    if (!isPackage(k)) throw new Error(`"uses": "${k}" is not a package name (owner/name)`);
+    if (typeof v !== 'string' || !VERSION_RE.test(v)) throw new Error(`"uses": "${k}" needs a version such as "1.3", got ${JSON.stringify(v)}`);
+  }
+  const libraries = raw.libraries ?? [];
+  if (!Array.isArray(libraries) || libraries.some((l: unknown) => typeof l !== 'string' || !l.trim())) throw new Error('"libraries" must be a list of registered library names and paths relative to the project');
+  for (const l of libraries as string[])
+    if (path.isAbsolute(l) || /^[A-Za-z]:/.test(l)) throw new Error(`"libraries": "${l}" is an absolute path: give the path relative to the project (a library in the same repository) or a registered library's name`);
   return {
     id, graph, bake,
     title: str(raw.title, 'title', id),
@@ -166,6 +193,9 @@ export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
     tags: [...new Set(tags.map((t: string) => t.trim()).filter(Boolean))] as string[],
     links: links.map((l: any) => ({ label: typeof l.label === 'string' && l.label ? l.label : l.url, url: l.url })),
     created: str(raw.created, 'created'),
+    ...(pkg !== undefined ? { package: pkg } : {}),
+    uses: Object.fromEntries(Object.entries(uses as Record<string, string>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    libraries: libraries as string[],
   };
 }
 
@@ -183,7 +213,11 @@ export function writeManifest(dir: string, m: ProjectManifest) {
   const file = manifestFile(dir);
   let raw: any = {};
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new or unreadable: replaced */ }
-  writeAtomic(file, JSON.stringify({ ...raw, ...m }, null, 2) + '\n');
+  const out = { ...raw, ...m };
+  // "uses" and "libraries" appear once they hold something (or when the file had them already)
+  if (!Object.keys(m.uses).length && !Object.hasOwn(raw, 'uses')) delete out.uses;
+  if (!m.libraries.length && !Object.hasOwn(raw, 'libraries')) delete out.libraries;
+  writeAtomic(file, JSON.stringify(out, null, 2) + '\n');
 }
 
 /** Written as a dot-file next to the target and renamed, so readers never see half a file. */
@@ -281,6 +315,26 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
   return scanLibrary(lib).projects.find((p) => p.id === id)!;
 }
 
+/**
+ * Make a folder a project (`topotopo init`), in a library or anywhere: project.json with an id from the folder's name
+ * and "graph": "main", and a .gitignore for the derived files. `pkg` names the package the project is ("owner/name").
+ * Fails when the folder is a project already or lies inside one.
+ */
+export function initProject(dir: string, o: { package?: string } = {}): { dir: string; manifest: ProjectManifest } {
+  const abs = path.resolve(dir);
+  if (fs.existsSync(manifestFile(abs))) throw new Error(`${abs} is a project already (${manifestFile(abs)})`);
+  const outer = projectDirOf(path.dirname(abs));
+  if (outer) throw new Error(`${abs} is inside the project ${outer}: a project cannot hold another`);
+  const id = slugify(path.basename(abs));
+  if (!ID_RE.test(id)) throw new Error(`"${path.basename(abs)}" gives no usable project id: name the folder with letters or digits`);
+  const manifest = parseManifest({ id, title: path.basename(abs), graph: 'main', created: new Date().toISOString().slice(0, 10), ...(o.package !== undefined ? { package: o.package } : {}) }, id);
+  fs.mkdirSync(abs, { recursive: true });
+  writeManifest(abs, manifest);
+  const gi = path.join(abs, '.gitignore');
+  if (!fs.existsSync(gi)) fs.writeFileSync(gi, '.gallery/\n.cache/\n');
+  return { dir: abs, manifest };
+}
+
 // ------------------------------------------------------------------------------------------------------ project files
 
 export interface ProjectFile { path: string; size: number; mtime: number; image: boolean }
@@ -318,7 +372,7 @@ export const galleryDir = (dir: string) => path.join(dir, '.gallery');
 
 /**
  * What a bake depends on: the bake version, the package version, the manifest's graph and bake choice, every graph
- * and asset file's content, and each input file's path, size and time.
+ * and asset file's content, each input file's path, size and time, and the package lock (the versions it uses).
  */
 export function bakeKey(dir: string, m: ProjectManifest): string {
   const h = createHash('sha256');
@@ -328,6 +382,8 @@ export function bakeKey(dir: string, m: ProjectManifest): string {
     try { h.update(fs.readFileSync(path.join(dir, d, f))); } catch { /* removed meanwhile */ }
   }
   for (const f of listFiles(path.join(dir, 'inputs'))) h.update(`inputs/${f.path}|${f.size}|${f.mtime}\n`);
+  const lock = path.join(dir, 'packages', 'lock.json');
+  if (fs.existsSync(lock)) { h.update('packages/lock.json\n'); try { h.update(fs.readFileSync(lock)); } catch { /* removed meanwhile */ } }
   return h.digest('hex').slice(0, 32);
 }
 

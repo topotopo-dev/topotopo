@@ -81,18 +81,21 @@ export interface PreparedTarget {
   sourceManifest?: string;
 }
 
-/** When a target's output was cooked: the engine's defaults (frame 1, 24 fps) unless the cook used others. */
-export interface TargetCook { frame?: number; fps?: number }
+/**
+ * When a target's output was cooked: the engine's defaults (frame 1, 24 fps) unless the cook used others, and the
+ * package versions the graph uses (src/graph/packages.ts packagesUsed).
+ */
+export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string> }
 
 /**
  * Serialize one published output to its target inside `exportsDir` (nothing is written yet). The export records its
- * source: the graph it is published from (p.spec), its vars and seeds, the node, `cook`'s frame and fps.
+ * source: the graph it is published from (p.spec), its vars and seeds, the node, `cook`'s frame and fps, its packages.
  */
 export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, host: Host, cook: TargetCook = {}): Promise<PreparedTarget> {
   const dest = insideRoot(exportsDir, path.join(exportsDir, ...p.target.path.split('/')));
   const source = exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
-    format: p.target.format, options: p.target.options, version: TOPOTOPO_VERSION,
+    format: p.target.format, options: p.target.options, packages: cook.packages, version: TOPOTOPO_VERSION,
   });
   const r = await serializeExport(geo, p.target.format, dest, p.target.options, host, source);
   for (const f of r.files) insideRoot(exportsDir, f.path);

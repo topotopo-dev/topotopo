@@ -27,7 +27,8 @@ PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in on
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
-LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".`;
+LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".
+PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. library {action:"packages"} lists them, {action:"publish", note} publishes a version of the open project's package. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -90,7 +91,8 @@ WORKING IN A PROJECT
   simulations that settle after frame 1; bake.node to show one part).
 - library {action:"bake"} → render the previews now and see the thumbnail.
 Put reference images the person gives you in attachments/, guide files in inputs/. Links in "links" point back to the
-board or concept pages, so the gallery page and the board link both ways.`,
+board or concept pages, so the gallery page and the board link both ways.
+A project can be a package that other projects use, and use packages itself: help topic "packages".`,
   graph: `GRAPH FORMAT
 {
   "nodes": {
@@ -125,7 +127,8 @@ board or concept pages, so the gallery page and the board link both ways.`,
 - Output node: "output", else a node named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
   the default. Publish complete assets and useful separate parts; the viewer isolates each on click and lists
-  its textures/layers. Rename/remove edits maintain references. The latest render of each graph node is saved as
+  its textures/layers. In a project that is a package they are its outputs; "publish": false keeps one (a viewer-only
+  preview) out of the package (help topic "packages"). Rename/remove edits maintain references. The latest render of each graph node is saved as
   exports/renders/<graph>-<node>.png (each render overwrites it) unless save_to is supplied; explicit render/export
   destinations are registered in the viewer too.
 - Optional "export" (on the graph for the default output, or on an entry of "outputs") is where that output
@@ -787,6 +790,58 @@ SHELF: 35 shipped assets (catalog {category:"shelf"}; help {nodes:["stairs"]} fo
   To change one: assets {action:"fork", name:"stairs", to:"my_stairs"} copies its graph into the workspace; edit it, then
   assets {action:"save", name:"stairs", from_graph:"my_stairs"} overrides the shelf asset (delete restores the original).`,
 
+  packages: `PACKAGES (a project uses another project's published outputs by name)
+A package is a project with a full name and published versions. Its author names it once in project.json, "package":
+"owner/name" (lower-case letters, digits, - and _; the owner "topotopo" is reserved for TopoTopo's own), and publishes:
+  library {action:"publish", note:"taller pines"}        CLI: topotopo publish [folder] --note "taller pines" [--big]
+A graph uses an output of a package as a node type; "owner/name" alone is the package's default output:
+  {"type": "studio/trees/pine", "in": ["ground"], "params": {"height": 6}}      {"type": "studio/trees"}
+Its params are the vars of the output's graph with their "params" declarations (ranges clamp, options are checked) and
+its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the version and its note;
+catalog {category:"package"} lists the outputs of the packages the project uses.
+
+WHAT A PACKAGE PUBLISHES: every named output ("outputs") of every graph in graphs/ but those marked "publish": false
+(viewer-only previews), and the default output: the output node ("output") of the graph project.json shows ("graph"),
+which must be set. Output names follow the same rule as the package name and are unique in the package.
+
+VERSIONS: big.small from 1.0, each a folder versions/<version>/ in the package that is never written over: project.json,
+graphs/, assets/, inputs/, the copies the package uses (packages/) and version.json (the note, the time, a hash of every
+other file, each output's graph, node, sliders and inputs). exports/, attachments/ and other files are not part of it.
+The number comes from the version before: big (2.0) when something a user relies on goes away or means something else
+(an output removed, renamed or marked "publish": false; a slider removed, renamed or of another type; a narrower range;
+a removed option; an input removed or moved), small (1.4) for everything else (new outputs, sliders, options and inputs,
+wider ranges, other defaults, labels, any change to the geometry). big:true (--big) marks a version big when its
+meaning changed in a way the tools cannot see (a model that now faces another way). Publishing cooks every published
+output first and is refused for an output that does not cook, an output name clash, no default output, a copy edited by
+hand, nothing changed since the last version, no note, and a package this session follows. It warns about URLs and
+files outside the package that its nodes read (a version holds no copy of them) and about a version above 50 MB.
+
+USING PACKAGES: project.json "uses" holds the version the project uses of each ({"studio/trees": "1.3"}), and packages/
+its own copy of each, and of the packages those use, flat: packages/<owner>/<name>/<version>/, each version once, with
+packages/lock.json (each copy's hash, the library it came from, its own uses). The copies are committed with the project,
+so it cooks anywhere without the libraries, and what it uses never changes by itself; a copy edited by hand is warned
+about. A project finds packages only in the libraries its project.json lists, "libraries": ["../shared/library", "game"]:
+a path relative to the project for a library in the same repository (every checkout and worktree uses its own), else a
+registered library's name. The tools never list a library themselves; the person does.
+- First use: a build or edit whose graph names a package the project does not use yet adds its newest version, and
+  the response says so. library {action:"use", package:"studio/trees"} (CLI: topotopo use studio/trees) adds one
+  explicitly; library {action:"packages"} (CLI: topotopo packages) lists what the project uses and the packages in its
+  libraries with their newest version, note and outputs.
+- A package output cooks in its version's own scope: its own assets, graphs (graph_ref) and files (relative paths read
+  the version's folder) and the versions it uses. Nothing leaks either way, and two versions of one package (one the
+  project uses, one another package uses) cook side by side.
+- Errors never guess: a package not in "uses" says how to add it, an unknown output lists the package's outputs, a
+  missing copy says which, and a package found only in a registered library the project does not list names that library.
+
+FOLLOWING, for one session: library {action:"follow", package:"studio/trees", on:true} (CLI: --follow studio/trees on a
+graph cook or topotopo view) uses the package's working folder in the project's libraries instead of its copy, until
+on:false or the end of the session; nothing about it is saved. Every edit there re-cooks, exports record it
+("studio/trees@working" and the hash of its files), and publishing the project is refused while it lasts. Other
+packages' versions keep the copies they hold.
+
+EXPORTS record the package versions their graph used in the source block: "packages": {"studio/trees@1.3": "<hash>"}.
+CLI: topotopo init [folder] [--package owner/name] makes a folder a project; use, packages and publish take the project
+folder (default: the current one).`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing; boxes and simple shapes.
