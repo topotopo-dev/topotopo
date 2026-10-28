@@ -23,7 +23,7 @@ const lib = { name: 'game', path: path.join(tmp, 'lib') };
 fs.mkdirSync(lib.path);
 const BOX = { nodes: { b: { type: 'box' } }, output: 'b' };
 const crate = createProject(lib, 'props/crate', { title: 'Crate <b>&', tags: ['props'], graph: BOX, links: [{ label: 'board', url: 'http://board.local/x' }] });
-fs.writeFileSync(path.join(crate.dir, 'attachments', 'concept.png'), fs.readFileSync(path.resolve('shelf/thumbs/crate.png')));
+fs.writeFileSync(path.join(crate.dir, 'attachments', 'concept.png'), fs.readFileSync(path.resolve('library/props/thumbs/crate.png')));
 fs.writeFileSync(path.join(crate.dir, 'attachments', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 fs.writeFileSync(path.join(tmp, 'secret.txt'), 'secret');
 const cfg: GalleryConfig = { file: path.join(tmp, 'config.json'), libraries: [lib], gallery: { port: 0, cors: ['http://board.local:3000'] } };

@@ -442,12 +442,6 @@ export class Engine {
   /** cooks in progress by signature: a second cook of the same signature waits for the first */
   private inflight = new Map<string, Flight>();
 
-  /** the shipped shelf's assets (loadShelf): every scope sees them after its own */
-  shelf = new Map<string, AssetEntry>();
-  /** problems found while loading the shelf (unreadable index or files, invalid graphs) */
-  shelfErrors: string[] = [];
-  private shelfLoaded = false;
-
   constructor(host: Host) {
     this.host = host;
     this.root = { id: '', assets: new Map(), files: host };
@@ -461,54 +455,11 @@ export class Engine {
       const { MeshoptSimplifier } = await import('meshoptimizer');
       await MeshoptSimplifier.ready;
     }
-    if (!this.shelfLoaded && this.host.shelfPath) await this.loadShelf(this.host.shelfPath);
   }
 
   /**
-   * Register the shipped asset shelf as node types of category "shelf", which every scope sees after its own assets.
-   * `<base>/index.json` lists the asset files ({"assets": [{"name", "file"}]}, dependencies first); everything is read
-   * through the Host, so a browser host serves the same directory over HTTP. A workspace asset with the same name takes
-   * precedence (Engine.asset), also over a later (re)load of the shelf.
-   */
-  async loadShelf(base: string): Promise<{ loaded: number; errors: string[] }> {
-    this.shelfLoaded = true;
-    const dec = new TextDecoder();
-    const at = (f: string) => base.replace(/[\\/]+$/, '') + '/' + f;
-    const errors: string[] = [];
-    let entries: { name: string; file: string }[] = [];
-    try {
-      const index = JSON.parse(dec.decode(await this.host.readFile(at('index.json'))));
-      entries = (Array.isArray(index) ? index : index.assets ?? []).map((e: any) =>
-        typeof e === 'string' ? { name: e.replace(/\.json$/, ''), file: e } : { name: e.name ?? String(e.file).replace(/\.json$/, ''), file: e.file ?? `${e.name}.json` });
-    } catch (e: any) {
-      errors.push(`shelf index ${at('index.json')}: ${e.message}`);
-    }
-    let pending: { name: string; graph: GraphSpec }[] = [];
-    for (const { name, file } of entries) {
-      try { pending.push({ name, graph: JSON.parse(dec.decode(await this.host.readFile(at(file)))) }); }
-      catch (e: any) { errors.push(`${file}: ${e.message}`); }
-    }
-    // register in index order; an asset that uses a shelf asset listed after it is retried until nothing changes
-    let loaded = 0;
-    for (let pass = 0; pending.length; pass++) {
-      const failed: { name: string; graph: GraphSpec; error: string }[] = [];
-      for (const { name, graph } of pending) {
-        try { this.registerAsset(name, graph, { category: 'shelf' }); loaded++; }
-        catch (e: any) { failed.push({ name, graph, error: e.message }); }
-      }
-      if (failed.length === pending.length || pass > 8) {
-        for (const f of failed) errors.push(`${f.name}: ${f.error}`);
-        break;
-      }
-      pending = failed;
-    }
-    this.shelfErrors = errors;
-    return { loaded, errors };
-  }
-
-  /**
-   * A node type in a scope: its own assets, then the shelf, then the built-in nodes. A name with a slash is a package
-   * output, which only the scope's packages resolve (packageIssue says why one does not).
+   * A node type in a scope: its own assets, then the built-in nodes. A name with a slash is a package output, which
+   * only the scope's packages resolve (packageIssue says why one does not).
    */
   resolveDef(type: string, scope: Scope = this.root): NodeDef | undefined {
     if (typeof type !== 'string') return undefined;
@@ -558,38 +509,30 @@ export class Engine {
 
   // ------------------------------------------------------------ assets
 
-  /** The asset a name refers to in a scope: the scope's own, else the shelf's. */
+  /** The asset a name refers to in a scope: one of the scope's own. */
   asset(name: string, scope: Scope = this.root): AssetEntry | undefined {
-    return scope.assets.get(name) ?? this.shelf.get(name);
+    return scope.assets.get(name);
   }
 
-  /** The assets a scope sees: the shelf's in shelf order (an own asset of the same name in its place), then its others. */
+  /** The assets a scope has, in the order they were registered. */
   assetsIn(scope: Scope = this.root): AssetEntry[] {
-    const own = scope.assets;
-    return [...[...this.shelf.values()].map((a) => own.get(a.name) ?? a), ...[...own.values()].filter((a) => !this.shelf.has(a.name))];
+    return [...scope.assets.values()];
   }
 
-  /**
-   * Register a graph as a node type: an asset of a scope (default: the root; category "asset"), or with category "shelf"
-   * a shipped asset of the shelf (see loadShelf). The graph is validated in that scope.
-   */
-  registerAsset(name: string, graph: GraphSpec, opts: { category?: string; scope?: Scope } = {}): NodeDef {
+  /** Register a graph as a node type, an asset of a scope (default: the root). The graph is validated in that scope. */
+  registerAsset(name: string, graph: GraphSpec, opts: { scope?: Scope } = {}): NodeDef {
     if (!/^[A-Za-z_][\w]*$/.test(name)) throw new Error(`asset name must be an identifier, got "${name}"`);
     const scope = opts.scope ?? this.root;
     if (getNodeDef(name) && !this.asset(name, scope)) throw new Error(`"${name}" clashes with a built-in node type`);
-    const category = opts.category ?? 'asset';
     graph = migrateGraphDetailed(graph).graph;
     const issues = this.validate(graph, '', scope);
     if (issues.errors.length) throw new Error(`asset graph invalid: ${issues.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
     const hash = String(hashString(stableStringify(graph)));
     const { params, inputs } = graphInterface(graph);
-    // shelf assets: the first sentence of the description is the catalog summary, the rest the long description
-    const shelfDoc = category === 'shelf' && graph.description ? /^(.+?[.!?])\s+(.+)$/s.exec(graph.description) : null;
     const def: NodeDef = {
       type: name,
-      category,
-      summary: shelfDoc?.[1] ?? graph.description ?? `${category === 'shelf' ? 'shelf' : 'user'} asset "${name}"`,
-      ...(shelfDoc ? { description: shelfDoc[2] } : {}),
+      category: 'asset',
+      summary: graph.description ?? `user asset "${name}"`,
       inputs,
       params,
       // the graph's node types resolve in the scope the asset cooks in
@@ -608,9 +551,9 @@ export class Engine {
       },
     };
     // results of other graphs (and assets) that used the previous definition are cached under unchanged keys
-    const shelf = category === 'shelf', prev = shelf ? this.shelf.get(name) : this.asset(name, scope);
+    const prev = this.asset(name, scope);
     if (prev && prev.hash !== hash) this.cache.clear();
-    (shelf ? this.shelf : scope.assets).set(name, { name, graph, def, hash });
+    scope.assets.set(name, { name, graph, def, hash });
     return def;
   }
 

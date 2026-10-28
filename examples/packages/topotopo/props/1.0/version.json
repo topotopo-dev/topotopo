@@ -1,0 +1,277 @@
+{
+  "package": "topotopo/props",
+  "version": "1.0",
+  "note": "first version: barrels, crates, pallets, sandbag walls and pipe runs",
+  "published": "2026-10-28T04:57:54.141Z",
+  "big": false,
+  "hash": "2948cd2c4c371c21652aa2411ddf28310cfcbb1dc5d9847539ded6b3dbda0930",
+  "outputs": {
+    "barrel": {
+      "graph": "barrel",
+      "node": "out",
+      "label": "Barrel",
+      "sliders": {
+        "height": {
+          "type": "float",
+          "default": 0.9,
+          "min": 0.3,
+          "max": 2.5,
+          "desc": "height (m)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 0.28,
+          "min": 0.1,
+          "max": 1.2,
+          "desc": "radius at the ends (m)"
+        },
+        "bulge": {
+          "type": "float",
+          "default": 0.14,
+          "min": 0,
+          "max": 0.35,
+          "desc": "extra radius at the middle, as a fraction of radius"
+        },
+        "staves": {
+          "type": "int",
+          "default": 18,
+          "min": 6,
+          "max": 48,
+          "desc": "number of staves (facets around)"
+        },
+        "hoops": {
+          "type": "int",
+          "default": 4,
+          "min": 0,
+          "max": 8,
+          "desc": "number of metal hoops"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed of the stave tint"
+        }
+      },
+      "inputs": []
+    },
+    "crate": {
+      "graph": "crate",
+      "node": "out",
+      "label": "Crate",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 1,
+          "min": 0.3,
+          "max": 3,
+          "desc": "outer size along X (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 0.8,
+          "min": 0.3,
+          "max": 3,
+          "desc": "outer size along Y (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 0.8,
+          "min": 0.3,
+          "max": 3,
+          "desc": "outer size along Z (m)"
+        },
+        "planks": {
+          "type": "int",
+          "default": 4,
+          "min": 2,
+          "max": 10,
+          "desc": "planks per face"
+        },
+        "frame_width": {
+          "type": "float",
+          "default": 0.08,
+          "min": 0.03,
+          "max": 0.15,
+          "desc": "edge batten width (m)"
+        },
+        "gap": {
+          "type": "float",
+          "default": 0.01,
+          "min": 0,
+          "max": 0.03,
+          "desc": "gap between planks (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed of the plank tint"
+        }
+      },
+      "inputs": []
+    },
+    "pallet": {
+      "graph": "pallet",
+      "node": "out",
+      "label": "Pallet",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 1.2,
+          "min": 0.6,
+          "max": 2.4,
+          "desc": "size along X (m), the deck board direction"
+        },
+        "depth": {
+          "type": "float",
+          "default": 0.8,
+          "min": 0.5,
+          "max": 2,
+          "desc": "size along Z (m)"
+        },
+        "deck_boards": {
+          "type": "int",
+          "default": 5,
+          "min": 3,
+          "max": 11,
+          "desc": "top deck boards"
+        },
+        "board_thickness": {
+          "type": "float",
+          "default": 0.022,
+          "min": 0.015,
+          "max": 0.05,
+          "desc": "board thickness (m)"
+        },
+        "block_height": {
+          "type": "float",
+          "default": 0.078,
+          "min": 0.04,
+          "max": 0.2,
+          "desc": "height of the blocks between the board layers (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed of the board tint"
+        }
+      },
+      "inputs": []
+    },
+    "pipe_run": {
+      "graph": "pipe_run",
+      "node": "out",
+      "label": "Pipe run",
+      "sliders": {
+        "radius": {
+          "type": "float",
+          "default": 0.08,
+          "min": 0.01,
+          "max": 0.6,
+          "desc": "pipe radius (m)"
+        },
+        "bend_radius": {
+          "type": "float",
+          "default": 0.35,
+          "min": 0,
+          "max": 3,
+          "desc": "elbow radius at the corners (m); 0 = mitred corners"
+        },
+        "flange_spacing": {
+          "type": "float",
+          "default": 2.5,
+          "min": 0,
+          "max": 20,
+          "desc": "distance between flange joints (m); 0 = only at the ends"
+        },
+        "segments": {
+          "type": "int",
+          "default": 14,
+          "min": 4,
+          "max": 48,
+          "desc": "sides of the pipe section"
+        },
+        "supports": {
+          "type": "bool",
+          "default": true,
+          "desc": "stands from y = 0 under horizontal stretches"
+        },
+        "support_spacing": {
+          "type": "float",
+          "default": 3,
+          "min": 0.5,
+          "max": 20,
+          "desc": "distance between stands (m)"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "pipe centre line (polyline); optional"
+        }
+      ]
+    },
+    "sandbag_wall": {
+      "graph": "sandbag_wall",
+      "node": "out",
+      "label": "Sandbag wall",
+      "sliders": {
+        "wall_length": {
+          "type": "float",
+          "default": 3,
+          "min": 0.6,
+          "max": 15,
+          "desc": "length along X (m)"
+        },
+        "rows": {
+          "type": "int",
+          "default": 5,
+          "min": 1,
+          "max": 10,
+          "desc": "number of rows"
+        },
+        "bag_length": {
+          "type": "float",
+          "default": 0.6,
+          "min": 0.3,
+          "max": 1.2,
+          "desc": "bag length (m)"
+        },
+        "bag_height": {
+          "type": "float",
+          "default": 0.16,
+          "min": 0.06,
+          "max": 0.4,
+          "desc": "bag height (m)"
+        },
+        "jitter": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "desc": "random yaw and offset (0 = neat)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": []
+    }
+  },
+  "default": {
+    "graph": "kit",
+    "node": "kit",
+    "sliders": {},
+    "inputs": []
+  },
+  "topotopo": "0.4.0"
+}

@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "description": "Gable roof for a width × depth footprint: two pitched slabs meeting at a ridge along X with a ridge cap, overhanging eaves and verges, and optional triangular gable walls under it. Pivot at the centre of the wall-top plane (put it on top of the walls); the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on top, wood_dark on edges and underside), roof_ridge (roof_tiles), roof_gables (plaster). Every piece is closed.",
+  "params": {
+    "width": {
+      "type": "float",
+      "default": 8,
+      "min": 1,
+      "max": 40,
+      "desc": "footprint along X, the ridge direction (m)"
+    },
+    "depth": { "type": "float", "default": 6, "min": 1, "max": 30, "desc": "footprint along Z, the span (m)" },
+    "pitch": { "type": "float", "default": 35, "min": 5, "max": 65, "desc": "roof slope (degrees)" },
+    "overhang": {
+      "type": "float",
+      "default": 0.4,
+      "min": 0,
+      "max": 2,
+      "desc": "eave and verge overhang beyond the footprint (m)"
+    },
+    "thickness": { "type": "float", "default": 0.18, "min": 0.03, "max": 0.6, "desc": "slab thickness (m)" },
+    "gable_walls": { "type": "bool", "default": true, "desc": "fill the gable triangles under the roof with wall" }
+  },
+  "vars": { "width": 8, "depth": 6, "pitch": 35, "overhang": 0.4, "thickness": 0.18, "gable_walls": true },
+  "nodes": {
+    "none": { "type": "points", "params": { "positions": [] } },
+    "section": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "the slab cross-section (a thick Λ) in the ZY plane; its underside passes through the wall-top edges",
+      "params": {
+        "run_over": "detail",
+        "code": "const B = depth / 2 + overhang, s = Math.tan(radians(pitch)), tc = thickness / Math.cos(radians(pitch));\nconst h = depth / 2 * s, ye = -overhang * s;\nconst P = [[0, ye, -B], [0, ye + tc, -B], [0, h + tc, 0], [0, ye + tc, B], [0, ye, B], [0, h, 0]];\naddprim(0, 'poly', P.map((p) => addpoint(0, p)));"
+      }
+    },
+    "slab": {
+      "type": "extrude",
+      "in": ["section"],
+      "params": { "height": "=width + 2 * overhang", "center": true, "plane": "yz" }
+    },
+    "slab_parts": {
+      "type": "wrangle",
+      "in": ["slab"],
+      "params": { "run_over": "prims", "code": "if (@N.y > 0.2) @group_tiles = 1;" }
+    },
+    "slab_name": {
+      "type": "attrib_create",
+      "in": ["slab_parts"],
+      "params": { "name": "name", "class": "prim", "value": "roof" }
+    },
+    "slab_edge": {
+      "type": "material",
+      "in": ["slab_name"],
+      "params": { "name": "wood_dark", "base_color": "#5e4129", "roughness": 0.85 }
+    },
+    "slab_mat": {
+      "type": "material",
+      "in": ["slab_edge"],
+      "params": { "name": "roof_tiles", "group": "tiles", "base_color": "#9a4a35", "roughness": 0.8 }
+    },
+    "ridge": {
+      "type": "box",
+      "params": {
+        "size": ["=width + 2 * overhang + 0.04", 0.16, 0.16],
+        "center": [0, "=depth / 2 * Math.tan(pitch * Math.PI / 180) + thickness / Math.cos(pitch * Math.PI / 180)", 0],
+        "divisions": [1, 1, 1]
+      }
+    },
+    "ridge_rot": {
+      "type": "transform",
+      "in": ["ridge"],
+      "params": {
+        "rotate": [45, 0, 0],
+        "pivot": [0, "=depth / 2 * Math.tan(pitch * Math.PI / 180) + thickness / Math.cos(pitch * Math.PI / 180)", 0]
+      }
+    },
+    "ridge_name": {
+      "type": "attrib_create",
+      "in": ["ridge_rot"],
+      "params": { "name": "name", "class": "prim", "value": "roof_ridge" }
+    },
+    "ridge_mat": {
+      "type": "material",
+      "in": ["ridge_name"],
+      "params": { "name": "roof_tiles", "base_color": "#9a4a35", "roughness": 0.8 }
+    },
+    "gable_section": {
+      "type": "curve",
+      "params": {
+        "points": [[0, 0, "=-depth / 2"], [0, "=depth / 2 * Math.tan(pitch * Math.PI / 180)", 0], [0, 0, "=depth / 2"]],
+        "closed": true
+      }
+    },
+    "gables": {
+      "type": "extrude",
+      "in": ["gable_section"],
+      "params": { "height": "=width", "center": true, "plane": "yz" }
+    },
+    "gables_name": {
+      "type": "attrib_create",
+      "in": ["gables"],
+      "params": { "name": "name", "class": "prim", "value": "roof_gables" }
+    },
+    "gables_mat": {
+      "type": "material",
+      "in": ["gables_name"],
+      "params": { "name": "plaster", "base_color": "#ddd3c1", "roughness": 0.85 }
+    },
+    "gables_on": { "type": "switch", "in": ["none", "gables_mat"], "params": { "index": "=gable_walls ? 1 : 0" } },
+    "all": { "type": "merge", "in": ["slab_mat", "ridge_mat", "gables_on"] },
+    "paint": {
+      "type": "wrangle",
+      "in": ["all"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
+  },
+  "output": "out",
+  "outputs": { "roof_gable": { "node": "out", "label": "Gable roof" } },
+  "meta": {
+    "watertight": true,
+    "pivot": "wall_top",
+    "thumbnail_render": { "elevation": 25 }
+  }
+}

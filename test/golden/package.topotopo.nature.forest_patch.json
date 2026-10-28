@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3", "height:float:1", "uv:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [8.5452, 8.8496, 8.0901],
+      "min": [-11.0414, -0.8733, -8.776]
+    },
+    "counts": {
+      "points": 21,
+      "prims": 21,
+      "vertices": 21,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "8837f3fcfed73bb2",
+      "attributes": {
+        "detail.materials": "3543fa8837bbfdea",
+        "point.height": "4d239aca5875227c",
+        "point.uv": "10ff26d8711f1f72",
+        "prim.copynum": "adb19f61815e8bfb"
+      },
+      "topology": "83c889068829d23c"
+    },
+    "packed": {
+      "hash": "fbba3928061fe0d2",
+      "instances": 21,
+      "sources": ["8fac219f637ff8f1", "b783edd4daf2a33e", "598494b97a25066b", "4feb679b5139431d"]
+    }
+  },
+  "name": "package.topotopo.nature.forest_patch",
+  "ok": true,
+  "source": "topotopo/nature/forest_patch at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

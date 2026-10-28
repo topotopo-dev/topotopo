@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "description": "Railing along a curve (input 0; without one, a straight run of `run_length` along +X from the origin): posts at even spacing including both ends, a handrail on top, lower rails and balusters. Sits on the curve (pivot = the curve). Pieces: railing_posts, railing_rails, railing_balusters (all metal_dark).",
+  "params": {
+    "run_length": {
+      "type": "float",
+      "default": 4,
+      "min": 0.5,
+      "max": 30,
+      "desc": "run length along +X when no curve is connected (m)"
+    },
+    "height": {
+      "type": "float",
+      "default": 1,
+      "min": 0.4,
+      "max": 2,
+      "desc": "handrail height above the curve (m)"
+    },
+    "post_spacing": {
+      "type": "float",
+      "default": 1.5,
+      "min": 0.3,
+      "max": 6,
+      "desc": "maximum distance between posts (m)"
+    },
+    "baluster_spacing": {
+      "type": "float",
+      "default": 0.15,
+      "min": 0,
+      "max": 1,
+      "desc": "distance between balusters (m); 0 = none"
+    },
+    "rails": {
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 6,
+      "desc": "horizontal rails below the handrail (the lowest at 0.1 m)"
+    },
+    "profile": {
+      "type": "enum",
+      "default": "round",
+      "options": ["round", "square"],
+      "desc": "tube or square section for posts and rails"
+    }
+  },
+  "vars": {
+    "run_length": 4,
+    "height": 1,
+    "post_spacing": 1.5,
+    "baluster_spacing": 0.15,
+    "rails": 2,
+    "profile": "round"
+  },
+  "nodes": {
+    "curve_in": { "type": "input", "params": { "index": 0, "label": "curve to follow (polyline); optional" } },
+    "straight": {
+      "type": "line",
+      "params": { "origin": [0, 0, 0], "direction": [1, 0, 0], "length": "=run_length", "points": 2 }
+    },
+    "path": {
+      "type": "switch",
+      "in": ["straight", "curve_in"],
+      "params": { "index": "=npoints('curve_in') > 1 ? 1 : 0" }
+    },
+    "post_pts": {
+      "type": "resample",
+      "in": ["path"],
+      "params": { "mode": "length", "length": "=post_spacing", "tangent": true }
+    },
+    "post_orient": {
+      "type": "wrangle",
+      "in": ["post_pts"],
+      "params": {
+        "code": "const t = [v@tangentu.x, 0, v@tangentu.z]; if (length(t) > 1e-6) p@orient = lookat(normalize(t), [0, 1, 0]);"
+      }
+    },
+    "post_round": {
+      "type": "tube",
+      "params": { "radius": 0.03, "height": "=height", "center": [0, "=height / 2", 0], "cols": 10 }
+    },
+    "post_square": { "type": "box", "params": { "size": [0.05, "=height", 0.05], "center": [0, "=height / 2", 0] } },
+    "post": {
+      "type": "switch",
+      "in": ["post_round", "post_square"],
+      "params": { "index": "=profile == 'square' ? 1 : 0" }
+    },
+    "posts": { "type": "copy_to_points", "in": ["post", "post_orient"] },
+    "posts_name": {
+      "type": "attrib_create",
+      "in": ["posts"],
+      "params": { "name": "name", "class": "prim", "value": "railing_posts" }
+    },
+    "hand_path": { "type": "transform", "in": ["path"], "params": { "translate": [0, "=height", 0] } },
+    "handrail": {
+      "type": "sweep",
+      "in": ["hand_path"],
+      "params": { "shape": "=profile == 'square' ? 'square' : 'circle'", "radius": 0.032, "divisions": 10 }
+    },
+    "low_path": { "type": "transform", "in": ["path"], "params": { "translate": [0, 0.1, 0] } },
+    "low_rail": {
+      "type": "sweep",
+      "in": ["low_path"],
+      "params": { "shape": "=profile == 'square' ? 'square' : 'circle'", "radius": 0.015, "divisions": 8 }
+    },
+    "low_rails": {
+      "type": "copy_xform",
+      "in": ["low_rail"],
+      "params": { "count": "=rails", "translate": [0, "=(height - 0.1) / Math.max(1, rails)", 0] }
+    },
+    "rails_geo": { "type": "merge", "in": ["handrail", "low_rails"] },
+    "rails_name": {
+      "type": "attrib_create",
+      "in": ["rails_geo"],
+      "params": { "name": "name", "class": "prim", "value": "railing_rails" }
+    },
+    "bal_pts": {
+      "type": "resample",
+      "in": ["path"],
+      "params": { "mode": "length", "length": "=Math.max(0.05, baluster_spacing)" }
+    },
+    "baluster": {
+      "type": "box",
+      "params": { "size": [0.016, "=height - 0.1", 0.016], "center": [0, "=0.1 + (height - 0.1) / 2", 0] }
+    },
+    "balusters": { "type": "copy_to_points", "in": ["baluster", "bal_pts"] },
+    "none": { "type": "points", "params": { "positions": [] } },
+    "balusters_on": {
+      "type": "switch",
+      "in": ["none", "balusters"],
+      "params": { "index": "=baluster_spacing > 0 ? 1 : 0" }
+    },
+    "bal_name": {
+      "type": "attrib_create",
+      "in": ["balusters_on"],
+      "params": { "name": "name", "class": "prim", "value": "railing_balusters" }
+    },
+    "all": { "type": "merge", "in": ["posts_name", "rails_name", "bal_name"] },
+    "mat": {
+      "type": "material",
+      "in": ["all"],
+      "params": { "name": "metal_dark", "base_color": "#3a3d42", "metallic": 0.8, "roughness": 0.45 }
+    },
+    "paint": {
+      "type": "wrangle",
+      "in": ["mat"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": {
+      "type": "attrib_delete",
+      "in": ["paint"],
+      "params": { "names": "copynum curveu tangentu orient", "groups": "*" }
+    }
+  },
+  "output": "out",
+  "outputs": { "railing": { "node": "out", "label": "Railing" } },
+  "meta": {
+    "pivot": "curve",
+    "inputs": ["curve"],
+    "thumbnail_render": { "elevation": 25, "zoom": 1.3 }
+  }
+}

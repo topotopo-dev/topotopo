@@ -767,7 +767,7 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
 
 // ---------------------------------------------------------------- glTF: constant vertex colour folds into the base colour
 {
-  // dogfood 2026-10-15: the shelf trees write Cd = material colour; glTF then got a white factor × COLOR_0, which
+  // dogfood 2026-10-15: the nature kit's trees write Cd = material colour; glTF then got a white factor × COLOR_0, which
   // Unreal's Interchange materials ignore, so every tree imported white
   const leaf = await cook({
     nodes: {

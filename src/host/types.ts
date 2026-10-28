@@ -89,11 +89,6 @@ export interface Host {
   name: string;
   /** Read a file (or URL) as bytes. */
   readFile(path: string): Promise<Uint8Array>;
-  /**
-   * Directory (path or URL, read with readFile) of the shipped asset shelf: `index.json` there lists the asset files.
-   * The engine registers them as node types of category "shelf" on init. Absent = no shelf.
-   */
-  shelfPath?: string;
   /** A string that changes when the file changes (mtime+size), for cache keys. */
   fileStamp(path: string): string;
   resolvePath(path: string): string;

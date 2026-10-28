@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "description": "Classical pillar: a round, fluted or square shaft with an optional plinth base and capital. Pivot at the centre of the base. Pieces: pillar_shaft, pillar_base, pillar_capital (all stone_light). Every piece is closed.",
+  "params": {
+    "height": { "type": "float", "default": 3, "min": 0.5, "max": 15, "desc": "total height (m)" },
+    "radius": {
+      "type": "float",
+      "default": 0.22,
+      "min": 0.05,
+      "max": 2,
+      "desc": "shaft radius (half width for square) (m)"
+    },
+    "style": {
+      "type": "enum",
+      "default": "fluted",
+      "options": ["round", "fluted", "square"],
+      "desc": "shaft section"
+    },
+    "flutes": { "type": "int", "default": 16, "min": 6, "max": 32, "desc": "fluted style: number of flutes" },
+    "base": { "type": "bool", "default": true, "desc": "plinth and torus at the foot" },
+    "capital": { "type": "bool", "default": true, "desc": "echinus and abacus at the top" }
+  },
+  "vars": { "height": 3, "radius": 0.22, "style": "fluted", "flutes": 16, "base": true, "capital": true },
+  "nodes": {
+    "round_shaft": {
+      "type": "tube",
+      "params": {
+        "radius": "=radius",
+        "radius_top": "=radius * 0.9",
+        "height": 1,
+        "center": [0, 0.5, 0],
+        "rows": 1,
+        "cols": "=style == 'fluted' ? flutes * 4 : 24"
+      }
+    },
+    "fluting": {
+      "type": "wrangle",
+      "in": ["round_shaft"],
+      "params": {
+        "code": "if (style !== 'fluted') return; const a = Math.atan2(@P.z, @P.x), r = Math.hypot(@P.x, @P.z), k = 1 - 0.06 * Math.pow(Math.abs(Math.cos(a * flutes / 2)), 2); @P.x = Math.cos(a) * r * k; @P.z = Math.sin(a) * r * k;"
+      }
+    },
+    "square_shaft": { "type": "box", "params": { "size": ["=radius * 2", 1, "=radius * 2"], "center": [0, 0.5, 0] } },
+    "shaft_src": {
+      "type": "switch",
+      "in": ["fluting", "square_shaft"],
+      "params": { "index": "=style == 'square' ? 1 : 0" }
+    },
+    "shaft": {
+      "type": "transform",
+      "in": ["shaft_src"],
+      "note": "stretch the unit-height shaft between base and capital",
+      "params": {
+        "scale": [1, "=height - (base ? radius * 0.75 : 0) - (capital ? radius * 0.85 : 0)", 1],
+        "translate": [0, "=base ? radius * 0.75 : 0", 0]
+      }
+    },
+    "shaft_name": {
+      "type": "attrib_create",
+      "in": ["shaft"],
+      "params": { "name": "name", "class": "prim", "value": "pillar_shaft" }
+    },
+    "plinth": {
+      "type": "box",
+      "params": { "size": ["=radius * 2.7", "=radius * 0.4", "=radius * 2.7"], "center": [0, "=radius * 0.2", 0] }
+    },
+    "torus_base": {
+      "type": "tube",
+      "params": {
+        "radius": "=radius * 1.18 * (style == 'square' ? Math.SQRT2 : 1)",
+        "radius_top": "=radius * 1.02 * (style == 'square' ? Math.SQRT2 : 1)",
+        "height": "=radius * 0.35",
+        "center": [0, "=radius * 0.575", 0],
+        "cols": "=style == 'square' ? 4 : 24"
+      }
+    },
+    "torus_rot": {
+      "type": "transform",
+      "in": ["torus_base"],
+      "params": { "rotate": [0, "=style == 'square' ? 45 : 0", 0] }
+    },
+    "base_geo": { "type": "merge", "in": ["plinth", "torus_rot"] },
+    "base_name": {
+      "type": "attrib_create",
+      "in": ["base_geo"],
+      "params": { "name": "name", "class": "prim", "value": "pillar_base" }
+    },
+    "none": { "type": "points", "params": { "positions": [] } },
+    "base_on": { "type": "switch", "in": ["none", "base_name"], "params": { "index": "=base ? 1 : 0" } },
+    "echinus": {
+      "type": "tube",
+      "params": {
+        "radius": "=radius * 0.92 * (style == 'square' ? Math.SQRT2 : 1)",
+        "radius_top": "=radius * 1.3 * (style == 'square' ? Math.SQRT2 : 1)",
+        "height": "=radius * 0.45",
+        "center": [0, "=height - radius * 0.85 + radius * 0.225", 0],
+        "cols": "=style == 'square' ? 4 : 24"
+      }
+    },
+    "echinus_rot": {
+      "type": "transform",
+      "in": ["echinus"],
+      "params": { "rotate": [0, "=style == 'square' ? 45 : 0", 0] }
+    },
+    "abacus": {
+      "type": "box",
+      "params": {
+        "size": ["=radius * 2.8", "=radius * 0.4", "=radius * 2.8"],
+        "center": [0, "=height - radius * 0.2", 0]
+      }
+    },
+    "capital_geo": { "type": "merge", "in": ["echinus_rot", "abacus"] },
+    "capital_name": {
+      "type": "attrib_create",
+      "in": ["capital_geo"],
+      "params": { "name": "name", "class": "prim", "value": "pillar_capital" }
+    },
+    "capital_on": { "type": "switch", "in": ["none", "capital_name"], "params": { "index": "=capital ? 1 : 0" } },
+    "all": { "type": "merge", "in": ["shaft_name", "base_on", "capital_on"] },
+    "mat": {
+      "type": "material",
+      "in": ["all"],
+      "params": { "name": "stone_light", "base_color": "#d6cfc2", "roughness": 0.75 }
+    },
+    "paint": {
+      "type": "wrangle",
+      "in": ["mat"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": { "type": "normal", "in": ["paint"], "params": { "cusp_angle": 50 } }
+  },
+  "output": "out",
+  "outputs": { "pillar": { "node": "out", "label": "Pillar" } },
+  "meta": { "watertight": true, "thumbnail_render": { "elevation": 15 } }
+}

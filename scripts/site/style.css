@@ -318,10 +318,10 @@ h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:
 /* galleries */
 .example h2 { font-size: 1.1rem; }
 .example .types { margin: 0.6rem 0 0; }
-.shelf-card img { aspect-ratio: 1 / 1; }
-.shelf-card .body { padding: 0.6rem 0.75rem 0.75rem; }
-.shelf-card h3 { font-family: var(--mono); font-size: 0.92rem; }
-.shelf-card p { color: var(--muted); font-size: 0.85rem; }
+.kit-card img { aspect-ratio: 1 / 1; }
+.kit-card .body { padding: 0.6rem 0.75rem 0.75rem; }
+.kit-card h3 { font-family: var(--mono); font-size: 0.92rem; }
+.kit-card p { color: var(--muted); font-size: 0.85rem; }
 
 .notfound { text-align: center; padding: 4rem 0; }
 .notfound h1 { font-size: 3rem; }

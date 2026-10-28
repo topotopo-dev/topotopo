@@ -1,0 +1,48 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["N:float:3", "copynum:int:1", "edge:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["Cd:float:3", "N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [95.786, 8.3453, 3.5557],
+      "min": [0, -0.2887, -3.5557]
+    },
+    "counts": {
+      "points": 9134,
+      "prims": 7055,
+      "vertices": 28850,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["front", "side"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "5a0eaca5a6767547",
+      "attributes": {
+        "detail.materials": "e49d5ca65e611650",
+        "group.prim.front": "ea12a3e7eb2f3bb1",
+        "group.prim.side": "789cc3a35484ea0d",
+        "prim.N": "f18c7b4594a38e2f",
+        "prim.copynum": "c0fe2825ebe1309f",
+        "prim.edge": "fcae34edd88db937",
+        "prim.material": "5098f1d2bf718140",
+        "prim.name": "1fb6f8ffe437c0f5",
+        "vertex.Cd": "1ea796e941efb31b",
+        "vertex.N": "35d98b5d7430bbd7",
+        "vertex.uv": "274dff959d241523"
+      },
+      "topology": "3235a1dbb79938f1"
+    }
+  },
+  "name": "package.topotopo.architecture",
+  "ok": true,
+  "source": "topotopo/architecture at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

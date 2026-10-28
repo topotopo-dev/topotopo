@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "description": "Street name sign: a post with a ball cap and a green blade (two crossed blades for a corner) carrying raised white lettering on both faces, scaled to fit. The first blade faces ±Z. Pivot at the centre of the base. Pieces: sign_post (galvanized), sign_panel (sign_green), sign_text (sign_white). Every piece is closed.",
+  "params": {
+    "height": { "type": "float", "default": 2.8, "min": 1, "max": 6, "desc": "post height (m)" },
+    "panel_width": { "type": "float", "default": 0.9, "min": 0.3, "max": 3, "desc": "blade width (m)" },
+    "panel_height": { "type": "float", "default": 0.22, "min": 0.08, "max": 1, "desc": "blade height (m)" },
+    "text": { "type": "string", "default": "MAIN ST", "desc": "lettering on the first blade" },
+    "cross_text": {
+      "type": "string",
+      "default": "1ST AVE",
+      "desc": "lettering on the second blade (empty = one blade)"
+    }
+  },
+  "vars": {
+    "height": 2.8,
+    "panel_width": 0.9,
+    "panel_height": 0.22,
+    "text": "MAIN ST",
+    "cross_text": "1ST AVE"
+  },
+  "nodes": {
+    "pole": {
+      "type": "tube",
+      "params": { "radius": 0.032, "height": "=height", "center": [0, "=height / 2", 0], "cols": 12 }
+    },
+    "ball": {
+      "type": "sphere",
+      "params": { "type": "ico", "level": 2, "radius": 0.045, "center": [0, "=height + 0.03", 0] }
+    },
+    "post": { "type": "merge", "in": ["pole", "ball"] },
+    "post_name": {
+      "type": "attrib_create",
+      "in": ["post"],
+      "params": { "name": "name", "class": "prim", "value": "sign_post" }
+    },
+    "post_mat": {
+      "type": "material",
+      "in": ["post_name"],
+      "params": { "name": "galvanized", "base_color": "#a3a8ad", "metallic": 0.9, "roughness": 0.4 }
+    },
+    "blade": {
+      "type": "box",
+      "params": { "size": ["=panel_width", "=panel_height", 0.02], "center": [0, 0, 0] }
+    },
+    "blade_name": {
+      "type": "attrib_create",
+      "in": ["blade"],
+      "params": { "name": "name", "class": "prim", "value": "sign_panel" }
+    },
+    "blade_mat": {
+      "type": "material",
+      "in": ["blade_name"],
+      "params": { "name": "sign_green", "base_color": "#2c6a3f", "roughness": 0.4 }
+    },
+    "txt1": {
+      "type": "text",
+      "params": { "text": "=text", "size": 1, "depth": 0.004, "align": "center", "valign": "center" }
+    },
+    "fit1": {
+      "type": "transform",
+      "in": ["txt1"],
+      "params": {
+        "uniform_scale": "=Math.min(panel_height * 0.6 / Math.max(1e-6, bbox('txt1').size.y), panel_width * 0.86 / Math.max(1e-6, bbox('txt1').size.x))",
+        "translate": [0, 0, 0.012]
+      }
+    },
+    "back1": { "type": "transform", "in": ["fit1"], "params": { "rotate": [0, 180, 0] } },
+    "letters1": { "type": "merge", "in": ["fit1", "back1"] },
+    "letters1_name": {
+      "type": "attrib_create",
+      "in": ["letters1"],
+      "params": { "name": "name", "class": "prim", "value": "sign_text" }
+    },
+    "letters1_mat": {
+      "type": "material",
+      "in": ["letters1_name"],
+      "params": { "name": "sign_white", "base_color": "#f2f2ee", "roughness": 0.4 }
+    },
+    "sign1": { "type": "merge", "in": ["blade_mat", "letters1_mat"] },
+    "sign1_up": {
+      "type": "transform",
+      "in": ["sign1"],
+      "params": { "translate": [0, "=height - panel_height / 2 - 0.06", 0.035] }
+    },
+    "txt2": {
+      "type": "text",
+      "params": { "text": "=cross_text || '-'", "size": 1, "depth": 0.004, "align": "center", "valign": "center" }
+    },
+    "fit2": {
+      "type": "transform",
+      "in": ["txt2"],
+      "params": {
+        "uniform_scale": "=Math.min(panel_height * 0.6 / Math.max(1e-6, bbox('txt2').size.y), panel_width * 0.86 / Math.max(1e-6, bbox('txt2').size.x))",
+        "translate": [0, 0, 0.012]
+      }
+    },
+    "back2": { "type": "transform", "in": ["fit2"], "params": { "rotate": [0, 180, 0] } },
+    "letters2": { "type": "merge", "in": ["fit2", "back2"] },
+    "letters2_name": {
+      "type": "attrib_create",
+      "in": ["letters2"],
+      "params": { "name": "name", "class": "prim", "value": "sign_text" }
+    },
+    "letters2_mat": {
+      "type": "material",
+      "in": ["letters2_name"],
+      "params": { "name": "sign_white", "base_color": "#f2f2ee", "roughness": 0.4 }
+    },
+    "sign2": { "type": "merge", "in": ["blade_mat", "letters2_mat"] },
+    "sign2_up": {
+      "type": "transform",
+      "in": ["sign2"],
+      "params": { "rotate": [0, 90, 0], "translate": [0.035, "=height - panel_height * 1.5 - 0.1", 0] }
+    },
+    "none": { "type": "points", "params": { "positions": [] } },
+    "sign2_on": { "type": "switch", "in": ["none", "sign2_up"], "params": { "index": "=cross_text ? 1 : 0" } },
+    "all": { "type": "merge", "in": ["post_mat", "sign1_up", "sign2_on"] },
+    "paint": {
+      "type": "wrangle",
+      "in": ["all"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
+  },
+  "output": "out",
+  "outputs": { "sign_post": { "node": "out", "label": "Street sign" } },
+  "meta": {
+    "watertight": true,
+    "thumbnail_render": { "azimuth": 20, "elevation": 10 }
+  }
+}

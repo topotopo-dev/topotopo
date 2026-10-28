@@ -238,12 +238,7 @@ export class Workspace {
       try { this.graphs.set(path.basename(f, '.json'), migrateGraph(JSON.parse(fs.readFileSync(path.join(this.graphDir, f), 'utf8')))); }
       catch { /* skip unreadable */ }
     }
-    // workspace assets take the place of shelf assets of the same name
-    const defs = this.engine.assetsIn().map((a) => a.def);
-    return {
-      graphs: this.graphs.size, assets: defs.filter((d) => d.category !== 'shelf').length, shelf: defs.filter((d) => d.category === 'shelf').length,
-      assetErrors: [...assetErrors, ...this.engine.shelfErrors.map((e) => `shelf ${e}`)],
-    };
+    return { graphs: this.graphs.size, assets: this.engine.assetsIn().length, assetErrors };
   }
 
   private persist(name: string) {

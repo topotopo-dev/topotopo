@@ -1,0 +1,346 @@
+{
+  "package": "topotopo/street",
+  "version": "1.0",
+  "note": "first version: roads, lamp posts, bollards, benches, street signs, fences and cables",
+  "published": "2026-10-28T04:57:55.645Z",
+  "big": false,
+  "hash": "93b1834d22694359f6a769526cbdc04a05c7f05cdef7cf64a61c81d355d5f3f8",
+  "outputs": {
+    "bench": {
+      "graph": "bench",
+      "node": "out",
+      "label": "Bench",
+      "sliders": {
+        "bench_length": {
+          "type": "float",
+          "default": 1.8,
+          "min": 0.6,
+          "max": 5,
+          "desc": "length along X (m)"
+        },
+        "seat_height": {
+          "type": "float",
+          "default": 0.45,
+          "min": 0.25,
+          "max": 0.8,
+          "desc": "seat height (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 0.45,
+          "min": 0.25,
+          "max": 0.8,
+          "desc": "seat depth along Z (m)"
+        },
+        "slats": {
+          "type": "int",
+          "default": 5,
+          "min": 2,
+          "max": 10,
+          "desc": "seat slats"
+        },
+        "backrest": {
+          "type": "bool",
+          "default": true,
+          "desc": "add the backrest"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed of the slat tint"
+        }
+      },
+      "inputs": []
+    },
+    "bollard": {
+      "graph": "bollard",
+      "node": "out",
+      "label": "Bollard",
+      "sliders": {
+        "height": {
+          "type": "float",
+          "default": 0.9,
+          "min": 0.3,
+          "max": 2,
+          "desc": "height (m)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 0.1,
+          "min": 0.03,
+          "max": 0.4,
+          "desc": "post radius (half width for square) (m)"
+        },
+        "style": {
+          "type": "enum",
+          "default": "round",
+          "options": [
+            "round",
+            "square"
+          ],
+          "desc": "post section"
+        },
+        "band": {
+          "type": "bool",
+          "default": true,
+          "desc": "reflective band near the top"
+        }
+      },
+      "inputs": []
+    },
+    "cable": {
+      "graph": "cable",
+      "node": "out",
+      "label": "Cable",
+      "sliders": {
+        "start": {
+          "type": "vec3",
+          "default": [
+            0,
+            5,
+            0
+          ],
+          "desc": "first end point (m)"
+        },
+        "end": {
+          "type": "vec3",
+          "default": [
+            10,
+            4.6,
+            0
+          ],
+          "desc": "second end point (m)"
+        },
+        "sag": {
+          "type": "float",
+          "default": 0.8,
+          "min": 0,
+          "max": 10,
+          "desc": "drop below the straight line at mid-span (m)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 0.015,
+          "min": 0.003,
+          "max": 0.2,
+          "desc": "cable radius (m)"
+        },
+        "segments": {
+          "type": "int",
+          "default": 32,
+          "min": 2,
+          "max": 200,
+          "desc": "segments along the cable"
+        },
+        "poles": {
+          "type": "bool",
+          "default": true,
+          "desc": "poles under both ends"
+        }
+      },
+      "inputs": []
+    },
+    "fence": {
+      "graph": "fence",
+      "node": "out",
+      "label": "Fence",
+      "sliders": {
+        "run_length": {
+          "type": "float",
+          "default": 6,
+          "min": 0.5,
+          "max": 40,
+          "desc": "run length along +X when no curve is connected (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 1.1,
+          "min": 0.4,
+          "max": 2.5,
+          "desc": "fence height (m)"
+        },
+        "style": {
+          "type": "enum",
+          "default": "picket",
+          "options": [
+            "picket",
+            "plank",
+            "rail"
+          ],
+          "desc": "infill style"
+        },
+        "post_spacing": {
+          "type": "float",
+          "default": 2,
+          "min": 0.5,
+          "max": 5,
+          "desc": "maximum distance between posts (m)"
+        },
+        "picket_spacing": {
+          "type": "float",
+          "default": 0.15,
+          "min": 0.08,
+          "max": 0.5,
+          "desc": "picket style: distance between pickets (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed of the board tint"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "curve to follow (polyline); optional"
+        }
+      ]
+    },
+    "lamp_post": {
+      "graph": "lamp_post",
+      "node": "out",
+      "label": "Lamp post",
+      "sliders": {
+        "height": {
+          "type": "float",
+          "default": 4.5,
+          "min": 1.5,
+          "max": 12,
+          "desc": "height of the lamp heads (m)"
+        },
+        "arm_length": {
+          "type": "float",
+          "default": 1,
+          "min": 0.2,
+          "max": 4,
+          "desc": "horizontal reach of each arm (m)"
+        },
+        "arms": {
+          "type": "int",
+          "default": 1,
+          "min": 0,
+          "max": 4,
+          "desc": "number of arms (0 = lantern on top)"
+        },
+        "pole_radius": {
+          "type": "float",
+          "default": 0.07,
+          "min": 0.03,
+          "max": 0.3,
+          "desc": "pole radius at the base (m)"
+        },
+        "lamp_size": {
+          "type": "float",
+          "default": 0.4,
+          "min": 0.15,
+          "max": 1.2,
+          "desc": "shade diameter (m)"
+        }
+      },
+      "inputs": []
+    },
+    "road_strip": {
+      "graph": "road_strip",
+      "node": "out",
+      "label": "Road",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 7,
+          "min": 2,
+          "max": 30,
+          "desc": "asphalt width (m)"
+        },
+        "lanes": {
+          "type": "int",
+          "default": 2,
+          "min": 1,
+          "max": 8,
+          "desc": "number of lanes (dashed lines between them)"
+        },
+        "edge_lines": {
+          "type": "bool",
+          "default": true,
+          "desc": "solid lines 0.2 m inside both edges"
+        },
+        "dash_length": {
+          "type": "float",
+          "default": 3,
+          "min": 0.5,
+          "max": 10,
+          "desc": "length of the lane dashes (gaps are as long) (m)"
+        },
+        "kerb_height": {
+          "type": "float",
+          "default": 0.15,
+          "min": 0,
+          "max": 0.4,
+          "desc": "kerb height above the asphalt (m); 0 = no kerbs or sidewalks"
+        },
+        "sidewalk_width": {
+          "type": "float",
+          "default": 2,
+          "min": 0,
+          "max": 8,
+          "desc": "sidewalk width behind each kerb (m); 0 = none"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "road centre line (polyline); optional"
+        }
+      ]
+    },
+    "sign_post": {
+      "graph": "sign_post",
+      "node": "out",
+      "label": "Street sign",
+      "sliders": {
+        "height": {
+          "type": "float",
+          "default": 2.8,
+          "min": 1,
+          "max": 6,
+          "desc": "post height (m)"
+        },
+        "panel_width": {
+          "type": "float",
+          "default": 0.9,
+          "min": 0.3,
+          "max": 3,
+          "desc": "blade width (m)"
+        },
+        "panel_height": {
+          "type": "float",
+          "default": 0.22,
+          "min": 0.08,
+          "max": 1,
+          "desc": "blade height (m)"
+        },
+        "text": {
+          "type": "string",
+          "default": "MAIN ST",
+          "desc": "lettering on the first blade"
+        },
+        "cross_text": {
+          "type": "string",
+          "default": "1ST AVE",
+          "desc": "lettering on the second blade (empty = one blade)"
+        }
+      },
+      "inputs": []
+    }
+  },
+  "default": {
+    "graph": "kit",
+    "node": "kit",
+    "sliders": {},
+    "inputs": []
+  },
+  "topotopo": "0.4.0"
+}

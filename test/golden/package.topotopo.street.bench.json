@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.9, 0.8725, 0.225],
+      "min": [-0.9, 0, -0.3624]
+    },
+    "counts": {
+      "points": 112,
+      "prims": 88,
+      "vertices": 352,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "788afee15fc82f13",
+      "attributes": {
+        "detail.materials": "abe25249eee5eb37",
+        "prim.Cd": "2f26e535f63bd567",
+        "prim.material": "b73f4fa5e4d245bf",
+        "prim.name": "f03b8855712b32cf",
+        "vertex.uv": "2b4400cdae550977"
+      },
+      "topology": "fb6f6a641e4be65e"
+    }
+  },
+  "name": "package.topotopo.street.bench",
+  "ok": true,
+  "source": "topotopo/street/bench at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

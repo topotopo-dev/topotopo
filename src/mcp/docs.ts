@@ -6,7 +6,7 @@ export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP
 
 WORKFLOW
 0. inputs {action:"list"} → the person's own files in the workspace inputs/ folder (guide curves, sites, zones, blockouts, PNG masks). Building a landscape or scene: look there first and build on them (help topic "inputs").
-1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…).
+1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…) and TopoTopo's own packages, ready-made generators by full name (topotopo/architecture/house, topotopo/nature/tree_lowpoly, topotopo/street/road_strip …).
 2. help {nodes:[...]} for exact params before using unfamiliar nodes; help {topic:"wrangle"|"graph"|"recipes"…} for concepts.
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs; overlays for specific questions: wireframe "hard"/"boundary", views "section", glyphs "N", label_groups, shading "matcap", see help topic "render"). inspect for numbers (bbox, attributes, watertightness).
@@ -28,7 +28,7 @@ ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geome
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
 LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".
-PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. Only a project's graphs use packages: library {action:"init"} makes the open workspace one. library {action:"packages"} lists them, {action:"publish", note} publishes a version of the open project's package, {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply only when the person says so. See help topic "packages".`;
+PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. TopoTopo's own packages are four kits built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a project's graphs use packages: library {action:"init"} makes the open workspace one (the server's default workspace is one). library {action:"packages"} lists them, {action:"publish", note} publishes a version of the open project's package, {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply only when the person says so. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -47,7 +47,7 @@ export const INPUTS_EXAMPLE: GraphSpec = {
     zone_mask: { type: 'heightfield_mask_by_object', in: ['road', 'areas'], params: { by: 'footprint', distance: 0, falloff: 3 } },
     off_road: { type: 'heightfield_layer', in: ['zone_mask'], params: { layer: 'mask', expression: 'mask * (1 - path)' } },
     spots: { type: 'heightfield_scatter', in: ['off_road'], params: { density: '=tree_density', align: 'upright', seed: 3 } },
-    tree: { type: 'tree_lowpoly', params: { height: 7 } },
+    tree: { type: 'topotopo/nature/tree_lowpoly', params: { height: 7 } },
     trees: { type: 'copy_to_points', in: ['tree', 'spots'], params: { pack: true } },
     land: { type: 'heightfield_to_mesh', in: ['off_road'], params: { color: 'terrain' } },
     out: { type: 'merge', in: ['land', 'trees'] },
@@ -193,7 +193,7 @@ ROLES AND RECIPES
             {density_mask:"mask"} scatters there (invert:true for a hole); group {class:"point", pattern:"@mask>0.5"} groups
             them. Let volumes reach below the ground. On a heightfield use heightfield_mask_by_object {by:"footprint"}.
   blockout  a placeholder mesh to replace: bound {per_piece:true} gives each piece's box; foreach {mode:"pieces",
-            piece_attrib:"name"} runs a body per object, where a shelf asset takes its size from the piece
+            piece_attrib:"name"} runs a body per object, where a package output takes its size from the piece
             ("width": "=bbox('piece').size.x", piece = the body's input node) and match_size(asset, piece) moves it in
             place. A footprint polygon feeds the house asset directly (its input 0).
 IMAGES: PNG masks and heightmaps. heightfield_from_image {path:"inputs/height.png", size:[x, z], height_min, height_max}
@@ -711,7 +711,7 @@ Example: examples/forest.json (30k candidates → pruned packed forest) and exam
 straight_skeleton {mode skeleton|offset|roof, distance, pitch, pitch_attrib, height_cap, group}
   Closed XZ polygons with contained holes; skeleton outputs lines with prim kind (0 skeleton, 1 contour).
   offset uses positive distance inward and negative outward; roof uses degrees and prim edge provenance.
-  WASM loads lazily through the host. roof_skeleton is the footprint-input shelf asset with overhang and thickness.
+  WASM loads lazily through the host. topotopo/architecture/roof_skeleton is the roof on a footprint input, with overhang and thickness.
 Polylines are open prims of points; closed curves are polygons (faces). Spline prims are Houdini's Bezier/NURBS curves:
   the prim's points are its CONTROL POINTS (CVs) and the curve is evaluated exactly wherever it is needed.
   bezier {points, order, closed, weights}   segments of order CVs sharing their ends: 7 CVs of order 4 = 2 cubic segments
@@ -780,18 +780,13 @@ Any graph with vars can be saved as a node type: assets {action:"save", name:"ro
 The graph's vars become parameters (add "params": {"var": {"desc": "...", "min": 0, "max": 1}} for docs/ranges).
 Inputs: put {"type":"input","params":{"index":0,"label":"surface"}} nodes in the graph.
 Then use it like any node: {"type": "rock_cluster", "in": ["terrain"], "params": {"count": 50}}.
-Assets are stored as JSON in workspace/assets and load on startup.
-SHELF: 35 shipped assets (catalog {category:"shelf"}; help {nodes:["stairs"]} for params), used like nodes:
-  {"type": "stairs", "params": {"steps": 12, "style": "open"}}   {"type": "wall_segment", "params": {"windows": 3, "door": true}}
-  architecture: wall_segment window_frame door_frame stairs spiral_stairs railing fence pillar arch roof_gable roof_hip
-    brick_wall tile_floor hex_grid_floor scaffold beam_truss
-  props: crate barrel pallet log rock cliff_block tree_lowpoly bush lamp_post bollard bench sign_post sandbag_wall cable pipe_run
-  terrain/PCG: road_strip scatter_rocks forest_patch grass_clumps
-  Pivots sit at the base (y = 0, Y up, metres; walls start at x = 0, roofs at the wall top); every piece has prim name and
-  material. Curve assets (railing, fence, pipe_run, road_strip) take the curve as input 0, surface assets (scatter_rocks,
-  forest_patch, grass_clumps) the surface; unconnected they build a default one. The PCG ones output packed instances.
-  To change one: assets {action:"fork", name:"stairs", to:"my_stairs"} copies its graph into the workspace; edit it, then
-  assets {action:"save", name:"stairs", from_graph:"my_stairs"} overrides the shelf asset (delete restores the original).`,
+Assets are stored as JSON in workspace/assets and load on startup; list, get and delete work on them.
+Ready-made generators are TopoTopo's own packages, used by full name (help topic "packages"): walls, houses, roofs,
+stairs, rocks, trees, props and roads such as {"type": "topotopo/architecture/stairs", "params": {"steps": 12}}. To
+change one: assets {action:"fork", name:"topotopo/architecture/stairs", to:"my_stairs"} copies the output's graph into
+the workspace's assets as my_stairs (an output whose graph names the kit's other outputs adds the kit to the project);
+assets {action:"get", name:"my_stairs"} shows it, assets {action:"save", name:"my_stairs", graph} writes it back, and
+{"type": "my_stairs"} uses it.`,
 
   packages: `PACKAGES (a project uses another project's published outputs by name)
 A package is a project with a full name and published versions. Its author names it once in project.json, "package":
@@ -847,6 +842,22 @@ and library {action:"init"} (CLI: topotopo init) makes it a project.
   no folder of this machine.
 - Errors never guess: a package not in "uses" says how to add it, an unknown output lists the package's outputs, a
   missing copy says which, and a package found only in a registered library the project does not list names that library.
+
+TOPOTOPO'S OWN PACKAGES: four kits in TopoTopo's built-in library, every one a package of the owner "topotopo"; their
+outputs are listed by the catalog (category "package") and help even where the project does not use them yet:
+  topotopo/architecture  wall_segment window_frame door_frame house stairs spiral_stairs railing pillar arch roof_gable
+                         roof_hip roof_skeleton brick_wall tile_floor hex_grid_floor scaffold beam_truss
+  topotopo/nature        rock cliff_block tree_lowpoly bush log forest_patch grass_clumps scatter_rocks
+  topotopo/props         crate barrel pallet sandbag_wall pipe_run
+  topotopo/street        road_strip lamp_post bollard bench sign_post fence cable
+  {"type": "topotopo/architecture/stairs", "params": {"steps": 12, "style": "open"}}   {"type": "topotopo/nature/rock"}
+  A kit's name alone ("topotopo/nature") is its default output: its outputs side by side. Pivots sit at the base (y = 0,
+  Y up, metres; walls start at x = 0, roofs at the wall top); every piece has prim name and material. Outputs that
+  follow a curve (railing, fence, pipe_run, road_strip) take the curve as input 0, those that dress a surface
+  (scatter_rocks, forest_patch, grass_clumps) the surface; unconnected they build a default one. Those three output
+  packed instances. A kit's pieces build on each other (house is the kit's wall_segment and roof_skeleton). The first
+  use copies the kit into the project like any package, and a newer version a TopoTopo release brings shows as an
+  update. In an installed TopoTopo they have no working folder to follow; TopoTopo's repository publishes them.
 
 FOLLOWING, for one session: library {action:"follow", package:"studio/trees", on:true} (CLI: --follow studio/trees on a
 graph cook or topotopo view) uses the package's working folder in the project's libraries instead of its copy, until
@@ -943,7 +954,7 @@ QUESTION → OPTION
                    gives the same PNG. Texture files are read from disk; transparency is not evaluated (shaded opaque,
                    with a note), nor are missing or non-PNG maps (named in the notes).
 Labels never overlap: ones without room are skipped (note says how many; raise size or lower max_labels).
-view_labels:false drops each view's name label and the persp axis gizmo (clean thumbnails, e.g. the shelf's).
+view_labels:false drops each view's name label and the persp axis gizmo (clean thumbnails, e.g. those of TopoTopo's own packages).
 Heightfields draw at most heightfield_res quads per side (default 256; "full" = every sample): a larger field is
   drawn decimated (a 513 × 513 field at 257 × 257) and the footer and a note say so. They show the mask in red;
   heightfield_layer:"flow" shows another layer (0..1 layers as they are, others from their min to their max, named
@@ -1167,10 +1178,12 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
  exceed target_faces, especially along hard curves. crease_group aligns explicit edges; group keeps its border fixed.
  Inspect detail quad_fraction and singularities, and the wireframe (examples/quad_remesh.json). remesh (voxel) only
  when the input is beyond repair (it drops attributes).
-14) Street from shelf assets (help topic assets): road_strip on a line → lamp_post packed onto points_along_curve
- {side_offset, both_sides}; a house = four wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true
- on the front) + roof_gable/roof_hip translated to the wall top; fence, bench, crate, tree_lowpoly placed with transform
- or copy_to_points; forest_patch on a grid for a park. Whole graph: examples/shelf_street.json.`,
+14) Street from TopoTopo's own packages (help topic packages): topotopo/street/road_strip on a line →
+ topotopo/street/lamp_post packed onto points_along_curve {side_offset, both_sides}; a house = four
+ topotopo/architecture/wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true on the front) +
+ topotopo/architecture/roof_gable or roof_hip translated to the wall top; topotopo/street/fence and bench,
+ topotopo/props/crate and topotopo/nature/tree_lowpoly placed with transform or copy_to_points;
+ topotopo/nature/forest_patch on a grid for a park. Whole graph: examples/street_block.json.`,
 };
 
 export function topicList() {
@@ -1219,7 +1232,7 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     const s = filter.search.toLowerCase();
     list = list.filter((d) => (d.type + ' ' + (d.aliases ?? []).join(' ') + ' ' + d.summary + ' ' + (d.description ?? '')).toLowerCase().includes(s));
   }
-  const cats = [...new Set([...CATEGORY_ORDER, 'shelf', 'asset', ...list.map((d) => d.category)])];
+  const cats = [...new Set([...CATEGORY_ORDER, 'asset', 'package', ...list.map((d) => d.category)])];
   const out: string[] = [];
   for (const c of cats) {
     const items = list.filter((d) => d.category === c);

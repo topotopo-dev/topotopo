@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["Cd:float:3", "P:float:3"],
+      "prim": ["N:float:3", "edge:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3"]
+    },
+    "bbox": {
+      "max": [10.4372, 2.2824, 9.4449],
+      "min": [-0.4637, 0, -0.462]
+    },
+    "counts": {
+      "points": 20,
+      "prims": 18,
+      "vertices": 72,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["front", "side"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "7339a5ddb4e9770b",
+      "attributes": {
+        "detail.materials": "19632de5b8ba2a13",
+        "group.prim.front": "37d6feb58a1d3d0f",
+        "group.prim.side": "59fd7c5602584c8c",
+        "point.Cd": "56128df5a47927df",
+        "prim.N": "099628dd6e75fd37",
+        "prim.edge": "8be16584c38385de",
+        "prim.material": "60117dd55f6609bf",
+        "prim.name": "275f1a258ea82c07",
+        "vertex.N": "e1d25769b5b56ab3"
+      },
+      "topology": "6621b41811213942"
+    }
+  },
+  "name": "package.topotopo.architecture.roof_skeleton",
+  "ok": true,
+  "source": "topotopo/architecture/roof_skeleton at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

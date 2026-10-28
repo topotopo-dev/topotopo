@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "description": "Window for a wall opening: a frame that fills the opening (width × height), mullions, a glass pane and a stone sill that sticks out at the front (+Z). Pivot at the bottom centre of the opening, centred in depth. Pieces: window_frame (paint_white), window_glass (glass), window_sill (stone). Every piece is a closed box.",
+  "params": {
+    "width": { "type": "float", "default": 1, "min": 0.3, "max": 4, "desc": "opening width (m)" },
+    "height": { "type": "float", "default": 1.3, "min": 0.3, "max": 4, "desc": "opening height (m)" },
+    "depth": { "type": "float", "default": 0.12, "min": 0.04, "max": 0.5, "desc": "frame depth along Z (m)" },
+    "frame_width": { "type": "float", "default": 0.07, "min": 0.02, "max": 0.25, "desc": "frame member width (m)" },
+    "mullions_x": { "type": "int", "default": 1, "min": 0, "max": 6, "desc": "vertical glazing bars" },
+    "mullions_y": { "type": "int", "default": 1, "min": 0, "max": 6, "desc": "horizontal glazing bars" },
+    "sill": { "type": "bool", "default": true, "desc": "add a sill below the opening" },
+    "sill_depth": {
+      "type": "float",
+      "default": 0.08,
+      "min": 0,
+      "max": 0.5,
+      "desc": "how far the sill reaches in front of the frame (m)"
+    }
+  },
+  "vars": {
+    "width": 1,
+    "height": 1.3,
+    "depth": 0.12,
+    "frame_width": 0.07,
+    "mullions_x": 1,
+    "mullions_y": 1,
+    "sill": true,
+    "sill_depth": 0.08
+  },
+  "nodes": {
+    "none": { "type": "points", "params": { "positions": [] } },
+    "frame_pts": {
+      "type": "wrangle",
+      "in": ["none"],
+      "params": {
+        "run_over": "detail",
+        "code": "const W = width, H = height, D = depth, f = Math.min(frame_width, W / 4, H / 4), m = f * 0.6;\nconst mx = Math.round(mullions_x), my = Math.round(mullions_y), iw = W - 2 * f, ih = H - 2 * f;\nconst add = (p, s) => { const q = addpoint(0, p); setpointattrib(0, 'scale', q, s); };\nadd([-(W - f) / 2, H / 2, 0], [f, H, D]); add([(W - f) / 2, H / 2, 0], [f, H, D]);\nadd([0, f / 2, 0], [iw, f, D]); add([0, H - f / 2, 0], [iw, f, D]);\nfor (let i = 1; i <= mx; i++) add([-iw / 2 + iw * i / (mx + 1), H / 2, 0], [m, ih, D * 0.7]);\nfor (let j = 1; j <= my; j++) add([0, f + ih * j / (my + 1), 0], [iw, m, D * 0.6]);"
+      }
+    },
+    "unit": { "type": "box" },
+    "frame": { "type": "copy_to_points", "in": ["unit", "frame_pts"] },
+    "frame_name": {
+      "type": "attrib_create",
+      "in": ["frame"],
+      "params": { "name": "name", "class": "prim", "value": "window_frame" }
+    },
+    "frame_mat": {
+      "type": "material",
+      "in": ["frame_name"],
+      "params": { "name": "paint_white", "base_color": "#e8e4da", "roughness": 0.5 }
+    },
+    "glass": {
+      "type": "box",
+      "params": {
+        "size": ["=width - 2 * Math.min(frame_width, width / 4, height / 4)", "=height - 2 * Math.min(frame_width, width / 4, height / 4)", 0.012],
+        "center": [0, "=height / 2", 0]
+      }
+    },
+    "glass_name": {
+      "type": "attrib_create",
+      "in": ["glass"],
+      "params": { "name": "name", "class": "prim", "value": "window_glass" }
+    },
+    "glass_mat": {
+      "type": "material",
+      "in": ["glass_name"],
+      "params": { "name": "glass", "base_color": "#6f93ad", "metallic": 0.1, "roughness": 0.05, "alpha": 0.45 }
+    },
+    "sill_geo": {
+      "type": "box",
+      "params": { "size": ["=width + 0.1", 0.05, "=depth + sill_depth"], "center": [0, -0.025, "=sill_depth / 2"] }
+    },
+    "sill_name": {
+      "type": "attrib_create",
+      "in": ["sill_geo"],
+      "params": { "name": "name", "class": "prim", "value": "window_sill" }
+    },
+    "sill_mat": {
+      "type": "material",
+      "in": ["sill_name"],
+      "params": { "name": "stone", "base_color": "#b9b2a6", "roughness": 0.8 }
+    },
+    "sill_on": { "type": "switch", "in": ["none", "sill_mat"], "params": { "index": "=sill ? 1 : 0" } },
+    "all": { "type": "merge", "in": ["frame_mat", "glass_mat", "sill_on"] },
+    "paint": {
+      "type": "wrangle",
+      "in": ["all"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "copynum" } }
+  },
+  "output": "out",
+  "outputs": { "window_frame": { "node": "out", "label": "Window" } },
+  "meta": {
+    "watertight": true,
+    "pivot": "opening",
+    "thumbnail_render": { "azimuth": 25, "elevation": 15 }
+  }
+}

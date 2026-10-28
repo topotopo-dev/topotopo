@@ -75,7 +75,7 @@ try {
     && eq(values(reexported, 'prim', 'category'), ['node0', 'node1', 'node2']), 'packed names and extras survive normal GLB export/reimport');
   check(eq(values(g, 'prim', 'name'), values(await importGeometryAsync(bytes, 'glb'), 'prim', 'name')), 'repeated import has stable instance order');
   fs.writeFileSync(path.join(tmp, 'scene.glb'), bytes);
-  const host = createNodeHost({ baseDir: tmp, workers: 0, shelf: false });
+  const host = createNodeHost({ baseDir: tmp, workers: 0 });
   const engine = new Engine(host); await engine.init();
   const cooked = await engine.cook(fileGraph('scene.glb'));
   check(cooked.ok && cooked.geo?.numPacked === 3, 'scene with sparse extras cooks through file node');
@@ -180,7 +180,7 @@ bpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(blend)})
     const digest = () => createHash('sha256').update(fs.readFileSync(blend)).digest('hex');
     const before = digest();
     let runs = 0;
-    const blendHost = createNodeHost({ baseDir: tmp, workers: 0, shelf: false, onBlenderRun: (r) => {
+    const blendHost = createNodeHost({ baseDir: tmp, workers: 0, onBlenderRun: (r) => {
       runs++; console.log(`Blender ${r.executable}: ${(r.durationMs / 1000).toFixed(3)}s`);
       for (const line of r.output.split(/\r?\n/)) if (line.startsWith('TopoTopo ')) console.log(line);
     } });

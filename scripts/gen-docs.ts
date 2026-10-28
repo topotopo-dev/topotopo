@@ -1,4 +1,4 @@
-// Generate docs/nodes.md (the node reference) from the registered NodeDefs and the shelf assets.
+// Generate docs/nodes.md (the node reference) from the registered NodeDefs and the outputs of TopoTopo's own packages.
 //   node scripts/gen-docs.ts            write docs/nodes.md
 //   node scripts/gen-docs.ts --check    exit 1 if docs/nodes.md is stale
 // test/docs.ts runs the same check inside `npm test`, so the reference cannot drift from the registry.
@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { CATEGORY_ORDER, allNodeDefs } from '../src/graph/registry.ts';
 import { Engine } from '../src/graph/engine.ts';
-import { SHELF_DIR, createNodeHost } from '../src/host/node.ts';
+import { createNodeHost } from '../src/host/node.ts';
+import { ProjectPackages } from '../src/gallery/packages.ts';
 import type { NodeDef, ParamDef } from '../src/graph/types.ts';
 
 export const NODES_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'nodes.md');
@@ -45,12 +46,22 @@ function categoriesOf(defs: NodeDef[]): string[] {
   return [...CATEGORY_ORDER, ...extra].filter((c) => defs.some((d) => d.category === c));
 }
 
+/** The anchor GitHub gives a heading: lower case, punctuation but - and _ dropped ("topotopo/nature/rock" → "topotoponaturerock"). */
+export const anchorOf = (heading: string) => heading.toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '').replace(/ /g, '-');
+
+/** The thumbnail of an output of one of TopoTopo's own packages, library/<kit>/thumbs/<output>.png (repository path), or null. */
+export function thumbOf(type: string): string | null {
+  const m = /^topotopo\/([a-z0-9_-]+)\/([a-z0-9_-]+)$/.exec(type);
+  return m ? `library/${m[1]}/thumbs/${m[2]}.png` : null;
+}
+
 function nodeSection(def: NodeDef): string[] {
   const out: string[] = [`### ${def.type}`, ''];
   const meta = [`category: ${code(def.category)}`];
   if (def.aliases?.length) meta.push(`aliases: ${def.aliases.map(code).join(', ')}`);
   out.push(meta.join(' · '), '', def.summary, '');
-  if (def.category === 'shelf') out.push(`![${def.type}](../shelf/thumbs/${def.type}.png)`, '');
+  const thumb = thumbOf(def.type);
+  if (thumb && fs.existsSync(path.join(path.dirname(NODES_MD), '..', thumb))) out.push(`![${def.type}](../${thumb})`, '');
   if (def.description) out.push(def.description, '');
 
   out.push('**Inputs**', '');
@@ -80,25 +91,31 @@ function nodeSection(def: NodeDef): string[] {
   return out;
 }
 
-/** The shelf assets (shelf/*.json, loaded the way the engine loads them at startup) as node definitions. */
-export async function shelfDefs(): Promise<NodeDef[]> {
-  const engine = new Engine(createNodeHost({ shelf: false }));
-  const r = await engine.loadShelf(SHELF_DIR);
-  if (r.errors.length) throw new Error(`shelf: ${r.errors.join('; ')}`);
-  return [...engine.shelf.values()].map((a) => a.def);
+/**
+ * The outputs of TopoTopo's own packages as node definitions (category "package"): every output and each kit's default
+ * output, at the newest version TopoTopo's built-in library holds, as the catalog offers them outside a project.
+ */
+export async function kitDefs(): Promise<NodeDef[]> {
+  const engine = new Engine(createNodeHost({ workers: 0 }));
+  await engine.init();
+  const pk = new ProjectPackages(engine, null);
+  engine.root.packages = pk.resolver;
+  const defs = engine.packageDefs();
+  if (pk.problems.size) throw new Error(`TopoTopo's own packages: ${[...pk.problems].join('; ')}`);
+  return defs;
 }
 
-/** docs/nodes.md as it should be: every node type and every shelf asset. */
+/** docs/nodes.md as it should be: every node type and every output of TopoTopo's own packages. */
 export async function referenceMarkdown(): Promise<string> {
-  return renderNodeReference(allNodeDefs(), await shelfDefs());
+  return renderNodeReference(allNodeDefs(), await kitDefs());
 }
 
 /**
  * The full Markdown reference for the given node definitions (default: every registered node type), followed by the
- * shelf assets (category "shelf") when given.
+ * outputs of TopoTopo's own packages (category "package") when given.
  */
-export function renderNodeReference(nodes: NodeDef[] = allNodeDefs(), shelf: NodeDef[] = []): string {
-  const defs = [...nodes, ...shelf];
+export function renderNodeReference(nodes: NodeDef[] = allNodeDefs(), packages: NodeDef[] = []): string {
+  const defs = [...nodes, ...packages];
   const cats = categoriesOf(defs);
   // a fixed collation: localeCompare without a locale follows the machine's LANG (cs puts "ch" after "h")
   const byCat = new Map(cats.map((c) => [c, defs.filter((d) => d.category === c).sort((a, b) => a.type.localeCompare(b.type, 'en'))]));
@@ -107,21 +124,23 @@ export function renderNodeReference(nodes: NodeDef[] = allNodeDefs(), shelf: Nod
     '',
     '# TopoTopo node reference',
     '',
-    `${nodes.length} node types${shelf.length ? ` and ${shelf.length} shelf assets` : ''}. Node types and parameter names are case- and underscore-insensitive and accept the listed`,
+    `${nodes.length} node types${packages.length ? ` and ${packages.length} outputs of TopoTopo's own packages` : ''}. Node types and parameter names are case- and underscore-insensitive and accept the listed`,
     'aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive',
     'validation, the MCP `catalog`/`help` tools and this page.',
     '',
     '## Contents',
     '',
   ];
-  for (const c of cats) out.push(`- [${c}](#${c}-nodes): ${byCat.get(c)!.map((d) => `[${d.type}](#${d.type})`).join(' · ')}`);
+  for (const c of cats) out.push(`- [${c}](#${c}-nodes): ${byCat.get(c)!.map((d) => `[${d.type}](#${anchorOf(d.type)})`).join(' · ')}`);
   out.push('');
   for (const c of cats) {
     out.push(`## ${c} nodes`, '');
-    if (c === 'shelf') {
-      out.push('Graph assets shipped in [shelf/](../shelf) and registered as node types on startup (see the README section',
-        '"Shelf"). Their parameters are the assets\' typed vars; their inputs are the graphs\' `input` nodes. A workspace asset',
-        'with the same name overrides one; `assets {action: "fork"}` copies one into the workspace to edit.', '');
+    if (c === 'package') {
+      out.push('The outputs of TopoTopo\'s own packages, the kits in its built-in library ([library/](../library); see the README',
+        'section "TopoTopo\'s own packages"), by full name; a kit\'s name alone is its default output, which lines its outputs up.',
+        'A project\'s graph names one like any node, and its first use copies the kit\'s version into the project. Their',
+        'parameters are the outputs\' typed vars; their inputs are the graphs\' `input` nodes. `assets {action: "fork"}`',
+        'copies one\'s graph into the project\'s assets to edit.', '');
     }
     for (const def of byCat.get(c)!) out.push(...nodeSection(def));
   }
@@ -143,5 +162,5 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
   }
   const changed = readNodesMd() !== md;
   if (changed) fs.writeFileSync(NODES_MD, md);
-  console.log(`${changed ? 'wrote' : 'unchanged'} docs/nodes.md (${allNodeDefs().length} node types + shelf assets, ${md.length} bytes)`);
+  console.log(`${changed ? 'wrote' : 'unchanged'} docs/nodes.md (${allNodeDefs().length} node types + the outputs of TopoTopo's own packages, ${md.length} bytes)`);
 }

@@ -1,12 +1,12 @@
 {
-  "description": "Cloth simulation (XPBD, Vellum-lite): a tarp draped over a stack of shelf crates, a banner pinned between two poles and blown by the wind, and a flat box inflated into a cushion that settles on the ground.",
+  "description": "Cloth simulation (XPBD, Vellum-lite): a tarp draped over a stack of crates (topotopo/props/crate), a banner pinned between two poles and blown by the wind, and a flat box inflated into a cushion that settles on the ground.",
   "meta": { "render": { "views": ["persp", "front", "right", "top"], "azimuth": 32, "elevation": 22, "wireframe": "none" } },
   "nodes": {
-    "crate_a": { "type": "crate", "params": { "width": 1.0, "height": 0.8, "depth": 0.8, "seed": 1 } },
+    "crate_a": { "type": "topotopo/props/crate", "params": { "width": 1.0, "height": 0.8, "depth": 0.8, "seed": 1 } },
     "crate_a_at": { "type": "transform", "in": ["crate_a"], "params": { "translate": [-0.5, 0, 0.05], "rotate": [0, 4, 0] } },
-    "crate_b": { "type": "crate", "params": { "width": 0.9, "height": 0.7, "depth": 0.8, "seed": 2 } },
+    "crate_b": { "type": "topotopo/props/crate", "params": { "width": 0.9, "height": 0.7, "depth": 0.8, "seed": 2 } },
     "crate_b_at": { "type": "transform", "in": ["crate_b"], "params": { "translate": [0.55, 0, -0.1], "rotate": [0, -8, 0] } },
-    "crate_c": { "type": "crate", "params": { "width": 0.8, "height": 0.6, "depth": 0.7, "seed": 3 } },
+    "crate_c": { "type": "topotopo/props/crate", "params": { "width": 0.8, "height": 0.6, "depth": 0.7, "seed": 3 } },
     "crate_c_at": { "type": "transform", "in": ["crate_c"], "params": { "translate": [-0.3, 0.8, 0.05], "rotate": [0, 15, 0] } },
     "crates": { "type": "merge", "in": ["crate_a_at", "crate_b_at", "crate_c_at"] },
     "tarp": { "type": "grid", "params": { "size": [3, 3], "divisions": [60, 60], "center": [-0.1, 1.9, 0] } },

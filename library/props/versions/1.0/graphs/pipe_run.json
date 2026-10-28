@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "description": "Pipe run along a polyline (input 0; without one, a default run that turns and rises): corners rounded into elbows of bend_radius, flanges at both ends and every flange_spacing metres, and floor stands under horizontal stretches. Pivot = the curve (the default run starts at the origin, 0.5 m up). Pieces: pipe (pipe_paint), pipe_flanges (steel), pipe_supports (metal_dark). Every piece is closed.",
+  "params": {
+    "radius": { "type": "float", "default": 0.08, "min": 0.01, "max": 0.6, "desc": "pipe radius (m)" },
+    "bend_radius": {
+      "type": "float",
+      "default": 0.35,
+      "min": 0,
+      "max": 3,
+      "desc": "elbow radius at the corners (m); 0 = mitred corners"
+    },
+    "flange_spacing": {
+      "type": "float",
+      "default": 2.5,
+      "min": 0,
+      "max": 20,
+      "desc": "distance between flange joints (m); 0 = only at the ends"
+    },
+    "segments": { "type": "int", "default": 14, "min": 4, "max": 48, "desc": "sides of the pipe section" },
+    "supports": { "type": "bool", "default": true, "desc": "stands from y = 0 under horizontal stretches" },
+    "support_spacing": { "type": "float", "default": 3, "min": 0.5, "max": 20, "desc": "distance between stands (m)" }
+  },
+  "vars": {
+    "radius": 0.08,
+    "bend_radius": 0.35,
+    "flange_spacing": 2.5,
+    "segments": 14,
+    "supports": true,
+    "support_spacing": 3
+  },
+  "nodes": {
+    "curve_in": { "type": "input", "params": { "index": 0, "label": "pipe centre line (polyline); optional" } },
+    "default_run": {
+      "type": "curve",
+      "params": { "points": [[0, 0.5, 0], [3, 0.5, 0], [3, 0.5, 2.5], [3, 1.8, 2.5], [6.5, 1.8, 2.5]] }
+    },
+    "path": {
+      "type": "switch",
+      "in": ["default_run", "curve_in"],
+      "params": { "index": "=npoints('curve_in') > 1 ? 1 : 0" }
+    },
+    "fillet": {
+      "type": "wrangle",
+      "in": ["path"],
+      "note": "replace every corner by a circular arc tangent to both segments (radius clamped to half the shorter segment)",
+      "params": {
+        "run_over": "detail",
+        "code": "const R = bend_radius;\nfor (let pr = 0; pr < nprims(0); pr++) {\n  const ids = primpoints(0, pr); if (ids.length < 2) continue;\n  const P = ids.map((i) => point(0, 'P', i)), out = [P[0]];\n  for (let i = 1; i < P.length - 1; i++) {\n    const u = sub(P[i - 1], P[i]), v = sub(P[i + 1], P[i]), lu = length(u), lv = length(v);\n    if (R <= 0 || lu < 1e-9 || lv < 1e-9) { out.push(P[i]); continue; }\n    const a = normalize(u), b = normalize(v), th = Math.acos(clamp(dot(a, b), -1, 1));\n    if (th > PI - 1e-3 || th < 1e-3) { out.push(P[i]); continue; }\n    let d = R / Math.tan(th / 2); d = Math.min(d, lu / 2, lv / 2); const r = d * Math.tan(th / 2);\n    const t1 = add(P[i], mul(a, d)), t2 = add(P[i], mul(b, d)), c = add(P[i], mul(normalize(add(a, b)), r / Math.sin(th / 2)));\n    const e1 = sub(t1, c), e2 = sub(t2, c), phi = PI - th, n = Math.max(2, Math.ceil(phi / radians(10)));\n    for (let k = 0; k <= n; k++) { const s = k / n; out.push(add(c, mul(add(mul(e1, Math.sin((1 - s) * phi)), mul(e2, Math.sin(s * phi))), 1 / Math.sin(phi)))); }\n  }\n  out.push(P[P.length - 1]);\n  addprim(0, 'polyline', out.map((p) => addpoint(0, p)));\n  removeprim(0, pr, true);\n}"
+      }
+    },
+    "pipe": {
+      "type": "sweep",
+      "in": ["fillet"],
+      "params": { "radius": "=radius", "divisions": "=segments", "caps": true }
+    },
+    "pipe_name": {
+      "type": "attrib_create",
+      "in": ["pipe"],
+      "params": { "name": "name", "class": "prim", "value": "pipe" }
+    },
+    "pipe_mat": {
+      "type": "material",
+      "in": ["pipe_name"],
+      "params": { "name": "pipe_paint", "base_color": "#6f8c74", "roughness": 0.55 }
+    },
+    "flange_pts": {
+      "type": "points_along_curve",
+      "in": ["fillet"],
+      "params": {
+        "spacing": "=flange_spacing > 0 ? flange_spacing : 1e6",
+        "start_offset": "=flange_spacing > 0 ? flange_spacing : 1e6"
+      }
+    },
+    "end_pts": {
+      "type": "points_along_curve",
+      "in": ["fillet"],
+      "params": { "count": 2, "start_offset": 0.03, "end_offset": 0.03 }
+    },
+    "all_flange_pts": { "type": "merge", "in": ["flange_pts", "end_pts"] },
+    "flange": {
+      "type": "tube",
+      "params": {
+        "axis": "z",
+        "radius": "=radius * 1.55",
+        "height": "=Math.max(0.03, radius * 0.5)",
+        "cols": "=segments"
+      }
+    },
+    "flanges": { "type": "copy_to_points", "in": ["flange", "all_flange_pts"] },
+    "flanges_name": {
+      "type": "attrib_create",
+      "in": ["flanges"],
+      "params": { "name": "name", "class": "prim", "value": "pipe_flanges" }
+    },
+    "flanges_mat": {
+      "type": "material",
+      "in": ["flanges_name"],
+      "params": { "name": "steel", "base_color": "#8d949b", "metallic": 0.85, "roughness": 0.35 }
+    },
+    "support_pts": {
+      "type": "points_along_curve",
+      "in": ["fillet"],
+      "params": { "spacing": "=support_spacing", "start_offset": "=support_spacing / 2" }
+    },
+    "stands": {
+      "type": "wrangle",
+      "in": ["support_pts"],
+      "note": "keep points on near-horizontal stretches above the floor; drop them to y = 0 with the stand height as scale",
+      "params": {
+        "code": "const t = v@tangent; const top = @P.y - radius; if (Math.abs(t.y) > 0.3 || top < 0.05) { removepoint(0, @ptnum); return; } v@scale = [radius * 1.2, top, radius * 1.2]; p@orient = [0, 0, 0, 1]; @P.y = 0;"
+      }
+    },
+    "stand": { "type": "box", "params": { "center": [0, 0.5, 0] } },
+    "stands_geo": { "type": "copy_to_points", "in": ["stand", "stands"] },
+    "stands_name": {
+      "type": "attrib_create",
+      "in": ["stands_geo"],
+      "params": { "name": "name", "class": "prim", "value": "pipe_supports" }
+    },
+    "stands_mat": {
+      "type": "material",
+      "in": ["stands_name"],
+      "params": { "name": "metal_dark", "base_color": "#2f3338", "metallic": 0.7, "roughness": 0.5 }
+    },
+    "none": { "type": "points", "params": { "positions": [] } },
+    "stands_on": { "type": "switch", "in": ["none", "stands_mat"], "params": { "index": "=supports ? 1 : 0" } },
+    "all": { "type": "merge", "in": ["pipe_mat", "flanges_mat", "stands_on"] },
+    "paint": {
+      "type": "wrangle",
+      "in": ["all"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": {
+      "type": "attrib_delete",
+      "in": ["paint"],
+      "params": { "names": "scale orient copynum curveu tangent N up curve_id", "groups": "*" }
+    }
+  },
+  "output": "out",
+  "outputs": { "pipe_run": { "node": "out", "label": "Pipe run" } },
+  "meta": {
+    "watertight": true,
+    "pivot": "curve",
+    "inputs": ["curve"],
+    "thumbnail_render": { "azimuth": 35, "elevation": 30, "zoom": 1.35 }
+  }
+}

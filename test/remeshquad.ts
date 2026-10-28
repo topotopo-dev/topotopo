@@ -2,9 +2,11 @@
 // node test/remeshquad.ts
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { openPackages } from '../src/gallery/packages.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { NodeSpec, GraphSpec } from '../src/graph/types.ts';
 import { halfEdges } from '../src/core/halfedge.ts';
@@ -335,6 +337,8 @@ try {
   hash(parity.source_triangle, 4); hash(parity.barycentric, 8); hash(parity.src_prim, 4);
   console.log(`quad_parity_digest=${digest.toString(16).padStart(16, '0')}; ${parity.positions.length / 3} points, ${parity.prim_start.length - 1} faces`);
   const example = JSON.parse(fs.readFileSync(new URL('../examples/quad_remesh.json', import.meta.url), 'utf8')) as GraphSpec;
+  // the example's rock is topotopo/nature/rock: it cooks as a graph of the examples' project, from its copy
+  openPackages(off, fileURLToPath(new URL('../examples/', import.meta.url)));
   for (const output of ['sphere_quad', 'box_quad', 'rock_quad', 'tube_quad']) {
     const geo = await cook(example.nodes, output);
     check(watertight(geo), `showcase ${output}: closed manifold nondegenerate mesh`);

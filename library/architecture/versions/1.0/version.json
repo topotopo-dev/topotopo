@@ -1,0 +1,960 @@
+{
+  "package": "topotopo/architecture",
+  "version": "1.0",
+  "note": "first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds",
+  "published": "2026-10-28T04:57:42.855Z",
+  "big": false,
+  "hash": "095c309489d55e53898e4bcab72ae2319fd1f3c6a454741fd539a1e6db37e1da",
+  "outputs": {
+    "arch": {
+      "graph": "arch",
+      "node": "out",
+      "label": "Arch",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 2,
+          "min": 0.4,
+          "max": 10,
+          "desc": "opening width (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 3,
+          "min": 0.5,
+          "max": 15,
+          "desc": "opening height at the apex (m)"
+        },
+        "thickness": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0.1,
+          "max": 3,
+          "desc": "masonry around the opening (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 0.6,
+          "min": 0.1,
+          "max": 5,
+          "desc": "depth along Z (m)"
+        },
+        "style": {
+          "type": "enum",
+          "default": "round",
+          "options": [
+            "round",
+            "pointed",
+            "flat"
+          ],
+          "desc": "shape of the opening's top"
+        },
+        "segments": {
+          "type": "int",
+          "default": 16,
+          "min": 4,
+          "max": 64,
+          "desc": "segments of the curved top"
+        },
+        "keystone": {
+          "type": "bool",
+          "default": true,
+          "desc": "keystone at the apex and impost blocks at the spring line"
+        }
+      },
+      "inputs": []
+    },
+    "beam_truss": {
+      "graph": "beam_truss",
+      "node": "out",
+      "label": "Truss",
+      "sliders": {
+        "span": {
+          "type": "float",
+          "default": 8,
+          "min": 1,
+          "max": 40,
+          "desc": "span along X (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 1.2,
+          "min": 0.2,
+          "max": 6,
+          "desc": "depth of the truss, chord centre to chord centre (m)"
+        },
+        "panels": {
+          "type": "int",
+          "default": 6,
+          "min": 2,
+          "max": 30,
+          "desc": "panels along the span (even counts are symmetric)"
+        },
+        "member_size": {
+          "type": "float",
+          "default": 0.12,
+          "min": 0.03,
+          "max": 0.6,
+          "desc": "member section size (m)"
+        },
+        "layout": {
+          "type": "enum",
+          "default": "warren",
+          "options": [
+            "warren",
+            "pratt",
+            "howe"
+          ],
+          "desc": "web layout"
+        },
+        "steel": {
+          "type": "bool",
+          "default": true,
+          "desc": "steel I-sections (false = square timber)"
+        }
+      },
+      "inputs": []
+    },
+    "brick_wall": {
+      "graph": "brick_wall",
+      "node": "out",
+      "label": "Brick wall",
+      "sliders": {
+        "wall_length": {
+          "type": "float",
+          "default": 3,
+          "min": 0.3,
+          "max": 40,
+          "desc": "length along X (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 1.8,
+          "min": 0.1,
+          "max": 5,
+          "desc": "height (m)"
+        },
+        "brick_length": {
+          "type": "float",
+          "default": 0.215,
+          "min": 0.1,
+          "max": 0.5,
+          "desc": "brick length (m); depth is half of it"
+        },
+        "brick_height": {
+          "type": "float",
+          "default": 0.065,
+          "min": 0.03,
+          "max": 0.3,
+          "desc": "brick height (m)"
+        },
+        "mortar": {
+          "type": "float",
+          "default": 0.01,
+          "min": 0.002,
+          "max": 0.04,
+          "desc": "joint width (m)"
+        },
+        "bond": {
+          "type": "enum",
+          "default": "running",
+          "options": [
+            "running",
+            "stack",
+            "english",
+            "flemish"
+          ],
+          "desc": "brick pattern"
+        },
+        "jitter": {
+          "type": "float",
+          "default": 0.4,
+          "min": 0,
+          "max": 1,
+          "desc": "random offset and yaw of each brick (0 = perfect)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": []
+    },
+    "door_frame": {
+      "graph": "door_frame",
+      "node": "out",
+      "label": "Door",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 1,
+          "min": 0.5,
+          "max": 3,
+          "desc": "opening width (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 2.1,
+          "min": 1.5,
+          "max": 4,
+          "desc": "opening height (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 0.16,
+          "min": 0.06,
+          "max": 0.6,
+          "desc": "frame depth along Z (m)"
+        },
+        "frame_width": {
+          "type": "float",
+          "default": 0.08,
+          "min": 0.03,
+          "max": 0.25,
+          "desc": "jamb and head width (m)"
+        },
+        "panels": {
+          "type": "int",
+          "default": 2,
+          "min": 0,
+          "max": 5,
+          "desc": "raised panels on each face of the leaf"
+        },
+        "open_angle": {
+          "type": "float",
+          "default": 0,
+          "min": 0,
+          "max": 110,
+          "desc": "how far the leaf is open (degrees)"
+        }
+      },
+      "inputs": []
+    },
+    "hex_grid_floor": {
+      "graph": "hex_grid_floor",
+      "node": "out",
+      "label": "Hexagonal paving",
+      "sliders": {
+        "size_x": {
+          "type": "float",
+          "default": 5,
+          "min": 0.5,
+          "max": 40,
+          "desc": "area size along X (m)"
+        },
+        "size_z": {
+          "type": "float",
+          "default": 5,
+          "min": 0.5,
+          "max": 40,
+          "desc": "area size along Z (m)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 0.3,
+          "min": 0.05,
+          "max": 3,
+          "desc": "hexagon circumradius including the gap (m)"
+        },
+        "gap": {
+          "type": "float",
+          "default": 0.02,
+          "min": 0,
+          "max": 0.2,
+          "desc": "gap between tiles (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 0.08,
+          "min": 0.01,
+          "max": 1,
+          "desc": "tile height (m)"
+        },
+        "height_jitter": {
+          "type": "float",
+          "default": 0.015,
+          "min": 0,
+          "max": 0.5,
+          "desc": "random height variation (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": []
+    },
+    "house": {
+      "graph": "house",
+      "node": "out",
+      "label": "House",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 8,
+          "min": 3,
+          "max": 30,
+          "desc": "default footprint along X (m), used when no footprint is connected"
+        },
+        "depth": {
+          "type": "float",
+          "default": 6,
+          "min": 3,
+          "max": 30,
+          "desc": "default footprint along Z (m)"
+        },
+        "floors": {
+          "type": "int",
+          "default": 2,
+          "min": 1,
+          "max": 4,
+          "desc": "number of floors (wall segments stacked)"
+        },
+        "floor_height": {
+          "type": "float",
+          "default": 3,
+          "min": 2.4,
+          "max": 4.5,
+          "desc": "height of one floor (m)"
+        },
+        "window_spacing": {
+          "type": "float",
+          "default": 2.5,
+          "min": 1.5,
+          "max": 6,
+          "desc": "one window per this length of wall (m)"
+        },
+        "pitch": {
+          "type": "float",
+          "default": 32,
+          "min": 5,
+          "max": 65,
+          "desc": "roof slope (degrees)"
+        },
+        "overhang": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 2,
+          "desc": "eave overhang (m)"
+        },
+        "door": {
+          "type": "bool",
+          "default": true,
+          "desc": "a door on the first footprint edge"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "footprint: a closed polygon on the XZ plane (optional)"
+        }
+      ]
+    },
+    "pillar": {
+      "graph": "pillar",
+      "node": "out",
+      "label": "Pillar",
+      "sliders": {
+        "height": {
+          "type": "float",
+          "default": 3,
+          "min": 0.5,
+          "max": 15,
+          "desc": "total height (m)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 0.22,
+          "min": 0.05,
+          "max": 2,
+          "desc": "shaft radius (half width for square) (m)"
+        },
+        "style": {
+          "type": "enum",
+          "default": "fluted",
+          "options": [
+            "round",
+            "fluted",
+            "square"
+          ],
+          "desc": "shaft section"
+        },
+        "flutes": {
+          "type": "int",
+          "default": 16,
+          "min": 6,
+          "max": 32,
+          "desc": "fluted style: number of flutes"
+        },
+        "base": {
+          "type": "bool",
+          "default": true,
+          "desc": "plinth and torus at the foot"
+        },
+        "capital": {
+          "type": "bool",
+          "default": true,
+          "desc": "echinus and abacus at the top"
+        }
+      },
+      "inputs": []
+    },
+    "railing": {
+      "graph": "railing",
+      "node": "out",
+      "label": "Railing",
+      "sliders": {
+        "run_length": {
+          "type": "float",
+          "default": 4,
+          "min": 0.5,
+          "max": 30,
+          "desc": "run length along +X when no curve is connected (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 1,
+          "min": 0.4,
+          "max": 2,
+          "desc": "handrail height above the curve (m)"
+        },
+        "post_spacing": {
+          "type": "float",
+          "default": 1.5,
+          "min": 0.3,
+          "max": 6,
+          "desc": "maximum distance between posts (m)"
+        },
+        "baluster_spacing": {
+          "type": "float",
+          "default": 0.15,
+          "min": 0,
+          "max": 1,
+          "desc": "distance between balusters (m); 0 = none"
+        },
+        "rails": {
+          "type": "int",
+          "default": 2,
+          "min": 0,
+          "max": 6,
+          "desc": "horizontal rails below the handrail (the lowest at 0.1 m)"
+        },
+        "profile": {
+          "type": "enum",
+          "default": "round",
+          "options": [
+            "round",
+            "square"
+          ],
+          "desc": "tube or square section for posts and rails"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "curve to follow (polyline); optional"
+        }
+      ]
+    },
+    "roof_gable": {
+      "graph": "roof_gable",
+      "node": "out",
+      "label": "Gable roof",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 8,
+          "min": 1,
+          "max": 40,
+          "desc": "footprint along X, the ridge direction (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 6,
+          "min": 1,
+          "max": 30,
+          "desc": "footprint along Z, the span (m)"
+        },
+        "pitch": {
+          "type": "float",
+          "default": 35,
+          "min": 5,
+          "max": 65,
+          "desc": "roof slope (degrees)"
+        },
+        "overhang": {
+          "type": "float",
+          "default": 0.4,
+          "min": 0,
+          "max": 2,
+          "desc": "eave and verge overhang beyond the footprint (m)"
+        },
+        "thickness": {
+          "type": "float",
+          "default": 0.18,
+          "min": 0.03,
+          "max": 0.6,
+          "desc": "slab thickness (m)"
+        },
+        "gable_walls": {
+          "type": "bool",
+          "default": true,
+          "desc": "fill the gable triangles under the roof with wall"
+        }
+      },
+      "inputs": []
+    },
+    "roof_hip": {
+      "graph": "roof_hip",
+      "node": "out",
+      "label": "Hip roof",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 8,
+          "min": 1,
+          "max": 40,
+          "desc": "footprint along X (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 6,
+          "min": 1,
+          "max": 40,
+          "desc": "footprint along Z (m)"
+        },
+        "pitch": {
+          "type": "float",
+          "default": 30,
+          "min": 5,
+          "max": 65,
+          "desc": "roof slope (degrees)"
+        },
+        "overhang": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 2,
+          "desc": "eave overhang beyond the footprint (m)"
+        },
+        "thickness": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0.03,
+          "max": 0.6,
+          "desc": "fascia height measured square to the slope (m)"
+        }
+      },
+      "inputs": []
+    },
+    "roof_skeleton": {
+      "graph": "roof_skeleton",
+      "node": "paint",
+      "label": "Roof on a footprint",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 8,
+          "min": 1,
+          "max": 40,
+          "desc": "default footprint width along X (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 6,
+          "min": 1,
+          "max": 40,
+          "desc": "default footprint depth along Z (m)"
+        },
+        "pitch": {
+          "type": "float",
+          "default": 32,
+          "min": 5,
+          "max": 65,
+          "desc": "roof face slope (degrees)"
+        },
+        "overhang": {
+          "type": "float",
+          "default": 0.4,
+          "min": 0,
+          "max": 2,
+          "desc": "outward footprint offset before roofing (m)"
+        },
+        "thickness": {
+          "type": "float",
+          "default": 0.16,
+          "min": 0.03,
+          "max": 0.6,
+          "desc": "shell extrusion along averaged vertex normals (m)"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "footprint: closed XZ polygons, optional"
+        }
+      ]
+    },
+    "scaffold": {
+      "graph": "scaffold",
+      "node": "out",
+      "label": "Scaffold",
+      "sliders": {
+        "bays": {
+          "type": "int",
+          "default": 3,
+          "min": 1,
+          "max": 12,
+          "desc": "bays along X"
+        },
+        "lifts": {
+          "type": "int",
+          "default": 3,
+          "min": 1,
+          "max": 10,
+          "desc": "lifts (levels)"
+        },
+        "bay_width": {
+          "type": "float",
+          "default": 2.1,
+          "min": 0.8,
+          "max": 3.5,
+          "desc": "bay width along X (m)"
+        },
+        "lift_height": {
+          "type": "float",
+          "default": 2,
+          "min": 1.2,
+          "max": 3,
+          "desc": "height of one lift (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 1.2,
+          "min": 0.6,
+          "max": 2.5,
+          "desc": "distance between the front and back standards (m)"
+        },
+        "boards": {
+          "type": "bool",
+          "default": true,
+          "desc": "board decks on every lift"
+        },
+        "braces": {
+          "type": "bool",
+          "default": true,
+          "desc": "diagonal braces on the front face"
+        }
+      },
+      "inputs": []
+    },
+    "spiral_stairs": {
+      "graph": "spiral_stairs",
+      "node": "out",
+      "label": "Spiral stairs",
+      "sliders": {
+        "steps": {
+          "type": "int",
+          "default": 16,
+          "min": 2,
+          "max": 60,
+          "desc": "number of treads"
+        },
+        "rise": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0.1,
+          "max": 0.3,
+          "desc": "height of one step (m)"
+        },
+        "turn": {
+          "type": "float",
+          "default": 22.5,
+          "min": 10,
+          "max": 45,
+          "desc": "rotation per step (degrees)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 1.1,
+          "min": 0.5,
+          "max": 4,
+          "desc": "outer radius (m)"
+        },
+        "column_radius": {
+          "type": "float",
+          "default": 0.1,
+          "min": 0.03,
+          "max": 0.5,
+          "desc": "column radius (m)"
+        },
+        "railing": {
+          "type": "bool",
+          "default": true,
+          "desc": "handrail along the outer edge"
+        }
+      },
+      "inputs": []
+    },
+    "stairs": {
+      "graph": "stairs",
+      "node": "out",
+      "label": "Stairs",
+      "sliders": {
+        "steps": {
+          "type": "int",
+          "default": 12,
+          "min": 1,
+          "max": 40,
+          "desc": "number of steps"
+        },
+        "rise": {
+          "type": "float",
+          "default": 0.18,
+          "min": 0.08,
+          "max": 0.3,
+          "desc": "height of one step (m)"
+        },
+        "run": {
+          "type": "float",
+          "default": 0.28,
+          "min": 0.15,
+          "max": 0.5,
+          "desc": "depth of one step (m)"
+        },
+        "width": {
+          "type": "float",
+          "default": 1.2,
+          "min": 0.5,
+          "max": 5,
+          "desc": "width along X (m)"
+        },
+        "style": {
+          "type": "enum",
+          "default": "solid",
+          "options": [
+            "solid",
+            "open"
+          ],
+          "desc": "solid concrete flight or open treads on stringers"
+        },
+        "railing": {
+          "type": "bool",
+          "default": true,
+          "desc": "handrails with posts on both sides"
+        }
+      },
+      "inputs": []
+    },
+    "tile_floor": {
+      "graph": "tile_floor",
+      "node": "out",
+      "label": "Tiled floor",
+      "sliders": {
+        "size_x": {
+          "type": "float",
+          "default": 4,
+          "min": 0.2,
+          "max": 30,
+          "desc": "floor size along X (m)"
+        },
+        "size_z": {
+          "type": "float",
+          "default": 4,
+          "min": 0.2,
+          "max": 30,
+          "desc": "floor size along Z (m)"
+        },
+        "tile_size": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0.1,
+          "max": 2,
+          "desc": "tile edge length including the gap (m)"
+        },
+        "gap": {
+          "type": "float",
+          "default": 0.012,
+          "min": 0,
+          "max": 0.08,
+          "desc": "grout gap (m)"
+        },
+        "thickness": {
+          "type": "float",
+          "default": 0.02,
+          "min": 0.005,
+          "max": 0.1,
+          "desc": "tile thickness (m)"
+        },
+        "pattern": {
+          "type": "enum",
+          "default": "checker",
+          "options": [
+            "grid",
+            "offset",
+            "checker"
+          ],
+          "desc": "tile layout"
+        },
+        "height_jitter": {
+          "type": "float",
+          "default": 0.002,
+          "min": 0,
+          "max": 0.02,
+          "desc": "random tile height variation (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": []
+    },
+    "wall_segment": {
+      "graph": "wall_segment",
+      "node": "out",
+      "label": "Wall",
+      "sliders": {
+        "wall_length": {
+          "type": "float",
+          "default": 4,
+          "min": 0.5,
+          "max": 60,
+          "desc": "length along X (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 3,
+          "min": 1,
+          "max": 10,
+          "desc": "height (m)"
+        },
+        "thickness": {
+          "type": "float",
+          "default": 0.25,
+          "min": 0.05,
+          "max": 1,
+          "desc": "thickness along Z (m)"
+        },
+        "windows": {
+          "type": "int",
+          "default": 2,
+          "min": 0,
+          "max": 24,
+          "desc": "number of window openings"
+        },
+        "window_width": {
+          "type": "float",
+          "default": 1,
+          "min": 0.3,
+          "max": 4,
+          "desc": "window opening width (m), clamped to fit the bay"
+        },
+        "window_height": {
+          "type": "float",
+          "default": 1.3,
+          "min": 0.3,
+          "max": 4,
+          "desc": "window opening height (m), clamped to fit under the top"
+        },
+        "sill_height": {
+          "type": "float",
+          "default": 0.9,
+          "min": 0,
+          "max": 3,
+          "desc": "height of the window openings above the ground (m)"
+        },
+        "door": {
+          "type": "bool",
+          "default": false,
+          "desc": "add a 1.0 × 2.1 m door in the middle bay"
+        },
+        "frames": {
+          "type": "bool",
+          "default": true,
+          "desc": "fill the openings with window_frame / door_frame"
+        }
+      },
+      "inputs": []
+    },
+    "window_frame": {
+      "graph": "window_frame",
+      "node": "out",
+      "label": "Window",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 1,
+          "min": 0.3,
+          "max": 4,
+          "desc": "opening width (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 1.3,
+          "min": 0.3,
+          "max": 4,
+          "desc": "opening height (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 0.12,
+          "min": 0.04,
+          "max": 0.5,
+          "desc": "frame depth along Z (m)"
+        },
+        "frame_width": {
+          "type": "float",
+          "default": 0.07,
+          "min": 0.02,
+          "max": 0.25,
+          "desc": "frame member width (m)"
+        },
+        "mullions_x": {
+          "type": "int",
+          "default": 1,
+          "min": 0,
+          "max": 6,
+          "desc": "vertical glazing bars"
+        },
+        "mullions_y": {
+          "type": "int",
+          "default": 1,
+          "min": 0,
+          "max": 6,
+          "desc": "horizontal glazing bars"
+        },
+        "sill": {
+          "type": "bool",
+          "default": true,
+          "desc": "add a sill below the opening"
+        },
+        "sill_depth": {
+          "type": "float",
+          "default": 0.08,
+          "min": 0,
+          "max": 0.5,
+          "desc": "how far the sill reaches in front of the frame (m)"
+        }
+      },
+      "inputs": []
+    }
+  },
+  "default": {
+    "graph": "kit",
+    "node": "kit",
+    "sliders": {},
+    "inputs": []
+  },
+  "topotopo": "0.4.0"
+}

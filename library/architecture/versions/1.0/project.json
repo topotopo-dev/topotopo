@@ -1,0 +1,13 @@
+{
+  "id": "architecture",
+  "graph": "kit",
+  "bake": {},
+  "title": "Architecture kit",
+  "description": "TopoTopo's architecture kit: walls with windows and doors, houses on any footprint, gable, hip and straight-skeleton roofs, stairs and spiral stairs, railings, pillars and arches, brick walls, tiled and hexagonal floors, trusses and scaffolds.",
+  "tags": [
+    "kit"
+  ],
+  "links": [],
+  "created": "2026-10-28",
+  "package": "topotopo/architecture"
+}

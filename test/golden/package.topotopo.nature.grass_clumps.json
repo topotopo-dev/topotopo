@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3", "height:float:1", "uv:float:3"],
+      "prim": ["copynum:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [8.1984, 1.4428, 8.2101],
+      "min": [-8.3699, -1.3005, -8.2635]
+    },
+    "counts": {
+      "points": 2230,
+      "prims": 2230,
+      "vertices": 2230,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "5ca82d3d947f19af",
+      "attributes": {
+        "detail.materials": "cbb5fb2055222b66",
+        "point.height": "3248b5a630700e34",
+        "point.uv": "b622f22c4b01f74e",
+        "prim.copynum": "1c783544865d793e"
+      },
+      "topology": "0de0ba942e161b8e"
+    },
+    "packed": {
+      "hash": "9b036ff4901d9806",
+      "instances": 2230,
+      "sources": ["c68b61d4e1fa321e", "1ed0a3bce4b8447e"]
+    }
+  },
+  "name": "package.topotopo.nature.grass_clumps",
+  "ok": true,
+  "source": "topotopo/nature/grass_clumps at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

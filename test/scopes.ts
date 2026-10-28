@@ -79,12 +79,15 @@ defineNode({
   },
 });
 
-// a root graph cooked before any scoped cook, and again at the end
+// a root graph cooked before any scoped cook, and again at the end; its asset is a root asset (scopes register their own
+// of the same name below)
+const sampleBox: GraphSpec = { nodes: { b: { type: 'box', params: { size: [0.4, 0.6, 0.8] } } }, output: 'b' };
+engine.registerAsset('sample_box', sampleBox);
 const rootSample: GraphSpec = {
   nodes: {
     f: { type: 'file', params: { path: 'mesh.obj' } },
     i: { type: 'image_file', params: { path: 'img.png' } },
-    c: { type: 'crate' },
+    c: { type: 'sample_box' },
     m: { type: 'merge', in: ['f', 'i', 'c'] },
   },
   output: 'm',
@@ -139,7 +142,7 @@ section('files: the same relative path reads the scope\'s own file');
   check(!tb.ok && /font "fonts\/scope\.ttf" not found/.test(errorOf(tb)), `another scope does not have it: ${errorOf(tb)}`);
 }
 
-section('assets: the scope\'s own, then the shelf, then built-in nodes');
+section('assets: the scope\'s own, then built-in nodes');
 {
   // part is a box of width 1 in the root, 2 in a and 3 in b; piece is the same graph in a and b and names part
   engine.registerAsset('part', box(1));
@@ -161,22 +164,16 @@ section('assets: the scope\'s own, then the shelf, then built-in nodes');
   check(!ro.ok && /unknown node type "root_only"/.test(errorOf(ro)), `the root's assets are invisible to a scope: ${errorOf(ro)}`);
   check(engine.resolveDef('piece', a) === a.assets.get('piece')?.def && !engine.resolveDef('piece'), 'resolveDef resolves in the scope it is given (the root by default)');
   check(engine.allTypeNames(a).includes('piece') && !engine.allTypeNames().includes('piece') && !engine.allTypeNames(a).includes('root_only'), 'allTypeNames lists the scope\'s own assets');
-  // the shelf and built-in nodes: seen by both; a built-in node with the same params shares its cache entry
-  const crate = { nodes: { c: { type: 'crate' } } }, plainBox = { nodes: { x: { type: 'box', params: { size: [7, 7, 7] } } } };
-  const cr = await cook(crate), ca = await cook(crate, { scope: a });
-  check(ca.ok && fp(ca) === fp(cr), `the shipped shelf is seen in a scope: ${errorOf(ca)}`);
-  check(res(ca, 'c').sig !== res(cr, 'c').sig, 'a shelf asset (whose graph resolves in the scope) is keyed by the scope');
+  // built-in nodes: seen by both; a built-in node with the same params shares its cache entry
+  const plainBox = { nodes: { x: { type: 'box', params: { size: [7, 7, 7] } } } };
   const br = await cook(plainBox), ba = await cook(plainBox, { scope: a }), bb = await cook(plainBox, { scope: b });
   check(res(ba, 'x').sig === res(br, 'x').sig && res(ba, 'x').cached && res(bb, 'x').cached, 'a built-in node with the same params is one cache entry in every scope');
-  // a scope's own asset in the place of a shelf asset: inside shelf assets too, in that scope only
-  engine.registerAsset('scopes_inner', box(1), { category: 'shelf' });
-  engine.registerAsset('scopes_outer', { nodes: { i: { type: 'scopes_inner' } }, output: 'i' }, { category: 'shelf' });
-  engine.registerAsset('scopes_inner', box(4), { scope: a });
-  const outer = { nodes: { o: { type: 'scopes_outer' } } };
-  const or = await cook(outer), oa = await cook(outer, { scope: a }), ob = await cook(outer, { scope: b });
-  check(width(or) === 1 && width(oa) === 4 && width(ob) === 1, `inside a shelf asset, a name resolves to the scope's own asset (widths ${width(or)}, ${width(oa)}, ${width(ob)})`);
-  check(engine.asset('scopes_inner')?.def.category === 'shelf' && engine.asset('scopes_inner', a)?.def.category === 'asset', 'asset() looks in the scope first, then in the shelf');
-  check(engine.assetsIn(a).filter((x) => x.name === 'scopes_inner').length === 1 && engine.assetsIn(a).some((x) => x.name === 'piece'), 'assetsIn lists a scope\'s asset in the place of the shelf\'s');
+  // an asset of the same name in two scopes: each sees its own, nothing else
+  engine.registerAsset('sample_box', box(4), { scope: a });
+  const sr = await cook({ nodes: { s: { type: 'sample_box' } } }), sa = await cook({ nodes: { s: { type: 'sample_box' } } }, { scope: a }), sb = await cook({ nodes: { s: { type: 'sample_box' } } }, { scope: b });
+  check(width(sr) === 0.4 && width(sa) === 4 && !sb.ok, `a name resolves to the scope's own asset, and no other scope's (widths ${width(sr)}, ${width(sa)}; ${errorOf(sb)})`);
+  check(engine.asset('sample_box')?.def === engine.resolveDef('sample_box') && engine.asset('sample_box', a)?.def === engine.resolveDef('sample_box', a) && !engine.asset('sample_box', b), 'asset() looks in the scope it is given');
+  check(engine.assetsIn(a).some((x) => x.name === 'sample_box') && engine.assetsIn(a).some((x) => x.name === 'piece') && !engine.assetsIn(a).some((x) => x.name === 'root_only'), 'assetsIn lists a scope\'s own assets');
   // registering validates in the target scope
   engine.registerAsset('b_thing', box(1), { scope: b });
   let threw = '';
@@ -264,6 +261,7 @@ section('the root scope is unaffected');
   check([...rootBefore.results.keys()].every((n) => res(after, n).sig === res(rootBefore, n).sig), 'with the same signatures');
   const fresh = new Engine(createNodeHost({ baseDir: tmp }));
   await fresh.init();
+  fresh.registerAsset('sample_box', sampleBox);
   const other = await cook(rootSample, {}, fresh);
   check(fp(other) === fp(rootBefore) && [...rootBefore.results.keys()].every((n) => res(other, n).sig === res(rootBefore, n).sig),
     'and as an engine without scopes cooks it');

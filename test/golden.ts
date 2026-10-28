@@ -1,6 +1,7 @@
-// Golden tests: every node type (on its fixture), every example graph and every shelf asset is cooked and fingerprinted
-// (counts, bbox, attribute schema, groups, quantised hashes of positions, topology and attributes).
-// Fingerprints live in test/golden/<name>.json, one file per node or example, so changes show up in git diffs.
+// Golden tests: every node type (on its fixture), every example graph and every output of TopoTopo's own packages is
+// cooked and fingerprinted (counts, bbox, attribute schema, groups, quantised hashes of positions, topology and
+// attributes). Fingerprints live in test/golden/<name>.json, one file per node, example or output, so changes show up in
+// git diffs.
 //
 //   node test/golden.ts             compare against test/golden/*.json, print a per-field diff on mismatch
 //   node test/golden.ts --update    rewrite the golden files (and remove orphaned ones when no filter is given)
@@ -10,8 +11,9 @@ import path from 'node:path';
 import { Engine } from '../src/graph/engine.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { openPackages } from '../src/gallery/packages.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, shelfFixtureGraph } from './fixtures.ts';
+import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, kitFixtureGraph } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff, sortedJSON } from './fingerprint.ts';
 
 const args = process.argv.slice(2);
@@ -21,8 +23,10 @@ const goldenDir = path.join(ROOT, 'test', 'golden');
 const examplesDir = path.join(ROOT, 'examples');
 
 const { engine } = await createFixtureEngine();
+// the examples are a project: they cook TopoTopo's own packages from its copies
 const exampleEngine = new Engine(createNodeHost({ baseDir: examplesDir }));
 await exampleEngine.init();
+openPackages(exampleEngine, examplesDir);
 
 interface Case { name: string; graph: GraphSpec; engine: Engine; source: string }
 const cases: Case[] = [];
@@ -30,13 +34,14 @@ for (const def of allNodeDefs()) {
   if (SKIP.has(def.type)) continue;
   cases.push({ name: `node.${def.type}`, graph: fixtureGraphFor(def.type), engine, source: `fixture for node type "${def.type}" (test/fixtures.ts)` });
 }
-for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json')).sort()) {
+for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json') && x !== 'project.json').sort()) {
   const graph = JSON.parse(fs.readFileSync(path.join(examplesDir, f), 'utf8'));
   cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}` });
 }
-// shelf assets at their defaults (curve/surface assets on their fixture inputs)
-for (const name of [...engine.shelf.keys()].sort()) {
-  cases.push({ name: `shelf.${name}`, graph: shelfFixtureGraph(name), engine, source: `shelf/${name}.json at its defaults (test/fixtures.ts)` });
+// the outputs of TopoTopo's own packages at their defaults (curve/surface outputs on their fixture inputs), and each
+// kit's default output, its line-up
+for (const type of engine.packageDefs().map((d) => d.type).sort()) {
+  cases.push({ name: `package.${type.replace(/\//g, '.')}`, graph: kitFixtureGraph(type), engine, source: `${type} at its defaults (test/fixtures.ts)` });
 }
 
 /** The machine-dependent inputs a graph's output depends on (currently: the default system font). */

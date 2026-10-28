@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Straight-skeleton roofs: an L-shaped house using the house shelf wall layout, a courtyard roof surrounding a hole, and nested inward offsets making a staircase.",
+  "description": "Straight-skeleton roofs: an L-shaped house using the wall layout of topotopo/architecture/house, a courtyard roof surrounding a hole, and nested inward offsets making a staircase.",
   "vars": {
     "width": 8,
     "depth": 6,
@@ -115,7 +115,7 @@
                       }
                     },
                     "ground": {
-                      "type": "wall_segment",
+                      "type": "topotopo/architecture/wall_segment",
                       "params": {
                         "wall_length": "=prim('piece', 0, 'len')",
                         "height": "=floor_height",
@@ -124,7 +124,7 @@
                       }
                     },
                     "upper": {
-                      "type": "wall_segment",
+                      "type": "topotopo/architecture/wall_segment",
                       "params": {
                         "wall_length": "=prim('piece', 0, 'len')",
                         "height": "=floor_height",
@@ -203,7 +203,7 @@
               }
             },
             "roof": {
-              "type": "roof_skeleton",
+              "type": "topotopo/architecture/roof_skeleton",
               "in": [
                 "fp"
               ],
@@ -321,7 +321,7 @@
       }
     },
     "courtyard_roof": {
-      "type": "roof_skeleton",
+      "type": "topotopo/architecture/roof_skeleton",
       "in": [
         "courtyard_footprint"
       ],

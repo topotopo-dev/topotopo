@@ -1,6 +1,6 @@
 // The publishable JavaScript: src/**/*.ts → dist/**/*.js + .d.ts (npm run build, run by prepack).
 // Development and tests keep running src/*.ts directly under Node's type stripping; this config is only for the package.
-// rootDir src → dist mirrors the source layout one-to-one, so module-relative lookups (../../shelf, ../../assets/fonts,
+// rootDir src → dist mirrors the source layout one-to-one, so module-relative lookups (../../library, ../../assets/fonts,
 // ../../kernels/pkg, the worker entry next to src/host/pool.ts) resolve the same from dist/ as from src/.
 {
   "extends": "./tsconfig.json",

@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.54, 3.55, 0.32],
+      "min": [-1.54, 0, -0.32]
+    },
+    "counts": {
+      "points": 70,
+      "prims": 43,
+      "vertices": 210,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "560ebc3e057978a4",
+      "attributes": {
+        "detail.materials": "589c72445e4b8606",
+        "prim.Cd": "098623b08ac07cea",
+        "prim.material": "a841242eb6bb5840",
+        "prim.name": "03361736ccd294c0",
+        "vertex.uv": "7a62f545828c489f"
+      },
+      "topology": "7032ee551f9bd3af"
+    }
+  },
+  "name": "package.topotopo.architecture.arch",
+  "ok": true,
+  "source": "topotopo/architecture/arch at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

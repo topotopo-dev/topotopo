@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.8, 0.4],
+      "min": [-0.5, 0, -0.4]
+    },
+    "counts": {
+      "points": 288,
+      "prims": 216,
+      "vertices": 864,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "08d3e4a595b5606f",
+      "attributes": {
+        "detail.materials": "e84a28e1f9fd15e7",
+        "prim.Cd": "1daf61e9522ea26b",
+        "prim.material": "29a25a25f046501f",
+        "prim.name": "e7f162459b9cd77f",
+        "vertex.uv": "a1a48ec55156d31f"
+      },
+      "topology": "3fd36124e9d278de"
+    }
+  },
+  "name": "package.topotopo.props.crate",
+  "ok": true,
+  "source": "topotopo/props/crate at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

@@ -253,7 +253,7 @@ defineBake({
   outputs: 'image <name> (default "ao"): C grey 0..1 (1 = open), mask',
   example: {
     nodes: {
-      crate: { type: 'crate' },
+      crate: { type: 'topotopo/props/crate' },
       uv: { type: 'uv_unwrap', in: ['crate'] },
       ao: { type: 'bake_ao', in: ['uv'], params: { resolution: 512, samples: 24 } },
     },
@@ -366,7 +366,7 @@ defineBake({
   outputs: 'image <name> (default "position"): C RGBA, mask',
   example: {
     nodes: {
-      crate: { type: 'crate' },
+      crate: { type: 'topotopo/props/crate' },
       uv: { type: 'uv_unwrap', in: ['crate'] },
       pos: { type: 'bake_position', in: ['uv'], params: { resolution: 256 } },
     },
@@ -539,7 +539,7 @@ defineBake({
   outputs: 'image <name> (default "island_id"): C RGBA, id (island number), mask',
   example: {
     nodes: {
-      crate: { type: 'crate' },
+      crate: { type: 'topotopo/props/crate' },
       uv: { type: 'uv_unwrap', in: ['crate'] },
       ids: { type: 'bake_island_id', in: ['uv'], params: { resolution: 256 } },
     },

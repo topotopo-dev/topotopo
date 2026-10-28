@@ -1,0 +1,16 @@
+{
+  "id": "examples",
+  "graph": "main",
+  "bake": {},
+  "title": "Examples",
+  "description": "The showcase graphs: npm run showcase renders each into renders/, npm test checks each against its golden fingerprint. Some use TopoTopo's own packages, whose copies are in packages/.",
+  "tags": [],
+  "links": [],
+  "created": "2026-10-28",
+  "uses": {
+    "topotopo/architecture": "1.0",
+    "topotopo/nature": "1.0",
+    "topotopo/props": "1.0",
+    "topotopo/street": "1.0"
+  }
+}

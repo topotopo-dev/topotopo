@@ -1,5 +1,5 @@
 {
-  "description": "Rigid-body settling: shelf rocks dropped onto the rocks_on_terrain landscape come to rest on it (rbd_settle), then crates are dropped one at a time onto three spots and pile up on the terrain and the rocks (rbd_stack).",
+  "description": "Rigid-body settling: rocks (topotopo/nature/rock) dropped onto the rocks_on_terrain landscape come to rest on it (rbd_settle), then crates are dropped one at a time onto three spots and pile up on the terrain and the rocks (rbd_stack).",
   "vars": { "rock_count": 150, "seed": 7 },
   "nodes": {
     "terrain": {
@@ -40,9 +40,9 @@
       "params": { "mode": "random", "axis": [0, 0, 0], "scale_min": 0.35, "scale_max": 1, "seed": "=seed" }
     },
     "lifted": { "type": "transform", "in": ["sized"], "params": { "translate": [0, 1.2, 0] } },
-    "rock_a": { "type": "rock", "params": { "seed": 1 } },
-    "rock_b": { "type": "rock", "params": { "seed": 2, "flatness": 0.5 } },
-    "rock_c": { "type": "rock", "params": { "seed": 3, "roughness": 0.45 } },
+    "rock_a": { "type": "topotopo/nature/rock", "params": { "seed": 1 } },
+    "rock_b": { "type": "topotopo/nature/rock", "params": { "seed": 2, "flatness": 0.5 } },
+    "rock_c": { "type": "topotopo/nature/rock", "params": { "seed": 3, "roughness": 0.45 } },
     "rock_set": { "type": "merge", "in": ["rock_a", "rock_b", "rock_c"] },
     "rocks": {
       "type": "copy_to_points",
@@ -65,7 +65,7 @@
       "in": ["spread"],
       "params": { "mode": "direction", "align_axis": "y", "direction": [0, 0, 1], "random_yaw": [0, 360], "scale_min": 0.6, "scale_max": 0.6, "seed": "=seed" }
     },
-    "crate": { "type": "crate" },
+    "crate": { "type": "topotopo/props/crate" },
     "crates": { "type": "copy_to_points", "in": ["crate", "turned"], "params": { "pack": true } },
     "ground_and_rocks": { "type": "merge", "in": ["ground", "settled_rocks"] },
     "crate_piles": { "type": "rbd_stack", "in": ["crates", "ground_and_rocks"], "params": { "interval": 30, "duration": 4 } },

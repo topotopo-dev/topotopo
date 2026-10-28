@@ -1,0 +1,32 @@
+{
+  "packages": {
+    "topotopo/architecture": {
+      "1.0": {
+        "hash": "095c309489d55e53898e4bcab72ae2319fd1f3c6a454741fd539a1e6db37e1da",
+        "library": "topotopo",
+        "uses": {}
+      }
+    },
+    "topotopo/nature": {
+      "1.0": {
+        "hash": "29e92c869b439ba9e24d33ef13b6533a6392d03ae407d528107c7985d37f090a",
+        "library": "topotopo",
+        "uses": {}
+      }
+    },
+    "topotopo/props": {
+      "1.0": {
+        "hash": "2948cd2c4c371c21652aa2411ddf28310cfcbb1dc5d9847539ded6b3dbda0930",
+        "library": "topotopo",
+        "uses": {}
+      }
+    },
+    "topotopo/street": {
+      "1.0": {
+        "hash": "93b1834d22694359f6a769526cbdc04a05c7f05cdef7cf64a61c81d355d5f3f8",
+        "library": "topotopo",
+        "uses": {}
+      }
+    }
+  }
+}

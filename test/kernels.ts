@@ -286,7 +286,7 @@ await test('deterministic simple random polygon property corpus tiles and preser
 });
 
 function countingHost() {
-  const original = createNodeHost({ shelf: false, workers: 0 });
+  const original = createNodeHost({ workers: 0 });
   let reads = 0;
   const host: Host = { ...original, async readFile(path) { if (/topotopo_kernels.*\.wasm/.test(path)) reads++; return original.readFile(path); } };
   return { host, reads: () => reads };
@@ -305,7 +305,7 @@ await test('host loads lazily, reads once across concurrent callers, and caches 
   assert.equal(secondHost.reads(), 1, 'second host reads its own file');
 });
 await test('a failed host read clears its cache and retries once on the same host', async () => {
-  const original = createNodeHost({ shelf: false, workers: 0 });
+  const original = createNodeHost({ workers: 0 });
   let attempts = 0;
   const host: Host = { ...original, async readFile() { if (++attempts === 1) throw new Error('temporary kernel read failure'); return bytes; } };
   await assert.rejects(loadHostKernels(host), /temporary kernel read failure/);

@@ -3,9 +3,12 @@
 //   npm run site:check    broken internal links, missing images, unused files, size budget (scripts/check-site.ts)
 // Every page is built from files in the repository at build time, so the site cannot drift from them:
 //   index.html           README.md (positioning paragraph, capability list, install, graph and MCP snippets, the MCP
-//                        tool names), counts from the node registry, the shelf and examples/, renders from examples/renders
-//   nodes/               one page per category from the registered NodeDefs and shelf assets (the data of docs/nodes.md)
-//   shelf/               shelf/*.json grouped by meta.shelf_group, thumbnails from shelf/thumbs
+//                        tool names), counts from the node registry, TopoTopo's own packages and examples/, renders
+//                        from examples/renders
+//   nodes/               one page per category from the registered NodeDefs and the outputs of TopoTopo's own packages
+//                        (the data of docs/nodes.md)
+//   packages/            TopoTopo's own packages: the kits of library/, their outputs with the thumbnails in
+//                        library/<kit>/thumbs
 //   examples/            every examples/*.json with its render, its description and the graph JSON itself
 //   releases/            docs/release/v*-release-notes.md converted from Markdown
 //   404.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg (docs/brand/mark.svg)
@@ -19,21 +22,21 @@ import { Marked, Renderer } from 'marked';
 import type { Token, Tokens } from 'marked';
 import '../src/nodes/index.ts';
 import { CATEGORY_ORDER, allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
-import type { GraphSpec, NodeDef, ParamDef } from '../src/graph/types.ts';
-import { shelfDefs } from './gen-docs.ts';
-import { GROUPS, readShelfFiles, typesUsed } from './gen-shelf.ts';
+import type { NodeDef, ParamDef } from '../src/graph/types.ts';
+import { anchorOf, kitDefs, thumbOf } from './gen-docs.ts';
+import { kitText, readKits, typesUsed } from './gen-kits.ts';
 import { ROOT, SITE_DIR, SIZE_LIMIT, listFiles } from './check-site.ts';
 
 /** The renders on the home page, in order (the first is also the social preview image). */
 const HERO: { name: string; caption: string }[] = [
-  { name: 'shelf_street', caption: 'A street block assembled only from shelf assets: houses, road, lamp posts, trees, fences.' },
+  { name: 'street_block', caption: 'A street block assembled only from TopoTopo\'s own packages: houses, road, lamp posts, trees, fences.' },
   { name: 'unreal_demo', caption: 'The Unreal 5.8 demo scene: an eroded heightfield that fits a Landscape exactly, a road, packed trees and rocks.' },
   { name: 'terrain_erosion', caption: 'Hydraulic and thermal erosion on a ridged massif, a road cut along a curve, rocks on the steep slopes.' },
-  { name: 'rbd_settle', caption: 'Rigid bodies: shelf rocks dropped onto a terrain until they rest, crates piled one at a time.' },
+  { name: 'rbd_settle', caption: 'Rigid bodies: rocks of the nature kit dropped onto a terrain until they rest, crates piled one at a time.' },
   { name: 'particles', caption: 'Particles running down an eroded massif with curl noise and sliding contacts, next to a fountain.' },
   { name: 'textures', caption: 'A brick material from texture nodes, and a crate whose baked AO and curvature become worn paint.' },
   { name: 'quad_remesh', caption: 'Field-aligned quad remeshing (Rust/WASM): each input on the left, its quads on the right.' },
-  { name: 'house_city', caption: 'Nested generators: the house shelf asset spawned on a grid of lots, varied per lot.' },
+  { name: 'house_city', caption: 'Nested generators: the architecture kit\'s house spawned on a grid of lots, varied per lot.' },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -56,25 +59,25 @@ const COMMIT = (() => {
 })();
 
 const nodeDefs = allNodeDefs();
-const shelfAssets = await shelfDefs();
-const defs = [...nodeDefs, ...shelfAssets];
+const packageOutputs = await kitDefs();
+const defs = [...nodeDefs, ...packageOutputs];
 const categories = [...CATEGORY_ORDER, ...[...new Set(defs.map((d) => d.category))].filter((c) => !CATEGORY_ORDER.includes(c)).sort()]
   .filter((c) => defs.some((d) => d.category === c));
 // a fixed collation: localeCompare without a locale follows the machine's LANG
 const byCat = new Map(categories.map((c) => [c, defs.filter((d) => d.category === c).sort((a, b) => a.type.localeCompare(b.type, 'en'))]));
 const catOf = new Map(defs.map((d) => [d.type, d.category]));
-const nodeCategories = categories.filter((c) => c !== 'shelf');
+const nodeCategories = categories.filter((c) => c !== 'package');
 /** Canonical node type of a name or alias used in a graph (null for saved assets and unknown names). */
 const resolveType = (t: string) => (catOf.has(t) ? t : getNodeDef(t)?.type ?? null);
 
-const shelfFiles = readShelfFiles();
-const shelfNames = new Set(shelfFiles.map((f) => f.name));
-const shelfGroup = (g: GraphSpec) => String((g as any).meta?.shelf_group ?? 'props');
-const shelfGroups = [...GROUPS, ...[...new Set(shelfFiles.map((f) => shelfGroup(f.graph)))].filter((g) => !GROUPS.includes(g)).sort()]
-  .filter((g) => shelfFiles.some((f) => shelfGroup(f.graph) === g));
+const kits = readKits();
+/** The outputs of TopoTopo's own packages, each kit's default output aside (it lines the others up). */
+const kitOutputs = kits.flatMap((k) => k.outputs);
+/** docs/nodes.md anchors of the node types (a full name loses its slashes there) */
+const byAnchor = new Map(defs.map((d) => [anchorOf(d.type), d.type]));
 
 interface Example { name: string; graph: any; description: string; types: string[]; nodes: number; render: string | null }
-const examples: Example[] = fs.readdirSync(path.join(ROOT, 'examples')).filter((f) => f.endsWith('.json')).sort().map((f) => {
+const examples: Example[] = fs.readdirSync(path.join(ROOT, 'examples')).filter((f) => f.endsWith('.json') && f !== 'project.json').sort().map((f) => {
   const name = f.slice(0, -'.json'.length);
   const graph = JSON.parse(read(`examples/${f}`));
   const render = exists(`examples/renders/${name}.png`) ? `examples/renders/${name}.png` : null;
@@ -143,8 +146,8 @@ function img(repoRel: string, alt: string, o: { lazy?: boolean; cls?: string } =
 function nodeTarget(frag: string): string {
   if (!frag) return 'nodes/index.html';
   if (frag.endsWith('-nodes') && byCat.has(frag.slice(0, -'-nodes'.length))) return `nodes/${frag.slice(0, -'-nodes'.length)}.html`;
-  const c = catOf.get(frag);
-  return c ? `nodes/${c}.html#${frag}` : 'nodes/index.html';
+  const t = byAnchor.get(frag) ?? frag, c = catOf.get(t);
+  return c ? `nodes/${c}.html#${t}` : 'nodes/index.html';
 }
 
 /** The site path a repository path (+ fragment) maps to, or null when the site has no page for it. */
@@ -156,10 +159,10 @@ function siteTarget(repoPath: string, frag: string): string | null {
   if (repoPath === 'examples' || repoPath === 'examples/renders') return 'examples/index.html';
   let m = /^examples\/([\w.-]+)\.json$/.exec(repoPath);
   if (m && examples.some((e) => e.name === m![1])) return `examples/index.html#${m[1]}`;
-  if (repoPath === 'shelf' || repoPath === 'shelf/thumbs') return 'shelf/index.html';
-  m = /^shelf\/([\w.-]+)\.json$/.exec(repoPath);
-  if (m && shelfNames.has(m[1])) return `shelf/index.html#${m[1]}`;
-  if (/^(examples\/renders|shelf\/thumbs)\/[\w.-]+\.png$/.test(repoPath) && exists(repoPath)) return useFile(repoPath);
+  if (repoPath === 'library') return 'packages/index.html';
+  m = /^library\/([\w-]+)(?:\/graphs\/([\w-]+)\.json)?$/.exec(repoPath);
+  if (m && kits.some((k) => k.name === m![1])) return m[2] && m[2] !== 'kit' ? `packages/index.html#topotopo/${m[1]}/${m[2]}` : `packages/index.html#${m[1]}`;
+  if (/^(examples\/renders|library\/[\w-]+\/thumbs)\/[\w.-]+\.png$/.test(repoPath) && exists(repoPath)) return useFile(repoPath);
   return null;
 }
 
@@ -296,7 +299,7 @@ const clip = (s: string, n = 160) => (s.length <= n ? s : s.slice(0, s.lastIndex
 
 const NAV = [
   { key: 'nodes', label: 'Nodes', to: 'nodes/index.html' },
-  { key: 'shelf', label: 'Shelf', to: 'shelf/index.html' },
+  { key: 'packages', label: 'Packages', to: 'packages/index.html' },
   { key: 'examples', label: 'Examples', to: 'examples/index.html' },
   ...(releases.length ? [{ key: 'releases', label: 'Release notes', to: releases[0].out }] : []),
 ];
@@ -399,9 +402,9 @@ const claudeCode = need(findCode(section(readme, 'Connect to Claude Code'), /cla
 const mcpJson = need(findCode(section(readme, /^Other MCP clients/), /mcpServers/, 'json'), 'json config under "### Other MCP clients"');
 const toolTable = section(readme, 'MCP tools').find((t) => t.type === 'table') as Tokens.Table | undefined;
 const mcpTools = (toolTable?.rows ?? []).map((r) => r[0].text.replace(/`/g, '').trim()).filter(Boolean);
-const shelfJson = findCode(section(readme, 'Shelf'), /"type"/, 'json');
+const kitJson = findCode(section(readme, "TopoTopo's own packages"), /"type"/, 'json');
 
-const counts = `<strong>${nodeDefs.length}</strong> node types · <strong>${shelfAssets.length}</strong> shelf assets · ` +
+const counts = `<strong>${nodeDefs.length}</strong> node types · <strong>${kitOutputs.length}</strong> ready-made outputs in ${kits.length} kits · ` +
   `<strong>${examples.length}</strong> example graphs · ${esc(pkg.license ?? 'Apache-2.0')}`;
 
 page({
@@ -417,7 +420,7 @@ page({
 </figure>`).join('\n');
   const links = [
     ['nodes/index.html', 'Node reference', `${nodeDefs.length} node types in ${nodeCategories.length} categories: params, inputs, examples`],
-    ['shelf/index.html', 'Shelf', `${shelfAssets.length} ready-made graph assets used like nodes`],
+    ['packages/index.html', 'TopoTopo\'s own packages', `${kits.length} kits, ${kitOutputs.length} ready-made outputs used like nodes`],
     ['examples/index.html', 'Examples', `${examples.length} example graphs with their renders`],
     ...(releases.length ? [[releases[0].out, 'Release notes', `what is in ${releases[0].version}, known limits`]] : []),
     [REPO, 'Source on GitHub', 'issues, contributing, licence'],
@@ -491,7 +494,8 @@ function nodeSection(d: NodeDef): string {
   if (d.aliases?.length) out.push(`<p class="aliases">aliases: ${d.aliases.map((a) => `<code>${esc(a)}</code>`).join(' ')}</p>`);
   if (d.deprecated) out.push(`<p><strong>Deprecated:</strong> ${inline(d.deprecated)}</p>`);
   out.push(`<p class="summary">${inline(d.summary)}</p>`);
-  if (d.category === 'shelf' && exists(`shelf/thumbs/${d.type}.png`)) out.push(`<p>${img(`shelf/thumbs/${d.type}.png`, `${d.type} thumbnail`, { cls: 'thumb' })}</p>`);
+  const thumb = thumbOf(d.type);
+  if (thumb && exists(thumb)) out.push(`<p>${img(thumb, `${d.type} thumbnail`, { cls: 'thumb' })}</p>`);
   if (d.description) out.push(`<div class="description">${block(d.description)}</div>`);
 
   out.push('<h3>Inputs</h3>');
@@ -527,12 +531,12 @@ page({
   out: 'nodes/index.html',
   title: 'Node reference',
   nav: 'nodes',
-  description: `Every TopoTopo node type (${nodeDefs.length}) and shelf asset (${shelfAssets.length}): summary, inputs, parameters with types, defaults and ranges, and an example graph.`,
+  description: `Every TopoTopo node type (${nodeDefs.length}) and output of TopoTopo's own packages (${packageOutputs.length}): summary, inputs, parameters with types, defaults and ranges, and an example graph.`,
 }, () => `<div class="with-sidebar">
 ${nodesSidebar(null)}
 <div class="content">
 <h1>Node reference</h1>
-<p class="intro">${nodeDefs.length} node types in ${nodeCategories.length} categories, plus ${shelfAssets.length} shelf assets (graph assets used like nodes).
+<p class="intro">${nodeDefs.length} node types in ${nodeCategories.length} categories, plus the ${packageOutputs.length} outputs of TopoTopo's own packages (ready-made graphs used like nodes, by full name).
 Node types and parameter names are case- and underscore-insensitive and accept the listed aliases, Houdini names included;
 any parameter can also be an <code>"=expr"</code> string evaluated with the graph vars. The same definitions drive
 validation, the MCP <code>catalog</code> and <code>help</code> tools, <a href="${esc(repoUrl('docs/nodes.md'))}">docs/nodes.md</a> and these pages.</p>
@@ -562,18 +566,18 @@ ${byCat.get(c)!.map((d) => `<li data-k="${esc([d.type, ...(d.aliases ?? []), c, 
 
 for (const c of categories) {
   const list = byCat.get(c)!;
-  const isShelf = c === 'shelf';
+  const isPackage = c === 'package';
   page({
     out: `nodes/${c}.html`,
     title: `${c} nodes`,
     nav: 'nodes',
-    description: clip(`${list.length} TopoTopo ${isShelf ? 'shelf assets' : `${c} node types`}: ${list.map((d) => d.type).join(', ')}.`, 300),
+    description: clip(`${list.length} ${isPackage ? 'outputs of TopoTopo\'s own packages' : `TopoTopo ${c} node types`}: ${list.map((d) => d.type).join(', ')}.`, 300),
   }, () => `<div class="with-sidebar">
 ${nodesSidebar(c)}
 <div class="content">
 <h1 id="${esc(c)}-nodes">${esc(c)} nodes</h1>
-<p class="intro">${isShelf
-  ? `${list.length} graph assets from <code>shelf/</code>, registered as node types on startup (see the <a href="${u('shelf/index.html')}">shelf gallery</a>). Their parameters are the assets' typed vars and their inputs the graphs' <code>input</code> nodes. A workspace asset with the same name overrides one; <code>assets {action: "fork"}</code> copies one into the workspace to edit.`
+<p class="intro">${isPackage
+  ? `${list.length} outputs of TopoTopo's own packages, the kits in its built-in library (see <a href="${u('packages/index.html')}">TopoTopo's own packages</a>), by full name; a kit's name alone is its default output, which lines its outputs up. A project's graph names one like any node, and its first use copies the kit's version into the project. Their parameters are the outputs' typed vars and their inputs the graphs' <code>input</code> nodes; <code>assets {action: "fork"}</code> copies one's graph into the project's assets to edit.`
   : `${list.length} node type${list.length > 1 ? 's' : ''} in the <code>${esc(c)}</code> category.`}</p>
 <ul class="chips">${list.map((d) => `<li><a href="#${esc(d.type)}">${esc(d.type)}</a></li>`).join('')}</ul>
 ${list.map(nodeSection).join('\n')}
@@ -582,36 +586,41 @@ ${list.map(nodeSection).join('\n')}
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// shelf and examples galleries
+// TopoTopo's own packages and the examples gallery
 
 page({
-  out: 'shelf/index.html',
-  title: 'Shelf',
-  nav: 'shelf',
-  description: `${shelfAssets.length} ready-made TopoTopo graph assets (walls, roofs, stairs, props, trees, rocks, PCG helpers) used like nodes.`,
+  out: 'packages/index.html',
+  title: 'TopoTopo\'s own packages',
+  nav: 'packages',
+  description: `TopoTopo's own packages: ${kits.length} kits of ${kitOutputs.length} ready-made generators (walls, houses, roofs, stairs, rocks, trees, props, roads) used like nodes.`,
 }, () => {
-  const card = (name: string) => {
-    const d = shelfAssets.find((s) => s.type === name);
+  const card = (type: string, name: string, kit: string) => {
+    const d = packageOutputs.find((x) => x.type === type);
     const params = d ? Object.keys(d.params).length : 0;
     const inputs = d?.inputs.map((i) => i.name) ?? [];
-    return `<article class="card shelf-card" id="${esc(name)}">
-<a href="${u(`nodes/shelf.html#${name}`)}">${exists(`shelf/thumbs/${name}.png`) ? img(`shelf/thumbs/${name}.png`, `${name} thumbnail`) : ''}</a>
-<div class="body"><h3><a href="${u(`nodes/shelf.html#${name}`)}">${esc(name)}</a></h3>
+    const thumb = `library/${kit}/thumbs/${name}.png`;
+    return `<article class="card kit-card" id="${esc(type)}">
+<a href="${u(`nodes/package.html#${type}`)}">${exists(thumb) ? img(thumb, `${type} thumbnail`) : ''}</a>
+<div class="body"><h3><a href="${u(`nodes/package.html#${type}`)}">${esc(type)}</a></h3>
 ${d ? `<p>${inline(d.summary)}</p>` : ''}
 <p class="meta">${params} param${params === 1 ? '' : 's'}${inputs.length ? ` · input: ${inputs.map(esc).join(', ')}` : ''}</p></div>
 </article>`;
   };
-  return `<h1>Shelf</h1>
-<p class="intro">${shelfAssets.length} graph assets in <a href="${esc(repoUrl('shelf'))}">shelf/</a>: walls, windows and doors, whole houses,
-roofs, stairs, railings and fences, bricks and tiles, props, trees and rocks, and PCG helpers. The engine registers them on startup as node
-types of category <code>shelf</code>, so a graph uses one like any node. Each asset documents its typed parameters, puts its pivot at
-the base and tags every piece with <code>name</code> and <code>material</code>. Parameters, inputs and examples are in the
-<a href="${u('nodes/shelf.html')}">node reference</a>.</p>
-${shelfJson ? codeBlock(shelfJson.text, shelfJson.lang) : ''}
-<ul class="chips">${shelfGroups.map((g) => `<li><a href="#group-${esc(g)}">${esc(g)}</a></li>`).join('')}</ul>
-${shelfGroups.map((g) => `<h2 id="group-${esc(g)}">${esc(g)}</h2>
+  return `<h1>TopoTopo's own packages</h1>
+<p class="intro">${kitOutputs.length} ready-made generators in ${kits.length} kits, TopoTopo's own packages: walls, windows and doors, whole
+houses, roofs, stairs, railings and floors, props, trees and rocks, roads and street furniture, and generators that dress
+a road or a terrain. TopoTopo carries them built in (<a href="${esc(repoUrl('library'))}">library/</a>), so they work
+offline and every project finds them without listing a library. A project's graph names an output by its full name; the
+first use copies the kit's version into the project and locks it, as for any package, and a newer version a TopoTopo
+release brings shows as an update. Each output documents its typed parameters, puts its pivot at the base and tags every
+piece with <code>name</code> and <code>material</code>. Parameters, inputs and examples are in the
+<a href="${u('nodes/package.html')}">node reference</a>.</p>
+${kitJson ? codeBlock(kitJson.text, kitJson.lang) : ''}
+<ul class="chips">${kits.map((k) => `<li><a href="#${esc(k.name)}">${esc(k.package)}</a></li>`).join('')}</ul>
+${kits.map((k) => `<h2 id="${esc(k.name)}">${esc(k.package)}${k.versions.length ? `<span class="badge">${esc(k.versions.at(-1)!.version)}</span>` : ''}</h2>
+<p>${esc(kitText(k))} Its default output, <a href="${u(`nodes/package.html#${k.package}`)}"><code>${esc(k.package)}</code></a> alone, lines them up.</p>
 <div class="grid small">
-${shelfFiles.filter((f) => shelfGroup(f.graph) === g).map((f) => card(f.name)).join('\n')}
+${k.outputs.map((o) => card(o.type, o.name, k.name)).join('\n')}
 </div>`).join('\n')}`;
 });
 
@@ -711,5 +720,5 @@ const pageBytes = pages.reduce((s, p) => s + size(p.out), 0);
 for (const p of pages) console.log(`  ${p.out.padEnd(28)} ${kb(size(p.out)).padStart(10)}`);
 const imgs = files.filter((f) => /\.(png|svg)$/.test(f));
 console.log(`site/: ${pages.length} pages (${kb(pageBytes)}), ${imgs.length} images (${(imgs.reduce((s, f) => s + size(f), 0) / 1048576).toFixed(2)} MB), ` +
-  `${files.length} files, ${(total / 1048576).toFixed(2)} MB total; ${nodeDefs.length} node types, ${shelfAssets.length} shelf assets, ${examples.length} examples`);
+  `${files.length} files, ${(total / 1048576).toFixed(2)} MB total; ${nodeDefs.length} node types, ${kitOutputs.length} outputs of TopoTopo's own packages, ${examples.length} examples`);
 if (total > SIZE_LIMIT) { console.log(`FAIL the site is over the ${SIZE_LIMIT / 1048576} MB budget`); process.exit(1); }

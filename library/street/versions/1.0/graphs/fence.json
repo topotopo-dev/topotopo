@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "description": "Fence along a curve (input 0; without one, a straight run of `run_length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails). Posts at even spacing including both ends. Sits on the curve (pivot = the curve). Pieces: fence_posts, fence_infill (paint_white, wood or wood_dark by style).",
+  "params": {
+    "run_length": {
+      "type": "float",
+      "default": 6,
+      "min": 0.5,
+      "max": 40,
+      "desc": "run length along +X when no curve is connected (m)"
+    },
+    "height": { "type": "float", "default": 1.1, "min": 0.4, "max": 2.5, "desc": "fence height (m)" },
+    "style": {
+      "type": "enum",
+      "default": "picket",
+      "options": ["picket", "plank", "rail"],
+      "desc": "infill style"
+    },
+    "post_spacing": {
+      "type": "float",
+      "default": 2,
+      "min": 0.5,
+      "max": 5,
+      "desc": "maximum distance between posts (m)"
+    },
+    "picket_spacing": {
+      "type": "float",
+      "default": 0.15,
+      "min": 0.08,
+      "max": 0.5,
+      "desc": "picket style: distance between pickets (m)"
+    },
+    "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed of the board tint" }
+  },
+  "vars": {
+    "run_length": 6,
+    "height": 1.1,
+    "style": "picket",
+    "post_spacing": 2,
+    "picket_spacing": 0.15,
+    "seed": 0
+  },
+  "nodes": {
+    "curve_in": { "type": "input", "params": { "index": 0, "label": "curve to follow (polyline); optional" } },
+    "straight": {
+      "type": "line",
+      "params": { "origin": [0, 0, 0], "direction": [1, 0, 0], "length": "=run_length", "points": 2 }
+    },
+    "path": {
+      "type": "switch",
+      "in": ["straight", "curve_in"],
+      "params": { "index": "=npoints('curve_in') > 1 ? 1 : 0" }
+    },
+    "post_pts": {
+      "type": "resample",
+      "in": ["path"],
+      "params": { "mode": "length", "length": "=post_spacing", "tangent": true }
+    },
+    "post_orient": {
+      "type": "wrangle",
+      "in": ["post_pts"],
+      "params": {
+        "code": "const t = [v@tangentu.x, 0, v@tangentu.z]; if (length(t) > 1e-6) p@orient = lookat(normalize(t), [0, 1, 0]);"
+      }
+    },
+    "post": {
+      "type": "box",
+      "params": { "size": [0.09, "=height + 0.08", 0.09], "center": [0, "=(height + 0.08) / 2", 0] }
+    },
+    "posts": { "type": "copy_to_points", "in": ["post", "post_orient"] },
+    "posts_name": {
+      "type": "attrib_create",
+      "in": ["posts"],
+      "params": { "name": "name", "class": "prim", "value": "fence_posts" }
+    },
+    "picket_shape": {
+      "type": "curve",
+      "params": {
+        "points": [[0, 0.04, -0.045], [0, 0.04, 0.045], [0, "=height - 0.05", 0.045], [0, "=height", 0], [0, "=height - 0.05", -0.045]],
+        "closed": true
+      }
+    },
+    "picket": {
+      "type": "extrude",
+      "in": ["picket_shape"],
+      "params": { "height": 0.022, "center": true, "plane": "yz" }
+    },
+    "picket_pts": {
+      "type": "resample",
+      "in": ["path"],
+      "params": { "mode": "length", "length": "=picket_spacing", "tangent": true }
+    },
+    "picket_orient": {
+      "type": "wrangle",
+      "in": ["picket_pts"],
+      "params": {
+        "code": "const t = [v@tangentu.x, 0, v@tangentu.z]; if (length(t) > 1e-6) p@orient = lookat(normalize(t), [0, 1, 0]); f@tint = 0.9 + 0.15 * rand(@ptnum, seed);"
+      }
+    },
+    "pickets": { "type": "copy_to_points", "in": ["picket", "picket_orient"] },
+    "picket_rail_profile": {
+      "type": "curve",
+      "params": {
+        "points": [[-0.065, "=height * 0.22", 0], [-0.015, "=height * 0.22", 0], [-0.015, "=height * 0.22 + 0.08", 0], [-0.065, "=height * 0.22 + 0.08", 0]],
+        "closed": true
+      }
+    },
+    "picket_rail": { "type": "sweep", "in": ["path", "picket_rail_profile"] },
+    "picket_rails": {
+      "type": "copy_xform",
+      "in": ["picket_rail"],
+      "params": { "count": 2, "translate": [0, "=height * 0.48", 0] }
+    },
+    "picket_fence": { "type": "merge", "in": ["pickets", "picket_rails"] },
+    "plank_profile": {
+      "type": "curve",
+      "params": {
+        "points": [[-0.012, 0.06, 0], [0.012, 0.06, 0], [0.012, 0.2, 0], [-0.012, 0.2, 0]],
+        "closed": true
+      }
+    },
+    "plank": { "type": "sweep", "in": ["path", "plank_profile"] },
+    "planks": {
+      "type": "copy_xform",
+      "in": ["plank"],
+      "params": { "count": "=Math.max(1, Math.floor((height - 0.06) / 0.16))", "translate": [0, 0.16, 0] }
+    },
+    "plank_tint": {
+      "type": "wrangle",
+      "in": ["planks"],
+      "params": { "run_over": "prims", "code": "f@tint = 0.85 + 0.25 * rand(i@copynum, seed);" }
+    },
+    "rail_profile": {
+      "type": "curve",
+      "params": {
+        "points": [[-0.065, -0.06, 0], [-0.025, -0.06, 0], [-0.025, 0.06, 0], [-0.065, 0.06, 0]],
+        "closed": true
+      }
+    },
+    "rail_one": { "type": "sweep", "in": ["path", "rail_profile"] },
+    "rail_low": { "type": "transform", "in": ["rail_one"], "params": { "translate": [0, "=height * 0.25", 0] } },
+    "rails": {
+      "type": "copy_xform",
+      "in": ["rail_low"],
+      "params": { "count": 3, "translate": [0, "=height * 0.3", 0] }
+    },
+    "infill": {
+      "type": "switch",
+      "in": ["picket_fence", "plank_tint", "rails"],
+      "params": { "index": "=style == 'plank' ? 1 : style == 'rail' ? 2 : 0" }
+    },
+    "infill_name": {
+      "type": "attrib_create",
+      "in": ["infill"],
+      "params": { "name": "name", "class": "prim", "value": "fence_infill" }
+    },
+    "all": { "type": "merge", "in": ["posts_name", "infill_name"] },
+    "mat": {
+      "type": "material",
+      "in": ["all"],
+      "params": {
+        "name": "=style == 'picket' ? 'paint_white' : style == 'plank' ? 'wood' : 'wood_dark'",
+        "base_color": "=style == 'picket' ? '#e8e4da' : style == 'plank' ? '#9a7148' : '#5e4129'",
+        "roughness": 0.8
+      }
+    },
+    "paint": {
+      "type": "wrangle",
+      "in": ["mat"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (!m) return; let k = hasprimattrib(0, 'tint') ? prim(0, 'tint', @primnum) : 0; if (!k && haspointattrib(0, 'tint')) k = point(0, 'tint', primpoints(0, @primnum)[0]); @Cd = mul(m.baseColor, k || 1);"
+      }
+    },
+    "out": {
+      "type": "attrib_delete",
+      "in": ["paint"],
+      "params": { "names": "tint copynum curveu tangentu orient", "groups": "*" }
+    }
+  },
+  "output": "out",
+  "outputs": { "fence": { "node": "out", "label": "Fence" } },
+  "meta": {
+    "pivot": "curve",
+    "inputs": ["curve"],
+    "thumbnail_render": { "elevation": 25, "zoom": 1.3 }
+  }
+}

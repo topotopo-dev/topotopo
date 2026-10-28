@@ -130,8 +130,8 @@ if (argv.includes('--help-topic')) {
   process.exit(0);
 }
 if (argv.includes('--catalog') || opt('--help-node')) {
-  // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts, the outputs of the
-  // packages the current folder's project uses, and those of TopoTopo's own packages it does not use yet
+  // node types, the current folder's assets, the outputs of the packages its project uses, and those of TopoTopo's own
+  // packages (house, stairs, …) it does not use yet
   const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
   await engine.init();
   openPackages(engine, process.cwd());

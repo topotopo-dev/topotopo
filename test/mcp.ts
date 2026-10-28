@@ -58,7 +58,7 @@ check(tools.length >= 9, `tools: ${tools.map((t) => t.name).join(', ')}`);
 
 const cat = await call('catalog', {});
 check(cat.txt.includes('copy_to_points') && cat.txt.includes('[sdf]'), 'catalog lists nodes');
-check(cat.txt.includes('[shelf]') && cat.txt.includes('wall_segment'), 'catalog lists the shelf assets');
+check(cat.txt.includes('[package]') && cat.txt.includes('topotopo/architecture/wall_segment ◦ — Straight wall from x = 0'), 'catalog lists the outputs of TopoTopo\'s own packages with their descriptions, in a workspace in no project too');
 const help = await call('help', { nodes: ['scatter', 'copytopoints', 'nope_node'], topic: 'wrangle' });
 check(help.txt.includes('## scatter') && help.txt.includes('## copy_to_points') && help.txt.includes('unknown node "nope_node"'), 'help resolves nodes + aliases');
 
@@ -233,8 +233,9 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const example = exText ? JSON.parse(exText) : null;
   check(!!example && JSON.stringify(example) === JSON.stringify(INPUTS_EXAMPLE) && help.txt.includes('@name=path.*') && help.txt.includes("s@role = s@role || @name.split('.')[0].toLowerCase();"),
     'help topic inputs: group pattern, role wrangle and the example graph');
+  // it names topotopo/nature/tree_lowpoly: a dry run adds nothing and says that a build adds the kit
   const dry = await call('build', { name: 'land', graph: example, dry_run: true });
-  check(!dry.isError && /✓ valid: 15 nodes/.test(dry.txt), `help inputs example validates: ${dry.txt.split('\n')[0]}`);
+  check(dry.isError && /package topotopo\/nature is not in this project's uses/.test(dry.txt) && /build and edit add it when a graph first names it/.test(dry.txt), `a dry run of the help inputs example adds nothing: ${dry.txt.split('\n')[1]}`);
   await call('build', { name: 'guides_src', graph: { nodes: {
     road: { type: 'curve', params: { points: [[-60, 0, -20], [-10, 0, 0], [30, 0, 10], [70, 0, 40]] } },
     road_n: { type: 'attrib_create', in: ['road'], params: { name: 'name', class: 'prim', type: 'string', value: 'path.road' } },
@@ -245,6 +246,10 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const xg = await call('export', { graph: 'guides_src', path: 'inputs/guides.glb' });
   const land = await call('build', { name: 'land', graph: example });
   check(!xg.isError && !land.isError && /packed: \d+ instances of 1 source/.test(land.txt) && /point: .*\bpath f1/.test(land.txt), `help inputs example cooks on inputs/guides.glb: ${land.txt.split('\n')[0]}`);
+  check(/note: added topotopo\/nature 1\.0 to project .* from library "topotopo" \(TopoTopo's built-in library\): packages\/topotopo\/nature\/1\.0/.test(land.txt) && fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature', '1.0', 'version.json')),
+    'its first use copies the nature kit in from TopoTopo\'s built-in library');
+  const dry2 = await call('build', { name: 'land', graph: example, dry_run: true });
+  check(!dry2.isError && /✓ valid: 15 nodes/.test(dry2.txt), `then the help inputs example validates: ${dry2.txt.split('\n')[0]}`);
   const lsg = await call('inputs', { action: 'list' });
   check(/guides\.glb {2}geometry .*1 polyline.*name: path\.road, zone\.park/.test(lsg.txt), 'inputs list shows the exported glb');
   check(/guides\.glb\.source\.json {2}metadata .*export source: how guides\.glb was made \(graph "guides_src", frame 1\), not geometry/.test(lsg.txt)
@@ -421,6 +426,9 @@ await client.close();
   const r: any = await own.callTool({ name: 'library', arguments: { action: 'packages' } });
   const txt = r.content.map((c: any) => c.text ?? '').join('\n');
   check(!r.isError && fs.existsSync(path.join(cwd, 'workspace', 'project.json')) && /^project workspace \(.*workspace\)\nuses: nothing yet/.test(txt), `the default workspace is a project: ${txt.split('\n')[0]}`);
+  const b: any = await own.callTool({ name: 'build', arguments: { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } } } });
+  const bt = b.content.map((c: any) => c.text ?? '').join('\n');
+  check(!b.isError && /✓ graph "main"/.test(bt) && /note: added topotopo\/nature 1\.0/.test(bt), `its graphs use TopoTopo's own packages as they come: ${bt.split('\n')[0]}`);
   await own.close();
 }
 console.log(`\n${failures ? failures + ' FAILURES' : 'ALL PASSED'} — workspace ${wsDir}`);

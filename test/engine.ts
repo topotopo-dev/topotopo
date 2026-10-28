@@ -28,6 +28,11 @@ import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
+/** The graphs TopoTopo ships: examples/*.json and the graphs of its own packages (library/<kit>/graphs/), by path. */
+const shippedGraphs = (): [string, any][] => [
+  ...fs.readdirSync(path.join(root, 'examples')).filter((f) => f.endsWith('.json') && f !== 'project.json').map((f) => `examples/${f}`),
+  ...fs.readdirSync(path.join(root, 'library')).flatMap((k) => fs.readdirSync(path.join(root, 'library', k, 'graphs')).filter((f) => f.endsWith('.json')).map((f) => `library/${k}/graphs/${f}`)),
+].map((rel) => [rel, JSON.parse(fs.readFileSync(path.join(root, rel), 'utf8'))]);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-engine-'));
 
 let failures = 0, passes = 0;
@@ -400,13 +405,13 @@ section('expression sandbox');
   const undocumented = EXPR_HELPERS.filter((n) => !['Math', 'NaN', 'Infinity', 'undefined'].includes(n) && !new RegExp(`\\b${n}\\b`).test(TOPICS.expressions));
   check(!missing.length && !undocumented.length, `every helper is in scope and documented in topic "expressions"${missing.length + undocumented.length ? `; missing: ${missing.join(', ')}; undocumented: ${undocumented.join(', ')}` : ''}`);
 
-  // the static check: every expression shipped in examples/ and shelf/ runs without the per-call timer
+  // the static check: every expression shipped in examples/ and in TopoTopo's own packages runs without the per-call timer
   const shipped: string[] = [];
   const walk = (v: any) => {
     if (typeof v === 'string') { if (v.length > 1 && v[0] === '=') shipped.push(v.slice(1)); }
     else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x);
   };
-  for (const dir of ['examples', 'shelf']) for (const f of fs.readdirSync(path.join(root, dir))) if (f.endsWith('.json')) walk(JSON.parse(fs.readFileSync(path.join(root, dir, f), 'utf8')));
+  for (const [, g] of shippedGraphs()) walk(g);
   const timedShipped = shipped.filter((s) => !isSimpleExpr(s));
   check(shipped.length > 100 && !timedShipped.length, `all ${shipped.length} shipped expressions run without the timer${timedShipped.length ? '; not: ' + timedShipped.join(' | ') : ''}`);
   const timedForms = [
@@ -645,7 +650,7 @@ section('shipped graphs, help topics and node docs read vars by their bare name'
     if (typeof v === 'string') { if (oldForm.test(v.replace(/not `?vars\.height/g, ''))) hits.push(where); }
     else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(`${where}.${k}`, x);
   };
-  for (const dir of ['examples', 'shelf']) for (const f of fs.readdirSync(path.join(root, dir))) if (f.endsWith('.json')) walk(`${dir}/${f}`, JSON.parse(fs.readFileSync(path.join(root, dir, f), 'utf8')));
+  for (const [rel, g] of shippedGraphs()) walk(rel, g);
   for (const [k, t] of Object.entries(TOPICS)) walk(`topic ${k}`, t);
   for (const d of allNodeDefs()) walk(`node ${d.type}`, nodeDoc(d));
   walk('README.md', fs.readFileSync(path.join(root, 'README.md'), 'utf8'));
@@ -784,9 +789,10 @@ section('CLI arguments');
   const badJson = cli(bad);
   check(badJson.status === 1 && /not valid JSON/.test(badJson.stderr), 'invalid JSON is reported plainly');
   const cat = cli('--catalog');
-  check(cat.status === 0 && /\[shelf\]/.test(cat.stdout) && /^\s+house /m.test(cat.stdout), `--catalog lists the shelf assets (status ${cat.status}, ${cat.stdout.length} chars)`);
-  const hn = cli('--help-node', 'house');
-  check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout), '--help-node documents a shelf asset');
+  check(cat.status === 0 && /\[package\]/.test(cat.stdout) && /^\s+topotopo\/architecture\/house — House built from a footprint polygon/m.test(cat.stdout), `--catalog lists the outputs of TopoTopo's own packages (status ${cat.status}, ${cat.stdout.length} chars)`);
+  const hn = cli('--help-node', 'topotopo/architecture/house');
+  check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout) && /\nin this folder: package topotopo\/architecture: this graph is in no project/.test(hn.stdout),
+    '--help-node documents one, and says what naming it does in a folder that is in no project');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
   check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, library, graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
     '--catalog ends with the command line\'s help flags and the topic names');

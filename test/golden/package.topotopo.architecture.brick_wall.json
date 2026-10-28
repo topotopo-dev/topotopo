@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.0003, 1.798, 0.0526],
+      "min": [-0.0003, 0, -0.0526]
+    },
+    "counts": {
+      "points": 2696,
+      "prims": 2022,
+      "vertices": 8088,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "198fe40537a09d27",
+      "attributes": {
+        "detail.materials": "7ac3f10bfce096dd",
+        "prim.Cd": "0d97fc35dfb9cfb7",
+        "prim.material": "e4e94a1db96f4667",
+        "prim.name": "3b6a9b3d8deaba97",
+        "vertex.uv": "e55f5c05d4ef269f"
+      },
+      "topology": "de098e9c434f557e"
+    }
+  },
+  "name": "package.topotopo.architecture.brick_wall",
+  "ok": true,
+  "source": "topotopo/architecture/brick_wall at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

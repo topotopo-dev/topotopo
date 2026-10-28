@@ -33,12 +33,6 @@ function filterRealmRejections() {
   });
 }
 
-/**
- * The repository's asset shelf (shelf/index.json + one graph per asset). Paths relative to this module hold for the
- * sources (src/host) and for the built package (dist/host): both sit two levels below the package root.
- */
-export const SHELF_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../shelf');
-
 /** No shell: executable paths and file names are passed as separate arguments on every platform. */
 function runBlender(executable: string, args: string[], timeout: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -78,14 +72,11 @@ function blenderScript(): string {
   throw new Error('Blender conversion script export_scene.py is missing from this TopoTopo installation');
 }
 
-/** opts.shelf: shelf directory (default SHELF_DIR), or false for an engine without the shelf. */
 /** The process-wide pool of hosts created with the environment's settings (created lazily: no thread until used). */
 let envPool: WorkerPool | undefined | null = null;
 
 export interface NodeHostOptions {
   baseDir?: string;
-  /** shelf directory (default SHELF_DIR), or false for an engine without the shelf */
-  shelf?: string | false;
   /**
    * Worker threads for Host.pool. Default: TOPOTOPO_WORKERS (availableParallelism() - 1 when unset), shared by every
    * host of the process; a number gives this host its own pool (0 = none).
@@ -221,7 +212,6 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
 
   return {
     name: 'node',
-    shelfPath: opts.shelf === false ? undefined : opts.shelf ?? SHELF_DIR,
     pool,
     resolvePath: resolveIn(baseDir),
     async readFile(p) {

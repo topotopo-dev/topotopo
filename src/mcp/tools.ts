@@ -19,7 +19,7 @@ import { EXPORT_FORMATS, exportFormatFromPath } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportToolOptions, publishedOutputs } from '../io/targets.ts';
 import { exportSource } from '../io/source.ts';
-import { packagesUsed } from '../graph/packages.ts';
+import { packageAt, packagesUsed } from '../graph/packages.ts';
 import type { ExportSource } from '../io/source.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
 import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
@@ -237,7 +237,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets, package = package outputs, "owner/name/output": those the project uses, and TopoTopo\'s own, "topotopo/…", which a graph\'s first use adds to the project). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the workspace.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, asset = workspace assets, package = package outputs, "owner/name/output": those the project uses, and TopoTopo\'s own, ready-made walls, houses, roofs, stairs, rocks, trees, props and roads such as "topotopo/architecture/house" or "topotopo/nature/rock", which a graph\'s first use adds to the project). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the workspace.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -469,15 +469,16 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'assets',
-      description: 'Reusable custom node types built from graphs (like HDAs). save {name, from_graph | graph, description, params:{var:{desc,min,max}}}: the graph\'s vars become parameters and its "input" nodes become inputs. list, get, delete. The shipped shelf assets (category shelf: stairs, wall_segment, fence, tree_lowpoly …) are read-only; fork {name, to} copies one into a workspace graph to edit, and saving under the same name overrides it.',
+      description: 'Reusable custom node types built from graphs (like HDAs), the workspace\'s own (assets/). save {name, from_graph | graph, description, params:{var:{desc,min,max}}}: the graph\'s vars become parameters and its "input" nodes become inputs. list, get, delete. fork {name: "owner/name/output", to?} copies the graph of a package output, TopoTopo\'s own included ("topotopo/architecture/stairs" …), into the workspace\'s assets as "to" (default: the output\'s name), an asset to edit and use like any other; get shows its graph, save writes it back.',
       inputSchema: {
         type: 'object',
         required: ['action'],
         properties: {
           action: { type: 'string', enum: ['save', 'list', 'get', 'delete', 'fork'] },
-          name: { type: 'string' }, from_graph: { type: 'string' }, graph: { type: 'object' },
+          name: { type: 'string', description: 'the asset; fork: the package output to copy, "owner/name/output" (or "owner/name" for its default output)' },
+          from_graph: { type: 'string' }, graph: { type: 'object' },
           description: { type: 'string' }, params: { type: 'object' },
-          to: { type: 'string', description: 'fork: name of the workspace graph to create (default: the asset name)' },
+          to: { type: 'string', description: 'fork: name of the asset to create (default: the output\'s name)' },
         },
       },
       run: async (a) => {
@@ -489,36 +490,42 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         switch (a.action) {
           case 'list': {
             const all = engine.assetsIn();
-            if (!all.length) return text('no assets yet');
+            if (!all.length) return text('no assets yet (assets {action:"save"} makes one of a graph; fork copies a package output\'s graph, catalog {category:"package"} lists them)');
             const line = (x: { name: string; def: any }) => `  ${x.name} — ${x.def.summary}; params: ${Object.keys(x.def.params).join(', ') || 'none'}; inputs: ${x.def.inputs.length}`;
-            const mine = all.filter((x) => x.def.category !== 'shelf'), shelf = all.filter((x) => x.def.category === 'shelf');
-            const out: string[] = [];
-            if (mine.length) out.push(`[asset] workspace assets (${mine.length})`, ...mine.map(line));
-            if (shelf.length) out.push(`[shelf] shipped assets (${shelf.length}; read-only, fork to edit)`, ...shelf.map(line));
-            return text(out.join('\n'));
+            return text([`[asset] workspace assets (${all.length})`, ...all.map(line)].join('\n'));
           }
           case 'get': {
             const x = assetOf(a.name);
             return text(nodeDoc(x.def) + '\n\n' + JSON.stringify(x.graph, null, 1));
           }
           case 'delete': {
-            const x = assetOf(a.name);
-            if (x.def.category === 'shelf') throw new Error(`"${a.name}" is a shelf asset and cannot be deleted; fork it to edit a copy: assets {action:"fork", name:"${a.name}"}`);
+            assetOf(a.name);
             engine.root.assets.delete(a.name);
             const f = path.join(ws.assetDir, a.name + '.json');
             if (fs.existsSync(f)) fs.unlinkSync(f);
-            // the shelf asset of that name is seen again: results that used the deleted one are cached under unchanged keys
-            const shipped = engine.shelf.has(a.name);
-            if (shipped) engine.cache.clear();
-            return text(`deleted asset "${a.name}"${shipped ? '; restored the shelf asset of that name' : ''}`);
+            return text(`deleted asset "${a.name}"`);
           }
           case 'fork': {
-            const x = assetOf(a.name);
-            const to = a.to ?? a.name;
-            ws.setGraph(to, structuredClone(x.graph));
-            ws.bump(to);
-            return text(`forked ${x.def.category === 'shelf' ? 'shelf ' : ''}asset "${a.name}" into workspace graph "${to}" (its vars are the asset params, its "input" nodes the inputs). ` +
-              `Edit it with build/edit, then assets {action:"save", name:"${a.name}", from_graph:"${to}"} saves it as a workspace asset that replaces the ${x.def.category === 'shelf' ? 'shelf' : 'current'} one (delete restores it).`);
+            const name = String(a.name ?? '');
+            if (!name.includes('/')) throw new Error(`fork copies a package output's graph into the workspace's assets: name one, "owner/name/output" (catalog {category:"package"} lists them, TopoTopo's own as "topotopo/architecture/stairs" …)${engine.asset(name) ? `; "${name}" is an asset of the workspace already: get shows its graph` : ''}`);
+            // an output the project uses, or one of TopoTopo's own it does not use yet
+            const all = engine.packageDefs(), o = (engine.resolveDef(name) ?? all.find((x) => x.type === name))?.package;
+            if (!o) {
+              const s = didYouMean(name, all.map((x) => x.type)), p = engine.packageIssue(name);
+              throw new Error(s.length ? `no package output "${name}" — did you mean ${s.join(', ')}?` : `${p.error}${p.hint ? ` (hint: ${p.hint})` : ''}`);
+            }
+            const to = String(a.to ?? o.output ?? o.package.split('/')[1]);
+            // the asset cooks the output's node; it publishes nothing and exports nowhere of its own
+            const g: GraphSpec = { ...structuredClone(o.spec), output: o.node };
+            delete g.outputs;
+            delete g.export;
+            // the package's other outputs its graph names join the project (first use)
+            const added = ws.packages?.addFor(g) ?? [];
+            const def = engine.registerAsset(to, g);
+            fs.writeFileSync(path.join(ws.assetDir, to + '.json'), JSON.stringify(g, null, 2));
+            return text(`forked ${name} (${packageAt(o)}) into asset "${to}" of the workspace (assets/${to}.json; use {"type": "${to}"}): its vars are the params, its "input" nodes the inputs. ` +
+              `assets {action:"get", name:"${to}"} shows its graph; change it and write it back with assets {action:"save", name:"${to}", graph}. Relative paths in it now read the workspace's files.` +
+              `${added.map((n) => `\nnote: ${n}`).join('')}\n\n${nodeDoc(def)}`);
           }
           case 'save': {
             if (!a.name) throw new Error('"name" is required');

@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.45, 2.875, 0.45],
+      "min": [-0.45, 0, -0.45]
+    },
+    "counts": {
+      "points": 1766,
+      "prims": 3394,
+      "vertices": 10224,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "9b5cdc1215e37944",
+      "attributes": {
+        "detail.materials": "d82c7e2a18809c50",
+        "point.N": "324b85beeff055b4",
+        "prim.Cd": "04b412ad4cb8af4f",
+        "prim.material": "d961fb1d319aa4ff",
+        "prim.name": "68e1b3dd5d9721f7",
+        "vertex.uv": "cd32e7adea651497"
+      },
+      "topology": "14a3ed79b75a53af"
+    }
+  },
+  "name": "package.topotopo.street.sign_post",
+  "ok": true,
+  "source": "topotopo/street/sign_post at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

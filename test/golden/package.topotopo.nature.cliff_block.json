@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [2.2197, 5.1946, 1.7649],
+      "min": [-2.1312, 0, -1.7186]
+    },
+    "counts": {
+      "points": 672,
+      "prims": 670,
+      "vertices": 2680,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "59e8f83da400c6eb",
+      "attributes": {
+        "detail.materials": "3c6b52fe99a7be60",
+        "prim.Cd": "cf53bc422210a550",
+        "prim.material": "1faad5f97938efbb",
+        "prim.name": "a09fd00d06abe00f",
+        "vertex.N": "eb86a3b17c315dab",
+        "vertex.uv": "a2cfcd6df3a12217"
+      },
+      "topology": "2b64f53fda4f6bcd"
+    }
+  },
+  "name": "package.topotopo.nature.cliff_block",
+  "ok": true,
+  "source": "topotopo/nature/cliff_block at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

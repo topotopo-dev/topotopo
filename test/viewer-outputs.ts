@@ -352,7 +352,7 @@ check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' &&
 
 // The agent hears about new inputs: the first answer names what is there, later ones what is new, once.
 const listenTools = makeTools(ws), catalog = listenTools.find((t) => t.name === 'catalog')!;
-const noteOf = async () => (await catalog.run({ filter: 'shelf' })).content.map((c) => (c.type === 'text' ? c.text : '')).join('\n');
+const noteOf = async () => (await catalog.run({ search: 'box' })).content.map((c) => (c.type === 'text' ? c.text : '')).join('\n');
 check(/inputs\/ holds \d+ file\(s\) from the person/.test(await noteOf()), 'the first answer names the files in inputs/');
 check(!/inputs\/ holds|new or changed in inputs/.test(await noteOf()), 'nothing new: no note');
 fs.writeFileSync(path.join(ws.inputDir, 'guides.json'), exportGeometry(box, 'json'));

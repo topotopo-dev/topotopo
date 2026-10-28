@@ -3,17 +3,20 @@
 //   node scripts/pack-test.ts [--keep]      (npm run pack:test; --keep leaves the temp directory for inspection)
 //
 // Checks
-// - npm pack (prepack builds dist/): required files are in the tarball, nothing from src/, test/, examples/, out/,
-//   shelf/thumbs or the Rust sources is.
+// - npm pack (prepack builds dist/): required files are in the tarball, TopoTopo's built-in library among them (the
+//   versions of its own packages, library/<kit>/versions/), and nothing from src/, test/, examples/, out/, the kits'
+//   working folders and thumbnails, or the Rust sources is.
 // - The bin from the installed package: `npm exec --no -- topotopo --help`, and cooking an example graph copied into the
 //   temp project with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
-//   kernels loaded from the installed kernels/pkg, and the house walls come from the installed shelf).
-// - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the shelf, the bundled
-//   font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location, and
-//   rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
+//   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
+//   makes the folder a project, and the cook's first use copies the kit in from the installed built-in library).
+// - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the built-in library, the
+//   bundled font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location,
+//   and rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
 // - The MCP server over stdio as a client starts it (`npm exec --no -- topotopo mcp --workspace …`, which is what
-//   `npx -y topotopo mcp` runs once the package is installed): catalog, a build that uses sdf_grid, and the preview
-//   page with three.js served from the installed dependencies.
+//   `npx -y topotopo mcp` runs once the package is installed): catalog (TopoTopo's own packages too), a build that uses
+//   sdf_grid, one in a workspace that is no project naming a kit's output (it says how to make it one), library init and
+//   the same build, which copies the kit in, and the preview page with three.js served from the installed dependencies.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,7 +64,7 @@ try {
     'package.json', 'README.md', 'LICENSE', 'NOTICE',
     'dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/mcp/server.js', 'dist/host/node.js', 'dist/host/pool.js',
     'dist/host/worker.js', 'dist/wasm/kernels.js', 'dist/viewer/server.js', 'dist/viewer/index.html',
-    'shelf/index.json', 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
+    ...fs.readdirSync(path.join(ROOT, 'library')).map((k) => `library/${k}/versions/1.0/version.json`), 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
     'kernels/pkg/topotopo_kernels.js', 'kernels/pkg/topotopo_kernels_bg.wasm', 'kernels/pkg/LICENSE',
     'kernels/pkg-simd/topotopo_kernels.js', 'kernels/pkg-simd/topotopo_kernels_bg.wasm', 'kernels/pkg-simd/LICENSE',
   ];
@@ -69,11 +72,15 @@ try {
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
   const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
   check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
-  const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|workspace|tmp|kernels\/(src|target|tests|benches)|shelf\/thumbs)\//.test(f) ||
+  const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|workspace|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
     (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
-  check(!stray.length, `tarball has no sources, tests, examples or build output${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
-  check(files.filter((f) => f.startsWith('shelf/') && f.endsWith('.json')).length === fs.readdirSync(path.join(ROOT, 'shelf')).filter((f) => f.endsWith('.json')).length,
-    'tarball has every shelf asset');
+  check(!stray.length, `tarball has no sources, tests, examples, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
+  // every file of every version of TopoTopo's own packages: a version has the same files wherever it is
+  const versionFiles: string[] = [];
+  const walkVersions = (dir: string, rel: string) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = `${rel}/${e.name}`; if (e.isDirectory()) walkVersions(path.join(dir, e.name), r); else versionFiles.push(r); } };
+  for (const k of fs.readdirSync(path.join(ROOT, 'library'))) walkVersions(path.join(ROOT, 'library', k, 'versions'), `library/${k}/versions`);
+  const unshipped = versionFiles.filter((f) => !files.includes(f));
+  check(!unshipped.length && versionFiles.length > 30, `tarball has every file of the built-in library's versions (${versionFiles.length})${unshipped.length ? `; missing: ${unshipped.slice(0, 5).join(', ')}` : ''}`);
 
   // ------------------------------------------------------------------------------------------------ install
   step('npm install <tarball> into an empty project');
@@ -97,10 +104,16 @@ try {
   const help = sh(`npm exec --no -- ${BIN} --help`, app);
   check(help.startsWith(`usage: ${BIN} `) && help.includes(`${BIN} mcp`), `--help prints the usage (${help.split('\n')[0].slice(0, 60)}…)`);
   fs.copyFileSync(path.join(ROOT, 'examples', 'skeleton_roofs.json'), path.join(app, 'roofs.json'));
+  // the example names topotopo/architecture's outputs: only a project's graphs use packages
+  const init = sh(`npm exec --no -- ${BIN} init .`, app);
+  check(/^project app → /.test(init) && fs.existsSync(path.join(app, 'project.json')), `init makes the temp project a TopoTopo project (${init.split('\n')[0]})`);
   const cook = sh(`npm exec --no -- ${BIN} roofs.json --render roofs.png --export roofs.glb`, app);
+  const lock = fs.existsSync(path.join(app, 'packages', 'lock.json')) ? JSON.parse(fs.readFileSync(path.join(app, 'packages', 'lock.json'), 'utf8')) : {};
+  check(/added topotopo\/architecture 1\.0 to project app from library "topotopo" \(TopoTopo's built-in library\)/.test(cook) && lock.packages?.['topotopo/architecture']?.['1.0']?.library === 'topotopo'
+    && fs.existsSync(path.join(app, 'packages', 'topotopo', 'architecture', '1.0', 'version.json')), 'the first use copies topotopo/architecture 1.0 in from the installed built-in library and locks it');
   const png = path.join(app, 'roofs.png');
   const pngOk = fs.existsSync(png) && fs.readFileSync(png).subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && fs.statSync(png).size > 20000;
-  check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/skeleton_roofs.json (straight_skeleton + shelf) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
+  check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/skeleton_roofs.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
   check(fs.existsSync(path.join(app, 'roofs.glb')) && fs.readFileSync(path.join(app, 'roofs.glb')).subarray(0, 4).toString() === 'glTF', 'exported roofs.glb');
   console.log(cook.split('\n').filter((l) => /^(cooked|geometry|rendered|exported)/.test(l)).join('\n'));
 
@@ -109,12 +122,13 @@ try {
   fs.writeFileSync(path.join(app, 'lib.mjs'), `
 import { Engine, allNodeDefs } from '${NAME}';
 import meta from '${NAME}/package.json' with { type: 'json' };
-import { createNodeHost, SHELF_DIR } from './node_modules/${NAME}/dist/host/node.js';
+import { createNodeHost } from './node_modules/${NAME}/dist/host/node.js';
+import { BUILTIN_LIBRARY } from './node_modules/${NAME}/dist/gallery/library.js';
 import { createNodePool } from './node_modules/${NAME}/dist/host/pool.js';
 import { kernelsWasmURL, kernelsWasmVariant, getLoadedKernels } from './node_modules/${NAME}/dist/wasm/kernels.js';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-const out = { version: meta.version, nodes: allNodeDefs().length, shelf: SHELF_DIR, wasm: fileURLToPath(kernelsWasmURL), variant: kernelsWasmVariant };
+const out = { version: meta.version, nodes: allNodeDefs().length, library: BUILTIN_LIBRARY.path, wasm: fileURLToPath(kernelsWasmURL), variant: kernelsWasmVariant };
 const host = createNodeHost({ workers: 0 });
 out.font = host.findFont();
 const pool = createNodePool({ size: 1 });
@@ -139,7 +153,8 @@ console.log(JSON.stringify(out));
   delete autoEnv.TOPOTOPO_WASM;
   const lib = JSON.parse(sh('node lib.mjs', app, autoEnv).trim().split('\n').pop()!);
   check(lib.version === pkg.version && lib.nodes >= 200, `import '${NAME}': ${lib.nodes} node types, ${NAME}/package.json ${lib.version}`);
-  check(inPkg(lib.shelf) && fs.existsSync(path.join(lib.shelf, 'index.json')), `shelf from the installed package (${path.relative(app, lib.shelf)})`);
+  check(inPkg(lib.library) && fs.existsSync(path.join(lib.library, 'nature', 'versions', '1.0', 'version.json')) && !fs.existsSync(path.join(lib.library, 'nature', 'graphs')),
+    `TopoTopo's built-in library from the installed package, its versions alone (${path.relative(app, lib.library)})`);
   check(inPkg(lib.font) && path.basename(lib.font) === 'DejaVuSans.ttf', `bundled font from the installed package (${lib.font && path.relative(app, lib.font)})`);
   check(inPkg(lib.wasm) && fs.existsSync(lib.wasm), `kernel WASM from the installed package (${path.relative(app, lib.wasm)})`);
   check(lib.variant === 'simd' && lib.wasm.includes('pkg-simd'), 'installed loader selects SIMD by feature detection on Node 22+');
@@ -211,7 +226,14 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     };
     check(client.getServerVersion()?.name === NAME && client.getServerVersion()?.version === pkg.version, `server ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
     const cat = await call('catalog', {});
-    check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('[shelf]'), 'catalog lists the nodes and the installed shelf');
+    check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('topotopo/nature/rock'), 'catalog lists the nodes and the installed packages of TopoTopo\'s own');
+    const rock = { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' };
+    const outside = await call('build', rock);
+    check(outside.isError && /this graph is in no project/.test(outside.txt) && /library \{action:"init"\}/.test(outside.txt), 'in a workspace that is no project, naming a kit\'s output says how to make it one');
+    const init = await call('library', { action: 'init' });
+    const inside = await call('build', rock);
+    check(!init.isError && !inside.isError && /note: added topotopo\/nature 1\.0/.test(inside.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', '1.0', 'version.json')),
+      `library init, then the build copies topotopo/nature in from the installed built-in library: ${inside.txt.split('\n')[0]}`);
     const b = await call('build', { graph: { nodes: { b: { type: 'box' }, g: { type: 'sdf_grid', in: ['b'], params: { voxel_size: 0.1 } }, m: { type: 'grid_to_mesh', in: ['g'] } } } });
     check(!b.isError && b.txt.includes('✓'), `build with sdf_grid (WASM kernels in the server): ${b.txt.split('\n')[0].slice(0, 80)}`);
     const pv = await call('preview', {});
@@ -222,7 +244,7 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
   } finally {
     await client.close().catch(() => {});
   }
-  check(/ready \(stdio\)/.test(serverLog) && /\d+ shelf assets/.test(serverLog), `server log: ${serverLog.split('\n').find((l) => l.includes('workspace'))?.trim()}`);
+  check(/ready \(stdio\)/.test(serverLog) && /workspace .*: \d+ graphs, \d+ assets; in no project/.test(serverLog), `server log: ${serverLog.split('\n').find((l) => l.includes('workspace'))?.trim()}`);
 } catch (e: any) {
   failures++;
   console.log(`FAIL ${e?.stack ?? e}`);

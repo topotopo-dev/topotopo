@@ -1,5 +1,5 @@
 {
-  "description": "Nested generators: the house shelf asset (walls from wall_segment per footprint edge + roof_skeleton) spawned on a grid of lots, each lot varying the house's parameters from its point attributes. Edit shelf/wall_segment.json or shelf/roof_skeleton.json and every house changes.",
+  "description": "Nested generators: the house of TopoTopo's architecture kit, topotopo/architecture/house (walls from its wall_segment per footprint edge + its roof_skeleton), spawned on a grid of lots, each lot varying the house's parameters from its point attributes. A new version of the kit's wall_segment or roof_skeleton changes every house once the examples update to it.",
   "vars": { "houses_x": 4, "houses_z": 3, "spacing": 16, "seed": 7 },
   "meta": { "render": { "views": ["persp"], "azimuth": 38, "elevation": 28, "shading": "matcap" } },
   "nodes": {
@@ -17,7 +17,7 @@
         "body": {
           "nodes": {
             "pt": { "type": "input", "params": { "index": 0 } },
-            "h": { "type": "house", "params": { "width": "=point('pt', 0, 'w')", "depth": "=point('pt', 0, 'd')", "floors": "=floor(point('pt', 0, 'floors'))", "pitch": "=point('pt', 0, 'pitch')", "door": true } },
+            "h": { "type": "topotopo/architecture/house", "params": { "width": "=point('pt', 0, 'w')", "depth": "=point('pt', 0, 'd')", "floors": "=floor(point('pt', 0, 'floors'))", "pitch": "=point('pt', 0, 'pitch')", "door": true } },
             "pl": { "type": "transform", "in": ["h"], "params": { "rotate": [0, "=point('pt', 0, 'yaw')", 0], "translate": ["=point('pt', 0, 'P', 0)", 0, "=point('pt', 0, 'P', 2)"] } }
           },
           "output": "pl"

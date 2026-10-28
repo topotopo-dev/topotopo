@@ -19,6 +19,9 @@ export const followLabel = (pkg) => `Use the ${pkg.slice(pkg.indexOf('/') + 1)} 
 /** The day of an ISO time ("2026-10-28"), '' without one. */
 export const day = (iso) => (typeof iso === 'string' ? iso.slice(0, 10) : '');
 
+/** The libraries that hold a package, as its card names them: library "game", and TopoTopo's built-in library ("topotopo"). */
+export const librariesText = (libs) => (libs ?? []).map((l) => (l === 'topotopo' ? 'TopoTopo\'s built-in library' : `library "${l}"`)).join(', ');
+
 /** "a small update", "a big update", "back to an older version", "back to an older big version" */
 export const stepText = (t) => (t.big ? (t.up ? 'a big update' : 'back to an older big version') : t.up ? 'a small update' : 'back to an older version');
 
@@ -36,7 +39,7 @@ export function packageState(p) {
     };
   }
   if (p.error) return { kind: 'error', text: p.error, title: p.error };
-  if (!ups.length) return { kind: 'current', text: 'up to date', title: `${p.version} is the newest version in the project's libraries` };
+  if (!ups.length) return { kind: 'current', text: 'up to date', title: `${p.version} is the newest version in ${librariesText(p.libraries) || 'the project\'s libraries'}` };
   return { kind: p.small ? 'small' : 'big', text: ups.join(' · '), title: updates };
 }
 
@@ -145,8 +148,8 @@ export function createPackagesPanel(ctx, host) {
     count.title = late ? `${late} of the ${rows.length} packages the project uses ${late === 1 ? 'has' : 'have'} an update` : `the project uses ${rows.length === 1 ? '1 package' : `${rows.length} packages`}`;
     const bar = el('div', 'packages-bar');
     if (P.project) {
-      bar.append(el('span', 'dim', `${P.project.label} · libraries: ${P.project.libraries.join(', ') || 'none listed'}`));
-      bar.title = `${P.project.dir}: its project.json lists the libraries it finds packages in; the copies of the versions it uses are in packages/`;
+      bar.append(el('span', 'dim', `${P.project.label} · libraries: ${[...P.project.libraries.filter((l) => l !== 'topotopo'), 'TopoTopo\'s built-in library'].join(', ')}`));
+      bar.title = `${P.project.dir}: its project.json lists the libraries it finds packages in, and every project looks in TopoTopo's built-in library, which holds TopoTopo's own packages; the copies of the versions it uses are in packages/`;
     }
     const parts = [bar];
     if (P.problems.length) parts.push(list(P.problems, 'err'));
@@ -165,6 +168,7 @@ export function createPackagesPanel(ctx, host) {
     state.title = st.title;
     box.append(head, state);
     if (p.version && (p.note || p.published)) box.append(el('div', 'pkg-note', [day(p.published), p.note].filter(Boolean).join(' · ')));
+    if (p.libraries?.length) box.append(el('div', 'pkg-note', `in ${librariesText(p.libraries)}`));
     const r = P.result?.target.package === p.package ? P.result : null;
     const running = P.running?.package === p.package ? P.running : null;
     // the newer versions' notes; a before/after lists those it goes over instead

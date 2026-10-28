@@ -11,9 +11,9 @@ graph and its seeds, and the core is browser-ready.
   modelling (bevel, knife, bridge, quad fill), UVs (xatlas unwrap, LSCM), remeshing (isotropic, quad, voxel) and LOD,
   scattering and instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit and sampled SDF grids,
   heightfield terrain (masks, hydraulic and thermal erosion, roads, scattering), procedural textures and bakes,
-  cloth draping and inflation (XPBD), L-systems, text, loops, a frame solver, in-graph checks, and code nodes. A shelf of ready-made graph assets (walls,
-  roofs, stairs, props, trees, rocks, PCG helpers) is used like nodes. Every node documents its params and carries an
-  example that is cooked in the tests.
+  cloth draping and inflation (XPBD), L-systems, text, loops, a frame solver, in-graph checks, and code nodes. TopoTopo's
+  own packages, kits of ready-made generators (walls, houses, roofs, stairs, props, trees, rocks, roads, PCG helpers), are
+  used like nodes. Every node documents its params and carries an example that is cooked in the tests.
 - **Familiar to Houdini users**: SOP-style nodes, attributes, groups and `.geo` export; Houdini node names work as
   aliases. Blender Geometry Nodes and Unreal PCG users will recognise the rest.
 - **Rust/WASM kernels**: a straight skeleton (pitched roofs and polygon offsets from any footprint, holes included),
@@ -62,8 +62,8 @@ graph and its seeds, and the core is browser-ready.
   the graph file), show as grey reference layers (a PNG as a flat picture), and `file` nodes read them as
   `inputs/<name>`.
 
-**Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, the shelf and example galleries and the
-release notes, generated from this repository (`npm run site`).
+**Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, TopoTopo's own packages, the example
+gallery and the release notes, generated from this repository (`npm run site`).
 
 ![city](examples/renders/voronoi_city.png)
 
@@ -198,20 +198,20 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 
 | tool | purpose |
 |---|---|
-| `catalog` | node types by category (filter/search), with the outputs of the packages the project uses |
+| `catalog` | node types by category (filter/search), with the outputs of the packages the project uses and of TopoTopo's own packages |
 | `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, packages, uv, render, export, verify, cloth, library, recipes; a package output's sliders, inputs, version and note |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inputs` | `list` the files in the workspace `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
 | `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus, render/export triangle slivers), element listings, images (size and per-layer ranges), `detail: "uv"` (exact uv overlaps, collapsed and out-of-tile triangles, charts, utilization, per-piece texel density; `json: true`) |
-| `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `shading: "pbr"` (the exported metallic-roughness material with its base colour, normal, orm and roughness maps under a fixed studio rig; deterministic, `exposure` in stops), `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the shelf thumbnails), `heightfield_res` (heightfield quads drawn per side, default 256, or `"full"`), `heightfield_layer` (the heightfield layer drawn in red, default the mask, or `"none"`); a footer line names what is shown (help topic `render`) |
+| `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `shading: "pbr"` (the exported metallic-roughness material with its base colour, normal, orm and roughness maps under a fixed studio rig; deterministic, `exposure` in stops), `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the kits' thumbnails), `heightfield_res` (heightfield quads drawn per side, default 256, or `"full"`), `heightfield_layer` (the heightfield layer drawn in red, default the mask, or `"none"`); a footer line names what is shown (help topic `render`) |
 | `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json (packed instances: instance rows + meshes sidecar + one GLB per source); heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png / unreal_landscape (a directory bundle); images: textures (one PNG per image; glb/gltf embed and usda writes the textures materials use); every export records its source (graph, vars, seeds, frame, version) to be made again |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
-| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a shelf asset into the workspace to edit |
+| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a package output's graph (TopoTopo's own included) into the workspace's assets to edit |
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, heightfields, images and SDF grids, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer; the open project's packages: `packages`, `use`, `follow` (a package's working folder for the session), `publish`, `outdated` (newer versions and their notes) and `update` (a before/after with overlay renders, applied when the person says so) |
+| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer, or `init`, which makes the open workspace a project; the open project's packages: `packages`, `use`, `follow` (a package's working folder for the session), `publish`, `outdated` (newer versions and their notes) and `update` (a before/after with overlay renders, applied when the person says so) |
 
 ## Graph format
 
@@ -296,7 +296,7 @@ is preserved in GLB and shown in the live and headless previews.
 | code | `wrangle` `script` |
 | flow | `merge` `switch` `null` `input` `foreach` `solver` `graph_ref` (plus saved assets) |
 | io | `file` (obj, stl, ply, glb/gltf, geo/bgeo, csv, points.json, json), `scene_null` (named scene empty / attachment socket: a meshless glTF node under the root, an empty or a mesh) |
-| shelf | graph assets used like nodes, e.g. `stairs` `railing` `roof_skeleton` `house` `crate` `tree_lowpoly` `forest_patch`; every asset is listed with its thumbnail under [Shelf](#shelf) |
+| package | the outputs of packages by full name, TopoTopo's own among them: `topotopo/architecture/stairs` `topotopo/architecture/house` `topotopo/architecture/roof_skeleton` `topotopo/props/crate` `topotopo/nature/tree_lowpoly` `topotopo/nature/forest_patch` `topotopo/street/road_strip` …; every one is listed with its thumbnail under [TopoTopo's own packages](#topotopos-own-packages) |
 
 Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated
 [node reference](docs/nodes.md).
@@ -314,10 +314,11 @@ heightfield with a road and rocks on its steep slopes. `unreal_demo` is the Unre
 Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with variants and materials; `npm run export:demo` writes its file set
 (landscape bundle, `scene.glb`, `scene.usda`, `scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`.
 `splines` shows the curve toolkit: a NURBS road projected onto bumpy ground, a boardwalk with filleted corners and
-offset handrails, and a Bezier letter extruded. `shelf_street` is a street block built only from shelf assets (see
-[Shelf](#shelf)). `textures` is a brick wall material made only from texture nodes and the shelf crate with baked AO and
-curvature turned into worn paint on its edges and an ORM map, rendered with `textures: true` next to the texture view.
-`house_city` spawns the `house` shelf asset on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
+offset handrails, and a Bezier letter extruded. `street_block` is a street block built only from TopoTopo's own packages
+(see [TopoTopo's own packages](#topotopos-own-packages)). `textures` is a brick wall material made only from texture
+nodes and the props kit's crate with baked AO and curvature turned into worn paint on its edges and an ORM map,
+rendered with `textures: true` next to the texture view.
+`house_city` spawns the architecture kit's `house` on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
 straight-skeleton roofs (an L-shaped house, a courtyard roof around a hole, nested offsets). `deformers` (lattice,
 path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert) and `remesh_lod` (isotropic remesh,
 repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
@@ -326,8 +327,8 @@ sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a b
 power), and `terrain_tiles` bends escarpments and a river with domain-warped noise, with one tile of the map cooked on
 its own (`heightfield_crop`) floating above the area it matches. `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
 collision surface, curl noise, sliding contacts; trails coloured by age) next to a fountain bouncing on a plane.
-`rbd_settle` drops shelf rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
-crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of shelf crates, a
+`rbd_settle` drops the nature kit's rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
+crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of the props kit's crates, a
 banner pinned between two poles in the wind, and a box inflated into a cushion.
 
 To cook a graph from the command line:
@@ -435,56 +436,74 @@ topotopo update studio/trees levels/forest --apply
 
 `topotopo --help-topic packages` (MCP: `help {topic: "packages"}`) has the details.
 
-## Shelf
+## TopoTopo's own packages
 
-[shelf/](shelf) holds ready-made graph assets (TopoTopo's answer to a shelf of HDAs): walls with windows and doors,
-whole houses, roofs (gable, hip, and straight-skeleton roofs for any footprint), stairs, railings and fences, bricks and
-tiles, props, trees and rocks, and PCG helpers that dress a road or a terrain. The engine registers them on startup as
-node types of category `shelf`, so a graph uses one like any node:
+TopoTopo comes with packages of its own, four kits of ready-made generators in its built-in library
+([library/](library)), used by full name like any package's outputs. `topotopo/architecture` has walls with windows
+and doors, whole houses, roofs (gable, hip, and straight-skeleton roofs for any footprint), stairs, railings, pillars,
+arches, floors, trusses and scaffolds; `topotopo/nature` rocks, cliffs, trees, bushes and logs, and forests, grass and
+rock fields that dress a surface; `topotopo/props` barrels, crates, pallets, sandbag walls and pipe runs;
+`topotopo/street` roads, lamp posts, bollards, benches, street signs, fences and cables:
 
 ```json
-{ "nodes": { "stairs": { "type": "stairs", "params": { "steps": 16, "style": "open" } } } }
+{ "nodes": { "stairs": { "type": "topotopo/architecture/stairs", "params": { "steps": 16, "style": "open" } } } }
 ```
 
-Each asset documents its typed parameters (`help {nodes: ["stairs"]}`, or [docs/nodes.md](docs/nodes.md#shelf-nodes)),
-puts its pivot at the base (Y up, metres), and tags every piece with `name` and `material` attributes, so exports split
-and shade cleanly. Assets that follow a curve (`railing`, `fence`, `pipe_run`, `road_strip`) take it as input 0 and
-those that dress a surface (`scatter_rocks`, `forest_patch`, `grass_clumps`) take the surface as input 0; without an
-input they build a default one, which is what the thumbnails show. A workspace asset with the same name overrides a
-shelf asset; `assets {action: "fork", name: "stairs"}` copies one into the workspace as a graph to edit and save back.
-[examples/shelf_street.json](examples/shelf_street.json) builds a street block from shelf assets only (transform, merge
-and copy nodes just place them):
+TopoTopo carries them built in, so they work offline and every project finds them without listing a library: the first
+graph that names an output copies its kit's version into the project's `packages/` and locks it, as for any package,
+and a newer version in a TopoTopo release shows as an update (`topotopo outdated`) instead of changing a scene by
+itself. A graph outside a project cannot use them: `topotopo init` makes its folder one (the MCP server's default
+workspace is one). Each output documents its typed parameters (`help {nodes: ["topotopo/architecture/stairs"]}`, or
+[docs/nodes.md](docs/nodes.md#package-nodes)), puts its pivot at the base (Y up, metres), and tags every piece with
+`name` and `material` attributes, so exports split and shade cleanly. Outputs that follow a curve (`railing`, `fence`,
+`pipe_run`, `road_strip`) take it as input 0 and those that dress a surface (`scatter_rocks`, `forest_patch`,
+`grass_clumps`) take the surface as input 0; without an input they build a default one, which is what the thumbnails
+show. A kit's pieces build on each other (the house is the kit's walls and roof), and a kit's default output
+(`topotopo/nature` alone) lines its outputs up. `assets {action: "fork", name: "topotopo/architecture/stairs"}` copies
+an output's graph into the project's assets to edit. [examples/street_block.json](examples/street_block.json) builds a
+street block from the kits alone (transform, merge and copy nodes just place them):
 
-![shelf street](examples/renders/shelf_street.png)
+![street block](examples/renders/street_block.png)
 
-`npm run shelf` rewrites `shelf/index.json` (the list the engine loads, also over HTTP), the thumbnails and the table
-below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of every numeric range.
+`npm run kits` rewrites the kits' line-ups, their thumbnails and the tables below. `npm run kits -- --publish nature
+--note "..."` publishes a kit's next version, numbered as for any package (TopoTopo's own packages are published there
+and nowhere else), and `npm test` fails while a kit's working folder differs from its newest version.
+`node test/kits.ts` cooks every output at its defaults and at the ends of every numeric range.
 
-<!-- shelf:start (generated by npm run shelf) -->
+<!-- kits:start (generated by npm run kits) -->
 
-**architecture**
+**topotopo/architecture** 1.0: walls with windows and doors, houses on any footprint, gable, hip and straight-skeleton roofs, stairs and spiral stairs, railings, pillars and arches, brick walls, tiled and hexagonal floors, trusses and scaffolds.
 
-| | | | | | |
-|---|---|---|---|---|---|
-| <img src="shelf/thumbs/arch.png" width="120" alt="arch"><br>`arch` | <img src="shelf/thumbs/beam_truss.png" width="120" alt="beam_truss"><br>`beam_truss` | <img src="shelf/thumbs/brick_wall.png" width="120" alt="brick_wall"><br>`brick_wall` | <img src="shelf/thumbs/door_frame.png" width="120" alt="door_frame"><br>`door_frame` | <img src="shelf/thumbs/fence.png" width="120" alt="fence"><br>`fence` | <img src="shelf/thumbs/hex_grid_floor.png" width="120" alt="hex_grid_floor"><br>`hex_grid_floor` |
-| <img src="shelf/thumbs/house.png" width="120" alt="house"><br>`house` | <img src="shelf/thumbs/pillar.png" width="120" alt="pillar"><br>`pillar` | <img src="shelf/thumbs/railing.png" width="120" alt="railing"><br>`railing` | <img src="shelf/thumbs/roof_gable.png" width="120" alt="roof_gable"><br>`roof_gable` | <img src="shelf/thumbs/roof_hip.png" width="120" alt="roof_hip"><br>`roof_hip` | <img src="shelf/thumbs/roof_skeleton.png" width="120" alt="roof_skeleton"><br>`roof_skeleton` |
-| <img src="shelf/thumbs/scaffold.png" width="120" alt="scaffold"><br>`scaffold` | <img src="shelf/thumbs/spiral_stairs.png" width="120" alt="spiral_stairs"><br>`spiral_stairs` | <img src="shelf/thumbs/stairs.png" width="120" alt="stairs"><br>`stairs` | <img src="shelf/thumbs/tile_floor.png" width="120" alt="tile_floor"><br>`tile_floor` | <img src="shelf/thumbs/wall_segment.png" width="120" alt="wall_segment"><br>`wall_segment` | <img src="shelf/thumbs/window_frame.png" width="120" alt="window_frame"><br>`window_frame` |
+| | | | |
+|---|---|---|---|
+| <img src="library/architecture/thumbs/arch.png" width="120" alt="topotopo/architecture/arch"><br>`topotopo/architecture/arch` | <img src="library/architecture/thumbs/beam_truss.png" width="120" alt="topotopo/architecture/beam_truss"><br>`topotopo/architecture/beam_truss` | <img src="library/architecture/thumbs/brick_wall.png" width="120" alt="topotopo/architecture/brick_wall"><br>`topotopo/architecture/brick_wall` | <img src="library/architecture/thumbs/door_frame.png" width="120" alt="topotopo/architecture/door_frame"><br>`topotopo/architecture/door_frame` |
+| <img src="library/architecture/thumbs/hex_grid_floor.png" width="120" alt="topotopo/architecture/hex_grid_floor"><br>`topotopo/architecture/hex_grid_floor` | <img src="library/architecture/thumbs/house.png" width="120" alt="topotopo/architecture/house"><br>`topotopo/architecture/house` | <img src="library/architecture/thumbs/pillar.png" width="120" alt="topotopo/architecture/pillar"><br>`topotopo/architecture/pillar` | <img src="library/architecture/thumbs/railing.png" width="120" alt="topotopo/architecture/railing"><br>`topotopo/architecture/railing` |
+| <img src="library/architecture/thumbs/roof_gable.png" width="120" alt="topotopo/architecture/roof_gable"><br>`topotopo/architecture/roof_gable` | <img src="library/architecture/thumbs/roof_hip.png" width="120" alt="topotopo/architecture/roof_hip"><br>`topotopo/architecture/roof_hip` | <img src="library/architecture/thumbs/roof_skeleton.png" width="120" alt="topotopo/architecture/roof_skeleton"><br>`topotopo/architecture/roof_skeleton` | <img src="library/architecture/thumbs/scaffold.png" width="120" alt="topotopo/architecture/scaffold"><br>`topotopo/architecture/scaffold` |
+| <img src="library/architecture/thumbs/spiral_stairs.png" width="120" alt="topotopo/architecture/spiral_stairs"><br>`topotopo/architecture/spiral_stairs` | <img src="library/architecture/thumbs/stairs.png" width="120" alt="topotopo/architecture/stairs"><br>`topotopo/architecture/stairs` | <img src="library/architecture/thumbs/tile_floor.png" width="120" alt="topotopo/architecture/tile_floor"><br>`topotopo/architecture/tile_floor` | <img src="library/architecture/thumbs/wall_segment.png" width="120" alt="topotopo/architecture/wall_segment"><br>`topotopo/architecture/wall_segment` |
+| <img src="library/architecture/thumbs/window_frame.png" width="120" alt="topotopo/architecture/window_frame"><br>`topotopo/architecture/window_frame` |  |  |  |
 
-**props**
+**topotopo/nature** 1.0: rocks and cliff blocks, low-poly trees, bushes and logs, and forests, grass clumps and scattered rocks that dress a surface.
 
-| | | | | | |
-|---|---|---|---|---|---|
-| <img src="shelf/thumbs/barrel.png" width="120" alt="barrel"><br>`barrel` | <img src="shelf/thumbs/bench.png" width="120" alt="bench"><br>`bench` | <img src="shelf/thumbs/bollard.png" width="120" alt="bollard"><br>`bollard` | <img src="shelf/thumbs/bush.png" width="120" alt="bush"><br>`bush` | <img src="shelf/thumbs/cable.png" width="120" alt="cable"><br>`cable` | <img src="shelf/thumbs/cliff_block.png" width="120" alt="cliff_block"><br>`cliff_block` |
-| <img src="shelf/thumbs/crate.png" width="120" alt="crate"><br>`crate` | <img src="shelf/thumbs/lamp_post.png" width="120" alt="lamp_post"><br>`lamp_post` | <img src="shelf/thumbs/log.png" width="120" alt="log"><br>`log` | <img src="shelf/thumbs/pallet.png" width="120" alt="pallet"><br>`pallet` | <img src="shelf/thumbs/pipe_run.png" width="120" alt="pipe_run"><br>`pipe_run` | <img src="shelf/thumbs/rock.png" width="120" alt="rock"><br>`rock` |
-| <img src="shelf/thumbs/sandbag_wall.png" width="120" alt="sandbag_wall"><br>`sandbag_wall` | <img src="shelf/thumbs/sign_post.png" width="120" alt="sign_post"><br>`sign_post` | <img src="shelf/thumbs/tree_lowpoly.png" width="120" alt="tree_lowpoly"><br>`tree_lowpoly` |  |  |  |
+| | | | |
+|---|---|---|---|
+| <img src="library/nature/thumbs/bush.png" width="120" alt="topotopo/nature/bush"><br>`topotopo/nature/bush` | <img src="library/nature/thumbs/cliff_block.png" width="120" alt="topotopo/nature/cliff_block"><br>`topotopo/nature/cliff_block` | <img src="library/nature/thumbs/forest_patch.png" width="120" alt="topotopo/nature/forest_patch"><br>`topotopo/nature/forest_patch` | <img src="library/nature/thumbs/grass_clumps.png" width="120" alt="topotopo/nature/grass_clumps"><br>`topotopo/nature/grass_clumps` |
+| <img src="library/nature/thumbs/log.png" width="120" alt="topotopo/nature/log"><br>`topotopo/nature/log` | <img src="library/nature/thumbs/rock.png" width="120" alt="topotopo/nature/rock"><br>`topotopo/nature/rock` | <img src="library/nature/thumbs/scatter_rocks.png" width="120" alt="topotopo/nature/scatter_rocks"><br>`topotopo/nature/scatter_rocks` | <img src="library/nature/thumbs/tree_lowpoly.png" width="120" alt="topotopo/nature/tree_lowpoly"><br>`topotopo/nature/tree_lowpoly` |
 
-**terrain**
+**topotopo/props** 1.0: barrels, crates, pallets, sandbag walls and pipe runs.
 
-| | | | | | |
-|---|---|---|---|---|---|
-| <img src="shelf/thumbs/forest_patch.png" width="120" alt="forest_patch"><br>`forest_patch` | <img src="shelf/thumbs/grass_clumps.png" width="120" alt="grass_clumps"><br>`grass_clumps` | <img src="shelf/thumbs/road_strip.png" width="120" alt="road_strip"><br>`road_strip` | <img src="shelf/thumbs/scatter_rocks.png" width="120" alt="scatter_rocks"><br>`scatter_rocks` |  |  |
+| | | | |
+|---|---|---|---|
+| <img src="library/props/thumbs/barrel.png" width="120" alt="topotopo/props/barrel"><br>`topotopo/props/barrel` | <img src="library/props/thumbs/crate.png" width="120" alt="topotopo/props/crate"><br>`topotopo/props/crate` | <img src="library/props/thumbs/pallet.png" width="120" alt="topotopo/props/pallet"><br>`topotopo/props/pallet` | <img src="library/props/thumbs/pipe_run.png" width="120" alt="topotopo/props/pipe_run"><br>`topotopo/props/pipe_run` |
+| <img src="library/props/thumbs/sandbag_wall.png" width="120" alt="topotopo/props/sandbag_wall"><br>`topotopo/props/sandbag_wall` |  |  |  |
 
-<!-- shelf:end -->
+**topotopo/street** 1.0: roads with kerbs and sidewalks, lamp posts, bollards, benches, street signs, fences and hanging cables.
+
+| | | | |
+|---|---|---|---|
+| <img src="library/street/thumbs/bench.png" width="120" alt="topotopo/street/bench"><br>`topotopo/street/bench` | <img src="library/street/thumbs/bollard.png" width="120" alt="topotopo/street/bollard"><br>`topotopo/street/bollard` | <img src="library/street/thumbs/cable.png" width="120" alt="topotopo/street/cable"><br>`topotopo/street/cable` | <img src="library/street/thumbs/fence.png" width="120" alt="topotopo/street/fence"><br>`topotopo/street/fence` |
+| <img src="library/street/thumbs/lamp_post.png" width="120" alt="topotopo/street/lamp_post"><br>`topotopo/street/lamp_post` | <img src="library/street/thumbs/road_strip.png" width="120" alt="topotopo/street/road_strip"><br>`topotopo/street/road_strip` | <img src="library/street/thumbs/sign_post.png" width="120" alt="topotopo/street/sign_post"><br>`topotopo/street/sign_post` |  |
+
+<!-- kits:end -->
 
 ## Testing
 
@@ -493,7 +512,7 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 | layer | command | what it checks |
 |---|---|---|
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
-| golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every shelf asset matches its fingerprint in `test/golden/` |
+| golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every output of TopoTopo's own packages matches its fingerprint in `test/golden/` |
 | property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets), hostile `=expr` expressions (escapes and endless loops, pool off and on), hostile code params (`heightfield_layer`, `sdf_expr`, parametric nodes), `sdf_expr` fields that hang only when `sdf_to_mesh`/`sdf_grid` sample them, and thrown values whose message never comes back (wrangle, script; also with a poisoned realm) |
 | docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions; this README's node table lists every node type |
 | examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors or warnings: a node spec on the node's fixture inputs, a graph as written |
@@ -509,7 +528,7 @@ below; `node test/shelf.ts` cooks every asset at its defaults and at the ends of
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, crops and tiles that match the whole map, erosion determinism and mass conservation, the same erosion settings at three spacings, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
-| shelf | `npm run test:shelf [-- filter]` | every shelf asset: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; index, thumbnails and README table current; workspace override precedence; `assets` list / delete / fork |
+| kits | `npm run test:kits [-- filter]` | every output of TopoTopo's own packages, cooked as a project that uses its kit: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; each kit's line-up, thumbnails and README table current, and its working folder its newest version; `assets` fork / list / get / delete; the catalog and help |
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
 | particles | `npm run test:particles` | the particles node: emission counts and lifetimes, attribute and group carry, determinism, pool on/off bit-identical (noise, fields, mesh and floor collisions, trails), particles never below the floor or a mesh and never inside a closed one, spheres kept pscale off a mesh, trail lengths/curveu/ages, max_particles, max_births (step cap, batched runs = one run), frames = one long run (resume, jump back, substeps, moving emitter), point/heightfield/SDF fields, wind, attraction, analytic Perlin gradients and divergence-free curl noise, 100k particles × 200 steps |
 | rbd | `npm run test:rbd` | rbd_settle / rbd_stack: rocks rest on the ground plane, a terrain mesh and a heightfield (exact hulls checked independently: no vertex below the surface or inside another piece beyond 5 mm / 1 cm; reduced hulls within 5 % of a radius), every piece settled and touching something, bit-identical across cooks, engines and pool on/off, input order independent (also coincident pieces of different shapes), packed = unpacked, static `active` = 0 pieces, initial `v`, fallen pieces and `delete_fallen`, the overlap warning, `ground_plane` auto, `max_pieces`, a 12-crate pile that keeps every crate, animate (frame 1, resumed frames, last frame = settled), every collision shape, and the 1,000-piece timing |
@@ -554,8 +573,9 @@ depend on the locale, exact file-name case, a symlinked checkout and LF line end
 
 **Package.** `npm run pack:test` builds and packs the npm tarball, installs it into an empty project in a temp
 directory and uses it from there: the `topotopo` bin (help, cooking an example with a render), the library import and
-its types, the shelf, the bundled font, the worker pool, the WASM kernels and the MCP server over stdio. It takes about
-a minute and is not part of `npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+its types, the built-in library of TopoTopo's own packages (a project's first use copies a kit from it), the bundled font,
+the worker pool, the WASM kernels and the MCP server over stdio. It takes about a minute and is not part of
+`npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Layout
 
@@ -564,7 +584,7 @@ the node library. The renderer is in `src/render`, import/export in `src/io`, an
 `src/mcp`. `src/viewer` has the live preview, `src/gallery` the gallery website of project libraries, and `src/host` the Node
 host (sandbox, files, fonts).
 `dist/` (not in git) is the compiled package: `npm run build` mirrors
-`src/` there one to one, so the shelf, fonts, kernels and worker entry are found relative to either.
+`src/` there one to one, so the built-in library, fonts, kernels and worker entry are found relative to either.
 
 ## Support
 

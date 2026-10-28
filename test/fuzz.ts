@@ -332,7 +332,7 @@ const EXPR_TIMEOUT_MS = 400;
 let exprFail = 0;
 const te = performance.now();
 for (const workers of [0, 2]) {
-  const e = new Engine(createNodeHost({ workers, shelf: false }));
+  const e = new Engine(createNodeHost({ workers }));
   e.manifold = engine.manifold;
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const mode = workers ? 'pool on' : 'pool off';
@@ -401,7 +401,7 @@ const codeGraph = (type: CodeType, code: string): GraphSpec => type === 'sdf_exp
 let codeFail = 0, codeRuns = 0;
 const tc = performance.now();
 for (const workers of [0, 2]) {
-  const e = new Engine(createNodeHost({ workers, shelf: false }));
+  const e = new Engine(createNodeHost({ workers }));
   e.manifold = engine.manifold;
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const mode = workers ? 'pool on' : 'pool off';
@@ -510,7 +510,7 @@ let laterFail = 0, laterRuns = 0;
 const tl = performance.now();
 for (const workers of [0, 2]) {
   // pool on: every kernel (point wrangles included) goes to the workers, whatever its size
-  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  const e = new Engine(createNodeHost({ workers, ...(workers ? { pool: { minElements: 1 } } : {}) }));
   e.manifold = engine.manifold;
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const mode = workers ? 'pool on' : 'pool off';
@@ -577,7 +577,7 @@ const POISON_CASES: { graph: GraphSpec; prefix: string; want: RegExp }[] = [
 let poisonFail = 0;
 const tp = performance.now();
 for (const workers of [0, 2]) {
-  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  const e = new Engine(createNodeHost({ workers, ...(workers ? { pool: { minElements: 1 } } : {}) }));
   e.manifold = engine.manifold;
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const mode = workers ? 'pool on' : 'pool off';
@@ -621,7 +621,7 @@ const THEN_POISONS = [
 let thenFail = 0;
 const tt = performance.now();
 for (const poison of THEN_POISONS) {
-  const e = new Engine(createNodeHost({ workers: 0, shelf: false }));
+  const e = new Engine(createNodeHost({ workers: 0 }));
   e.manifold = engine.manifold;
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const problems: string[] = [];
@@ -653,7 +653,7 @@ if (!G.poisoned) { G.poisoned = 1; for (const k of ['ReferenceError', 'Proxy', '
 let guardFail = 0;
 const tg = performance.now();
 for (const workers of [0, 2]) {
-  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  const e = new Engine(createNodeHost({ workers, ...(workers ? { pool: { minElements: 1 } } : {}) }));
   e.manifold = engine.manifold;
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const mode = workers ? 'pool on' : 'pool off';
@@ -714,7 +714,7 @@ const ts = performance.now();
 for (const workers of [0, 2]) {
   const mode = workers ? 'pool on' : 'pool off';
   for (const poison of SLOT_POISONS) {
-    const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+    const e = new Engine(createNodeHost({ workers, ...(workers ? { pool: { minElements: 1 } } : {}) }));
     e.manifold = engine.manifold;
     e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
     const problems: string[] = [];
@@ -756,7 +756,7 @@ let resultFail = 0;
 const tr = performance.now();
 for (const workers of [0, 2]) {
   const mode = workers ? 'pool on' : 'pool off';
-  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  const e = new Engine(createNodeHost({ workers, ...(workers ? { pool: { minElements: 1 } } : {}) }));
   e.manifold = engine.manifold;
   e.scriptTimeoutMs = EXPR_TIMEOUT_MS;
   const problems: string[] = [];

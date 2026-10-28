@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Field-aligned quad remeshing. In each pair the grey input is on the left and the coloured result is on the right. Top row: noisy sphere, bevelled box with sharp feature alignment. Bottom row: shelf rock, capped tube in quads-only mode. All polygon edges are drawn to expose the actual edge flow and irregular vertices.",
+  "description": "Field-aligned quad remeshing. In each pair the grey input is on the left and the coloured result is on the right. Top row: noisy sphere, bevelled box with sharp feature alignment. Bottom row: a rock (topotopo/nature/rock), capped tube in quads-only mode. All polygon edges are drawn to expose the actual edge flow and irregular vertices.",
   "meta": {
     "render": { "views": ["persp"], "size": 1600, "azimuth": 12, "elevation": 18, "wireframe": "all", "grid": false, "shading": "default" }
   },
@@ -19,7 +19,7 @@
     "box_result_color": { "type": "color", "in": ["box_quad"], "params": { "color": "#dfaa72" } },
     "box_input_place": { "type": "transform", "in": ["box_input_color"], "params": { "translate": [1.1, 1.45, 0], "rotate": [0, -15, 0] } },
     "box_result_place": { "type": "transform", "in": ["box_result_color"], "params": { "translate": [3.3, 1.45, 0], "rotate": [0, -15, 0] } },
-    "rock": { "type": "rock", "params": { "size": 1.85, "roughness": 0.38, "flatness": 0.8, "level": 3, "seed": 6 } },
+    "rock": { "type": "topotopo/nature/rock", "params": { "size": 1.85, "roughness": 0.38, "flatness": 0.8, "level": 3, "seed": 6 } },
     "rock_center": { "type": "transform", "in": ["rock"], "params": { "translate": [0, -0.7, 0] } },
     "rock_quad": { "type": "remesh_quad", "in": ["rock_center"], "params": { "target_faces": 450, "smooth_iterations": 10 } },
     "rock_input_color": { "type": "color", "in": ["rock_center"], "params": { "class": "prim", "color": "#b8bec6" } },

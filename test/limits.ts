@@ -68,7 +68,7 @@ const NOT_COUNTS = [
 
 // ------------------------------------------------------------------ absurd counts
 section('absurd counts are clamped to their max');
-const off = new Engine(createNodeHost({ workers: 0, shelf: false }));
+const off = new Engine(createNodeHost({ workers: 0 }));
 await off.init();
 async function timed(e: Engine, g: GraphSpec) {
   e.cache.clear();
@@ -119,7 +119,7 @@ const HEAVY: Record<string, { graph: GraphSpec; poolOnly?: boolean }> = {
 };
 for (const workers of [0, 2]) {
   const mode = workers ? 'pool on' : 'pool off';
-  const e = new Engine(createNodeHost({ workers, shelf: false, ...(workers ? { pool: { minElements: 1 } } : {}) }));
+  const e = new Engine(createNodeHost({ workers, ...(workers ? { pool: { minElements: 1 } } : {}) }));
   await e.init();
   e.simTimeoutMs = LIMIT;
   for (const [label, c] of Object.entries(HEAVY)) {
@@ -151,7 +151,7 @@ for (const workers of [0, 2]) {
 }
 {
   // the default limit is generous, and the env var reaches the MCP server
-  check(new Engine(createNodeHost({ workers: 0, shelf: false })).simTimeoutMs === 600000, 'engine.simTimeoutMs defaults to 10 minutes');
+  check(new Engine(createNodeHost({ workers: 0 })).simTimeoutMs === 600000, 'engine.simTimeoutMs defaults to 10 minutes');
 }
 
 console.log(`\nlimits: ${pass} passed, ${fail} failed`);

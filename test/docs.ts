@@ -1,4 +1,5 @@
-// Docs staleness: docs/nodes.md must match what scripts/gen-docs.ts generates from the registry and the shelf, and the
+// Docs staleness: docs/nodes.md must match what scripts/gen-docs.ts generates from the registry and TopoTopo's own
+// packages, and the
 // README's node table must list every node type (its "N+ node types" claim must hold).
 //   node test/docs.ts
 import fs from 'node:fs';

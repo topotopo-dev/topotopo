@@ -8,6 +8,9 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { BUILTIN_LIBRARY, initProject } from '../src/gallery/library.ts';
+import { openPackages } from '../src/gallery/packages.ts';
+import type { ProjectPackages } from '../src/gallery/packages.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { exportOBJ } from '../src/io/export.ts';
 import { encodeGreyPNG } from '../src/io/heightmap.ts';
@@ -66,13 +69,13 @@ export const SRC: Record<string, NodeSpec> = {
   ZIGZAG: { type: 'curve', params: { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [2, 0.5, 1], [2, 0, 2]] } },
   BUMPY: { type: 'noise_displace', in: ['GRID'], params: { amplitude: 0.3 } },
   ROAD: { type: 'curve', params: { points: [[-0.9, 1, -0.8], [0, 1, 0.2], [0.9, 1, 0.7]] } },
-  // shelf assets: a rising smooth path, a polyline with corners for pipes, a road centre line, a hilly ground
-  SHELF_PATH: { type: 'curve', params: { points: [[0, 0, 0], [3, 0, 1], [6, 0.3, 0.5], [8, 0.6, -1]], smooth: true } },
-  SHELF_PIPE: { type: 'curve', params: { points: [[0, 0.6, 0], [2, 0.6, 0], [2, 1.5, 0], [2, 1.5, 2], [4.5, 1.5, 2]] } },
-  SHELF_ROAD: { type: 'curve', params: { points: [[-10, 0, 0], [0, 0, 4], [10, 0, 0]], smooth: true, subdivisions: 8 } },
-  SHELF_GROUND: { type: 'terrain', params: { size: [16, 16], divisions: [24, 24], height: 1.5, frequency: 0.12, octaves: 3, seed: 3 } },
+  // TopoTopo's own packages: a rising smooth path, a polyline with corners for pipes, a road centre line, a hilly ground
+  KIT_PATH: { type: 'curve', params: { points: [[0, 0, 0], [3, 0, 1], [6, 0.3, 0.5], [8, 0.6, -1]], smooth: true } },
+  KIT_PIPE: { type: 'curve', params: { points: [[0, 0.6, 0], [2, 0.6, 0], [2, 1.5, 0], [2, 1.5, 2], [4.5, 1.5, 2]] } },
+  KIT_ROAD: { type: 'curve', params: { points: [[-10, 0, 0], [0, 0, 4], [10, 0, 0]], smooth: true, subdivisions: 8 } },
+  KIT_GROUND: { type: 'terrain', params: { size: [16, 16], divisions: [24, 24], height: 1.5, frequency: 0.12, octaves: 3, seed: 3 } },
   // an L-shaped footprint on the ground (closed polygon), concave on purpose
-  SHELF_FOOTPRINT: { type: 'curve', params: { points: [[0, 0, 0], [10, 0, 0], [10, 0, 6], [5, 0, 6], [5, 0, 9], [0, 0, 9]], closed: true } },
+  KIT_FOOTPRINT: { type: 'curve', params: { points: [[0, 0, 0], [10, 0, 0], [10, 0, 6], [5, 0, 6], [5, 0, 9], [0, 0, 9]], closed: true } },
   // textures: small images (noise "noise", bricks "pattern" + id, a soft disc stamp "shape"), a box unwrapped
   // for bakes (xatlas), the same box coloured, and its subdivided high-res version
   TEX: { type: 'tex_noise', params: { resolution: 64, seed: 1 } },
@@ -92,16 +95,22 @@ export const SRC: Record<string, NodeSpec> = {
   CLOTH: { type: 'grid', params: { size: [2, 2], divisions: [12, 12], center: [0, 1.2, 0] } },
 };
 
-/** Fixture inputs of the shelf assets that take one (curve input 0 or surface input 0); test/shelf.ts checks coverage. */
-export const SHELF_INPUTS: Record<string, string[]> = {
-  railing: ['SHELF_PATH'], fence: ['SHELF_PATH'], pipe_run: ['SHELF_PIPE'], road_strip: ['SHELF_ROAD'],
-  scatter_rocks: ['SHELF_GROUND'], forest_patch: ['SHELF_GROUND'], grass_clumps: ['SHELF_GROUND'],
-  house: ['SHELF_FOOTPRINT'], roof_skeleton: ['SHELF_FOOTPRINT'],
+/**
+ * Fixture inputs of the outputs of TopoTopo's own packages that take one (curve input 0 or surface input 0), by full
+ * name; test/kits.ts checks coverage.
+ */
+export const KIT_INPUTS: Record<string, string[]> = {
+  'topotopo/architecture/railing': ['KIT_PATH'], 'topotopo/street/fence': ['KIT_PATH'], 'topotopo/props/pipe_run': ['KIT_PIPE'],
+  'topotopo/street/road_strip': ['KIT_ROAD'], 'topotopo/nature/scatter_rocks': ['KIT_GROUND'], 'topotopo/nature/forest_patch': ['KIT_GROUND'],
+  'topotopo/nature/grass_clumps': ['KIT_GROUND'], 'topotopo/architecture/house': ['KIT_FOOTPRINT'], 'topotopo/architecture/roof_skeleton': ['KIT_FOOTPRINT'],
 };
 
-/** A graph that cooks the shelf asset `name` at its defaults (on its fixture inputs, if it takes any) as node `target`. */
-export function shelfFixtureGraph(name: string, params: Record<string, any> = {}): GraphSpec {
-  const ins = SHELF_INPUTS[name] ?? [];
+/**
+ * A graph that cooks the output `name` of one of TopoTopo's own packages at its defaults (on its fixture inputs, if it
+ * takes any) as node `target`. It cooks in an engine that uses the kits (useKits).
+ */
+export function kitFixtureGraph(name: string, params: Record<string, any> = {}): GraphSpec {
+  const ins = KIT_INPUTS[name] ?? [];
   const nodes: Record<string, NodeSpec> = {};
   ins.forEach((k) => addFixture(nodes, k));
   nodes.target = { type: name, ...(ins.length ? { in: ins } : {}), params: structuredClone(params) };
@@ -138,7 +147,7 @@ export const INPUTS: Record<string, string[]> = {
   // PCG: masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
-  curve_attribs: ['NURBS'], straight_skeleton: ['SHELF_FOOTPRINT'],
+  curve_attribs: ['NURBS'], straight_skeleton: ['KIT_FOOTPRINT'],
   // textures: filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
   tex_blend: ['TEX', 'TEX2', 'TEXSHAPE'], tex_levels: ['TEX'], tex_curves: ['TEX'], tex_blur: ['TEX'], tex_warp: ['TEX2', 'TEX'],
   tex_transform: ['TEX2'], tex_edge_detect: ['TEX2'], tex_invert: ['TEX'], tex_threshold: ['TEX'], tex_histogram_scan: ['TEX'],
@@ -364,13 +373,26 @@ export function graphIsEnvDependent(graph: GraphSpec): boolean {
 }
 
 /**
+ * TopoTopo's own packages for an engine: a project in `dir` (default: a new temp folder) that uses every one of them,
+ * their newest versions copied from the built-in library, attached to the engine's root, where their outputs resolve.
+ */
+export function useKits(engine: Engine, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-kits-'))): ProjectPackages {
+  initProject(dir);
+  const pk = openPackages(engine, dir);
+  for (const c of pk.catalog()) if (c.library === BUILTIN_LIBRARY.name && pk.manifest?.uses[c.package] === undefined) pk.use(c.package);
+  return pk;
+}
+
+/**
  * An initialised engine whose host resolves relative paths in a fresh temp dir, which holds `cube.obj`
- * (the `file` node fixture). PARAMS.file.path is set to that absolute path.
+ * (the `file` node fixture). PARAMS.file.path is set to that absolute path. The temp dir is a project that uses
+ * TopoTopo's own packages (useKits), so node examples and the kits' fixtures cook their outputs.
  */
 export async function createFixtureEngine(): Promise<{ engine: Engine; tmp: string; objPath: string }> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-test-'));
   const engine = new Engine(createNodeHost({ baseDir: tmp }));
   await engine.init();
+  useKits(engine, tmp);
   const objPath = path.join(tmp, 'cube.obj');
   fs.writeFileSync(objPath, exportOBJ((await engine.cook({ nodes: { b: { type: 'box' } } })).geo!));
   PARAMS.file = { path: objPath };

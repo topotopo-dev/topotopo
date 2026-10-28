@@ -1,0 +1,447 @@
+{
+  "package": "topotopo/nature",
+  "version": "1.0",
+  "note": "first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface",
+  "published": "2026-10-28T04:57:52.813Z",
+  "big": false,
+  "hash": "29e92c869b439ba9e24d33ef13b6533a6392d03ae407d528107c7985d37f090a",
+  "outputs": {
+    "bush": {
+      "graph": "bush",
+      "node": "out",
+      "label": "Bush",
+      "sliders": {
+        "size": {
+          "type": "float",
+          "default": 1.2,
+          "min": 0.2,
+          "max": 5,
+          "desc": "width (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 0.8,
+          "min": 0.1,
+          "max": 4,
+          "desc": "approximate height (m)"
+        },
+        "blobs": {
+          "type": "int",
+          "default": 6,
+          "min": 1,
+          "max": 16,
+          "desc": "number of blobs"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0,
+          "max": 0.5,
+          "desc": "blob displacement (fraction of the blob radius)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": []
+    },
+    "cliff_block": {
+      "graph": "cliff_block",
+      "node": "out",
+      "label": "Cliff block",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 4,
+          "min": 1,
+          "max": 20,
+          "desc": "size along X (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 5,
+          "min": 1,
+          "max": 30,
+          "desc": "height (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 3,
+          "min": 1,
+          "max": 20,
+          "desc": "size along Z (m)"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "desc": "noise and ledge strength (0 = smooth block)"
+        },
+        "strata": {
+          "type": "int",
+          "default": 6,
+          "min": 0,
+          "max": 20,
+          "desc": "number of strata ledges (0 = none)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "noise seed"
+        }
+      },
+      "inputs": []
+    },
+    "forest_patch": {
+      "graph": "forest_patch",
+      "node": "out",
+      "label": "Forest",
+      "sliders": {
+        "density": {
+          "type": "float",
+          "default": 0.02,
+          "min": 0.001,
+          "max": 0.5,
+          "desc": "trees per square metre before spacing"
+        },
+        "min_distance": {
+          "type": "float",
+          "default": 3,
+          "min": 0.5,
+          "max": 20,
+          "desc": "minimum distance between trees (m)"
+        },
+        "min_height": {
+          "type": "float",
+          "default": 4,
+          "min": 1,
+          "max": 30,
+          "desc": "smallest tree height (m)"
+        },
+        "max_height": {
+          "type": "float",
+          "default": 9,
+          "min": 1,
+          "max": 40,
+          "desc": "largest tree height (m)"
+        },
+        "conifer_ratio": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "desc": "share of conifers; the rest is split between round and poplar trees"
+        },
+        "max_slope": {
+          "type": "float",
+          "default": 30,
+          "min": 0,
+          "max": 90,
+          "desc": "no trees on faces steeper than this (degrees)"
+        },
+        "bushes": {
+          "type": "bool",
+          "default": true,
+          "desc": "scatter bushes (three times the tree density)"
+        },
+        "ground_size": {
+          "type": "float",
+          "default": 30,
+          "min": 2,
+          "max": 200,
+          "desc": "size of the ground patch used when nothing is connected (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "surface to plant on (polygons); optional"
+        }
+      ]
+    },
+    "grass_clumps": {
+      "graph": "grass_clumps",
+      "node": "out",
+      "label": "Grass",
+      "sliders": {
+        "density": {
+          "type": "float",
+          "default": 8,
+          "min": 0.1,
+          "max": 40,
+          "desc": "clumps per square metre"
+        },
+        "height": {
+          "type": "float",
+          "default": 0.35,
+          "min": 0.05,
+          "max": 2,
+          "desc": "blade height (m)"
+        },
+        "blades": {
+          "type": "int",
+          "default": 12,
+          "min": 3,
+          "max": 30,
+          "desc": "blades per clump"
+        },
+        "spread": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 1.5,
+          "desc": "how far the blades lean out (fraction of the height)"
+        },
+        "max_slope": {
+          "type": "float",
+          "default": 45,
+          "min": 0,
+          "max": 90,
+          "desc": "no grass on faces steeper than this (degrees)"
+        },
+        "ground_size": {
+          "type": "float",
+          "default": 4,
+          "min": 0.5,
+          "max": 20,
+          "desc": "size of the ground patch used when nothing is connected (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "surface to grow on (polygons); optional"
+        }
+      ]
+    },
+    "log": {
+      "graph": "log",
+      "node": "out",
+      "label": "Log",
+      "sliders": {
+        "log_length": {
+          "type": "float",
+          "default": 2.4,
+          "min": 0.4,
+          "max": 8,
+          "desc": "length along X (m)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0.05,
+          "max": 0.8,
+          "desc": "radius at the thick end (m)"
+        },
+        "taper": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0,
+          "max": 0.6,
+          "desc": "how much thinner the other end is (fraction of radius)"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.12,
+          "min": 0,
+          "max": 0.3,
+          "desc": "bark displacement as a fraction of radius"
+        },
+        "stubs": {
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 10,
+          "desc": "branch stubs"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed (bark noise, stubs)"
+        }
+      },
+      "inputs": []
+    },
+    "rock": {
+      "graph": "rock",
+      "node": "out",
+      "label": "Rock",
+      "sliders": {
+        "size": {
+          "type": "float",
+          "default": 1,
+          "min": 0.1,
+          "max": 6,
+          "desc": "approximate width (m)"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.35,
+          "min": 0,
+          "max": 0.8,
+          "desc": "displacement as a fraction of the size"
+        },
+        "flatness": {
+          "type": "float",
+          "default": 0.65,
+          "min": 0.2,
+          "max": 1,
+          "desc": "height / width"
+        },
+        "level": {
+          "type": "int",
+          "default": 2,
+          "min": 1,
+          "max": 4,
+          "desc": "icosphere subdivision level (2 = 162 points)"
+        },
+        "sink": {
+          "type": "float",
+          "default": 0,
+          "min": 0,
+          "max": 0.5,
+          "desc": "part of the height below y = 0"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "shape seed"
+        }
+      },
+      "inputs": []
+    },
+    "scatter_rocks": {
+      "graph": "scatter_rocks",
+      "node": "out",
+      "label": "Scattered rocks",
+      "sliders": {
+        "density": {
+          "type": "float",
+          "default": 0.4,
+          "min": 0.01,
+          "max": 5,
+          "desc": "rocks per square metre before pruning"
+        },
+        "min_scale": {
+          "type": "float",
+          "default": 0.35,
+          "min": 0.05,
+          "max": 5,
+          "desc": "smallest rock width (m)"
+        },
+        "max_scale": {
+          "type": "float",
+          "default": 1.1,
+          "min": 0.05,
+          "max": 8,
+          "desc": "largest rock width (m)"
+        },
+        "max_slope": {
+          "type": "float",
+          "default": 40,
+          "min": 0,
+          "max": 90,
+          "desc": "no rocks on faces steeper than this (degrees)"
+        },
+        "ground_size": {
+          "type": "float",
+          "default": 8,
+          "min": 1,
+          "max": 60,
+          "desc": "size of the ground patch used when nothing is connected (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "surface to scatter on (polygons); optional"
+        }
+      ]
+    },
+    "tree_lowpoly": {
+      "graph": "tree_lowpoly",
+      "node": "out",
+      "label": "Tree",
+      "sliders": {
+        "height": {
+          "type": "float",
+          "default": 6,
+          "min": 1.5,
+          "max": 25,
+          "desc": "total height (m)"
+        },
+        "trunk_radius": {
+          "type": "float",
+          "default": 0.18,
+          "min": 0.04,
+          "max": 1,
+          "desc": "trunk radius at the base (m)"
+        },
+        "canopy_radius": {
+          "type": "float",
+          "default": 1.8,
+          "min": 0.4,
+          "max": 8,
+          "desc": "crown radius (m)"
+        },
+        "style": {
+          "type": "enum",
+          "default": "round",
+          "options": [
+            "round",
+            "conifer",
+            "poplar"
+          ],
+          "desc": "crown shape"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed (blob placement, rotation, tint)"
+        }
+      },
+      "inputs": []
+    }
+  },
+  "default": {
+    "graph": "kit",
+    "node": "kit",
+    "sliders": {},
+    "inputs": []
+  },
+  "topotopo": "0.4.0"
+}

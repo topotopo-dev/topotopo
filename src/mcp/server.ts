@@ -59,7 +59,7 @@ async function openWorkspace(dir: string) {
   w.packages = pk;
   const loaded = w.load();
   w.watch();
-  log(`workspace ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets, ${loaded.shelf} shelf assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.manifest?.uses ?? {}).length} packages used` : ''}`);
+  log(`workspace ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.manifest?.uses ?? {}).length} packages used` : '; in no project'}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
   for (const x of pk.check()) log('package problem:', x);
   const prev = ws as Workspace | undefined;

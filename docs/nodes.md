@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-231 node types and 37 shelf assets. Node types and parameter names are case- and underscore-insensitive and accept the listed
+231 node types and 41 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -24,8 +24,8 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file) · [scene_null](#scene_null)
+- [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
-- [shelf](#shelf-nodes): [arch](#arch) · [barrel](#barrel) · [beam_truss](#beam_truss) · [bench](#bench) · [bollard](#bollard) · [brick_wall](#brick_wall) · [bush](#bush) · [cable](#cable) · [cliff_block](#cliff_block) · [crate](#crate) · [door_frame](#door_frame) · [fence](#fence) · [forest_patch](#forest_patch) · [grass_clumps](#grass_clumps) · [hex_grid_floor](#hex_grid_floor) · [house](#house) · [lamp_post](#lamp_post) · [log](#log) · [pallet](#pallet) · [pillar](#pillar) · [pipe_run](#pipe_run) · [railing](#railing) · [road_strip](#road_strip) · [rock](#rock) · [roof_gable](#roof_gable) · [roof_hip](#roof_hip) · [roof_skeleton](#roof_skeleton) · [sandbag_wall](#sandbag_wall) · [scaffold](#scaffold) · [scatter_rocks](#scatter_rocks) · [sign_post](#sign_post) · [spiral_stairs](#spiral_stairs) · [stairs](#stairs) · [tile_floor](#tile_floor) · [tree_lowpoly](#tree_lowpoly) · [wall_segment](#wall_segment) · [window_frame](#window_frame)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
 - [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_crop](#tex_crop) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
@@ -9417,6 +9417,1114 @@ Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated poi
 }
 ```
 
+## package nodes
+
+The outputs of TopoTopo's own packages, the kits in its built-in library ([library/](../library); see the README
+section "TopoTopo's own packages"), by full name; a kit's name alone is its default output, which lines its outputs up.
+A project's graph names one like any node, and its first use copies the kit's version into the project. Their
+parameters are the outputs' typed vars; their inputs are the graphs' `input` nodes. `assets {action: "fork"}`
+copies one's graph into the project's assets to edit.
+
+### topotopo/architecture
+
+category: `package`
+
+TopoTopo's architecture kit, its 17 outputs side by side at their defaults.
+
+The package's default output and its preview, from arch to window_frame along +X, 1 m apart.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+The default output of package topotopo/architecture 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
+### topotopo/architecture/arch
+
+category: `package`
+
+Stone arch: a wall block with a round, pointed (equilateral gothic) or flat-topped opening cut by a 2D boolean and extruded, with impost blocks at the spring line and a keystone.
+
+![topotopo/architecture/arch](../library/architecture/thumbs/arch.png)
+
+Pivot at the centre of the base (the opening is centred on x = 0, depth along Z). Pieces: arch (stone), arch_trim (stone_dark). Every piece is closed.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "arch" of package topotopo/architecture 1.0 (Arch): it cooks node "out" of the package's graph "arch"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `2` | 0.4..10 |  |  | opening width (m) |
+| `height` | float | `3` | 0.5..15 |  |  | opening height at the apex (m) |
+| `thickness` | float | `0.5` | 0.1..3 |  |  | masonry around the opening (m) |
+| `depth` | float | `0.6` | 0.1..5 |  |  | depth along Z (m) |
+| `style` | enum | `"round"` |  | `round`, `pointed`, `flat` |  | shape of the opening's top |
+| `segments` | int | `16` | 4..64 |  |  | segments of the curved top |
+| `keystone` | bool | `true` |  |  |  | keystone at the apex and impost blocks at the spring line |
+
+### topotopo/architecture/beam_truss
+
+category: `package`
+
+Planar truss in the XY plane: top and bottom chords, verticals and diagonals in Warren, Pratt or Howe layout, swept with a steel I-section or a square timber section.
+
+![topotopo/architecture/beam_truss](../library/architecture/thumbs/beam_truss.png)
+
+Spans x = -span/2 … span/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "beam_truss" of package topotopo/architecture 1.0 (Truss): it cooks node "out" of the package's graph "beam_truss"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `span` | float | `8` | 1..40 |  |  | span along X (m) |
+| `height` | float | `1.2` | 0.2..6 |  |  | depth of the truss, chord centre to chord centre (m) |
+| `panels` | int | `6` | 2..30 |  |  | panels along the span (even counts are symmetric) |
+| `member_size` | float | `0.12` | 0.03..0.6 |  |  | member section size (m) |
+| `layout` | enum | `"warren"` |  | `warren`, `pratt`, `howe` |  | web layout |
+| `steel` | bool | `true` |  |  |  | steel I-sections (false = square timber) |
+
+### topotopo/architecture/brick_wall
+
+category: `package`
+
+Brick wall from x = 0 to x = wall_length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core.
+
+![topotopo/architecture/brick_wall](../library/architecture/thumbs/brick_wall.png)
+
+One wythe deep (headers are drawn as half bricks). Pivot at the start of the wall, on the ground, centred in thickness. Pieces: brick_wall_bricks (brick), brick_wall_mortar (mortar). Every piece is a closed box.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "brick_wall" of package topotopo/architecture 1.0 (Brick wall): it cooks node "out" of the package's graph "brick_wall"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `wall_length` | float | `3` | 0.3..40 |  |  | length along X (m) |
+| `height` | float | `1.8` | 0.1..5 |  |  | height (m) |
+| `brick_length` | float | `0.215` | 0.1..0.5 |  |  | brick length (m); depth is half of it |
+| `brick_height` | float | `0.065` | 0.03..0.3 |  |  | brick height (m) |
+| `mortar` | float | `0.01` | 0.002..0.04 |  |  | joint width (m) |
+| `bond` | enum | `"running"` |  | `running`, `stack`, `english`, `flemish` |  | brick pattern |
+| `jitter` | float | `0.4` | 0..1 |  |  | random offset and yaw of each brick (0 = perfect) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/architecture/door_frame
+
+category: `package`
+
+Door for a wall opening: jambs and head that fill the opening (width × height), a panelled leaf hinged on the left (-X) that swings towards -Z by open_angle, and lever handles on both sides.
+
+![topotopo/architecture/door_frame](../library/architecture/thumbs/door_frame.png)
+
+Pivot at the bottom centre of the opening, centred in depth. Pieces: door_frame (paint_white), door_leaf (door_paint), door_handle (brass). Every piece is a closed box.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "door_frame" of package topotopo/architecture 1.0 (Door): it cooks node "out" of the package's graph "door_frame"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `1` | 0.5..3 |  |  | opening width (m) |
+| `height` | float | `2.1` | 1.5..4 |  |  | opening height (m) |
+| `depth` | float | `0.16` | 0.06..0.6 |  |  | frame depth along Z (m) |
+| `frame_width` | float | `0.08` | 0.03..0.25 |  |  | jamb and head width (m) |
+| `panels` | int | `2` | 0..5 |  |  | raised panels on each face of the leaf |
+| `open_angle` | float | `0` | 0..110 |  |  | how far the leaf is open (degrees) |
+
+### topotopo/architecture/hex_grid_floor
+
+category: `package`
+
+Hexagonal paving: flat-topped hexagonal prisms on a hex lattice filling a rectangle (tiles whose centre lies inside), with gaps and random height and tint.
+
+![topotopo/architecture/hex_grid_floor](../library/architecture/thumbs/hex_grid_floor.png)
+
+Pivot at the centre of the base. Piece: hex_tiles (paving). Every tile is a closed prism.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "hex_grid_floor" of package topotopo/architecture 1.0 (Hexagonal paving): it cooks node "out" of the package's graph "hex_grid_floor"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `size_x` | float | `5` | 0.5..40 |  |  | area size along X (m) |
+| `size_z` | float | `5` | 0.5..40 |  |  | area size along Z (m) |
+| `radius` | float | `0.3` | 0.05..3 |  |  | hexagon circumradius including the gap (m) |
+| `gap` | float | `0.02` | 0..0.2 |  |  | gap between tiles (m) |
+| `height` | float | `0.08` | 0.01..1 |  |  | tile height (m) |
+| `height_jitter` | float | `0.015` | 0..0.5 |  |  | random height variation (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/architecture/house
+
+category: `package`
+
+House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_skeleton hip roof that follows the footprint exactly (straight skeleton: L-shapes, courtyards and any simple polygon get correct valleys and ridges).
+
+![topotopo/architecture/house](../library/architecture/thumbs/house.png)
+
+Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are this kit's own wall_segment and roof_skeleton outputs, so a change to those changes every house. Pivot: the footprint's origin on the ground. Pieces come from those outputs (wall, window_frame, door_frame, roof).
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "house" of package topotopo/architecture 1.0 (House): it cooks node "out" of the package's graph "house"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | footprint: a closed polygon on the XZ plane (optional) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `8` | 3..30 |  |  | default footprint along X (m), used when no footprint is connected |
+| `depth` | float | `6` | 3..30 |  |  | default footprint along Z (m) |
+| `floors` | int | `2` | 1..4 |  |  | number of floors (wall segments stacked) |
+| `floor_height` | float | `3` | 2.4..4.5 |  |  | height of one floor (m) |
+| `window_spacing` | float | `2.5` | 1.5..6 |  |  | one window per this length of wall (m) |
+| `pitch` | float | `32` | 5..65 |  |  | roof slope (degrees) |
+| `overhang` | float | `0.5` | 0..2 |  |  | eave overhang (m) |
+| `door` | bool | `true` |  |  |  | a door on the first footprint edge |
+
+### topotopo/architecture/pillar
+
+category: `package`
+
+Classical pillar: a round, fluted or square shaft with an optional plinth base and capital.
+
+![topotopo/architecture/pillar](../library/architecture/thumbs/pillar.png)
+
+Pivot at the centre of the base. Pieces: pillar_shaft, pillar_base, pillar_capital (all stone_light). Every piece is closed.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "pillar" of package topotopo/architecture 1.0 (Pillar): it cooks node "out" of the package's graph "pillar"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `height` | float | `3` | 0.5..15 |  |  | total height (m) |
+| `radius` | float | `0.22` | 0.05..2 |  |  | shaft radius (half width for square) (m) |
+| `style` | enum | `"fluted"` |  | `round`, `fluted`, `square` |  | shaft section |
+| `flutes` | int | `16` | 6..32 |  |  | fluted style: number of flutes |
+| `base` | bool | `true` |  |  |  | plinth and torus at the foot |
+| `capital` | bool | `true` |  |  |  | echinus and abacus at the top |
+
+### topotopo/architecture/railing
+
+category: `package`
+
+Railing along a curve (input 0; without one, a straight run of `run_length` along +X from the origin): posts at even spacing including both ends, a handrail on top, lower rails and balusters.
+
+![topotopo/architecture/railing](../library/architecture/thumbs/railing.png)
+
+Sits on the curve (pivot = the curve). Pieces: railing_posts, railing_rails, railing_balusters (all metal_dark).
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "railing" of package topotopo/architecture 1.0 (Railing): it cooks node "out" of the package's graph "railing"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | curve to follow (polyline); optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `run_length` | float | `4` | 0.5..30 |  |  | run length along +X when no curve is connected (m) |
+| `height` | float | `1` | 0.4..2 |  |  | handrail height above the curve (m) |
+| `post_spacing` | float | `1.5` | 0.3..6 |  |  | maximum distance between posts (m) |
+| `baluster_spacing` | float | `0.15` | 0..1 |  |  | distance between balusters (m); 0 = none |
+| `rails` | int | `2` | 0..6 |  |  | horizontal rails below the handrail (the lowest at 0.1 m) |
+| `profile` | enum | `"round"` |  | `round`, `square` |  | tube or square section for posts and rails |
+
+### topotopo/architecture/roof_gable
+
+category: `package`
+
+Gable roof for a width × depth footprint: two pitched slabs meeting at a ridge along X with a ridge cap, overhanging eaves and verges, and optional triangular gable walls under it.
+
+![topotopo/architecture/roof_gable](../library/architecture/thumbs/roof_gable.png)
+
+Pivot at the centre of the wall-top plane (put it on top of the walls); the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on top, wood_dark on edges and underside), roof_ridge (roof_tiles), roof_gables (plaster). Every piece is closed.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "roof_gable" of package topotopo/architecture 1.0 (Gable roof): it cooks node "out" of the package's graph "roof_gable"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `8` | 1..40 |  |  | footprint along X, the ridge direction (m) |
+| `depth` | float | `6` | 1..30 |  |  | footprint along Z, the span (m) |
+| `pitch` | float | `35` | 5..65 |  |  | roof slope (degrees) |
+| `overhang` | float | `0.4` | 0..2 |  |  | eave and verge overhang beyond the footprint (m) |
+| `thickness` | float | `0.18` | 0.03..0.6 |  |  | slab thickness (m) |
+| `gable_walls` | bool | `true` |  |  |  | fill the gable triangles under the roof with wall |
+
+### topotopo/architecture/roof_hip
+
+category: `package`
+
+Hip roof for a width × depth footprint: four slopes at the same pitch meeting at a ridge along the longer side (a pyramid on a square), a fascia band and a flat soffit under overhanging eaves, and a ridge cap.
+
+![topotopo/architecture/roof_hip](../library/architecture/thumbs/roof_hip.png)
+
+Built as one closed solid (the attic is filled); there is no straight skeleton node yet, so footprints are rectangles. Pivot at the centre of the wall-top plane; the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on the slopes, wood_dark fascia and soffit), roof_ridge (roof_tiles). Every piece is closed.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "roof_hip" of package topotopo/architecture 1.0 (Hip roof): it cooks node "out" of the package's graph "roof_hip"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `8` | 1..40 |  |  | footprint along X (m) |
+| `depth` | float | `6` | 1..40 |  |  | footprint along Z (m) |
+| `pitch` | float | `30` | 5..65 |  |  | roof slope (degrees) |
+| `overhang` | float | `0.5` | 0..2 |  |  | eave overhang beyond the footprint (m) |
+| `thickness` | float | `0.2` | 0.03..0.6 |  |  | fascia height measured square to the slope (m) |
+
+### topotopo/architecture/roof_skeleton
+
+category: `package`
+
+Straight-skeleton hip roof from an optional XZ footprint, including concave outlines and courtyard holes.
+
+![topotopo/architecture/roof_skeleton](../library/architecture/thumbs/roof_skeleton.png)
+
+Without input it uses a width by depth rectangle. Negative offset distance adds the overhang before the roof is built; a connected extrusion gives the roof shell thickness along averaged vertex normals. Pivot is the wall-top plane. Every face carries the source contour edge as edge; the roof is one closed shell per connected footprint.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "roof_skeleton" of package topotopo/architecture 1.0 (Roof on a footprint): it cooks node "paint" of the package's graph "roof_skeleton"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | footprint: closed XZ polygons, optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `8` | 1..40 |  |  | default footprint width along X (m) |
+| `depth` | float | `6` | 1..40 |  |  | default footprint depth along Z (m) |
+| `pitch` | float | `32` | 5..65 |  |  | roof face slope (degrees) |
+| `overhang` | float | `0.4` | 0..2 |  |  | outward footprint offset before roofing (m) |
+| `thickness` | float | `0.16` | 0.03..0.6 |  |  | shell extrusion along averaged vertex normals (m) |
+
+### topotopo/architecture/scaffold
+
+category: `package`
+
+Tube-and-fitting scaffold: standards (verticals) on base plates, ledgers along X and transoms along Z at every lift, zig-zag face braces on the front (+Z), board decks on the lifts and guard rails at the top.
+
+![topotopo/architecture/scaffold](../library/architecture/thumbs/scaffold.png)
+
+Runs along +X from x = 0. Pivot at the start, on the ground, centred in depth. Pieces: scaffold_tubes (galvanized), scaffold_boards (wood_light), scaffold_plates (metal_dark). Every piece is closed.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "scaffold" of package topotopo/architecture 1.0 (Scaffold): it cooks node "out" of the package's graph "scaffold"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `bays` | int | `3` | 1..12 |  |  | bays along X |
+| `lifts` | int | `3` | 1..10 |  |  | lifts (levels) |
+| `bay_width` | float | `2.1` | 0.8..3.5 |  |  | bay width along X (m) |
+| `lift_height` | float | `2` | 1.2..3 |  |  | height of one lift (m) |
+| `depth` | float | `1.2` | 0.6..2.5 |  |  | distance between the front and back standards (m) |
+| `boards` | bool | `true` |  |  |  | board decks on every lift |
+| `braces` | bool | `true` |  |  |  | diagonal braces on the front face |
+
+### topotopo/architecture/spiral_stairs
+
+category: `package`
+
+Spiral staircase: wedge treads turning counter-clockwise (seen from above) around a central column, with an optional helical handrail on posts.
+
+![topotopo/architecture/spiral_stairs](../library/architecture/thumbs/spiral_stairs.png)
+
+Pivot at the foot of the column. Pieces: spiral_treads (wood), spiral_column (metal_dark), spiral_railing (metal_dark). Every piece is closed.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "spiral_stairs" of package topotopo/architecture 1.0 (Spiral stairs): it cooks node "out" of the package's graph "spiral_stairs"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `steps` | int | `16` | 2..60 |  |  | number of treads |
+| `rise` | float | `0.2` | 0.1..0.3 |  |  | height of one step (m) |
+| `turn` | float | `22.5` | 10..45 |  |  | rotation per step (degrees) |
+| `radius` | float | `1.1` | 0.5..4 |  |  | outer radius (m) |
+| `column_radius` | float | `0.1` | 0.03..0.5 |  |  | column radius (m) |
+| `railing` | bool | `true` |  |  |  | handrail along the outer edge |
+
+### topotopo/architecture/stairs
+
+category: `package`
+
+Straight stairs climbing along +Z: a solid concrete flight (one watertight sawtooth solid) or open wooden treads between two stringers, with optional handrails on both sides.
+
+![topotopo/architecture/stairs](../library/architecture/thumbs/stairs.png)
+
+Pivot at the bottom of the first step, centred in width. Pieces: stairs_flight (concrete) or stairs_treads (wood) + stairs_stringers (wood_dark), stairs_railing (metal_dark).
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "stairs" of package topotopo/architecture 1.0 (Stairs): it cooks node "out" of the package's graph "stairs"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `steps` | int | `12` | 1..40 |  |  | number of steps |
+| `rise` | float | `0.18` | 0.08..0.3 |  |  | height of one step (m) |
+| `run` | float | `0.28` | 0.15..0.5 |  |  | depth of one step (m) |
+| `width` | float | `1.2` | 0.5..5 |  |  | width along X (m) |
+| `style` | enum | `"solid"` |  | `solid`, `open` |  | solid concrete flight or open treads on stringers |
+| `railing` | bool | `true` |  |  |  | handrails with posts on both sides |
+
+### topotopo/architecture/tile_floor
+
+category: `package`
+
+Tiled floor: square tiles in a grid, offset (half-tile) or checker pattern with grout gaps, random height and tint, cut to the floor edges, on a grout bed.
+
+![topotopo/architecture/tile_floor](../library/architecture/thumbs/tile_floor.png)
+
+Pivot at the centre of the base; the tile tops are at the bed thickness + tile thickness. Pieces: tile_floor_tiles (tile_light; tile_dark for the checker's dark squares), tile_floor_grout (grout). Every piece is a closed box.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "tile_floor" of package topotopo/architecture 1.0 (Tiled floor): it cooks node "out" of the package's graph "tile_floor"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `size_x` | float | `4` | 0.2..30 |  |  | floor size along X (m) |
+| `size_z` | float | `4` | 0.2..30 |  |  | floor size along Z (m) |
+| `tile_size` | float | `0.5` | 0.1..2 |  |  | tile edge length including the gap (m) |
+| `gap` | float | `0.012` | 0..0.08 |  |  | grout gap (m) |
+| `thickness` | float | `0.02` | 0.005..0.1 |  |  | tile thickness (m) |
+| `pattern` | enum | `"checker"` |  | `grid`, `offset`, `checker` |  | tile layout |
+| `height_jitter` | float | `0.002` | 0..0.02 |  |  | random tile height variation (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/architecture/wall_segment
+
+category: `package`
+
+Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this kit's window_frame and door_frame outputs.
+
+![topotopo/architecture/wall_segment](../library/architecture/thumbs/wall_segment.png)
+
+The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "wall_segment" of package topotopo/architecture 1.0 (Wall): it cooks node "out" of the package's graph "wall_segment"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `wall_length` | float | `4` | 0.5..60 |  |  | length along X (m) |
+| `height` | float | `3` | 1..10 |  |  | height (m) |
+| `thickness` | float | `0.25` | 0.05..1 |  |  | thickness along Z (m) |
+| `windows` | int | `2` | 0..24 |  |  | number of window openings |
+| `window_width` | float | `1` | 0.3..4 |  |  | window opening width (m), clamped to fit the bay |
+| `window_height` | float | `1.3` | 0.3..4 |  |  | window opening height (m), clamped to fit under the top |
+| `sill_height` | float | `0.9` | 0..3 |  |  | height of the window openings above the ground (m) |
+| `door` | bool | `false` |  |  |  | add a 1.0 × 2.1 m door in the middle bay |
+| `frames` | bool | `true` |  |  |  | fill the openings with window_frame / door_frame |
+
+### topotopo/architecture/window_frame
+
+category: `package`
+
+Window for a wall opening: a frame that fills the opening (width × height), mullions, a glass pane and a stone sill that sticks out at the front (+Z).
+
+![topotopo/architecture/window_frame](../library/architecture/thumbs/window_frame.png)
+
+Pivot at the bottom centre of the opening, centred in depth. Pieces: window_frame (paint_white), window_glass (glass), window_sill (stone). Every piece is a closed box.
+topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
+Output "window_frame" of package topotopo/architecture 1.0 (Window): it cooks node "out" of the package's graph "window_frame"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `1` | 0.3..4 |  |  | opening width (m) |
+| `height` | float | `1.3` | 0.3..4 |  |  | opening height (m) |
+| `depth` | float | `0.12` | 0.04..0.5 |  |  | frame depth along Z (m) |
+| `frame_width` | float | `0.07` | 0.02..0.25 |  |  | frame member width (m) |
+| `mullions_x` | int | `1` | 0..6 |  |  | vertical glazing bars |
+| `mullions_y` | int | `1` | 0..6 |  |  | horizontal glazing bars |
+| `sill` | bool | `true` |  |  |  | add a sill below the opening |
+| `sill_depth` | float | `0.08` | 0..0.5 |  |  | how far the sill reaches in front of the frame (m) |
+
+### topotopo/nature
+
+category: `package`
+
+TopoTopo's nature kit, its 8 outputs side by side at their defaults.
+
+The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+The default output of package topotopo/nature 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
+### topotopo/nature/bush
+
+category: `package`
+
+Low-poly bush: overlapping faceted blobs, cut flat at the ground.
+
+![topotopo/nature/bush](../library/nature/thumbs/bush.png)
+
+Pivot at the centre of the base. Piece: bush (foliage_dark). Open at the bottom.
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "bush" of package topotopo/nature 1.0 (Bush): it cooks node "out" of the package's graph "bush"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `size` | float | `1.2` | 0.2..5 |  |  | width (m) |
+| `height` | float | `0.8` | 0.1..4 |  |  | approximate height (m) |
+| `blobs` | int | `6` | 1..16 |  |  | number of blobs |
+| `roughness` | float | `0.2` | 0..0.5 |  |  | blob displacement (fraction of the blob radius) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/nature/cliff_block
+
+category: `package`
+
+Cliff block: a tall rock mass with ridged noise, horizontal strata ledges and banded colour, flat on the ground.
+
+![topotopo/nature/cliff_block](../library/nature/thumbs/cliff_block.png)
+
+Pivot at the centre of the base. Piece: cliff (cliff_rock). Closed (watertight).
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "cliff_block" of package topotopo/nature 1.0 (Cliff block): it cooks node "out" of the package's graph "cliff_block"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `4` | 1..20 |  |  | size along X (m) |
+| `height` | float | `5` | 1..30 |  |  | height (m) |
+| `depth` | float | `3` | 1..20 |  |  | size along Z (m) |
+| `roughness` | float | `0.5` | 0..1 |  |  | noise and ledge strength (0 = smooth block) |
+| `strata` | int | `6` | 0..20 |  |  | number of strata ledges (0 = none) |
+| `seed` | int | `0` | 0..1000 |  |  | noise seed |
+
+### topotopo/nature/forest_patch
+
+category: `package`
+
+Forest on a surface (input 0; without one, a 30 × 30 m ground patch at y = 0): trees scattered by density with a minimum spacing on faces flatter than max_slope, kept upright with random yaw and height, as packed copies of three tree_lowpoly variants (conifer, round, poplar) picked by conifer_ratio, plus optional bushes between them.
+
+![topotopo/nature/forest_patch](../library/nature/thumbs/forest_patch.png)
+
+Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Pieces: tree_trunk, tree_canopy, bush.
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "forest_patch" of package topotopo/nature 1.0 (Forest): it cooks node "out" of the package's graph "forest_patch"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | surface to plant on (polygons); optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `density` | float | `0.02` | 0.001..0.5 |  |  | trees per square metre before spacing |
+| `min_distance` | float | `3` | 0.5..20 |  |  | minimum distance between trees (m) |
+| `min_height` | float | `4` | 1..30 |  |  | smallest tree height (m) |
+| `max_height` | float | `9` | 1..40 |  |  | largest tree height (m) |
+| `conifer_ratio` | float | `0.5` | 0..1 |  |  | share of conifers; the rest is split between round and poplar trees |
+| `max_slope` | float | `30` | 0..90 |  |  | no trees on faces steeper than this (degrees) |
+| `bushes` | bool | `true` |  |  |  | scatter bushes (three times the tree density) |
+| `ground_size` | float | `30` | 2..200 |  |  | size of the ground patch used when nothing is connected (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/nature/grass_clumps
+
+category: `package`
+
+Grass clumps on a surface (input 0; without one, a 4 × 4 m ground patch at y = 0): each clump is a fan of thin two-sided blades leaning outwards; clumps are scattered by density on faces flatter than max_slope and copied as packed instances of two variants with random yaw and size.
+
+![topotopo/nature/grass_clumps](../library/nature/thumbs/grass_clumps.png)
+
+Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: grass (grass, double sided).
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "grass_clumps" of package topotopo/nature 1.0 (Grass): it cooks node "out" of the package's graph "grass_clumps"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | surface to grow on (polygons); optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `density` | float | `8` | 0.1..40 |  |  | clumps per square metre |
+| `height` | float | `0.35` | 0.05..2 |  |  | blade height (m) |
+| `blades` | int | `12` | 3..30 |  |  | blades per clump |
+| `spread` | float | `0.5` | 0..1.5 |  |  | how far the blades lean out (fraction of the height) |
+| `max_slope` | float | `45` | 0..90 |  |  | no grass on faces steeper than this (degrees) |
+| `ground_size` | float | `4` | 0.5..20 |  |  | size of the ground patch used when nothing is connected (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/nature/log
+
+category: `package`
+
+Felled log lying along X: a tapered trunk with ridged bark, light end grain and a few branch stubs.
+
+![topotopo/nature/log](../library/nature/thumbs/log.png)
+
+Pivot at the centre of the base (the log rests on y = 0). Pieces: log_trunk (bark, ends wood_end), log_stubs (bark). The trunk is closed.
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "log" of package topotopo/nature 1.0 (Log): it cooks node "out" of the package's graph "log"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `log_length` | float | `2.4` | 0.4..8 |  |  | length along X (m) |
+| `radius` | float | `0.2` | 0.05..0.8 |  |  | radius at the thick end (m) |
+| `taper` | float | `0.2` | 0..0.6 |  |  | how much thinner the other end is (fraction of radius) |
+| `roughness` | float | `0.12` | 0..0.3 |  |  | bark displacement as a fraction of radius |
+| `stubs` | int | `3` | 0..10 |  |  | branch stubs |
+| `seed` | int | `0` | 0..1000 |  |  | random seed (bark noise, stubs) |
+
+### topotopo/nature/rock
+
+category: `package`
+
+Low-poly rock: a noise-displaced icosphere, flattened, with faceted shading and a mottled tint.
+
+![topotopo/nature/rock](../library/nature/thumbs/rock.png)
+
+Pivot at the centre of the base (sink lowers it into the ground). Piece: rock (rock). Closed (watertight).
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "rock" of package topotopo/nature 1.0 (Rock): it cooks node "out" of the package's graph "rock"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `size` | float | `1` | 0.1..6 |  |  | approximate width (m) |
+| `roughness` | float | `0.35` | 0..0.8 |  |  | displacement as a fraction of the size |
+| `flatness` | float | `0.65` | 0.2..1 |  |  | height / width |
+| `level` | int | `2` | 1..4 |  |  | icosphere subdivision level (2 = 162 points) |
+| `sink` | float | `0` | 0..0.5 |  |  | part of the height below y = 0 |
+| `seed` | int | `0` | 0..1000 |  |  | shape seed |
+
+### topotopo/nature/scatter_rocks
+
+category: `package`
+
+Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this kit's rock output) sunk slightly into the ground.
+
+![topotopo/nature/scatter_rocks](../library/nature/thumbs/scatter_rocks.png)
+
+Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "scatter_rocks" of package topotopo/nature 1.0 (Scattered rocks): it cooks node "out" of the package's graph "scatter_rocks"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | surface to scatter on (polygons); optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `density` | float | `0.4` | 0.01..5 |  |  | rocks per square metre before pruning |
+| `min_scale` | float | `0.35` | 0.05..5 |  |  | smallest rock width (m) |
+| `max_scale` | float | `1.1` | 0.05..8 |  |  | largest rock width (m) |
+| `max_slope` | float | `40` | 0..90 |  |  | no rocks on faces steeper than this (degrees) |
+| `ground_size` | float | `8` | 1..60 |  |  | size of the ground patch used when nothing is connected (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/nature/tree_lowpoly
+
+category: `package`
+
+Low-poly tree in three styles: round (a cluster of faceted blobs), conifer (stacked cones) and poplar (a tall narrow crown).
+
+![topotopo/nature/tree_lowpoly](../library/nature/thumbs/tree_lowpoly.png)
+
+Pivot at the base of the trunk. Pieces: tree_trunk (bark), tree_canopy (foliage, or foliage_dark for conifers). Every piece is closed.
+topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
+Output "tree_lowpoly" of package topotopo/nature 1.0 (Tree): it cooks node "out" of the package's graph "tree_lowpoly"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `height` | float | `6` | 1.5..25 |  |  | total height (m) |
+| `trunk_radius` | float | `0.18` | 0.04..1 |  |  | trunk radius at the base (m) |
+| `canopy_radius` | float | `1.8` | 0.4..8 |  |  | crown radius (m) |
+| `style` | enum | `"round"` |  | `round`, `conifer`, `poplar` |  | crown shape |
+| `seed` | int | `0` | 0..1000 |  |  | random seed (blob placement, rotation, tint) |
+
+### topotopo/props
+
+category: `package`
+
+TopoTopo's props kit, its 5 outputs side by side at their defaults.
+
+The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.
+topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
+The default output of package topotopo/props 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
+### topotopo/props/barrel
+
+category: `package`
+
+Wooden barrel: a bulged body of faceted staves with a recessed lid, and metal hoops.
+
+![topotopo/props/barrel](../library/props/thumbs/barrel.png)
+
+Pivot at the centre of the base, axis Y. Pieces: barrel_body (wood), barrel_hoops (metal_dark). Every piece is closed.
+topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
+Output "barrel" of package topotopo/props 1.0 (Barrel): it cooks node "out" of the package's graph "barrel"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `height` | float | `0.9` | 0.3..2.5 |  |  | height (m) |
+| `radius` | float | `0.28` | 0.1..1.2 |  |  | radius at the ends (m) |
+| `bulge` | float | `0.14` | 0..0.35 |  |  | extra radius at the middle, as a fraction of radius |
+| `staves` | int | `18` | 6..48 |  |  | number of staves (facets around) |
+| `hoops` | int | `4` | 0..8 |  |  | number of metal hoops |
+| `seed` | int | `0` | 0..1000 |  |  | random seed of the stave tint |
+
+### topotopo/props/crate
+
+category: `package`
+
+Wooden crate: plank walls with gaps on all six sides inside a frame of edge battens.
+
+![topotopo/props/crate](../library/props/thumbs/crate.png)
+
+Pivot at the centre of the base. Pieces: crate_planks (wood), crate_frame (wood_dark). Every piece is a closed box.
+topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
+Output "crate" of package topotopo/props 1.0 (Crate): it cooks node "out" of the package's graph "crate"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `1` | 0.3..3 |  |  | outer size along X (m) |
+| `height` | float | `0.8` | 0.3..3 |  |  | outer size along Y (m) |
+| `depth` | float | `0.8` | 0.3..3 |  |  | outer size along Z (m) |
+| `planks` | int | `4` | 2..10 |  |  | planks per face |
+| `frame_width` | float | `0.08` | 0.03..0.15 |  |  | edge batten width (m) |
+| `gap` | float | `0.01` | 0..0.03 |  |  | gap between planks (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed of the plank tint |
+
+### topotopo/props/pallet
+
+category: `package`
+
+Block pallet (EUR style): bottom boards, a 3 × 3 grid of blocks, cross boards and a top deck.
+
+![topotopo/props/pallet](../library/props/thumbs/pallet.png)
+
+Pivot at the centre of the base; deck boards run along X. Pieces: pallet_boards (wood_light), pallet_blocks (wood). Every piece is a closed box.
+topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
+Output "pallet" of package topotopo/props 1.0 (Pallet): it cooks node "out" of the package's graph "pallet"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `1.2` | 0.6..2.4 |  |  | size along X (m), the deck board direction |
+| `depth` | float | `0.8` | 0.5..2 |  |  | size along Z (m) |
+| `deck_boards` | int | `5` | 3..11 |  |  | top deck boards |
+| `board_thickness` | float | `0.022` | 0.015..0.05 |  |  | board thickness (m) |
+| `block_height` | float | `0.078` | 0.04..0.2 |  |  | height of the blocks between the board layers (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed of the board tint |
+
+### topotopo/props/pipe_run
+
+category: `package`
+
+Pipe run along a polyline (input 0; without one, a default run that turns and rises): corners rounded into elbows of bend_radius, flanges at both ends and every flange_spacing metres, and floor stands under horizontal stretches.
+
+![topotopo/props/pipe_run](../library/props/thumbs/pipe_run.png)
+
+Pivot = the curve (the default run starts at the origin, 0.5 m up). Pieces: pipe (pipe_paint), pipe_flanges (steel), pipe_supports (metal_dark). Every piece is closed.
+topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
+Output "pipe_run" of package topotopo/props 1.0 (Pipe run): it cooks node "out" of the package's graph "pipe_run"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | pipe centre line (polyline); optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `radius` | float | `0.08` | 0.01..0.6 |  |  | pipe radius (m) |
+| `bend_radius` | float | `0.35` | 0..3 |  |  | elbow radius at the corners (m); 0 = mitred corners |
+| `flange_spacing` | float | `2.5` | 0..20 |  |  | distance between flange joints (m); 0 = only at the ends |
+| `segments` | int | `14` | 4..48 |  |  | sides of the pipe section |
+| `supports` | bool | `true` |  |  |  | stands from y = 0 under horizontal stretches |
+| `support_spacing` | float | `3` | 0.5..20 |  |  | distance between stands (m) |
+
+### topotopo/props/sandbag_wall
+
+category: `package`
+
+Sandbag wall from x = 0 to x = wall_length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint.
+
+![topotopo/props/sandbag_wall](../library/props/thumbs/sandbag_wall.png)
+
+Pivot at the start of the wall, on the ground, centred in depth. Piece: sandbags (burlap). Every bag is closed.
+topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
+Output "sandbag_wall" of package topotopo/props 1.0 (Sandbag wall): it cooks node "out" of the package's graph "sandbag_wall"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `wall_length` | float | `3` | 0.6..15 |  |  | length along X (m) |
+| `rows` | int | `5` | 1..10 |  |  | number of rows |
+| `bag_length` | float | `0.6` | 0.3..1.2 |  |  | bag length (m) |
+| `bag_height` | float | `0.16` | 0.06..0.4 |  |  | bag height (m) |
+| `jitter` | float | `0.5` | 0..1 |  |  | random yaw and offset (0 = neat) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed |
+
+### topotopo/street
+
+category: `package`
+
+TopoTopo's street kit, its 7 outputs side by side at their defaults.
+
+The package's default output and its preview, from bench to sign_post along +X, 1 m apart.
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+The default output of package topotopo/street 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
+### topotopo/street/bench
+
+category: `package`
+
+Park bench along X: wooden seat slats and an optional reclined backrest on cast-iron side frames (two, or three on long benches).
+
+![topotopo/street/bench](../library/street/thumbs/bench.png)
+
+The seat faces +Z. Pivot at the centre of the base. Pieces: bench_slats (wood), bench_frames (metal_dark). Every piece is closed.
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+Output "bench" of package topotopo/street 1.0 (Bench): it cooks node "out" of the package's graph "bench"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `bench_length` | float | `1.8` | 0.6..5 |  |  | length along X (m) |
+| `seat_height` | float | `0.45` | 0.25..0.8 |  |  | seat height (m) |
+| `depth` | float | `0.45` | 0.25..0.8 |  |  | seat depth along Z (m) |
+| `slats` | int | `5` | 2..10 |  |  | seat slats |
+| `backrest` | bool | `true` |  |  |  | add the backrest |
+| `seed` | int | `0` | 0..1000 |  |  | random seed of the slat tint |
+
+### topotopo/street/bollard
+
+category: `package`
+
+Street bollard: a round post with a domed top or a square post with a pyramid cap, an optional reflective band and a base ring.
+
+![topotopo/street/bollard](../library/street/thumbs/bollard.png)
+
+Pivot at the centre of the base. Pieces: bollard_body (metal_dark), bollard_band (reflective). Every piece is closed.
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+Output "bollard" of package topotopo/street 1.0 (Bollard): it cooks node "out" of the package's graph "bollard"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `height` | float | `0.9` | 0.3..2 |  |  | height (m) |
+| `radius` | float | `0.1` | 0.03..0.4 |  |  | post radius (half width for square) (m) |
+| `style` | enum | `"round"` |  | `round`, `square` |  | post section |
+| `band` | bool | `true` |  |  |  | reflective band near the top |
+
+### topotopo/street/cable
+
+category: `package`
+
+Hanging cable between two points: a catenary that sags by `sag` below the straight line at mid-span, swept as a tube, with optional wooden poles (with a cross arm and insulators) standing on y = 0 under the ends.
+
+![topotopo/street/cable](../library/street/thumbs/cable.png)
+
+With the default end points the pivot is the foot of the first pole. Pieces: cable (rubber), cable_poles (wood_dark), cable_insulators (ceramic). Every piece is closed.
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+Output "cable" of package topotopo/street 1.0 (Cable): it cooks node "out" of the package's graph "cable"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `start` | vec3 | `[0,5,0]` |  |  |  | first end point (m) |
+| `end` | vec3 | `[10,4.6,0]` |  |  |  | second end point (m) |
+| `sag` | float | `0.8` | 0..10 |  |  | drop below the straight line at mid-span (m) |
+| `radius` | float | `0.015` | 0.003..0.2 |  |  | cable radius (m) |
+| `segments` | int | `32` | 2..200 |  |  | segments along the cable |
+| `poles` | bool | `true` |  |  |  | poles under both ends |
+
+### topotopo/street/fence
+
+category: `package`
+
+Fence along a curve (input 0; without one, a straight run of `run_length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails).
+
+![topotopo/street/fence](../library/street/thumbs/fence.png)
+
+Posts at even spacing including both ends. Sits on the curve (pivot = the curve). Pieces: fence_posts, fence_infill (paint_white, wood or wood_dark by style).
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+Output "fence" of package topotopo/street 1.0 (Fence): it cooks node "out" of the package's graph "fence"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | curve to follow (polyline); optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `run_length` | float | `6` | 0.5..40 |  |  | run length along +X when no curve is connected (m) |
+| `height` | float | `1.1` | 0.4..2.5 |  |  | fence height (m) |
+| `style` | enum | `"picket"` |  | `picket`, `plank`, `rail` |  | infill style |
+| `post_spacing` | float | `2` | 0.5..5 |  |  | maximum distance between posts (m) |
+| `picket_spacing` | float | `0.15` | 0.08..0.5 |  |  | picket style: distance between pickets (m) |
+| `seed` | int | `0` | 0..1000 |  |  | random seed of the board tint |
+
+### topotopo/street/lamp_post
+
+category: `package`
+
+Street lamp: a tapered pole on a flared base with 1–4 curved arms carrying shades and glowing glass (arms 0 = a lantern on top of the pole).
+
+![topotopo/street/lamp_post](../library/street/thumbs/lamp_post.png)
+
+The first arm points along +X. Pivot at the centre of the base. Pieces: lamp_pole, lamp_arms, lamp_heads (metal_dark), lamp_glass (lamp_glass, emissive). Every piece is closed.
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+Output "lamp_post" of package topotopo/street 1.0 (Lamp post): it cooks node "out" of the package's graph "lamp_post"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `height` | float | `4.5` | 1.5..12 |  |  | height of the lamp heads (m) |
+| `arm_length` | float | `1` | 0.2..4 |  |  | horizontal reach of each arm (m) |
+| `arms` | int | `1` | 0..4 |  |  | number of arms (0 = lantern on top) |
+| `pole_radius` | float | `0.07` | 0.03..0.3 |  |  | pole radius at the base (m) |
+| `lamp_size` | float | `0.4` | 0.15..1.2 |  |  | shade diameter (m) |
+
+### topotopo/street/road_strip
+
+category: `package`
+
+Road along a curve (input 0; without one, a gentle 24 m S-curve along X): an asphalt ribbon of `width` centred on the curve with solid white edge lines, dashed lane lines between `lanes` lanes, and kerbs with sidewalks on both sides.
+
+![topotopo/street/road_strip](../library/street/thumbs/road_strip.png)
+
+Follows the curve's height (drape the curve on a terrain first). Pivot = the curve. Pieces: road_surface (asphalt), road_markings (road_paint), road_kerbs (concrete), road_sidewalks (paving).
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+Output "road_strip" of package topotopo/street 1.0 (Road): it cooks node "out" of the package's graph "road_strip"; its params are that graph's vars.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `input0` | yes | no | road centre line (polyline); optional |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `width` | float | `7` | 2..30 |  |  | asphalt width (m) |
+| `lanes` | int | `2` | 1..8 |  |  | number of lanes (dashed lines between them) |
+| `edge_lines` | bool | `true` |  |  |  | solid lines 0.2 m inside both edges |
+| `dash_length` | float | `3` | 0.5..10 |  |  | length of the lane dashes (gaps are as long) (m) |
+| `kerb_height` | float | `0.15` | 0..0.4 |  |  | kerb height above the asphalt (m); 0 = no kerbs or sidewalks |
+| `sidewalk_width` | float | `2` | 0..8 |  |  | sidewalk width behind each kerb (m); 0 = none |
+
+### topotopo/street/sign_post
+
+category: `package`
+
+Street name sign: a post with a ball cap and a green blade (two crossed blades for a corner) carrying raised white lettering on both faces, scaled to fit.
+
+![topotopo/street/sign_post](../library/street/thumbs/sign_post.png)
+
+The first blade faces ±Z. Pivot at the centre of the base. Pieces: sign_post (galvanized), sign_panel (sign_green), sign_text (sign_white). Every piece is closed.
+topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
+Output "sign_post" of package topotopo/street 1.0 (Street sign): it cooks node "out" of the package's graph "sign_post"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `height` | float | `2.8` | 1..6 |  |  | post height (m) |
+| `panel_width` | float | `0.9` | 0.3..3 |  |  | blade width (m) |
+| `panel_height` | float | `0.22` | 0.08..1 |  |  | blade height (m) |
+| `text` | string | `"MAIN ST"` |  |  |  | lettering on the first blade |
+| `cross_text` | string | `"1ST AVE"` |  |  |  | lettering on the second blade (empty = one blade) |
+
 ## pcg nodes
 
 ### attribute_from_map
@@ -9886,966 +10994,6 @@ Unreal PCG: Self Pruning (overlap), Density Filter (density), Attribute Filter (
   "output": "p"
 }
 ```
-
-## shelf nodes
-
-Graph assets shipped in [shelf/](../shelf) and registered as node types on startup (see the README section
-"Shelf"). Their parameters are the assets' typed vars; their inputs are the graphs' `input` nodes. A workspace asset
-with the same name overrides one; `assets {action: "fork"}` copies one into the workspace to edit.
-
-### arch
-
-category: `shelf`
-
-Stone arch: a wall block with a round, pointed (equilateral gothic) or flat-topped opening cut by a 2D boolean and extruded, with impost blocks at the spring line and a keystone.
-
-![arch](../shelf/thumbs/arch.png)
-
-Pivot at the centre of the base (the opening is centred on x = 0, depth along Z). Pieces: arch (stone), arch_trim (stone_dark). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `2` | 0.4..10 |  |  | opening width (m) |
-| `height` | float | `3` | 0.5..15 |  |  | opening height at the apex (m) |
-| `thickness` | float | `0.5` | 0.1..3 |  |  | masonry around the opening (m) |
-| `depth` | float | `0.6` | 0.1..5 |  |  | depth along Z (m) |
-| `style` | enum | `"round"` |  | `round`, `pointed`, `flat` |  | shape of the opening's top |
-| `segments` | int | `16` | 4..64 |  |  | segments of the curved top |
-| `keystone` | bool | `true` |  |  |  | keystone at the apex and impost blocks at the spring line |
-
-### barrel
-
-category: `shelf`
-
-Wooden barrel: a bulged body of faceted staves with a recessed lid, and metal hoops.
-
-![barrel](../shelf/thumbs/barrel.png)
-
-Pivot at the centre of the base, axis Y. Pieces: barrel_body (wood), barrel_hoops (metal_dark). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `height` | float | `0.9` | 0.3..2.5 |  |  | height (m) |
-| `radius` | float | `0.28` | 0.1..1.2 |  |  | radius at the ends (m) |
-| `bulge` | float | `0.14` | 0..0.35 |  |  | extra radius at the middle, as a fraction of radius |
-| `staves` | int | `18` | 6..48 |  |  | number of staves (facets around) |
-| `hoops` | int | `4` | 0..8 |  |  | number of metal hoops |
-| `seed` | int | `0` | 0..1000 |  |  | random seed of the stave tint |
-
-### beam_truss
-
-category: `shelf`
-
-Planar truss in the XY plane: top and bottom chords, verticals and diagonals in Warren, Pratt or Howe layout, swept with a steel I-section or a square timber section.
-
-![beam_truss](../shelf/thumbs/beam_truss.png)
-
-Spans x = -span/2 … span/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `span` | float | `8` | 1..40 |  |  | span along X (m) |
-| `height` | float | `1.2` | 0.2..6 |  |  | depth of the truss, chord centre to chord centre (m) |
-| `panels` | int | `6` | 2..30 |  |  | panels along the span (even counts are symmetric) |
-| `member_size` | float | `0.12` | 0.03..0.6 |  |  | member section size (m) |
-| `layout` | enum | `"warren"` |  | `warren`, `pratt`, `howe` |  | web layout |
-| `steel` | bool | `true` |  |  |  | steel I-sections (false = square timber) |
-
-### bench
-
-category: `shelf`
-
-Park bench along X: wooden seat slats and an optional reclined backrest on cast-iron side frames (two, or three on long benches).
-
-![bench](../shelf/thumbs/bench.png)
-
-The seat faces +Z. Pivot at the centre of the base. Pieces: bench_slats (wood), bench_frames (metal_dark). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `bench_length` | float | `1.8` | 0.6..5 |  |  | length along X (m) |
-| `seat_height` | float | `0.45` | 0.25..0.8 |  |  | seat height (m) |
-| `depth` | float | `0.45` | 0.25..0.8 |  |  | seat depth along Z (m) |
-| `slats` | int | `5` | 2..10 |  |  | seat slats |
-| `backrest` | bool | `true` |  |  |  | add the backrest |
-| `seed` | int | `0` | 0..1000 |  |  | random seed of the slat tint |
-
-### bollard
-
-category: `shelf`
-
-Street bollard: a round post with a domed top or a square post with a pyramid cap, an optional reflective band and a base ring.
-
-![bollard](../shelf/thumbs/bollard.png)
-
-Pivot at the centre of the base. Pieces: bollard_body (metal_dark), bollard_band (reflective). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `height` | float | `0.9` | 0.3..2 |  |  | height (m) |
-| `radius` | float | `0.1` | 0.03..0.4 |  |  | post radius (half width for square) (m) |
-| `style` | enum | `"round"` |  | `round`, `square` |  | post section |
-| `band` | bool | `true` |  |  |  | reflective band near the top |
-
-### brick_wall
-
-category: `shelf`
-
-Brick wall from x = 0 to x = wall_length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core.
-
-![brick_wall](../shelf/thumbs/brick_wall.png)
-
-One wythe deep (headers are drawn as half bricks). Pivot at the start of the wall, on the ground, centred in thickness. Pieces: brick_wall_bricks (brick), brick_wall_mortar (mortar). Every piece is a closed box.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `wall_length` | float | `3` | 0.3..40 |  |  | length along X (m) |
-| `height` | float | `1.8` | 0.1..5 |  |  | height (m) |
-| `brick_length` | float | `0.215` | 0.1..0.5 |  |  | brick length (m); depth is half of it |
-| `brick_height` | float | `0.065` | 0.03..0.3 |  |  | brick height (m) |
-| `mortar` | float | `0.01` | 0.002..0.04 |  |  | joint width (m) |
-| `bond` | enum | `"running"` |  | `running`, `stack`, `english`, `flemish` |  | brick pattern |
-| `jitter` | float | `0.4` | 0..1 |  |  | random offset and yaw of each brick (0 = perfect) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### bush
-
-category: `shelf`
-
-Low-poly bush: overlapping faceted blobs, cut flat at the ground.
-
-![bush](../shelf/thumbs/bush.png)
-
-Pivot at the centre of the base. Piece: bush (foliage_dark). Open at the bottom.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `size` | float | `1.2` | 0.2..5 |  |  | width (m) |
-| `height` | float | `0.8` | 0.1..4 |  |  | approximate height (m) |
-| `blobs` | int | `6` | 1..16 |  |  | number of blobs |
-| `roughness` | float | `0.2` | 0..0.5 |  |  | blob displacement (fraction of the blob radius) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### cable
-
-category: `shelf`
-
-Hanging cable between two points: a catenary that sags by `sag` below the straight line at mid-span, swept as a tube, with optional wooden poles (with a cross arm and insulators) standing on y = 0 under the ends.
-
-![cable](../shelf/thumbs/cable.png)
-
-With the default end points the pivot is the foot of the first pole. Pieces: cable (rubber), cable_poles (wood_dark), cable_insulators (ceramic). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `start` | vec3 | `[0,5,0]` |  |  |  | first end point (m) |
-| `end` | vec3 | `[10,4.6,0]` |  |  |  | second end point (m) |
-| `sag` | float | `0.8` | 0..10 |  |  | drop below the straight line at mid-span (m) |
-| `radius` | float | `0.015` | 0.003..0.2 |  |  | cable radius (m) |
-| `segments` | int | `32` | 2..200 |  |  | segments along the cable |
-| `poles` | bool | `true` |  |  |  | poles under both ends |
-
-### cliff_block
-
-category: `shelf`
-
-Cliff block: a tall rock mass with ridged noise, horizontal strata ledges and banded colour, flat on the ground.
-
-![cliff_block](../shelf/thumbs/cliff_block.png)
-
-Pivot at the centre of the base. Piece: cliff (cliff_rock). Closed (watertight).
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `4` | 1..20 |  |  | size along X (m) |
-| `height` | float | `5` | 1..30 |  |  | height (m) |
-| `depth` | float | `3` | 1..20 |  |  | size along Z (m) |
-| `roughness` | float | `0.5` | 0..1 |  |  | noise and ledge strength (0 = smooth block) |
-| `strata` | int | `6` | 0..20 |  |  | number of strata ledges (0 = none) |
-| `seed` | int | `0` | 0..1000 |  |  | noise seed |
-
-### crate
-
-category: `shelf`
-
-Wooden crate: plank walls with gaps on all six sides inside a frame of edge battens.
-
-![crate](../shelf/thumbs/crate.png)
-
-Pivot at the centre of the base. Pieces: crate_planks (wood), crate_frame (wood_dark). Every piece is a closed box.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `1` | 0.3..3 |  |  | outer size along X (m) |
-| `height` | float | `0.8` | 0.3..3 |  |  | outer size along Y (m) |
-| `depth` | float | `0.8` | 0.3..3 |  |  | outer size along Z (m) |
-| `planks` | int | `4` | 2..10 |  |  | planks per face |
-| `frame_width` | float | `0.08` | 0.03..0.15 |  |  | edge batten width (m) |
-| `gap` | float | `0.01` | 0..0.03 |  |  | gap between planks (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed of the plank tint |
-
-### door_frame
-
-category: `shelf`
-
-Door for a wall opening: jambs and head that fill the opening (width × height), a panelled leaf hinged on the left (-X) that swings towards -Z by open_angle, and lever handles on both sides.
-
-![door_frame](../shelf/thumbs/door_frame.png)
-
-Pivot at the bottom centre of the opening, centred in depth. Pieces: door_frame (paint_white), door_leaf (door_paint), door_handle (brass). Every piece is a closed box.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `1` | 0.5..3 |  |  | opening width (m) |
-| `height` | float | `2.1` | 1.5..4 |  |  | opening height (m) |
-| `depth` | float | `0.16` | 0.06..0.6 |  |  | frame depth along Z (m) |
-| `frame_width` | float | `0.08` | 0.03..0.25 |  |  | jamb and head width (m) |
-| `panels` | int | `2` | 0..5 |  |  | raised panels on each face of the leaf |
-| `open_angle` | float | `0` | 0..110 |  |  | how far the leaf is open (degrees) |
-
-### fence
-
-category: `shelf`
-
-Fence along a curve (input 0; without one, a straight run of `run_length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails).
-
-![fence](../shelf/thumbs/fence.png)
-
-Posts at even spacing including both ends. Sits on the curve (pivot = the curve). Pieces: fence_posts, fence_infill (paint_white, wood or wood_dark by style).
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | curve to follow (polyline); optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `run_length` | float | `6` | 0.5..40 |  |  | run length along +X when no curve is connected (m) |
-| `height` | float | `1.1` | 0.4..2.5 |  |  | fence height (m) |
-| `style` | enum | `"picket"` |  | `picket`, `plank`, `rail` |  | infill style |
-| `post_spacing` | float | `2` | 0.5..5 |  |  | maximum distance between posts (m) |
-| `picket_spacing` | float | `0.15` | 0.08..0.5 |  |  | picket style: distance between pickets (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed of the board tint |
-
-### forest_patch
-
-category: `shelf`
-
-Forest on a surface (input 0; without one, a 30 × 30 m ground patch at y = 0): trees scattered by density with a minimum spacing on faces flatter than max_slope, kept upright with random yaw and height, as packed copies of three tree_lowpoly variants (conifer, round, poplar) picked by conifer_ratio, plus optional bushes between them.
-
-![forest_patch](../shelf/thumbs/forest_patch.png)
-
-Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Pieces: tree_trunk, tree_canopy, bush.
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | surface to plant on (polygons); optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `density` | float | `0.02` | 0.001..0.5 |  |  | trees per square metre before spacing |
-| `min_distance` | float | `3` | 0.5..20 |  |  | minimum distance between trees (m) |
-| `min_height` | float | `4` | 1..30 |  |  | smallest tree height (m) |
-| `max_height` | float | `9` | 1..40 |  |  | largest tree height (m) |
-| `conifer_ratio` | float | `0.5` | 0..1 |  |  | share of conifers; the rest is split between round and poplar trees |
-| `max_slope` | float | `30` | 0..90 |  |  | no trees on faces steeper than this (degrees) |
-| `bushes` | bool | `true` |  |  |  | scatter bushes (three times the tree density) |
-| `ground_size` | float | `30` | 2..200 |  |  | size of the ground patch used when nothing is connected (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### grass_clumps
-
-category: `shelf`
-
-Grass clumps on a surface (input 0; without one, a 4 × 4 m ground patch at y = 0): each clump is a fan of thin two-sided blades leaning outwards; clumps are scattered by density on faces flatter than max_slope and copied as packed instances of two variants with random yaw and size.
-
-![grass_clumps](../shelf/thumbs/grass_clumps.png)
-
-Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: grass (grass, double sided).
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | surface to grow on (polygons); optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `density` | float | `8` | 0.1..40 |  |  | clumps per square metre |
-| `height` | float | `0.35` | 0.05..2 |  |  | blade height (m) |
-| `blades` | int | `12` | 3..30 |  |  | blades per clump |
-| `spread` | float | `0.5` | 0..1.5 |  |  | how far the blades lean out (fraction of the height) |
-| `max_slope` | float | `45` | 0..90 |  |  | no grass on faces steeper than this (degrees) |
-| `ground_size` | float | `4` | 0.5..20 |  |  | size of the ground patch used when nothing is connected (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### hex_grid_floor
-
-category: `shelf`
-
-Hexagonal paving: flat-topped hexagonal prisms on a hex lattice filling a rectangle (tiles whose centre lies inside), with gaps and random height and tint.
-
-![hex_grid_floor](../shelf/thumbs/hex_grid_floor.png)
-
-Pivot at the centre of the base. Piece: hex_tiles (paving). Every tile is a closed prism.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `size_x` | float | `5` | 0.5..40 |  |  | area size along X (m) |
-| `size_z` | float | `5` | 0.5..40 |  |  | area size along Z (m) |
-| `radius` | float | `0.3` | 0.05..3 |  |  | hexagon circumradius including the gap (m) |
-| `gap` | float | `0.02` | 0..0.2 |  |  | gap between tiles (m) |
-| `height` | float | `0.08` | 0.01..1 |  |  | tile height (m) |
-| `height_jitter` | float | `0.015` | 0..0.5 |  |  | random height variation (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### house
-
-category: `shelf`
-
-House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_skeleton hip roof that follows the footprint exactly (straight skeleton: L-shapes, courtyards and any simple polygon get correct valleys and ridges).
-
-![house](../shelf/thumbs/house.png)
-
-Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are the shelf generators themselves, so editing wall_segment or roof_skeleton changes every house. Pivot: the footprint's origin on the ground. Pieces come from the child assets (wall, window_frame, door_frame, roof).
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | footprint: a closed polygon on the XZ plane (optional) |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `8` | 3..30 |  |  | default footprint along X (m), used when no footprint is connected |
-| `depth` | float | `6` | 3..30 |  |  | default footprint along Z (m) |
-| `floors` | int | `2` | 1..4 |  |  | number of floors (wall segments stacked) |
-| `floor_height` | float | `3` | 2.4..4.5 |  |  | height of one floor (m) |
-| `window_spacing` | float | `2.5` | 1.5..6 |  |  | one window per this length of wall (m) |
-| `pitch` | float | `32` | 5..65 |  |  | roof slope (degrees) |
-| `overhang` | float | `0.5` | 0..2 |  |  | eave overhang (m) |
-| `door` | bool | `true` |  |  |  | a door on the first footprint edge |
-
-### lamp_post
-
-category: `shelf`
-
-Street lamp: a tapered pole on a flared base with 1–4 curved arms carrying shades and glowing glass (arms 0 = a lantern on top of the pole).
-
-![lamp_post](../shelf/thumbs/lamp_post.png)
-
-The first arm points along +X. Pivot at the centre of the base. Pieces: lamp_pole, lamp_arms, lamp_heads (metal_dark), lamp_glass (lamp_glass, emissive). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `height` | float | `4.5` | 1.5..12 |  |  | height of the lamp heads (m) |
-| `arm_length` | float | `1` | 0.2..4 |  |  | horizontal reach of each arm (m) |
-| `arms` | int | `1` | 0..4 |  |  | number of arms (0 = lantern on top) |
-| `pole_radius` | float | `0.07` | 0.03..0.3 |  |  | pole radius at the base (m) |
-| `lamp_size` | float | `0.4` | 0.15..1.2 |  |  | shade diameter (m) |
-
-### log
-
-category: `shelf`
-
-Felled log lying along X: a tapered trunk with ridged bark, light end grain and a few branch stubs.
-
-![log](../shelf/thumbs/log.png)
-
-Pivot at the centre of the base (the log rests on y = 0). Pieces: log_trunk (bark, ends wood_end), log_stubs (bark). The trunk is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `log_length` | float | `2.4` | 0.4..8 |  |  | length along X (m) |
-| `radius` | float | `0.2` | 0.05..0.8 |  |  | radius at the thick end (m) |
-| `taper` | float | `0.2` | 0..0.6 |  |  | how much thinner the other end is (fraction of radius) |
-| `roughness` | float | `0.12` | 0..0.3 |  |  | bark displacement as a fraction of radius |
-| `stubs` | int | `3` | 0..10 |  |  | branch stubs |
-| `seed` | int | `0` | 0..1000 |  |  | random seed (bark noise, stubs) |
-
-### pallet
-
-category: `shelf`
-
-Block pallet (EUR style): bottom boards, a 3 × 3 grid of blocks, cross boards and a top deck.
-
-![pallet](../shelf/thumbs/pallet.png)
-
-Pivot at the centre of the base; deck boards run along X. Pieces: pallet_boards (wood_light), pallet_blocks (wood). Every piece is a closed box.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `1.2` | 0.6..2.4 |  |  | size along X (m), the deck board direction |
-| `depth` | float | `0.8` | 0.5..2 |  |  | size along Z (m) |
-| `deck_boards` | int | `5` | 3..11 |  |  | top deck boards |
-| `board_thickness` | float | `0.022` | 0.015..0.05 |  |  | board thickness (m) |
-| `block_height` | float | `0.078` | 0.04..0.2 |  |  | height of the blocks between the board layers (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed of the board tint |
-
-### pillar
-
-category: `shelf`
-
-Classical pillar: a round, fluted or square shaft with an optional plinth base and capital.
-
-![pillar](../shelf/thumbs/pillar.png)
-
-Pivot at the centre of the base. Pieces: pillar_shaft, pillar_base, pillar_capital (all stone_light). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `height` | float | `3` | 0.5..15 |  |  | total height (m) |
-| `radius` | float | `0.22` | 0.05..2 |  |  | shaft radius (half width for square) (m) |
-| `style` | enum | `"fluted"` |  | `round`, `fluted`, `square` |  | shaft section |
-| `flutes` | int | `16` | 6..32 |  |  | fluted style: number of flutes |
-| `base` | bool | `true` |  |  |  | plinth and torus at the foot |
-| `capital` | bool | `true` |  |  |  | echinus and abacus at the top |
-
-### pipe_run
-
-category: `shelf`
-
-Pipe run along a polyline (input 0; without one, a default run that turns and rises): corners rounded into elbows of bend_radius, flanges at both ends and every flange_spacing metres, and floor stands under horizontal stretches.
-
-![pipe_run](../shelf/thumbs/pipe_run.png)
-
-Pivot = the curve (the default run starts at the origin, 0.5 m up). Pieces: pipe (pipe_paint), pipe_flanges (steel), pipe_supports (metal_dark). Every piece is closed.
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | pipe centre line (polyline); optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `radius` | float | `0.08` | 0.01..0.6 |  |  | pipe radius (m) |
-| `bend_radius` | float | `0.35` | 0..3 |  |  | elbow radius at the corners (m); 0 = mitred corners |
-| `flange_spacing` | float | `2.5` | 0..20 |  |  | distance between flange joints (m); 0 = only at the ends |
-| `segments` | int | `14` | 4..48 |  |  | sides of the pipe section |
-| `supports` | bool | `true` |  |  |  | stands from y = 0 under horizontal stretches |
-| `support_spacing` | float | `3` | 0.5..20 |  |  | distance between stands (m) |
-
-### railing
-
-category: `shelf`
-
-Railing along a curve (input 0; without one, a straight run of `run_length` along +X from the origin): posts at even spacing including both ends, a handrail on top, lower rails and balusters.
-
-![railing](../shelf/thumbs/railing.png)
-
-Sits on the curve (pivot = the curve). Pieces: railing_posts, railing_rails, railing_balusters (all metal_dark).
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | curve to follow (polyline); optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `run_length` | float | `4` | 0.5..30 |  |  | run length along +X when no curve is connected (m) |
-| `height` | float | `1` | 0.4..2 |  |  | handrail height above the curve (m) |
-| `post_spacing` | float | `1.5` | 0.3..6 |  |  | maximum distance between posts (m) |
-| `baluster_spacing` | float | `0.15` | 0..1 |  |  | distance between balusters (m); 0 = none |
-| `rails` | int | `2` | 0..6 |  |  | horizontal rails below the handrail (the lowest at 0.1 m) |
-| `profile` | enum | `"round"` |  | `round`, `square` |  | tube or square section for posts and rails |
-
-### road_strip
-
-category: `shelf`
-
-Road along a curve (input 0; without one, a gentle 24 m S-curve along X): an asphalt ribbon of `width` centred on the curve with solid white edge lines, dashed lane lines between `lanes` lanes, and kerbs with sidewalks on both sides.
-
-![road_strip](../shelf/thumbs/road_strip.png)
-
-Follows the curve's height (drape the curve on a terrain first). Pivot = the curve. Pieces: road_surface (asphalt), road_markings (road_paint), road_kerbs (concrete), road_sidewalks (paving).
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | road centre line (polyline); optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `7` | 2..30 |  |  | asphalt width (m) |
-| `lanes` | int | `2` | 1..8 |  |  | number of lanes (dashed lines between them) |
-| `edge_lines` | bool | `true` |  |  |  | solid lines 0.2 m inside both edges |
-| `dash_length` | float | `3` | 0.5..10 |  |  | length of the lane dashes (gaps are as long) (m) |
-| `kerb_height` | float | `0.15` | 0..0.4 |  |  | kerb height above the asphalt (m); 0 = no kerbs or sidewalks |
-| `sidewalk_width` | float | `2` | 0..8 |  |  | sidewalk width behind each kerb (m); 0 = none |
-
-### rock
-
-category: `shelf`
-
-Low-poly rock: a noise-displaced icosphere, flattened, with faceted shading and a mottled tint.
-
-![rock](../shelf/thumbs/rock.png)
-
-Pivot at the centre of the base (sink lowers it into the ground). Piece: rock (rock). Closed (watertight).
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `size` | float | `1` | 0.1..6 |  |  | approximate width (m) |
-| `roughness` | float | `0.35` | 0..0.8 |  |  | displacement as a fraction of the size |
-| `flatness` | float | `0.65` | 0.2..1 |  |  | height / width |
-| `level` | int | `2` | 1..4 |  |  | icosphere subdivision level (2 = 162 points) |
-| `sink` | float | `0` | 0..0.5 |  |  | part of the height below y = 0 |
-| `seed` | int | `0` | 0..1000 |  |  | shape seed |
-
-### roof_gable
-
-category: `shelf`
-
-Gable roof for a width × depth footprint: two pitched slabs meeting at a ridge along X with a ridge cap, overhanging eaves and verges, and optional triangular gable walls under it.
-
-![roof_gable](../shelf/thumbs/roof_gable.png)
-
-Pivot at the centre of the wall-top plane (put it on top of the walls); the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on top, wood_dark on edges and underside), roof_ridge (roof_tiles), roof_gables (plaster). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `8` | 1..40 |  |  | footprint along X, the ridge direction (m) |
-| `depth` | float | `6` | 1..30 |  |  | footprint along Z, the span (m) |
-| `pitch` | float | `35` | 5..65 |  |  | roof slope (degrees) |
-| `overhang` | float | `0.4` | 0..2 |  |  | eave and verge overhang beyond the footprint (m) |
-| `thickness` | float | `0.18` | 0.03..0.6 |  |  | slab thickness (m) |
-| `gable_walls` | bool | `true` |  |  |  | fill the gable triangles under the roof with wall |
-
-### roof_hip
-
-category: `shelf`
-
-Hip roof for a width × depth footprint: four slopes at the same pitch meeting at a ridge along the longer side (a pyramid on a square), a fascia band and a flat soffit under overhanging eaves, and a ridge cap.
-
-![roof_hip](../shelf/thumbs/roof_hip.png)
-
-Built as one closed solid (the attic is filled); there is no straight skeleton node yet, so footprints are rectangles. Pivot at the centre of the wall-top plane; the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on the slopes, wood_dark fascia and soffit), roof_ridge (roof_tiles). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `8` | 1..40 |  |  | footprint along X (m) |
-| `depth` | float | `6` | 1..40 |  |  | footprint along Z (m) |
-| `pitch` | float | `30` | 5..65 |  |  | roof slope (degrees) |
-| `overhang` | float | `0.5` | 0..2 |  |  | eave overhang beyond the footprint (m) |
-| `thickness` | float | `0.2` | 0.03..0.6 |  |  | fascia height measured square to the slope (m) |
-
-### roof_skeleton
-
-category: `shelf`
-
-Straight-skeleton hip roof from an optional XZ footprint, including concave outlines and courtyard holes.
-
-![roof_skeleton](../shelf/thumbs/roof_skeleton.png)
-
-Without input it uses a width by depth rectangle. Negative offset distance adds the overhang before the roof is built; a connected extrusion gives the roof shell thickness along averaged vertex normals. Pivot is the wall-top plane. Every face carries the source contour edge as edge; the roof is one closed shell per connected footprint.
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | footprint: closed XZ polygons, optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `8` | 1..40 |  |  | default footprint width along X (m) |
-| `depth` | float | `6` | 1..40 |  |  | default footprint depth along Z (m) |
-| `pitch` | float | `32` | 5..65 |  |  | roof face slope (degrees) |
-| `overhang` | float | `0.4` | 0..2 |  |  | outward footprint offset before roofing (m) |
-| `thickness` | float | `0.16` | 0.03..0.6 |  |  | shell extrusion along averaged vertex normals (m) |
-
-### sandbag_wall
-
-category: `shelf`
-
-Sandbag wall from x = 0 to x = wall_length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint.
-
-![sandbag_wall](../shelf/thumbs/sandbag_wall.png)
-
-Pivot at the start of the wall, on the ground, centred in depth. Piece: sandbags (burlap). Every bag is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `wall_length` | float | `3` | 0.6..15 |  |  | length along X (m) |
-| `rows` | int | `5` | 1..10 |  |  | number of rows |
-| `bag_length` | float | `0.6` | 0.3..1.2 |  |  | bag length (m) |
-| `bag_height` | float | `0.16` | 0.06..0.4 |  |  | bag height (m) |
-| `jitter` | float | `0.5` | 0..1 |  |  | random yaw and offset (0 = neat) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### scaffold
-
-category: `shelf`
-
-Tube-and-fitting scaffold: standards (verticals) on base plates, ledgers along X and transoms along Z at every lift, zig-zag face braces on the front (+Z), board decks on the lifts and guard rails at the top.
-
-![scaffold](../shelf/thumbs/scaffold.png)
-
-Runs along +X from x = 0. Pivot at the start, on the ground, centred in depth. Pieces: scaffold_tubes (galvanized), scaffold_boards (wood_light), scaffold_plates (metal_dark). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `bays` | int | `3` | 1..12 |  |  | bays along X |
-| `lifts` | int | `3` | 1..10 |  |  | lifts (levels) |
-| `bay_width` | float | `2.1` | 0.8..3.5 |  |  | bay width along X (m) |
-| `lift_height` | float | `2` | 1.2..3 |  |  | height of one lift (m) |
-| `depth` | float | `1.2` | 0.6..2.5 |  |  | distance between the front and back standards (m) |
-| `boards` | bool | `true` |  |  |  | board decks on every lift |
-| `braces` | bool | `true` |  |  |  | diagonal braces on the front face |
-
-### scatter_rocks
-
-category: `shelf`
-
-Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (the shelf rock asset) sunk slightly into the ground.
-
-![scatter_rocks](../shelf/thumbs/scatter_rocks.png)
-
-Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).
-
-**Inputs**
-
-| # | name | optional | multi | description |
-|---|---|---|---|---|
-| 0 | `input0` | yes | no | surface to scatter on (polygons); optional |
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `density` | float | `0.4` | 0.01..5 |  |  | rocks per square metre before pruning |
-| `min_scale` | float | `0.35` | 0.05..5 |  |  | smallest rock width (m) |
-| `max_scale` | float | `1.1` | 0.05..8 |  |  | largest rock width (m) |
-| `max_slope` | float | `40` | 0..90 |  |  | no rocks on faces steeper than this (degrees) |
-| `ground_size` | float | `8` | 1..60 |  |  | size of the ground patch used when nothing is connected (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### sign_post
-
-category: `shelf`
-
-Street name sign: a post with a ball cap and a green blade (two crossed blades for a corner) carrying raised white lettering on both faces, scaled to fit.
-
-![sign_post](../shelf/thumbs/sign_post.png)
-
-The first blade faces ±Z. Pivot at the centre of the base. Pieces: sign_post (galvanized), sign_panel (sign_green), sign_text (sign_white). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `height` | float | `2.8` | 1..6 |  |  | post height (m) |
-| `panel_width` | float | `0.9` | 0.3..3 |  |  | blade width (m) |
-| `panel_height` | float | `0.22` | 0.08..1 |  |  | blade height (m) |
-| `text` | string | `"MAIN ST"` |  |  |  | lettering on the first blade |
-| `cross_text` | string | `"1ST AVE"` |  |  |  | lettering on the second blade (empty = one blade) |
-
-### spiral_stairs
-
-category: `shelf`
-
-Spiral staircase: wedge treads turning counter-clockwise (seen from above) around a central column, with an optional helical handrail on posts.
-
-![spiral_stairs](../shelf/thumbs/spiral_stairs.png)
-
-Pivot at the foot of the column. Pieces: spiral_treads (wood), spiral_column (metal_dark), spiral_railing (metal_dark). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `steps` | int | `16` | 2..60 |  |  | number of treads |
-| `rise` | float | `0.2` | 0.1..0.3 |  |  | height of one step (m) |
-| `turn` | float | `22.5` | 10..45 |  |  | rotation per step (degrees) |
-| `radius` | float | `1.1` | 0.5..4 |  |  | outer radius (m) |
-| `column_radius` | float | `0.1` | 0.03..0.5 |  |  | column radius (m) |
-| `railing` | bool | `true` |  |  |  | handrail along the outer edge |
-
-### stairs
-
-category: `shelf`
-
-Straight stairs climbing along +Z: a solid concrete flight (one watertight sawtooth solid) or open wooden treads between two stringers, with optional handrails on both sides.
-
-![stairs](../shelf/thumbs/stairs.png)
-
-Pivot at the bottom of the first step, centred in width. Pieces: stairs_flight (concrete) or stairs_treads (wood) + stairs_stringers (wood_dark), stairs_railing (metal_dark).
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `steps` | int | `12` | 1..40 |  |  | number of steps |
-| `rise` | float | `0.18` | 0.08..0.3 |  |  | height of one step (m) |
-| `run` | float | `0.28` | 0.15..0.5 |  |  | depth of one step (m) |
-| `width` | float | `1.2` | 0.5..5 |  |  | width along X (m) |
-| `style` | enum | `"solid"` |  | `solid`, `open` |  | solid concrete flight or open treads on stringers |
-| `railing` | bool | `true` |  |  |  | handrails with posts on both sides |
-
-### tile_floor
-
-category: `shelf`
-
-Tiled floor: square tiles in a grid, offset (half-tile) or checker pattern with grout gaps, random height and tint, cut to the floor edges, on a grout bed.
-
-![tile_floor](../shelf/thumbs/tile_floor.png)
-
-Pivot at the centre of the base; the tile tops are at the bed thickness + tile thickness. Pieces: tile_floor_tiles (tile_light; tile_dark for the checker's dark squares), tile_floor_grout (grout). Every piece is a closed box.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `size_x` | float | `4` | 0.2..30 |  |  | floor size along X (m) |
-| `size_z` | float | `4` | 0.2..30 |  |  | floor size along Z (m) |
-| `tile_size` | float | `0.5` | 0.1..2 |  |  | tile edge length including the gap (m) |
-| `gap` | float | `0.012` | 0..0.08 |  |  | grout gap (m) |
-| `thickness` | float | `0.02` | 0.005..0.1 |  |  | tile thickness (m) |
-| `pattern` | enum | `"checker"` |  | `grid`, `offset`, `checker` |  | tile layout |
-| `height_jitter` | float | `0.002` | 0..0.02 |  |  | random tile height variation (m) |
-| `seed` | int | `0` | 0..1000 |  |  | random seed |
-
-### tree_lowpoly
-
-category: `shelf`
-
-Low-poly tree in three styles: round (a cluster of faceted blobs), conifer (stacked cones) and poplar (a tall narrow crown).
-
-![tree_lowpoly](../shelf/thumbs/tree_lowpoly.png)
-
-Pivot at the base of the trunk. Pieces: tree_trunk (bark), tree_canopy (foliage, or foliage_dark for conifers). Every piece is closed.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `height` | float | `6` | 1.5..25 |  |  | total height (m) |
-| `trunk_radius` | float | `0.18` | 0.04..1 |  |  | trunk radius at the base (m) |
-| `canopy_radius` | float | `1.8` | 0.4..8 |  |  | crown radius (m) |
-| `style` | enum | `"round"` |  | `round`, `conifer`, `poplar` |  | crown shape |
-| `seed` | int | `0` | 0..1000 |  |  | random seed (blob placement, rotation, tint) |
-
-### wall_segment
-
-category: `shelf`
-
-Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with the window_frame and door_frame shelf assets.
-
-![wall_segment](../shelf/thumbs/wall_segment.png)
-
-The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `wall_length` | float | `4` | 0.5..60 |  |  | length along X (m) |
-| `height` | float | `3` | 1..10 |  |  | height (m) |
-| `thickness` | float | `0.25` | 0.05..1 |  |  | thickness along Z (m) |
-| `windows` | int | `2` | 0..24 |  |  | number of window openings |
-| `window_width` | float | `1` | 0.3..4 |  |  | window opening width (m), clamped to fit the bay |
-| `window_height` | float | `1.3` | 0.3..4 |  |  | window opening height (m), clamped to fit under the top |
-| `sill_height` | float | `0.9` | 0..3 |  |  | height of the window openings above the ground (m) |
-| `door` | bool | `false` |  |  |  | add a 1.0 × 2.1 m door in the middle bay |
-| `frames` | bool | `true` |  |  |  | fill the openings with window_frame / door_frame |
-
-### window_frame
-
-category: `shelf`
-
-Window for a wall opening: a frame that fills the opening (width × height), mullions, a glass pane and a stone sill that sticks out at the front (+Z).
-
-![window_frame](../shelf/thumbs/window_frame.png)
-
-Pivot at the bottom centre of the opening, centred in depth. Pieces: window_frame (paint_white), window_glass (glass), window_sill (stone). Every piece is a closed box.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-| name | type | default | min..max | options | aliases | description |
-|---|---|---|---|---|---|---|
-| `width` | float | `1` | 0.3..4 |  |  | opening width (m) |
-| `height` | float | `1.3` | 0.3..4 |  |  | opening height (m) |
-| `depth` | float | `0.12` | 0.04..0.5 |  |  | frame depth along Z (m) |
-| `frame_width` | float | `0.07` | 0.02..0.25 |  |  | frame member width (m) |
-| `mullions_x` | int | `1` | 0..6 |  |  | vertical glazing bars |
-| `mullions_y` | int | `1` | 0..6 |  |  | horizontal glazing bars |
-| `sill` | bool | `true` |  |  |  | add a sill below the opening |
-| `sill_depth` | float | `0.08` | 0..0.5 |  |  | how far the sill reaches in front of the frame (m) |
 
 ## sim nodes
 
@@ -11479,7 +11627,7 @@ Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping 
 {
   "nodes": {
     "crate": {
-      "type": "crate"
+      "type": "topotopo/props/crate"
     },
     "uv": {
       "type": "uv_unwrap",
@@ -11698,7 +11846,7 @@ Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 
 {
   "nodes": {
     "crate": {
-      "type": "crate"
+      "type": "topotopo/props/crate"
     },
     "uv": {
       "type": "uv_unwrap",
@@ -11894,7 +12042,7 @@ Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwra
 {
   "nodes": {
     "crate": {
-      "type": "crate"
+      "type": "topotopo/props/crate"
     },
     "uv": {
       "type": "uv_unwrap",

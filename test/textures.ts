@@ -30,6 +30,7 @@ import { renderArgs } from '../src/render/options.ts';
 import { summarize } from '../src/inspect.ts';
 import { explainGeometry } from '../src/explain.ts';
 import { fingerprint } from './fingerprint.ts';
+import { useKits } from './fixtures.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
 const require = createRequire(import.meta.url);
@@ -38,6 +39,8 @@ const validator = require('gltf-validator');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-tex-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
+// the crate is TopoTopo's own (topotopo/props/crate)
+useKits(engine, path.join(tmp, 'kits'));
 
 let fail = 0, pass = 0;
 const check = (ok: boolean, msg: string) => {
@@ -293,7 +296,7 @@ const UVBOX = { b: { type: 'box', params: { divisions: [2, 2, 2] } }, uv: { type
   const meanIn = mean(ain.layer('C')!, 1, 0, (i) => m[i] > 0);
   check(meanIn < 0.05, `AO of a box interior (reversed faces) is dark (mean ${f3(meanIn)})`);
   check(inside.stats.rays > 0 && inside.stats.texels > 0, `bake stats: ${inside.stats.texels} texels, ${inside.stats.rays} rays`);
-  const crateAO = await image({ c: { type: 'crate' }, uv: { type: 'uv_unwrap', in: ['c'], params: { resolution: 128 } }, ao: { type: 'bake_ao', in: ['uv'], params: { resolution: 128, samples: 16, max_distance: 0.2 } } }, 'ao');
+  const crateAO = await image({ c: { type: 'topotopo/props/crate' }, uv: { type: 'uv_unwrap', in: ['c'], params: { resolution: 128 } }, ao: { type: 'bake_ao', in: ['uv'], params: { resolution: 128, samples: 16, max_distance: 0.2 } } }, 'ao');
   const cm = crateAO.layer('mask')!, cv = crateAO.layer('C')!;
   let lo = 0, hi = 0;
   for (let i = 0; i < cv.length; i++) if (cm[i] > 0) { if (cv[i] < 0.5) lo++; if (cv[i] > 0.95) hi++; }

@@ -13,6 +13,10 @@ Thanks for your interest. A few things to know before you start.
   `npm run test:update` for its golden, add behavioural checks to the matching `test/*.ts`, and run `npm run docs`.
 - **Keep the core host-agnostic.** `src/core`, `src/graph` and `src/nodes` must not import Node APIs. Cooked geometry
   is immutable: `clone()` before writing. Y-up, metres, degrees, Houdini attribute names.
+- **TopoTopo's own packages are versioned.** A kit in `library/<kit>/` is a package project: change its graphs, run
+  `npm run kits` (line-ups, thumbnails, the README table), then publish the change as the kit's next version with
+  `npm run kits -- --publish <kit> --note "what changed"`, which numbers it as for any package. `npm test` fails while a
+  kit's working folder differs from its newest version: a change reaches projects only as a new version they update to.
 - **Licences.** Dependencies that ship must be permissive: MIT, Apache-2.0, BSD, ISC, MPL-2.0, Unicode-3.0, Zlib, 0BSD, Unlicense or CC0. No GPL or AGPL anywhere in the tree. LGPL is tolerated only for optional native modules that our code never calls and that load dynamically if present (today: sharp/libvips, an optional dependency of gltf-transform); `npm run notice` lists them and flags anything outside this list.
   Run `npm run notice` after adding one so `NOTICE` carries its licence text; after a change to the Rust crates of
   `kernels/` (Cargo.lock) it needs `cargo`. `npm test` checks NOTICE without Rust.
@@ -33,7 +37,8 @@ generated files byte-identical on every OS (`test/portability.ts` checks what it
 
 Development needs no build: Node runs `src/*.ts` directly. Only the npm package is compiled (`npm run build` writes
 `dist/`, and `npm pack` / `npm publish` run it through `prepack`). Code that finds files relative to its own module
-(the shelf, fonts, kernels, the worker entry, the viewer page) must work from `src/` and from `dist/`, which mirrors it.
+(the built-in library, fonts, kernels, the worker entry, the viewer page) must work from `src/` and from `dist/`, which
+mirrors it.
 
 ## Before a release
 
@@ -43,7 +48,7 @@ npm test
 npm run notice       # NOTICE for the current npm and Rust dependencies (Rust needs cargo), then commit it
 npm run pack:test    # builds and packs the tarball, installs it in a temp project, runs the CLI, library and MCP server
 npm pack --dry-run   # the file list that will be published
-npm run site         # the documentation site (https://topotopo.dev) into site/, from the README, registry, shelf, examples and docs
+npm run site         # the documentation site (https://topotopo.dev) into site/, from the README, registry, TopoTopo's own packages, examples and docs
 npm run site:check   # fails on broken internal links or anchors, missing images, unused files or a site over 25 MB
 ```
 

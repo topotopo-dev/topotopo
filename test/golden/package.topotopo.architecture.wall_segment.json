@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [4, 3, 0.175],
+      "min": [0, 0, -0.125]
+    },
+    "counts": {
+      "points": 152,
+      "prims": 148,
+      "vertices": 540,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "7762e8bd09d5f7af",
+      "attributes": {
+        "detail.materials": "170cb3d1fd617147",
+        "prim.Cd": "0091ee9d2e45a417",
+        "prim.material": "9139d68de5daae17",
+        "prim.name": "180ecadd3d56ce57",
+        "vertex.uv": "b9de7dbd641ad79f"
+      },
+      "topology": "15067e9b3c4ce9f1"
+    }
+  },
+  "name": "package.topotopo.architecture.wall_segment",
+  "ok": true,
+  "source": "topotopo/architecture/wall_segment at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

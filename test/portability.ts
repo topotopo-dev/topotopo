@@ -7,7 +7,7 @@
 //   such locales and must still match the committed files.
 // - Case: the files package.json names (scripts, bin, main, files) exist with exactly that spelling; Windows and macOS
 //   file systems ignore case, Linux does not.
-// - Symlinked checkout: the scripts that are both a library and a command (gen-docs, gen-shelf, check-site) still run
+// - Symlinked checkout: the scripts that are both a library and a command (gen-docs, gen-kits, check-site) still run
 //   their command when started through a symlinked path (a junction on Windows); a check that silently does nothing
 //   would pass.
 // - Line endings: .gitattributes keeps checkouts LF on Windows too, and the bin's shebang line is exact (a CRLF one
@@ -86,14 +86,14 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-port-'));
 try {
   const link = path.join(tmp, 'checkout');
   fs.symlinkSync(ROOT, link, process.platform === 'win32' ? 'junction' : 'dir');
-  const [site, docs, shelf] = await Promise.all([
+  const [site, docs, kits] = await Promise.all([
     run(path.join(link, 'scripts', 'check-site.ts'), [path.join(tmp, 'no-site')], process.env, tmp),
     run(path.join(link, 'scripts', 'gen-docs.ts'), ['--check'], process.env, tmp),
-    run(path.join(link, 'scripts', 'gen-shelf.ts'), ['--check'], process.env, tmp),
+    run(path.join(link, 'scripts', 'gen-kits.ts'), ['--check'], process.env, tmp),
   ]);
   check(site.code === 1 && /does not exist/.test(site.out), `check-site through a symlinked path reports a missing site (exit ${site.code}: ${site.out.trim().split('\n')[0] || 'no output'})`);
   check(docs.code === 0 && /docs\/nodes\.md is up to date/.test(docs.out), `gen-docs --check through a symlinked path runs its check (${docs.out.trim() || 'no output'})`);
-  check(shelf.code === 0 && /^shelf: /m.test(shelf.out), `gen-shelf --check through a symlinked path runs its check (${shelf.out.trim().split('\n').pop() || 'no output'})`);
+  check(kits.code === 0 && /^kits: /m.test(kits.out), `gen-kits --check through a symlinked path runs its check (${kits.out.trim().split('\n').pop() || 'no output'})`);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

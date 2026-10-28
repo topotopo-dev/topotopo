@@ -548,7 +548,8 @@ tested on the regression corpus, not an exhaustive operating-system/compiler mat
 Run `node test/remeshquad.ts`, `node bench/remeshquad.ts` and
 `cargo bench --manifest-path kernels/Cargo.toml --bench remesh_quad`.
 Inspect `examples/renders/quad_remesh.png`: gray inputs and colored results for a
-noisy sphere, bevelled box, shelf rock and capped tube, with every polygon edge visible.
+noisy sphere, bevelled box, rock (topotopo/nature/rock) and capped tube, with every
+polygon edge visible.
 
 ## Sampled SDF grids
 

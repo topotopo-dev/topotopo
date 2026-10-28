@@ -152,6 +152,15 @@ export function filesHash(files: { rel: string; sha: string }[]): string {
   return sha([...files].sort(byRel).map((f) => `${f.sha}  ${f.rel}\n`).join(''));
 }
 
+/**
+ * The hash a version published from the project folder `dir` now would have, which tells whether a working folder
+ * differs from its versions (its files are re-read only when they change).
+ */
+export function workingHash(dir: string): string {
+  const m = readManifest(dir), lock = readLock(dir);
+  return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? sha(f.bytes) : fileSha(f.abs!, true) })));
+}
+
 /** The hash of a version folder as published: every file but its version.json. */
 export function versionHash(dir: string, cached = false): string {
   return filesHash(filesBelow(dir).filter((f) => f.rel !== 'version.json').map((f) => ({ rel: f.rel, sha: fileSha(f.abs, cached) })));
@@ -735,7 +744,7 @@ export class ProjectPackages implements WorkspacePackages {
     this.loading.add(key);
     let r: Loaded | PackageIssue;
     try {
-      this.selfStamp ||= this.stampOf(this.dir!);
+      this.selfStamp ||= workingHash(this.dir!);
       // its outputs may use the packages this session follows: their results are keyed by those folders too
       const signature = sha(`${this.selfStamp}|${this.joint}`);
       const ctx: Context = { label: key, uses: this.root.uses, packages: this.root.packages, lock: this.root.lock, follows: true };
@@ -1007,17 +1016,11 @@ export class ProjectPackages implements WorkspacePackages {
     return `following ${pkg} for this session: its working folder ${w.dir} (${libraryText(w.library)}) instead of ${v ? `the copy of ${v}` : 'a copy (the project does not use it yet)'}; its edits re-cook, exports record it, and publishing this project is refused while it lasts`;
   }
 
-  /** The hash a version published from a working folder now would have (its files are re-read only when they change). */
-  private stampOf(dir: string): string {
-    const m = readManifest(dir), lock = readLock(dir);
-    return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? sha(f.bytes) : fileSha(f.abs!, true) })));
-  }
-
   private restamp(): boolean {
     let changed = false;
     for (const f of this.followed.values()) {
       let s: string;
-      try { s = this.stampOf(f.dir); } catch (e: any) { s = `unreadable: ${e.message}`; }
+      try { s = workingHash(f.dir); } catch (e: any) { s = `unreadable: ${e.message}`; }
       if (s !== f.stamp) { f.stamp = s; changed = true; }
     }
     const joint = this.followed.size ? sha([...this.followed.values()].map((f) => `${f.package} ${f.stamp}\n`).sort().join('')) : '';
@@ -1030,7 +1033,7 @@ export class ProjectPackages implements WorkspacePackages {
   private restampSelf(): boolean {
     if (!this.selfStamp || !this.dir) return false;
     let s: string;
-    try { s = this.stampOf(this.dir); } catch (e: any) { s = `unreadable: ${e.message}`; }
+    try { s = workingHash(this.dir); } catch (e: any) { s = `unreadable: ${e.message}`; }
     if (s === this.selfStamp) return false;
     this.selfStamp = s;
     this.selfLoaded = null;
