@@ -445,8 +445,9 @@ export function diffGeometry(a: Geometry, b: Geometry, labels: [string, string] 
 export const DIFF_COLORS = { same: [0.72, 0.72, 0.72], b: [0.2, 0.5, 1.0], a: [1.0, 0.5, 0.12] };
 
 /**
- * One geometry for the renderer: b first (grey where it lies on a, blue where it moved or is new), then a in
- * orange. Coincident surfaces resolve to b (drawn first), so grey = unchanged, blue = only b, orange = only a.
+ * One geometry for the renderer: b (grey where it lies on a, blue where it moved or is new), and in orange the polygons
+ * of a that do not lie on b. Those that do are left out, b's grey stands for both there: two coincident surfaces mix
+ * their colours in the renderer. So grey = unchanged, blue = only b, orange = only a.
  */
 export function diffOverlay(a: Geometry, b: Geometry): Geometry {
   const strip = (g: Geometry) => {
@@ -454,7 +455,8 @@ export function diffOverlay(a: Geometry, b: Geometry): Geometry {
     for (const cls of ['point', 'vertex', 'prim', 'detail'] as AttribClass[]) c.table(cls).delete('Cd');
     return c;
   };
-  const A = strip(a), B = strip(b);
+  let A = strip(a);
+  const B = strip(b);
   const qa = a.numPoints ? new SurfaceQuery(a) : null;
   const tol = 1e-3 * Math.max(bboxDiagonal(a), bboxDiagonal(b), 1e-9);
   const cB = B.points.add('Cd', 'float', 3).data as Float64Array, out = newNearest(), P = B.P;
@@ -462,6 +464,25 @@ export function diffOverlay(a: Geometry, b: Geometry): Geometry {
     const same = qa && qa.nearest(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], tol, out);
     const c = same ? DIFF_COLORS.same : DIFF_COLORS.b;
     cB[i * 3] = c[0]; cB[i * 3 + 1] = c[1]; cB[i * 3 + 2] = c[2];
+  }
+  if (b.numPoints && A.numPrims && !A.primKind) {
+    // a polygon lies on b when its corners and its centre do
+    const qb = new SurfaceQuery(b), PA = A.P, on = new Uint8Array(A.numPoints);
+    for (let i = 0; i < A.numPoints; i++) on[i] = qb.nearest(PA[i * 3], PA[i * 3 + 1], PA[i * 3 + 2], tol, out) ? 1 : 0;
+    const keep = new Uint8Array(A.numPrims), c = [0, 0, 0];
+    let kept = 0;
+    for (let p = 0; p < A.numPrims; p++) {
+      const s = A.primStart[p], e = A.primStart[p + 1];
+      let off = false;
+      c[0] = c[1] = c[2] = 0;
+      for (let v = s; v < e; v++) {
+        const i = A.vertexPoint[v];
+        if (!on[i]) { off = true; break; }
+        c[0] += PA[i * 3]; c[1] += PA[i * 3 + 1]; c[2] += PA[i * 3 + 2];
+      }
+      if (off || (e > s && !qb.nearest(c[0] / (e - s), c[1] / (e - s), c[2] / (e - s), tol, out))) { keep[p] = 1; kept++; }
+    }
+    if (kept < A.numPrims) A = A.subsetPrims(keep);
   }
   const cA = A.points.add('Cd', 'float', 3).data as Float64Array;
   for (let i = 0; i < A.numPoints; i++) { cA[i * 3] = DIFF_COLORS.a[0]; cA[i * 3 + 1] = DIFF_COLORS.a[1]; cA[i * 3 + 2] = DIFF_COLORS.a[2]; }

@@ -3,7 +3,7 @@
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { diffGeometry, explainGeometry } from '../src/explain.ts';
+import { DIFF_COLORS, diffGeometry, diffOverlay, explainGeometry } from '../src/explain.ts';
 import { RayScene, pieceReport, selfIntersections, symmetricEigen3 } from '../src/core/analysis.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
@@ -248,6 +248,12 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   const colored = await geo({ b: { type: 'box' }, c: { type: 'color', in: ['b'], params: { color: 'red' } }, g: { type: 'group', in: ['c'], params: { name: 'top', expr: '@P.y>0' } } }, 'g');
   const dc = diffGeometry(box, colored);
   check(/\+ point Cd f3/.test(dc.text) && /\+ prim top \(1\)/.test(dc.text) && /only attributes\/groups differ/.test(dc.text), 'diff: attribute and group changes');
+  // the overlay: b grey where it lies on a and blue elsewhere, the polygons of a that do not lie on b orange; those that
+  // do are left out, so a surface both share is one grey surface
+  const so = diffOverlay(box, box), sc = so.points.get('Cd')!.data as Float64Array;
+  check(so.numPrims === box.numPrims && Array.from(sc).every((x, i) => x === DIFF_COLORS.same[i % 3]), `diff overlay of the same geometry: one grey copy (${so.numPrims} prims)`);
+  const mo = diffOverlay(box, scaled);
+  check(mo.numPrims === box.numPrims + 2, `diff overlay of a box stretched in x: b, and the two sides of a that do not lie on b (${mo.numPrims} prims)`);
   // volumes: images and heightfields compared sample by sample, so a changed texture is never "no change"
   const noise = (seed: number) => geo({ t: { type: 'tex_noise', params: { resolution: 32, seed } } });
   const n1 = await noise(1), n2 = await noise(2);
