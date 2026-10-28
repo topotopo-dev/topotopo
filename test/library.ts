@@ -1,12 +1,13 @@
 // Gallery libraries (src/gallery/library.ts, bake.ts): the config, scanning a library (projects, collections, what a
-// scan skips, id collisions), project.json validation, creating projects, the bake key, and baking previews (a valid
-// PNG and meshopt GLB; a failed bake keeps the previous files and says why).
+// scan skips, id collisions), project.json validation, creating projects, the MCP server's workspace rule, the bake
+// key, and baking previews (a valid PNG and meshopt GLB; a failed bake keeps the previous files and says why).
 //   node test/library.ts
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  addLibrary, bakeKey, createProject, isStale, loadConfig, parseManifest, projectDirOf, readBakeState, readManifest, scanLibrary, slugify, writeManifest,
+  addLibrary, bakeKey, createProject, initWorkspace, isStale, loadConfig, notWorkspaceFiles, parseManifest, projectDirOf, readBakeState, readManifest, scanLibrary, slugify,
+  writeManifest,
 } from '../src/gallery/library.ts';
 import { bakeProject, BakeQueue } from '../src/gallery/bake.ts';
 
@@ -82,6 +83,30 @@ section('manifest');
   writeManifest(dir, { ...readManifest(dir), description: 'Oil lantern' });
   const back = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8'));
   check(back.description === 'Oil lantern' && back.custom?.keep === true, 'writing a manifest keeps keys it does not know');
+}
+
+section('the workspace of the MCP server: a project when it holds nothing but what a workspace makes itself');
+{
+  const ws = (name: string, files: Record<string, string> = {}) => {
+    const d = path.join(tmp, 'workspaces', name);
+    fs.mkdirSync(d, { recursive: true });
+    for (const [f, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), text); }
+    return d;
+  };
+  const fresh = path.join(tmp, 'workspaces', 'fresh'), empty = ws('empty');
+  const own = ws('own', { 'graphs/main.json': JSON.stringify(BOX), 'assets/rock.json': JSON.stringify(BOX), 'exports/renders/main-b.png': 'png', 'inputs/guides.obj': 'v 0 0 0', '.DS_Store': '', 'Thumbs.db': '' });
+  const repo = ws('repo', { 'README.md': '# a game', 'graphs/main.json': JSON.stringify(BOX) }), git = ws('git', { '.git/HEAD': 'ref: refs/heads/main' });
+  check([fresh, empty, own].every((d) => !notWorkspaceFiles(d).length), 'a workspace\'s own folders (and files an operating system leaves) are nothing else, as are no files and no folder');
+  check(notWorkspaceFiles(repo).join() === 'README.md' && notWorkspaceFiles(git).join() === '.git/', `anything else is: ${notWorkspaceFiles(repo)}, ${notWorkspaceFiles(git)}`);
+  for (const d of [fresh, empty, own]) check(/^made the workspace .* a project \(project\.json\)/.test(initWorkspace(d)) && fs.existsSync(path.join(d, 'project.json')), `${path.basename(d)}: made a project`);
+  check(readManifest(own).id === 'own' && fs.existsSync(path.join(own, 'graphs', 'main.json')) && fs.existsSync(path.join(own, 'assets', 'rock.json')), 'its graphs and assets stay where they are');
+  for (const d of [repo, git]) {
+    const said = initWorkspace(d);
+    check(/is in no project and holds .*, which a workspace does not make: left as it is \(library \{action:"init"\} makes it a project\)$/.test(said) && !fs.existsSync(path.join(d, 'project.json')), `${path.basename(d)}: left as it is (${said.slice(said.indexOf(' holds'))})`);
+  }
+  check(/^the workspace .* is a project$/.test(initWorkspace(own)), 'a project stays as it is');
+  const sub = ws('own/levels');
+  check(/^the workspace .* is in the project .*own$/.test(initWorkspace(sub)) && !fs.existsSync(path.join(sub, 'project.json')), 'and a folder in a project becomes no project of its own');
 }
 
 section('bake');

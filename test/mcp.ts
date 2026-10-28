@@ -32,6 +32,8 @@ const libDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-lib-'));
 const configFile = path.join(libDir, 'config.json');
 fs.writeFileSync(configFile, JSON.stringify({ libraries: [{ name: 'game', path: path.join(libDir, 'lib') }], gallery: { port: 7399 } }));
 fs.mkdirSync(path.join(libDir, 'lib'));
+// a folder of the person's (a file of their own in it): the server leaves it as it is, in no project
+fs.writeFileSync(path.join(wsDir, 'notes.md'), 'what this folder is for\n');
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [path.join(root, 'src/mcp/server.ts'), '--workspace', wsDir],
@@ -52,6 +54,7 @@ const call = async (name: string, args: any) => {
 
 const info = client.getServerVersion();
 check(info?.name === 'topotopo', `server name ${info?.name}`);
+check(!fs.existsSync(path.join(wsDir, 'project.json')), 'a named folder that holds files of its own is not made a project');
 check((client.getInstructions() ?? '').includes('WORKFLOW'), 'server instructions present');
 const { tools } = await client.listTools();
 check(tools.length >= 9, `tools: ${tools.map((t) => t.name).join(', ')}`);
@@ -424,14 +427,17 @@ if (url) {
 
 await client.close();
 
-// the server's own default workspace (no --workspace, no TOPOTOPO_WORKSPACE): <cwd>/workspace, made a project
-{
+// a new workspace becomes a project when the server starts, named or not: the default one (no --workspace, no
+// TOPOTOPO_WORKSPACE), <cwd>/workspace, which is not there yet, and a named folder that is empty
+for (const named of [false, true]) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-default-'));
-  const own = new Client({ name: 'topotopo-test-default', version: '0.0.1' });
-  await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts')], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile }, stderr: 'pipe' }));
+  const dir = named ? fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-empty-')) : path.join(cwd, 'workspace');
+  const own = new Client({ name: 'topotopo-test-new', version: '0.0.1' });
+  await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts'), ...(named ? ['--workspace', dir] : [])], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile }, stderr: 'pipe' }));
   const r: any = await own.callTool({ name: 'library', arguments: { action: 'packages' } });
   const txt = r.content.map((c: any) => c.text ?? '').join('\n');
-  check(!r.isError && fs.existsSync(path.join(cwd, 'workspace', 'project.json')) && /^project workspace \(.*workspace\)\nuses: nothing yet/.test(txt), `the default workspace is a project: ${txt.split('\n')[0]}`);
+  const pj = path.join(dir, 'project.json'), id = fs.existsSync(pj) ? JSON.parse(fs.readFileSync(pj, 'utf8')).id : null;
+  check(!r.isError && !!id && new RegExp(`^project ${id} \\(.*\\)\\nuses: nothing yet`).test(txt), `${named ? 'a named empty folder' : 'the default workspace'} is made a project: ${txt.split('\n')[0]}`);
   const b: any = await own.callTool({ name: 'build', arguments: { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } } } });
   const bt = b.content.map((c: any) => c.text ?? '').join('\n');
   check(!b.isError && /✓ graph "main"/.test(bt) && /note: added topotopo\/nature 1\.0/.test(bt), `its graphs use TopoTopo's own packages as they come: ${bt.split('\n')[0]}`);

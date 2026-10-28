@@ -194,6 +194,11 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 `file` node reads one as `inputs/<file>` (a PNG as an image for the texture nodes). Naming objects `path.river`, `zone.park`, `site.well`, `volume.no_trees` or
 `blockout.house` tells the agent what they mean (help topic `inputs`).
 
+When the server starts, it makes the workspace a project (a `project.json`, so that its graphs can use packages,
+TopoTopo's own among them) if the folder is in no project and holds nothing but these four folders, or nothing at all,
+as a new workspace does. A folder with anything else in it, such as a repository or a folder of your own files, stays as
+it is until you say so: `library {action: "init"}` (or `topotopo init <folder>`) makes it a project.
+
 ## MCP tools
 
 | tool | purpose |
@@ -405,9 +410,9 @@ on every machine and what it uses never changes by itself. It finds packages in 
 (`"libraries": ["../shared/library", "game"]`) and in TopoTopo's built-in library, `topotopo`, which every project looks
 in and which holds TopoTopo's own packages (a newer version in a TopoTopo release shows as an update); the first graph
 that names one adds it. Only a project uses packages: `topotopo init` (MCP: `library {action: "init"}`) makes a folder
-one, and the MCP server's default workspace is one. A package's own graphs name its other outputs the same way, a
-kit's house of the kit's walls: they resolve to the same version, with no entry in `uses`, and outputs that name each
-other in a loop are refused. To tune a package while looking at a project that uses it,
+one, and the MCP server makes a new or empty workspace one when it starts. A package's own graphs name its other
+outputs the same way, a kit's house of the kit's walls: they resolve to the same version, with no entry in `uses`, and
+outputs that name each other in a loop are refused. To tune a package while looking at a project that uses it,
 `--follow studio/trees` (or the MCP `library` tool's `follow`) uses the package's working folder for one session.
 Exports record the package versions they used.
 
@@ -452,8 +457,8 @@ rock fields that dress a surface; `topotopo/props` barrels, crates, pallets, san
 TopoTopo carries them built in, so they work offline and every project finds them without listing a library: the first
 graph that names an output copies its kit's version into the project's `packages/` and locks it, as for any package,
 and a newer version in a TopoTopo release shows as an update (`topotopo outdated`) instead of changing a scene by
-itself. A graph outside a project cannot use them: `topotopo init` makes its folder one (the MCP server's default
-workspace is one). Each output documents its typed parameters (`help {nodes: ["topotopo/architecture/stairs"]}`, or
+itself. A graph outside a project cannot use them: `topotopo init` makes its folder one (the MCP server makes a new or
+empty workspace one). Each output documents its typed parameters (`help {nodes: ["topotopo/architecture/stairs"]}`, or
 [docs/nodes.md](docs/nodes.md#package-nodes)), puts its pivot at the base (Y up, metres), and tags every piece with
 `name` and `material` attributes, so exports split and shade cleanly. Outputs that follow a curve (`railing`, `fence`,
 `pipe_run`, `road_strip`) take it as input 0 and those that dress a surface (`scatter_rocks`, `forest_patch`,

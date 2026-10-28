@@ -1,13 +1,14 @@
 // Open the live viewer on a workspace without an MCP client; optionally load the examples.
 //   node scripts/preview.ts [--workspace dir] [--examples]
-// The default workspace (workspace/ in the repository) is a project, as the MCP server's own is, so the examples that use
-// TopoTopo's own packages cook there: their first use copies the kits into it.
+// The workspace (default: workspace/ in the repository) becomes a project by the MCP server's rule (initWorkspace: in no
+// project, and holding nothing but a workspace's own folders), so the examples that use TopoTopo's own packages cook
+// there: their first use copies the kits into it.
 import fs from 'node:fs';
 import path from 'node:path';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { initProject, projectDirOf } from '../src/gallery/library.ts';
+import { initWorkspace } from '../src/gallery/library.ts';
 import { openPackages } from '../src/gallery/packages.ts';
 import { Workspace } from '../src/workspace.ts';
 import { startViewer } from '../src/viewer/server.ts';
@@ -16,7 +17,7 @@ const argv = process.argv.slice(2);
 const i = argv.indexOf('--workspace');
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 const wsDir = path.resolve(i >= 0 ? argv[i + 1] : path.join(root, 'workspace'));
-if (i < 0 && !projectDirOf(wsDir)) initProject(wsDir);
+console.log(initWorkspace(wsDir));
 const engine = new Engine(createNodeHost({ baseDir: wsDir }));
 await engine.init();
 const ws = new Workspace(wsDir, engine);

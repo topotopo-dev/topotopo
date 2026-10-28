@@ -158,6 +158,9 @@ export class EditRejected extends Error {
   }
 }
 
+/** The folders a workspace makes in its own folder (Workspace.load): graphs, assets, exports and inputs. */
+export const WORKSPACE_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
+
 /**
  * The packages of the project a workspace belongs to (src/gallery/packages.ts), attached by whoever opens it: a graph
  * set or edited through the workspace that names a package the project does not use yet adds it (first use).
@@ -220,6 +223,7 @@ export class Workspace {
     engine.root.graphs = (n) => this.graphs.get(n);
   }
 
+  // the folders of WORKSPACE_FOLDERS
   get graphDir() { return path.join(this.dir, 'graphs'); }
   get assetDir() { return path.join(this.dir, 'assets'); }
   get exportDir() { return this.exportsAt ?? path.join(this.dir, 'exports'); }

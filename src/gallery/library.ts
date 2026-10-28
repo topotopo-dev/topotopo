@@ -13,7 +13,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ID_RE, parsePackageName } from '../graph/scope.ts';
-import { NAME_RE } from '../workspace.ts';
+import { NAME_RE, WORKSPACE_FOLDERS } from '../workspace.ts';
 
 /** Bumped when the baked files change shape (render options, GLB options), so every project bakes again. */
 export const BAKE_VERSION = 1;
@@ -347,6 +347,39 @@ export function initProject(dir: string, o: { package?: string } = {}): { dir: s
   const gi = path.join(abs, '.gitignore');
   if (!fs.existsSync(gi)) fs.writeFileSync(gi, '.gallery/\n.cache/\n');
   return { dir: abs, manifest };
+}
+
+/** Files an operating system leaves in folders, which say nothing about what a folder holds. */
+const SYSTEM_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
+
+/**
+ * What a folder holds that a workspace does not make itself (its folders graphs/, assets/, exports/, inputs/), by name,
+ * a folder's with a slash: none for a folder that holds nothing else, nothing at all, or does not exist yet. Files an
+ * operating system leaves in folders do not count.
+ */
+export function notWorkspaceFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => !(e.isDirectory() && WORKSPACE_FOLDERS.includes(e.name)) && !SYSTEM_FILES.has(e.name))
+    .map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
+}
+
+/**
+ * The MCP server's rule for its workspace when it starts, named or not (scripts/preview.ts applies it too): a folder in
+ * no project that holds nothing but what a workspace makes itself (graphs/, assets/, exports/, inputs/), or nothing at
+ * all, becomes a project, so that its graphs use packages, TopoTopo's own among them, as they come. A folder with
+ * anything else in it (a repository, a folder of the person's) stays as it is, and so does one in a project:
+ * library {action:"init"} (topotopo init) makes it a project when the person says so. Says what it did.
+ */
+export function initWorkspace(dir: string): string {
+  const abs = path.resolve(dir);
+  const outer = projectDirOf(abs);
+  if (outer) return outer === abs ? `the workspace ${abs} is a project` : `the workspace ${abs} is in the project ${outer}`;
+  const other = notWorkspaceFiles(abs);
+  if (other.length)
+    return `the workspace ${abs} is in no project and holds ${other.slice(0, 3).join(', ')}${other.length > 3 ? ` and ${other.length - 3} more` : ''}, which a workspace does not make: left as it is (library {action:"init"} makes it a project)`;
+  try { initProject(abs); } catch (e: any) { return `the workspace ${abs} could not be made a project: ${e.message}`; }
+  return `made the workspace ${abs} a project (project.json): it held nothing but what a workspace makes itself`;
 }
 
 // ------------------------------------------------------------------------------------------------------ project files
