@@ -79,8 +79,9 @@ project is any folder in it holding project.json, and is a workspace of its own:
   props/lantern/.gallery/       thumb.png, preview.glb, bake.json: derived, never edit
 The parent folders ("props") are the project's collection. The gallery (\`topotopo gallery\`, http://127.0.0.1:7340)
 shows every library as a grid; each project has a page (/p/<library>/<id>), a thumbnail (…/thumb.png) and an
-iframe embed (/embed/<library>/<id>) that the person's board pastes. It bakes the previews by itself after graphs,
-assets or inputs change, from the graph named in "graph" (or "bake": another graph, a node, a frame).
+iframe embed (/embed/<library>/<id>) that the person's board pastes; a package's page lists its versions and outputs,
+a project's the packages it uses. It bakes the previews by itself after graphs, assets or inputs change, from the
+graph named in "graph" (or "bake": another graph, a node, a frame).
 
 WORKING IN A PROJECT
 - library {action:"list", query?, tag?} → find it; library {action:"get", library, id, thumbnail:true} → what it holds.
@@ -859,6 +860,14 @@ OUT OF DATE AND UPDATE: what a project uses changes only by an update, after a b
   (CLI: the same command with --apply) copies the new version in with the versions it uses, sets "uses" and the lock,
   and deletes the copies nothing uses any more. After a big update the graphs report what they must change until they
   do.
+
+IN THE VIEWER (preview, topotopo edit, topotopo view on a graph in a project): the Packages tab, shown while the project
+uses packages, lists each with the version in use, its updates and the notes of the newer versions, and the Scene tree
+marks the nodes of a package that has an update. Before/after compares every place with the version in use (a) and the
+new one (b), with its progress in the cook line and Stop; a place shows alone in the view as a, as b or both overlaid,
+with what changed. Update applies it and the scene cooks again; a big version is a button of its own, and what the
+graphs must change stays listed after it. "Use the trees I'm editing" follows the package's working folder for the
+viewer's session (never saved); a save in a working folder it does not follow offers that switch.
 
 EXPORTS record the package versions their graph used in the source block: "packages": {"studio/trees@1.3": "<hash>"}.
 CLI: topotopo init [folder] [--package owner/name] makes a folder a project (with graphs/); use, packages, publish,

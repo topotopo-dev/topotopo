@@ -114,7 +114,8 @@ To browse the examples in the live 3D viewer without an MCP client:
 npm run preview
 ```
 
-The viewer's left panel has three tabs: **Scene** (the graph's nodes and guides), **Outputs** and **Inputs**.
+The viewer's left panel has three tabs: **Scene** (the graph's nodes and guides), **Outputs** and **Inputs**, and a
+fourth, **Packages**, when the graphs belong to a project that uses packages (see [Packages](#packages)).
 **Outputs**, the default, shows all graphs' main results, named deliverables and their textures; click one to
 inspect it alone, and **Scene** in the top bar restores the scene. Publish extra results in graph JSON with
 `"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default. Each card says
@@ -388,7 +389,8 @@ topotopo gallery
 ```
 
 Each project has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
-`/embed/<library>/<id>`.
+`/embed/<library>/<id>`. A package's page lists its versions with their notes and dates and the outputs it publishes,
+a project's page the packages it uses, and the grid marks packages with their full name.
 
 ## Packages
 
@@ -407,6 +409,14 @@ folder for one session. Exports record the package versions they used.
 shows a before/after first: every place the project uses the package, cooked with the version in use and the new one,
 what changed and the notes in between, without writing anything; the same command with `--apply` updates it (a big
 version is named with `--to`, and the before/after says what the project's graphs must change).
+
+In the live viewer (`topotopo edit levels/forest`, or `topotopo view` on a graph in a project) the **Packages** tab
+lists what the project uses with the newer versions and their notes, and the Scene tree marks the nodes of a package
+that has an update. **Before/after** cooks each place with the version in use (a) and the new one (b), shown alone in
+the view as a, as b or both overlaid, with what changed; **Update** applies it and the scene cooks again, and after a
+big version the list of what the graphs must change stays in view. **Use the trees I'm editing** follows the
+package's working folder for that viewer session only, so every save there cooks the scene again; saving a working
+folder while the viewer is open offers it.
 
 ```bash
 topotopo init props/trees --package studio/trees
