@@ -805,6 +805,12 @@ WHAT A PACKAGE PUBLISHES: every named output ("outputs") of every graph in graph
 (viewer-only previews), and the default output: the output node ("output") of the graph project.json shows ("graph"),
 which must be set. Output names follow the same rule as the package name and are unique in the package.
 
+OUTPUTS OF THE SAME PACKAGE: a package's graphs and assets name its own outputs by full name, as any project does: a kit
+whose pieces build on each other, a house of the kit's walls ({"type": "studio/kit/wall"} in the house's graph). They
+resolve to the same version, with no entry in "uses"; in the project that is the package, to its graphs as they are now
+(its working folder), and in a followed working folder to that folder. Outputs that name each other in a loop (a names
+b and b names a, or a names itself) do not resolve, and publishing refuses them.
+
 VERSIONS: big.small from 1.0, each a folder versions/<version>/ in the package that is never written over: project.json,
 graphs/, assets/, inputs/, the copies the package uses (packages/) and version.json (the note, the time, a hash of every
 other file, each output's graph, node, sliders and inputs). exports/, attachments/ and other files are not part of it.

@@ -8,10 +8,16 @@
 // packages), so nothing leaks between the project and the package and two versions of one package cook side by side.
 // Its signature is the version's hash and the node it cooks: a frozen version cooks once for the project and once for
 // the packages that use it (which name its texture files differently).
+//
+// A package's graphs name its own outputs by full name too (a kit whose pieces build on each other: a house of the
+// kit's walls): they resolve to the same version, or the same working folder, with no entry in its uses. Outputs that
+// name each other in a loop do not resolve (ownOutputsNamed finds what each output names).
 import { Geometry } from '../core/geometry.ts';
 import { rebaseTexturePaths } from '../core/materials.ts';
 import { graphInterface } from './engine.ts';
 import type { Engine } from './engine.ts';
+import { scanValue } from './params.ts';
+import { getNodeDef } from './registry.ts';
 import { parsePackageName } from './scope.ts';
 import type { Scope } from './scope.ts';
 import { NodeError } from './types.ts';
@@ -107,6 +113,60 @@ export function packagesNamedIn(graph: GraphSpec): string[] {
     }
   };
   if (isGraph(graph)) walk(graph, 0);
+  return [...out];
+}
+
+/** The nodes of a graph a cook of `node` reaches: the node, its inputs and the nodes its expressions read, upstream. */
+function upstreamOf(g: GraphSpec, node: string): string[] {
+  const keep = new Set<string>(), todo = [node];
+  while (todo.length) {
+    const n = todo.pop()!;
+    if (keep.has(n) || !Object.hasOwn(g.nodes, n)) continue;
+    keep.add(n);
+    const spec = g.nodes[n];
+    const wired = typeof spec?.in === 'string' ? [spec.in] : Array.isArray(spec?.in) ? spec.in : spec?.in && typeof spec.in === 'object' ? Object.values(spec.in) : [];
+    for (const w of wired) if (typeof w === 'string') todo.push(w);
+    const refs = scanValue(Object.values(spec?.params ?? {}));
+    todo.push(...refs.geo, ...refs.ch.map((c) => c.node));
+  }
+  return [...keep];
+}
+
+/**
+ * The outputs of package `pkg` that a cook of node `node` of `graph` names in `scope` (the package's own scope): by full
+ * name, upstream of the node, in the nested graphs of those nodes (all of their nodes), and in the asset and graph_ref
+ * graphs they cook there. Each output by its name, "" for the package's default output ("owner/name" alone).
+ */
+export function ownOutputsNamed(pkg: string, graph: GraphSpec, node: string, scope: Scope): string[] {
+  const out = new Set<string>();
+  const done = new Map<GraphSpec, Set<string>>();
+  // `from`: the node whose upstream is cooked, null for every node of the graph
+  const visit = (g: GraphSpec, from: string | null, depth: number) => {
+    if (depth > 64 || !isGraph(g)) return;
+    let seen = done.get(g);
+    if (!seen) done.set(g, seen = new Set());
+    const key = from ?? '\u0000all';
+    if (seen.has(key)) return;
+    seen.add(key);
+    const at = (x: GraphSpec, n: unknown) => (typeof n === 'string' && n && Object.hasOwn(x.nodes, n) ? n : null);
+    for (const name of from === null ? Object.keys(g.nodes) : upstreamOf(g, from)) {
+      const spec = g.nodes[name];
+      if (!spec || typeof spec !== 'object' || typeof spec.type !== 'string') continue;
+      if (spec.type.includes('/')) {
+        const n = parsePackageName(spec.type);
+        if (typeof n !== 'string' && n.package === pkg) out.add(n.output ?? '');
+      } else {
+        const asset = scope.assets.get(spec.type) ?? scope.assets.get(spec.type.replace(/^asset:/, ''));
+        if (asset) visit(asset.graph, at(asset.graph, asset.graph.output), depth + 1);
+        else if (getNodeDef(spec.type)?.type === 'graph_ref' && typeof spec.params?.graph === 'string') {
+          const ref = scope.graphs?.(spec.params.graph);
+          if (ref && isGraph(ref)) visit(ref, at(ref, spec.params.node) ?? at(ref, ref.output), depth + 1);
+        }
+      }
+      if (spec.params && typeof spec.params === 'object') for (const v of Object.values(spec.params)) if (isGraph(v)) visit(v, null, depth + 1);
+    }
+  };
+  visit(graph, node, 0);
   return [...out];
 }
 

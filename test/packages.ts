@@ -1,7 +1,8 @@
 // Packages (src/graph/packages.ts, src/gallery/packages.ts). The engine: package output names and their errors, a
 // scope's package resolver, a package output's node type (its sliders, inputs, scope, signature and texture paths), the
 // packages a graph names and uses, "publish": false. The registry: publishing (the version rule, --big, blocks and
-// warnings, version.json, the hash, what a version holds), first use and `use` (copies, flat dependencies, the lock,
+// warnings, version.json, the hash, what a version holds), a package's graphs naming its own outputs (in its project, in
+// a version, in a followed working folder; loops), first use and `use` (copies, flat dependencies, the lock,
 // the project's libraries only, relative and registered libraries), cooking package outputs (sliders, inputs, a
 // package that uses another, two versions side by side, files and textures read from the version, nothing leaking),
 // hand-edited and missing copies, following a working folder, exports' source records, and the CLI commands.
@@ -371,6 +372,78 @@ section('publishing: blocks and warnings');
   const h = await publish(at('heavy'), 'heavy');
   check(h.ok && h.warnings.some((x) => /holds 51 MB \(above 50 MB\)/.test(x)), `a version above 50 MB warns: ${h.warnings.join(' | ')}`);
   fs.rmSync(at('heavy'), { recursive: true });
+}
+
+section('outputs of the same package: by full name, the same version, no entry in uses; a loop does not resolve');
+{
+  // studio/blocks: a brick; a wall of the kit's own bricks; the shown graph builds on the wall directly, in a foreach
+  // body and through an asset of the package (a pier of one brick)
+  const KITLIB = path.join(tmp, 'kitlib'), BLOCKS = path.join(KITLIB, 'blocks');
+  const brick = (h: number): GraphSpec => ({ nodes: { b: { type: 'box', params: { size: ['=w', h, 0.5] } } }, output: 'b', vars: { w: 1 }, params: { w: { type: 'float', min: 0.1, max: 4 } }, outputs: { brick: { node: 'b', label: 'Brick' } } });
+  project(BLOCKS, { package: 'studio/blocks' }, {
+    brick: brick(0.5),
+    wall: { nodes: { a: { type: 'studio/blocks/brick', params: { w: '=brick' } }, row: { type: 'copy_xform', in: ['a'], params: { count: '=n', translate: ['=brick', 0, 0] } } }, output: 'row', vars: { n: 3, brick: 1 }, outputs: { wall: { node: 'row', label: 'Wall' } } },
+    main: {
+      nodes: {
+        w: { type: 'studio/blocks/wall', params: { n: 4 } },
+        rows: { type: 'foreach', params: { mode: 'count', count: 2, body: { nodes: { w: { type: 'studio/blocks/wall' }, up: { type: 'transform', in: ['w'], params: { translate: [0, '=iteration', 0] } } }, output: 'up' } } },
+        p: { type: 'pier' },
+        out: { type: 'merge', in: ['w', 'rows', 'p'] },
+      },
+      output: 'out',
+    },
+  }, { 'assets/pier.json': JSON.stringify({ nodes: { b: { type: 'studio/blocks/brick', params: { w: 0.5 } }, t: { type: 'transform', in: ['b'], params: { translate: [0, 0, 2] } } }, output: 't' }) });
+  // in the project that is the package: its own graphs as they are now
+  const k = await open(BLOCKS);
+  const wall = await k.engine.cook({ nodes: { w: { type: 'studio/blocks/wall' } } });
+  const def = k.engine.resolveDef('studio/blocks/wall');
+  check(wall.ok && size(wall, 0) === 3 && def?.package?.version === null && /studio\/blocks \(working folder\)/.test(def.summary), `the package's own project cooks its outputs from its graphs (width ${size(wall, 0)}; ${def?.summary ?? errorOf(wall)})`);
+  check(['studio/blocks', 'studio/blocks/brick', 'studio/blocks/wall'].every((n) => k.engine.packageDefs().some((d) => d.type === n)), 'its catalog lists its own outputs');
+  check(/this project is the package studio\/blocks: its graphs name its own outputs by full name, with no entry in "uses"/.test(errorText(() => k.pk.use('studio/blocks'))), 'it does not use itself');
+  setGraph(BLOCKS, 'brick', brick(0.8));
+  check(k.pk.refresh() && top(await k.engine.cook({ nodes: { w: { type: 'studio/blocks/wall' } } })) === 0.4, 'a change to its graphs: refresh sees it and the wall has the new bricks');
+  const p = await publish(BLOCKS, 'first blocks');
+  check(p.ok && p.version === '1.0', `publishing cooks the wall from the project's own brick: ${p.blocks.join('; ')}`);
+  const info = readJSON(path.join(BLOCKS, 'versions', '1.0', 'version.json'));
+  check(Object.keys(info.outputs).join() === 'brick,wall' && !('uses' in readJSON(path.join(BLOCKS, 'versions', '1.0', 'project.json'))) && !exists(BLOCKS, 'versions', '1.0', 'packages'),
+    'the version publishes both, and names no package of its own in its uses');
+  // a project that uses it: the version's outputs name each other within that version
+  const USER = path.join(tmp, 'blocks-user');
+  project(USER, { libraries: ['../kitlib'] }, {});
+  const u = await open(USER);
+  const scene: GraphSpec = { nodes: { k: { type: 'studio/blocks', params: {} } }, output: 'k' };
+  check(u.pk.addFor(scene).length === 1 && JSON.stringify(readManifest(USER).uses) === '{"studio/blocks":"1.0"}' && Object.keys(readLock(USER).packages).join() === 'studio/blocks',
+    'first use adds the package once: uses and the lock name nothing else');
+  const r = await u.engine.cook(scene);
+  check(r.ok && size(r, 0) === 4 && size(r, 2) === 2.5, `its default output cooks: the wall, a foreach of walls and the pier asset, of its own bricks (${size(r, 0)} × ${size(r, 2)}; ${errorOf(r)})`);
+  const w = u.engine.resolveDef('studio/blocks/wall')!, inside = u.engine.resolveDef('studio/blocks/brick', w.package!.scope);
+  check(inside?.package?.version === '1.0' && inside.package.hash === w.package!.hash && inside.package.scope === w.package!.scope, 'inside the version, the brick is the same version\'s');
+  check(JSON.stringify(Object.keys(packagesUsed(u.engine, scene))) === '["studio/blocks@1.0"]', 'exports record the one version');
+  // following its working folder: the wall's own bricks come from that folder too
+  setGraph(BLOCKS, 'brick', brick(1.2));
+  const f = await open(USER, ['studio/blocks']);
+  check(top(await f.engine.cook({ nodes: { w: { type: 'studio/blocks/wall' } } })) === 0.6, 'a followed working folder\'s outputs name its own outputs in that folder');
+  setGraph(BLOCKS, 'brick', brick(0.8));
+
+  // studio/loops: a and b name each other, c names itself; ok names itself only in a node its output does not cook
+  const LOOPS = path.join(KITLIB, 'loops');
+  project(LOOPS, { package: 'studio/loops' }, {
+    main: { nodes: { a: { type: 'studio/loops/a' } }, output: 'a' },
+    a: { nodes: { b: { type: 'studio/loops/b' } }, output: 'b', outputs: { a: { node: 'b' } } },
+    b: { nodes: { x: { type: 'box' }, a: { type: 'studio/loops/a' }, m: { type: 'merge', in: ['x', 'a'] } }, output: 'm', outputs: { b: { node: 'm' } } },
+    c: { nodes: { c: { type: 'studio/loops/c' } }, output: 'c', outputs: { c: { node: 'c' } } },
+    ok: { nodes: { x: { type: 'box' }, aside: { type: 'studio/loops/ok' } }, output: 'x', outputs: { ok: { node: 'x' } } },
+  });
+  const l = await open(LOOPS);
+  const loopA = errorOf(await l.engine.cook({ nodes: { n: { type: 'studio/loops/a' } } }));
+  check(/studio\/loops \(working folder\): output "a" is in a loop: studio\/loops\/a → studio\/loops\/b → studio\/loops\/a name each other in a loop/.test(loopA), `outputs that name each other: ${loopA}`);
+  check(/output "c" is in a loop: studio\/loops\/c names itself/.test(errorOf(await l.engine.cook({ nodes: { n: { type: 'studio/loops/c' } } }))), 'an output that names itself');
+  check((await l.engine.cook({ nodes: { n: { type: 'studio/loops/ok' } } })).ok, 'a node its output does not cook is no loop');
+  const viaLoop = await l.engine.cook({ nodes: { n: { type: 'studio/loops' } } });
+  check(!viaLoop.ok && !!l.engine.resolveDef('studio/loops') && /is in a loop/.test(errorOf(viaLoop)), 'an output that uses one in a loop resolves, and its cook says why it fails');
+  const lp = await publish(LOOPS, 'loops');
+  check(!lp.ok && lp.blocks.some((b) => /^studio\/loops\/a → studio\/loops\/b → studio\/loops\/a name each other in a loop$/.test(b)) && lp.blocks.some((b) => /^studio\/loops\/c names itself$/.test(b)) && !exists(LOOPS, 'versions'),
+    `publishing refuses a loop: ${lp.blocks.join(' | ')}`);
 }
 
 // ------------------------------------------------------------------ first use, use, copies and the lock

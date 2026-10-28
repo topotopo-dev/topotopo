@@ -19,6 +19,11 @@
 // libraries its project.json lists: a path relative to the project (a library in the same repository, so every checkout
 // and worktree reads its own) or a registered library's name. Cooking needs only the copies.
 //
+// A package's graphs name its own outputs by full name, with no entry in its uses: in a version they resolve to that
+// version, in a followed working folder to that folder, and in the project that is the package to its own graphs as
+// they are now (its working folder, as following it would). Outputs that name each other in a loop do not resolve, and
+// publishing refuses them.
+//
 // Update goes to the newest version with the same big number, or to a version named (a big one is named). Its
 // before/after reads the new version where its library holds it, apart from the copies (a scope and results of its
 // own), and copies nothing; applying copies it in, sets "uses" and the lock, and deletes the copies nothing uses any
@@ -29,7 +34,7 @@ import { createHash } from 'node:crypto';
 import { graphInterface } from '../graph/engine.ts';
 import type { Engine } from '../graph/engine.ts';
 import { migrateGraph } from '../graph/migrate.ts';
-import { packageAt, packageOutputDef, packagesNamedIn } from '../graph/packages.ts';
+import { ownOutputsNamed, packageAt, packageOutputDef, packagesNamedIn } from '../graph/packages.ts';
 import { didYouMean, resolveParamName } from '../graph/params.ts';
 import { getNodeDef } from '../graph/registry.ts';
 import { ID_RE, parsePackageName } from '../graph/scope.ts';
@@ -281,6 +286,30 @@ function folderOutputs(m: ProjectManifest, graphs: Map<string, GraphSpec>): { na
   return { named: named.sort((a, b) => (a.name! < b.name! ? -1 : 1)), default: def, problems };
 }
 
+/**
+ * The outputs of package `pkg` that name each other in a loop, through its own outputs by full name (ownOutputsNamed, in
+ * the package's scope): output (its name, "" for the default output) → the loop, said.
+ */
+function outputLoops(pkg: string, outs: FolderOutput[], scope: Scope): Map<string, string> {
+  const refs = new Map(outs.map((o) => [o.name ?? '', ownOutputsNamed(pkg, o.spec, o.node, scope)]));
+  const label = (k: string) => (k ? `${pkg}/${k}` : pkg);
+  const loops = new Map<string, string>(), state = new Map<string, number>();
+  const visit = (k: string, stack: string[]) => {
+    if (state.get(k) === 2 || !refs.has(k)) return;
+    if (state.get(k) === 1) {
+      const loop = [...stack.slice(stack.indexOf(k)), k];
+      const said = loop.length === 2 ? `${label(k)} names itself` : `${loop.map(label).join(' → ')} name each other in a loop`;
+      for (const x of loop) if (!loops.has(x)) loops.set(x, said);
+      return;
+    }
+    state.set(k, 1);
+    for (const r of refs.get(k)!) visit(r, [...stack, k]);
+    state.set(k, 2);
+  };
+  for (const k of refs.keys()) visit(k, []);
+  return loops;
+}
+
 /** An output's interface: its sliders (the graph's vars, with their declarations) and its inputs (its input nodes). */
 function outputInfo(o: FolderOutput): OutputInfo {
   const sliders: Record<string, SliderInfo> = {};
@@ -331,6 +360,8 @@ interface Context {
   lock: Lock;
   /** followed packages resolve to their working folders (in the project and in followed folders, never in a version) */
   follows: boolean;
+  /** the package the scope is (a version, a working folder, the project that is a package): its own outputs by full name */
+  self?: { package: string; get: () => Loaded | PackageIssue };
   /**
    * Update's before/after: versions read where a library holds them ("owner/name@version"), and below them (`apart`)
    * the copies those hold. Each is the project's own copy when it holds that version, else read apart from its copies.
@@ -350,6 +381,8 @@ interface Loaded {
   default: NodeDef | null;
   /** why it has no default output */
   noDefault?: string;
+  /** outputs that name each other in a loop (by name, "" for the default output), and the loop, said */
+  loops: Map<string, string>;
 }
 
 /** A package's working folder, followed this session. */
@@ -431,6 +464,9 @@ export class ProjectPackages implements WorkspacePackages {
   private followLoaded = new Map<string, Loaded | PackageIssue>();
   /** the hash of every followed folder: what their outputs' results are keyed by */
   private joint = '';
+  /** the project's own package, its graphs as they are now ("" until its graphs name one of its outputs) */
+  private selfStamp = '';
+  private selfLoaded: Loaded | PackageIssue | null = null;
   /** why first use could not add a package, said when a graph names it */
   private unavailable = new Map<string, string>();
   private disk = '';
@@ -454,12 +490,17 @@ export class ProjectPackages implements WorkspacePackages {
     this.disk = this.diskStamp();
     // a version that loaded stays as it is (it is frozen); one that could not load is tried again
     for (const [k, v] of this.loaded) if ('error' in v) this.loaded.delete(k);
+    // the project's own package is read again with its uses and lock (its files are hashed again when next named)
+    this.selfLoaded = null;
+    this.selfStamp = '';
     if (!this.dir) return;
     try {
       this.manifest = readManifest(this.dir);
-      this.root = { ...this.root, uses: this.manifest.uses, lock: readLock(this.dir) };
+      const pkg = this.manifest.package;
+      // the project that is a package: its graphs name their own outputs, which cook from its graphs as they are now
+      this.root = { ...this.root, uses: this.manifest.uses, lock: readLock(this.dir), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
       this.error = null;
-    } catch (e: any) { this.error = e.message; this.root = { ...this.root, uses: {}, lock: { packages: {} } }; }
+    } catch (e: any) { this.error = e.message; this.root = { ...this.root, uses: {}, lock: { packages: {} }, self: undefined }; }
   }
 
   private diskStamp(): string {
@@ -504,6 +545,8 @@ export class ProjectPackages implements WorkspacePackages {
     if (typeof n === 'string') return { error: n };
     const p = this.packageIn(ctx, n.package);
     if ('error' in p) return p;
+    const loop = p.loops.get(n.output ?? '');
+    if (loop) return { error: `${n.output === null ? `the default output of ${packageAt(p)}` : `${packageAt(p)}: output "${n.output}"`} is in a loop: ${loop}`, hint: 'a package\'s outputs use each other by full name only without a loop: change one of their graphs so that it no longer names the other' };
     if (n.output === null) return p.default ?? { error: `${packageAt(p)} has no default output${p.noDefault ? `: ${p.noDefault}` : ''}`, hint: `name one of its outputs: ${[...p.named.keys()].map((k) => `${n.package}/${k}`).join(', ') || 'it has none'}` };
     const def = p.named.get(n.output);
     if (def) return def;
@@ -517,6 +560,7 @@ export class ProjectPackages implements WorkspacePackages {
   private namesIn(ctx: Context): string[] {
     const pkgs = new Set(Object.keys(ctx.uses));
     if (ctx.follows) for (const k of this.followed.keys()) pkgs.add(k);
+    if (ctx.self) pkgs.add(ctx.self.package);
     const out: string[] = [];
     for (const pkg of pkgs) {
       const p = this.packageIn(ctx, pkg);
@@ -528,13 +572,14 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   private packageIn(ctx: Context, pkg: string): Loaded | PackageIssue {
+    // the package's own outputs: the same version (or working folder), with no entry in its uses
+    if (ctx.self?.package === pkg) return ctx.self.get();
     if (ctx.follows && this.followed.has(pkg)) return this.loadFollowed(pkg);
     const v = ctx.uses[pkg];
     if (v !== undefined) return this.loadCopy(ctx, pkg, v);
     if (ctx !== this.root) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
     if (!this.dir) return { error: `package ${pkg}: this graph is in no project, and only projects use packages`, hint: `topotopo init <folder> makes a folder a project (project.json); then topotopo use ${pkg} adds the package` };
     if (this.error) return { error: `package ${pkg}: ${this.error}` };
-    if (pkg === this.manifest?.package) return { error: `this project is the package ${pkg}: its graphs use their own outputs directly (graph_ref), not as a package` };
     const why = this.unavailable.get(pkg);
     return {
       error: `package ${pkg} is not in this project's uses (project.json)${why ? `, and it could not be added: ${why}` : ''}`,
@@ -643,26 +688,56 @@ export class ProjectPackages implements WorkspacePackages {
     return r;
   }
 
-  /** A version's (or working folder's) scope with its graphs, assets and uses, and a node type per output. */
+  /**
+   * The project's own package (the project is the package `pkg`) as its graphs are now: its graphs name their own
+   * outputs, which cook from the project's folder, as they would from a working folder the session follows.
+   */
+  private loadSelf(pkg: string): Loaded | PackageIssue {
+    if (this.selfLoaded) return this.selfLoaded;
+    const key = `${pkg} (this project)`;
+    if (this.loading.has(key)) return { error: `${key} uses itself (through ${[...this.loading].join(' → ')})` };
+    this.loading.add(key);
+    let r: Loaded | PackageIssue;
+    try {
+      this.selfStamp ||= this.stampOf(this.dir!);
+      // its outputs may use the packages this session follows: their results are keyed by those folders too
+      const signature = sha(`${this.selfStamp}|${this.joint}`);
+      const ctx: Context = { label: key, uses: this.root.uses, packages: this.root.packages, lock: this.root.lock, follows: true };
+      r = this.build({ pkg, version: null, dir: this.dir!, hash: this.selfStamp, signature, manifest: this.manifest!, ctx, scope: `${pkg}@project-${signature.slice(0, 16)}` });
+    } catch (e: any) { r = { error: `${key} (${this.dir}): ${e.message}` }; }
+    finally { this.loading.delete(key); }
+    this.selfLoaded = r;
+    return r;
+  }
+
+  /**
+   * A version's (or working folder's) scope with its graphs, assets and uses, and a node type per output. Its graphs and
+   * assets name its own outputs by full name: they resolve to what this builds (Context.self).
+   */
   private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; note?: string; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string; problems?: Set<string> }): Loaded {
     const problems: string[] = [];
     const graphs = readGraphs(o.dir, problems);
     const scope = this.engine.createScope(o.scope, { folder: o.dir, graphs: (n) => graphs.get(n), packages: this.resolverOf(o.ctx) });
-    registerAssets(this.engine, scope, o.dir, problems);
     const outs = folderOutputs(o.manifest, graphs);
     const def = (x: FolderOutput) => packageOutputDef({
       package: o.pkg, version: o.version, hash: o.hash, signature: o.signature, output: x.name, graph: x.graph, spec: x.spec, node: x.node, scope,
       rootPath: this.rootPath,
       ...(o.note ? { note: o.note } : {}), ...(x.label ? { label: x.label } : {}), ...(o.warning ? { warning: o.warning } : {}),
     });
-    const at = packageAt({ package: o.pkg, version: o.version });
-    for (const p of [...problems, ...outs.problems.filter((p) => !p.startsWith('no default output'))]) (o.problems ?? this.problems).add(`${at}: ${p}`);
-    return {
+    const loaded: Loaded = {
       package: o.pkg, version: o.version, dir: o.dir, hash: o.hash, scope,
       named: new Map(outs.named.map((x) => [x.name!, def(x)])),
       default: outs.default ? def(outs.default) : null,
       ...(outs.default ? {} : { noDefault: outs.problems.find((p) => p.startsWith('no default output'))?.replace(/^no default output: /, '') }),
+      loops: new Map(),
     };
+    // its outputs exist before its assets register: an asset may name one
+    o.ctx.self = { package: o.pkg, get: () => loaded };
+    registerAssets(this.engine, scope, o.dir, problems);
+    loaded.loops = outputLoops(o.pkg, [...outs.named, ...(outs.default ? [outs.default] : [])], scope);
+    const at = packageAt({ package: o.pkg, version: o.version });
+    for (const p of [...problems, ...outs.problems.filter((p) => !p.startsWith('no default output')), ...new Set(loaded.loops.values())]) (o.problems ?? this.problems).add(`${at}: ${p}`);
+    return loaded;
   }
 
   /** Load every version the project uses (and those they use), so that problems with the copies are known. */
@@ -715,7 +790,7 @@ export class ProjectPackages implements WorkspacePackages {
     const { dir } = this.project();
     if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name (lower-case letters, digits, - and _)`);
     const m = readManifest(dir);
-    if (pkg === m.package) throw new Error(`this project is the package ${pkg}: its graphs use their own outputs directly (graph_ref), not as a package`);
+    if (pkg === m.package) throw new Error(`this project is the package ${pkg}: its graphs name its own outputs by full name, with no entry in "uses"`);
     const inUse = m.uses[pkg];
     if (inUse !== undefined) {
       const packages = path.join(dir, 'packages');
@@ -897,24 +972,39 @@ export class ProjectPackages implements WorkspacePackages {
     }
     const joint = this.followed.size ? sha([...this.followed.values()].map((f) => `${f.package} ${f.stamp}\n`).sort().join('')) : '';
     if (joint !== this.joint) { this.joint = joint; changed = true; }
-    if (changed) this.followLoaded.clear();
+    if (changed) { this.followLoaded.clear(); this.selfLoaded = null; }
     return changed;
   }
 
-  /** WorkspacePackages: read again what changed on disk: project.json and the lock, followed working folders. */
+  /** The project's own package, once its graphs named one of its outputs: true when its files changed since. */
+  private restampSelf(): boolean {
+    if (!this.selfStamp || !this.dir) return false;
+    let s: string;
+    try { s = this.stampOf(this.dir); } catch (e: any) { s = `unreadable: ${e.message}`; }
+    if (s === this.selfStamp) return false;
+    this.selfStamp = s;
+    this.selfLoaded = null;
+    return true;
+  }
+
+  /**
+   * WorkspacePackages: read again what changed on disk: project.json and the lock, followed working folders, and the
+   * project's own graphs when they name its own outputs.
+   */
   refresh(): boolean {
     let changed = false;
     if (this.diskStamp() !== this.disk) { this.reload(); changed = true; }
     if (this.followed.size && this.restamp()) changed = true;
+    if (this.restampSelf()) changed = true;
     return changed;
   }
 
   /**
    * WorkspacePackages: a stamp of what package names resolve to: project.json and the lock as they are on disk now,
-   * and the files of the followed working folders as refresh() last found them.
+   * and the files of the followed working folders and of the project's own package as refresh() last found them.
    */
   revision(): string {
-    return `${this.diskStamp()}|${this.joint}`;
+    return `${this.diskStamp()}|${this.joint}|${this.selfStamp}`;
   }
 
   /** Call `onChange` after a followed working folder changed on disk (and refresh() has taken it in). */
@@ -1027,7 +1117,7 @@ export class ProjectPackages implements WorkspacePackages {
     const uses = sortKeys({ ...this.root.uses, [t.package]: t.to });
     const before = this.followed.size ? this.resolverOf({ ...this.root, follows: false }) : this.resolver;
     const after = this.resolverOf({
-      label: 'this project after the update', uses, packages: this.root.packages, lock: this.root.lock, follows: false,
+      label: 'this project after the update', uses, packages: this.root.packages, lock: this.root.lock, follows: false, self: this.root.self,
       library: new Map([[`${t.package}@${t.to}`, { library: t.library, dir: t.dir, info: t.toInfo }]]),
     });
     return { before, after, key: sha(JSON.stringify([this.root.uses, uses, t.dir])).slice(0, 16) };
@@ -1271,11 +1361,13 @@ export interface PublishResult {
 /**
  * Publish the project of a workspace as the next version of its package: check its name, outputs and default output,
  * cook every published output, number the version by comparing it with the previous one (and the author's `big`), and
- * write versions/<big>.<small>/. Blocks: an output that does not cook, an output name clash, no default output, a copy
- * edited by hand, nothing changed, no note, a package the session follows.
+ * write versions/<big>.<small>/. Blocks: an output that does not cook, an output name clash, outputs that name each
+ * other in a loop, no default output, a copy edited by hand, nothing changed, no note, a package the session follows.
  */
 export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: PublishOptions): Promise<PublishResult> {
   const { dir } = pk.project();
+  // what its graphs name resolves as its files are now (its own outputs, the copies)
+  pk.refresh();
   const m = readManifest(dir);
   // one line: a note says what changed
   const note = (o.note ?? '').replace(/\s+/g, ' ').trim();
@@ -1293,6 +1385,9 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
   r.blocks.push(...problems);
   const outs = folderOutputs(m, graphs);
   r.blocks.push(...outs.problems);
+  if (r.blocks.length) return r;
+  // its outputs name each other only without a loop (the project's assets and graphs are the root scope's)
+  r.blocks.push(...new Set(outputLoops(m.package!, [...outs.named, outs.default!], ws.engine.root).values()));
   if (r.blocks.length) return r;
 
   // every published output cooks
