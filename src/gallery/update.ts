@@ -32,10 +32,12 @@ import { compareInterfaces, compareVersions } from './packages.ts';
 import type { ProjectPackages, UpdateTarget } from './packages.ts';
 
 /**
- * The folders of a project a search for graph files does not enter: graphs/ and assets/ are read as such, the others
- * hold no graph files of the project (dot-folders, node_modules and other projects are never entered).
+ * Folders a search for graph files does not enter: anywhere, those holding data and exports (a graph file has its own
+ * inputs/ and exports/ beside it) and node_modules; at the top of the project, its own folders (graphs/ and assets/
+ * are read as such); never dot-folders or another project's folder.
  */
-const OWN = new Set(['graphs', 'assets', 'inputs', 'exports', 'attachments', 'versions', 'packages']);
+const NO_GRAPHS = new Set(['inputs', 'exports', 'node_modules']);
+const OWN = new Set(['graphs', 'assets', 'attachments', 'versions', 'packages']);
 /** Graph files are read up to this size (a graph is up to about 100 KB). */
 const MAX_GRAPH_BYTES = 16 * 2 ** 20;
 /** Packed results are compared expanded, up to this many triangles. */
@@ -146,7 +148,7 @@ function graphsNaming(dir: string, pkg: string, problems: string[]): ProjectGrap
       if (e.name.startsWith('.')) continue;
       const abs = path.join(d, e.name), r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
-        if (!(depth === 0 && OWN.has(e.name)) && e.name !== 'node_modules' && depth < 8 && !fs.existsSync(path.join(abs, 'project.json'))) walk(abs, r, depth + 1);
+        if (!NO_GRAPHS.has(e.name) && !(depth === 0 && OWN.has(e.name)) && depth < 8 && !fs.existsSync(path.join(abs, 'project.json'))) walk(abs, r, depth + 1);
       } else if (e.isFile() && e.name.endsWith('.json') && e.name !== 'project.json') read(abs, r, 'file');
     }
   };
@@ -354,7 +356,8 @@ export function beforeAfterText(r: BeforeAfter, closing: string): string {
   const lines = [`before/after: ${t.package} ${t.from} → ${t.to} (${kind}) in ${r.project}; nothing has changed yet`];
   lines.push(`${t.package} ${t.to} is in library "${t.library}". ${up ? `The versions after ${t.from}` : `The versions it goes back over`}:`, ...t.between.map((v) => `  ${v.version}  "${v.note}"`));
   if (t.big) {
-    lines.push(r.interfaceBig.length ? `${t.to} is a big version; what goes away or means something else:` : `${t.to} is a big version (its author marked it big: its meaning changed in a way the tools cannot see)`);
+    const step = up ? `${t.to} is a big version` : `going back to ${t.to} crosses a big version`;
+    lines.push(r.interfaceBig.length ? `${step}; what goes away or means something else:` : `${step}: nothing goes away between the two, and a version between was marked big by its author, its meaning changed in a way the tools cannot see (its note says how)`);
     lines.push(...r.interfaceBig.map((x) => `  ${x}`));
   }
   if (r.mustChange.length) lines.push(`what the project's graphs must change (updating is allowed; until they change, they report these errors):`, ...r.mustChange.map((x) => `  ${x}`));

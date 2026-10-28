@@ -844,7 +844,8 @@ packages' versions keep the copies they hold.
 OUT OF DATE AND UPDATE: what a project uses changes only by an update, after a before/after.
 - library {action:"outdated"} (CLI: topotopo outdated) lists each package the project uses: the version in use, its
   small update (the newest version with the same big number), its big update (the newest, when its big number is
-  higher) and the note of every version after the one in use. library {action:"packages"} says in a line which are.
+  higher) and the note of every version after the one in use. library {action:"packages"} names the out-of-date ones
+  in a line.
 - library {action:"update", package:"studio/trees", to?} (CLI: topotopo update studio/trees [--to 2.0]) is the
   before/after: every place the project uses the package (each node of its type in graphs/, assets/ and the graph files
   in the project's folder, nested graphs included, with its params and inputs as they are) cooked with the version in

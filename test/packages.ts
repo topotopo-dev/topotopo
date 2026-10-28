@@ -708,6 +708,8 @@ section('Update: the before/after of a small update; nothing is written until it
   // file outside graphs/ (scene.json)
   setGraph(dirs.forest, 'loop', { nodes: { loop: { type: 'foreach', params: { mode: 'count', count: 2, body: { nodes: { t: { type: 'studio/trees/pine', params: { height: '=2 + iteration' } }, m: { type: 'transform', in: ['t'], params: { translate: ['=iteration * 6', 0, 0] } } }, output: 'm' } } } }, output: 'loop' });
   write(path.join(dirs.forest, 'assets', 'twin.json'), JSON.stringify({ nodes: { t: { type: 'studio/trees/pine', params: { height: '=h' } } }, output: 't', vars: { h: 3 } }));
+  // not a place: a graph in an exports/ folder, here beside a graph file in a subfolder
+  write(path.join(dirs.forest, 'levels', 'exports', 'scene.json'), fs.readFileSync(path.join(dirs.forest, 'scene.json')));
   const o = await open(dirs.forest);
   check(/this project does not use studio\/oaks: its uses are nordic\/rocks, studio\/grove, studio\/rules, studio\/trees/.test(await rejection(beforeAfter(o.pk, 'studio/oaks'))), 'a package the project does not use');
   check(/studio\/grove 1\.0 is the newest version in the project's libraries: there is nothing to update/.test(await rejection(beforeAfter(o.pk, 'studio/grove'))), 'a package that is up to date');
@@ -804,6 +806,9 @@ section('Update: a big version is named, and says what the graphs must change');
   check(/the project's graphs must change for studio\/trees 2\.0; until they do, they report these errors:\n {2}graphs\/loop\.json loop\/t: sets slider "height"/.test(a.text) && a.mustChange.length === 6, 'applying says what the graphs must change');
   const cooked = await o.engine.cook(o.ws.getGraph('main'));
   check(!cooked.ok && /unknown param "height" for studio\/trees\/pine — did you mean "trunk_height"/.test(errorOf(cooked)), `the graphs report it until they change: ${errorOf(cooked)}`);
+  const back = await beforeAfter(o.pk, 'studio/trees', { to: '1.3' }), backText = beforeAfterText(back, '');
+  check(/\(back to an older big version\)/.test(backText) && /\ngoing back to 1\.3 crosses a big version; what goes away or means something else:\n {2}output "pine": slider "trunk_height" removed\n/.test(backText) && !back.mustChange.length,
+    'going back across a big version says what goes away, and the graphs, which set "height", need no change for it');
   // a package the project uses only through another
   const user = path.join(dirs.repo, 'grove-user');
   project(user, { libraries: ['../../game'] }, {});
