@@ -534,9 +534,14 @@ export class Engine {
     return [...allAliases(), ...this.assetsIn(scope).map((a) => a.name), ...(scope.packages?.names() ?? [])];
   }
 
-  /** The node types of the package outputs a scope uses, for the catalog. */
+  /**
+   * The node types of package outputs for the catalog and help: those a scope uses, then those its packages offer that
+   * it does not use yet (PackageResolver.offered: TopoTopo's own, which a graph's first use adds).
+   */
   packageDefs(scope: Scope = this.root): NodeDef[] {
-    return (scope.packages?.names() ?? []).map((n) => this.resolveDef(n, scope)).filter((d): d is NodeDef => !!d);
+    const used = (scope.packages?.names() ?? []).map((n) => this.resolveDef(n, scope)).filter((d): d is NodeDef => !!d);
+    const have = new Set(used.map((d) => d.type));
+    return [...used, ...(scope.packages?.offered?.() ?? []).filter((d) => !have.has(d.type))];
   }
 
   /**

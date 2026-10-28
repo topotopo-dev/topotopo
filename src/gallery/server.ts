@@ -16,7 +16,7 @@ import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { galleryDir, graphNames, isStale, listFiles, loadConfig, readBakeState, readGraph, scanLibrary } from './library.ts';
 import type { BakeState, GalleryConfig, LibraryScan, Project } from './library.ts';
-import { compareVersions, copyRecord, publishedVersions, startsBigVersion } from './packages.ts';
+import { builtinVersions, compareVersions, copyRecord, publishedVersions, startsBigVersion } from './packages.ts';
 import type { VersionInfo } from './packages.ts';
 import { BakeQueue } from './bake.ts';
 import { embedPage, galleryPage, projectPage } from './pages.ts';
@@ -222,10 +222,11 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     const abs = (u: string) => base + u;
     const m = p.manifest, homes = packageHomes();
     const versions = m.package ? publishedVersions(p.dir, m.package) : [];
-    // the packages it uses: the version in use (its copy's record), and the newest the gallery knows of
+    // the packages it uses: the version in use (its copy's record), and the newest the gallery knows of (TopoTopo's own
+    // also in TopoTopo's built-in library)
     const uses = Object.entries(m.uses).map(([name, v]) => {
       const rec = copyRecord(p.dir, name, v), home = homes.get(name);
-      const newest = home ? publishedVersions(home.dir, name).at(-1)?.version : undefined;
+      const newest = [...(home ? publishedVersions(home.dir, name) : []), ...builtinVersions(name)].map((x) => x.version).sort(compareVersions).at(-1);
       return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(home ? { url: urls.project(home.lib, home.id) } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {

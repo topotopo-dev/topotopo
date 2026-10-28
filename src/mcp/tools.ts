@@ -237,7 +237,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets, package = the outputs of the packages the project uses, "owner/name/output"). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the workspace.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, shelf = shipped graph assets such as stairs or fence, asset = workspace assets, package = package outputs, "owner/name/output": those the project uses, and TopoTopo\'s own, "topotopo/…", which a graph\'s first use adds to the project). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the workspace.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -261,7 +261,13 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         if (a.topic) out.push(topicText(String(a.topic)) ?? `unknown topic "${a.topic}". Topics: overview, ${topicList().join(', ')}`);
         for (const n of a.nodes ?? []) {
           const d = engine.resolveDef(n);
-          if (!d && String(n).includes('/')) { const p = engine.packageIssue(String(n)); out.push(`${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`); continue; }
+          if (!d && String(n).includes('/')) {
+            const p = engine.packageIssue(String(n));
+            // one of TopoTopo's own packages the project does not use yet: its docs, and what naming it does here
+            const offered = engine.packageDefs().find((x) => x.type === n);
+            out.push(offered ? `${nodeDoc(offered)}\nin this workspace: ${p.error}${p.hint ? ` (hint: ${p.hint})` : ''}` : `${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`);
+            continue;
+          }
           if (!d) { const s = didYouMean(n, engine.allTypeNames()); out.push(`unknown node "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); continue; }
           out.push(nodeDoc(d));
         }

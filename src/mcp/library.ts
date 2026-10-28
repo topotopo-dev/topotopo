@@ -1,7 +1,8 @@
 // The `library` tool: the person's libraries of projects (src/gallery/library.ts) and the packages of the open project
 // (src/gallery/packages.ts, src/gallery/update.ts). An agent lists and searches every library, reads a project, makes
 // new ones, edits their project.json, bakes previews, and opens a project: the server's workspace becomes that project
-// folder, so build/edit/render/export work on it. In the open project it publishes a version of its package, lists and
+// folder, so build/edit/render/export work on it; or it makes the open workspace a project (init), when the person says
+// so: only a project's graphs use packages. In the open project it publishes a version of its package, lists and
 // adds the packages it uses, follows a package's working folder for the session, says which packages are out of date,
 // and shows the before/after of an update, which it applies only when the person says so.
 import fs from 'node:fs';
@@ -9,7 +10,7 @@ import path from 'node:path';
 import type { Workspace } from '../workspace.ts';
 import type { ToolDef, ToolResult, Content } from './tools.ts';
 import {
-  createProject, graphNames, isStale, listFiles, loadConfig, parseManifest, projectDirOf, readBakeState, readGraph, readManifest,
+  createProject, graphNames, initProject, isStale, listFiles, loadConfig, parseManifest, projectDirOf, readBakeState, readGraph, readManifest,
   scanAll, writeManifest,
 } from '../gallery/library.ts';
 import type { GalleryConfig, LibraryScan, Project } from '../gallery/library.ts';
@@ -59,6 +60,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
     description: 'The person\'s libraries of projects (the TopoTopo Gallery website shows them; a board links to them). A library is a folder; a project is a folder in it with project.json (title, description, tags, links to concept art/board pages) and is a workspace of its own (graphs/, assets/, inputs/, exports/, attachments/ for concept art and references). ' +
       'list {query?, tag?, library?}: every project with status and gallery URL. get {library, id} (or the open project): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
       'open {library, id} | {path}: make that project the workspace of every tool and the live viewer, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new project, opened. ' +
+      'init {package?}: make the open workspace a project (project.json in its folder), when it is none: only a project\'s graphs use packages (TopoTopo\'s own included), and a build that names one in a workspace outside any project fails saying so. ' +
       'set {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the package the project is, set once by its author). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). ' +
       'Packages of the open project: packages (what it uses, and the packages in the libraries it lists, with their newest version, note and outputs); use {package:"owner/name"} adds one (a graph that names "owner/name/output" adds it too); follow {package, on} uses a package\'s working folder instead of its copy for this session; publish {note, big?} publishes the next version of the project\'s package. ' +
       'outdated: for each package it uses, the newer versions (the small update: the newest with the same big number; the big one) with their notes. update {package, to?}: the before/after of updating it (to the newest version with the same big number; a big version needs "to"): every place the project uses it, cooked with the version in use and the new one, what changed in each, overlay renders, the notes of the versions between and, for a big version, what the graphs must change. It writes nothing. Show the before/after to the person and apply it only when they say so: update {package, to, apply:true} copies the new version in, updates the uses and the lock, and deletes the copies nothing uses any more. See help topics "library" and "packages".',
@@ -66,7 +68,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'set', 'bake', 'packages', 'use', 'follow', 'publish', 'outdated', 'update'] },
+        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'init', 'set', 'bake', 'packages', 'use', 'follow', 'publish', 'outdated', 'update'] },
         library: { type: 'string', description: 'library name (list shows them)' },
         id: { type: 'string', description: 'project id' },
         path: { type: 'string', description: 'create: folder below the library ("props/lantern"); open/get: a project folder on disk instead of {library, id}' },
@@ -80,7 +82,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         bake: { type: 'object', properties: { graph: { type: 'string' }, node: { type: 'string' }, frame: { type: 'number' } }, description: 'set: what the preview shows instead of the graph output' },
         thumbnail: { type: 'boolean', description: 'get: include the baked thumbnail image' },
         open: { type: 'boolean', description: 'create: open the new project (default true)' },
-        package: { type: 'string', description: 'use / follow / update: a package, "owner/name"; set: the package the project is' },
+        package: { type: 'string', description: 'use / follow / update: a package, "owner/name"; set and init: the package the project is' },
         on: { type: 'boolean', description: 'follow: true to follow the package\'s working folder (default), false to go back to its copy' },
         note: { type: 'string', description: 'publish: one line on what changed (required)' },
         big: { type: 'boolean', description: 'publish: mark the version big (its meaning changed in a way the tools cannot see)' },
@@ -151,6 +153,15 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           if (a.open !== false) { await host.open(p.dir); opened = ' and opened it: build/edit now work in it (graph "main" is the one the gallery shows)'; }
           return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Gallery page: ${urlsOf(cfg, p).page}`);
         }
+        case 'init': {
+          const dir = host.workspace().dir, inside = projectDirOf(dir);
+          if (inside) throw new Error(`the workspace ${dir} is in a project already: ${path.join(inside, 'project.json')}`);
+          const { manifest } = initProject(dir, { package: a.package });
+          // the tools take in the project (its packages) as a workspace opened afresh
+          const r = await host.open(dir);
+          return text(`made the workspace ${dir} a project, id "${manifest.id}"${manifest.package ? `, package ${manifest.package}` : ''} (project.json; ${r.graphs} graphs, ${r.assets} assets): ` +
+            'its graphs use packages now. A build that names one adds it on first use: TopoTopo\'s own (topotopo/…) from TopoTopo\'s built-in library, others from the libraries its project.json lists under "libraries" (the person lists them). library {action:"packages"} shows them');
+        }
         case 'set': {
           const p = pick(a, scans);
           const m = { ...p.manifest };
@@ -209,7 +220,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           return { content };
         }
       }
-      return text(`unknown action "${a.action}": list, get, open, create, set, bake, packages, use, follow, publish, outdated or update`, true);
+      return text(`unknown action "${a.action}": list, get, open, create, init, set, bake, packages, use, follow, publish, outdated or update`, true);
     },
   };
 }

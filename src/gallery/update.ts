@@ -29,7 +29,7 @@ import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../workspace.ts';
-import { compareInterfaces, compareVersions } from './packages.ts';
+import { compareInterfaces, compareVersions, libraryText } from './packages.ts';
 import type { ProjectPackages, UpdateTarget } from './packages.ts';
 
 /**
@@ -361,7 +361,7 @@ export function beforeAfterText(r: BeforeAfter, closing: string): string {
   const t = r.target, up = compareVersions(t.to, t.from) > 0;
   const kind = t.big ? (up ? 'a big update' : 'back to an older big version') : up ? 'a small update' : 'back to an older version';
   const lines = [`before/after: ${t.package} ${t.from} → ${t.to} (${kind}) in ${r.project}; nothing has changed yet`];
-  lines.push(`${t.package} ${t.to} is in library "${t.library}". ${up ? `The versions after ${t.from}` : `The versions it goes back over`}:`, ...t.between.map((v) => `  ${v.version}  "${v.note}"`));
+  lines.push(`${t.package} ${t.to} is in ${libraryText(t.library)}. ${up ? `The versions after ${t.from}` : `The versions it goes back over`}:`, ...t.between.map((v) => `  ${v.version}  "${v.note}"`));
   if (t.big) {
     const step = up ? `${t.to} is a big version` : `going back to ${t.to} crosses a big version`;
     lines.push(r.interfaceBig.length ? `${step}; what goes away or means something else:` : `${step}: nothing goes away between the two, and a version between was marked big by its author, its meaning changed in a way the tools cannot see (its note says how)`);
@@ -415,7 +415,7 @@ export function outdatedText(pk: ProjectPackages, mcp = false): string {
   for (const o of list) {
     if (o.error) { lines.push(`  ${o.package} ${o.version}: ${o.error}`); continue; }
     const ups = [o.small ? `small update ${o.small}` : '', o.big ? `big update ${o.big}` : ''].filter(Boolean);
-    lines.push(`  ${o.package} ${o.version}: ${ups.join(', ') || 'up to date'}  [library ${o.libraries.map((l) => `"${l}"`).join(', ')}]`, ...o.newer.map((v) => `    ${v.version}  "${v.note}"`));
+    lines.push(`  ${o.package} ${o.version}: ${ups.join(', ') || 'up to date'}  [${o.libraries.map(libraryText).join(', ')}]`, ...o.newer.map((v) => `    ${v.version}  "${v.note}"`));
   }
   if (late.length) lines.push(mcp
     ? 'library {action:"update", package:"owner/name"} shows the before/after of the small update, with to:"<version>" of a big one; nothing changes until the person says so (apply:true)'

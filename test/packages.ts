@@ -2,7 +2,9 @@
 // scope's package resolver, a package output's node type (its sliders, inputs, scope, signature and texture paths), the
 // packages a graph names and uses, "publish": false. The registry: publishing (the version rule, --big, blocks and
 // warnings, version.json, the hash, what a version holds), a package's graphs naming its own outputs (in its project, in
-// a version, in a followed working folder; loops), first use and `use` (copies, flat dependencies, the lock,
+// a version, in a followed working folder; loops), TopoTopo's built-in library (looked in without listing it, copied
+// and locked, a new version an update, publishing under "topotopo", following with and without a working folder, the
+// reserved library name), first use and `use` (copies, flat dependencies, the lock,
 // the project's libraries only, relative and registered libraries), cooking package outputs (sliders, inputs, a
 // package that uses another, two versions side by side, files and textures read from the version, nothing leaking),
 // hand-edited and missing copies, following a working folder, exports' source records, and the CLI commands.
@@ -30,8 +32,8 @@ import { createNodeHost } from '../src/host/node.ts';
 import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Workspace } from '../src/workspace.ts';
-import { parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
-import { compareInterfaces, lockFile, openPackages, packagesText, publishPackage, readLock, startsBigVersion, versionHash } from '../src/gallery/packages.ts';
+import { addLibrary, loadConfig, parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
+import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, readLock, startsBigVersion, versionHash } from '../src/gallery/packages.ts';
 import type { ProjectPackages, PublishResult } from '../src/gallery/packages.ts';
 import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/gallery/update.ts';
 import { ROOT } from './fixtures.ts';
@@ -194,9 +196,9 @@ const editManifest = (dir: string, f: (m: any) => void) => { const m = readJSON(
 
 interface Opened { engine: Engine; pk: ProjectPackages; ws: Workspace }
 /** An engine, the packages of the project `dir` belongs to, and a workspace on it, as the tools open them. */
-async function open(dir: string, follow: string[] = []): Promise<Opened> {
+async function open(dir: string, follow: string[] = [], builtin?: string): Promise<Opened> {
   const engine = await newEngine(dir);
-  const pk = openPackages(engine, dir, { follow });
+  const pk = openPackages(engine, dir, { follow, builtin });
   const ws = new Workspace(dir, engine);
   ws.packages = pk;
   ws.load();
@@ -681,6 +683,79 @@ section('following a working folder for one session');
   check(!s.pk.addFor(sg).length && (await s.engine.cook(sg)).ok && !readManifest(dirs.forest).uses['studio/sapling'], 'a followed package with no version yet cooks from its folder and is not added to uses');
   check(/has a working folder in more than one library|no library this project lists has a package studio\/oaks/.test(errorText(() => s.pk.follow('studio/oaks'))), 'following a package the libraries do not have fails');
   setGraph(TREES, 'crown', crown(1.5));
+}
+
+// ------------------------------------------------------------------ TopoTopo's built-in library
+section('TopoTopo\'s built-in library: looked in without listing it; copies and locks; a new version is an update');
+{
+  // a built-in library as TopoTopo's repository has it: topotopo/kit's working folder, which publishes its versions
+  const BUILTIN = path.join(tmp, 'builtin'), KIT = path.join(BUILTIN, 'kit');
+  const cube = (s: number): GraphSpec => ({ description: 'A test cube. Its size is s.', nodes: { b: { type: 'box', params: { size: ['=s', '=s', '=s'] } } }, output: 'b', vars: { s }, params: { s: { type: 'float', min: 0.1, max: 9 } }, outputs: { cube: { node: 'b', label: 'Cube' } } });
+  project(KIT, { package: 'topotopo/kit' }, { main: cube(1) });
+  const asTopoTopo = async (dir: string, note: string, builtin?: string, flag = true) => { const o = await open(dir, [], builtin); return publishPackage(o.ws, o.pk, { note, builtin: flag }); };
+  const refused = await asTopoTopo(KIT, 'mine', BUILTIN, false), outside = await asTopoTopo(KIT, 'mine');
+  check(!refused.ok && refused.blocks.some((b) => /the owner "topotopo" is reserved for TopoTopo's own packages, which TopoTopo's repository publishes into its built-in library/.test(b)), `a project does not publish under "topotopo": ${refused.blocks.join(' | ')}`);
+  check(!outside.ok && outside.blocks.some((b) => /only a folder of TopoTopo's built-in library .* publishes one of TopoTopo's own packages/.test(b)), `nor does a folder outside the built-in library: ${outside.blocks.join(' | ')}`);
+  const WRONG = path.join(BUILTIN, 'other');
+  project(WRONG, { package: 'topotopo/kit2' }, { main: cube(1) });
+  check((await asTopoTopo(WRONG, 'x', BUILTIN)).blocks.some((b) => /the folder other of TopoTopo's built-in library holds the package topotopo\/other, and its project\.json names topotopo\/kit2/.test(b)), 'a folder of the built-in library holds the package of its name');
+  fs.rmSync(WRONG, { recursive: true });
+  const v1 = await asTopoTopo(KIT, 'first kit', BUILTIN);
+  check(v1.ok && v1.version === '1.0', `the built-in library's folder publishes topotopo/kit 1.0: ${v1.blocks.join('; ')}`);
+  // a project that lists no library: first use copies the kit in and locks it, from library "topotopo"
+  const APP = path.join(tmp, 'app');
+  project(APP, {}, {});
+  const a = await open(APP, [], BUILTIN);
+  const scene: GraphSpec = { nodes: { c: { type: 'topotopo/kit/cube', params: { s: 3 } } }, output: 'c' };
+  const added = a.pk.addFor(scene);
+  check(added.length === 1 && added[0] === 'added topotopo/kit 1.0 to project app from library "topotopo" (TopoTopo\'s built-in library): packages/topotopo/kit/1.0',
+    `found without listing a library: ${added.join(' | ')}`);
+  check(JSON.stringify(readManifest(APP).uses) === '{"topotopo/kit":"1.0"}' && readLock(APP).packages['topotopo/kit']['1.0'].library === 'topotopo' && readLock(APP).packages['topotopo/kit']['1.0'].hash === v1.hash
+    && exists(APP, 'packages', 'topotopo', 'kit', '1.0', 'version.json'), 'copied and locked like any package: the lock names library "topotopo" and the version\'s hash');
+  check(size(await a.engine.cook(scene), 0) === 3, 'it cooks from the copy');
+  const listed = packagesText(a.pk);
+  check(/libraries: none listed .*; TopoTopo's built-in library "topotopo" \(.*builtin\), which every project looks in/.test(listed) && /\n {2}topotopo\/kit {2}1\.0 "first kit" {2}\[library "topotopo" \(TopoTopo's built-in library\)\] {2}\(this project uses 1\.0\)/.test(listed),
+    `packages names TopoTopo's built-in library and the packages in it:\n${listed}`);
+  // the catalog and help: offered where it is not used yet, with its description as the summary
+  const B = path.join(tmp, 'app-b');
+  project(B, { libraries: ['topotopo'] }, {});
+  const b = await open(B, [], BUILTIN);
+  const offered = b.engine.packageDefs().find((d) => d.type === 'topotopo/kit/cube');
+  check(!!offered && offered.summary === 'A test cube.' && /^Its size is s\.\ntopotopo\/kit 1\.0: first kit\nOutput "cube" of package topotopo\/kit 1\.0 \(Cube\): it cooks node "b"/.test(offered.description ?? '') && !b.engine.resolveDef('topotopo/kit/cube'),
+    `a project that does not use it gets it offered: the catalog lists it (${offered?.summary}), and only a graph's first use makes it resolve`);
+  check(b.pk.libraries().length === 0 && /^added topotopo\/kit 1\.0/.test(b.pk.use('topotopo/kit').text), 'a project that lists "topotopo" lists nothing more: the built-in library is looked in anyway');
+  const loose = path.join(tmp, 'loose-builtin');
+  fs.mkdirSync(loose);
+  const lo = await open(loose, [], BUILTIN);
+  const notHere = await lo.engine.cook(scene);
+  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no project, and only projects use packages \(hint: topotopo init <folder> \(MCP: library \{action:"init"\} for the open workspace\) makes the folder a project/.test(errorOf(notHere)),
+    `outside a project it is offered too, and naming it says how to make the folder a project: ${errorOf(notHere)}`);
+  // a TopoTopo release with a new version: an update, never a silent change
+  setGraph(KIT, 'main', cube(2));
+  const v11 = await asTopoTopo(KIT, 'a bigger cube', BUILTIN);
+  check(v11.ok && v11.version === '1.1', `topotopo/kit 1.1: ${v11.blocks.join('; ')}`);
+  const a2 = await open(APP, [], BUILTIN);
+  const late = a2.pk.outdated()[0];
+  check(late.package === 'topotopo/kit' && late.small === '1.1' && late.libraries.join() === 'topotopo' && /topotopo\/kit 1\.0: small update 1\.1 {2}\[library "topotopo" \(TopoTopo's built-in library\)\]\n {4}1\.1 {2}"a bigger cube"/.test(outdatedText(a2.pk)),
+    `the new built-in version shows as an update (${outdatedText(a2.pk).split('\n')[1]})`);
+  check(size(await a2.engine.cook(scene), 0) === 3, 'and the project keeps cooking the copy of 1.0 until it updates');
+  check(builtinVersions('topotopo/kit', BUILTIN).map((v) => v.version).join() === '1.0,1.1' && !builtinVersions('studio/trees', BUILTIN).length, 'the versions the built-in library holds (the Gallery names the newest)');
+  const up = applyUpdate(a2.pk, 'topotopo/kit');
+  check(/from library "topotopo" \(TopoTopo's built-in library\)/.test(up.text) && size(await a2.engine.cook({ nodes: { c: { type: 'topotopo/kit/cube' } } }), 0) === 2 && readLock(APP).packages['topotopo/kit']['1.1'].library === 'topotopo',
+    `Update copies 1.1 in from the built-in library: ${up.text.split('\n')[0]}`);
+  // following: the working folder in TopoTopo's repository; an installed TopoTopo ships the versions alone
+  check(/^following topotopo\/kit for this session: its working folder .*kit \(library "topotopo" \(TopoTopo's built-in library\)\)/.test(a2.pk.follow('topotopo/kit')) && a2.pk.outdated()[0].working.length === 1, 'the built-in library\'s working folder is followed like any');
+  const SHIPPED = path.join(tmp, 'shipped');
+  fs.cpSync(path.join(KIT, 'versions'), path.join(SHIPPED, 'kit', 'versions'), { recursive: true });
+  const a3 = await open(APP, [], SHIPPED);
+  check(/topotopo\/kit has no working folder in the libraries this project looks in: "topotopo" holds its versions alone \(an installed TopoTopo ships its own packages without their working folders\), and follow needs one/.test(errorText(() => a3.pk.follow('topotopo/kit')))
+    && a3.pk.outdated()[0].working.length === 0 && a3.pk.outdated()[0].libraries.join() === 'topotopo', 'without a working folder there is nothing to follow (the viewer offers no switch)');
+  check((await a3.engine.cook(scene)).ok && a3.engine.packageDefs().length > 0, 'and the versions alone serve the project');
+  // no registered library takes the built-in library's name
+  check(/"topotopo" is the name of TopoTopo's built-in library, which every project looks in: give this library another name/.test(errorText(() => addLibrary('topotopo', path.join(tmp, 'mylib')))), 'library add refuses the name "topotopo"');
+  process.env.TOPOTOPO_LIBRARIES = `topotopo=${path.join(tmp, 'mylib')}`;
+  check(/^TOPOTOPO_LIBRARIES: "topotopo" is the name of TopoTopo's built-in library/.test(errorText(() => loadConfig())), 'and so does the config');
+  delete process.env.TOPOTOPO_LIBRARIES;
 }
 
 // ------------------------------------------------------------------ the CLI

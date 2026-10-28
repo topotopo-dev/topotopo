@@ -183,6 +183,23 @@ check(!as.isError && as.txt.includes('saved asset "pills"'), 'asset saved');
 const useAsset = await call('build', { name: 'asset_test', graph: { nodes: { g: { type: 'grid', params: { divisions: [3, 3] } }, p: { type: 'pills', in: ['g'], params: { r: 0.2 } } } } });
 check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as node: ${useAsset.txt.split('\n')[0]}`);
 
+// only a project's graphs use packages: in a workspace that is none, naming one says how it becomes one; init makes it one
+{
+  const probe = { name: 'pkg_probe', graph: { nodes: { t: { type: 'studio/none/thing' } } } };
+  const outside = await call('build', probe);
+  check(outside.isError && /package studio\/none: this graph is in no project, and only projects use packages/.test(outside.txt) && /library \{action:"init"\} for the open workspace/.test(outside.txt),
+    `a package named outside a project says how the workspace becomes one: ${outside.txt.split('\n').slice(1, 3).join(' ')}`);
+  const init = await call('library', { action: 'init' });
+  check(!init.isError && fs.existsSync(path.join(wsDir, 'project.json')) && /^made the workspace .* a project, id "/.test(init.txt) && fs.existsSync(path.join(wsDir, 'assets', 'pills.json')),
+    `library init makes the open workspace a project: ${init.txt.slice(0, 80)}…`);
+  const again = await call('library', { action: 'init' });
+  check(again.isError && /is in a project already: .*project\.json/.test(again.txt), 'init refuses a workspace that is a project');
+  const inside = await call('build', probe);
+  check(inside.isError && /package studio\/none is not in this project's uses/.test(inside.txt), `in the project, a package is looked for in its libraries: ${inside.txt.split('\n')[1]}`);
+  const kept = await call('build', { name: 'asset_test', graph: { nodes: { g: { type: 'grid', params: { divisions: [3, 3] } }, p: { type: 'pills', in: ['g'], params: { r: 0.2 } } } } });
+  check(!kept.isError, 'the workspace keeps its graphs and assets');
+}
+
 // human input: files people drop into <workspace>/inputs, listed and described for the agent
 {
   const inDir = path.join(wsDir, 'inputs');
@@ -298,7 +315,7 @@ if (url) {
   check(!bk.isError && !!bk.img && fs.existsSync(path.join(projDir, '.gallery', 'preview.glb')), 'library bake renders the previews and shows the thumbnail');
   const got = await call('library', { action: 'get', library: 'game', id: 'barrel', thumbnail: true });
   check(got.txt.includes('(open)') && got.txt.includes('main (shown)') && got.txt.includes('board: http://board.local/1') && !!got.img, 'library get: manifest, graphs, links, thumbnail');
-  const back = await call('library', { action: 'open', path: wsDir });
+  const back = await call('library', { action: 'open', path: fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-loose-')) });
   check(back.isError && back.txt.includes('no project.json'), 'open refuses a folder that is not a project');
   const found = await call('library', { action: 'list', query: 'barrel' });
   check(found.txt.includes('barrel (open)') && found.txt.includes('baked'), 'library list finds it by words, marks the open one and its status');
@@ -395,5 +412,16 @@ if (url) {
 }
 
 await client.close();
+
+// the server's own default workspace (no --workspace, no TOPOTOPO_WORKSPACE): <cwd>/workspace, made a project
+{
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-default-'));
+  const own = new Client({ name: 'topotopo-test-default', version: '0.0.1' });
+  await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts')], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile }, stderr: 'pipe' }));
+  const r: any = await own.callTool({ name: 'library', arguments: { action: 'packages' } });
+  const txt = r.content.map((c: any) => c.text ?? '').join('\n');
+  check(!r.isError && fs.existsSync(path.join(cwd, 'workspace', 'project.json')) && /^project workspace \(.*workspace\)\nuses: nothing yet/.test(txt), `the default workspace is a project: ${txt.split('\n')[0]}`);
+  await own.close();
+}
 console.log(`\n${failures ? failures + ' FAILURES' : 'ALL PASSED'} — workspace ${wsDir}`);
 process.exit(failures ? 1 : 0);

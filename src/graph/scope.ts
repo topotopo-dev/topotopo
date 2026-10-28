@@ -27,6 +27,11 @@ export interface PackageResolver {
   resolve(name: string): NodeDef | PackageIssue;
   /** every package output name the scope resolves ("owner/name" and "owner/name/output"), for did-you-mean and the catalog */
   names(): string[];
+  /**
+   * the node types of package outputs the scope does not use yet but a graph may name, which its first use adds
+   * (TopoTopo's own packages): for the catalog and help, never for cooking
+   */
+  offered?(): NodeDef[];
 }
 
 export interface Scope {

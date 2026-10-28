@@ -130,8 +130,8 @@ if (argv.includes('--help-topic')) {
   process.exit(0);
 }
 if (argv.includes('--catalog') || opt('--help-node')) {
-  // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts, and the outputs of
-  // the packages the current folder's project uses
+  // node types plus the shelf assets (house, stairs, …), which the engine registers when it starts, the outputs of the
+  // packages the current folder's project uses, and those of TopoTopo's own packages it does not use yet
   const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
   await engine.init();
   openPackages(engine, process.cwd());
@@ -140,8 +140,10 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   else {
     const name = opt('--help-node')!;
     const d = defs.find((x) => x.type === name) ?? (name.includes('/') ? engine.resolveDef(name) : undefined);
-    const why = !d && name.includes('/') ? engine.packageIssue(name) : null;
-    console.log(d ? nodeDoc(d) : why ? `${why.error}${why.hint ? ` (${why.hint})` : ''}` : `unknown node "${name}" (see --catalog)`);
+    // a package output this folder cannot cook as it is (one of TopoTopo's own it does not use, a folder in no project)
+    const why = name.includes('/') && !engine.resolveDef(name) ? engine.packageIssue(name) : null;
+    const said = why ? `${why.error}${why.hint ? ` (${why.hint})` : ''}` : '';
+    console.log(d ? `${nodeDoc(d)}${said ? `\nin this folder: ${said}` : ''}` : said || `unknown node "${name}" (see --catalog)`);
   }
   process.exit(0);
 }

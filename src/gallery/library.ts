@@ -5,11 +5,13 @@
 // (src/gallery/packages.ts).
 //   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], gallery: {port, cors: [origins]}}
 //   $TOPOTOPO_LIBRARIES                              more libraries: name=path entries separated by path.delimiter
-// Scanning reads project.json files only: it never creates folders and never cooks.
+// Scanning reads project.json files only: it never creates folders and never cooks. TopoTopo carries a library of its
+// own, its built-in library (BUILTIN_LIBRARY), which every project looks in without listing it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { ID_RE, parsePackageName } from '../graph/scope.ts';
 import { NAME_RE } from '../workspace.ts';
 
@@ -32,6 +34,15 @@ const PKG_VERSION = (() => {
 })();
 
 export interface LibraryRef { name: string; path: string }
+
+/**
+ * TopoTopo's built-in library: TopoTopo's own packages (owner "topotopo"), shipped in library/ beside src/ and dist/.
+ * Every project looks in it without listing it, and no other library takes its name. Its folder <name> holds the
+ * versions of topotopo/<name> (versions/<version>/); in TopoTopo's repository it is the package's working folder as well,
+ * a project, while an installed TopoTopo ships the versions alone (src/gallery/packages.ts reads it).
+ */
+export const BUILTIN_LIBRARY: LibraryRef = { name: 'topotopo', path: fileURLToPath(new URL('../../library', import.meta.url)) };
+const builtinName = (name: string, from: string) => `${from}"${name}" is the name of TopoTopo's built-in library, which every project looks in: give this library another name`;
 export interface GalleryConfig {
   /** the config file read (or the one `library add` writes) */
   file: string;
@@ -110,6 +121,7 @@ export function loadConfig(): GalleryConfig {
   const libraries: LibraryRef[] = [];
   const add = (name: string, p: string, from: string) => {
     if (!ID_RE.test(name)) throw new Error(`${from}: library name "${name}" must match ${ID_RE}`);
+    if (name === BUILTIN_LIBRARY.name) throw new Error(builtinName(name, `${from}: `));
     if (libraries.some((l) => l.name === name)) return;
     libraries.push({ name, path: path.resolve(path.dirname(file), p) });
   };
@@ -136,6 +148,7 @@ export function loadConfig(): GalleryConfig {
 /** Add (or re-point) a library in the config file, keeping its other keys. */
 export function addLibrary(name: string, dir: string): GalleryConfig {
   if (!ID_RE.test(name)) throw new Error(`library name "${name}" must match ${ID_RE} (e.g. "${slugify(name) || 'game'}")`);
+  if (name === BUILTIN_LIBRARY.name) throw new Error(builtinName(name, ''));
   const file = configFile();
   let raw: any = {};
   if (fs.existsSync(file)) raw = JSON.parse(fs.readFileSync(file, 'utf8'));

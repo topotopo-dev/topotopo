@@ -28,7 +28,7 @@ ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geome
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
 LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".
-PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. library {action:"packages"} lists them, {action:"publish", note} publishes a version of the open project's package, {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply only when the person says so. See help topic "packages".`;
+PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. Only a project's graphs use packages: library {action:"init"} makes the open workspace one. library {action:"packages"} lists them, {action:"publish", note} publishes a version of the open project's package, {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply only when the person says so. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -88,6 +88,8 @@ WORKING IN A PROJECT
 - library {action:"open", library, id} → every tool (build, edit, render, export, inputs, assets, preview) now works
   in that folder. Build the project's model into graph "main" (or the manifest's "graph").
 - library {action:"create", library, path:"props/barrel", title, tags, links} → a new project, opened.
+- library {action:"init"} → the open workspace becomes a project where it is none (project.json in its folder), when
+  the person wants its graphs to use packages. The server's own default workspace is one already.
 - library {action:"set", tags, links, description, bake:{frame: 48}} → edit project.json (bake.frame for
   simulations that settle after frame 1; bake.node to show one part).
 - library {action:"bake"} → render the previews now and see the thumbnail.
@@ -829,7 +831,11 @@ packages/lock.json (each copy's hash, the library it came from, its own uses). T
 so it cooks anywhere without the libraries, and what it uses never changes by itself; a copy edited by hand is warned
 about. A project finds packages only in the libraries its project.json lists, "libraries": ["../shared/library", "game"]:
 a path relative to the project for a library in the same repository (every checkout and worktree uses its own), else a
-registered library's name. The tools never list a library themselves; the person does.
+registered library's name. The tools never list a library themselves; the person does. Besides those, every project
+looks in TopoTopo's built-in library, "topotopo" (no other library takes that name): it holds TopoTopo's own packages
+(owner "topotopo"), which a project uses, copies and locks like any other; a newer version a TopoTopo release brings
+shows as an update. Only a project's graphs use packages: in a workspace that is none, naming one fails and says so,
+and library {action:"init"} (CLI: topotopo init) makes it a project.
 - First use: a build or edit whose graph names a package the project does not use yet adds its newest version, and
   the response says so. library {action:"use", package:"studio/trees"} (CLI: topotopo use studio/trees) adds one
   explicitly; library {action:"packages"} (CLI: topotopo packages) lists what the project uses and the packages in its

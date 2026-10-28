@@ -19,14 +19,21 @@ import { libraryTool } from './library.ts';
 import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
+import { initProject, projectDirOf } from '../gallery/library.ts';
 import { openPackages } from '../gallery/packages.ts';
 import type { ProjectPackages } from '../gallery/packages.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
-const wsDir = path.resolve(argOf('--workspace') ?? process.env.TOPOTOPO_WORKSPACE ?? path.join(process.cwd(), 'workspace'));
+const named = argOf('--workspace') ?? process.env.TOPOTOPO_WORKSPACE;
+const wsDir = path.resolve(named ?? path.join(process.cwd(), 'workspace'));
 
 const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + '\n');
+
+// The server's own workspace (no --workspace, no TOPOTOPO_WORKSPACE) is a project, so that its graphs can use packages,
+// TopoTopo's own among them, as they come: the server makes that folder itself, and it lies in no other project. A
+// folder the person names stays as it is: library {action:"init"} makes it a project when they say so.
+if (named === undefined && !projectDirOf(wsDir)) { initProject(wsDir); log(`made the default workspace ${wsDir} a project (project.json)`); }
 
 // The workspace can change while the server runs (library {action:"open"} opens a gallery project): every tool and
 // the live viewer then work on the new folder. Each workspace has its own engine (asset registry, base directory,

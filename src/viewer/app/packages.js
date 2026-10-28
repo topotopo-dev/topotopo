@@ -1,8 +1,9 @@
 // The Packages tab (src/viewer/packages.ts serves it), shown while the project uses packages: a card per package with
 // the version in use and its note, the updates the project's libraries have (a small one, the newest version with the
-// same big number, and a big one, a step of its own) with the notes of the newer versions, and the follow switch,
-// "Use the trees I'm editing": for this viewer's session the package cooks from its working folder and every save
-// there cooks the scene again. A save there while the switch is off is offered through the status bar's question.
+// same big number, and a big one, a step of its own) with the notes of the newer versions, and, where the libraries hold
+// its working folder, the follow switch, "Use the trees I'm editing": for this viewer's session the package cooks from
+// its working folder and every save there cooks the scene again. A save there while the switch is off is offered
+// through the status bar's question.
 // Before/after cooks every place the project uses the package with the version in use (a) and the new one (b), its
 // progress in the cook lines with their Stop; a place shows alone in the view as an output card does, as a, as b or
 // both overlaid, and its details say what changed. Nothing changes until Update. A node of a package with an update
@@ -174,7 +175,8 @@ export function createPackagesPanel(ctx, host) {
     if (p.big) acts.append(button(`Before/after ${p.big} (big)`, p.small ? '' : 'primary', at(p.big, true), () => P.compare(p.package, p.big)));
     for (const b of acts.children) b.disabled = comparing || applying;
     if (acts.children.length && !r && !running) box.append(acts);
-    box.append(followSwitch(p));
+    // a package whose libraries hold its versions alone (TopoTopo's own in an installed TopoTopo) has nothing to follow
+    if (p.followed || p.working.length) box.append(followSwitch(p));
     if (p.mustChange) {
       const m = el('div', 'pkg-must');
       m.append(el('div', 'pkg-sub', `Updated to ${p.mustChange.to}: the project's graphs must change; until they do, they report these errors:`), list(p.mustChange.items, 'err'));
@@ -193,8 +195,7 @@ export function createPackagesPanel(ctx, host) {
     box.disabled = !one;
     label.title = one
       ? `for this session, cook ${p.package} from its working folder ${one.dir} (library "${one.library}") instead of ${p.version ? `the copy of ${p.version}` : 'a copy'}: every save there cooks the scene again. Nothing about it is saved; off goes back to the copy`
-      : p.working.length > 1 ? `${p.package} has a working folder in more than one library this project lists (${p.working.map((w) => w.dir).join(', ')}): following needs exactly one`
-      : `no library this project lists has the working folder of ${p.package}`;
+      : `${p.package} has a working folder in more than one library this project lists (${p.working.map((w) => w.dir).join(', ')}): following needs exactly one`;
     box.onchange = () => { box.blur(); P.follow(p.package, box.checked); };
     label.append(box, el('span', '', followLabel(p.package)));
     return label;

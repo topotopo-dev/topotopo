@@ -58,16 +58,23 @@ export interface PackageOutput {
 /** "studio/trees 1.3", or "studio/trees (working folder)" for one followed this session. */
 export const packageAt = (o: Pick<PackageOutput, 'package' | 'version'>) => (o.version === null ? `${o.package} (working folder)` : `${o.package} ${o.version}`);
 
-/** The node type of a package output: its graph's vars are its params and its input nodes the inputs, as for assets. */
+/**
+ * The node type of a package output: its graph's vars are its params and its input nodes the inputs, as for assets. A
+ * graph that describes itself gives the catalog's summary (its description's first sentence) and the rest of the text.
+ */
 export function packageOutputDef(o: PackageOutput): NodeDef {
   const type = o.output === null ? o.package : `${o.package}/${o.output}`;
   const at = packageAt(o);
   const { params, inputs } = graphInterface(o.spec);
+  const what = `${o.output === null ? 'the default output' : `output "${o.output}"`} of package ${at}${o.label ? ` (${o.label})` : ''}`;
+  const desc = typeof o.spec.description === 'string' ? o.spec.description.trim() : '';
+  const split = /^(.+?[.!?])\s+(.+)$/s.exec(desc);
+  const cooks = `it cooks node "${o.node}" of the package's graph "${o.graph}"; its params are that graph's vars.`;
   return {
     type,
     category: 'package',
-    summary: `${o.output === null ? 'the default output' : `output "${o.output}"`} of package ${at}${o.label ? ` (${o.label})` : ''}`,
-    description: [o.spec.description, o.note ? `${at}: ${o.note}` : '', `It cooks node "${o.node}" of the package's graph "${o.graph}"; its params are that graph's vars.`].filter(Boolean).join('\n'),
+    summary: desc ? split?.[1] ?? desc : what,
+    description: [split?.[2] ?? '', o.note ? `${at}: ${o.note}` : '', desc ? `${what[0].toUpperCase()}${what.slice(1)}: ${cooks}` : `${cooks[0].toUpperCase()}${cooks.slice(1)}`].filter(Boolean).join('\n'),
     inputs,
     params,
     package: o,

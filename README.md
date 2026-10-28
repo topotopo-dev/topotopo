@@ -401,9 +401,12 @@ copy in the project's `versions/` folder, numbered big.small by what changed for
 renamed output, slider or input, a narrower range or a removed option makes a big version). A project that uses a
 package keeps its own copy of the version it uses in `packages/` and names it in `project.json`, so it cooks the same
 on every machine and what it uses never changes by itself. It finds packages in the libraries its `project.json` lists
-(`"libraries": ["../shared/library", "game"]`); the first graph that names one adds it. A package's own graphs name its
-other outputs the same way, a kit's house of the kit's walls: they resolve to the same version, with no entry in `uses`,
-and outputs that name each other in a loop are refused. To tune a package while looking at a project that uses it,
+(`"libraries": ["../shared/library", "game"]`) and in TopoTopo's built-in library, `topotopo`, which every project looks
+in and which holds TopoTopo's own packages (a newer version in a TopoTopo release shows as an update); the first graph
+that names one adds it. Only a project uses packages: `topotopo init` (MCP: `library {action: "init"}`) makes a folder
+one, and the MCP server's default workspace is one. A package's own graphs name its other outputs the same way, a
+kit's house of the kit's walls: they resolve to the same version, with no entry in `uses`, and outputs that name each
+other in a loop are refused. To tune a package while looking at a project that uses it,
 `--follow studio/trees` (or the MCP `library` tool's `follow`) uses the package's working folder for one session.
 Exports record the package versions they used.
 
