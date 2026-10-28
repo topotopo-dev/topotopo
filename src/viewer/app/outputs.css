@@ -78,6 +78,12 @@ button:disabled { opacity: .45; cursor: default; }
 .pkg-vd { font: var(--mono); font-size: 10px; color: var(--faint); }
 .pkg-vt { overflow-wrap: anywhere; }
 .pkg-tag { padding: 0 4px; border: 1px solid var(--sel); border-radius: 2px; color: var(--sel); font-size: 10px; line-height: 14px; }
+/* the outputs of the version in use: name, kind, tags */
+.pkg-outs { display: flex; flex-direction: column; gap: 1px; }
+.pkg-out { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 11px; color: var(--dim); }
+.pkg-on { font: var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.pkg-kind { padding: 0 4px; border: 1px solid var(--faint); border-radius: 2px; font-size: 10px; line-height: 14px; }
+.pkg-otags { overflow-wrap: anywhere; }
 .pkg-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .pkg-actions button { padding: 3px 10px; }
 .pkg-follow { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 11px; cursor: pointer; }
@@ -112,6 +118,8 @@ button:disabled { opacity: .45; cursor: default; }
 .layer-pick { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .layer-pick select { flex: 1; min-width: 0; }
 #output-details .output-kind { color: var(--text); }
+/* an output that is not the kind its graph pins */
+.output-card .warn, #output-details .warn { color: var(--sel); }
 .export-error { color: var(--err); font-size: 11px; }
 .export-error:empty { display: none; }
 .export-actions { display: flex; justify-content: flex-end; gap: 8px; }

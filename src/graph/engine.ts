@@ -42,6 +42,7 @@ import {
 } from './params.ts';
 import type { ExprRefs, ResolvedParams, TimeState } from './params.ts';
 import { migrateGraphDetailed } from './migrate.ts';
+import { outputFieldIssues } from './outputs.ts';
 import { parallelMap as runKernel } from './parallel.ts';
 import type { PoolStats } from './parallel.ts';
 import { parsePackageName, scopeSig } from './scope.ts';
@@ -603,6 +604,7 @@ export class Engine {
           errors.push({ node: path || '(graph)', message: `named output "${id}": ${targetError(out.export)}` });
         else if (out.publish !== undefined && typeof out.publish !== 'boolean')
           errors.push({ node: path || '(graph)', message: `named output "${id}": "publish" must be true or false (false keeps it out of the project's package), got ${JSON.stringify(out.publish)}` });
+        else for (const i of outputFieldIssues(out)) errors.push({ node: path || '(graph)', message: `named output "${id}": ${i.message}`, hint: i.hint });
       }
     }
     if (graph.export !== undefined && targetError(graph.export))

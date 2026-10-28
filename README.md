@@ -216,7 +216,7 @@ it is until you say so: `library {action: "init"}` (or `topotopo init <folder>`)
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, heightfields, images and SDF grids, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer, or `init`, which makes the open workspace a project; the open project's packages: `packages`, `use`, `follow` (a package's working folder for the session), `publish`, `outdated` (newer versions and their notes) and `update` (a before/after with overlay renders, applied when the person says so) |
+| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer, or `init`, which makes the open workspace a project; the open project's packages: `packages`, `search` (the outputs of every library by words, kind and tag, and whether the project can use them), `use`, `follow` (a package's working folder for the session), `publish` (with `check: true` a dry run), `outdated` (newer versions and their notes) and `update` (a before/after with overlay renders, applied when the person says so) |
 
 ## Graph format
 
@@ -395,8 +395,9 @@ topotopo gallery
 ```
 
 Each project has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
-`/embed/<library>/<id>`. A package's page lists its versions with their notes and dates and the outputs it publishes,
-a project's page the packages it uses, and the grid marks packages with their full name.
+`/embed/<library>/<id>`. A package's page lists its versions with their notes and dates and the outputs it publishes
+with their kinds and tags, a project's page the packages it uses, and the grid marks packages with their full name; its
+search finds their outputs by name, kind and tag as well.
 
 ## Packages
 
@@ -416,6 +417,17 @@ outputs that name each other in a loop are refused. To tune a package while look
 `--follow studio/trees` (or the MCP `library` tool's `follow`) uses the package's working folder for one session.
 Exports record the package versions they used.
 
+Every published output says what it is. Publishing cooks it and records its kind (`mesh`, `instances`, `points`,
+`curves`, `terrain`, `textures`, `volume`, or `scene` for several of these), its tags and its description, from the
+graph's `outputs`: `{"pine": {"node": "out", "kind": "mesh", "tags": ["conifer", "low-poly"], "description": "…"}}`.
+A `kind` written there is checked: publishing refuses an output of another kind, or one that cooks to nothing, and
+build and the viewer warn before that. An output of another kind than before makes the version big; tags and
+descriptions are small changes. `topotopo publish --check` (MCP: `publish {check: true}`) runs every check and says
+the version number it would get, its changes, blocks and warnings, writing nothing. `topotopo search conifer --kind
+mesh` (MCP: `library {action: "search"}`) finds outputs in TopoTopo's built-in library, the libraries the project lists
+and every registered library, and says for each whether the project can use it or which `"libraries"` entry its
+`project.json` needs.
+
 `topotopo outdated` lists the newer versions of what a project uses, with their notes. `topotopo update studio/trees`
 shows a before/after first: every place the project uses the package, cooked with the version in use and the new one,
 what changed and the notes in between, without writing anything; the same command with `--apply` updates it (a big
@@ -431,7 +443,9 @@ folder while the viewer is open offers it.
 
 ```bash
 topotopo init props/trees --package studio/trees
+topotopo publish props/trees --check
 topotopo publish props/trees --note "first version"
+topotopo search conifer --kind mesh
 topotopo use studio/trees levels/forest
 topotopo packages levels/forest
 topotopo outdated levels/forest

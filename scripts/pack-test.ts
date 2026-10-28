@@ -34,6 +34,12 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 const NAME: string = pkg.name;
 const BIN = Object.keys(pkg.bin)[0];
 
+/** The newest version TopoTopo's built-in library holds of a kit, which a first use copies in. */
+const newestOf = (kit: string) => fs.readdirSync(path.join(ROOT, 'library', kit, 'versions')).filter((v) => /^\d+\.\d+$/.test(v))
+  .sort((a, b) => { const [x, y] = a.split('.').map(Number), [u, w] = b.split('.').map(Number); return x - u || y - w; }).at(-1)!;
+/** A version as a regular expression matches it. */
+const re = (v: string) => v.replace(/\./g, '\\.');
+
 let failures = 0;
 const check = (cond: unknown, msg: string) => { console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); if (!cond) failures++; };
 const t0 = Date.now();
@@ -65,7 +71,7 @@ try {
     'package.json', 'README.md', 'LICENSE', 'NOTICE',
     'dist/index.js', 'dist/index.d.ts', 'dist/cli.js', 'dist/mcp/server.js', 'dist/host/node.js', 'dist/host/pool.js',
     'dist/host/worker.js', 'dist/wasm/kernels.js', 'dist/viewer/server.js', 'dist/viewer/index.html',
-    ...fs.readdirSync(path.join(ROOT, 'library')).map((k) => `library/${k}/versions/1.0/version.json`), 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
+    ...fs.readdirSync(path.join(ROOT, 'library')).map((k) => `library/${k}/versions/${newestOf(k)}/version.json`), 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
     'kernels/pkg/topotopo_kernels.js', 'kernels/pkg/topotopo_kernels_bg.wasm', 'kernels/pkg/LICENSE',
     'kernels/pkg-simd/topotopo_kernels.js', 'kernels/pkg-simd/topotopo_kernels_bg.wasm', 'kernels/pkg-simd/LICENSE',
   ];
@@ -110,8 +116,9 @@ try {
   check(/^project app → /.test(init) && fs.existsSync(path.join(app, 'project.json')), `init makes the temp project a TopoTopo project (${init.split('\n')[0]})`);
   const cook = sh(`npm exec --no -- ${BIN} roofs.json --render roofs.png --export roofs.glb`, app);
   const lock = fs.existsSync(path.join(app, 'packages', 'lock.json')) ? JSON.parse(fs.readFileSync(path.join(app, 'packages', 'lock.json'), 'utf8')) : {};
-  check(/added topotopo\/architecture 1\.0 to project app from library "topotopo" \(TopoTopo's built-in library\)/.test(cook) && lock.packages?.['topotopo/architecture']?.['1.0']?.library === 'topotopo'
-    && fs.existsSync(path.join(app, 'packages', 'topotopo', 'architecture', '1.0', 'version.json')), 'the first use copies topotopo/architecture 1.0 in from the installed built-in library and locks it');
+  const arch = newestOf('architecture');
+  check(new RegExp(`added topotopo/architecture ${re(arch)} to project app from library "topotopo" \\(TopoTopo's built-in library\\)`).test(cook) && lock.packages?.['topotopo/architecture']?.[arch]?.library === 'topotopo'
+    && fs.existsSync(path.join(app, 'packages', 'topotopo', 'architecture', arch, 'version.json')), `the first use copies topotopo/architecture ${arch} in from the installed built-in library and locks it`);
   const png = path.join(app, 'roofs.png');
   const pngOk = fs.existsSync(png) && fs.readFileSync(png).subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && fs.statSync(png).size > 20000;
   check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/skeleton_roofs.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
@@ -231,7 +238,8 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     // the documented setup: a new workspace folder, which the server made a project, so the first build that names a
     // kit's output copies the kit in
     const rock = await call('build', { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' });
-    check(fs.existsSync(path.join(ws, 'project.json')) && !rock.isError && /note: added topotopo\/nature 1\.0/.test(rock.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', '1.0', 'version.json')),
+    const nature = newestOf('nature');
+    check(fs.existsSync(path.join(ws, 'project.json')) && !rock.isError && new RegExp(`note: added topotopo/nature ${re(nature)}`).test(rock.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', nature, 'version.json')),
       `a new workspace is a project: the first build copies topotopo/nature in from the installed built-in library: ${rock.txt.split('\n')[0]}`);
     const b = await call('build', { graph: { nodes: { b: { type: 'box' }, g: { type: 'sdf_grid', in: ['b'], params: { voxel_size: 0.1 } }, m: { type: 'grid_to_mesh', in: ['g'] } } } });
     check(!b.isError && b.txt.includes('✓'), `build with sdf_grid (WASM kernels in the server): ${b.txt.split('\n')[0].slice(0, 80)}`);

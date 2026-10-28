@@ -53,6 +53,14 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 /* a package: its full name and newest version */
 .pkg { align-self: flex-start; max-width: 100%; padding: 0 6px; border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); font: var(--mono); font-size: 11px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pkgline { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--dim); font-size: 13px; }
+/* an output's kind beside its tags; on a card, the outputs the search found */
+.kind { padding: 0 6px; border: 1px solid var(--faint); border-radius: 3px; color: var(--text); font-size: 11px; line-height: 16px; }
+.outs { display: flex; flex-direction: column; gap: 3px; }
+.outs:not(:has(.out:not([hidden]))) { display: none; }
+.out { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; font-size: 11px; color: var(--dim); }
+.out[hidden] { display: none; }
+.out code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+td .tags { margin-top: 4px; }
 .s-failed { color: var(--err); }
 .s-baking { color: var(--accent); }
 

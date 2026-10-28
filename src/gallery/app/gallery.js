@@ -1,5 +1,6 @@
-// The gallery pages' script (src/gallery/pages.ts): search and tag filters on the grid, copy buttons and actions on a
-// project page, and live updates from the server's event stream (a bake finished, projects added or removed).
+// The gallery pages' script (src/gallery/pages.ts): search and tag filters on the grid (the search finds a package's
+// outputs too, by name, kind and tag, and shows those it found on the card), copy buttons and actions on a project page,
+// and live updates from the server's event stream (a bake finished, projects added or removed).
 const page = document.body.dataset.page;
 const data = document.body.dataset.json ? JSON.parse(document.body.dataset.json) : {};
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -12,8 +13,12 @@ if (page === 'gallery') {
     const tags = chips.filter((c) => c.getAttribute('aria-pressed') === 'true').map((c) => c.dataset.tag);
     let shown = 0;
     for (const card of $$('.card')) {
-      const own = card.dataset.tags.split('\n');
-      const ok = words.every((w) => card.dataset.hay.includes(w)) && tags.every((t) => own.includes(t));
+      const own = card.dataset.tags.split('\n'), hay = card.dataset.hay;
+      // an output is found when every word is in it or in its project, and at least one in the output itself
+      const outs = [...card.querySelectorAll('.out')];
+      const found = words.length ? outs.filter((o) => words.every((w) => o.dataset.hay.includes(w) || hay.includes(w)) && words.some((w) => o.dataset.hay.includes(w))) : [];
+      const ok = (words.every((w) => hay.includes(w)) || found.length > 0) && tags.every((t) => own.includes(t));
+      for (const o of outs) o.hidden = !ok || !found.includes(o);
       card.hidden = !ok;
       if (ok) shown++;
     }

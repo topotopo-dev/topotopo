@@ -492,6 +492,9 @@ function nodeSection(d: NodeDef): string {
   const out: string[] = [`<section class="node" id="${id}">`,
     `<h2><code>${id}</code>${d.deprecated ? '<span class="badge">deprecated</span>' : ''}<a class="anchor" href="#${id}" aria-label="Link to ${id}">#</a></h2>`];
   if (d.aliases?.length) out.push(`<p class="aliases">aliases: ${d.aliases.map((a) => `<code>${esc(a)}</code>`).join(' ')}</p>`);
+  // a package output: what it is and its tags, as its version records them
+  const kt = [d.package?.kind ? `kind: <code>${esc(d.package.kind)}</code>` : '', d.package?.tags?.length ? `tags: ${d.package.tags.map((t) => `<code>${esc(t)}</code>`).join(' ')}` : ''].filter(Boolean);
+  if (kt.length) out.push(`<p class="kind-tags">${kt.join(' · ')}</p>`);
   if (d.deprecated) out.push(`<p><strong>Deprecated:</strong> ${inline(d.deprecated)}</p>`);
   out.push(`<p class="summary">${inline(d.summary)}</p>`);
   const thumb = thumbOf(d.type);
@@ -544,7 +547,7 @@ validation, the MCP <code>catalog</code> and <code>help</code> tools, <a href="$
 ${categories.map((c) => `<section class="cat" id="${esc(c)}">
 <h2><a href="${u(`nodes/${c}.html`)}">${esc(c)}</a><span class="badge">${byCat.get(c)!.length}</span></h2>
 <ul class="cat-list">
-${byCat.get(c)!.map((d) => `<li data-k="${esc([d.type, ...(d.aliases ?? []), c, plain(d.summary)].join(' ').toLowerCase())}"><a href="${u(`nodes/${c}.html#${d.type}`)}">${esc(d.type)}</a><span>${inline(d.summary)}</span></li>`).join('\n')}
+${byCat.get(c)!.map((d) => `<li data-k="${esc([d.type, ...(d.aliases ?? []), c, plain(d.summary), d.package?.kind ?? '', ...(d.package?.tags ?? [])].join(' ').toLowerCase())}"><a href="${u(`nodes/${c}.html#${d.type}`)}">${esc(d.type)}</a><span>${inline(d.summary)}</span></li>`).join('\n')}
 </ul>
 </section>`).join('\n')}
 <p id="no-match" hidden>No node matches the filter.</p>
@@ -603,7 +606,8 @@ page({
 <a href="${u(`nodes/package.html#${type}`)}">${exists(thumb) ? img(thumb, `${type} thumbnail`) : ''}</a>
 <div class="body"><h3><a href="${u(`nodes/package.html#${type}`)}">${esc(type)}</a></h3>
 ${d ? `<p>${inline(d.summary)}</p>` : ''}
-<p class="meta">${params} param${params === 1 ? '' : 's'}${inputs.length ? ` · input: ${inputs.map(esc).join(', ')}` : ''}</p></div>
+<p class="meta">${d?.package?.kind ? `${esc(d.package.kind)} · ` : ''}${params} param${params === 1 ? '' : 's'}${inputs.length ? ` · input: ${inputs.map(esc).join(', ')}` : ''}</p>
+${d?.package?.tags?.length ? `<p class="meta">tags: ${d.package.tags.map(esc).join(', ')}</p>` : ''}</div>
 </article>`;
   };
   return `<h1>TopoTopo's own packages</h1>
@@ -613,7 +617,9 @@ a road or a terrain. TopoTopo carries them built in (<a href="${esc(repoUrl('lib
 offline and every project finds them without listing a library. A project's graph names an output by its full name; the
 first use copies the kit's version into the project and locks it, as for any package, and a newer version a TopoTopo
 release brings shows as an update. Each output documents its typed parameters, puts its pivot at the base and tags every
-piece with <code>name</code> and <code>material</code>. Parameters, inputs and examples are in the
+piece with <code>name</code> and <code>material</code>; it says what it is (its kind) and carries tags a search finds it by
+(<code>topotopo search --tag street-furniture</code>, or the MCP <code>library</code> tool's <code>search</code>, across
+every library). Parameters, inputs and examples are in the
 <a href="${u('nodes/package.html')}">node reference</a>.</p>
 ${kitJson ? codeBlock(kitJson.text, kitJson.lang) : ''}
 <ul class="chips">${kits.map((k) => `<li><a href="#${esc(k.name)}">${esc(k.package)}</a></li>`).join('')}</ul>

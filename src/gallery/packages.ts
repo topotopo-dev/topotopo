@@ -1,7 +1,8 @@
 // Packages on disk (the engine side is src/graph/packages.ts): the copies of the package versions a project uses and
 // their lock, the libraries a project finds packages in, adding a package on first use, following a package's working
-// folder for one session, publishing a version, and the newer versions of what a project uses and updating to one
-// (the before/after is src/gallery/update.ts).
+// folder for one session, publishing a version (with the kind, tags and description of each output, and a dry run),
+// the newer versions of what a project uses and updating to one (the before/after is src/gallery/update.ts), and
+// searching the outputs of every library.
 //
 //   <package>/project.json                          "package": "studio/trees" (set by the author), "uses", "libraries"
 //   <package>/versions/1.3/                         a published version, never written over: project.json (without
@@ -35,6 +36,8 @@ import { createHash } from 'node:crypto';
 import { graphInterface } from '../graph/engine.ts';
 import type { Engine } from '../graph/engine.ts';
 import { migrateGraph } from '../graph/migrate.ts';
+import { KINDS, isKind, outputFieldIssues } from '../graph/outputs.ts';
+import type { Kind } from '../graph/outputs.ts';
 import { ownOutputsNamed, packageAt, packageOutputDef, packagesNamedIn } from '../graph/packages.ts';
 import { didYouMean, resolveParamName } from '../graph/params.ts';
 import { getNodeDef } from '../graph/registry.ts';
@@ -42,6 +45,7 @@ import { ID_RE, parsePackageName } from '../graph/scope.ts';
 import type { PackageIssue, PackageResolver, Scope } from '../graph/scope.ts';
 import type { GraphSpec, NodeDef } from '../graph/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
+import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
 import { NAME_RE } from '../workspace.ts';
 import type { Workspace, WorkspacePackages } from '../workspace.ts';
 import { BUILTIN_LIBRARY, VERSION_RE, loadConfig, manifestFile, projectDirOf, readManifest, scanLibrary, writeAtomic, writeManifest } from './library.ts';
@@ -62,8 +66,15 @@ export interface Lock { packages: Record<string, Record<string, LockEntry>> }
 
 export interface SliderInfo { type: string; default?: unknown; min?: number; max?: number; options?: (string | number)[]; label?: string; desc?: string }
 export interface InputInfo { index: number; label: string }
-/** A published output: the graph and node it cooks, its sliders (the graph's vars) and its inputs (its input nodes). */
-export interface OutputInfo { graph: string; node: string; label?: string; sliders: Record<string, SliderInfo>; inputs: InputInfo[] }
+/**
+ * A published output: the graph and node it cooks, what it is (its kind as it cooked, its tags, its description: the
+ * output's own or else its graph's), its sliders (the graph's vars) and its inputs (its input nodes). A version
+ * published before TopoTopo recorded kinds has no kind, tags or description.
+ */
+export interface OutputInfo {
+  graph: string; node: string; label?: string; kind?: Kind; tags?: string[]; description?: string;
+  sliders: Record<string, SliderInfo>; inputs: InputInfo[];
+}
 
 /** version.json */
 export interface VersionInfo {
@@ -75,7 +86,10 @@ export interface VersionInfo {
   /** the author marked it big (publish --big) */
   big: boolean;
   hash: string;
-  /** every published output, and the default output (the output node of the graph project.json shows) */
+  /**
+   * every published output, and the default output (the output node of the graph project.json shows; its tags and
+   * description are those of the named output it is, if any)
+   */
   outputs: Record<string, OutputInfo>;
   default: OutputInfo;
   /** the TopoTopo version that published it */
@@ -267,12 +281,20 @@ function readGraphs(dir: string, problems: string[]): Map<string, GraphSpec> {
   return out;
 }
 
-interface FolderOutput { name: string | null; graph: string; spec: GraphSpec; node: string; label?: string }
+/**
+ * A published output of a package folder: the graph and node it cooks, its label, the kind its author pinned, its tags
+ * and its description (its own, else its graph's).
+ */
+interface FolderOutput { name: string | null; graph: string; spec: GraphSpec; node: string; label?: string; kind?: Kind; tags: string[]; description?: string }
+
+/** A graph's description, trimmed ('' without one). */
+const describedAs = (g: GraphSpec) => (typeof g.description === 'string' ? g.description.trim() : '');
 
 /**
  * What a package folder publishes: every named output of every graph in graphs/ but those marked "publish": false, and
- * the default output, the output node of the graph project.json shows. Names that are not ids, clashes and a missing
- * default are problems (publishing blocks on them); a clashing name is left out.
+ * the default output, the output node of the graph project.json shows (with the tags and description of the named
+ * output it is, if any). Names that are not ids, clashes, a malformed kind, tag or description and a missing default
+ * are problems (publishing blocks on them); a clashing name is left out.
  */
 function folderOutputs(m: ProjectManifest, graphs: Map<string, GraphSpec>): { named: FolderOutput[]; default: FolderOutput | null; problems: string[] } {
   const problems: string[] = [];
@@ -282,8 +304,14 @@ function folderOutputs(m: ProjectManifest, graphs: Map<string, GraphSpec>): { na
       if (!out || typeof out !== 'object' || out.publish === false) continue;
       if (!ID_RE.test(id)) { problems.push(`output "${id}" (graph "${graph}") is not a package output name: lower-case letters, digits, - and _, starting with a letter or digit`); continue; }
       if (typeof out.node !== 'string' || !Object.hasOwn(spec.nodes, out.node)) { problems.push(`output "${id}" (graph "${graph}") names no node of its graph`); continue; }
+      const issues = outputFieldIssues(out);
+      if (issues.length) { for (const i of issues) problems.push(`output "${id}" (graph "${graph}"): ${i.message} (${i.hint})`); continue; }
+      const description = (typeof out.description === 'string' ? out.description.trim() : '') || describedAs(spec);
       const list = byName.get(id) ?? [];
-      list.push({ name: id, graph, spec, node: out.node, ...(typeof out.label === 'string' ? { label: out.label } : {}) });
+      list.push({
+        name: id, graph, spec, node: out.node, ...(typeof out.label === 'string' ? { label: out.label } : {}),
+        ...(out.kind ? { kind: out.kind } : {}), tags: out.tags ?? [], ...(description ? { description } : {}),
+      });
       byName.set(id, list);
     }
   }
@@ -296,7 +324,10 @@ function folderOutputs(m: ProjectManifest, graphs: Map<string, GraphSpec>): { na
   const shown = graphs.get(m.graph);
   if (!shown) problems.push(`no default output: project.json shows graph "${m.graph}", and graphs/ has no ${m.graph}.json`);
   else if (!shown.output || !Object.hasOwn(shown.nodes, shown.output)) problems.push(`no default output: set "output" in graphs/${m.graph}.json (the graph project.json shows); TopoTopo never picks an end node for a package`);
-  else def = { name: null, graph: m.graph, spec: shown, node: shown.output };
+  else {
+    const same = named.find((x) => x.graph === m.graph && x.node === shown.output), description = same ? same.description : describedAs(shown);
+    def = { name: null, graph: m.graph, spec: shown, node: shown.output, ...(same?.kind ? { kind: same.kind } : {}), tags: same?.tags ?? [], ...(description ? { description } : {}) };
+  }
   return { named: named.sort((a, b) => (a.name! < b.name! ? -1 : 1)), default: def, problems };
 }
 
@@ -324,8 +355,11 @@ function outputLoops(pkg: string, outs: FolderOutput[], scope: Scope): Map<strin
   return loops;
 }
 
-/** An output's interface: its sliders (the graph's vars, with their declarations) and its inputs (its input nodes). */
-function outputInfo(o: FolderOutput): OutputInfo {
+/**
+ * An output's record: what it is (the kind it cooked to, its tags and description) and its interface, its sliders (the
+ * graph's vars, with their declarations) and its inputs (its input nodes).
+ */
+function outputInfo(o: FolderOutput, kind: Kind | undefined): OutputInfo {
   const sliders: Record<string, SliderInfo> = {};
   for (const [k, p] of Object.entries(graphInterface(o.spec).params)) {
     const label = o.spec.params?.[k]?.label;
@@ -340,7 +374,10 @@ function outputInfo(o: FolderOutput): OutputInfo {
     if (!n || typeof n.type !== 'string' || getNodeDef(n.type)?.type !== 'input') continue;
     inputs.push({ index: Number(n.params?.index ?? 0), label: String(n.params?.label ?? n.note ?? '') });
   }
-  return { graph: o.graph, node: o.node, ...(o.label ? { label: o.label } : {}), sliders, inputs: inputs.sort((a, b) => a.index - b.index) };
+  return {
+    graph: o.graph, node: o.node, ...(o.label ? { label: o.label } : {}), ...(kind ? { kind } : {}), tags: o.tags, ...(o.description ? { description: o.description } : {}),
+    sliders, inputs: inputs.sort((a, b) => a.index - b.index),
+  };
 }
 
 /** Register a folder's assets/*.json into a scope; an asset that uses one registered later is tried again. */
@@ -675,7 +712,7 @@ export class ProjectPackages implements WorkspacePackages {
     else if (expected !== hash) warning = editedCopy(pkg, v, this.shown(dir));
     if (warning) this.problems.add(warning);
     const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: ctx.packages, lock: ctx.lock, follows: false };
-    return this.build({ pkg, version: v, dir, hash, signature: hash, note: info.note, warning, manifest: m, ctx: vctx, scope: `${pkg}@${v}` });
+    return this.build({ pkg, version: v, dir, hash, signature: hash, info, warning, manifest: m, ctx: vctx, scope: `${pkg}@${v}` });
   }
 
   /**
@@ -712,7 +749,7 @@ export class ProjectPackages implements WorkspacePackages {
         if (hash !== expected) r = { error: `${pkg} ${v} in ${dir} was changed after publishing: its files do not match the hash it was published with` };
         else {
           const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: place ? path.join(dir, 'packages') : ctx.packages, lock: place ? readLock(dir) : ctx.lock, follows: false, apart: true };
-          r = this.build({ pkg, version: v, dir, hash, signature: `${hash}|${dir}`, note: info.note, manifest: m, ctx: vctx, scope: `${pkg}@${v}|${dir}`, problems: this.apartProblems });
+          r = this.build({ pkg, version: v, dir, hash, signature: `${hash}|${dir}`, info, manifest: m, ctx: vctx, scope: `${pkg}@${v}|${dir}`, problems: this.apartProblems });
         }
       }
     } catch (e: any) { r = { error: `${pkg} ${v} (${dir}): ${e.message}` }; }
@@ -761,19 +798,25 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
-   * A version's (or working folder's) scope with its graphs, assets and uses, and a node type per output. Its graphs and
+   * A version's (or working folder's) scope with its graphs, assets and uses, and a node type per output: what each is
+   * as the version's record (`info`) says, or in a working folder as its author pinned and tagged it. Its graphs and
    * assets name its own outputs by full name: they resolve to what this builds (Context.self).
    */
-  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; note?: string; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string; problems?: Set<string> }): Loaded {
+  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; info?: VersionInfo; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string; problems?: Set<string> }): Loaded {
     const problems: string[] = [];
     const graphs = readGraphs(o.dir, problems);
     const scope = this.engine.createScope(o.scope, { folder: o.dir, graphs: (n) => graphs.get(n), packages: this.resolverOf(o.ctx) });
     const outs = folderOutputs(o.manifest, graphs);
-    const def = (x: FolderOutput) => packageOutputDef({
-      package: o.pkg, version: o.version, hash: o.hash, signature: o.signature, output: x.name, graph: x.graph, spec: x.spec, node: x.node, scope,
-      rootPath: this.rootPath,
-      ...(o.note ? { note: o.note } : {}), ...(x.label ? { label: x.label } : {}), ...(o.warning ? { warning: o.warning } : {}),
-    });
+    const def = (x: FolderOutput) => {
+      const rec = o.info && (x.name === null ? o.info.default : o.info.outputs[x.name]);
+      const kind = rec ? rec.kind : x.kind, tags = rec ? rec.tags : x.tags;
+      return packageOutputDef({
+        package: o.pkg, version: o.version, hash: o.hash, signature: o.signature, output: x.name, graph: x.graph, spec: x.spec, node: x.node, scope,
+        rootPath: this.rootPath,
+        ...(o.info?.note ? { note: o.info.note } : {}), ...(x.label ? { label: x.label } : {}), ...(kind ? { kind } : {}), ...(tags?.length ? { tags } : {}),
+        ...(o.warning ? { warning: o.warning } : {}),
+      });
+    };
     const loaded: Loaded = {
       package: o.pkg, version: o.version, dir: o.dir, hash: o.hash, scope,
       named: new Map(outs.named.map((x) => [x.name!, def(x)])),
@@ -953,20 +996,7 @@ export class ProjectPackages implements WorkspacePackages {
    * name changes nothing).
    */
   libraries(): { entry: string; root: string }[] {
-    const { dir } = this.project();
-    const manifest = readManifest(dir);
-    let cfg: GalleryConfig | null = null;
-    return manifest.libraries.filter((entry) => entry !== BUILTIN_LIBRARY.name).map((entry) => {
-      if (ID_RE.test(entry)) {
-        cfg ??= loadConfig();
-        const lib = cfg.libraries.find((l) => l.name === entry);
-        if (!lib) throw new Error(`project.json lists library "${entry}", which is not registered on this machine (${cfg.file}): topotopo library add ${entry} <folder>, or list the library by its path relative to the project`);
-        return { entry, root: lib.path };
-      }
-      const root = path.resolve(dir, entry);
-      if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`project.json lists library "${entry}", and ${root} is not a folder`);
-      return { entry, root };
-    });
+    return listedLibraries(this.project().dir);
   }
 
   /** The packages of TopoTopo's built-in library: their versions, and in TopoTopo's repository their working folders. */
@@ -1299,6 +1329,27 @@ export class ProjectPackages implements WorkspacePackages {
   }
 }
 
+/**
+ * The libraries the project folder `dir` lists in its project.json (as it is now): a path relative to the project, or a
+ * registered library's name. TopoTopo's built-in library is none of them (listing it by its name changes nothing).
+ * Throws for one that is not registered or not a folder.
+ */
+function listedLibraries(dir: string): { entry: string; root: string }[] {
+  const manifest = readManifest(dir);
+  let cfg: GalleryConfig | null = null;
+  return manifest.libraries.filter((entry) => entry !== BUILTIN_LIBRARY.name).map((entry) => {
+    if (ID_RE.test(entry)) {
+      cfg ??= loadConfig();
+      const lib = cfg.libraries.find((l) => l.name === entry);
+      if (!lib) throw new Error(`project.json lists library "${entry}", which is not registered on this machine (${cfg.file}): topotopo library add ${entry} <folder>, or list the library by its path relative to the project`);
+      return { entry, root: lib.path };
+    }
+    const root = path.resolve(dir, entry);
+    if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`project.json lists library "${entry}", and ${root} is not a folder`);
+    return { entry, root };
+  });
+}
+
 /** The records of a package's published versions (its versions/ folder), oldest first; unreadable ones are left out. */
 export function publishedVersions(dir: string, pkg: string): VersionInfo[] {
   return readVersions(dir, pkg, '', new Set()).map((p) => p.info);
@@ -1381,16 +1432,27 @@ function versionFiles(dir: string, m: ProjectManifest, lock: Lock): { rel: strin
   return out.sort(byRel);
 }
 
+/** The changes of two lists of tags: "tags added conifer, lowpoly", "tag removed tree" (none: the same tags). */
+const tagChanges = (a: string[], b: string[]) => {
+  const added = b.filter((t) => !a.includes(t)), gone = a.filter((t) => !b.includes(t));
+  return [added.length ? `tag${added.length > 1 ? 's' : ''} added ${added.join(', ')}` : '', gone.length ? `tag${gone.length > 1 ? 's' : ''} removed ${gone.join(', ')}` : ''].filter(Boolean);
+};
+
 /**
  * What changed between two versions' interfaces: what makes a big version (an output, slider or input that goes away
- * or means something else: removed or renamed, another type, a narrower range, a removed option, an input moved), and
- * the rest (added outputs, sliders, options and inputs, wider ranges, changed defaults, labels and descriptions).
+ * or means something else: removed or renamed, another type, a narrower range, a removed option, an input moved, an
+ * output of another kind), and the rest (added outputs, sliders, options and inputs, wider ranges, changed defaults,
+ * labels, tags and descriptions, a kind the previous version did not record).
  */
 export function compareInterfaces(prev: Pick<VersionInfo, 'outputs' | 'default'>, next: Pick<VersionInfo, 'outputs' | 'default'>): { big: string[]; small: string[] } {
   const big: string[] = [], small: string[] = [];
   const range = (s: SliderInfo) => `${s.min ?? ''}..${s.max ?? ''}`;
   const output = (what: string, a: OutputInfo, b: OutputInfo) => {
     if (a.graph !== b.graph || a.node !== b.node) small.push(`${what} now cooks "${b.node}" of graph "${b.graph}" (was "${a.node}" of "${a.graph}")`);
+    if (a.kind && b.kind && a.kind !== b.kind) big.push(`${what}: kind ${a.kind} → ${b.kind}`);
+    else if (!a.kind && b.kind) small.push(`${what}: kind ${b.kind} (the version before recorded no kind)`);
+    for (const c of tagChanges(a.tags ?? [], b.tags ?? [])) small.push(`${what}: ${c}`);
+    if ((a.description ?? '') !== (b.description ?? '')) small.push(`${what}: description ${!a.description ? 'added' : !b.description ? 'removed' : 'changed'}`);
     if ((a.label ?? '') !== (b.label ?? '')) small.push(`${what}: label "${a.label ?? ''}" → "${b.label ?? ''}"`);
     for (const [k, s] of Object.entries(a.sliders)) {
       const t = b.sliders[k];
@@ -1463,12 +1525,19 @@ export interface PublishOptions {
    * owner "topotopo" is refused for every other project.
    */
   builtin?: boolean;
+  /**
+   * a dry run: every check, every output cooked, the number the version would get, its changes, blocks and warnings,
+   * and nothing written (the note may still be missing: publishing needs it)
+   */
+  check?: boolean;
 }
 
 export interface PublishResult {
   ok: boolean;
+  /** a dry run (PublishOptions.check): ok says it would publish, and nothing was written */
+  check: boolean;
   package: string;
-  /** the version written */
+  /** the version written, or that a dry run would write */
   version?: string;
   /** the version before it */
   previous?: string;
@@ -1480,17 +1549,26 @@ export interface PublishResult {
   /** what kept it from being published */
   blocks: string[];
   warnings: string[];
+  /** the records of the outputs, as version.json holds them (each one's kind, tags and description) */
+  outputs?: Record<string, OutputInfo>;
+  default?: OutputInfo;
   dir?: string;
   hash?: string;
   files?: number;
   bytes?: number;
 }
 
+/** An output as publishing names it: output "pine" (graph "main"), or the default output ("out" of graph "main"). */
+const outputWhat = (x: FolderOutput) => (x.name === null ? `the default output ("${x.node}" of graph "${x.graph}")` : `output "${x.name}" (graph "${x.graph}")`);
+
 /**
  * Publish the project of a workspace as the next version of its package: check its name, outputs and default output,
- * cook every published output, number the version by comparing it with the previous one (and the author's `big`), and
- * write versions/<big>.<small>/. Blocks: an output that does not cook, an output name clash, outputs that name each
+ * cook every published output and record what it is, number the version by comparing it with the previous one (and the
+ * author's `big`), and write versions/<big>.<small>/. Blocks: an output that does not cook, one that cooks to nothing
+ * or to another kind than its author pinned, a malformed kind or tag, an output name clash, outputs that name each
  * other in a loop, no default output, a copy edited by hand, nothing changed, no note, a package the session follows.
+ * Warnings: an output without tags or a description, an output of another kind than before, files it reads that the
+ * version does not hold, the size. A dry run (o.check) goes through every step it can and writes nothing.
  */
 export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: PublishOptions): Promise<PublishResult> {
   const { dir } = pk.project();
@@ -1499,7 +1577,10 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
   const m = readManifest(dir);
   // one line: a note says what changed
   const note = (o.note ?? '').replace(/\s+/g, ' ').trim();
-  const r: PublishResult = { ok: false, package: m.package ?? '', note, bigBecause: [], changes: [], blocks: [], warnings: [] };
+  const check = !!o.check;
+  const r: PublishResult = { ok: false, check, package: m.package ?? '', note, bigBecause: [], changes: [], blocks: [], warnings: [] };
+  // a publish stops at the first step that blocks; a dry run goes on as far as it can, to say everything
+  const stop = () => r.blocks.length > 0 && !check;
   // TopoTopo's own packages: a folder of its built-in library, named as the package
   const inBuiltin = path.relative(pk.builtin, dir), kit = !!inBuiltin && !inBuiltin.startsWith('..') && !path.isAbsolute(inBuiltin) && !/[\\/]/.test(inBuiltin);
   if (!m.package) r.blocks.push(`project.json has no "package": the author names the package once, e.g. "package": "<owner>/${m.id}" (owner and name: lower-case letters, digits, - and _)`);
@@ -1507,7 +1588,7 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
     if (!kit) r.blocks.push(`only a folder of TopoTopo's built-in library (${pk.builtin}) publishes one of TopoTopo's own packages, and ${dir} is none`);
     else if (m.package !== `${RESERVED_OWNER}/${inBuiltin}`) r.blocks.push(`the folder ${inBuiltin} of TopoTopo's built-in library holds the package ${RESERVED_OWNER}/${inBuiltin}, and its project.json names ${m.package}`);
   } else if (m.package.split('/')[0] === RESERVED_OWNER) r.blocks.push(`the owner "${RESERVED_OWNER}" is reserved for TopoTopo's own packages, which TopoTopo's repository publishes into its built-in library: publish under your own owner`);
-  if (!note) r.blocks.push('a version needs a note, one line on what changed: --note "..." (library {action:"publish", note})');
+  if (!note && !check) r.blocks.push('a version needs a note, one line on what changed: --note "..." (library {action:"publish", note})');
   for (const f of pk.following()) r.blocks.push(`this session follows ${f.package} from its working folder (${f.dir}): stop following it to publish`);
   let lock: Lock = { packages: {} };
   try { lock = readLock(dir); } catch (e: any) { r.blocks.push(e.message); }
@@ -1518,30 +1599,50 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
   r.blocks.push(...problems);
   const outs = folderOutputs(m, graphs);
   r.blocks.push(...outs.problems);
-  if (r.blocks.length) return r;
+  if (stop()) return r;
+  const all = [...outs.named, ...(outs.default ? [outs.default] : [])];
   // its outputs name each other only without a loop (the project's assets and graphs are the root scope's)
-  r.blocks.push(...new Set(outputLoops(m.package!, [...outs.named, outs.default!], ws.engine.root).values()));
-  if (r.blocks.length) return r;
+  if (m.package) r.blocks.push(...new Set(outputLoops(m.package, all, ws.engine.root).values()));
+  if (stop()) return r;
 
-  // every published output cooks
-  const all = [...outs.named, outs.default!];
+  // every published output cooks, to something, and to the kind its author pinned; its kind is recorded. A default
+  // output that is a named output is that output.
+  const sameNamed = (x: FolderOutput) => (x.name === null ? outs.named.find((n) => n.graph === x.graph && n.node === x.node) : undefined);
+  const kinds = new Map<FolderOutput, Kind>();
   for (const x of all) {
-    const what = x.name === null ? `the default output ("${x.node}" of graph "${x.graph}")` : `output "${x.name}" (graph "${x.graph}")`;
+    const same = sameNamed(x);
+    if (same) { const k = kinds.get(same); if (k) kinds.set(x, k); continue; }
+    const what = outputWhat(x);
     const c = await ws.engine.cook(x.spec, { target: x.node });
-    if (!c.ok || !c.geo) r.blocks.push(`${what} does not cook: ${c.errors.map((e) => `[${e.node}] ${e.message}`).join('; ') || 'no geometry'}`);
     for (const w of c.warnings) r.warnings.push(`${what}: [${w.node}] ${w.message}`);
+    if (!c.ok || !c.geo) { r.blocks.push(`${what} does not cook: ${c.errors.map((e) => `[${e.node}] ${e.message}`).join('; ') || 'no geometry'}`); continue; }
+    const info = outputKind(c.geo), kind = publishedKind(info);
+    if (!kind) { r.blocks.push(`${what} cooks to nothing (no polygons, curves, points, instances, heightfields, images or volumes): there is nothing to publish`); continue; }
+    kinds.set(x, kind);
+    if (x.kind && x.kind !== kind) r.blocks.push(`${what}: ${kindMismatch(x.kind, info)}`);
   }
-  if (r.blocks.length) return r;
+  // what search finds an output by
+  for (const x of all) {
+    if (sameNamed(x)) continue;
+    const what = outputWhat(x);
+    if (!x.tags.length) r.warnings.push(x.name === null
+      ? `${what} has no tags, which search finds an output by: tags go on a named output, so name it in its graph's "outputs" with "tags"`
+      : `${what} has no tags, which search finds an output by: "tags": ["conifer", "low-poly"] in its graph's outputs`);
+    if (!x.description) r.warnings.push(`${what} has no description: ${x.name === null ? 'describe its graph ("description")' : 'give it "description" in its graph\'s outputs, or describe its graph'}`);
+  }
+  if (stop()) return r;
 
-  const files = versionFiles(dir, m, lock);
-  const hashed = files.map((f) => ({ ...f, bytes: f.bytes ?? fs.readFileSync(f.abs!) }));
-  const hash = filesHash(hashed.map((f) => ({ rel: f.rel, sha: sha(f.bytes) })));
+  let hashed: { rel: string; bytes: Uint8Array }[] = [], hash = '';
+  try {
+    hashed = versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, bytes: f.bytes ?? fs.readFileSync(f.abs!) }));
+    hash = filesHash(hashed.map((f) => ({ rel: f.rel, sha: sha(f.bytes) })));
+  } catch (e: any) { r.blocks.push(e.message); }
   const bytes = hashed.reduce((s, f) => s + f.bytes.byteLength, 0);
-  const versions = readVersions(dir, m.package!, '', new Set());
-  const prev = versions.at(-1)?.info;
-  if (prev && prev.hash === hash) { r.blocks.push(`nothing changed since ${prev.version}`); return r; }
-  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x)]));
-  const def = outputInfo(outs.default!);
+  const prev = m.package ? readVersions(dir, m.package, '', new Set()).at(-1)?.info : undefined;
+  if (prev && hash && prev.hash === hash) { r.blocks.push(`nothing changed since ${prev.version}`); return r; }
+  if (stop() || !outs.default) return r;
+  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x))]));
+  const def = outputInfo(outs.default, kinds.get(outs.default));
   let version = '1.0';
   if (prev) {
     const c = compareInterfaces(prev, { outputs, default: def });
@@ -1550,7 +1651,14 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
     const [b, s] = versionParts(prev.version);
     version = r.bigBecause.length ? `${b + 1}.0` : `${b}.${s + 1}`;
     r.previous = prev.version;
+    // a project may rely on what an output is: an Unreal static mesh is not a level
+    const was = (k: string, now: OutputInfo, before: OutputInfo | undefined) => {
+      if (before?.kind && now.kind && before.kind !== now.kind) r.warnings.push(`${k} is now ${now.kind} (it was ${before.kind} in ${prev.version}): a project that relies on what it is may have to change, and the version is big`);
+    };
+    for (const x of outs.named) was(outputWhat(x), outputs[x.name!], prev.outputs[x.name!]);
+    if (!sameNamed(outs.default) && !Object.values(prev.outputs).some((p) => p.graph === prev.default.graph && p.node === prev.default.node)) was(outputWhat(outs.default), def, prev.default);
   }
+  Object.assign(r, { version, outputs, default: def });
   if (bytes > MAX_VERSION_BYTES) r.warnings.push(`the version holds ${(bytes / 2 ** 20).toFixed(0)} MB (above ${MAX_VERSION_BYTES / 2 ** 20} MB): every project that uses it keeps a copy`);
   const sources = new Map<string, GraphSpec>([...[...graphs].map(([k, g]) => [`graphs/${k}.json`, g] as [string, GraphSpec])]);
   try { for (const f of fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json'))) sources.set(`assets/${f}`, JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8'))); } catch { /* no assets */ }
@@ -1558,7 +1666,9 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
 
   // write it: through a .part folder renamed into place, never over a version that is there
   const at = path.join(dir, 'versions', version);
-  if (fs.existsSync(at)) { r.blocks.push(`${at} is there already: a version is never written over`); return r; }
+  if (fs.existsSync(at)) r.blocks.push(`${at} is there already: a version is never written over`);
+  if (check) return { ...r, ok: !r.blocks.length, ...(hash ? { hash, files: hashed.length, bytes } : {}) };
+  if (r.blocks.length) return r;
   const info: VersionInfo = { package: m.package!, version, note, published: new Date().toISOString(), big: !!o.big, hash, outputs, default: def, topotopo: TOPOTOPO_VERSION };
   const part = path.join(dir, 'versions', `.${version}.${process.pid}-${Date.now().toString(36)}.part`);
   try {
@@ -1573,16 +1683,57 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
   return { ...r, ok: true, version, dir: at, hash, files: hashed.length, bytes };
 }
 
-/** A publish result as the CLI and the library tool say it. */
+/** An output's kind and tags in a few words: "mesh: conifer, lowpoly", "instances", "" when the record has neither. */
+export const kindTagsText = (o: Pick<OutputInfo, 'kind' | 'tags'>) =>
+  [o.kind ?? (o.tags?.length ? 'kind not recorded' : ''), o.tags?.join(', ') ?? ''].filter(Boolean).join(': ');
+
+/**
+ * A version's outputs in a line, each with its kind and tags: "pine (mesh: conifer, lowpoly), stump (mesh)", and
+ * "(default: scene)" for a default output that is no named output.
+ */
+export function outputsLine(v: Pick<VersionInfo, 'outputs' | 'default'>): string {
+  const one = (name: string, o: OutputInfo) => { const k = kindTagsText(o); return k ? `${name} (${k})` : name; };
+  const named = Object.entries(v.outputs).map(([k, o]) => one(k, o));
+  const isNamed = Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node);
+  return [...named, ...(isNamed ? [] : [v.default.kind ? `(default: ${v.default.kind})` : '(default)'])].join(', ');
+}
+
+/** The outputs of version `b` whose kind differs from version `a`'s: 'output "pine": mesh → scene'. */
+export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick<VersionInfo, 'outputs' | 'default'>): string[] {
+  const out: string[] = [];
+  const one = (what: string, x: OutputInfo | undefined, y: OutputInfo | undefined) => { if (x?.kind && y?.kind && x.kind !== y.kind) out.push(`${what}: ${x.kind} → ${y.kind}`); };
+  for (const [k, o] of Object.entries(b.outputs)) one(`output "${k}"`, a.outputs[k], o);
+  const named = (v: Pick<VersionInfo, 'outputs' | 'default'>) => Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node);
+  if (!named(a) && !named(b)) one('the default output', a.default, b.default);
+  return out;
+}
+
+/** A publish result as the CLI and the library tool say it; a dry run says what publishing would do. */
 export function publishText(r: PublishResult): string {
-  if (!r.ok) return [`✗ not published — ${r.blocks.length} problem${r.blocks.length === 1 ? '' : 's'}:`, ...r.blocks.map((b) => `  ${b}`), ...(r.warnings.length ? ['warnings:', ...r.warnings.map((w) => `  ${w}`)] : [])].join('\n');
   const kind = !r.previous ? 'the first version' : r.bigBecause.length ? `big, after ${r.previous}` : `small, after ${r.previous}`;
-  return [
-    `✓ published ${r.package} ${r.version} (${kind}): "${r.note}"`,
-    `  ${r.dir}: ${r.files} files, ${((r.bytes ?? 0) / 1024).toFixed(1)} KB, hash ${r.hash!.slice(0, 16)}…`,
+  const said = [
+    ...(r.outputs ? ['outputs:', ...Object.entries(r.outputs).map(([k, o]) => `  ${k}  ${kindTagsText(o) || 'no kind'}${o.label ? `  "${o.label}"` : ''}`)] : []),
+    ...(r.default && r.outputs && !Object.values(r.outputs).some((o) => o.graph === r.default!.graph && o.node === r.default!.node) ? [`  (default: "${r.default.node}" of graph "${r.default.graph}")  ${r.default.kind ?? 'no kind'}`] : []),
     ...(r.bigBecause.length ? ['big because:', ...r.bigBecause.map((c) => `  ${c}`)] : []),
     ...(r.changes.length ? ['changes:', ...r.changes.map((c) => `  ${c}`)] : []),
     ...(r.warnings.length ? ['warnings:', ...r.warnings.map((w) => `  ${w}`)] : []),
+  ];
+  if (r.check) {
+    const number = r.version ? `${r.package} ${r.version} (${kind})` : r.package || 'the package';
+    const noted = r.note ? `: "${r.note}"` : '; publishing it needs a note, one line on what changed (--note "...")';
+    return [
+      r.ok ? `✓ would publish ${number}${noted}` : `✗ would not publish ${number} — ${r.blocks.length} problem${r.blocks.length === 1 ? '' : 's'}:`,
+      ...(r.ok ? [] : r.blocks.map((b) => `  ${b}`)),
+      ...(r.ok && r.hash ? [`  ${r.files} files, ${((r.bytes ?? 0) / 1024).toFixed(1)} KB, hash ${r.hash.slice(0, 16)}…`] : []),
+      ...said,
+      'a dry run: nothing was written',
+    ].join('\n');
+  }
+  if (!r.ok) return [`✗ not published — ${r.blocks.length} problem${r.blocks.length === 1 ? '' : 's'}:`, ...r.blocks.map((b) => `  ${b}`), ...(r.warnings.length ? ['warnings:', ...r.warnings.map((w) => `  ${w}`)] : [])].join('\n');
+  return [
+    `✓ published ${r.package} ${r.version} (${kind}): "${r.note}"`,
+    `  ${r.dir}: ${r.files} files, ${((r.bytes ?? 0) / 1024).toFixed(1)} KB, hash ${r.hash!.slice(0, 16)}…`,
+    ...said,
   ].join('\n');
 }
 
@@ -1621,12 +1772,150 @@ export function packagesText(pk: ProjectPackages): string {
     lines.push(cat.length ? 'packages in them:' : 'packages in them: none yet (a project becomes a package with "package": "owner/name" in its project.json and topotopo publish)');
     for (const c of cat) {
       const v = c.versions.at(-1);
-      const outs = v ? [...Object.keys(v.outputs), ...(Object.values(v.outputs).some((x) => x.graph === v.default.graph && x.node === v.default.node) ? [] : ['(default)'])] : [];
       const used = m.uses[c.package];
       lines.push(`  ${c.package}  ${v ? `${v.version} "${v.note}"` : 'no version published yet'}  [${libraryText(c.library)}]${used ? `  (this project uses ${used})` : ''}`);
-      if (v) lines.push(`    outputs: ${outs.join(', ') || '(default)'}; default: "${v.default.node}" of graph "${v.default.graph}"`);
+      if (v) lines.push(`    outputs: ${outputsLine(v)}; default: "${v.default.node}" of graph "${v.default.graph}"`);
     }
   }
   if (problems.length) lines.push('problems:', ...problems.map((p) => `  ${p}`));
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------------------------------------- search
+
+export interface SearchQuery {
+  /** words, each of which must be in the output's full name, label, description or tags, or its package's title, description or project tags */
+  query?: string;
+  /** only outputs of this kind */
+  kind?: string;
+  /** only outputs with this tag */
+  tag?: string;
+}
+
+/** An output a search found, in the newest version of its package that a library holds. */
+export interface SearchHit {
+  /** the node type a graph names it with: "owner/name/output", or "owner/name" for a default output that is no named output */
+  type: string;
+  /** "owner/name": it is the package's default output as well */
+  alias?: string;
+  package: string;
+  version: string;
+  label?: string;
+  kind?: Kind;
+  tags: string[];
+  description?: string;
+  /** the version of the package the open project uses, when it uses it */
+  used?: string;
+  /** the open project is the package: its graphs name its outputs */
+  self?: boolean;
+}
+
+/** A library a search looked in, and how the open project stands to it. */
+export interface SearchLibrary {
+  /** as project.json lists it, a registered library's name, or "topotopo" for TopoTopo's built-in library */
+  name: string;
+  root: string;
+  /** "builtin": every project uses it; "listed": the open project lists it; "unlisted": its project.json would have to list it */
+  standing: 'builtin' | 'listed' | 'unlisted';
+  hits: SearchHit[];
+}
+
+export interface SearchResult {
+  query: SearchQuery;
+  /** the open project ("project forest"), null when the folder is in no project, which uses no package */
+  project: string | null;
+  /** the libraries looked in: those the project lists, TopoTopo's built-in library, then the other registered ones by name */
+  libraries: SearchLibrary[];
+  problems: string[];
+}
+
+/**
+ * Search the outputs of the newest version of every package in TopoTopo's built-in library, the libraries the project
+ * folder `dir` lists and every registered library (~/.topotopo/config.json), by words, kind and tag, and say for each
+ * library whether the project can use what it holds: TopoTopo's built-in library and the libraries it lists, yes; any
+ * other once its project.json lists it, which the person does (the tools never add a library). `dir`: the open
+ * project's folder, null for a folder in no project. Throws for a kind that is none.
+ */
+export function searchPackages(dir: string | null, q: SearchQuery, opts: { builtin?: string } = {}): SearchResult {
+  if (q.kind !== undefined && !isKind(q.kind)) throw new Error(`"${q.kind}" is not a kind: ${KINDS.join(', ')}`);
+  const problems = new Set<string>();
+  const builtin = path.resolve(opts.builtin ?? BUILTIN_LIBRARY.path);
+  let manifest: ProjectManifest | null = null;
+  if (dir) { try { manifest = readManifest(dir); } catch (e: any) { problems.add(e.message); } }
+  // each folder once: what the project lists first, then TopoTopo's built-in library, then the other registered libraries
+  const key = (p: string) => path.resolve(p).toLowerCase(), seen = new Set([key(builtin)]);
+  const libs: Omit<SearchLibrary, 'hits'>[] = [];
+  if (dir && manifest) {
+    try { for (const l of listedLibraries(dir)) if (!seen.has(key(l.root))) { seen.add(key(l.root)); libs.push({ name: l.entry, root: l.root, standing: 'listed' }); } }
+    catch (e: any) { problems.add(e.message); }
+  }
+  libs.push({ name: BUILTIN_LIBRARY.name, root: builtin, standing: 'builtin' });
+  try {
+    for (const l of [...loadConfig().libraries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
+      if (!seen.has(key(l.path))) { seen.add(key(l.path)); libs.push({ name: l.name, root: l.path, standing: 'unlisted' }); }
+  } catch (e: any) { problems.add(e.message); }
+  const words = String(q.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  // a library that holds TopoTopo's built-in library (its repository, say) holds none of its packages again
+  const builtinFolders = builtinPackages(builtin, problems), builtinDirs = new Set(builtinFolders.map((f) => key(f.dir)));
+  const libraries: SearchLibrary[] = libs.map((lib) => {
+    let folders: PackageFolder[];
+    if (lib.standing === 'builtin') folders = builtinFolders;
+    else {
+      const scan = scanLibrary({ name: lib.name, path: lib.root });
+      for (const p of scan.problems) problems.add(`${libraryText(lib.name)}: ${p}`);
+      folders = scan.projects.flatMap((p) => (p.manifest.package && !builtinDirs.has(key(p.dir)) ? [{ package: p.manifest.package, library: lib.name, dir: p.dir, working: true }] : []));
+    }
+    const hits: SearchHit[] = [];
+    for (const f of folders) {
+      const place = readVersions(f.dir, f.package, lib.name, problems).at(-1);
+      if (!place) continue;
+      let pm: ProjectManifest | null = null;
+      try { pm = readManifest(place.dir); } catch (e: any) { problems.add(e.message); }
+      const v = place.info, about = [pm?.title ?? '', pm?.description ?? '', ...(pm?.tags ?? [])];
+      const isDefault = (o: OutputInfo) => o.graph === v.default.graph && o.node === v.default.node;
+      const found: [string, OutputInfo, string | undefined][] = Object.entries(v.outputs).map(([k, o]) => [`${f.package}/${k}`, o, isDefault(o) ? f.package : undefined]);
+      if (!Object.values(v.outputs).some(isDefault)) found.unshift([f.package, v.default, undefined]);
+      for (const [type, o, alias] of found) {
+        const tags = o.tags ?? [];
+        if (q.kind !== undefined && o.kind !== q.kind) continue;
+        if (q.tag !== undefined && !tags.includes(q.tag)) continue;
+        const hay = [type, alias ?? '', o.label ?? '', o.description ?? '', ...tags, ...about].join(' ').toLowerCase();
+        if (!words.every((w) => hay.includes(w))) continue;
+        const used = manifest?.uses[f.package];
+        hits.push({
+          type, ...(alias ? { alias } : {}), package: f.package, version: v.version, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags,
+          ...(o.description ? { description: o.description } : {}), ...(used ? { used } : {}), ...(manifest?.package === f.package ? { self: true } : {}),
+        });
+      }
+    }
+    return { ...lib, hits: hits.sort((a, b) => (a.type < b.type ? -1 : a.type > b.type ? 1 : 0)) };
+  });
+  return { query: q, project: dir && manifest ? `project ${manifest.id}` : null, libraries, problems: [...problems] };
+}
+
+/** A search as the CLI (or, `mcp`, the library tool) says it: the hits by library, and whether the project can use them. */
+export function searchText(r: SearchResult, mcp = false): string {
+  const q = r.query, hits = r.libraries.flatMap((l) => l.hits);
+  const asked = [q.query?.trim() ? `"${q.query.trim()}"` : '', q.kind ? `kind ${q.kind}` : '', q.tag ? `tag ${q.tag}` : ''].filter(Boolean).join(', ') || 'everything';
+  const lines = [hits.length
+    ? `search ${asked}: ${hits.length} output${hits.length === 1 ? '' : 's'} in ${r.libraries.filter((l) => l.hits.length).length} of the ${r.libraries.length} libraries looked in${r.project ? `, for ${r.project}` : ''}`
+    : `search ${asked}: no output matches in ${r.libraries.map((l) => libraryText(l.name)).join(', ')}`];
+  if (!r.project) lines.push(`this folder is in no project, and only a project's graphs use packages: ${mcp ? 'library {action:"init"} makes the open workspace one, when the person says so' : MAKE_PROJECT}`);
+  for (const l of r.libraries) {
+    if (!l.hits.length) continue;
+    const standing = l.standing === 'builtin' ? 'TopoTopo\'s own packages, which every project uses: a graph that names one adds it'
+      : l.standing === 'listed' ? `${r.project} lists it: a graph that names one of these adds its package`
+      : r.project ? `${r.project} does not list it: to use these, add "${l.name}" to "libraries" in its project.json${mcp ? ' (the person does: the tools never add a library)' : ''}, or the library's path relative to the project when it is in the same repository`
+      : 'a registered library';
+    lines.push(`${l.standing === 'builtin' ? `TopoTopo's built-in library "${l.name}"` : `library "${l.name}" (${l.root})`}: ${standing}`);
+    for (const h of l.hits) {
+      const also = [h.alias ? `also ${h.alias}, its default output` : '', h.self ? 'this project\'s own package' : h.used ? `this project uses ${h.used}` : ''].filter(Boolean).join('; ');
+      lines.push(`  ${h.type}  ${h.kind ?? 'kind not recorded'}${h.tags.length ? `  [${h.tags.join(', ')}]` : ''}${h.label ? `  "${h.label}"` : ''}  ${h.version}${also ? `  (${also})` : ''}`);
+      if (h.description) lines.push(`    ${h.description.length > 300 ? `${h.description.slice(0, 299)}…` : h.description}`);
+    }
+  }
+  if (hits.length && r.libraries.some((l) => !l.hits.length)) lines.push(`nothing matches in ${r.libraries.filter((l) => !l.hits.length).map((l) => libraryText(l.name)).join(', ')}`);
+  if (hits.length) lines.push(mcp ? 'help {nodes:["owner/name/output"]} gives an output\'s sliders and inputs' : '--help-node owner/name/output gives an output\'s sliders and inputs');
+  if (r.problems.length) lines.push('problems:', ...r.problems.map((p) => `  ${p}`));
   return lines.join('\n');
 }

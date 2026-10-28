@@ -1,10 +1,11 @@
 // Output catalogue, previews, downloads and exports. Geometry stays server-side; cards and previews are lazy.
 // A published output's card says what it is (io/kinds.ts: a mesh, a heightfield, packed instances, points, curves, an
-// image or several of these, and its size) and offers the formats that write it. Its Download gets the export as a
-// browser download (the file itself, or a zip of its files: a sidecar, a textures folder), with the record of how it
-// was made; its Export writes its target in the graph (io/targets.ts) into exports/, Export all every target, and a
-// first export sets the target in the graph so the next click just writes again. Saved files (exports/, renders) are
-// cards too: a sidecar or manifest beside an export (io/sidecars.ts) is metadata of it, not a card of its own.
+// image or several of these, and its size; and when it is not the kind its graph pins) and offers the formats that
+// write it. Its Download gets the export as a browser download (the file itself, or a zip of its files: a sidecar, a
+// textures folder), with the record of how it was made; its Export writes its target in the graph (io/targets.ts) into
+// exports/, Export all every target, and a first export sets the target in the graph so the next click just writes
+// again. Saved files (exports/, renders) are cards too: a sidecar or manifest beside an export (io/sidecars.ts) is
+// metadata of it, not a card of its own.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -27,7 +28,7 @@ import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
-import { fittingFormats, outputKind } from '../io/kinds.ts';
+import { fittingFormats, kindMismatch, outputKind } from '../io/kinds.ts';
 import { packagesUsed } from '../graph/packages.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
@@ -60,6 +61,8 @@ export interface OutputEntry {
   kind?: OutputKind | 'metadata';
   /** what it is in a few words ("heightfield 2049 × 2049, 2 m"), and its bounding size (x, y, z metres) */
   about?: string; size?: [number, number, number] | null;
+  /** a named output: the kind its graph pins ("kind" in its outputs), and what it says when it cooks to another */
+  pinned?: string; warning?: string;
   /** its heightfield (samples, spacing, layers with their ranges): the page colours the terrain by a layer */
   heightfield?: HeightfieldInfo;
   /** a published output: the formats that write it, best first (io/kinds.ts) */
@@ -138,12 +141,17 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         width: img.width, height: img.height, layers: [...img.layers.keys()], layer: img.mainLayer, image: name } });
     }
   };
-  /** What a cooked result is, on its card: kind, words, size, heightfield; a published one's fitting formats. */
+  /**
+   * What a cooked result is, on its card: kind, words, size, heightfield; a published one's fitting formats, and a
+   * warning when it is not the kind its graph pins (publishing the project's package would block on it).
+   */
   const describe = (e: OutputEntry, g: Geometry) => {
     const info = outputKind(g);
     e.kind = info.kind; e.about = info.text; e.size = info.size;
     if (info.heightfield) e.heightfield = info.heightfield; else delete e.heightfield;
     if (e.exportable) e.formats = fittingFormats(info);
+    const said = e.pinned ? kindMismatch(e.pinned, info) : null;
+    if (said) e.warning = `${e.output ? `output "${e.output}": ` : ''}${said}`; else delete e.warning;
     return info;
   };
   /**
@@ -258,7 +266,8 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
       for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name)) {
         const id = idFor('graph', graph, p.output === null ? 'default' : 'named', p.output ?? 'main'); alive.add(id);
         const key = workspaceRevision, old = items.get(id);
-        const meta = { label: p.label, output: p.output, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null, saved: lastSaved(records, graph, p) };
+        const pinned = p.output === null ? undefined : spec.outputs?.[p.output]?.kind;
+        const meta = { label: p.label, output: p.output, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null, saved: lastSaved(records, graph, p), ...(pinned ? { pinned } : {}) };
         // the same inputs, or a graph held after a stop (the card keeps what it shows until something changes)
         if (old?.key === key || (old && ws.held(graph))) { Object.assign(old.entry, meta); if (!meta.saved) delete old.entry.saved; continue; }
         // while it cooks again, the card keeps what it said (summary, kind, formats), so the details shown for it keep

@@ -308,6 +308,8 @@ section('the Packages tab: a package\'s state, the Scene tree\'s mark, a before/
   check(pkgs.packageState(p({ error: 'no library this project lists has a package studio/trees' })).kind === 'error', 'a package its libraries do not have: the error');
   check(pkgs.librariesText(['topotopo', '../lib']) === 'TopoTopo\'s built-in library, library "../lib"' && pkgs.packageState(p({ package: 'topotopo/nature', libraries: ['topotopo'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
     && cur.title === '1.1 is the newest version in the project\'s libraries', 'a card names the libraries that hold its package, TopoTopo\'s built-in library by what it is');
+  const named = pkgs.outputLine('studio/trees', { type: 'studio/trees/pine', kind: 'mesh', tags: ['conifer'] }), dflt = pkgs.outputLine('studio/trees', { type: 'studio/trees', tags: [] });
+  check(JSON.stringify(named) === '{"name":"pine","kind":"mesh","tags":["conifer"]}' && JSON.stringify(dflt) === '{"name":"(default)","kind":"","tags":[]}', 'an output on a card: its name in the package, its kind and tags');
   const rows = new Map([['studio/trees', p({ small: '1.3' })], ['studio/rocks', p({ package: 'studio/rocks', followed: { library: '../lib', dir: '/lib/rocks' } })], ['nordic/moss', p({ package: 'nordic/moss' })]]);
   const late = pkgs.nodeMark(['studio/trees'], rows), fm = pkgs.nodeMark(['studio/rocks'], rows);
   check(late?.kind === 'small' && late.text === '↑ 1.3' && late.package === 'studio/trees' && /studio\/trees 1\.1 is in use: 1\.3 is a small update \(click: its before\/after in the Packages tab\)/.test(late.title) && fm?.text === 'working' && fm.kind === 'followed' && fm.package === 'studio/rocks',

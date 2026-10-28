@@ -2,9 +2,10 @@
 // (src/gallery/packages.ts, src/gallery/update.ts). An agent lists and searches every library, reads a project, makes
 // new ones, edits their project.json, bakes previews, and opens a project: the server's workspace becomes that project
 // folder, so build/edit/render/export work on it; or it makes the open workspace a project (init), when the person says
-// so: only a project's graphs use packages. In the open project it publishes a version of its package, lists and
-// adds the packages it uses, follows a package's working folder for the session, says which packages are out of date,
-// and shows the before/after of an update, which it applies only when the person says so.
+// so: only a project's graphs use packages. In the open project it publishes a version of its package (or a dry run of
+// it), searches the outputs of every library and says which the project can use, lists and adds the packages it uses,
+// follows a package's working folder for the session, says which packages are out of date, and shows the before/after
+// of an update, which it applies only when the person says so.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Workspace } from '../workspace.ts';
@@ -14,7 +15,8 @@ import {
   scanAll, writeManifest,
 } from '../gallery/library.ts';
 import type { GalleryConfig, LibraryScan, Project } from '../gallery/library.ts';
-import { packagesText, publishPackage, publishText } from '../gallery/packages.ts';
+import { KINDS } from '../graph/outputs.ts';
+import { packagesText, publishPackage, publishText, searchPackages, searchText } from '../gallery/packages.ts';
 import type { ProjectPackages } from '../gallery/packages.ts';
 import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../gallery/update.ts';
 
@@ -62,18 +64,20 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
       'open {library, id} | {path}: make that project the workspace of every tool and the live viewer, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new project, opened. ' +
       'init {package?}: make the open workspace a project (project.json in its folder), when it is none: only a project\'s graphs use packages (TopoTopo\'s own included), and a build that names one in a workspace outside any project fails saying so. ' +
       'set {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the package the project is, set once by its author). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). ' +
-      'Packages of the open project: packages (what it uses, and the packages in the libraries it lists, with their newest version, note and outputs); use {package:"owner/name"} adds one (a graph that names "owner/name/output" adds it too); follow {package, on} uses a package\'s working folder instead of its copy for this session; publish {note, big?} publishes the next version of the project\'s package. ' +
+      `Packages of the open project: packages (what it uses, and the packages in the libraries it lists, with their newest version, note and outputs with their kinds and tags); search {query?, kind?, tag?}: the outputs of every library (TopoTopo\'s built-in one, those the project lists, every registered one) by words, kind (${KINDS.join(', ')}) and tag, each with its full name, kind, tags, label, version and description, and whether the project can use it, else which "libraries" entry its project.json needs (the person adds it); use {package:"owner/name"} adds one (a graph that names "owner/name/output" adds it too); follow {package, on} uses a package\'s working folder instead of its copy for this session; publish {note, big?} publishes the next version of the project\'s package (each output\'s kind, detected or pinned with "kind" in the graph\'s outputs, its "tags" and "description" are recorded), publish {check:true, note?, big?} is a dry run: every check and cook, the version number it would get, the blocks and warnings, nothing written. ` +
       'outdated: for each package it uses, the newer versions (the small update: the newest with the same big number; the big one) with their notes. update {package, to?}: the before/after of updating it (to the newest version with the same big number; a big version needs "to"): every place the project uses it, cooked with the version in use and the new one, what changed in each, overlay renders, the notes of the versions between and, for a big version, what the graphs must change. It writes nothing. Show the before/after to the person and apply it only when they say so: update {package, to, apply:true} copies the new version in, updates the uses and the lock, and deletes the copies nothing uses any more. See help topics "library" and "packages".',
     inputSchema: {
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'init', 'set', 'bake', 'packages', 'use', 'follow', 'publish', 'outdated', 'update'] },
+        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'init', 'set', 'bake', 'packages', 'search', 'use', 'follow', 'publish', 'outdated', 'update'] },
         library: { type: 'string', description: 'library name (list shows them)' },
         id: { type: 'string', description: 'project id' },
         path: { type: 'string', description: 'create: folder below the library ("props/lantern"); open/get: a project folder on disk instead of {library, id}' },
-        query: { type: 'string', description: 'list: words to match in title, id, collection, description, tags' },
-        tag: { type: 'string', description: 'list: only projects with this tag' },
+        query: { type: 'string', description: 'list: words to match in title, id, collection, description, tags; search: words each published output found must match (its full name, label, description, tags, or its package\'s title, description, tags)' },
+        tag: { type: 'string', description: 'list: only projects with this tag; search: only outputs with this tag' },
+        kind: { type: 'string', enum: [...KINDS], description: 'search: only outputs of this kind' },
+        check: { type: 'boolean', description: 'publish: a dry run, which writes nothing: every check, every output cooked, the version number it would get, the changes, blocks and warnings' },
         title: { type: 'string' },
         description: { type: 'string' },
         tags: { type: 'array', items: { type: 'string' } },
@@ -93,7 +97,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
     run: async (a, call) => {
       const { cfg, scans } = scan();
       // the packages of the open project as its files are now (a person may have edited project.json)
-      if (['packages', 'use', 'follow', 'publish', 'outdated', 'update'].includes(a.action)) host.packages().refresh();
+      if (['packages', 'search', 'use', 'follow', 'publish', 'outdated', 'update'].includes(a.action)) host.packages().refresh();
       switch (a.action) {
         case 'list': {
           if (!cfg.libraries.length) return text(`no libraries configured (${cfg.file}). The person adds one with \`topotopo library add <name> <folder>\`.`);
@@ -207,8 +211,13 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           return text(said);
         }
         case 'publish': {
-          const r = await publishPackage(host.workspace(), host.packages(), { note: a.note, big: a.big });
+          const r = await publishPackage(host.workspace(), host.packages(), { note: a.note, big: a.big, check: a.check === true });
           return text(publishText(r), !r.ok);
+        }
+        case 'search': {
+          const pk = host.packages();
+          const r = searchPackages(pk.dir && pk.manifest ? pk.dir : null, { query: a.query, kind: a.kind, tag: a.tag }, { builtin: pk.builtin });
+          return text(searchText(r, true));
         }
         case 'bake': {
           const p = pick(a, scans);
@@ -220,7 +229,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           return { content };
         }
       }
-      return text(`unknown action "${a.action}": list, get, open, create, init, set, bake, packages, use, follow, publish, outdated or update`, true);
+      return text(`unknown action "${a.action}": list, get, open, create, init, set, bake, packages, search, use, follow, publish, outdated or update`, true);
     },
   };
 }

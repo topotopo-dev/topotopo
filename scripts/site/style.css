@@ -279,7 +279,7 @@ h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:
 .node h2 code { font-size: 1em; background: none; border: 0; padding: 0; }
 .node h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1.25rem 0 0.4rem; }
 .node .summary { font-size: 1.05rem; }
-.node .aliases { color: var(--muted); font-size: 0.9rem; }
+.node .aliases, .node .kind-tags { color: var(--muted); font-size: 0.9rem; }
 .node .thumb { width: 160px; height: 160px; border-radius: var(--radius); border: 1px solid var(--border); background: #4a4f58; }
 .badge {
   display: inline-block;

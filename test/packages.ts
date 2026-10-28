@@ -33,7 +33,8 @@ import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Workspace } from '../src/workspace.ts';
 import { addLibrary, loadConfig, parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
-import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, readLock, startsBigVersion, versionHash } from '../src/gallery/packages.ts';
+import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, readLock, searchPackages, searchText, startsBigVersion, versionHash } from '../src/gallery/packages.ts';
+import { makeTools } from '../src/mcp/tools.ts';
 import type { ProjectPackages, PublishResult } from '../src/gallery/packages.ts';
 import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/gallery/update.ts';
 import { ROOT } from './fixtures.ts';
@@ -237,7 +238,7 @@ const treesMain: GraphSpec = {
     out: { type: 'merge', in: ['tall', 'lifted', 'rock', 'ground'] },
   },
   output: 'out', vars: { height: 4 }, params: { height: { type: 'float', min: 1, max: 20, label: 'Height' } },
-  outputs: { pine: { node: 'out', label: 'Pine' }, preview: { node: 'lifted', publish: false } },
+  outputs: { pine: { node: 'out', label: 'Pine', kind: 'mesh', tags: ['conifer', 'tree'] }, preview: { node: 'lifted', publish: false } },
 };
 const crown = (r: number): GraphSpec => ({ nodes: { s: { type: 'sphere', params: { radius: r } } }, output: 's' });
 project(TREES, { package: 'studio/trees', libraries: ['../../repo/lib'] }, { main: treesMain, crown: crown(1) }, {
@@ -285,8 +286,10 @@ section('publishing: the first version, what it holds, its hash');
   const pkgVersion = readJSON(path.join(ROOT, 'package.json')).version;
   check(info.package === 'nordic/rocks' && info.version === '1.0' && info.note === 'first rocks' && info.big === false && !Number.isNaN(Date.parse(info.published)) && info.topotopo === pkgVersion,
     'version.json: package, version, note, published, big, TopoTopo version');
-  check(JSON.stringify(info.outputs) === JSON.stringify({ boulder: { graph: 'main', node: 'mat', label: 'Boulder', sliders: { size: { type: 'float', default: 1, min: 0.1, max: 10, label: 'Size' } }, inputs: [] } })
-    && info.default.graph === 'main' && info.default.node === 'mat', `version.json: each output's graph, node, sliders and inputs, and the default output (${JSON.stringify(info.outputs)})`);
+  check(JSON.stringify(info.outputs) === JSON.stringify({ boulder: { graph: 'main', node: 'mat', label: 'Boulder', kind: 'mesh', tags: [], sliders: { size: { type: 'float', default: 1, min: 0.1, max: 10, label: 'Size' } }, inputs: [] } })
+    && info.default.graph === 'main' && info.default.node === 'mat' && info.default.kind === 'mesh', `version.json: each output's graph, node, kind, tags, sliders and inputs, and the default output (${JSON.stringify(info.outputs)})`);
+  check(r.warnings.some((w) => /^output "boulder" \(graph "main"\) has no tags, which search finds an output by/.test(w)) && r.warnings.some((w) => /^output "boulder" \(graph "main"\) has no description/.test(w)),
+    `an output without tags or a description warns: ${r.warnings.join(' | ')}`);
   // the hash: every file but version.json, sorted posix paths with each file's SHA-256
   const lines = files.filter((f) => f !== 'version.json').map((f) => `${sha(fs.readFileSync(path.join(v, ...f.split('/'))))}  ${f}\n`).join('');
   check(info.hash === sha(lines) && versionHash(v) === info.hash && r.hash === info.hash, 'the hash covers every file but version.json: sorted paths, each with its SHA-256');
@@ -374,6 +377,148 @@ section('publishing: blocks and warnings');
   const h = await publish(at('heavy'), 'heavy');
   check(h.ok && h.warnings.some((x) => /holds 51 MB \(above 50 MB\)/.test(x)), `a version above 50 MB warns: ${h.warnings.join(' | ')}`);
   fs.rmSync(at('heavy'), { recursive: true });
+}
+
+// ------------------------------------------------------------------ kinds, tags, descriptions
+// studio/kinds: an output of every kind, in one graph; its default output is the mesh
+const KINDS_DIR = path.join(dirs.lib, 'kinds');
+const kindsGraph: any = {
+  description: 'One output of every kind. The default output is the mesh.',
+  nodes: {
+    b: { type: 'box' },
+    c: { type: 'line' },
+    g: { type: 'grid' },
+    pts: { type: 'scatter', in: ['g'], params: { count: 20 } },
+    few: { type: 'scatter', in: ['g'], params: { count: 5 } },
+    packed: { type: 'copy_to_points', in: ['b', 'few'], params: { pack: true } },
+    hf: { type: 'heightfield', params: { size: 8, resolution: 1 } },
+    land: { type: 'heightfield_noise', in: ['hf'] },
+    tex: { type: 'tex_noise', params: { resolution: 8 } },
+    sdf: { type: 'sdf_shape' },
+    street: { type: 'merge', in: ['land', 'packed'] },
+  },
+  output: 'b',
+  outputs: {
+    mesh: { node: 'b' }, curves: { node: 'c' }, points: { node: 'pts' }, instances: { node: 'packed' }, terrain: { node: 'land' },
+    textures: { node: 'tex' }, volume: { node: 'sdf' }, scene: { node: 'street' },
+  },
+};
+project(KINDS_DIR, { package: 'studio/kinds', tags: ['showcase'], description: 'every kind of output' }, { main: kindsGraph });
+
+section('kinds: publishing records what each output cooks to; an output that cooks to nothing blocks');
+{
+  const r = await publish(KINDS_DIR, 'every kind');
+  const info = readJSON(path.join(KINDS_DIR, 'versions', '1.0', 'version.json'));
+  const kinds = Object.fromEntries(Object.entries<any>(info.outputs).map(([k, o]) => [k, o.kind]));
+  check(r.ok && Object.entries(kinds).every(([k, v]) => k === v) && Object.keys(kinds).length === 8, `each output's kind: heightfield → terrain, image → textures, several → scene, the others as named (${JSON.stringify(kinds)}; ${r.blocks.join('; ')})`);
+  check(info.default.kind === 'mesh' && info.outputs.mesh.description === kindsGraph.description && info.default.description === kindsGraph.description,
+    'the default output records its kind; a description falls back to the graph\'s');
+  check(Object.keys(r.outputs ?? {}).length === 8 && r.outputs!.scene.kind === 'scene', 'the result has the records too');
+  const EMPTY = path.join(dirs.lib, 'empty');
+  project(EMPTY, { package: 'studio/empty' }, { main: { nodes: { b: { type: 'box' }, d: { type: 'delete', in: ['b'], params: { group: '*' } } }, output: 'd', outputs: { nothing: { node: 'd' } } } });
+  const e = await publish(EMPTY, 'nothing');
+  check(!e.ok && e.blocks.some((b) => /^output "nothing" \(graph "main"\) cooks to nothing/.test(b)) && !exists(EMPTY, 'versions'), `an output that cooks to nothing blocks: ${e.blocks.join(' | ')}`);
+  check(e.blocks.length === 1, 'the default output, which is that output, is said once');
+}
+
+section('a pinned kind: publishing blocks on another kind, build warns, a kind not on the list is an error');
+{
+  const PINNED = path.join(dirs.lib, 'pinned');
+  const scatter = (kind: string): GraphSpec => ({
+    nodes: { b: { type: 'box' }, g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 5 } }, trees: { type: 'copy_to_points', in: ['b', 's'], params: { pack: true } } },
+    output: 'b', outputs: { trees: { node: 'trees', kind: kind as any, tags: ['forest'] }, block: { node: 'b', kind: 'mesh', tags: ['block'] } },
+  });
+  project(PINNED, { package: 'studio/pinned' }, { main: scatter('mesh') });
+  const p = await publish(PINNED, 'pinned');
+  check(!p.ok && p.blocks.length === 1 && /^output "trees" \(graph "main"\): its "kind" is "mesh", and it cooks to instances \(5 instances of 1 source\): change what it cooks, or its "kind"/.test(p.blocks[0]) && !exists(PINNED, 'versions'),
+    `publishing blocks an output that is not the kind its author pinned: ${p.blocks.join(' | ')}`);
+  // build in a workspace on the project warns before that, for the output it cooks and for another
+  const o = await open(PINNED);
+  const tools = makeTools(o.ws), build = tools.find((t) => t.name === 'build')!;
+  const said = (await build.run({ graph: scatter('mesh') })).content.map((c: any) => c.text ?? '').join('\n');
+  check(/✓ graph "main"/.test(said) && /\n {2}\[output "trees"\] its "kind" is "mesh", and it cooks to instances \(5 instances of 1 source\)/.test(said) && !/\[output "block"\]/.test(said),
+    `build warns about a pinned kind the output does not cook to:\n${said.split('\n').filter((l) => /warnings|output "/.test(l)).join('\n')}`);
+  const target = (await build.run({ graph: { ...scatter('mesh'), output: 'trees' } })).content.map((c: any) => c.text ?? '').join('\n');
+  check(/\[output "trees"\] its "kind" is "mesh"/.test(target), 'and when that output is the one it cooks');
+  check(!/\[output "/.test((await build.run({ graph: scatter('instances') })).content.map((c: any) => c.text ?? '').join('\n')), 'no warning when the kinds match');
+  const ok = await publish(PINNED, 'pinned right');
+  check(ok.ok && readJSON(path.join(PINNED, 'versions', '1.0', 'version.json')).outputs.trees.kind === 'instances', 'with the kind it cooks to it publishes');
+  // a kind not on the list: an error wherever the graph is read, with the list in the hint
+  const v = o.engine.validate({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'material' as any } } });
+  check(v.errors.length === 1 && v.errors[0].message === 'named output "brick": "kind" "material" is not a kind' && /mesh, instances, points, curves, terrain, textures, volume, scene/.test(v.errors[0].hint ?? ''),
+    `validate: ${v.errors.map((x) => `${x.message} (${x.hint})`).join('; ')}`);
+  const cooked = await o.engine.cook({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'Mesh' as any } } });
+  check(!cooked.ok && /"kind" "Mesh" is not a kind/.test(errorOf(cooked)), 'a cook of it fails the same way');
+  setGraph(PINNED, 'main', { ...scatter('instances'), outputs: { ...scatter('instances').outputs, block: { node: 'b', kind: 'material' as any } } });
+  const bad = await publish(PINNED, 'material');
+  check(!bad.ok && bad.blocks.some((b) => /^output "block" \(graph "main"\): "kind" "material" is not a kind \(the kinds: mesh, instances/.test(b)), `publishing blocks it: ${bad.blocks.join(' | ')}`);
+}
+
+section('tags and descriptions: the rule, recorded, searched; the version rule for kinds');
+{
+  const e = await newEngine(tmp);
+  const errs = (tags: unknown) => e.validate({ nodes: { b: { type: 'box' } }, outputs: { o: { node: 'b', tags: tags as any } } }).errors;
+  check(!errs(['conifer', 'low-poly', '3d']).length, 'lower-case letters, digits and -');
+  const bad = errs(['Low Poly', '-x', 'ok', 'ok']);
+  check(bad.length === 3 && bad[0].message === 'named output "o": tag "Low Poly" is malformed' && /lower-case letters, digits and -, starting with a letter or digit/.test(bad[0].hint ?? '') && /tag "-x" is malformed/.test(bad[1].message) && /tag "ok" given twice/.test(bad[2].message),
+    `malformed and repeated tags are errors, with the rule in the hint: ${bad.map((x) => x.message).join('; ')}`);
+  check(/17 tags, more than 16/.test(errs(Array.from({ length: 17 }, (_, i) => `t${i}`))[0]?.message ?? '') && /"tags" must be a list of words/.test(errs('conifer')[0]?.message ?? '') && errs([`a${'b'.repeat(64)}`]).length === 1,
+    'at most 16 tags of at most 64 characters; tags are a list');
+  check(/"description" must be a string/.test(e.validate({ nodes: { b: { type: 'box' } }, outputs: { o: { node: 'b', description: 3 as any } } }).errors[0]?.message ?? ''), 'a description is a string');
+  const TAGGED = path.join(dirs.lib, 'tagged');
+  project(TAGGED, { package: 'studio/tagged' }, { main: { nodes: { b: { type: 'box' } }, output: 'b', outputs: { b: { node: 'b', tags: ['Bad Tag'] } } } });
+  const blocked = await publish(TAGGED, 'bad');
+  check(!blocked.ok && blocked.blocks.some((b) => /^output "b" \(graph "main"\): tag "Bad Tag" is malformed \(a tag is lower-case letters/.test(b)), `a malformed tag blocks publishing: ${blocked.blocks.join(' | ')}`);
+
+  // studio/kinds 1.1: tags, a description and the kind it has pinned, all small
+  kindsGraph.outputs.mesh = { node: 'b', kind: 'mesh', tags: ['block', 'box'], description: 'A unit box.' };
+  kindsGraph.outputs.curves.tags = ['wire'];
+  setGraph(KINDS_DIR, 'main', kindsGraph);
+  const r11 = await publish(KINDS_DIR, 'tags');
+  const v11 = readJSON(path.join(KINDS_DIR, 'versions', '1.1', 'version.json'));
+  check(r11.ok && r11.version === '1.1' && !r11.bigBecause.length && r11.changes.includes('output "mesh": tags added block, box') && r11.changes.includes('output "mesh": description changed') && r11.changes.includes('output "curves": tag added wire'),
+    `tags, a description and pinning the kind it has are small: ${r11.version} ${r11.changes.join('; ')}`);
+  check(JSON.stringify(v11.outputs.mesh.tags) === '["block","box"]' && v11.outputs.mesh.description === 'A unit box.' && v11.default.description === 'A unit box.' && JSON.stringify(v11.default.tags) === '["block","box"]',
+    'version.json records tags and descriptions; the default output has those of the named output it is');
+  check(!r11.warnings.some((w) => /output "mesh".*no tags/.test(w)) && r11.warnings.some((w) => /^output "volume" \(graph "main"\) has no tags/.test(w)) && !r11.warnings.some((w) => /has no description/.test(w)),
+    'the warnings name the outputs still without tags (the graph describes them all)');
+  // 2.0: "points" now cooks to instances, which makes the version big
+  kindsGraph.outputs.points = { node: 'packed' };
+  setGraph(KINDS_DIR, 'main', kindsGraph);
+  const r20 = await publish(KINDS_DIR, 'points are instances now');
+  check(r20.ok && r20.version === '2.0' && r20.bigBecause.join() === 'output "points": kind points → instances' && r20.warnings.some((w) => /^output "points" \(graph "main"\) is now instances \(it was points in 1\.1\): a project that relies on what it is may have to change, and the version is big$/.test(w)),
+    `an output of another kind makes the version big, and warns: ${r20.version} ${r20.bigBecause.join('; ')}`);
+  // 2.1: the pin removed, the kind the same
+  kindsGraph.outputs.mesh = { node: 'b', tags: ['block', 'box'], description: 'A unit box.' };
+  setGraph(KINDS_DIR, 'main', kindsGraph);
+  const r21 = await publish(KINDS_DIR, 'unpinned');
+  check(r21.ok && r21.version === '2.1' && !r21.bigBecause.length, `a pinned kind removed without a change of kind is small: ${r21.version} ${r21.bigBecause.join('; ')}`);
+  check(compareInterfaces({ outputs: { a: { graph: 'g', node: 'n', sliders: {}, inputs: [] } }, default: { graph: 'g', node: 'n', sliders: {}, inputs: [] } }, { outputs: { a: { graph: 'g', node: 'n', kind: 'mesh', tags: [], sliders: {}, inputs: [] } }, default: { graph: 'g', node: 'n', kind: 'mesh', tags: [], sliders: {}, inputs: [] } }).small.join() === 'output "a": kind mesh (the version before recorded no kind)',
+    'a version before that recorded no kind: its kind is a small change');
+}
+
+section('a dry run: what publishing would do, and nothing written');
+{
+  kindsGraph.outputs.textures.tags = ['noise'];
+  setGraph(KINDS_DIR, 'main', kindsGraph);
+  const before = listing(KINDS_DIR);
+  const o = await open(KINDS_DIR);
+  const d = await publishPackage(o.ws, o.pk, { check: true });
+  check(d.check && d.ok && d.version === '2.2' && d.previous === '2.1' && d.changes.includes('output "textures": tag added noise') && d.warnings.some((w) => /^output "scene" \(graph "main"\) has no tags/.test(w)) && !d.blocks.length,
+    `the version number it would get, its changes and warnings (${d.version}: ${d.changes.join('; ')})`);
+  const text = publishText(d);
+  check(/^✓ would publish studio\/kinds 2\.2 \(small, after 2\.1\); publishing it needs a note, one line on what changed/.test(text) && /\noutputs:\n {2}curves {2}curves: wire\n/.test(text) && /\na dry run: nothing was written$/.test(text),
+    `it says so, and that the note is still to write:\n${text.split('\n').slice(0, 3).join('\n')}`);
+  check(JSON.stringify(listing(KINDS_DIR)) === JSON.stringify(before), 'nothing is written');
+  kindsGraph.outputs.scene.kind = 'terrain';
+  setGraph(KINDS_DIR, 'main', kindsGraph);
+  const b = await publishPackage(o.ws, o.pk, { check: true, note: 'scene' });
+  check(b.check && !b.ok && b.version === '2.2' && b.blocks.length === 1 && /^output "scene" \(graph "main"\): its "kind" is "terrain", and it cooks to scene/.test(b.blocks[0])
+    && /^✗ would not publish studio\/kinds 2\.2 \(small, after 2\.1\) — 1 problem:\n {2}output "scene"/.test(publishText(b)), `a block, and the number all the same: ${publishText(b).split('\n').slice(0, 2).join(' | ')}`);
+  const noVersion = listing(KINDS_DIR).filter((f) => f.startsWith('versions/2.2'));
+  check(!noVersion.length, 'still nothing written');
+  delete kindsGraph.outputs.scene.kind;
+  setGraph(KINDS_DIR, 'main', kindsGraph);
 }
 
 section('outputs of the same package: by full name, the same version, no entry in uses; a loop does not resolve');
@@ -594,7 +739,7 @@ section('dry runs: a package a graph names for the first time is checked against
   check(!d.errors.length && d.output === 'out', `the graph checks against the versions a build would add: ${d.said}`);
   check(d.first.length === 3 && d.first.includes('build or edit adds studio/trees 1.1 to project dry on first use, from library "game": this dry run read it there and copied nothing')
     && d.first.some((n) => /^build or edit adds studio\/grove 1\.0 to project dry on first use, from library "game"/.test(n))
-    && d.first.some((n) => /^build or edit adds topotopo\/props 1\.0 to project dry on first use, from library "topotopo" \(TopoTopo's built-in library\)/.test(n)),
+    && d.first.some((n) => n.startsWith(`build or edit adds topotopo/props ${builtinVersions('topotopo/props').at(-1)!.version} to project dry on first use, from library "topotopo" (TopoTopo's built-in library)`)),
     `a note names each package and the version a build adds, from the libraries the project lists and TopoTopo's built-in library: ${d.first.join(' | ')}`);
   check(listing(DRY).join() === before.join() && !exists(DRY, 'packages') && JSON.stringify(readManifest(DRY).uses) === '{}', 'nothing is copied or written: no packages/, project.json as it was');
   check(!o.engine.resolveDef('studio/trees/pine') && /package studio\/trees is not in this project's uses/.test(o.engine.packageIssue('studio/trees/pine').error), 'and the project\'s own packages are as they were');
@@ -794,6 +939,58 @@ section('TopoTopo\'s built-in library: looked in without listing it; copies and 
   delete process.env.TOPOTOPO_LIBRARIES;
 }
 
+// ------------------------------------------------------------------ search
+section('search: every library, by words, kind and tag; what the project can use, and the "libraries" entry it needs');
+{
+  // a built-in library of its own: topotopo/woods, published as TopoTopo's repository publishes its kits
+  const SB = path.join(tmp, 'search-builtin'), WOODS = path.join(SB, 'woods');
+  project(WOODS, { package: 'topotopo/woods' }, {
+    main: {
+      nodes: { fir: { type: 'cone' }, b: { type: 'box' }, g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 5 } }, grove: { type: 'copy_to_points', in: ['fir', 's'], params: { pack: true } } },
+      output: 'fir',
+      outputs: { fir: { node: 'fir', label: 'Fir', kind: 'mesh', tags: ['conifer', 'tree'] }, grove: { node: 'grove', kind: 'instances', tags: ['forest', 'conifer'] }, stone: { node: 'b', kind: 'mesh', tags: ['rock'] } },
+    },
+  });
+  const w = await open(WOODS, [], SB);
+  check((await publishPackage(w.ws, w.pk, { note: 'woods', builtin: true })).ok, 'the built-in library of the search: topotopo/woods 1.0');
+  // finder lists ../lib (repo/lib); game and other are registered and not listed
+  const FINDER = path.join(dirs.repo, 'finder');
+  project(FINDER, { libraries: ['../lib'] }, {});
+  const find = (dir: string | null, q: Parameters<typeof searchPackages>[1]) => searchPackages(dir, q, { builtin: SB });
+  const s = find(FINDER, { query: 'conifer' });
+  const where = (r: ReturnType<typeof searchPackages>) => r.libraries.map((l) => `${l.name}:${l.standing}:${l.hits.map((h) => h.type).join('+')}`).join(' ');
+  check(s.project === 'project finder' && s.libraries.map((l) => `${l.name}:${l.standing}`).join() === '../lib:listed,topotopo:builtin,game:unlisted,other:unlisted',
+    `the project's own libraries first (those it lists, then the built-in library), then the registered ones by name (${where(s)})`);
+  check(where(s) === '../lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:',
+    `words match the outputs' names, descriptions and tags, across the built-in library and a registered one (${where(s)})`);
+  const pine = s.libraries[2].hits[0];
+  check(pine.kind === 'mesh' && pine.tags.join() === 'conifer,tree' && pine.label === 'Pine' && pine.version === '1.1' && pine.alias === 'studio/trees' && pine.package === 'studio/trees',
+    `each result: full name, kind, tags, label, version (${JSON.stringify(pine)})`);
+  const text = searchText(s, true);
+  check(/^search "conifer": 3 outputs in 2 of the 4 libraries looked in, for project finder\n/.test(text) && /\nTopoTopo's built-in library "topotopo": TopoTopo's own packages, which every project uses/.test(text)
+    && /\nlibrary "game" \(.*game\): project finder does not list it: to use these, add "game" to "libraries" in its project\.json \(the person does: the tools never add a library\)/.test(text)
+    && /\n {2}studio\/trees\/pine {2}mesh {2}\[conifer, tree\] {2}"Pine" {2}1\.1 {2}\(also studio\/trees, its default output\)\n/.test(text) && /\nnothing matches in library "\.\.\/lib", library "other"/.test(text),
+    `it says which the project can use, and the entry it needs for the others:\n${text}`);
+  check(where(find(FINDER, { query: 'conifer', kind: 'instances' })) === '../lib:listed: topotopo:builtin:topotopo/woods/grove game:unlisted: other:unlisted:', 'kind matches exactly');
+  check(where(find(FINDER, { tag: 'conifer' })) === '../lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:'
+    && !find(FINDER, { tag: 'conif' }).libraries.some((l) => l.hits.length) && where(find(FINDER, { tag: 'rock' })) === '../lib:listed: topotopo:builtin:topotopo/woods/stone game:unlisted: other:unlisted:', 'tag matches exactly');
+  const show = find(FINDER, { query: 'showcase every' });
+  check(show.libraries[0].hits.length === 8 && show.libraries[0].hits.every((h) => h.package === 'studio/kinds' && h.version === '2.1') && show.libraries[0].hits.find((h) => h.type === 'studio/kinds/mesh')?.alias === 'studio/kinds',
+    `the package's project tags and description match too: every output of its newest version (${show.libraries[0].hits.map((h) => h.type).join(', ')})`);
+  check(where(find(FINDER, { query: 'nordic boulder' })) === '../lib:listed:nordic/rocks/boulder topotopo:builtin: game:unlisted: other:unlisted:', 'every word must match');
+  check(throws(() => find(FINDER, { kind: 'material' }), /^"material" is not a kind: mesh, instances, points, curves, terrain, textures, volume, scene$/), 'a kind not on the list says the list');
+  // a project that lists the library, uses the package; the package itself; a folder in no project
+  const used = find(dirs.forest, { tag: 'conifer' });
+  check(used.libraries.find((l) => l.name === 'game')?.standing === 'listed' && used.libraries.find((l) => l.name === 'game')!.hits[0].used === '1.1' && /\(also studio\/trees, its default output; this project uses 1\.1\)/.test(searchText(used)),
+    'a library the project lists: it can use it, and the result says the version it uses');
+  const own = find(TREES, { tag: 'conifer' });
+  check(own.libraries.find((l) => l.name === 'game')?.hits[0].self === true && /this project's own package/.test(searchText(own)), 'the project that is the package: its own outputs');
+  const none = find(null, { tag: 'conifer' });
+  check(none.project === null && none.libraries.map((l) => l.name).join() === 'topotopo,game,other' && /\nthis folder is in no project, and only a project's graphs use packages: topotopo init/.test(searchText(none)),
+    'a folder in no project: TopoTopo\'s built-in library and the registered ones, and how to make it a project');
+  check(/^search "nothing-here": no output matches in library "\.\.\/lib", library "topotopo" \(TopoTopo's built-in library\), library "game", library "other"$/.test(searchText(find(FINDER, { query: 'nothing-here' }))), 'nothing found: it says where it looked');
+}
+
 // ------------------------------------------------------------------ the CLI
 section('the CLI: init, use, packages, publish, --follow, --catalog');
 {
@@ -829,10 +1026,21 @@ section('the CLI: init, use, packages, publish, --follow, --catalog');
     const named = txt.split('moss.png').length - 1, relative = txt.split(moss).length - 1;
     check(r.code === 0 && named > 0 && named === relative && fs.existsSync(path.resolve(CLI, 'graphs', moss)), `a .${ext} export of a package output is portable: its texture is ${moss} (${relative} of ${named})`);
   }
+  const before = listing(CLI);
+  const dry = cli(['publish', CLI, '--check']);
+  check(dry.code === 0 && /^✓ would publish studio\/cli 1\.0 \(the first version\); publishing it needs a note/.test(dry.out) && /\noutputs:\n {2}\(default: "r" of graph "main"\) {2}mesh\n/.test(dry.out) && /a dry run: nothing was written/.test(dry.out)
+    && JSON.stringify(listing(CLI)) === JSON.stringify(before), `publish --check is a dry run that writes nothing:\n${dry.out}`);
   const pub = cli(['publish', CLI, '--note', 'from the cli']);
   check(pub.code === 0 && /✓ published studio\/cli 1\.0 \(the first version\): "from the cli"/.test(pub.out), `publish: ${pub.out.split('\n')[0]}`);
   const again = cli(['publish', CLI, '--note', 'again']);
   check(again.code === 1 && /nothing changed since 1\.0/.test(again.out), 'publish without a change fails');
+  check(cli(['publish', CLI, '--check']).code === 1, 'and so does its dry run');
+  const found = cli(['search', 'conifer', '--kind', 'mesh'], path.join(dirs.repo, 'finder'));
+  check(found.code === 0 && /^search "conifer", kind mesh: \d+ outputs? in \d+ of the 4 libraries looked in, for project finder/.test(found.out) && /\n {2}studio\/trees\/pine {2}mesh {2}\[conifer, tree\]/.test(found.out)
+    && /add "game" to "libraries" in its project\.json, or the library's path/.test(found.out) && /--help-node owner\/name\/output/.test(found.out), `search: ${found.out.split('\n')[0]}`);
+  check(cli(['search', '--tag', 'conifer'], CLI).code === 0 && /\n {2}studio\/trees\/pine /.test(cli(['search', '--tag', 'conifer'], CLI).out), 'search --tag');
+  const wrong = cli(['search', '--kind', 'material'], CLI);
+  check(wrong.code === 1 && /"material" is not a kind: mesh, instances/.test(wrong.out), `search --kind with no such kind: ${wrong.out.trim()}`);
   // first use from a graph-file cook, --follow, the catalog of the current folder's project
   const FILE = path.join(dirs.forest, 'scene.json');
   json(FILE, { nodes: { t: { type: 'studio/trees/pine' }, x: { type: 'studio/rules/box' }, out: { type: 'merge', in: ['t', 'x'] } }, output: 'out' });

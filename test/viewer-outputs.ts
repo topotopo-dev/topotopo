@@ -259,6 +259,15 @@ try {
   check(failedAll.status === 422 && fs.readFileSync(path.join(ws.exportDir, 'parts', 'nacelle.obj')).equals(beforeFailure), 'a cook failure stops Export all before any write');
   ws.setGraph('broken', { nodes: { b: { type: 'file', params: { path: 'missing.obj' } } } }); ws.bump('broken');
   items = await settled(); check(items.some((x: any) => x.graph === 'broken' && x.status === 'error'), 'failed output remains visible');
+  // a named output that cooks to another kind than its graph pins says so on its card (publishing would block on it)
+  ws.setGraph('pinned', { nodes: { b: { type: 'box' }, c: { type: 'line' } }, output: 'b', outputs: { block: { node: 'b', kind: 'mesh' }, wire: { node: 'c', kind: 'mesh' } } }); ws.bump('pinned');
+  items = await settled();
+  const pinnedCard = (o: string) => items.find((x: any) => x.graph === 'pinned' && x.output === o);
+  check(pinnedCard('block')?.pinned === 'mesh' && pinnedCard('block')?.warning === undefined && pinnedCard('wire')?.kind === 'curves'
+    && /^output "wire": its "kind" is "mesh", and it cooks to curves \(1 curve, 2 points\): change what it cooks, or its "kind"/.test(pinnedCard('wire')?.warning ?? ''), `a pinned kind the output does not cook to warns on its card: ${pinnedCard('wire')?.warning}`);
+  check(!engine.validate({ nodes: { b: { type: 'box' } }, outputs: { o: { node: 'b', kind: 'mesh', tags: ['a-b'], description: 'x' } } }).errors.length
+    && engine.validate({ nodes: { b: { type: 'box' } }, outputs: { o: { node: 'b', kind: 'brick' as any } } }).errors.length === 1, 'kind, tags and description of an output validate; a kind not on the list does not');
+  ws.deleteGraph('pinned'); ws.bump('pinned');
   fs.writeFileSync(path.join(ws.exportDir, 'agent.txt'), 'result');
   check((await list()).some((x: any) => x.label === 'agent.txt'), 'external agent-written outputs discovered');
   viewer.close(); viewer = await startViewer(new Workspace(path.join(tmp, 'other'), engine, { exports: ws.exportDir }), 0);

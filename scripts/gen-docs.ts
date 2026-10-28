@@ -59,6 +59,9 @@ function nodeSection(def: NodeDef): string[] {
   const out: string[] = [`### ${def.type}`, ''];
   const meta = [`category: ${code(def.category)}`];
   if (def.aliases?.length) meta.push(`aliases: ${def.aliases.map(code).join(', ')}`);
+  // a package output: what it is and its tags, as its version records them
+  if (def.package?.kind) meta.push(`kind: ${code(def.package.kind)}`);
+  if (def.package?.tags?.length) meta.push(`tags: ${def.package.tags.map(code).join(', ')}`);
   out.push(meta.join(' · '), '', def.summary, '');
   const thumb = thumbOf(def.type);
   if (thumb && fs.existsSync(path.join(path.dirname(NODES_MD), '..', thumb))) out.push(`![${def.type}](../${thumb})`, '');

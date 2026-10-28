@@ -110,7 +110,7 @@ try {
   {
     // a package with two published versions and a project that uses the first, their records as publishing and use
     // write them (versions/<v>/version.json, packages/<owner>/<name>/<v>/version.json)
-    const pine = { graph: 'main', node: 'tree', label: 'Pine', sliders: { height: { type: 'float', default: 4 } }, inputs: [{ index: 0, label: 'ground' }] };
+    const pine = { graph: 'main', node: 'tree', label: 'Pine', kind: 'mesh', tags: ['conifer', 'low-poly'], sliders: { height: { type: 'float', default: 4 } }, inputs: [{ index: 0, label: 'ground' }] };
     const rec = (version: string, note: string, published: string) => ({ package: 'studio/trees', version, note, published, big: false, hash: `h${version}`, outputs: { pine }, default: pine, topotopo: '0' });
     const trees = createProject(lib, 'nature/trees', { title: 'Trees', graph: BOX });
     const forest = createProject(lib, 'levels/forest', { title: 'Forest', graph: BOX });
@@ -126,8 +126,8 @@ try {
     check(/class="pkgline">Package <span class="pkg"[^>]*>studio\/trees 1\.1<\/span>/.test(page), 'a package\'s page names it in full, with its newest version');
     check(/<th>1\.1<\/th><td>2026-10-22<\/td><td>rounder &lt;crowns&gt;<\/td>/.test(page) && /<th>1\.0<\/th><td>2026-10-20<\/td><td>first trees<\/td>/.test(page) && page.indexOf('<th>1.1</th>') < page.indexOf('<th>1.0</th>'),
       'its versions, newest first, with their dates and notes (escaped)');
-    check(/<code>studio\/trees\/pine<\/code><br><code>studio\/trees<\/code> <span class="dim">\(the default\)<\/span><\/th><td>Pine<\/td><td class="dim">node &quot;tree&quot; of graph &quot;main&quot; · sliders height · input ground<\/td>/.test(page),
-      'the outputs it publishes, by the node type a graph names them with: their sliders and inputs, the default output');
+    check(/<code>studio\/trees\/pine<\/code><br><code>studio\/trees<\/code> <span class="dim">\(the default\)<\/span><\/th><td>Pine<span class="tags"><span class="kind"[^>]*>mesh<\/span><span class="tag">conifer<\/span><span class="tag">low-poly<\/span><\/span><\/td><td class="dim">node &quot;tree&quot; of graph &quot;main&quot; · sliders height · input ground<\/td>/.test(page),
+      'the outputs it publishes, by the node type a graph names them with: their kinds, tags, sliders and inputs, the default output');
     const user = (await req('/p/game/forest')).body.toString();
     check(/<h2>Packages it uses<\/h2>/.test(user) && /<th><a href="\/p\/game\/trees">studio\/trees<\/a><\/th><td>1\.0<\/td><td class="dim">first trees · 2026-10-20 <span class="newer">1\.1 is out<\/span><\/td>/.test(user) && !/class="pkgline"/.test(user),
       'a project\'s page lists the packages it uses: the version in use, its note, the package\'s page, a newer version');
@@ -135,6 +135,8 @@ try {
     const cardOf = (key: string) => { const at = grid.indexOf(`data-key="${key}"`); return at < 0 ? '' : grid.slice(at, grid.indexOf('</a>', at)); };
     check(cardOf('game/trees').includes('<span class="pkg" title="package studio/trees, newest version 1.1">studio/trees 1.1</span>') && cardOf('game/forest') && !cardOf('game/forest').includes('class="pkg"'),
       'the grid marks a package with its full name and newest version');
+    check(/<span class="out" hidden data-hay="studio\/trees\/pine studio\/trees pine mesh conifer low-poly"><code>studio\/trees\/pine<\/code><span class="kind"[^>]*>mesh<\/span><span class="tag">conifer<\/span>/.test(cardOf('game/trees')) && !cardOf('game/forest').includes('class="out"')
+      && /placeholder="Search \d+ projects and 1 output"/.test(grid), 'the grid\'s search finds a package\'s outputs by name, kind and tag: each card carries them, shown when the search finds them');
     const api = JSON.parse((await req('/api/projects')).body.toString());
     check(JSON.stringify(api.projects.find((x: any) => x.id === 'trees')?.package) === '{"name":"studio/trees","version":"1.1"}' && api.projects.find((x: any) => x.id === 'forest')?.package === undefined,
       '/api/projects names the packages too');

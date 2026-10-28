@@ -18,6 +18,7 @@ import { encodePNG } from '../render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from '../io/export.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportToolOptions, publishedOutputs } from '../io/targets.ts';
+import { kindMismatch, outputKind } from '../io/kinds.ts';
 import { exportSource } from '../io/source.ts';
 import { packageAt, packagesUsed } from '../graph/packages.ts';
 import type { ExportSource } from '../io/source.ts';
@@ -52,7 +53,7 @@ export interface ToolDef {
 /** " at frame N" when the cook was not at frame 1. */
 const atFrame = (r: { frame: number }) => (r.frame !== 1 ? ` at frame ${r.frame}` : '');
 
-function reportText(name: string, r: CookReport, extraNotes: string[] = []): string {
+function reportText(name: string, r: CookReport, extraNotes: string[] = [], extraWarnings: string[] = []): string {
   const lines: string[] = [];
   const nodes = [...r.results.values()];
   const cooked = nodes.filter((n) => !n.cached && !n.error).length;
@@ -60,8 +61,9 @@ function reportText(name: string, r: CookReport, extraNotes: string[] = []): str
   else lines.push(`✗ graph "${name}" failed${r.target ? ` at "${r.target}"` : ''}${atFrame(r)} — ${r.errors.length} error(s):`);
   for (const e of r.errors) lines.push(`  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`);
   for (const n of [...r.notes, ...extraNotes]) lines.push(`note: ${n}`);
-  if (r.warnings.length) {
+  if (r.warnings.length || extraWarnings.length) {
     lines.push('warnings:');
+    for (const w of extraWarnings) lines.push(`  ${w}`);
     for (const w of r.warnings.slice(0, 15)) lines.push(`  [${w.node}] ${w.message}`);
     if (r.warnings.length > 15) lines.push(`  … ${r.warnings.length - 15} more`);
   }
@@ -178,9 +180,27 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     path.join(ws.exportDir, 'renders', `${name}-${node}`.replace(/[^A-Za-z0-9_.-]/g, '_') + '.png');
   const engine = ws.engine;
 
+  /**
+   * The named outputs of a cooked graph that cook to another kind than their author pinned ("kind" in its outputs, help
+   * topic "packages"), each said as a warning: publishing the project's package would block on them.
+   */
+  const kindWarnings = async (name: string, r: CookReport, frame?: number): Promise<string[]> => {
+    const out: string[] = [];
+    if (!r.ok) return out;
+    for (const [id, o] of Object.entries(ws.graphs.get(name)?.outputs ?? {})) {
+      if (!o || typeof o.kind !== 'string') continue;
+      const c = o.node === r.target ? r : await ws.cook(name, o.node, frame);
+      // an output that does not cook says so when it is cooked
+      if (!c.ok || !c.geo) continue;
+      const said = kindMismatch(o.kind, outputKind(c.geo));
+      if (said) out.push(`[output "${id}"] ${said}`);
+    }
+    return out;
+  };
+
   /** The text (+ optional render) of a cook report. */
   const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
-    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes) }];
+    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes, await kindWarnings(name, r, a.frame)) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
       const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
@@ -282,7 +302,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not part of the project\'s package)}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not part of the project\'s package), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
           name: { type: 'string', description: 'graph name (default "main")' },
           mode: { type: 'string', enum: ['replace', 'merge'] },
           dry_run: { type: 'boolean' },

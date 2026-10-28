@@ -24,7 +24,7 @@
 //                                                         files dropped on the page go to inputs/ beside the graph file
 //   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/gallery/cli.ts)
 //   node src/cli.ts library add|list|new|bake …           libraries and projects; edit <project> opens the live viewer
-//   node src/cli.ts init|use|packages|publish …           a project and its packages (src/gallery/packages.ts);
+//   node src/cli.ts init|use|packages|publish|search …    a project and its packages (src/gallery/packages.ts);
 //                                                         --follow owner/name on a cook or view uses a package's
 //                                                         working folder instead of its copy, for that run
 //   node src/cli.ts outdated|update …                     the newer versions of what a project uses, and the
@@ -37,6 +37,7 @@ import './nodes/index.ts';
 import { Engine } from './graph/engine.ts';
 import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
+import { KINDS } from './graph/outputs.ts';
 import { createNodeHost } from './host/node.ts';
 import { renderGeometryAsync } from './render/raster.ts';
 import { parseViews } from './render/raster.ts';
@@ -108,6 +109,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} use owner/name [folder]   (add a package to the project: its newest version in the libraries project.json lists, copied into packages/)`,
     `       ${prog} packages [folder]   (what the project uses, and the packages in its libraries with their newest version, note and outputs)`,
     `       ${prog} publish [folder] --note "what changed" [--big]   (publish the next version of the project's package into versions/; --help-topic packages)`,
+    `       ${prog} publish [folder] --check [--note "..."] [--big]   (a dry run: every check and cook, the version number it would get, blocks and warnings; writes nothing)`,
+    `       ${prog} search [words] [--kind ${KINDS.join('|')}] [--tag t]   (the outputs of every library, and whether this folder's project can use them)`,
     `       ${prog} outdated [folder]   (the newer versions of the packages the project uses, small and big, with the notes of each)`,
     `       ${prog} update owner/name [folder] [--to <version>] [--render <folder>]   (the before/after of an update: every place the project uses it, cooked`,
     '         with the version in use and the new one, what changed and the notes between; nothing is written. Without --to: the newest version',
@@ -161,12 +164,12 @@ if (argv[0] === 'view') {
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
-} else if (['gallery', 'library', 'edit', 'init', 'use', 'packages', 'publish', 'outdated', 'update'].includes(argv[0])) {
+} else if (['gallery', 'library', 'edit', 'init', 'use', 'packages', 'publish', 'search', 'outdated', 'update'].includes(argv[0])) {
   // the gallery website, its libraries and its editor; a project's packages (src/gallery/cli.ts)
   const g = await import('./gallery/cli.ts');
   const commands: Record<string, (argv: string[], prog: string) => Promise<void>> = {
     gallery: g.galleryCommand, library: g.libraryCommand, edit: g.editCommand, init: g.initCommand, use: g.useCommand, packages: g.packagesCommand,
-    publish: g.publishCommand, outdated: g.outdatedCommand, update: g.updateCommand,
+    publish: g.publishCommand, search: g.searchCommand, outdated: g.outdatedCommand, update: g.updateCommand,
   };
   await commands[argv[0]](argv.slice(1), prog);
 } else if (argv[0] === 'mcp') {

@@ -65,6 +65,7 @@ export function createOutputPanel(ctx) {
     if (item.details) { item.details(details); return; }
     const what = kindLine(item);
     if (what) details.append(text('p', what, 'output-kind'));
+    if (item.warning) details.append(text('p', item.warning, 'warn'));
     if (item.heightfield && item.view === 'model' && !item.inputPath) {
       // the terrain coloured by one of its layers, in red over the height ramp
       const choice = document.createElement('select'); choice.setAttribute('aria-label', 'Layer drawn in red');
@@ -204,7 +205,10 @@ export function createOutputPanel(ctx) {
         if (thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
         icon.textContent = item.view === 'model' ? '3D' : item.view === 'image' ? 'IMG' : (item.kind === 'metadata' ? 'JSON' : (item.files?.[0]?.name.split('.').pop() ?? 'file').toUpperCase().slice(0, 5));
         label.textContent = item.label;
-        info.textContent = item.error ?? (item.status === 'loading' ? 'Cooking…' : what); info.className = item.error ? 'err' : 'dim'; info.title = item.error ?? what;
+        // an output that is not the kind its graph pins says so (publishing the project's package would block on it)
+        const warned = !item.error && item.status !== 'loading' && item.warning;
+        info.textContent = item.error ?? (item.status === 'loading' ? 'Cooking…' : warned ? `${what} · not a "${item.pinned}"` : what);
+        info.className = item.error ? 'err' : warned ? 'warn' : 'dim'; info.title = item.error ?? (warned ? `${what}\n${item.warning}` : what);
         const next = previous ? previous.nextSibling : group.rows.firstChild; if (row !== next) group.rows.insertBefore(row, next); previous = row;
       }
     }

@@ -7,6 +7,7 @@ import zlib from 'node:zlib';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { INPUTS_EXAMPLE } from '../src/mcp/docs.ts';
+import { builtinVersions } from '../src/gallery/packages.ts';
 
 /** A 16-bit grey PNG made by hand (signature, IHDR, IDAT, IEND), the way a heightmap arrives. */
 function grey16PNG(w: number, h: number, values: number[]): Buffer {
@@ -45,6 +46,8 @@ await client.connect(transport);
 
 let failures = 0;
 const check = (cond: any, msg: string) => { console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); if (!cond) failures++; };
+/** the newest version of topotopo/nature in TopoTopo's built-in library, which a first use adds, and as a pattern */
+const NATURE = builtinVersions('topotopo/nature').at(-1)!.version, NV = NATURE.replace('.', '\\.');
 const call = async (name: string, args: any) => {
   const r: any = await client.callTool({ name, arguments: args });
   const txt = r.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
@@ -238,12 +241,12 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
     'help topic inputs: group pattern, role wrangle and the example graph');
   // it names topotopo/nature/tree_lowpoly: a dry run checks it against the kit's version a build adds, and copies nothing
   const dry = await call('build', { name: 'land', graph: example, dry_run: true });
-  check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && /\nnote: build or edit adds topotopo\/nature 1\.0 to project .* on first use, from library "topotopo" \(TopoTopo's built-in library\): this dry run read it there and copied nothing/.test(dry.txt),
+  check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV} to project .* on first use, from library "topotopo" \\(TopoTopo's built-in library\\): this dry run read it there and copied nothing`).test(dry.txt),
     `a dry run of the help inputs example validates the kit's output where it lies: ${dry.txt.split('\n').slice(0, 2).join(' | ')}`);
   check(!fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature')) && !JSON.parse(fs.readFileSync(path.join(wsDir, 'project.json'), 'utf8')).uses?.['topotopo/nature'] && !fs.existsSync(path.join(wsDir, 'graphs', 'land.json')),
     'and writes nothing: no copy, no entry in uses, no graph');
   const dryTypo = await call('build', { name: 'land', graph: { nodes: { t: { type: 'topotopo/nature/tree_lowpoly', params: { heigth: 7 } } } }, dry_run: true });
-  check(dryTypo.isError && /unknown param "heigth" for topotopo\/nature\/tree_lowpoly — did you mean "height"/.test(dryTypo.txt) && /\nnote: build or edit adds topotopo\/nature 1\.0/.test(dryTypo.txt),
+  check(dryTypo.isError && /unknown param "heigth" for topotopo\/nature\/tree_lowpoly — did you mean "height"/.test(dryTypo.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV}`).test(dryTypo.txt),
     `a slider the version does not have is an error of the dry run: ${dryTypo.txt.split('\n')[1]}`);
   await call('build', { name: 'guides_src', graph: { nodes: {
     road: { type: 'curve', params: { points: [[-60, 0, -20], [-10, 0, 0], [30, 0, 10], [70, 0, 40]] } },
@@ -255,8 +258,8 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const xg = await call('export', { graph: 'guides_src', path: 'inputs/guides.glb' });
   const land = await call('build', { name: 'land', graph: example });
   check(!xg.isError && !land.isError && /packed: \d+ instances of 1 source/.test(land.txt) && /point: .*\bpath f1/.test(land.txt), `help inputs example cooks on inputs/guides.glb: ${land.txt.split('\n')[0]}`);
-  check(/note: added topotopo\/nature 1\.0 to project .* from library "topotopo" \(TopoTopo's built-in library\): packages\/topotopo\/nature\/1\.0/.test(land.txt) && fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature', '1.0', 'version.json')),
-    'its first use copies the nature kit in from TopoTopo\'s built-in library');
+  check(new RegExp(`note: added topotopo/nature ${NV} to project .* from library "topotopo" \\(TopoTopo's built-in library\\): packages/topotopo/nature/${NV}`).test(land.txt) && fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature', NATURE, 'version.json')),
+    `its first use copies the nature kit's newest version (${NATURE}) in from TopoTopo's built-in library`);
   const dry2 = await call('build', { name: 'land', graph: example, dry_run: true });
   check(!dry2.isError && /✓ valid: 15 nodes/.test(dry2.txt), `then the help inputs example validates: ${dry2.txt.split('\n')[0]}`);
   const lsg = await call('inputs', { action: 'list' });
@@ -348,6 +351,9 @@ if (url) {
   } });
   const noNote = await call('library', { action: 'publish' });
   check(noNote.isError && /a version needs a note/.test(noNote.txt), 'library publish needs a note');
+  const dry = await call('library', { action: 'publish', check: true });
+  check(!dry.isError && /^✓ would publish studio\/crates 1\.0 \(the first version\); publishing it needs a note/.test(dry.txt) && /\n {2}crate {2}mesh {2}"Crate"\n/.test(dry.txt) && !fs.existsSync(path.join(kit, 'versions')),
+    `library publish check:true is a dry run: the number, each output's kind, nothing written (${dry.txt.split('\n')[0]})`);
   const pub = await call('library', { action: 'publish', note: 'first crates' });
   check(!pub.isError && /✓ published studio\/crates 1\.0 \(the first version\): "first crates"/.test(pub.txt) && fs.existsSync(path.join(kit, 'versions', '1.0', 'version.json')), `library publish: ${pub.txt.split('\n')[0]}`);
   const again = await call('library', { action: 'publish', note: 'again' });
@@ -359,7 +365,12 @@ if (url) {
   const pj = JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8'));
   fs.writeFileSync(path.join(yard, 'project.json'), JSON.stringify({ ...pj, libraries: ['game'] }, null, 2));
   const listed = await call('library', { action: 'packages' });
-  check(!listed.isError && /studio\/crates {2}1\.0 "first crates" {2}\[library "game"\]/.test(listed.txt) && /outputs: crate/.test(listed.txt), `library packages lists the packages in the project's libraries: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
+  check(!listed.isError && /studio\/crates {2}1\.0 "first crates" {2}\[library "game"\]/.test(listed.txt) && /outputs: crate \(mesh\)/.test(listed.txt), `library packages lists the packages in the project's libraries: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
+  const found = await call('library', { action: 'search', query: 'crate' });
+  check(!found.isError && /^search "crate": \d+ outputs/.test(found.txt) && /\nlibrary "game" \(.*\): project yard lists it: a graph that names one of these adds its package\n {2}studio\/crates\/crate {2}mesh {2}"Crate" {2}1\.0/.test(found.txt)
+    && /\n {2}topotopo\/props\/crate {2}/.test(found.txt), `library search finds outputs in the project's library and TopoTopo's built-in one: ${found.txt.split('\n').filter((l) => /^ {2}\S/.test(l)).join(' | ')}`);
+  const meshes = await call('library', { action: 'search', kind: 'mesh', tag: 'nothing-has-this' });
+  check(!meshes.isError && /^search kind mesh, tag nothing-has-this: no output matches in /.test(meshes.txt), `kind and tag filters: ${meshes.txt.split('\n')[0]}`);
   const b = await call('build', { graph: { nodes: { a: { type: 'studio/crates/crate', params: { s: 2 } }, d: { type: 'studio/crates', params: { s: 0.5 } }, t: { type: 'transform', in: ['d'], params: { translate: [3, 0, 0] } }, out: { type: 'merge', in: ['a', 't'] } }, output: 'out' } });
   check(!b.isError && /note: added studio\/crates 1\.0 to project yard from library "game"/.test(b.txt) && /✓ graph "main"/.test(b.txt) && fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.0', 'version.json')),
     `a build that names a package adds it on first use and cooks its outputs: ${b.txt.split('\n').filter((l) => /✓|note:|✗|\[/.test(l)).join(' | ')}`);
@@ -440,7 +451,7 @@ for (const named of [false, true]) {
   check(!r.isError && !!id && new RegExp(`^project ${id} \\(.*\\)\\nuses: nothing yet`).test(txt), `${named ? 'a named empty folder' : 'the default workspace'} is made a project: ${txt.split('\n')[0]}`);
   const b: any = await own.callTool({ name: 'build', arguments: { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } } } });
   const bt = b.content.map((c: any) => c.text ?? '').join('\n');
-  check(!b.isError && /✓ graph "main"/.test(bt) && /note: added topotopo\/nature 1\.0/.test(bt), `its graphs use TopoTopo's own packages as they come: ${bt.split('\n')[0]}`);
+  check(!b.isError && /✓ graph "main"/.test(bt) && new RegExp(`note: added topotopo/nature ${NV}`).test(bt), `its graphs use TopoTopo's own packages as they come: ${bt.split('\n')[0]}`);
   await own.close();
 }
 console.log(`\n${failures ? failures + ' FAILURES' : 'ALL PASSED'} — workspace ${wsDir}`);

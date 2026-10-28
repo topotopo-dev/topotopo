@@ -1,6 +1,7 @@
 // The gallery web server: every library's projects as a grid, a page per project with its 3D
 // preview, and stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their
-// notes and the outputs it publishes (from its versions' records), any project's page the packages it uses. It reads
+// notes and the outputs it publishes with their kinds and tags (from its versions' records), which the grid's search
+// finds as well, and any project's page the packages it uses. It reads
 // files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in editor"
 // starts a `topotopo edit` child.
 // Bound to 127.0.0.1 on a fixed port (stable links); requests must name this server as their Host, and writes must
@@ -188,9 +189,14 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   const cardOf = (p: Project): CardData => {
     const s = readBakeState(p.dir);
     const m = p.manifest;
-    // a package: its full name and newest version (its published versions' records)
-    const pkg = m.package ? { name: m.package, version: publishedVersions(p.dir, m.package).at(-1)?.version ?? null } : undefined;
-    return { lib: p.lib, id: p.id, title: m.title, collection: p.collection, tags: m.tags, description: m.description, updated: p.updated, status: status(p, s), version: String(s?.at ?? 0), ...(pkg ? { pkg } : {}) };
+    // a package: its full name, its newest version and its outputs (its published versions' records)
+    const newest = m.package ? publishedVersions(p.dir, m.package).at(-1) : undefined;
+    const pkg = m.package ? { name: m.package, version: newest?.version ?? null } : undefined;
+    const outputs = m.package && newest ? outputsOf(m.package, newest).map((o) => ({ type: o.type, ...(o.alias ? { alias: o.alias } : {}), label: o.label, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags })) : undefined;
+    return {
+      lib: p.lib, id: p.id, title: m.title, collection: p.collection, tags: m.tags, description: m.description, updated: p.updated, status: status(p, s), version: String(s?.at ?? 0),
+      ...(pkg ? { pkg } : {}), ...(outputs ? { outputs } : {}),
+    };
   };
   /** The projects that are packages, by full name: the first library's when two hold one. */
   const packageHomes = () => {
@@ -202,7 +208,8 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   const outputsOf = (name: string, v: VersionInfo): OutputRow[] => {
     const isDefault = (o: { graph: string; node: string }) => o.graph === v.default.graph && o.node === v.default.node;
     const row = (type: string, o: VersionInfo['default'], dflt: boolean): OutputRow => ({
-      type, ...(dflt ? { alias: name } : {}), label: o.label ?? '', graph: o.graph, node: o.node, sliders: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`),
+      type, ...(dflt ? { alias: name } : {}), label: o.label ?? '', ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [],
+      graph: o.graph, node: o.node, sliders: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`),
     });
     const rows = Object.entries(v.outputs).map(([k, o]) => row(`${name}/${k}`, o, isDefault(o)));
     // a default output that is no named output is listed by the package's name alone

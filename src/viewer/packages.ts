@@ -1,11 +1,11 @@
 // The project's packages in the live viewer (the registry is src/gallery/packages.ts, Update's before/after
-// src/gallery/update.ts): what the page's Packages tab shows, each package the project uses with the version in use,
-// the updates its libraries have and their notes, its working folder and whether this session follows it; the
-// before/after of an update, with progress events and a stop of its own (its cooks are not the workspace's, so the
-// workspace's stop does not reach them); applying it; and the follow switch. Following lasts as long as the viewer and
-// is never saved. The working folders of the packages the project uses are watched: a save in one the session follows
-// cooks the graphs that use it again, a save in another is told to the pages (they offer to follow it), and a version
-// published there is a new update.
+// src/gallery/update.ts): what the page's Packages tab shows, each package the project uses with the version in use and
+// its outputs' kinds and tags, the updates its libraries have and their notes, its working folder and whether this
+// session follows it; the before/after of an update, with progress events and a stop of its own (its cooks are not the
+// workspace's, so the workspace's stop does not reach them); applying it; and the follow switch. Following lasts as
+// long as the viewer and is never saved. The working folders of the packages the project uses are watched: a save in
+// one the session follows cooks the graphs that use it again, a save in another is told to the pages (they offer to
+// follow it), and a version published there is a new update.
 //
 //   GET  /api/packages               the project and its packages (project null: the graphs are in no project)
 //   POST /api/packages/compare       {package, to?}: the before/after, answered when it is done or stopped
@@ -43,6 +43,8 @@ export interface PackageRow {
   /** the note and date of the version in use, from the project's copy */
   note?: string;
   published?: string;
+  /** the outputs of the version in use (its copy's record) with their kinds and tags: "owner/name/output", or "owner/name" for a default output that is no named output */
+  outputs?: { type: string; label?: string; kind?: string; tags: string[] }[];
   /** the small update (the newest version with the same big number) and the big one */
   small?: string;
   big?: string;
@@ -102,6 +104,12 @@ function asked<T>(f: () => T): T {
 }
 const sameDir = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
 const versionRow = (v: VersionInfo): VersionRow => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: !!v.big });
+/** A version's outputs by the node type a graph names them with, with their kinds and tags (PackageRow.outputs). */
+const outputRows = (pkg: string, v: VersionInfo): NonNullable<PackageRow['outputs']> => {
+  const row = (type: string, o: VersionInfo['default']) => ({ type, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [] });
+  const rows = Object.entries(v.outputs).map(([k, o]) => row(`${pkg}/${k}`, o));
+  return Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node) ? rows : [row(pkg, v.default), ...rows];
+};
 const byName = <T extends { package: string }>(a: T, b: T) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0);
 
 export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
@@ -130,7 +138,7 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
     const packages: PackageRow[] = outdated.map((o) => {
       const info = pk.copyInfo(o.package, o.version);
       return {
-        package: o.package, version: o.version, ...(info ? { note: info.note, published: info.published } : {}),
+        package: o.package, version: o.version, ...(info ? { note: info.note, published: info.published, outputs: outputRows(o.package, info) } : {}),
         ...(o.small ? { small: o.small } : {}), ...(o.big ? { big: o.big } : {}),
         newer: o.newer.map(versionRow), libraries: o.libraries, working: o.working, followed: following.get(o.package) ?? null,
         ...(o.error ? { error: o.error } : {}), ...(kept.has(o.package) ? { mustChange: kept.get(o.package) } : {}),

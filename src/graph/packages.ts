@@ -16,6 +16,7 @@ import { Geometry } from '../core/geometry.ts';
 import { rebaseTexturePaths } from '../core/materials.ts';
 import { graphInterface } from './engine.ts';
 import type { Engine } from './engine.ts';
+import type { Kind } from './outputs.ts';
 import { scanValue } from './params.ts';
 import { getNodeDef } from './registry.ts';
 import { parsePackageName } from './scope.ts';
@@ -45,6 +46,12 @@ export interface PackageOutput {
   note?: string;
   /** the output's label in its graph */
   label?: string;
+  /**
+   * what it is and the words search finds it by: as the version records them, or for a working folder the kind its
+   * author pinned and its tags (src/graph/outputs.ts)
+   */
+  kind?: Kind;
+  tags?: string[];
   /** a problem every cook repeats (a copy edited by hand) */
   warning?: string;
   /**

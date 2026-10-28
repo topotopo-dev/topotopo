@@ -1,9 +1,9 @@
 // The Packages tab (src/viewer/packages.ts serves it), shown while the project uses packages: a card per package with
-// the version in use and its note, the updates the project's libraries have (a small one, the newest version with the
-// same big number, and a big one, a step of its own) with the notes of the newer versions, and, where the libraries hold
-// its working folder, the follow switch, "Use the trees I'm editing": for this viewer's session the package cooks from
-// its working folder and every save there cooks the scene again. A save there while the switch is off is offered
-// through the status bar's question.
+// the version in use, its note and its outputs with their kinds and tags, the updates the project's libraries have (a
+// small one, the newest version with the same big number, and a big one, a step of its own) with the notes of the newer
+// versions, and, where the libraries hold its working folder, the follow switch, "Use the trees I'm editing": for this
+// viewer's session the package cooks from its working folder and every save there cooks the scene again. A save there
+// while the switch is off is offered through the status bar's question.
 // Before/after cooks every place the project uses the package with the version in use (a) and the new one (b), its
 // progress in the cook lines with their Stop; a place shows alone in the view as an output card does, as a, as b or
 // both overlaid, and its details say what changed. Nothing changes until Update. A node of a package with an update
@@ -21,6 +21,12 @@ export const day = (iso) => (typeof iso === 'string' ? iso.slice(0, 10) : '');
 
 /** The libraries that hold a package, as its card names them: library "game", and TopoTopo's built-in library ("topotopo"). */
 export const librariesText = (libs) => (libs ?? []).map((l) => (l === 'topotopo' ? 'TopoTopo\'s built-in library' : `library "${l}"`)).join(', ');
+
+/**
+ * An output of the version in use on a package's card: {name, kind, tags}; its name without the package ("pine"), or
+ * "(default)" for the package's default output named by the package alone. kind '' when its record has none.
+ */
+export const outputLine = (pkg, o) => ({ name: o.type.startsWith(`${pkg}/`) ? o.type.slice(pkg.length + 1) : '(default)', kind: o.kind ?? '', tags: o.tags ?? [] });
 
 /** "a small update", "a big update", "back to an older version", "back to an older big version" */
 export const stepText = (t) => (t.big ? (t.up ? 'a big update' : 'back to an older big version') : t.up ? 'a small update' : 'back to an older version');
@@ -169,6 +175,19 @@ export function createPackagesPanel(ctx, host) {
     box.append(head, state);
     if (p.version && (p.note || p.published)) box.append(el('div', 'pkg-note', [day(p.published), p.note].filter(Boolean).join(' · ')));
     if (p.libraries?.length) box.append(el('div', 'pkg-note', `in ${librariesText(p.libraries)}`));
+    // the outputs of the version in use: what each is, and its tags
+    if (p.outputs?.length) {
+      const outs = el('div', 'pkg-outs');
+      for (const o of p.outputs) {
+        const l = outputLine(p.package, o), r = el('div', 'pkg-out');
+        r.title = `${o.type}${o.label ? ` (${o.label})` : ''}`;
+        r.append(el('span', 'pkg-on', l.name));
+        if (l.kind) { const k = el('span', 'pkg-kind', l.kind); k.title = 'what the output is'; r.append(k); }
+        if (l.tags.length) r.append(el('span', 'pkg-otags', l.tags.join(', ')));
+        outs.append(r);
+      }
+      box.append(outs);
+    }
     const r = P.result?.target.package === p.package ? P.result : null;
     const running = P.running?.package === p.package ? P.running : null;
     // the newer versions' notes; a before/after lists those it goes over instead

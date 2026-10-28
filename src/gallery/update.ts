@@ -29,7 +29,7 @@ import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../workspace.ts';
-import { compareInterfaces, compareVersions, libraryText } from './packages.ts';
+import { compareInterfaces, compareVersions, kindChanges, libraryText, outputsLine } from './packages.ts';
 import type { ProjectPackages, UpdateTarget } from './packages.ts';
 
 /**
@@ -415,7 +415,16 @@ export function outdatedText(pk: ProjectPackages, mcp = false): string {
   for (const o of list) {
     if (o.error) { lines.push(`  ${o.package} ${o.version}: ${o.error}`); continue; }
     const ups = [o.small ? `small update ${o.small}` : '', o.big ? `big update ${o.big}` : ''].filter(Boolean);
-    lines.push(`  ${o.package} ${o.version}: ${ups.join(', ') || 'up to date'}  [${o.libraries.map(libraryText).join(', ')}]`, ...o.newer.map((v) => `    ${v.version}  "${v.note}"`));
+    lines.push(`  ${o.package} ${o.version}: ${ups.join(', ') || 'up to date'}  [${o.libraries.map(libraryText).join(', ')}]`);
+    // each newer version's outputs of another kind, and the outputs of the version in use with their kinds and tags
+    const inUse = pk.copyInfo(o.package, o.version);
+    let was = inUse;
+    for (const v of o.newer) {
+      const kinds = was ? kindChanges(was, v) : [];
+      lines.push(`    ${v.version}  "${v.note}"${kinds.length ? `  (another kind: ${kinds.join('; ')})` : ''}`);
+      was = v;
+    }
+    if (inUse) lines.push(`    outputs of ${o.version}: ${outputsLine(inUse)}`);
   }
   if (late.length) lines.push(mcp
     ? 'library {action:"update", package:"owner/name"} shows the before/after of the small update, with to:"<version>" of a big one; nothing changes until the person says so (apply:true)'

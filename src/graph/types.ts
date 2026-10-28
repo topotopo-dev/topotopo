@@ -1,6 +1,7 @@
 import type { Geometry } from '../core/geometry.ts';
 import type { CookOptions, CookReport, Engine, StopSignal } from './engine.ts';
 import type { PackageOutput } from './packages.ts';
+import type { Kind } from './outputs.ts';
 import type { KernelJob, ParallelOptions, ParallelRun } from './parallel.ts';
 import type { Scope } from './scope.ts';
 
@@ -135,9 +136,10 @@ export interface GraphSpec {
   export?: ExportTarget;
   /**
    * Named deliverables for the viewer. `output` remains the default cook target. A project that is a package publishes
-   * every named output of its graphs but those with `publish: false` (viewer-only previews).
+   * every named output of its graphs but those with `publish: false` (viewer-only previews), with its kind (detected,
+   * or pinned here and checked), its tags and its description (else the graph's): src/graph/outputs.ts.
    */
-  outputs?: Record<string, { node: string; label?: string; export?: ExportTarget; publish?: boolean }>;
+  outputs?: Record<string, { node: string; label?: string; export?: ExportTarget; publish?: boolean; kind?: Kind; tags?: string[]; description?: string }>;
   vars?: Record<string, any>;
   /** metadata for exposed vars: asset parameters, and the controls the live viewer shows for them */
   params?: Record<string, VarDef>;

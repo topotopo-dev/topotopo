@@ -25,12 +25,17 @@ export interface CardData {
   status: string; version: string;
   /** a package: its full name and newest version (null before the first is published) */
   pkg?: { name: string; version: string | null };
+  /** a package's outputs in its newest version, which the search finds by name, label, kind and tag */
+  outputs?: { type: string; alias?: string; label: string; kind?: string; tags: string[] }[];
 }
 
 export interface VarRow { name: string; value: unknown; desc?: string; min?: number; max?: number }
 export interface FileRow { path: string; size: number; image: boolean }
-/** A published output: the node type a graph names it with ("owner/name/output"; `alias` "owner/name" for the default). */
-export interface OutputRow { type: string; alias?: string; label: string; graph: string; node: string; sliders: string[]; inputs: string[] }
+/**
+ * A published output: the node type a graph names it with ("owner/name/output"; `alias` "owner/name" for the default),
+ * its kind and tags (none in a version published before TopoTopo recorded kinds).
+ */
+export interface OutputRow { type: string; alias?: string; label: string; kind?: string; tags: string[]; graph: string; node: string; sliders: string[]; inputs: string[] }
 /** A published version: `big` when it starts a big version, `marked` when its author marked it big. */
 export interface VersionRow { version: string; note: string; published: string; big: boolean; marked: boolean }
 export interface ProjectData extends CardData {
@@ -82,8 +87,14 @@ const pkgMark = (p: { name: string; version: string | null }) =>
   `<span class="pkg" title="${esc(`package ${p.name}${p.version ? `, newest version ${p.version}` : ', no version published yet'}`)}">${esc(p.name)}${p.version ? ` ${esc(p.version)}` : ''}</span>`;
 const day = (iso: string) => (iso ? iso.slice(0, 10) : '');
 
+/** An output's kind and tags as marks: the kind outlined, each tag a tag. */
+const kindTagMarks = (o: { kind?: string; tags: string[] }) =>
+  `${o.kind ? `<span class="kind" title="what the output is">${esc(o.kind)}</span>` : ''}${o.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}`;
+
 function card(c: CardData, u: Urls) {
   const hay = [c.title, c.id, c.collection, c.description, ...c.tags, c.pkg?.name ?? ''].join(' ').toLowerCase();
+  // a package's outputs: the search shows those it finds by their name, label, kind or tags
+  const outs = (c.outputs ?? []).map((o) => `<span class="out" hidden data-hay="${esc([o.type, o.alias ?? '', o.label, o.kind ?? '', ...o.tags].join(' ').toLowerCase())}"><code>${esc(o.type)}</code>${kindTagMarks(o)}</span>`).join('');
   return `<a class="card" href="${esc(u.project(c.lib, c.id))}" data-key="${esc(`${c.lib}/${c.id}`)}" data-hay="${esc(hay)}" data-tags="${esc(c.tags.join('\n'))}" data-collection="${esc(c.collection)}">
   <span class="thumb"><img src="${esc(u.thumb(c.lib, c.id, c.version))}" alt="" loading="lazy" width="512" height="512"></span>
   <span class="meta">
@@ -91,15 +102,20 @@ function card(c: CardData, u: Urls) {
     <span class="sub">${c.collection ? `${esc(c.collection)} · ` : ''}${esc(c.id)}</span>
     ${c.pkg ? pkgMark(c.pkg) : ''}
     ${c.tags.length ? `<span class="tags">${c.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>` : ''}
+    ${outs ? `<span class="outs">${outs}</span>` : ''}
     <span class="status s-${esc(c.status)}">${esc(STATUS[c.status] ?? '')}</span>
   </span>
 </a>`;
 }
 
-/** The front page: every library's projects grouped by collection, with search and tag filters; packages are marked. */
+/**
+ * The front page: every library's projects grouped by collection, with search and tag filters; packages are marked,
+ * and the search finds their outputs by name, kind and tag too.
+ */
 export function galleryPage(d: GalleryData, u: Urls): string {
   const tags = [...new Set(d.libraries.flatMap((l) => l.cards.flatMap((c) => c.tags)))].sort();
   const total = d.libraries.reduce((n, l) => n + l.cards.length, 0);
+  const outputs = d.libraries.reduce((n, l) => n + l.cards.reduce((k, c) => k + (c.outputs?.length ?? 0), 0), 0);
   const libs = d.libraries.map((l) => {
     const groups = new Map<string, CardData[]>();
     for (const c of l.cards) { const g = groups.get(c.collection) ?? []; g.push(c); groups.set(c.collection, g); }
@@ -116,7 +132,7 @@ export function galleryPage(d: GalleryData, u: Urls): string {
   const none = d.libraries.length ? '' : `<p class="empty">No libraries yet. Add a folder with <code>topotopo library add &lt;name&gt; &lt;folder&gt;</code>.</p>`;
   return shell('TopoTopo Gallery', u, `<header class="bar">
   <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>
-  <input id="search" type="search" placeholder="Search ${total} projects" autocomplete="off" aria-label="Search projects">
+  <input id="search" type="search" placeholder="Search ${total} project${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search projects${outputs ? ' and the outputs of packages' : ''}">
 </header>
 <main class="wrap">
 ${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''} in the libraries</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
@@ -130,13 +146,14 @@ function fileList(rows: FileRow[], lib: string, id: string, base: string, u: Url
   return `<ul class="files">${rows.map((f) => `<li><a href="${esc(u.file(lib, id, `${base}/${f.path}`))}"${f.image ? '' : ' download'}>${esc(f.path)}</a><span>${size(f.size)}</span></li>`).join('')}</ul>`;
 }
 
-/** A package's versions with their notes and dates, and the outputs its newest version publishes. */
+/** A package's versions with their notes and dates, and the outputs its newest version publishes with their kinds and tags. */
 function packageSection(pk: NonNullable<ProjectData['package']>): string {
   if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the project's folder publishes the first, which other projects can then use as <code>${esc(pk.name)}</code>.</p>`;
   const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a project relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
   const outputs = pk.outputs.map((o) => {
     const what = [`node "${o.node}" of graph "${o.graph}"`, o.sliders.length ? `sliders ${o.sliders.join(', ')}` : '', o.inputs.length ? `input${o.inputs.length > 1 ? 's' : ''} ${o.inputs.join(', ')}` : ''].filter(Boolean).join(' · ');
-    return `<tr><th><code>${esc(o.type)}</code>${o.alias ? `<br><code>${esc(o.alias)}</code> <span class="dim">(the default)</span>` : ''}</th><td>${esc(o.label)}</td><td class="dim">${esc(what)}</td></tr>`;
+    const marks = kindTagMarks(o);
+    return `<tr><th><code>${esc(o.type)}</code>${o.alias ? `<br><code>${esc(o.alias)}</code> <span class="dim">(the default)</span>` : ''}</th><td>${esc(o.label)}${marks ? `<span class="tags">${marks}</span>` : ''}</td><td class="dim">${esc(what)}</td></tr>`;
   }).join('');
   return `<h2>Versions <span class="count">${pk.versions.length}</span></h2>
     <table class="vars versions"><tbody>${pk.versions.map((v) => `<tr><th>${esc(v.version)}${big(v)}</th><td>${esc(day(v.published))}</td><td>${esc(v.note)}</td></tr>`).join('')}</tbody></table>

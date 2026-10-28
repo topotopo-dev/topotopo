@@ -3,8 +3,10 @@
 // 3 sources", "5,000 points", "12 curves, 840 points", "image 1024 × 1024", or several of these (mixed), with its
 // bounding size. Their format menus offer only the formats that write it: PART_FORMATS lists the formats that write
 // each part, best first, as the exporters do (test/viewer-outputs.ts exports every part in every format to check it),
-// and a format that needs a heightfield or an image is offered only with one. Pure: no file system.
+// and a format that needs a heightfield or an image is offered only with one. A package records the same finding as the
+// kind of each published output it publishes (publishedKind). Pure: no file system.
 import type { Geometry } from '../core/geometry.ts';
+import type { Kind } from '../graph/outputs.ts';
 import { heightfieldsOf, layerStats } from '../core/heightfield.ts';
 import { referenceableImages } from '../core/image.ts';
 import type { ExportFormat } from './export.ts';
@@ -118,6 +120,30 @@ export function outputKind(g: Geometry): OutputInfo {
     parts, text: parts.length ? parts.map((p) => text[p]()).join(' + ') : 'empty', size,
     ...(heightfield ? { heightfield } : {}), heightfields: fields.length, images: images.length, grids: grids.length,
   };
+}
+
+/**
+ * The kind a published output records (src/graph/outputs.ts KINDS): its one part as named, a heightfield a terrain and
+ * an image textures; scene for several parts; null for an empty output, which is no kind (publishing blocks it).
+ */
+export function publishedKind(o: Pick<OutputInfo, 'kind'>): Kind | null {
+  switch (o.kind) {
+    case 'empty': return null;
+    case 'mixed': return 'scene';
+    case 'heightfield': return 'terrain';
+    case 'image': return 'textures';
+    default: return o.kind;
+  }
+}
+
+/**
+ * What an output whose author pinned its kind (graph.outputs[id].kind) says when it cooks to another kind or to
+ * nothing (null: it is the kind pinned). Build and the viewer warn with it; publishing blocks.
+ */
+export function kindMismatch(pinned: string, o: OutputInfo): string | null {
+  const k = publishedKind(o);
+  if (k === pinned) return null;
+  return `its "kind" is "${pinned}", and it cooks to ${k ? `${k} (${o.text})` : 'nothing'}: change what it cooks, or its "kind" in the graph's outputs`;
 }
 
 /** A bounding size in words: "4096 × 312 × 4096 m". */

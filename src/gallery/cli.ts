@@ -9,12 +9,15 @@
 //   topotopo init [folder] [--package owner/name]                     make a folder a project (project.json)
 //   topotopo use owner/name [folder]                                  add a package from the libraries the project lists
 //   topotopo packages [folder]                                        what it uses, and the packages in its libraries
-//   topotopo publish [folder] --note "..." [--big]                    publish the next version of the project's package
+//   topotopo publish [folder] --note "..." [--big] [--check]          publish the next version of the project's package
+//                                                                     (--check: a dry run, nothing written)
+//   topotopo search [words] [--kind k] [--tag t]                      the outputs of every library, for the current project
 //   topotopo outdated [folder]                                        the newer versions of what it uses, with their notes
 //   topotopo update owner/name [folder] [--to <version>] [--render <folder>] [--apply]
 //                                                                     the before/after of an update; --apply applies it
 import fs from 'node:fs';
 import path from 'node:path';
+import { KINDS } from '../graph/outputs.ts';
 import { addLibrary, createProject, initProject, isStale, loadConfig, projectDirOf, readBakeState, scanAll, slugify } from './library.ts';
 import type { GalleryConfig } from './library.ts';
 
@@ -175,20 +178,36 @@ export async function packagesCommand(argv: string[], prog: string) {
   console.log(packagesText(pk));
 }
 
-/** `publish [folder] --note "..." [--big]`: publish the next version of the project's package. */
+/**
+ * `publish [folder] --note "..." [--big]`: publish the next version of the project's package; `--check` is a dry run
+ * that says what publishing would do and writes nothing.
+ */
 export async function publishCommand(argv: string[], prog: string) {
   const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  if (argv.includes('--note') && (opt('--note') === undefined || opt('--note')!.startsWith('--'))) fail(`usage: ${prog} publish [folder] --note "what changed" [--big]`);
-  const { publishPackage, publishText } = await import('./packages.ts');
+  if (argv.includes('--note') && (opt('--note') === undefined || opt('--note')!.startsWith('--'))) fail(`usage: ${prog} publish [folder] --note "what changed" [--big] [--check]`);
+  const { loadProject, publishPackage, publishText } = await import('./packages.ts');
   const { Workspace } = await import('../workspace.ts');
   const { engine, project, pk } = await projectPackages(folderArg(argv, ['--note']), prog);
+  // the project's graphs and assets in the root, read without writing anything into its folder (a workspace's load
+  // would make its folders)
   const ws = new Workspace(project, engine);
   ws.packages = pk;
-  ws.load();
-  const r = await publishPackage(ws, pk, { note: opt('--note'), big: argv.includes('--big') });
+  for (const p of loadProject(engine, project)) console.error(`warning: ${p}`);
+  const r = await publishPackage(ws, pk, { note: opt('--note'), big: argv.includes('--big'), check: argv.includes('--check') });
   console.log(publishText(r));
   await engine.host.pool?.close();
   process.exit(r.ok ? 0 : 1);
+}
+
+/** `search [words] [--kind k] [--tag t]`: the outputs of every library, and whether the current folder's project can use them. */
+export async function searchCommand(argv: string[], prog: string) {
+  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
+  const valued = ['--kind', '--tag'];
+  if (valued.some((f) => argv.includes(f) && (opt(f) === undefined || opt(f)!.startsWith('--')))) fail(`usage: ${prog} search [words] [--kind ${KINDS.join('|')}] [--tag t]`);
+  const words = argv.filter((x, i) => !x.startsWith('--') && !valued.includes(argv[i - 1]));
+  const { searchPackages, searchText } = await import('./packages.ts');
+  try { console.log(searchText(searchPackages(projectDirOf(process.cwd()), { query: words.join(' '), kind: opt('--kind'), tag: opt('--tag') }))); }
+  catch (e: any) { fail(e.message); }
 }
 
 /** `outdated [folder]`: for each package the project uses, the newer versions in its libraries and their notes. */
