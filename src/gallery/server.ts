@@ -1,6 +1,8 @@
 // The gallery web server: every library's projects as a grid, a page per project with its 3D
-// preview, and stable URLs a board pastes (link, thumbnail, iframe embed). It reads files and serves baked previews;
-// it never cooks: bakes run in child processes (BakeQueue) and "Open in editor" starts a `topotopo edit` child.
+// preview, and stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their
+// notes and the outputs it publishes (from its versions' records), any project's page the packages it uses. It reads
+// files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in editor"
+// starts a `topotopo edit` child.
 // Bound to 127.0.0.1 on a fixed port (stable links); requests must name this server as their Host, and writes must
 // come from its own pages.
 import http from 'node:http';
@@ -14,9 +16,11 @@ import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { galleryDir, graphNames, isStale, listFiles, loadConfig, readBakeState, readGraph, scanLibrary } from './library.ts';
 import type { BakeState, GalleryConfig, LibraryScan, Project } from './library.ts';
+import { compareVersions, copyRecord, publishedVersions } from './packages.ts';
+import type { VersionInfo } from './packages.ts';
 import { BakeQueue } from './bake.ts';
 import { embedPage, galleryPage, projectPage } from './pages.ts';
-import type { CardData, ProjectData, Urls } from './pages.ts';
+import type { CardData, OutputRow, ProjectData, Urls } from './pages.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const assetDir = path.join(here, 'app');
@@ -184,7 +188,26 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   const cardOf = (p: Project): CardData => {
     const s = readBakeState(p.dir);
     const m = p.manifest;
-    return { lib: p.lib, id: p.id, title: m.title, collection: p.collection, tags: m.tags, description: m.description, updated: p.updated, status: status(p, s), version: String(s?.at ?? 0) };
+    // a package: its full name and newest version (its published versions' records)
+    const pkg = m.package ? { name: m.package, version: publishedVersions(p.dir, m.package).at(-1)?.version ?? null } : undefined;
+    return { lib: p.lib, id: p.id, title: m.title, collection: p.collection, tags: m.tags, description: m.description, updated: p.updated, status: status(p, s), version: String(s?.at ?? 0), ...(pkg ? { pkg } : {}) };
+  };
+  /** The projects that are packages, by full name: the first library's when two hold one. */
+  const packageHomes = () => {
+    const homes = new Map<string, Project>();
+    for (const p of projects.values()) if (p.manifest.package && !homes.has(p.manifest.package)) homes.set(p.manifest.package, p);
+    return homes;
+  };
+  /** A version's published outputs, each by the node type a graph names it with; "owner/name" alone is the default. */
+  const outputsOf = (name: string, v: VersionInfo): OutputRow[] => {
+    const isDefault = (o: { graph: string; node: string }) => o.graph === v.default.graph && o.node === v.default.node;
+    const row = (type: string, o: VersionInfo['default'], dflt: boolean): OutputRow => ({
+      type, ...(dflt ? { alias: name } : {}), label: o.label ?? '', graph: o.graph, node: o.node, sliders: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`),
+    });
+    const rows = Object.entries(v.outputs).map(([k, o]) => row(`${name}/${k}`, o, isDefault(o)));
+    // a default output that is no named output is listed by the package's name alone
+    if (!Object.values(v.outputs).some(isDefault)) rows.unshift(row(name, v.default, false));
+    return rows;
   };
   const projectData = (p: Project): ProjectData => {
     const s = readBakeState(p.dir);
@@ -197,11 +220,25 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       };
     });
     const abs = (u: string) => base + u;
+    const m = p.manifest, homes = packageHomes();
+    const versions = m.package ? publishedVersions(p.dir, m.package) : [];
+    // the packages it uses: the version in use (its copy's record), and the newest the gallery knows of
+    const uses = Object.entries(m.uses).map(([name, v]) => {
+      const rec = copyRecord(p.dir, name, v), home = homes.get(name);
+      const newest = home ? publishedVersions(home.dir, name).at(-1)?.version : undefined;
+      return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(home ? { url: urls.project(home.lib, home.id) } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
+    });
     return {
-      ...cardOf(p), rel: p.rel, links: p.manifest.links, graph: p.manifest.graph, graphs, created: p.manifest.created,
+      ...cardOf(p), rel: p.rel, links: m.links, graph: m.graph, graphs, created: m.created,
       attachments: listFiles(path.join(p.dir, 'attachments')), exports: listFiles(path.join(p.dir, 'exports')),
       glb: fs.existsSync(path.join(galleryDir(p.dir), 'preview.glb')), bake: s,
       share: { link: abs(urls.project(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
+      package: m.package ? {
+        name: m.package,
+        versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: v.version.endsWith('.0') && v.version !== '1.0', marked: v.big })),
+        outputs: versions.length ? outputsOf(m.package, versions.at(-1)!) : [],
+      } : null,
+      uses,
     };
   };
   const listJSON = () => [...projects.values()].map((p) => {
@@ -209,6 +246,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     return {
       lib: p.lib, id: p.id, title: c.title, description: c.description, tags: c.tags, collection: c.collection, updated: p.updated, status: c.status,
       url: base + urls.project(p.lib, p.id), thumb: base + urls.thumb(p.lib, p.id, c.version), embed: base + urls.embed(p.lib, p.id),
+      ...(c.pkg ? { package: c.pkg } : {}),
     };
   });
 

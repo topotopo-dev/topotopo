@@ -1092,6 +1092,11 @@ export class ProjectPackages implements WorkspacePackages {
   }
 }
 
+/** The records of a package's published versions (its versions/ folder), oldest first; unreadable ones are left out. */
+export function publishedVersions(dir: string, pkg: string): VersionInfo[] {
+  return readVersions(dir, pkg, '', new Set()).map((p) => p.info);
+}
+
 /** The record of a version a project holds a copy of (packages/<owner>/<name>/<version>/), null when it holds none. */
 export function copyRecord(dir: string, pkg: string, v: string): VersionInfo | null {
   try { return readVersionInfo(copyAt(path.join(dir, 'packages'), pkg, v)); } catch { return null; }

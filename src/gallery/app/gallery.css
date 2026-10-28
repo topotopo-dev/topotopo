@@ -50,6 +50,9 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 .tag { padding: 0 6px; border-radius: 3px; background: var(--panel2); color: var(--dim); font-size: 11px; line-height: 18px; }
 .status { font-size: 11px; color: var(--dim); }
 .status:empty { display: none; }
+/* a package: its full name and newest version */
+.pkg { align-self: flex-start; max-width: 100%; padding: 0 6px; border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); font: var(--mono); font-size: 11px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkgline { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--dim); font-size: 13px; }
 .s-failed { color: var(--err); }
 .s-baking { color: var(--accent); }
 
@@ -91,6 +94,12 @@ pre.error { color: var(--err); }
 .vars th { font-weight: 500; white-space: nowrap; }
 .vars td:nth-child(2) { font: var(--mono); white-space: nowrap; }
 .range { color: var(--faint); }
+/* a package's versions and outputs, the packages a project uses */
+.versions th, .uses th { font: var(--mono); }
+.outputs th code, .outputs th .dim { white-space: nowrap; }
+.outputs td:nth-child(2) { font: var(--font); font-size: 13px; }
+.uses a { color: var(--accent); }
+.newer { color: var(--accent); }
 
 @media (max-width: 860px) {
   .project { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "info" "more"; }

@@ -1,7 +1,7 @@
 // The gallery web server (src/gallery/server.ts): the grid, a project page, thumbnails (a placeholder before the first
 // bake), preview.glb, the embed page, attachments (inside the project only, scripts never inline), /api/projects
-// (CORS only for listed origins), framing headers, the Host and Origin checks, a bake from a file change, and the
-// pages' templates escaping what they show.
+// (CORS only for listed origins), framing headers, the Host and Origin checks, a bake from a file change, a package's
+// versions and outputs and the packages a project uses, and the pages' templates escaping what they show.
 //   node test/gallery.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -104,6 +104,40 @@ try {
     createProject(lib, 'props/barrel', { graph: BOX });
     check(await until(async () => JSON.parse((await req('/api/health')).body.toString()).projects === 2, 10000), 'a new project folder appears');
     check((await req('/p/game/barrel')).status === 200, 'and has its page');
+  }
+
+  section('packages: a package\'s versions and outputs, the packages a project uses, the grid marks packages');
+  {
+    // a package with two published versions and a project that uses the first, their records as publishing and use
+    // write them (versions/<v>/version.json, packages/<owner>/<name>/<v>/version.json)
+    const pine = { graph: 'main', node: 'tree', label: 'Pine', sliders: { height: { type: 'float', default: 4 } }, inputs: [{ index: 0, label: 'ground' }] };
+    const rec = (version: string, note: string, published: string) => ({ package: 'studio/trees', version, note, published, big: false, hash: `h${version}`, outputs: { pine }, default: pine, topotopo: '0' });
+    const trees = createProject(lib, 'nature/trees', { title: 'Trees', graph: BOX });
+    const forest = createProject(lib, 'levels/forest', { title: 'Forest', graph: BOX });
+    const edit = (dir: string, f: (m: any) => void) => { const file = path.join(dir, 'project.json'); const m = JSON.parse(fs.readFileSync(file, 'utf8')); f(m); fs.writeFileSync(file, JSON.stringify(m, null, 2)); };
+    const write = (file: string, v: unknown) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(v)); };
+    edit(trees.dir, (m) => { m.package = 'studio/trees'; });
+    write(path.join(trees.dir, 'versions', '1.0', 'version.json'), rec('1.0', 'first trees', '2026-10-20T10:00:00.000Z'));
+    write(path.join(trees.dir, 'versions', '1.1', 'version.json'), rec('1.1', 'rounder <crowns>', '2026-10-22T10:00:00.000Z'));
+    edit(forest.dir, (m) => { m.uses = { 'studio/trees': '1.0' }; });
+    write(path.join(forest.dir, 'packages', 'studio', 'trees', '1.0', 'version.json'), rec('1.0', 'first trees', '2026-10-20T10:00:00.000Z'));
+    g.rescan();
+    const page = (await req('/p/game/trees')).body.toString();
+    check(/class="pkgline">Package <span class="pkg"[^>]*>studio\/trees 1\.1<\/span>/.test(page), 'a package\'s page names it in full, with its newest version');
+    check(/<th>1\.1<\/th><td>2026-10-22<\/td><td>rounder &lt;crowns&gt;<\/td>/.test(page) && /<th>1\.0<\/th><td>2026-10-20<\/td><td>first trees<\/td>/.test(page) && page.indexOf('<th>1.1</th>') < page.indexOf('<th>1.0</th>'),
+      'its versions, newest first, with their dates and notes (escaped)');
+    check(/<code>studio\/trees\/pine<\/code><br><code>studio\/trees<\/code> <span class="dim">\(the default\)<\/span><\/th><td>Pine<\/td><td class="dim">node &quot;tree&quot; of graph &quot;main&quot; · sliders height · input ground<\/td>/.test(page),
+      'the outputs it publishes, by the node type a graph names them with: their sliders and inputs, the default output');
+    const user = (await req('/p/game/forest')).body.toString();
+    check(/<h2>Packages it uses<\/h2>/.test(user) && /<th><a href="\/p\/game\/trees">studio\/trees<\/a><\/th><td>1\.0<\/td><td class="dim">first trees · 2026-10-20 <span class="newer">1\.1 is out<\/span><\/td>/.test(user) && !/class="pkgline"/.test(user),
+      'a project\'s page lists the packages it uses: the version in use, its note, the package\'s page, a newer version');
+    const grid = (await req('/')).body.toString();
+    const cardOf = (key: string) => { const at = grid.indexOf(`data-key="${key}"`); return at < 0 ? '' : grid.slice(at, grid.indexOf('</a>', at)); };
+    check(cardOf('game/trees').includes('<span class="pkg" title="package studio/trees, newest version 1.1">studio/trees 1.1</span>') && cardOf('game/forest') && !cardOf('game/forest').includes('class="pkg"'),
+      'the grid marks a package with its full name and newest version');
+    const api = JSON.parse((await req('/api/projects')).body.toString());
+    check(JSON.stringify(api.projects.find((x: any) => x.id === 'trees')?.package) === '{"name":"studio/trees","version":"1.1"}' && api.projects.find((x: any) => x.id === 'forest')?.package === undefined,
+      '/api/projects names the packages too');
   }
 
   section('templates');
