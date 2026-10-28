@@ -208,9 +208,9 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a shelf asset into the workspace to edit |
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
-| `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
+| `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, heightfields, images and SDF grids, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `update` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer; the open project's packages: `packages`, `use`, `follow` (a package's working folder for the session) and `publish` |
+| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer; the open project's packages: `packages`, `use`, `follow` (a package's working folder for the session), `publish`, `outdated` (newer versions and their notes) and `update` (a before/after with overlay renders, applied when the person says so) |
 
 ## Graph format
 
@@ -403,11 +403,19 @@ on every machine and what it uses never changes by itself. It finds packages in 
 a project that uses it, `--follow studio/trees` (or the MCP `library` tool's `follow`) uses the package's working
 folder for one session. Exports record the package versions they used.
 
+`topotopo outdated` lists the newer versions of what a project uses, with their notes. `topotopo update studio/trees`
+shows a before/after first: every place the project uses the package, cooked with the version in use and the new one,
+what changed and the notes in between, without writing anything; the same command with `--apply` updates it (a big
+version is named with `--to`, and the before/after says what the project's graphs must change).
+
 ```bash
 topotopo init props/trees --package studio/trees
 topotopo publish props/trees --note "first version"
 topotopo use studio/trees levels/forest
 topotopo packages levels/forest
+topotopo outdated levels/forest
+topotopo update studio/trees levels/forest
+topotopo update studio/trees levels/forest --apply
 ```
 
 `topotopo --help-topic packages` (MCP: `help {topic: "packages"}`) has the details.
