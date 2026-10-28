@@ -197,8 +197,8 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 
 | tool | purpose |
 |---|---|
-| `catalog` | node types by category (filter/search) |
-| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, uv, render, export, verify, cloth, library, recipes |
+| `catalog` | node types by category (filter/search), with the outputs of the packages the project uses |
+| `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, packages, uv, render, export, verify, cloth, library, recipes; a package output's sliders, inputs, version and note |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inputs` | `list` the files in the workspace `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
@@ -210,7 +210,7 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `update` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer |
+| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `update` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer; the open project's packages: `packages`, `use`, `follow` (a package's working folder for the session) and `publish` |
 
 ## Graph format
 
@@ -389,6 +389,28 @@ topotopo gallery
 
 Each project has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
 `/embed/<library>/<id>`.
+
+## Packages
+
+A project can use the published outputs of other projects by name, as node types: `{"type": "studio/trees/pine"}`, or
+`studio/trees` for the package's default output, with the output's vars as params and its input nodes as inputs. The
+author names the package once in `project.json` (`"package": "studio/trees"`) and publishes versions: each is a frozen
+copy in the project's `versions/` folder, numbered big.small by what changed for the projects that use it (a removed or
+renamed output, slider or input, a narrower range or a removed option makes a big version). A project that uses a
+package keeps its own copy of the version it uses in `packages/` and names it in `project.json`, so it cooks the same
+on every machine and what it uses never changes by itself. It finds packages in the libraries its `project.json` lists
+(`"libraries": ["../shared/library", "game"]`); the first graph that names one adds it. To tune a package while looking at
+a project that uses it, `--follow studio/trees` (or the MCP `library` tool's `follow`) uses the package's working
+folder for one session. Exports record the package versions they used.
+
+```bash
+topotopo init props/trees --package studio/trees
+topotopo publish props/trees --note "first version"
+topotopo use studio/trees levels/forest
+topotopo packages levels/forest
+```
+
+`topotopo --help-topic packages` (MCP: `help {topic: "packages"}`) has the details.
 
 ## Shelf
 
