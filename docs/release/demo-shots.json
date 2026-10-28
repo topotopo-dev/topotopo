@@ -19,10 +19,10 @@
       "kind": "orbit",
       "orbit": { "azimuth": 38, "degrees_per_frame": 1, "frames": 360 },
       "render": { "views": ["persp"], "elevation": 28, "shading": "matcap", "annotate": false, "size": 960, "view_labels": false },
-      "caption": "12 houses · each house is a shelf asset made of shelf assets",
+      "caption": "12 houses · each house is TopoTopo's own house, built from its walls and roof",
       "left": [
         { "file": "examples/house_city.json", "paths": ["vars", "nodes.w", "nodes.d", "nodes.fl", "nodes.pit", "nodes.yaw", "nodes.houses"] },
-        { "file": "shelf/house.json", "paths": ["nodes.walls", "nodes.roof"] }
+        { "file": "library/architecture/graphs/house.json", "paths": ["nodes.walls", "nodes.roof"] }
       ]
     },
     {
@@ -33,7 +33,7 @@
       "kind": "orbit",
       "orbit": { "azimuth": 38, "degrees_per_frame": 1, "frames": 360 },
       "render": { "views": ["persp"], "elevation": 28, "shading": "matcap", "annotate": false, "size": 960, "view_labels": false },
-      "caption": "12 houses · each house is a shelf asset made of shelf assets",
+      "caption": "12 houses · each house is TopoTopo's own house, built from its walls and roof",
       "left": [
         { "file": "examples/house_city.json", "paths": ["vars"], "note": "edit \"seed\": 7 to \"seed\": 8 on screen" }
       ]
