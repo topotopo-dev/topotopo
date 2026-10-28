@@ -118,6 +118,37 @@ export function writeMaterials(g: Geometry, t: MaterialTable): void {
   g.detail.add(MATERIALS_DETAIL, 'string', 1).set(0, JSON.stringify(sorted));
 }
 
+/** A texture path that names a file relative to a folder: not "image:<name>", "embedded:<name>", a URL or an absolute path. */
+const relativeTexture = (p: string | undefined): p is string => !!p && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(p) && !/^[\\/]/.test(p);
+
+/**
+ * The geometry with the relative texture paths of its material tables (its own and its packed sources') rewritten by
+ * `resolve`, cloned where something changes; g itself when no path is relative. A package output's result names its
+ * textures in the version's folder this way, so exports and renders read them wherever the result goes.
+ */
+export function rebaseTexturePaths(g: Geometry, resolve: (path: string) => string, done = new Map<Geometry, Geometry>()): Geometry {
+  const seen = done.get(g);
+  if (seen) return seen;
+  let out = g;
+  const table = readMaterials(g);
+  let changed = false;
+  for (const m of Object.values(table)) for (const k of TEXTURE_SLOTS) {
+    const p = m.textures?.[k];
+    if (relativeTexture(p)) { m.textures![k] = resolve(p); changed = true; }
+  }
+  if (changed) { out = g.clone(); writeMaterials(out, table); }
+  // packed sources are shared and never modified: a rewritten source is a new one
+  if (g.primKind) {
+    const sources = g.packedSources.map((s) => rebaseTexturePaths(s, resolve, done));
+    if (sources.some((s, i) => s !== g.packedSources[i])) {
+      if (out === g) out = g.clone();
+      out.packedSources = sources;
+    }
+  }
+  done.set(g, out);
+  return out;
+}
+
 /** Union of the tables of several geometries; the first definition of a name wins. */
 export function mergeMaterialTables(geos: (Geometry | null | undefined)[]): MaterialTable {
   const out: MaterialTable = {};

@@ -20,7 +20,8 @@
 //
 // Scopes (src/graph/scope.ts): a cook runs in a scope, which gives it its node types, the graphs graph_ref reads and
 // the files nodes read; nested cooks inherit it. The cache is shared by all scopes: outside the root scope, a node
-// whose result depends on its scope (NodeDef.usesScope) has the scope's id in its signature.
+// whose result depends on its scope (NodeDef.usesScope) has the scope's id in its signature. A node type with a slash
+// is a package output (src/graph/packages.ts), which only the scope's packages resolve.
 //
 // Concurrency: when the host has a worker pool (Engine.concurrent), the inputs of a node (and the nodes its
 // expressions reference) are pulled at once, so independent branches overlap wherever a cook awaits (a chunked
@@ -43,10 +44,10 @@ import type { ExprRefs, ResolvedParams, TimeState } from './params.ts';
 import { migrateGraphDetailed } from './migrate.ts';
 import { parallelMap as runKernel } from './parallel.ts';
 import type { PoolStats } from './parallel.ts';
-import { scopeSig } from './scope.ts';
-import type { AssetEntry, Scope } from './scope.ts';
+import { parsePackageName, scopeSig } from './scope.ts';
+import type { AssetEntry, PackageIssue, PackageResolver, Scope } from './scope.ts';
 import { NodeError, STOPPED } from './types.ts';
-import type { CookContext, GraphSpec, NodeDef, NodeSpec, ParamDef } from './types.ts';
+import type { CookContext, GraphSpec, InputDef, NodeDef, NodeSpec, ParamDef } from './types.ts';
 import { VAR_NAME_HINT, varNameError } from './vars.ts';
 import { codeVarNames, pickVars } from '../core/usercode.ts';
 
@@ -262,6 +263,31 @@ function inferParamType(meta: any, v: any): ParamDef['type'] {
     if (v.length === 4) return 'vec4';
   }
   return 'json';
+}
+
+/**
+ * A graph as a node type (an asset, a package output): its vars are the params, with their "params" declarations, and
+ * its input nodes the inputs, by their index.
+ */
+export function graphInterface(graph: GraphSpec): { params: Record<string, ParamDef>; inputs: InputDef[] } {
+  const params: Record<string, ParamDef> = {};
+  for (const [k, v] of Object.entries(graph.vars ?? {})) {
+    const meta = graph.params?.[k] ?? {};
+    params[k] = {
+      type: inferParamType(meta, v), default: v, desc: meta.desc ?? '',
+      min: meta.min, max: meta.max, options: meta.options,
+    };
+  }
+  let nIn = 0;
+  const inputDescs: string[] = [];
+  for (const n of Object.values(graph.nodes)) {
+    if (typeof n?.type === 'string' && getNodeDef(n.type)?.type === 'input') {
+      const idx = Number(n.params?.index ?? 0);
+      nIn = Math.max(nIn, idx + 1);
+      inputDescs[idx] = n.params?.label ?? n.note ?? '';
+    }
+  }
+  return { params, inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })) };
 }
 
 type ChParams = Map<string, { def: NodeDef; values: Record<string, any> }>;
@@ -480,27 +506,48 @@ export class Engine {
     return { loaded, errors };
   }
 
-  /** A node type in a scope: its own assets, then the shelf, then the built-in nodes. */
+  /**
+   * A node type in a scope: its own assets, then the shelf, then the built-in nodes. A name with a slash is a package
+   * output, which only the scope's packages resolve (packageIssue says why one does not).
+   */
   resolveDef(type: string, scope: Scope = this.root): NodeDef | undefined {
     if (typeof type !== 'string') return undefined;
+    if (type.includes('/')) {
+      const r = scope.packages?.resolve(type);
+      return r && !('error' in r) ? r : undefined;
+    }
     const a = this.asset(type, scope) ?? this.asset(type.replace(/^asset:/, ''), scope);
     if (a) return a.def;
     return getNodeDef(type);
   }
 
+  /** Why a name with a slash names no node type in a scope: a package the scope does not use, an unknown output … */
+  packageIssue(type: string, scope: Scope = this.root): PackageIssue {
+    const r = scope.packages?.resolve(type);
+    if (r && 'error' in r) return r;
+    const n = parsePackageName(type);
+    if (typeof n === 'string') return { error: n };
+    return { error: `"${type}" is an output of package ${n.package}, and this cook has no packages`, hint: 'packages are used by projects (project.json "uses"), cooked by the TopoTopo CLI, viewer or MCP server' };
+  }
+
   allTypeNames(scope: Scope = this.root): string[] {
-    return [...allAliases(), ...this.assetsIn(scope).map((a) => a.name)];
+    return [...allAliases(), ...this.assetsIn(scope).map((a) => a.name), ...(scope.packages?.names() ?? [])];
+  }
+
+  /** The node types of the package outputs a scope uses, for the catalog. */
+  packageDefs(scope: Scope = this.root): NodeDef[] {
+    return (scope.packages?.names() ?? []).map((n) => this.resolveDef(n, scope)).filter((d): d is NodeDef => !!d);
   }
 
   /**
    * A scope for cooks of its own (CookOptions.scope): its id (not "", which is the root's), the folder its relative
-   * paths read (absolute, or relative to the host's own; default: the host's files) and the graphs graph_ref reads in
-   * it. Register its assets with registerAsset(name, graph, {scope}).
+   * paths read (absolute, or relative to the host's own; default: the host's files), the graphs graph_ref reads in it
+   * and the package outputs its graphs name. Register its assets with registerAsset(name, graph, {scope}).
    */
-  createScope(id: string, opts: { folder?: string; graphs?: (name: string) => GraphSpec | undefined } = {}): Scope {
+  createScope(id: string, opts: { folder?: string; graphs?: (name: string) => GraphSpec | undefined; packages?: PackageResolver } = {}): Scope {
     if (!id) throw new Error('a scope needs an id ("" is the root scope\'s)');
     if (opts.folder !== undefined && !this.host.filesAt) throw new Error(`scope "${id}": the ${this.host.name} host has no file access for other folders (Host.filesAt)`);
-    return { id, assets: new Map(), graphs: opts.graphs, files: opts.folder === undefined ? this.host : this.host.filesAt!(opts.folder) };
+    return { id, assets: new Map(), graphs: opts.graphs, files: opts.folder === undefined ? this.host : this.host.filesAt!(opts.folder), packages: opts.packages };
   }
 
   // ------------------------------------------------------------ assets
@@ -529,23 +576,7 @@ export class Engine {
     const issues = this.validate(graph, '', scope);
     if (issues.errors.length) throw new Error(`asset graph invalid: ${issues.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
     const hash = String(hashString(stableStringify(graph)));
-    const params: Record<string, ParamDef> = {};
-    for (const [k, v] of Object.entries(graph.vars ?? {})) {
-      const meta = graph.params?.[k] ?? {};
-      params[k] = {
-        type: inferParamType(meta, v), default: v, desc: meta.desc ?? '',
-        min: meta.min, max: meta.max, options: meta.options,
-      };
-    }
-    let nIn = 0;
-    const inputDescs: string[] = [];
-    for (const n of Object.values(graph.nodes)) {
-      if (getNodeDef(n.type)?.type === 'input') {
-        const idx = Number(n.params?.index ?? 0);
-        nIn = Math.max(nIn, idx + 1);
-        inputDescs[idx] = n.params?.label ?? n.note ?? '';
-      }
-    }
+    const { params, inputs } = graphInterface(graph);
     // shelf assets: the first sentence of the description is the catalog summary, the rest the long description
     const shelfDoc = category === 'shelf' && graph.description ? /^(.+?[.!?])\s+(.+)$/s.exec(graph.description) : null;
     const def: NodeDef = {
@@ -553,7 +584,7 @@ export class Engine {
       category,
       summary: shelfDoc?.[1] ?? graph.description ?? `${category === 'shelf' ? 'shelf' : 'user'} asset "${name}"`,
       ...(shelfDoc ? { description: shelfDoc[2] } : {}),
-      inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })),
+      inputs,
       params,
       // the graph's node types resolve in the scope the asset cooks in
       usesScope: true,
@@ -617,6 +648,8 @@ export class Engine {
           errors.push({ node: path || '(graph)', message: `named output "${id}" must reference an existing node and have an optional string label` });
         else if (out.export !== undefined && targetError(out.export))
           errors.push({ node: path || '(graph)', message: `named output "${id}": ${targetError(out.export)}` });
+        else if (out.publish !== undefined && typeof out.publish !== 'boolean')
+          errors.push({ node: path || '(graph)', message: `named output "${id}": "publish" must be true or false (false keeps it out of the project's package), got ${JSON.stringify(out.publish)}` });
       }
     }
     if (graph.export !== undefined && targetError(graph.export))
@@ -651,7 +684,8 @@ export class Engine {
           errors.push({ node: path + '(params)', message: `params "${k}": options must be a list of strings or numbers, got ${JSON.stringify(o)?.slice(0, 80)}` });
       }
     }
-    const typeNames = this.allTypeNames(scope);
+    // for did-you-mean, listed once a type is unknown (the package names load the scope's packages)
+    let typeNames: string[] | null = null;
     const refsOf = new Map<string, ExprRefs>();
     for (const name of names) {
       const spec = graph.nodes[name];
@@ -662,7 +696,12 @@ export class Engine {
       }
       const def = this.resolveDef(spec.type, scope);
       if (!def) {
-        const s = didYouMean(spec.type, typeNames);
+        if (spec.type.includes('/')) {
+          const p = this.packageIssue(spec.type, scope);
+          errors.push({ node: nm, message: p.error, ...(p.hint ? { hint: p.hint } : {}) });
+          continue;
+        }
+        const s = didYouMean(spec.type, typeNames ??= this.allTypeNames(scope));
         errors.push({ node: nm, message: `unknown node type "${spec.type}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`, hint: 'use the catalog tool to list node types' });
         continue;
       }

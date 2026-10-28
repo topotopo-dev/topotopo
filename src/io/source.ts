@@ -8,6 +8,9 @@
 //   frame, fps     the cook time
 //   vars           every var of the graph after overrides (CLI --var), keys sorted
 //   seeds          the seed params the graph sets, by node ("loop/pts" inside a nested graph), as written
+//   packages       only when the graph uses packages (src/graph/packages.ts packagesUsed): "owner/name@version" → the
+//                  version's hash for every package version it uses, directly or through other packages, and
+//                  "owner/name@working" → the hash of the files of a working folder followed this session
 //   export         {format, options}: the export options given (the export tool's names)
 //   topotopo       the version that wrote it
 // Formats that write a sidecar or manifest carry the block there (png16 / r16: <name>.json; csv / points.json instance
@@ -29,6 +32,8 @@ export interface ExportSource {
   fps: number;
   vars: Record<string, unknown>;
   seeds: Record<string, unknown>;
+  /** the package versions the graph uses (absent when it uses none) */
+  packages?: Record<string, string>;
   export: { format: string; options: Record<string, unknown> };
   topotopo: string;
 }
@@ -48,6 +53,8 @@ export interface SourceInput {
   format: string;
   /** the export options given, by the export tool's names (up_axis, scale, …) */
   options?: Record<string, unknown>;
+  /** the package versions the cooked graph uses (packagesUsed) */
+  packages?: Record<string, string>;
   /** the TopoTopo version */
   version: string;
 }
@@ -104,6 +111,7 @@ export function exportSource(i: SourceInput): ExportSource {
     fps: i.fps ?? 24,
     vars: sorted(spec.vars ?? {}),
     seeds: graphSeeds(spec),
+    ...(i.packages && Object.keys(i.packages).length ? { packages: sorted(i.packages) } : {}),
     export: { format: i.format, options: sorted(i.options ?? {}) },
     topotopo: i.version,
   };

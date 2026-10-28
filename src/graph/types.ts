@@ -1,5 +1,6 @@
 import type { Geometry } from '../core/geometry.ts';
 import type { CookOptions, CookReport, Engine, StopSignal } from './engine.ts';
+import type { PackageOutput } from './packages.ts';
 import type { KernelJob, ParallelOptions, ParallelRun } from './parallel.ts';
 import type { Scope } from './scope.ts';
 
@@ -85,6 +86,8 @@ export interface NodeDef {
   inputsUsed?: (p: Record<string, any>, count: number) => boolean[];
   /** extra cache-key material (e.g. file mtime), from the scope the node cooks in */
   signatureExtra?: (p: Record<string, any>, scope: Scope) => string;
+  /** a package output's node type (src/graph/packages.ts): the package, its version and what it cooks */
+  package?: PackageOutput;
   cook(ctx: CookContext): Geometry | Promise<Geometry>;
 }
 
@@ -130,8 +133,11 @@ export interface GraphSpec {
   output?: string;
   /** where the default output exports to (io/targets.ts): a format ("glb"), or {format, path?, ...export options} */
   export?: ExportTarget;
-  /** Named deliverables for the viewer. `output` remains the default cook target. */
-  outputs?: Record<string, { node: string; label?: string; export?: ExportTarget }>;
+  /**
+   * Named deliverables for the viewer. `output` remains the default cook target. A project that is a package publishes
+   * every named output of its graphs but those with `publish: false` (viewer-only previews).
+   */
+  outputs?: Record<string, { node: string; label?: string; export?: ExportTarget; publish?: boolean }>;
   vars?: Record<string, any>;
   /** metadata for exposed vars: asset parameters, and the controls the live viewer shows for them */
   params?: Record<string, VarDef>;
