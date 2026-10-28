@@ -1054,8 +1054,8 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    watertight/genus/boundary loops, flipped normals, symmetry planes, principal axis + aspect, sampled thickness,
    degenerate faces, polygon mix, attributes, groups. Compare it with what you meant to build.
 3. DIFF TO SEE WHAT A CHANGE DID: graphs {action:"duplicate", name:"main", to:"before"} → edit → diff {a:"before", b:"main"}:
-   counts, bbox delta, topology/volume, attribute and group changes, Hausdorff + mean distance, per-point displacement
-   (same point count), verdict. a/b: "graph", "graph/node" or {graph, node, frame} (two nodes or two frames work too).
+   counts, bbox delta, topology/volume, attribute and group changes, heightfields, images and SDF grids (sample by
+   sample), Hausdorff + mean distance, per-point displacement (same point count), verdict. a/b: "graph", "graph/node" or {graph, node, frame} (two nodes or two frames work too).
    render:true overlays them: grey = unchanged, blue = only in b, orange = only in a.
 4. RENDER for what text cannot tell (proportions, style); inspect for one attribute's numbers.
 MEASURE NODES (category measure) turn shape into attributes for masks and colour:

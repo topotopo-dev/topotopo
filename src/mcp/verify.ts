@@ -61,7 +61,7 @@ export function verifyTools(ws: Workspace): ToolDef[] {
     },
     {
       name: 'diff',
-      description: 'Compare two geometries (two graphs, two nodes of one graph, or two frames) to see what a change did: point/prim counts, bbox delta, topology and volume, attribute schema and group changes, symmetric Hausdorff and mean surface distance (sampled, BVH), per-point displacement when point counts match, and a one-line verdict. render:true adds a quad-view overlay PNG: grey = unchanged, blue = only in b (moved or new), orange = only in a. Tip: graphs {action:"duplicate"} before an edit, then diff the copy against the edited graph.',
+      description: 'Compare two geometries (two graphs, two nodes of one graph, or two frames) to see what a change did: point/prim counts, bbox delta, topology and volume, attribute schema and group changes, heightfields, images and SDF grids sample by sample, symmetric Hausdorff and mean surface distance (sampled, BVH), per-point displacement when point counts match, and a one-line verdict. render:true adds a quad-view overlay PNG: grey = unchanged, blue = only in b (moved or new), orange = only in a. Tip: graphs {action:"duplicate"} before an edit, then diff the copy against the edited graph.',
       inputSchema: {
         type: 'object',
         required: ['a', 'b'],

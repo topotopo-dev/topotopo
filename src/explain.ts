@@ -1,8 +1,8 @@
 // Shape descriptions for LLMs: explain (what a cooked geometry is, in ~30 lines of text) and diff (what changed
-// between two geometries: counts, bbox, attribute schema, groups, Hausdorff distance, an overlay for the renderer).
-// Host-agnostic; the MCP tools in src/mcp/verify.ts resolve graphs and render.
+// between two geometries: counts, bbox, attribute schema, groups, volumes, Hausdorff distance, an overlay for the
+// renderer). Host-agnostic; the MCP tools in src/mcp/verify.ts resolve graphs and render.
 import { Geometry } from './core/geometry.ts';
-import type { AttribClass, Attribute } from './core/geometry.ts';
+import type { AttribClass, Attribute, Volume } from './core/geometry.ts';
 import type { Vec3 } from './core/math.ts';
 import { buildEdges, primArea } from './core/topology.ts';
 import {
@@ -289,6 +289,72 @@ const delta = (a: number, b: number) => {
 };
 const signed = (x: number) => (Math.abs(x) < 1e-12 ? '0' : `${x > 0 ? '+' : ''}${fmt(x)}`);
 
+/** The largest difference between two sample arrays: 0 when they are equal, Infinity when their lengths differ. */
+function maxDelta(x: ArrayLike<number>, y: ArrayLike<number>): number {
+  if (x === y) return 0;
+  if (x.length !== y.length) return Infinity;
+  let m = 0;
+  for (let i = 0; i < x.length; i++) {
+    if (x[i] === y[i]) continue;
+    const d = Math.abs(x[i] - y[i]);
+    if (!(d <= m)) m = Number.isNaN(d) ? Infinity : d;
+  }
+  return m;
+}
+
+/** How a volume differs from the one of the same kind and name in b, '' when it does not (or, analytic, cannot be told). */
+function volumeDelta(a: Volume, b: Volume): string {
+  const by = (m: number, metres: boolean) => (Number.isFinite(m) ? (metres ? fmtLen(m) : fmt(m)) : 'a lot');
+  if (a.kind === 'sdf' || b.kind === 'sdf') {
+    const box = (v: Volume) => `${v3(v.bounds.min)}..${v3(v.bounds.max)}`;
+    return box(a) === box(b) ? '' : `bounds ${box(a)} → ${box(b)}`;
+  }
+  if (a.kind === 'grid' && b.kind === 'grid') {
+    const dims = (v: typeof a) => `${v.dims.join(' × ')} at ${fmtLen(v.voxel)} from ${v3(v.origin)}`;
+    if (dims(a) !== dims(b)) return `${dims(a)} → ${dims(b)}`;
+    const m = maxDelta(a.values, b.values);
+    return m ? `distances differ by up to ${by(m, true)}` : '';
+  }
+  if ((a.kind === 'heightfield' && b.kind === 'heightfield') || (a.kind === 'image' && b.kind === 'image')) {
+    const grid = (v: Volume) => (v.kind === 'heightfield' ? `${v.width} × ${v.height} cells of ${fmtLen(v.cellSize)} from (${v.origin.map((x) => fmt(x)).join(', ')})` : v.kind === 'image' ? `${v.width} × ${v.height} px` : '');
+    if (grid(a) !== grid(b)) return `${grid(a)} → ${grid(b)}`;
+    const parts: string[] = [];
+    for (const k of b.layers.keys()) if (!a.layers.has(k)) parts.push(`+ layer ${k}`);
+    for (const k of a.layers.keys()) if (!b.layers.has(k)) parts.push(`- layer ${k}`);
+    for (const [k, la] of a.layers) {
+      const lb = b.layers.get(k), m = lb ? maxDelta(la, lb) : 0;
+      if (m) parts.push(`layer ${k} by up to ${by(m, a.kind === 'heightfield' && k === 'height')}`);
+    }
+    return parts.join(', ');
+  }
+  return '';
+}
+
+/**
+ * What changed in the volumes, by kind and name: heightfields, images and SDF grids compared sample by sample, analytic
+ * SDFs by their bounds. "+" only in b, "-" only in a, "~" changed.
+ */
+function volumeChanges(a: Geometry, b: Geometry): string[] {
+  const byName = (g: Geometry) => {
+    const m = new Map<string, Volume>(), seen = new Map<string, number>();
+    for (const v of g.volumes) {
+      const base = `${v.kind === 'grid' ? 'SDF grid' : v.kind === 'sdf' ? 'SDF' : v.kind} "${v.name}"`;
+      const k = (seen.get(base) ?? 0) + 1;
+      seen.set(base, k);
+      m.set(k > 1 ? `${base} #${k}` : base, v);
+    }
+    return m;
+  };
+  const A = byName(a), B = byName(b), out: string[] = [];
+  for (const k of B.keys()) if (!A.has(k)) out.push(`+ ${k}`);
+  for (const k of A.keys()) if (!B.has(k)) out.push(`- ${k}`);
+  for (const [k, v] of A) {
+    const w = B.get(k), d = w ? volumeDelta(v, w) : '';
+    if (d) out.push(`~ ${k}: ${d}`);
+  }
+  return out;
+}
+
 export interface DiffResult {
   text: string;
   /** symmetric Hausdorff distance (Infinity when one side is empty) */
@@ -297,7 +363,7 @@ export interface DiffResult {
   identical: boolean;
 }
 
-/** What changed from a to b: counts, bbox, topology, attribute schema, groups, sampled Hausdorff and mean distance. */
+/** What changed from a to b: counts, bbox, topology, attribute schema, groups, volumes, sampled Hausdorff and mean distance. */
 export function diffGeometry(a: Geometry, b: Geometry, labels: [string, string] = ['a', 'b'], samples = 3000): DiffResult {
   const out: string[] = [`diff a = ${labels[0]}  vs  b = ${labels[1]}`];
   const ma = primMix(a), mb = primMix(b);
@@ -334,6 +400,8 @@ export function diffGeometry(a: Geometry, b: Geometry, labels: [string, string] 
   for (const [k, c] of gA) if (!gB.has(k)) grpChanges.push(`- ${k} (${n(c)})`);
   for (const [k, c] of gA) if (gB.has(k) && gB.get(k) !== c) grpChanges.push(`~ ${k} ${n(c)} → ${n(gB.get(k)!)} members`);
   out.push(`groups: ${grpChanges.length ? grpChanges.join('; ') : gA.size ? 'same names and sizes' : 'none'}`);
+  const volChanges = a.volumes.length || b.volumes.length ? volumeChanges(a, b) : [];
+  if (a.volumes.length || b.volumes.length) out.push(`volumes: ${volChanges.length ? volChanges.join('; ') + ' (+ only in b, - only in a, ~ changed)' : `same (${volumeCounts(a)}${a.volumes.some((v) => v.kind === 'sdf') ? '; analytic SDFs by their bounds' : ''})`}`);
   // distances
   let haus = Infinity, mean = Infinity;
   if (a.numPoints && b.numPoints) {
@@ -361,12 +429,14 @@ export function diffGeometry(a: Geometry, b: Geometry, labels: [string, string] 
   }
   const sameCounts = a.numPoints === b.numPoints && a.numPrims === b.numPrims && a.numVertices === b.numVertices;
   const diag = Math.max(bboxDiagonal(a), bboxDiagonal(b));
-  const identical = sameCounts && !attrChanges.length && !grpChanges.length && (a.numPoints === 0 || haus <= 1e-9 * Math.max(1, diag));
+  const identical = sameCounts && !attrChanges.length && !grpChanges.length && !volChanges.length && (a.numPoints === 0 || haus <= 1e-9 * Math.max(1, diag));
+  const vols = volChanges.length ? '; the volumes changed' : '';
   let verdict: string;
-  if (identical) verdict = 'no geometric change (same counts, schema and shape within 1e-9)';
-  else if (!a.numPoints || !b.numPoints) verdict = !a.numPoints && !b.numPoints ? 'both empty' : `${!a.numPoints ? 'a' : 'b'} is empty`;
-  else if (haus <= 1e-9 * Math.max(1, diag)) verdict = 'same shape; ' + (sameCounts ? 'only attributes/groups differ' : 'topology / tessellation differs');
-  else verdict = `shape changed by up to ${fmtLen(haus)} (${fmt((100 * haus) / Math.max(1e-12, diag))}% of the bbox diagonal)${sameCounts ? '' : ', and the topology differs'}`;
+  if (identical) verdict = `no geometric change (same counts, schema${a.volumes.length ? ', volumes' : ''} and shape within 1e-9)`;
+  else if (!a.numPoints && !b.numPoints) verdict = (a.volumes.length || b.volumes.length ? 'no points on either side' : 'both empty') + vols;
+  else if (!a.numPoints || !b.numPoints) verdict = `${!a.numPoints ? 'a' : 'b'} is empty${vols}`;
+  else if (haus <= 1e-9 * Math.max(1, diag)) verdict = 'same shape; ' + (!sameCounts ? `topology / tessellation differs${vols}` : attrChanges.length || grpChanges.length ? `only attributes/groups differ${vols}` : 'only the volumes differ');
+  else verdict = `shape changed by up to ${fmtLen(haus)} (${fmt((100 * haus) / Math.max(1e-12, diag))}% of the bbox diagonal)${sameCounts ? '' : ', and the topology differs'}${vols}`;
   out.push(`verdict: ${verdict}`);
   return { text: out.join('\n'), hausdorff: haus, mean, identical };
 }
