@@ -905,6 +905,14 @@ export class ProjectPackages implements WorkspacePackages {
     return changed;
   }
 
+  /**
+   * WorkspacePackages: a stamp of what package names resolve to: project.json and the lock as they are on disk now,
+   * and the files of the followed working folders as refresh() last found them.
+   */
+  revision(): string {
+    return `${this.diskStamp()}|${this.joint}`;
+  }
+
   /** Call `onChange` after a followed working folder changed on disk (and refresh() has taken it in). */
   watch(onChange: () => void) {
     this.onChange = onChange;

@@ -166,6 +166,11 @@ export interface WorkspacePackages {
   addFor(graph: GraphSpec): string[];
   /** read again what changed on disk (project.json, the lock, working folders followed this session); true if anything did */
   refresh(): boolean;
+  /**
+   * a stamp of what package names resolve to (the uses, the copies, the followed working folders): a result that may use
+   * a package is kept only while it stays the same (the viewer's previews, a person's stop)
+   */
+  revision(): string;
 }
 
 export class Workspace {
@@ -355,19 +360,24 @@ export class Workspace {
   }
 
   /**
-   * Hold a graph as it is now (a person stopped its cooks): held() is true until the graph or its session values
-   * change, and what cooks on its own (the viewer's previews) waits for that change instead of cooking it again.
+   * Hold a graph as it is now (a person stopped its cooks): held() is true until the graph, its session values or the
+   * packages it can use change, and what cooks on its own (the viewer's previews) waits for that change instead of
+   * cooking it again.
    */
   hold(name: string) {
-    if (this.graphs.has(name)) this.holds.set(name, JSON.stringify(this.effectiveGraph(name)));
+    if (this.graphs.has(name)) this.holds.set(name, this.holdKey(name));
   }
 
   held(name: string): boolean {
     const h = this.holds.get(name);
     if (h === undefined) return false;
-    if (this.graphs.has(name) && h === JSON.stringify(this.effectiveGraph(name))) return true;
+    if (this.graphs.has(name) && h === this.holdKey(name)) return true;
     this.holds.delete(name);
     return false;
+  }
+
+  private holdKey(name: string): string {
+    return JSON.stringify(this.effectiveGraph(name)) + (this.packages ? `|${this.packages.revision()}` : '');
   }
 
   private notifyActivity(name: string, ev?: NodeProgress) {

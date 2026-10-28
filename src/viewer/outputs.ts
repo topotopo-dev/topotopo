@@ -250,8 +250,9 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         const child = path.join(p, f); sourceFiles.set(child, ws.engine.host.fileStamp(child));
       } } catch { /* a disappearing file is reported by the next cook */ }
     }
-    // the session values (a person tuning a graph file in the viewer) are part of what each output shows
-    const workspaceRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]));
+    // the session values (a person tuning a graph file in the viewer) are part of what each output shows, and so are
+    // the packages: an update, or a save in a working folder the session follows, changes what they resolve to
+    const workspaceRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
     for (const [graph, spec] of ws.graphs) {
       for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name)) {
