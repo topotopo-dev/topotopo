@@ -382,6 +382,11 @@ interface Context {
    */
   library?: Map<string, Place>;
   apart?: boolean;
+  /**
+   * The project as a dry run sees it (ProjectPackages.dryRun): the packages a graph names for the first time are in its
+   * uses, read where a library holds them (`library`); this says why the others its first use could not add.
+   */
+  unavailable?: Map<string, string>;
 }
 
 /** A package version (or a followed working folder) loaded into the engine: its scope and its output node types. */
@@ -622,10 +627,10 @@ export class ProjectPackages implements WorkspacePackages {
     if (ctx.follows && this.followed.has(pkg)) return this.loadFollowed(pkg);
     const v = ctx.uses[pkg];
     if (v !== undefined) return this.loadCopy(ctx, pkg, v);
-    if (ctx !== this.root) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
+    if (ctx !== this.root && !ctx.unavailable) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
     if (!this.dir) return { error: `package ${pkg}: this graph is in no project, and only projects use packages`, hint: `${MAKE_PROJECT}; then a graph of it that names ${pkg} adds the package (or topotopo use ${pkg})` };
     if (this.error) return { error: `package ${pkg}: ${this.error}` };
-    const why = this.unavailable.get(pkg);
+    const why = (ctx.unavailable ?? this.unavailable).get(pkg);
     return {
       error: `package ${pkg} is not in this project's uses (project.json)${why ? `, and it could not be added: ${why}` : ''}`,
       hint: `topotopo use ${pkg} (MCP: library {action:"use", package:"${pkg}"}) adds its newest version from the libraries the project lists; build and edit add it when a graph first names it`,
@@ -843,14 +848,7 @@ export class ProjectPackages implements WorkspacePackages {
       try { complete = usesClosure({ [pkg]: inUse }, readLock(dir)).every(([p, w]) => fs.existsSync(path.join(copyAt(packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
       if (complete) return { version: inUse, copied: [], text: `${this.label} already uses ${pkg} ${inUse}` };
     }
-    const found = this.find(pkg);
-    if (!found.versions.size) {
-      const w = found.working[0];
-      throw new Error(`${pkg} is in library "${w?.library ?? found.libraries[0]}"${w ? ` (${w.dir})` : ''} but has no published version yet: publish one in its folder (topotopo publish --note "...")`);
-    }
-    const v = inUse ?? newestOf(found.versions.keys())!;
-    const place = found.versions.get(v)?.[0];
-    if (!place) throw new Error(`project.json uses ${pkg} ${v}, and no library this project lists has that version (they have ${[...found.versions.keys()].sort(compareVersions).join(', ')})`);
+    const { version: v, place } = this.versionToAdd(pkg, inUse);
     const copied = this.copyIn(pkg, v, place);
     if (inUse === undefined) {
       m.uses = sortKeys({ ...m.uses, [pkg]: v });
@@ -864,6 +862,47 @@ export class ProjectPackages implements WorkspacePackages {
         ? `added ${pkg} ${v} to ${this.label} from ${libraryText(place.library)}${deps.length ? `, with ${deps.join(', ')}` : ''}: packages/${pkg}/${v}`
         : `copied what was missing of ${pkg} ${v} again from ${libraryText(place.library)}: ${copied.join(', ')}`,
     };
+  }
+
+  /**
+   * The version of a package the project adds (`v`, else the newest in the libraries it looks in, TopoTopo's built-in
+   * library among them) and where a library holds it; throws saying why there is none.
+   */
+  private versionToAdd(pkg: string, v?: string, scanned?: Scanned): { version: string; place: Place } {
+    const found = this.find(pkg, scanned);
+    if (!found.versions.size) {
+      const w = found.working[0];
+      throw new Error(`${pkg} is in library "${w?.library ?? found.libraries[0]}"${w ? ` (${w.dir})` : ''} but has no published version yet: publish one in its folder (topotopo publish --note "...")`);
+    }
+    const version = v ?? newestOf(found.versions.keys())!;
+    const place = found.versions.get(version)?.[0];
+    if (!place) throw new Error(`project.json uses ${pkg} ${version}, and no library this project lists has that version (they have ${[...found.versions.keys()].sort(compareVersions).join(', ')})`);
+    return { version, place };
+  }
+
+  /**
+   * WorkspacePackages.dryRun: the packages a graph is checked with where nothing may be written (a dry run, a trial of
+   * a person's values). A package it names for the first time is the version its first use would add, the newest in
+   * the libraries the project looks in (TopoTopo's built-in library among them), read where that library holds it:
+   * nothing is copied, and project.json and the lock stay as they are. The notes say what build or edit add. Outside a
+   * project, and for a graph that names nothing new, it is the project's own resolver.
+   */
+  dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[] } {
+    if (!this.dir || !this.manifest || this.error) return { resolver: this.resolver, notes: [] };
+    const fresh = packagesNamedIn(graph).filter((pkg) => this.root.uses[pkg] === undefined && !this.followed.has(pkg) && pkg !== this.manifest!.package);
+    if (!fresh.length) return { resolver: this.resolver, notes: [] };
+    const uses = { ...this.root.uses }, library = new Map<string, Place>(), unavailable = new Map<string, string>(), notes: string[] = [];
+    let scanned: Scanned | undefined;
+    for (const pkg of fresh) {
+      try {
+        const { version, place } = this.versionToAdd(pkg, undefined, scanned ??= this.scanLibraries());
+        uses[pkg] = version;
+        library.set(`${pkg}@${version}`, place);
+        notes.push(`build or edit adds ${pkg} ${version} to ${this.label} on first use, from ${libraryText(place.library)}: this dry run read it there and copied nothing`);
+      } catch (e: any) { unavailable.set(pkg, e.message); }
+    }
+    const ctx: Context = { ...this.root, uses: sortKeys(uses), library, unavailable };
+    return { resolver: { ...this.resolverOf(ctx), offered: () => this.offered() }, notes };
   }
 
   /** Copy a version as published, and the versions it holds copies of, into the project; record them in the lock. */

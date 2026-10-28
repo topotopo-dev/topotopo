@@ -9,6 +9,7 @@ import path from 'node:path';
 import { Engine, wiringOf } from './graph/engine.ts';
 import type { CookReport, Issue, NodeProgress, StopSignal } from './graph/engine.ts';
 import type { ExportTarget, GraphSpec, NodeSpec } from './graph/types.ts';
+import type { PackageResolver, Scope } from './graph/scope.ts';
 import { didYouMean, renameExprRefs } from './graph/params.ts';
 import { migrateGraph } from './graph/migrate.ts';
 import { maybeSidecar, sidecarOf } from './io/sidecars.ts';
@@ -164,6 +165,12 @@ export class EditRejected extends Error {
 export interface WorkspacePackages {
   /** add the packages a graph names that the project does not use yet; says what was added */
   addFor(graph: GraphSpec): string[];
+  /**
+   * what a graph is checked with where nothing may be written (a dry run, a trial of a person's values): the project's
+   * packages, and those the graph names for the first time at the version build or edit would add, read where a library
+   * holds them, nothing copied; the notes say what build or edit add
+   */
+  dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[] };
   /** read again what changed on disk (project.json, the lock, working folders followed this session); true if anything did */
   refresh(): boolean;
   /**
@@ -593,6 +600,17 @@ export class Workspace {
     try { report = await this.cook(name, undefined, opts.frame, { kind: opts.kind, signal: opts.signal }); }
     finally { if (!report?.stopped) this.bump(name); }
     return { graph: this.getGraph(name), notes, report };
+  }
+
+  /**
+   * The scope a graph is checked in where nothing may be written (a dry run, a trial of a person's values): the
+   * engine's root, whose packages include those the graph names for the first time at the version build or edit would
+   * add (WorkspacePackages.dryRun), with notes that say so. Nothing is copied or written.
+   */
+  dryScope(graph: GraphSpec): { scope: Scope; notes: string[] } {
+    const root = this.engine.root, d = this.packages?.dryRun(graph);
+    if (!d || d.resolver === root.packages) return { scope: root, notes: d?.notes ?? [] };
+    return { scope: { ...root, packages: d.resolver }, notes: d.notes };
   }
 
   /**

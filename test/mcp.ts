@@ -233,9 +233,15 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const example = exText ? JSON.parse(exText) : null;
   check(!!example && JSON.stringify(example) === JSON.stringify(INPUTS_EXAMPLE) && help.txt.includes('@name=path.*') && help.txt.includes("s@role = s@role || @name.split('.')[0].toLowerCase();"),
     'help topic inputs: group pattern, role wrangle and the example graph');
-  // it names topotopo/nature/tree_lowpoly: a dry run adds nothing and says that a build adds the kit
+  // it names topotopo/nature/tree_lowpoly: a dry run checks it against the kit's version a build adds, and copies nothing
   const dry = await call('build', { name: 'land', graph: example, dry_run: true });
-  check(dry.isError && /package topotopo\/nature is not in this project's uses/.test(dry.txt) && /build and edit add it when a graph first names it/.test(dry.txt), `a dry run of the help inputs example adds nothing: ${dry.txt.split('\n')[1]}`);
+  check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && /\nnote: build or edit adds topotopo\/nature 1\.0 to project .* on first use, from library "topotopo" \(TopoTopo's built-in library\): this dry run read it there and copied nothing/.test(dry.txt),
+    `a dry run of the help inputs example validates the kit's output where it lies: ${dry.txt.split('\n').slice(0, 2).join(' | ')}`);
+  check(!fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature')) && !JSON.parse(fs.readFileSync(path.join(wsDir, 'project.json'), 'utf8')).uses?.['topotopo/nature'] && !fs.existsSync(path.join(wsDir, 'graphs', 'land.json')),
+    'and writes nothing: no copy, no entry in uses, no graph');
+  const dryTypo = await call('build', { name: 'land', graph: { nodes: { t: { type: 'topotopo/nature/tree_lowpoly', params: { heigth: 7 } } } }, dry_run: true });
+  check(dryTypo.isError && /unknown param "heigth" for topotopo\/nature\/tree_lowpoly — did you mean "height"/.test(dryTypo.txt) && /\nnote: build or edit adds topotopo\/nature 1\.0/.test(dryTypo.txt),
+    `a slider the version does not have is an error of the dry run: ${dryTypo.txt.split('\n')[1]}`);
   await call('build', { name: 'guides_src', graph: { nodes: {
     road: { type: 'curve', params: { points: [[-60, 0, -20], [-10, 0, 0], [30, 0, 10], [70, 0, 40]] } },
     road_n: { type: 'attrib_create', in: ['road'], params: { name: 'name', class: 'prim', type: 'string', value: 'path.road' } },

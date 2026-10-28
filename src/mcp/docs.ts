@@ -832,9 +832,11 @@ looks in TopoTopo's built-in library, "topotopo" (no other library takes that na
 shows as an update. Only a project's graphs use packages: in a workspace that is none, naming one fails and says so,
 and library {action:"init"} (CLI: topotopo init) makes it a project.
 - First use: a build or edit whose graph names a package the project does not use yet adds its newest version, and
-  the response says so. library {action:"use", package:"studio/trees"} (CLI: topotopo use studio/trees) adds one
-  explicitly; library {action:"packages"} (CLI: topotopo packages) lists what the project uses and the packages in its
-  libraries with their newest version, note and outputs.
+  the response says so. A dry run (build {dry_run:true}) checks the graph against that version, read where its library
+  holds it, copies and writes nothing, and a note says what build or edit would add. library {action:"use",
+  package:"studio/trees"} (CLI: topotopo use studio/trees) adds one explicitly; library {action:"packages"} (CLI:
+  topotopo packages) lists what the project uses and the packages in its libraries with their newest version, note and
+  outputs.
 - A package output cooks in its version's own scope: its own assets, graphs (graph_ref) and files (relative paths read
   the version's folder) and the versions it uses. Nothing leaks either way, and two versions of one package (one the
   project uses, one another package uses) cook side by side. Its result names the version's texture files by paths

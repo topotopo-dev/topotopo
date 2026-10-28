@@ -383,7 +383,9 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       const back = graphVarValue(g, k);
       if (v !== null) trial[k] = v; else if (back === undefined) delete trial[k]; else trial[k] = back;
     }
-    return ws.engine.validate({ ...g, vars: trial }).errors.map(issueText);
+    // nothing is written yet: a package the graph names for the first time counts as the version its first use adds
+    const tried = { ...g, vars: trial };
+    return ws.engine.validate(tried, '', ws.dryScope(tried).scope).errors.map(issueText);
   };
   const applyBatch = async (name: string, b: VarsBatch): Promise<VarsReply> => {
     if (!ws.graphs.get(name)) return { status: 404, body: { ok: false, ms: 0, errors: [`no graph ${name}`] } };

@@ -297,10 +297,13 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         spec = migrateGraph(spec);
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
         if (a.dry_run) {
-          const d = engine.dryRun(spec);
+          // a package the graph names for the first time: checked against the version a build adds, nothing copied
+          const dry = ws.dryScope(spec);
+          const d = engine.dryRun(spec, undefined, dry.scope);
+          const first = dry.notes.map((n) => `\nnote: ${n}`).join('');
           return text(d.errors.length
-            ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n')
-            : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : ''), d.errors.length > 0);
+            ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + first
+            : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : '') + first, d.errors.length > 0);
         }
         // packages the graph names for the first time join the project (a dry run changes nothing)
         const added = ws.packages?.addFor(spec) ?? [];

@@ -582,6 +582,42 @@ section('errors: unknown outputs, packages the libraries do not have, libraries 
   check(/topotopo init/.test(errorText(() => lp.pk.use('studio/trees'))), 'use outside a project says how to make one');
 }
 
+section('dry runs: a package a graph names for the first time is checked against the version its first use adds, and nothing is written');
+{
+  const DRY = path.join(tmp, 'dry');
+  project(DRY, { libraries: ['game'] }, {});
+  const o = await open(DRY);
+  const before = listing(DRY);
+  const dry = (g: GraphSpec) => { const s = o.ws.dryScope(g); const d = o.engine.dryRun(g, undefined, s.scope); return { ...d, said: d.errors.map((e) => e.message + (e.hint ? ` (hint: ${e.hint})` : '')).join('; '), first: s.notes }; };
+  const graph: GraphSpec = { nodes: { t: { type: 'studio/trees/pine', params: { height: 3 } }, g: { type: 'studio/grove' }, c: { type: 'topotopo/props/crate' }, out: { type: 'merge', in: ['t', 'g', 'c'] } }, output: 'out' };
+  const d = dry(graph);
+  check(!d.errors.length && d.output === 'out', `the graph checks against the versions a build would add: ${d.said}`);
+  check(d.first.length === 3 && d.first.includes('build or edit adds studio/trees 1.1 to project dry on first use, from library "game": this dry run read it there and copied nothing')
+    && d.first.some((n) => /^build or edit adds studio\/grove 1\.0 to project dry on first use, from library "game"/.test(n))
+    && d.first.some((n) => /^build or edit adds topotopo\/props 1\.0 to project dry on first use, from library "topotopo" \(TopoTopo's built-in library\)/.test(n)),
+    `a note names each package and the version a build adds, from the libraries the project lists and TopoTopo's built-in library: ${d.first.join(' | ')}`);
+  check(listing(DRY).join() === before.join() && !exists(DRY, 'packages') && JSON.stringify(readManifest(DRY).uses) === '{}', 'nothing is copied or written: no packages/, project.json as it was');
+  check(!o.engine.resolveDef('studio/trees/pine') && /package studio\/trees is not in this project's uses/.test(o.engine.packageIssue('studio/trees/pine').error), 'and the project\'s own packages are as they were');
+  // checked against that version, as a build checks it
+  check(/studio\/trees 1\.1 has no output "pin" — did you mean pine\?/.test(dry({ nodes: { t: { type: 'studio/trees/pin' } } }).said), 'an output the version does not have is an error');
+  check(/unknown param "heigth" for studio\/trees\/pine — did you mean "height"/.test(dry({ nodes: { t: { type: 'studio/trees/pine', params: { heigth: 3 } } } }).said), 'and so is a slider it does not have');
+  const oaks = dry({ nodes: { t: { type: 'studio/oaks/oak' } } });
+  check(!oaks.first.length && /package studio\/oaks is not in this project's uses \(project\.json\), and it could not be added: no library this project lists has a package studio\/oaks/.test(oaks.said),
+    `a package no library has: why first use could not add it, as a build says: ${oaks.said}`);
+  check(!dry({ nodes: { b: { type: 'box' } } }).first.length && o.ws.dryScope({ nodes: { b: { type: 'box' } } }).scope === o.engine.root, 'a graph that names nothing new is checked in the project as it is');
+  // the build adds what the dry run said
+  const added = o.pk.addFor(graph);
+  check(added.length === 3 && added.some((n) => /^added studio\/trees 1\.1 to project dry from library "game"/.test(n)) && !dry(graph).first.length && !dry(graph).errors.length,
+    `then build and edit add those versions, and a dry run has nothing new to say: ${added.join(' | ')}`);
+  // outside a project it stays the error that says how to make one
+  const loose = path.join(tmp, 'dry-loose');
+  fs.mkdirSync(loose);
+  const lw = (await open(loose)).ws, outside = lw.dryScope({ nodes: { c: { type: 'topotopo/props/crate' } } });
+  const od = lw.engine.dryRun({ nodes: { c: { type: 'topotopo/props/crate' } } }, undefined, outside.scope);
+  check(!outside.notes.length && /package topotopo\/props: this graph is in no project, and only projects use packages \(hint: topotopo init/.test(od.errors.map((e) => `${e.message} (hint: ${e.hint})`).join('; ')),
+    `outside a project a dry run says how to make the folder one: ${od.errors[0]?.message}`);
+}
+
 section('copies: edited by hand, missing, one version with two contents');
 {
   const crownFile = path.join(dirs.forest, 'packages', 'studio', 'trees', '1.1', 'graphs', 'crown.json');
