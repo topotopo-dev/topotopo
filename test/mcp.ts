@@ -292,8 +292,8 @@ if (url) {
   const url = (await call('preview', {})).txt.match(/http:\/\/[^\s]+/)?.[0] ?? '';
   const names = ((await (await fetch(url + 'api/graphs')).json()) as any[]).map((g: any) => g.name);
   check(names.join() === 'main', `the live viewer shows the project (${names})`);
-  const upd = await call('library', { action: 'update', description: 'An oil barrel', bake: { frame: 1 } });
-  check(!upd.isError && JSON.parse(fs.readFileSync(path.join(projDir, 'project.json'), 'utf8')).description === 'An oil barrel', "library update edits the open project's project.json");
+  const upd = await call('library', { action: 'set', description: 'An oil barrel', bake: { frame: 1 } });
+  check(!upd.isError && JSON.parse(fs.readFileSync(path.join(projDir, 'project.json'), 'utf8')).description === 'An oil barrel', "library set edits the open project's project.json");
   const bk = await call('library', { action: 'bake' });
   check(!bk.isError && !!bk.img && fs.existsSync(path.join(projDir, '.gallery', 'preview.glb')), 'library bake renders the previews and shows the thumbnail');
   const got = await call('library', { action: 'get', library: 'game', id: 'barrel', thumbnail: true });
@@ -308,8 +308,8 @@ if (url) {
 {
   const kit = path.join(libDir, 'lib', 'kits', 'crates');
   await call('library', { action: 'create', library: 'game', path: 'kits/crates', title: 'Crates' });
-  const named = await call('library', { action: 'update', package: 'studio/crates' });
-  check(!named.isError && JSON.parse(fs.readFileSync(path.join(kit, 'project.json'), 'utf8')).package === 'studio/crates', 'library update names the package');
+  const named = await call('library', { action: 'set', package: 'studio/crates' });
+  check(!named.isError && JSON.parse(fs.readFileSync(path.join(kit, 'project.json'), 'utf8')).package === 'studio/crates', 'library set names the package');
   await call('build', { graph: {
     nodes: { c: { type: 'box', params: { size: '=s' } }, peek: { type: 'sphere' } }, output: 'c',
     vars: { s: 1 }, params: { s: { type: 'float', min: 0.1, max: 5, label: 'Size' } },
@@ -363,6 +363,35 @@ if (url) {
   check(blocked.isError && /this session follows studio\/crates from its working folder/.test(blocked.txt), 'publishing while following is refused');
   const off = await call('library', { action: 'follow', package: 'studio/crates', on: false });
   check(!off.isError && /it resolves to its copy \(1\.0\) again/.test(off.txt), 'library follow on:false goes back to the copy');
+
+  // out of date and Update: the kit publishes 1.1 (its crate four times the size since the edits above); the yard sees
+  // it, looks at the before/after while it cooks, and updates once told to
+  await call('library', { action: 'open', path: kit });
+  const p11 = await call('library', { action: 'publish', note: 'four times the size' });
+  check(!p11.isError && /✓ published studio\/crates 1\.1 \(small, after 1\.0\)/.test(p11.txt), `the kit publishes 1.1: ${p11.txt.split('\n')[0]}`);
+  await call('library', { action: 'open', path: yard });
+  const od = await call('library', { action: 'outdated' });
+  check(!od.isError && /studio\/crates 1\.0: small update 1\.1 {2}\[library "game"\]\n {4}1\.1 {2}"four times the size"/.test(od.txt) && /library \{action:"update", package:"owner\/name"\} shows the before\/after/.test(od.txt),
+    `library outdated: ${od.txt.split('\n').slice(0, 3).join(' | ')}`);
+  const pjBefore = fs.readFileSync(path.join(yard, 'project.json'), 'utf8');
+  const steps: { progress: number; total?: number; message?: string }[] = [];
+  const ba: any = await client.callTool({ name: 'library', arguments: { action: 'update', package: 'studio/crates' } }, undefined, { onprogress: (p) => steps.push(p) });
+  const baText = ba.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+  const baImages = ba.content.filter((c: any) => c.type === 'image');
+  check(!ba.isError && /^before\/after: studio\/crates 1\.0 → 1\.1 \(a small update\) in project yard; nothing has changed yet/.test(baText) && /\n {2}graphs\/main\.json {2}a: studio\/crates\/crate \{"s":2\}\n/.test(baText)
+    && /\n {2}graphs\/main\.json {2}d: studio\/crates \{"s":0\.5\}\n/.test(baText) && /apply it only when they say so: library \{action:"update", package:"studio\/crates", to:"1\.1", apply:true\}/.test(baText),
+    `library update shows the before/after:\n${baText.split('\n').slice(0, 6).join('\n')}`);
+  check(baImages.length === 2 && baImages.every((x: any) => x.mimeType === 'image/png') && /overlay renders of the 2 places that changed, in order: graphs\/main\.json a, graphs\/main\.json d/.test(baText), `and an overlay render of each place that changed (${baImages.length})`);
+  check(steps.length === 4 && steps.every((s, i) => s.progress === i && s.total === 4) && steps[0].message === 'graphs/main.json a with studio/crates 1.0', `progress notifications while it cooks (${steps.map((s) => `${s.progress}/${s.total}`).join(' ')})`);
+  check(fs.readFileSync(path.join(yard, 'project.json'), 'utf8') === pjBefore && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1')), 'the before/after writes nothing');
+  if (baImages[0]) fs.writeFileSync(path.join(wsDir, 'update.png'), Buffer.from(baImages[0].data, 'base64'));
+  const noTo = await call('library', { action: 'update', package: 'studio/crates', apply: true });
+  check(noTo.isError && /apply:true needs "to": the version whose before\/after the person saw/.test(noTo.txt), 'applying names the version whose before/after the person saw');
+  const ap = await call('library', { action: 'update', package: 'studio/crates', to: '1.1', apply: true });
+  check(!ap.isError && /^updated studio\/crates 1\.0 → 1\.1 in project yard/.test(ap.txt) && JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8')).uses['studio/crates'] === '1.1'
+    && fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1', 'version.json')) && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.0')), `library update with apply:true applies it: ${ap.txt.split('\n')[0]}`);
+  const grown = await call('inspect', { node: 'a' });
+  check(/size 8\.00 × 8\.00 × 8\.00/.test(grown.txt), 'the graphs cook with the new version at once');
 }
 
 await client.close();

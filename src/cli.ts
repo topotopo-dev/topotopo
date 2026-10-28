@@ -27,6 +27,8 @@
 //   node src/cli.ts init|use|packages|publish …           a project and its packages (src/gallery/packages.ts);
 //                                                         --follow owner/name on a cook or view uses a package's
 //                                                         working folder instead of its copy, for that run
+//   node src/cli.ts outdated|update …                     the newer versions of what a project uses, and the
+//                                                         before/after of an update (src/gallery/update.ts)
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -106,6 +108,11 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} use owner/name [folder]   (add a package to the project: its newest version in the libraries project.json lists, copied into packages/)`,
     `       ${prog} packages [folder]   (what the project uses, and the packages in its libraries with their newest version, note and outputs)`,
     `       ${prog} publish [folder] --note "what changed" [--big]   (publish the next version of the project's package into versions/; --help-topic packages)`,
+    `       ${prog} outdated [folder]   (the newer versions of the packages the project uses, small and big, with the notes of each)`,
+    `       ${prog} update owner/name [folder] [--to <version>] [--render <folder>]   (the before/after of an update: every place the project uses it, cooked`,
+    '         with the version in use and the new one, what changed and the notes between; nothing is written. Without --to: the newest version',
+    '         with the same big number; a big version needs --to. --render writes an overlay render of each place that changed into a folder)',
+    `       ${prog} update owner/name [folder] [--to <version>] --apply   (apply it: copy the new version in, update "uses" and the lock, delete copies nothing uses)`,
   ].join('\n'));
   process.exit(0);
 }
@@ -152,11 +159,14 @@ if (argv[0] === 'view') {
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
-} else if (argv[0] === 'gallery' || argv[0] === 'library' || argv[0] === 'edit' || argv[0] === 'init' || argv[0] === 'use' || argv[0] === 'packages' || argv[0] === 'publish') {
+} else if (['gallery', 'library', 'edit', 'init', 'use', 'packages', 'publish', 'outdated', 'update'].includes(argv[0])) {
   // the gallery website, its libraries and its editor; a project's packages (src/gallery/cli.ts)
   const g = await import('./gallery/cli.ts');
-  const run = { gallery: g.galleryCommand, library: g.libraryCommand, edit: g.editCommand, init: g.initCommand, use: g.useCommand, packages: g.packagesCommand, publish: g.publishCommand }[argv[0]];
-  await run(argv.slice(1), prog);
+  const commands: Record<string, (argv: string[], prog: string) => Promise<void>> = {
+    gallery: g.galleryCommand, library: g.libraryCommand, edit: g.editCommand, init: g.initCommand, use: g.useCommand, packages: g.packagesCommand,
+    publish: g.publishCommand, outdated: g.outdatedCommand, update: g.updateCommand,
+  };
+  await commands[argv[0]](argv.slice(1), prog);
 } else if (argv[0] === 'mcp') {
   // `topotopo mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin

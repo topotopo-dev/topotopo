@@ -5,11 +5,14 @@
 //   topotopo library new <library> <folder/name> [--title t] [--tags a,b] [--description d]
 //   topotopo library bake <project folder> | --stale | --all          bake previews in this process
 //   topotopo edit <project folder> [--port 7341] [--json]             the live viewer on a project (the gallery's editor)
-// and a project's packages (src/gallery/packages.ts):
+// and a project's packages (src/gallery/packages.ts, src/gallery/update.ts):
 //   topotopo init [folder] [--package owner/name]                     make a folder a project (project.json)
 //   topotopo use owner/name [folder]                                  add a package from the libraries the project lists
 //   topotopo packages [folder]                                        what it uses, and the packages in its libraries
 //   topotopo publish [folder] --note "..." [--big]                    publish the next version of the project's package
+//   topotopo outdated [folder]                                        the newer versions of what it uses, with their notes
+//   topotopo update owner/name [folder] [--to <version>] [--render <folder>] [--apply]
+//                                                                     the before/after of an update; --apply applies it
 import fs from 'node:fs';
 import path from 'node:path';
 import { addLibrary, createProject, initProject, isStale, loadConfig, projectDirOf, readBakeState, scanAll, slugify } from './library.ts';
@@ -186,4 +189,49 @@ export async function publishCommand(argv: string[], prog: string) {
   console.log(publishText(r));
   await engine.host.pool?.close();
   process.exit(r.ok ? 0 : 1);
+}
+
+/** `outdated [folder]`: for each package the project uses, the newer versions in its libraries and their notes. */
+export async function outdatedCommand(argv: string[], prog: string) {
+  const { outdatedText } = await import('./update.ts');
+  const { pk } = await projectPackages(folderArg(argv, []), prog);
+  try { console.log(outdatedText(pk)); } catch (e: any) { fail(e.message); }
+}
+
+/**
+ * `update owner/name [folder] [--to <version>] [--render <folder>] [--apply]`: the before/after of updating a package
+ * the project uses, which writes nothing (--render writes its overlay renders into a folder); the same command with
+ * --apply applies the update. Ctrl+C stops a long before/after at the next node.
+ */
+export async function updateCommand(argv: string[], prog: string) {
+  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
+  const usage = `usage: ${prog} update owner/name [folder] [--to <version>] [--render <folder>] [--apply]`;
+  const valued = ['--to', '--render'];
+  if (valued.some((f) => argv.includes(f) && (opt(f) === undefined || opt(f)!.startsWith('--')))) fail(usage);
+  const [pkg, folder] = argv.filter((x, i) => !x.startsWith('--') && !valued.includes(argv[i - 1]));
+  if (!pkg) fail(usage);
+  const { applyUpdate, beforeAfter, beforeAfterText, overlayRenders } = await import('./update.ts');
+  const { loadProject } = await import('./packages.ts');
+  const { engine, project, pk } = await projectPackages(path.resolve(folder ?? '.'), prog);
+  try {
+    if (argv.includes('--apply')) { console.log(applyUpdate(pk, pkg, opt('--to')).text); return; }
+    for (const p of loadProject(engine, project)) console.error(`warning: ${p}`);
+    const stop = { aborted: false };
+    process.once('SIGINT', () => { stop.aborted = true; console.error('stopping at the next node (Ctrl+C again ends it at once); nothing is written'); });
+    const r = await beforeAfter(pk, pkg, { to: opt('--to'), signal: stop, progress: (done, total, what) => console.error(`[${done + 1}/${total}] ${what}`) });
+    const again = `${prog} ${['update', pkg, ...(folder ? [folder] : []), '--to', r.target.to, '--apply'].map((x) => (/\s/.test(x) ? JSON.stringify(x) : x)).join(' ')}`;
+    console.log(beforeAfterText(r, `nothing was written. To apply it: ${again}`));
+    const renders = overlayRenders(r, Infinity), dir = opt('--render');
+    if (dir && renders.length) {
+      fs.mkdirSync(path.resolve(dir), { recursive: true });
+      const files = renders.map((x, i) => {
+        const file = path.join(path.resolve(dir), `${String(i + 1).padStart(2, '0')}-${x.title.replace(/[^A-Za-z0-9_.-]+/g, '_')}.png`);
+        fs.writeFileSync(file, x.png);
+        return file;
+      });
+      console.log(`overlay renders (grey: the same with both, blue: only with ${r.target.to}, orange: only with ${r.target.from}):`, ...files.map((f) => `\n  ${f}`));
+    } else if (renders.length) console.log(`--render <folder> writes an overlay render of each place that changed`);
+    await engine.host.pool?.close();
+    process.exit(r.stopped ? 1 : 0);
+  } catch (e: any) { fail(e.message); }
 }

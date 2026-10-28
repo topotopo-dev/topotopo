@@ -28,7 +28,7 @@ ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geome
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
 LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".
-PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. library {action:"packages"} lists them, {action:"publish", note} publishes a version of the open project's package. See help topic "packages".`;
+PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. library {action:"packages"} lists them, {action:"publish", note} publishes a version of the open project's package, {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply only when the person says so. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -87,7 +87,7 @@ WORKING IN A PROJECT
 - library {action:"open", library, id} → every tool (build, edit, render, export, inputs, assets, preview) now works
   in that folder. Build the project's model into graph "main" (or the manifest's "graph").
 - library {action:"create", library, path:"props/barrel", title, tags, links} → a new project, opened.
-- library {action:"update", tags, links, description, bake:{frame: 48}} → edit project.json (bake.frame for
+- library {action:"set", tags, links, description, bake:{frame: 48}} → edit project.json (bake.frame for
   simulations that settle after frame 1; bake.node to show one part).
 - library {action:"bake"} → render the previews now and see the thumbnail.
 Put reference images the person gives you in attachments/, guide files in inputs/. Links in "links" point back to the
@@ -841,9 +841,27 @@ on:false or the end of the session; nothing about it is saved. Every edit there 
 ("studio/trees@working" and the hash of its files), and publishing the project is refused while it lasts. Other
 packages' versions keep the copies they hold.
 
+OUT OF DATE AND UPDATE: what a project uses changes only by an update, after a before/after.
+- library {action:"outdated"} (CLI: topotopo outdated) lists each package the project uses: the version in use, its
+  small update (the newest version with the same big number), its big update (the newest, when its big number is
+  higher) and the note of every version after the one in use. library {action:"packages"} says in a line which are.
+- library {action:"update", package:"studio/trees", to?} (CLI: topotopo update studio/trees [--to 2.0]) is the
+  before/after: every place the project uses the package (each node of its type in graphs/, assets/ and the graph files
+  in the project's folder, nested graphs included, with its params and inputs as they are) cooked with the version in
+  use and with the new one; what changed in each (counts, size, attributes, the largest move) with an overlay render
+  (grey the same, blue only with the new version, orange only with the old); the notes of the versions between. Without
+  "to" it goes to the newest version with the same big number. A big version is named with "to", and the before/after
+  then lists what the graphs must change: sliders they set that it no longer has (with did-you-mean), outputs they use
+  and inputs they wire that are gone. The new version is read where its library holds it: nothing is written. It says
+  how far it is, stops when the call is cancelled (CLI: Ctrl+C) and reuses what was cooked before.
+- Show the before/after to the person and apply it only when they say so: {action:"update", package, to, apply:true}
+  (CLI: the same command with --apply) copies the new version in with the versions it uses, sets "uses" and the lock,
+  and deletes the copies nothing uses any more. After a big update the graphs report what they must change until they
+  do.
+
 EXPORTS record the package versions their graph used in the source block: "packages": {"studio/trees@1.3": "<hash>"}.
-CLI: topotopo init [folder] [--package owner/name] makes a folder a project; use, packages and publish take the project
-folder (default: the current one).`,
+CLI: topotopo init [folder] [--package owner/name] makes a folder a project (with graphs/); use, packages, publish,
+outdated and update take the project folder (default: the current one).`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing; boxes and simple shapes.

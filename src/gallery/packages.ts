@@ -1,6 +1,7 @@
 // Packages on disk (the engine side is src/graph/packages.ts): the copies of the package versions a project uses and
 // their lock, the libraries a project finds packages in, adding a package on first use, following a package's working
-// folder for one session, and publishing a version.
+// folder for one session, publishing a version, and the newer versions of what a project uses and updating to one
+// (the before/after is src/gallery/update.ts).
 //
 //   <package>/project.json                          "package": "studio/trees" (set by the author), "uses", "libraries"
 //   <package>/versions/1.3/                         a published version, never written over: project.json (without
@@ -17,6 +18,11 @@
 // the copies it uses as the project holds them, so a copy edited by hand shows. A project finds packages only in the
 // libraries its project.json lists: a path relative to the project (a library in the same repository, so every checkout
 // and worktree reads its own) or a registered library's name. Cooking needs only the copies.
+//
+// Update goes to the newest version with the same big number, or to a version named (a big one is named). Its
+// before/after reads the new version where its library holds it, apart from the copies (a scope and results of its
+// own), and copies nothing; applying copies it in, sets "uses" and the lock, and deletes the copies nothing uses any
+// more: those the uses needed before and need no more.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -323,6 +329,12 @@ interface Context {
   lock: Lock;
   /** followed packages resolve to their working folders (in the project and in followed folders, never in a version) */
   follows: boolean;
+  /**
+   * Update's before/after: versions read where a library holds them ("owner/name@version"), and below them (`apart`)
+   * the copies those hold. Each is the project's own copy when it holds that version, else read apart from its copies.
+   */
+  library?: Map<string, Place>;
+  apart?: boolean;
 }
 
 /** A package version (or a followed working folder) loaded into the engine: its scope and its output node types. */
@@ -347,7 +359,46 @@ interface Place { library: string; dir: string; info: VersionInfo }
 /** A package in the project's libraries: its working folders and its versions. */
 interface Found { package: string; working: { library: string; dir: string }[]; versions: Map<string, Place[]> }
 
+/** The project's libraries and the projects in them that are packages, scanned once for several finds. */
+interface Scanned { libs: { entry: string; root: string }[]; packages: { package: string; library: string; dir: string }[] }
+
 export interface UseResult { version: string; copied: string[]; text: string }
+
+/** A package the project uses, and the newer versions its libraries have. */
+export interface Outdated {
+  package: string;
+  /** the version in use */
+  version: string;
+  /** the newest version with the same big number, when it is newer: a small update */
+  small?: string;
+  /** the newest version, when its big number is higher: a big update */
+  big?: string;
+  /** every version after the one in use, oldest first */
+  newer: VersionInfo[];
+  /** the libraries that hold the package, as project.json lists them */
+  libraries: string[];
+  /** why its versions could not be looked up */
+  error?: string;
+}
+
+/** What an Update goes to: the version in use, the version it goes to, the versions between them. */
+export interface UpdateTarget {
+  package: string;
+  from: string;
+  to: string;
+  /** `to` has another big number than `from` */
+  big: boolean;
+  /** the record of `from` (its copy's, else its library's; null when neither has it) and of `to` */
+  fromInfo: VersionInfo | null;
+  toInfo: VersionInfo;
+  /** the versions after `from` up to `to`, oldest first; going back to an older `to`, the ones it leaves */
+  between: VersionInfo[];
+  /** the library that holds `to` (as project.json lists it) and the version's folder there */
+  library: string;
+  dir: string;
+}
+
+export interface UpdateResult { copied: string[]; deleted: string[]; text: string }
 
 /**
  * The packages of one project in one engine: the resolver of the engine's root scope (the project's uses), a scope per
@@ -363,10 +414,14 @@ export class ProjectPackages implements WorkspacePackages {
   error: string | null = null;
   /** copies edited by hand, files a copy cannot read: the CLI prints them, the library tool lists them, cooks warn */
   readonly problems = new Set<string>();
+  /** files that versions read apart (Update's before/after) cannot read */
+  readonly apartProblems = new Set<string>();
   /** what the engine's root scope resolves package names with */
   readonly resolver: PackageResolver;
   private root: Context;
   private loaded = new Map<string, Loaded | PackageIssue>();
+  /** versions read apart from the copies (Context.library), by folder */
+  private apart = new Map<string, Loaded | PackageIssue>();
   private loading = new Set<string>();
   private followed = new Map<string, Followed>();
   private followLoaded = new Map<string, Loaded | PackageIssue>();
@@ -485,6 +540,12 @@ export class ProjectPackages implements WorkspacePackages {
 
   private loadCopy(ctx: Context, pkg: string, v: string): Loaded | PackageIssue {
     const key = `${pkg}@${v}`, dir = copyAt(ctx.packages, pkg, v);
+    if (ctx.apart || ctx.library?.has(key)) {
+      // Update's before/after: the project's own copy when it holds the version, else the version where it is
+      const place = ctx.library?.get(key);
+      const own = this.ownCopy(pkg, v, place ? place.info.hash : ctx.lock.packages[pkg]?.[v]?.hash, place ? place.dir : dir);
+      return own ?? this.loadApart(ctx, pkg, v);
+    }
     const have = this.loaded.get(key);
     if (have) {
       if ('error' in have || path.resolve(have.dir) === path.resolve(dir)) return have;
@@ -518,6 +579,49 @@ export class ProjectPackages implements WorkspacePackages {
     return this.build({ pkg, version: v, dir, hash, signature: hash, note: info.note, warning, manifest: m, ctx: vctx, scope: `${pkg}@${v}` });
   }
 
+  /**
+   * The project's copy of a version, when it holds one that loads: the same files as the version `elsewhere` (whose
+   * hash is `expected`) must be there, TopoTopo never picks between two. null when the project has no such copy.
+   */
+  private ownCopy(pkg: string, v: string, expected: string | undefined, elsewhere: string): Loaded | PackageIssue | null {
+    if (expected === undefined || !this.dir || !this.root.lock.packages[pkg]?.[v] || !fs.existsSync(path.join(copyAt(this.root.packages, pkg, v), 'version.json'))) return null;
+    const own = this.loadCopy(this.root, pkg, v);
+    if ('error' in own) return null;
+    return own.hash === expected ? own : { error: `${pkg} ${v} has different files in ${own.dir} and in ${elsewhere}: one of them was changed after publishing, and TopoTopo never picks one` };
+  }
+
+  /**
+   * A version where a library holds it (Context.library), or a copy that such a version holds: read there without
+   * copying it, apart from the project's copies, in a scope of its own whose results are keyed by its folder.
+   */
+  private loadApart(ctx: Context, pkg: string, v: string): Loaded | PackageIssue {
+    const place = ctx.library?.get(`${pkg}@${v}`);
+    const dir = path.resolve(place ? place.dir : copyAt(ctx.packages, pkg, v));
+    const have = this.apart.get(dir);
+    if (have) return have;
+    const key = `${pkg}@${v} in ${dir}`;
+    if (this.loading.has(key)) return { error: `${pkg} ${v} uses itself (through ${[...this.loading].join(' → ')})` };
+    this.loading.add(key);
+    let r: Loaded | PackageIssue;
+    try {
+      const expected = place ? place.info.hash : ctx.lock.packages[pkg]?.[v]?.hash;
+      if (expected === undefined) r = { error: `${ctx.label} uses ${pkg} ${v}, and its packages/lock.json does not list it` };
+      else if (!fs.existsSync(path.join(dir, 'version.json'))) r = { error: `${ctx.label} lists ${pkg} ${v} in its packages/lock.json but holds no copy of it (${dir})` };
+      else {
+        const info = readVersionInfo(dir), m = readManifest(dir);
+        const hash = place ? versionHash(dir, true) : copyHash(dir, ctx.packages);
+        if (hash !== expected) r = { error: `${pkg} ${v} in ${dir} was changed after publishing: its files do not match the hash it was published with` };
+        else {
+          const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: place ? path.join(dir, 'packages') : ctx.packages, lock: place ? readLock(dir) : ctx.lock, follows: false, apart: true };
+          r = this.build({ pkg, version: v, dir, hash, signature: `${hash}|${dir}`, note: info.note, manifest: m, ctx: vctx, scope: `${pkg}@${v}|${dir}`, problems: this.apartProblems });
+        }
+      }
+    } catch (e: any) { r = { error: `${pkg} ${v} (${dir}): ${e.message}` }; }
+    finally { this.loading.delete(key); }
+    this.apart.set(dir, r);
+    return r;
+  }
+
   private loadFollowed(pkg: string): Loaded | PackageIssue {
     const have = this.followLoaded.get(pkg);
     if (have) return have;
@@ -536,7 +640,7 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /** A version's (or working folder's) scope with its graphs, assets and uses, and a node type per output. */
-  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; note?: string; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string }): Loaded {
+  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; note?: string; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string; problems?: Set<string> }): Loaded {
     const problems: string[] = [];
     const graphs = readGraphs(o.dir, problems);
     const scope = this.engine.createScope(o.scope, { folder: o.dir, graphs: (n) => graphs.get(n), packages: this.resolverOf(o.ctx) });
@@ -548,7 +652,7 @@ export class ProjectPackages implements WorkspacePackages {
       ...(o.note ? { note: o.note } : {}), ...(x.label ? { label: x.label } : {}), ...(o.warning ? { warning: o.warning } : {}),
     });
     const at = packageAt({ package: o.pkg, version: o.version });
-    for (const p of [...problems, ...outs.problems.filter((p) => !p.startsWith('no default output'))]) this.problems.add(`${at}: ${p}`);
+    for (const p of [...problems, ...outs.problems.filter((p) => !p.startsWith('no default output'))]) (o.problems ?? this.problems).add(`${at}: ${p}`);
     return {
       package: o.pkg, version: o.version, dir: o.dir, hash: o.hash, scope,
       named: new Map(outs.named.map((x) => [x.name!, def(x)])),
@@ -698,22 +802,25 @@ export class ProjectPackages implements WorkspacePackages {
     });
   }
 
-  /** The working folders and versions of a package in the project's libraries; throws saying where it is not. */
-  private find(pkg: string): Found {
+  /** The project's libraries and the packages in them (their working folders). */
+  private scanLibraries(): Scanned {
     const libs = this.libraries();
+    const packages = libs.flatMap((lib) => scanLibrary({ name: lib.entry, path: lib.root }).projects.flatMap((p) => (p.manifest.package ? [{ package: p.manifest.package, library: lib.entry, dir: p.dir }] : [])));
+    return { libs, packages };
+  }
+
+  /** The working folders and versions of a package in the project's libraries; throws saying where it is not. */
+  private find(pkg: string, scanned: Scanned = this.scanLibraries()): Found {
+    const { libs } = scanned;
     const found: Found = { package: pkg, working: [], versions: new Map() };
-    const others = new Set<string>();
-    for (const lib of libs) {
-      for (const p of scanLibrary({ name: lib.entry, path: lib.root }).projects) {
-        if (!p.manifest.package) continue;
-        others.add(p.manifest.package);
-        if (p.manifest.package !== pkg) continue;
-        found.working.push({ library: lib.entry, dir: p.dir });
-        for (const place of readVersions(p.dir, pkg, lib.entry, this.problems)) {
-          const list = found.versions.get(place.info.version) ?? [];
-          list.push(place);
-          found.versions.set(place.info.version, list);
-        }
+    const others = new Set(scanned.packages.map((p) => p.package));
+    for (const p of scanned.packages) {
+      if (p.package !== pkg) continue;
+      found.working.push({ library: p.library, dir: p.dir });
+      for (const place of readVersions(p.dir, pkg, p.library, this.problems)) {
+        const list = found.versions.get(place.info.version) ?? [];
+        list.push(place);
+        found.versions.set(place.info.version, list);
       }
     }
     // one version number holds the same files everywhere
@@ -832,13 +939,125 @@ export class ProjectPackages implements WorkspacePackages {
 
   /** Every package in the project's libraries: its working folders, and its versions with their records. */
   catalog(): { package: string; library: string; dir: string; versions: VersionInfo[] }[] {
-    const out: { package: string; library: string; dir: string; versions: VersionInfo[] }[] = [];
-    for (const lib of this.libraries())
-      for (const p of scanLibrary({ name: lib.entry, path: lib.root }).projects) {
-        if (!p.manifest.package) continue;
-        out.push({ package: p.manifest.package, library: lib.entry, dir: p.dir, versions: readVersions(p.dir, p.manifest.package, lib.entry, this.problems).map((x) => x.info).sort((a, b) => compareVersions(a.version, b.version)) });
-      }
-    return out.sort((a, b) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0));
+    return this.scanLibraries().packages
+      .map((p) => ({ ...p, versions: readVersions(p.dir, p.package, p.library, this.problems).map((x) => x.info).sort((a, b) => compareVersions(a.version, b.version)) }))
+      .sort((a, b) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0));
+  }
+
+  /** For each package the project uses: the version in use, the small and the big update, every version after it. */
+  outdated(): Outdated[] {
+    const { dir } = this.project();
+    const uses = readManifest(dir).uses;
+    let scanned: Scanned | null = null, why = '';
+    if (Object.keys(uses).length) try { scanned = this.scanLibraries(); } catch (e: any) { why = e.message; }
+    return Object.entries(uses).map(([pkg, version]) => {
+      const o: Outdated = { package: pkg, version, newer: [], libraries: [] };
+      if (!scanned) return { ...o, error: why };
+      try {
+        const f = this.find(pkg, scanned);
+        const big = versionParts(version)[0];
+        const after = [...f.versions.keys()].sort(compareVersions).filter((v) => compareVersions(v, version) > 0);
+        const small = after.filter((v) => versionParts(v)[0] === big).at(-1), top = after.at(-1);
+        o.newer = after.map((v) => f.versions.get(v)![0].info);
+        o.libraries = [...new Set(f.working.map((w) => w.library))];
+        if (small) o.small = small;
+        if (top && versionParts(top)[0] > big) o.big = top;
+      } catch (e: any) { o.error = e.message; }
+      return o;
+    });
+  }
+
+  /**
+   * What an Update of a package the project uses goes to: `to`, or else the newest version with the same big number. A
+   * big version is a step of its own: it is named. Throws saying why there is none.
+   */
+  updateTarget(pkg: string, to?: string): UpdateTarget {
+    const { dir } = this.project();
+    if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name`);
+    this.refresh();
+    const uses = readManifest(dir).uses, from = uses[pkg];
+    if (from === undefined) {
+      const users = Object.entries(readLock(dir).packages).flatMap(([p, vs]) => Object.entries(vs).filter(([, e]) => e.uses[pkg]).map(([w, e]) => `${p} ${w} uses ${pkg} ${e.uses[pkg]}`));
+      throw new Error(users.length
+        ? `this project does not use ${pkg} itself (${users.join('; ')}): a version keeps what it uses, so updating the package that uses it can bring another`
+        : `this project does not use ${pkg}: its uses are ${Object.keys(uses).join(', ') || 'none'}`);
+    }
+    if (to !== undefined && !VERSION_RE.test(to)) throw new Error(`"${to}" is not a version: write big.small, such as 1.4`);
+    const found = this.find(pkg);
+    const all = [...found.versions.keys()].sort(compareVersions);
+    const bigOf = (v: string) => versionParts(v)[0];
+    let target = to;
+    if (target === undefined) {
+      target = all.filter((v) => bigOf(v) === bigOf(from) && compareVersions(v, from) > 0).at(-1);
+      const big = all.filter((v) => bigOf(v) > bigOf(from)).at(-1);
+      if (!target) throw new Error(big
+        ? `${pkg} ${from} is the newest ${bigOf(from)}.x in the project's libraries, and ${big} is a big version, a step of its own: name it, --to ${big} (library {action:"update", package:"${pkg}", to:"${big}"})`
+        : `${pkg} ${from} is the newest version in the project's libraries: there is nothing to update`);
+    } else if (target === from) throw new Error(`this project uses ${pkg} ${from} already`);
+    const place = found.versions.get(target)?.[0];
+    if (!place) throw new Error(`no library this project lists has ${pkg} ${target}: they have ${all.join(', ') || 'no version of it'}`);
+    const [lo, hi] = compareVersions(target, from) > 0 ? [from, target] : [target, from];
+    return {
+      package: pkg, from, to: target, big: bigOf(target) !== bigOf(from),
+      fromInfo: this.copyInfo(pkg, from) ?? found.versions.get(from)?.[0]?.info ?? null, toInfo: place.info,
+      between: all.filter((v) => compareVersions(v, lo) > 0 && compareVersions(v, hi) <= 0).map((v) => found.versions.get(v)![0].info),
+      library: place.library, dir: place.dir,
+    };
+  }
+
+  /**
+   * The package resolvers of Update's before/after: the project as its copies cook it now (what this session follows
+   * plays no part) and as it would after the update, which reads the new version where its library holds it. Nothing
+   * is copied. `key` tells pairs apart, for the ids of scopes made with them.
+   */
+  updateResolvers(t: UpdateTarget): { before: PackageResolver; after: PackageResolver; key: string } {
+    const uses = sortKeys({ ...this.root.uses, [t.package]: t.to });
+    const before = this.followed.size ? this.resolverOf({ ...this.root, follows: false }) : this.resolver;
+    const after = this.resolverOf({
+      label: 'this project after the update', uses, packages: this.root.packages, lock: this.root.lock, follows: false,
+      library: new Map([[`${t.package}@${t.to}`, { library: t.library, dir: t.dir, info: t.toInfo }]]),
+    });
+    return { before, after, key: sha(JSON.stringify([this.root.uses, uses, t.dir])).slice(0, 16) };
+  }
+
+  /**
+   * Apply an update: copy the version in with the versions it uses, name it in "uses" and the lock, and delete the
+   * copies nothing uses any more (those the project's uses needed before and need no more).
+   */
+  applyUpdate(t: UpdateTarget): UpdateResult {
+    const { dir } = this.project();
+    const m = readManifest(dir);
+    if (m.uses[t.package] !== t.from) throw new Error(`project.json uses ${t.package} ${m.uses[t.package] ?? 'no more'} now, not ${t.from}: look at the before/after again`);
+    const packages = path.join(dir, 'packages');
+    let before: [string, string][] = [];
+    try { before = usesClosure(m.uses, readLock(dir)); } catch { /* the lock misses a version: nothing is deleted */ }
+    const copied = this.copyIn(t.package, t.to, { library: t.library, dir: t.dir, info: t.toInfo });
+    m.uses = sortKeys({ ...m.uses, [t.package]: t.to });
+    writeManifest(dir, m);
+    const lock = readLock(dir);
+    let keep: Set<string> | null = null;
+    try { keep = new Set(usesClosure(m.uses, lock).map(([p, v]) => `${p}@${v}`)); } catch { /* the lock misses a version: every copy stays */ }
+    const deleted: string[] = [];
+    for (const [p, v] of keep ? before : []) {
+      if (keep!.has(`${p}@${v}`)) continue;
+      if (lock.packages[p]) { delete lock.packages[p][v]; if (!Object.keys(lock.packages[p]).length) delete lock.packages[p]; }
+      const at = copyAt(packages, p, v);
+      fs.rmSync(at, { recursive: true, force: true });
+      // the package's and the owner's folders go once they are empty
+      for (let d = path.dirname(at); d.length > packages.length; d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
+      this.loaded.delete(`${p}@${v}`);
+      deleted.push(`${p} ${v}`);
+    }
+    writeLock(dir, lock);
+    this.reload();
+    return {
+      copied, deleted,
+      text: [
+        `updated ${t.package} ${t.from} → ${t.to} in ${this.label}: project.json uses ${t.package} ${t.to}, from library "${t.library}"`,
+        `  copied into packages/: ${copied.length ? copied.join(', ') : 'nothing (the project held it already)'}; packages/lock.json records them`,
+        `  deleted the copies nothing uses any more: ${deleted.length ? deleted.join(', ') : 'none (every other copy is still used)'}`,
+      ].join('\n'),
+    };
   }
 
   /** The version record of a copy the project holds, null when it is missing. */
@@ -889,6 +1108,19 @@ export function openPackages(engine: Engine, start: string, opts: { follow?: str
   engine.root.packages = pk.resolver;
   for (const f of opts.follow ?? []) pk.follow(f, true);
   return pk;
+}
+
+/**
+ * A project's assets and graphs in an engine's root scope as a workspace has them, read without writing anything (a
+ * workspace makes its folders): for a command that cooks the project's graphs and leaves the project as it is. Says
+ * what could not be read.
+ */
+export function loadProject(engine: Engine, dir: string): string[] {
+  const problems: string[] = [];
+  const graphs = readGraphs(dir, problems);
+  engine.root.graphs = (n) => graphs.get(n);
+  registerAssets(engine, engine.root, dir, problems);
+  return problems;
 }
 
 // ------------------------------------------------------------------------------------------------------ publishing
@@ -1115,6 +1347,14 @@ export function packagesText(pk: ProjectPackages): string {
   for (const e of entries) {
     const info = pk.copyInfo(e.package, e.version);
     lines.push(`  ${e.package} ${e.version}${e.direct ? '' : ' (used by another package)'}${e.entry ? `  from library "${e.entry.library}"` : '  (not in packages/lock.json)'}${info ? '' : '  COPY MISSING'}${info?.note ? `  "${info.note}"` : ''}`);
+  }
+  // (libraries that cannot be read are said on the libraries line)
+  if (Object.keys(m.uses).length && m.libraries.length && (() => { try { return pk.libraries().length > 0; } catch { return false; } })()) {
+    const outdated = pk.outdated(), late = outdated.filter((o) => o.small || o.big);
+    problems.push(...outdated.flatMap((o) => (o.error ? [`${o.package}: ${o.error}`] : [])));
+    lines.push(late.length
+      ? `out of date: ${late.map((o) => `${o.package} ${o.version} (${[o.small ? `small update ${o.small}` : '', o.big ? `big update ${o.big}` : ''].filter(Boolean).join(', ')})`).join(', ')}; outdated lists the notes of the newer versions, update owner/name shows the before/after`
+      : outdated.some((o) => o.error) ? 'out of date: none of the packages its libraries have (the others are under problems)' : 'out of date: nothing, every package it uses is the newest in its libraries');
   }
   const followed = pk.following();
   if (followed.length) lines.push('following this session:', ...followed.map((f) => `  ${f.package}  ${f.dir} (library "${f.library}")`));

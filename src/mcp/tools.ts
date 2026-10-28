@@ -24,7 +24,7 @@ import type { ExportSource } from '../io/source.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
 import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
-import type { Host } from '../host/types.ts';
+import type { Host, StopSignal } from '../host/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
@@ -36,11 +36,17 @@ export interface ToolResult { content: Content[]; isError?: boolean }
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) });
 
+/** What a call brings besides its arguments: the client's stop, and how to tell the client how far a long call is. */
+export interface ToolCall {
+  signal?: StopSignal;
+  progress?: (done: number, total: number, message: string) => void;
+}
+
 export interface ToolDef {
   name: string;
   description: string;
   inputSchema: any;
-  run: (args: any) => Promise<ToolResult>;
+  run: (args: any, call?: ToolCall) => Promise<ToolResult>;
 }
 
 /** " at frame N" when the cook was not at frame 1. */

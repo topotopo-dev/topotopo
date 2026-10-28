@@ -77,11 +77,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const t = tools.find((x) => x.name === req.params.name);
   if (!t) return { content: [{ type: 'text', text: `unknown tool "${req.params.name}". Tools: ${tools.map((x) => x.name).join(', ')}` }], isError: true };
+  // a long call (library update) stops when the client cancels it, and says how far it is when the client asks to
+  const token = req.params._meta?.progressToken;
+  const progress = token === undefined ? undefined : (done: number, total: number, message: string) => {
+    extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: done, total, message } }).catch(() => {});
+  };
   try {
-    return (await t.run(req.params.arguments ?? {})) as any;
+    return (await t.run(req.params.arguments ?? {}, { signal: extra.signal, progress })) as any;
   } catch (e: any) {
     return { content: [{ type: 'text', text: `error: ${e?.message ?? e}` }], isError: true };
   }

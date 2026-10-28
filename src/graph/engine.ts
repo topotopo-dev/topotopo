@@ -542,12 +542,13 @@ export class Engine {
   /**
    * A scope for cooks of its own (CookOptions.scope): its id (not "", which is the root's), the folder its relative
    * paths read (absolute, or relative to the host's own; default: the host's files), the graphs graph_ref reads in it
-   * and the package outputs its graphs name. Register its assets with registerAsset(name, graph, {scope}).
+   * and the package outputs its graphs name. Register its assets with registerAsset(name, graph, {scope}), or give it
+   * another scope's (`assets`: a scope like that one with other packages).
    */
-  createScope(id: string, opts: { folder?: string; graphs?: (name: string) => GraphSpec | undefined; packages?: PackageResolver } = {}): Scope {
+  createScope(id: string, opts: { folder?: string; graphs?: (name: string) => GraphSpec | undefined; packages?: PackageResolver; assets?: Map<string, AssetEntry> } = {}): Scope {
     if (!id) throw new Error('a scope needs an id ("" is the root scope\'s)');
     if (opts.folder !== undefined && !this.host.filesAt) throw new Error(`scope "${id}": the ${this.host.name} host has no file access for other folders (Host.filesAt)`);
-    return { id, assets: new Map(), graphs: opts.graphs, files: opts.folder === undefined ? this.host : this.host.filesAt!(opts.folder), packages: opts.packages };
+    return { id, assets: opts.assets ?? new Map(), graphs: opts.graphs, files: opts.folder === undefined ? this.host : this.host.filesAt!(opts.folder), packages: opts.packages };
   }
 
   // ------------------------------------------------------------ assets

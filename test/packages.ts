@@ -30,8 +30,9 @@ import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Workspace } from '../src/workspace.ts';
 import { parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
-import { compareInterfaces, openPackages, packagesText, publishPackage, readLock, versionHash } from '../src/gallery/packages.ts';
+import { compareInterfaces, lockFile, openPackages, packagesText, publishPackage, readLock, versionHash } from '../src/gallery/packages.ts';
 import type { ProjectPackages, PublishResult } from '../src/gallery/packages.ts';
+import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/gallery/update.ts';
 import { ROOT } from './fixtures.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-packages-'));
@@ -665,6 +666,173 @@ section('the CLI: init, use, packages, publish, --follow, --catalog');
   const no = cli([lost]);
   check(no.code === 1 && /in no project, and only projects use packages \(hint: topotopo init/.test(no.out), `a graph outside a project: ${no.out.trim().split('\n')[0]}`);
   setGraph(TREES, 'crown', crown(1.5));
+}
+
+// ------------------------------------------------------------------ out of date and Update
+const rejection = async (p: Promise<unknown>) => { try { await p; return ''; } catch (e: any) { return String(e.message); } };
+/** What an update must leave alone until it is applied: the project's files and copies, and the library. */
+const untouched = (dir: string) => JSON.stringify([fs.readFileSync(path.join(dir, 'project.json'), 'utf8'), fs.readFileSync(lockFile(dir), 'utf8'), listing(path.join(dir, 'packages')), listing(dirs.game), listing(dirs.lib)]);
+
+section('out of date: the newer versions of what a project uses, with their notes');
+{
+  // nordic/rocks 1.1; studio/trees moves to it with an update of its own, then publishes 1.2 (a wider crown and a
+  // stump) and 1.3 (taller by default)
+  write(path.join(ROCKS, 'inputs', 'rock.obj'), triangle(2.5));
+  check((await publish(ROCKS, 'a bigger rock')).version === '1.1', 'nordic/rocks 1.1');
+  const t = await open(TREES);
+  const own = applyUpdate(t.pk, 'nordic/rocks');
+  check(readManifest(TREES).uses['nordic/rocks'] === '1.1' && Object.keys(readLock(TREES).packages['nordic/rocks']).join() === '1.1' && !exists(TREES, 'packages', 'nordic', 'rocks', '1.0') && exists(TREES, 'packages', 'nordic', 'rocks', '1.1', 'version.json'),
+    `a package updates what it uses too: ${own.text.split('\n')[0]}`);
+  setGraph(TREES, 'crown', crown(1.8));
+  treesMain.outputs!.stump = { node: 'tall', label: 'Stump' };
+  setGraph(TREES, 'main', treesMain);
+  const p12 = await publish(TREES, 'a wider crown, and a stump');
+  treesMain.vars!.height = 5;
+  setGraph(TREES, 'main', treesMain);
+  const p13 = await publish(TREES, 'taller by default');
+  check(p12.version === '1.2' && p13.version === '1.3', `studio/trees 1.2 and 1.3, small: ${p12.blocks} ${p13.blocks}`);
+  const o = await open(dirs.forest);
+  const list = o.pk.outdated(), of = (p: string) => list.find((x) => x.package === p)!;
+  check(of('studio/trees').small === '1.3' && !of('studio/trees').big && of('studio/trees').newer.map((v) => `${v.version} ${v.note}`).join(' | ') === '1.2 a wider crown, and a stump | 1.3 taller by default' && of('studio/trees').libraries.join() === 'game',
+    `studio/trees 1.1: the small update and the versions after it, with their notes (${JSON.stringify(of('studio/trees'))?.slice(0, 160)})`);
+  check(of('nordic/rocks').small === '1.1' && !of('studio/grove').small && !of('studio/grove').big && of('studio/grove').newer.length === 0 && !of('studio/rules').small, 'the others: a small update of nordic/rocks, grove and rules up to date');
+  const said = outdatedText(o.pk);
+  check(/^project forest: 2 of the 4 packages it uses are out of date/.test(said) && /\n {2}studio\/trees 1\.1: small update 1\.3 {2}\[library "game"\]\n {4}1\.2 {2}"a wider crown, and a stump"\n {4}1\.3 {2}"taller by default"/.test(said)
+    && /studio\/grove 1\.0: up to date/.test(said) && /topotopo update owner\/name \[folder\] shows the before\/after/.test(said), `outdated:\n${said}`);
+  check(/out of date: nordic\/rocks 1\.0 \(small update 1\.1\), studio\/trees 1\.1 \(small update 1\.3\); outdated lists the notes/.test(packagesText(o.pk)), 'packages says in a line what is out of date');
+}
+
+section('Update: the before/after of a small update; nothing is written until it is applied');
+{
+  // the forest uses studio/trees in graphs/main.json, in a foreach body (graphs/loop.json), in an asset and in a graph
+  // file outside graphs/ (scene.json)
+  setGraph(dirs.forest, 'loop', { nodes: { loop: { type: 'foreach', params: { mode: 'count', count: 2, body: { nodes: { t: { type: 'studio/trees/pine', params: { height: '=2 + iteration' } }, m: { type: 'transform', in: ['t'], params: { translate: ['=iteration * 6', 0, 0] } } }, output: 'm' } } } }, output: 'loop' });
+  write(path.join(dirs.forest, 'assets', 'twin.json'), JSON.stringify({ nodes: { t: { type: 'studio/trees/pine', params: { height: '=h' } } }, output: 't', vars: { h: 3 } }));
+  const o = await open(dirs.forest);
+  check(/this project does not use studio\/oaks: its uses are nordic\/rocks, studio\/grove, studio\/rules, studio\/trees/.test(await rejection(beforeAfter(o.pk, 'studio/oaks'))), 'a package the project does not use');
+  check(/studio\/grove 1\.0 is the newest version in the project's libraries: there is nothing to update/.test(await rejection(beforeAfter(o.pk, 'studio/grove'))), 'a package that is up to date');
+  check(/no library this project lists has studio\/trees 1\.9: they have 1\.0, 1\.1, 1\.2, 1\.3/.test(await rejection(beforeAfter(o.pk, 'studio/trees', { to: '1.9' }))) && /this project uses studio\/trees 1\.1 already/.test(await rejection(beforeAfter(o.pk, 'studio/trees', { to: '1.1' }))),
+    'a version no library has, and the version in use');
+  const was = untouched(dirs.forest);
+  const steps: string[] = [];
+  const r = await beforeAfter(o.pk, 'studio/trees', { progress: (done, total, what) => steps.push(`${done}/${total} ${what}`) });
+  check(r.target.from === '1.1' && r.target.to === '1.3' && !r.target.big && r.target.library === 'game' && r.target.between.map((v) => v.version).join() === '1.2,1.3', `without "to": the newest version with the same big number, ${r.target.from} → ${r.target.to}`);
+  check(r.uses.map((u) => `${u.file} ${u.node}`).join(' | ') === 'graphs/loop.json loop/t | graphs/main.json b | assets/twin.json t | scene.json t',
+    `every place the project uses it: graphs, a nested graph, an asset, a graph file (${r.uses.map((u) => `${u.file} ${u.node}`).join(' | ')})`);
+  check(r.compared.map((c) => c.node).join() === 'loop,b,t,t' && r.compared.every((c) => c.before.ok && c.after.ok && c.diff && !c.diff.identical),
+    `each cooked with both versions and compared; a use in a nested graph through the node that holds it (${r.compared.map((c) => `${c.file} ${c.node}: ${c.after.errors.join(';') || (c.diff?.identical ? 'same' : 'changed')}`).join(' | ')})`);
+  const main = r.compared.find((c) => c.file === 'graphs/main.json')!;
+  check(/^counts: points/m.test(main.diff!.text) && /^bbox delta:/m.test(main.diff!.text) && /^attributes:/m.test(main.diff!.text) && /^verdict: shape changed by up to/m.test(main.diff!.text), 'what changed: counts, size, attributes, the largest move');
+  check(steps.length === 8 && steps[0] === '0/8 graphs/loop.json loop with studio/trees 1.1' && steps[7] === '7/8 scene.json t with studio/trees 1.3', `progress before each cook (${steps[0]} … ${steps[7]})`);
+  check(untouched(dirs.forest) === was && readManifest(dirs.forest).uses['studio/trees'] === '1.1', 'nothing is written: project.json, the lock, the copies and the libraries are as they were');
+  const text = beforeAfterText(r, 'nothing was written');
+  check(/^before\/after: studio\/trees 1\.1 → 1\.3 \(a small update\) in project forest; nothing has changed yet\nstudio\/trees 1\.3 is in library "game"\. The versions after 1\.1:\n {2}1\.2 {2}"a wider crown, and a stump"\n {2}1\.3 {2}"taller by default"/.test(text)
+    && /\n4 places use studio\/trees; each cooked with 1\.1 \(a\) and with 1\.3 \(b\):/.test(text) && /\n {2}graphs\/loop\.json {2}loop: holds loop\/t \(studio\/trees\/pine \{"height":"=2 \+ iteration"\}\); its result compared/.test(text)
+    && /\n {2}graphs\/main\.json {2}b: studio\/trees\/pine \{"height":6\}\n {4}counts:/.test(text) && /\nin short: 4 of the 4 compared changed\nnothing was written$/.test(text) && !/must change/.test(text), `the before/after says it:\n${text.split('\n').slice(0, 12).join('\n')}`);
+  const renders = overlayRenders(r);
+  check(renders.length === 4 && renders.every((x) => x.png.length > 1000 && x.png[1] === 0x50), `an overlay render of each place that changed (${renders.map((x) => x.title).join(', ')})`);
+  // it reuses the cook cache: a second before/after cooks nothing
+  const again = await beforeAfter(o.pk, 'studio/trees');
+  check(again.compared.every((c) => c.before.cooked === 0 && c.after.cooked === 0) && r.compared.some((c) => c.after.cooked > 0), 'the cook cache: a second before/after cooks nothing again');
+  // a stop ends it at the next node: what was compared is kept
+  const fresh = await open(dirs.forest), stop = { aborted: false };
+  const s = await beforeAfter(fresh.pk, 'studio/trees', { signal: stop, progress: (done) => { if (done === 2) stop.aborted = true; } });
+  check(s.stopped && s.compared.length === 1 && /stopped after 1 of 4 comparisons/.test(beforeAfterText(s, '')), `it can be stopped (${s.compared.length} compared)`);
+  // following a package plays no part: the before/after compares the copies
+  const f = await open(dirs.forest, ['studio/trees']);
+  const fr = await beforeAfter(f.pk, 'studio/trees');
+  check(fr.compared.length === 4 && fr.compared.every((c, i) => c.before.ok && Math.abs(c.diff!.hausdorff - r.compared[i].diff!.hausdorff) < 1e-9), 'while following its working folder, the before is still the copy in use');
+  // apply: the new version and what it uses are copied in, the uses and the lock name them, unused copies go
+  const a = applyUpdate(o.pk, 'studio/trees');
+  const lock = readLock(dirs.forest);
+  check(a.target.to === '1.3' && JSON.stringify(readManifest(dirs.forest).uses) === '{"nordic/rocks":"1.0","studio/grove":"1.0","studio/rules":"7.1","studio/trees":"1.3"}', `applied: project.json uses studio/trees 1.3 (${a.text.split('\n')[0]})`);
+  check(Object.keys(lock.packages['studio/trees']).join() === '1.0,1.3' && Object.keys(lock.packages['nordic/rocks']).join() === '1.0,1.1' && lock.packages['studio/trees']['1.3'].library === 'game',
+    'the lock: trees 1.3 and the rocks 1.1 it uses; trees 1.0 and rocks 1.0, which grove and the project still use, stay');
+  check(exists(dirs.forest, 'packages', 'studio', 'trees', '1.3', 'version.json') && exists(dirs.forest, 'packages', 'nordic', 'rocks', '1.1', 'version.json') && !exists(dirs.forest, 'packages', 'studio', 'trees', '1.1')
+    && exists(dirs.forest, 'packages', 'studio', 'trees', '1.0', 'version.json') && exists(dirs.forest, 'packages', 'nordic', 'rocks', '1.0', 'version.json'), 'the copies: 1.3 and what it uses copied in, 1.1 deleted, the dependencies still used kept');
+  check(/^updated studio\/trees 1\.1 → 1\.3 in project forest: project\.json uses studio\/trees 1\.3, from library "game"\n {2}copied into packages\/: nordic\/rocks 1\.1, studio\/trees 1\.3; packages\/lock\.json records them\n {2}deleted the copies nothing uses any more: studio\/trees 1\.1$/.test(a.text), `it says what it did:\n${a.text}`);
+  const cooked = await o.engine.cook(o.ws.getGraph('main'));
+  check(cooked.ok && top(cooked) === 7.8 && o.pk.verifyCopies().length === 0, `the project cooks with 1.3 at once (top ${top(cooked)}), and its copies check`);
+  const back = await beforeAfter(o.pk, 'studio/trees', { to: '1.2' });
+  check(back.target.between.map((v) => v.version).join() === '1.3' && /\(back to an older version\)/.test(beforeAfterText(back, '')), 'going back to an older version lists the ones it leaves');
+}
+
+section('Update: a big version is named, and says what the graphs must change');
+{
+  // studio/trees 2.0: "height" is now "trunk_height", no ground input, no stump, no rock (and so no nordic/rocks)
+  const g2: any = structuredClone(treesMain);
+  g2.vars = { trunk_height: 5 };
+  g2.params = { trunk_height: { type: 'float', min: 1, max: 20, label: 'Height' } };
+  g2.nodes.tall.params.scale = [1, '=trunk_height', 1];
+  g2.nodes.lifted.params.translate = [0, '=trunk_height', 0];
+  delete g2.nodes.ground;
+  delete g2.nodes.rock;
+  g2.nodes.out.in = ['tall', 'lifted'];
+  delete g2.outputs.stump;
+  setGraph(TREES, 'main', g2);
+  editManifest(TREES, (m) => { m.uses = {}; });
+  fs.rmSync(path.join(TREES, 'packages'), { recursive: true });
+  const p2 = await publish(TREES, 'height in trunk_height; no ground, no stump, no rock');
+  check(p2.version === '2.0' && p2.bigBecause.some((b) => /slider "height" removed/.test(b)), `studio/trees 2.0, big: ${p2.bigBecause.join('; ')}`);
+  // the yard uses the stump and wires the ground input
+  setGraph(dirs.forest, 'yard', { nodes: { g: { type: 'grid', params: { size: [10, 10] } }, p: { type: 'studio/trees/pine', in: ['g'], params: { height: 2 } }, s: { type: 'studio/trees/stump' }, out: { type: 'merge', in: ['p', 's'] } }, output: 'out' });
+  const o = await open(dirs.forest);
+  check(o.pk.outdated().find((x) => x.package === 'studio/trees')?.big === '2.0', 'outdated names the big update');
+  check(/studio\/trees 1\.3 is the newest 1\.x in the project's libraries, and 2\.0 is a big version, a step of its own: name it, --to 2\.0 \(library \{action:"update", package:"studio\/trees", to:"2\.0"\}\)/.test(await rejection(beforeAfter(o.pk, 'studio/trees'))),
+    'without "to", a big version is not taken: it says how to name it');
+  const was = untouched(dirs.forest);
+  const r = await beforeAfter(o.pk, 'studio/trees', { to: '2.0' });
+  check(r.target.big && r.interfaceBig.some((x) => /output "pine": slider "height" removed/.test(x)) && r.interfaceBig.some((x) => /input 0 \("ground"\) removed/.test(x)) && r.interfaceBig.some((x) => /output "stump" removed/.test(x)),
+    `what goes away in 2.0: ${r.interfaceBig.join('; ')}`);
+  const must = r.mustChange.join('\n');
+  check(/^graphs\/loop\.json loop\/t: sets slider "height", which studio\/trees 2\.0 does not have — did you mean "trunk_height"\? \(its sliders: trunk_height\)$/m.test(must)
+    && /^graphs\/main\.json b: sets slider "height"/m.test(must) && /^assets\/twin\.json t: sets slider "height"/m.test(must) && /^graphs\/yard\.json p: sets slider "height"/m.test(must),
+    'sliders the graphs set that 2.0 does not have, with did-you-mean');
+  check(/^graphs\/yard\.json p: wires input 0 \("ground"\), which studio\/trees 2\.0 does not have \(it has 0 inputs\)$/m.test(must), 'inputs they wire that are gone');
+  check(/^graphs\/yard\.json s: uses studio\/trees\/stump, and studio\/trees 2\.0 has no output "stump"/m.test(must) && !/scene\.json/.test(must) && r.mustChange.length === 6, `outputs they use that are gone; nothing for a use that sets nothing (${r.mustChange.length}):\n${must}`);
+  const main = r.compared.find((c) => c.file === 'graphs/main.json')!, scene = r.compared.find((c) => c.file === 'scene.json')!;
+  check(main.before.ok && !main.after.ok && /unknown param "height" for studio\/trees\/pine — did you mean "trunk_height"/.test(main.after.errors.join()) && scene.after.ok && !!scene.diff,
+    'with 2.0 a use that must change does not cook, the others are compared');
+  const text = beforeAfterText(r, 'nothing was written');
+  check(/\(a big update\)/.test(text) && /\n2\.0 is a big version; what goes away or means something else:\n/.test(text) && /\nwhat the project's graphs must change \(updating is allowed; until they change, they report these errors\):\n/.test(text) && /with 2\.0 it does not cook: \[b\] unknown param "height"/.test(text),
+    'the before/after says it');
+  check(untouched(dirs.forest) === was, 'nothing written');
+  // applying is allowed: the graphs then report what they must change
+  const a = applyUpdate(o.pk, 'studio/trees', '2.0');
+  check(readManifest(dirs.forest).uses['studio/trees'] === '2.0' && /deleted the copies nothing uses any more: nordic\/rocks 1\.1, studio\/trees 1\.3/.test(a.text) && !exists(dirs.forest, 'packages', 'nordic', 'rocks', '1.1') && exists(dirs.forest, 'packages', 'nordic', 'rocks', '1.0', 'version.json'),
+    `applied: 1.3 and the rocks 1.1 only it used are deleted, rocks 1.0 stays (${a.text.split('\n')[2]})`);
+  check(/the project's graphs must change for studio\/trees 2\.0; until they do, they report these errors:\n {2}graphs\/loop\.json loop\/t: sets slider "height"/.test(a.text) && a.mustChange.length === 6, 'applying says what the graphs must change');
+  const cooked = await o.engine.cook(o.ws.getGraph('main'));
+  check(!cooked.ok && /unknown param "height" for studio\/trees\/pine — did you mean "trunk_height"/.test(errorOf(cooked)), `the graphs report it until they change: ${errorOf(cooked)}`);
+  // a package the project uses only through another
+  const user = path.join(dirs.repo, 'grove-user');
+  project(user, { libraries: ['../../game'] }, {});
+  const u = await open(user);
+  u.pk.use('studio/grove');
+  check(/this project does not use studio\/trees itself \(studio\/grove 1\.0 uses studio\/trees 1\.0\): a version keeps what it uses/.test(await rejection(beforeAfter(u.pk, 'studio/trees'))), 'a package used only through another says so');
+}
+
+section('the CLI: outdated, update and --apply');
+{
+  const cli = (args: string[], cwd = ROOT) => {
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOPOTOPO_WORKERS: '0' } });
+    return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
+  };
+  const CLI = path.join(dirs.repo, 'cliproj');
+  const od = cli(['outdated', CLI]);
+  check(od.code === 0 && /nordic\/rocks 1\.0: small update 1\.1 {2}\[library "\.\.\/lib"\]\n {4}1\.1 {2}"a bigger rock"/.test(od.out), `outdated: ${od.out.trim().split('\n').slice(0, 3).join(' | ')}`);
+  const was = untouched(CLI);
+  const renders = path.join(tmp, 'renders');
+  const ba = cli(['update', 'nordic/rocks', CLI, '--render', renders]);
+  check(ba.code === 0 && /^before\/after: nordic\/rocks 1\.0 → 1\.1 \(a small update\) in project cliproj/.test(ba.out) && /graphs\/main\.json {2}r: nordic\/rocks\/boulder \{"size":2\}/.test(ba.out) && /\[1\/2\] graphs\/main\.json r with nordic\/rocks 1\.0/.test(ba.err),
+    `update shows the before/after, progress on stderr:\n${ba.out.split('\n').slice(0, 4).join('\n')}`);
+  check(new RegExp(`nothing was written\\. To apply it: node src/cli\\.ts update nordic/rocks ${CLI.replace(/[\\.]/g, '\\$&')} --to 1\\.1 --apply`).test(ba.out), 'and how to apply it');
+  check(fs.existsSync(renders) && fs.readdirSync(renders).join() === '01-graphs_main.json_r.png' && untouched(CLI) === was, `--render writes the overlay renders, and nothing else is written (${fs.existsSync(renders) ? fs.readdirSync(renders) : 'none'})`);
+  const ap = cli(['update', 'nordic/rocks', CLI, '--apply']);
+  check(ap.code === 0 && /^updated nordic\/rocks 1\.0 → 1\.1 in project cliproj/.test(ap.out) && readManifest(CLI).uses['nordic/rocks'] === '1.1' && !exists(CLI, 'packages', 'nordic', 'rocks', '1.0'), `--apply applies it: ${ap.out.split('\n')[0]}`);
+  const none = cli(['update', 'nordic/rocks', CLI]);
+  check(none.code === 1 && /nordic\/rocks 1\.1 is the newest version in the project's libraries: there is nothing to update/.test(none.err), `nothing newer: ${none.err.trim()}`);
+  check(cli(['update']).code === 1 && /usage: .* update owner\/name \[folder\]/.test(cli(['update']).err), 'update without a package says how to use it');
 }
 
 await engines[0]?.host.pool?.close();
