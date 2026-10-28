@@ -829,7 +829,9 @@ registered library's name. The tools never list a library themselves; the person
   libraries with their newest version, note and outputs.
 - A package output cooks in its version's own scope: its own assets, graphs (graph_ref) and files (relative paths read
   the version's folder) and the versions it uses. Nothing leaks either way, and two versions of one package (one the
-  project uses, one another package uses) cook side by side.
+  project uses, one another package uses) cook side by side. Its result names the version's texture files by paths
+  relative to the project's folder (absolute only for a followed working folder outside the project), so exports name
+  no folder of this machine.
 - Errors never guess: a package not in "uses" says how to add it, an unknown output lists the package's outputs, a
   missing copy says which, and a package found only in a registered library the project does not list names that library.
 

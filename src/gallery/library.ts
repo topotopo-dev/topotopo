@@ -317,8 +317,9 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
 
 /**
  * Make a folder a project (`topotopo init`), in a library or anywhere: project.json with an id from the folder's name
- * and "graph": "main", and a .gitignore for the derived files. `pkg` names the package the project is ("owner/name").
- * Fails when the folder is a project already or lies inside one.
+ * and "graph": "main", graphs/ (where a project's graphs go: the workspace, the gallery and publishing read them there,
+ * for a package and any other project alike) and a .gitignore for the derived files. `pkg` names the package the
+ * project is ("owner/name"). Fails when the folder is a project already or lies inside one.
  */
 export function initProject(dir: string, o: { package?: string } = {}): { dir: string; manifest: ProjectManifest } {
   const abs = path.resolve(dir);
@@ -328,7 +329,7 @@ export function initProject(dir: string, o: { package?: string } = {}): { dir: s
   const id = slugify(path.basename(abs));
   if (!ID_RE.test(id)) throw new Error(`"${path.basename(abs)}" gives no usable project id: name the folder with letters or digits`);
   const manifest = parseManifest({ id, title: path.basename(abs), graph: 'main', created: new Date().toISOString().slice(0, 10), ...(o.package !== undefined ? { package: o.package } : {}) }, id);
-  fs.mkdirSync(abs, { recursive: true });
+  fs.mkdirSync(path.join(abs, 'graphs'), { recursive: true });
   writeManifest(abs, manifest);
   const gi = path.join(abs, '.gitignore');
   if (!fs.existsSync(gi)) fs.writeFileSync(gi, '.gallery/\n.cache/\n');

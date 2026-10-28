@@ -409,6 +409,17 @@ export class ProjectPackages implements WorkspacePackages {
     return `${st(manifestFile(this.dir))}|${st(lockFile(this.dir))}`;
   }
 
+  /**
+   * PackageOutput.rootPath: a file as the root names it. Relative to the root's folder (where its relative paths read:
+   * the project's, or the folder of a graph file in it) when it lies in the project, as copies do, so exports name no
+   * folder of this machine; absolute when it lies elsewhere (a followed working folder in another library).
+   */
+  private rootPath = (abs: string): string => {
+    const inProject = this.dir ? path.relative(this.dir, abs) : '..';
+    if (!inProject || inProject.startsWith('..') || path.isAbsolute(inProject)) return abs;
+    return path.relative(this.engine.root.files.resolvePath('.'), abs).split(path.sep).join('/');
+  };
+
   /** A path for messages: relative to the project when inside it. */
   private shown(p: string): string {
     if (!this.dir) return p;
@@ -533,6 +544,7 @@ export class ProjectPackages implements WorkspacePackages {
     const outs = folderOutputs(o.manifest, graphs);
     const def = (x: FolderOutput) => packageOutputDef({
       package: o.pkg, version: o.version, hash: o.hash, signature: o.signature, output: x.name, graph: x.graph, spec: x.spec, node: x.node, scope,
+      rootPath: this.rootPath,
       ...(o.note ? { note: o.note } : {}), ...(x.label ? { label: x.label } : {}), ...(o.warning ? { warning: o.warning } : {}),
     });
     const at = packageAt({ package: o.pkg, version: o.version });

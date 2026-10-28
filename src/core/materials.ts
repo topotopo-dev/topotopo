@@ -120,13 +120,16 @@ export function writeMaterials(g: Geometry, t: MaterialTable): void {
 
 /** A texture path that names a file relative to a folder: not "image:<name>", "embedded:<name>", a URL or an absolute path. */
 const relativeTexture = (p: string | undefined): p is string => !!p && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(p) && !/^[\\/]/.test(p);
+/** An absolute file path: "/x", "\\server\x" or a drive ("C:/x", "C:\x"). */
+const absoluteTexture = (p: string | undefined): p is string => !!p && (/^[\\/]/.test(p) || /^[A-Za-z]:[\\/]/.test(p));
 
 /**
- * The geometry with the relative texture paths of its material tables (its own and its packed sources') rewritten by
- * `resolve`, cloned where something changes; g itself when no path is relative. A package output's result names its
- * textures in the version's folder this way, so exports and renders read them wherever the result goes.
+ * The geometry with the file paths of its material textures (its own and its packed sources') rewritten by `resolve`,
+ * cloned where something changes; g itself when nothing does. `resolve` sees every texture path that names a file,
+ * relative (`relative` true) or absolute, never "image:<name>", "embedded:<name>" or a URL. A package output's result
+ * names its textures in the version's folder this way, so exports and renders read them wherever the result goes.
  */
-export function rebaseTexturePaths(g: Geometry, resolve: (path: string) => string, done = new Map<Geometry, Geometry>()): Geometry {
+export function rebaseTexturePaths(g: Geometry, resolve: (path: string, relative: boolean) => string, done = new Map<Geometry, Geometry>()): Geometry {
   const seen = done.get(g);
   if (seen) return seen;
   let out = g;
@@ -134,7 +137,10 @@ export function rebaseTexturePaths(g: Geometry, resolve: (path: string) => strin
   let changed = false;
   for (const m of Object.values(table)) for (const k of TEXTURE_SLOTS) {
     const p = m.textures?.[k];
-    if (relativeTexture(p)) { m.textures![k] = resolve(p); changed = true; }
+    const relative = relativeTexture(p);
+    if (!relative && !absoluteTexture(p)) continue;
+    const to = resolve(p!, relative);
+    if (to !== p) { m.textures![k] = to; changed = true; }
   }
   if (changed) { out = g.clone(); writeMaterials(out, table); }
   // packed sources are shared and never modified: a rewritten source is a new one

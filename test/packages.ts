@@ -132,12 +132,24 @@ section('the engine: a scope resolves package outputs through its packages');
   check(JSON.stringify(used) === '{"test/kit@1.0":"h2"}', `packagesUsed finds them through assets and graph_ref graphs: ${JSON.stringify(used)}`);
   defs['test/kit/working'] = out({ output: 'working', node: 'out', version: null, hash: 'w1' });
   check(JSON.stringify(packagesUsed(e, { nodes: { w: { type: 'test/kit/working' }, a: { type: 'uses_kit' } } })) === '{"test/kit@1.0":"h1","test/kit@working":"w1"}', 'a working folder is "@working", keys sorted');
-  // which texture paths are rebased: relative file paths, not images, URLs or absolute paths
+  // which texture paths are rebased: file paths, relative and absolute, not images or URLs
   const geo = new Geometry();
   writeMaterials(geo, { t: { baseColor: [1, 1, 1], metallic: 0, roughness: 1, emissive: [0, 0, 0], alpha: 1, doubleSided: false, unlit: false, textures: { baseColor: 'image:noise', normal: 'https://example.com/n.png', roughness: '/abs/r.png', orm: 'maps/orm.png' } } });
-  const t = readMaterials(rebaseTexturePaths(geo, (x) => `V/${x}`)).t.textures!;
-  check(t.baseColor === 'image:noise' && t.normal === 'https://example.com/n.png' && t.roughness === '/abs/r.png' && t.orm === 'V/maps/orm.png', 'only relative file paths are rebased');
+  const t = readMaterials(rebaseTexturePaths(geo, (x, relative) => `${relative ? 'V' : 'A'}|${x}`)).t.textures!;
+  check(t.baseColor === 'image:noise' && t.normal === 'https://example.com/n.png' && t.roughness === 'A|/abs/r.png' && t.orm === 'V|maps/orm.png', 'file paths are rebased, told whether they are relative; images and URLs are not');
   check(readMaterials(geo).t.textures!.orm === 'maps/orm.png', 'the cooked geometry itself is never changed');
+  check(rebaseTexturePaths(geo, (x) => x) === geo, 'nothing rewritten: the same geometry');
+  // given rootPath (as the registry gives it), the root's result names its textures by it, another scope's absolutely
+  const named = packageOutputDef({
+    package: 'test/kit', version: '1.0', hash: 'h1', signature: 'h1', output: 'mark', graph: 'main', spec: graphs.main, node: 'out', scope,
+    rootPath: (abs) => `root:${path.basename(abs)}`,
+  });
+  defs['test/kit/named'] = named;
+  const forRoot = await e.cook({ nodes: { k: { type: 'test/kit/named' } } });
+  const inside = await e.cook({ nodes: { k: { type: 'test/kit/named' } } }, { scope: e.createScope('test/user', { packages: resolver }) });
+  const texOf = (r: CookReport) => (r.geo ? readMaterials(r.geo).bark?.textures?.baseColor : '');
+  check(texOf(forRoot) === 'root:bark.png' && texOf(inside) === path.join(vdir, 'inputs', 'bark.png'), `with rootPath: the root's result names its textures by it, another scope's absolutely (${texOf(forRoot)}, ${texOf(inside)})`);
+  check(forRoot.results.get('k')!.sig !== inside.results.get('k')!.sig, 'so the two are cached apart');
 }
 
 section('"publish": false');
@@ -445,9 +457,9 @@ section('a project that uses packages: first use, two versions side by side');
   const rock = await o.engine.cook({ nodes: { b: { type: 'nordic/rocks/boulder' } } });
   const tex = rock.geo ? readMaterials(rock.geo).moss?.textures?.baseColor : undefined;
   check(size(rock, 0) === 2, `files are read from the version's folder: the rock is 2 wide, not the project's 5 (${size(rock, 0)})`);
-  check(tex === path.join(dirs.forest, 'packages', 'nordic', 'rocks', '1.0', 'inputs', 'moss.png') && fs.existsSync(tex!), `texture paths name the version's files: ${tex}`);
+  check(tex === 'packages/nordic/rocks/1.0/inputs/moss.png' && fs.existsSync(path.join(dirs.forest, tex)), `texture paths name the version's files, relative to the project: ${tex}`);
   const inPine = one.geo ? readMaterials(one.geo).moss?.textures?.baseColor : undefined;
-  check(inPine === tex, 'also through a package that uses it');
+  check(inPine === tex, `also through a package that uses it (${inPine})`);
   // the catalog and help
   const names = o.engine.packageDefs().map((d) => d.type);
   check(['studio/trees', 'studio/trees/pine', 'studio/grove', 'nordic/rocks/boulder'].every((n) => names.includes(n)) && !names.includes('studio/trees/preview'), `the catalog lists the project's package outputs: ${names}`);
@@ -606,6 +618,10 @@ section('the CLI: init, use, packages, publish, --follow, --catalog');
   const CLI = path.join(dirs.repo, 'cliproj');
   const init = cli(['init', CLI, '--package', 'studio/cli']);
   check(init.code === 0 && /^project cliproj → .*cliproj \(package studio\/cli\)/.test(init.out) && readManifest(CLI).package === 'studio/cli' && exists(CLI, '.gitignore'), `init makes a folder a project: ${init.out.split('\n')[0]}`);
+  const PLAIN = path.join(dirs.repo, 'plainproj');
+  const plain = cli(['init', PLAIN]);
+  check(exists(CLI, 'graphs') && plain.code === 0 && /graphs go in graphs\//.test(plain.out) && exists(PLAIN, 'graphs') && readManifest(PLAIN).package === undefined,
+    'init makes graphs/, where it says graphs go, for a package and a plain project alike');
   check(cli(['init', CLI]).code === 1 && cli(['init', path.join(CLI, 'inner')]).code === 1, 'init refuses a project, and a folder inside one');
   editManifest(CLI, (m) => { m.libraries = ['../lib']; });
   setGraph(CLI, 'main', { nodes: { r: { type: 'nordic/rocks/boulder', params: { size: 2 } } }, output: 'r' });
@@ -617,6 +633,16 @@ section('the CLI: init, use, packages, publish, --follow, --catalog');
   const cook = cli([path.join(CLI, 'graphs', 'main.json'), '--export', exp]);
   const rec = fs.existsSync(exp + '.source.json') ? readJSON(exp + '.source.json').source : {};
   check(cook.code === 0 && JSON.stringify(rec.packages) === JSON.stringify({ 'nordic/rocks@1.0': readLock(CLI).packages['nordic/rocks']['1.0'].hash }), `a graph-file cook records the packages it used: ${JSON.stringify(rec.packages)} ${cook.code ? cook.out : ''}`);
+  // the texture of a package output names the copy relative to the root's folder (here graphs/, the graph file's), so
+  // exports that carry texture paths name no folder of this machine
+  const moss = '../packages/nordic/rocks/1.0/inputs/moss.png';
+  for (const ext of ['json', 'geo']) {
+    const out = path.join(CLI, 'exports', `rock.${ext}`);
+    const r = cli([path.join(CLI, 'graphs', 'main.json'), '--export', out]);
+    const txt = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
+    const named = txt.split('moss.png').length - 1, relative = txt.split(moss).length - 1;
+    check(r.code === 0 && named > 0 && named === relative && fs.existsSync(path.resolve(CLI, 'graphs', moss)), `a .${ext} export of a package output is portable: its texture is ${moss} (${relative} of ${named})`);
+  }
   const pub = cli(['publish', CLI, '--note', 'from the cli']);
   check(pub.code === 0 && /✓ published studio\/cli 1\.0 \(the first version\): "from the cli"/.test(pub.out), `publish: ${pub.out.split('\n')[0]}`);
   const again = cli(['publish', CLI, '--note', 'again']);

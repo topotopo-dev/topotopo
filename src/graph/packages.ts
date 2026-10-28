@@ -6,7 +6,8 @@
 // and inputs. A graph uses an output of one as a node type, "owner/name/output", or "owner/name" for the package's
 // default output. A package output cooks its graph in the version's own scope (its assets, graphs, files and
 // packages), so nothing leaks between the project and the package and two versions of one package cook side by side.
-// Its signature is the version's hash and the node it cooks: a frozen version cooks once for everyone who uses it.
+// Its signature is the version's hash and the node it cooks: a frozen version cooks once for the project and once for
+// the packages that use it (which name its texture files differently).
 import { Geometry } from '../core/geometry.ts';
 import { rebaseTexturePaths } from '../core/materials.ts';
 import { graphInterface } from './engine.ts';
@@ -40,6 +41,12 @@ export interface PackageOutput {
   label?: string;
   /** a problem every cook repeats (a copy edited by hand) */
   warning?: string;
+  /**
+   * How the root names a file of the version, given its absolute path: relative to the root's folder when the version
+   * lies inside the root's project, so exports stay portable, else the absolute path. The registry gives it (the core
+   * has no paths); absent, texture paths are absolute.
+   */
+  rootPath?: (absolute: string) => string;
 }
 
 /** "studio/trees 1.3", or "studio/trees (working folder)" for one followed this session. */
@@ -58,8 +65,9 @@ export function packageOutputDef(o: PackageOutput): NodeDef {
     inputs,
     params,
     package: o,
-    // the version is frozen: its hash and the node say what it cooks, in a scope of its own (no usesScope)
-    signatureExtra: () => `${o.signature}|${o.graph}/${o.node}`,
+    // the version is frozen: its hash and the node say what it cooks, in a scope of its own (no usesScope); a result
+    // for the root names its textures as the root does (rootPath), one for another scope absolutely
+    signatureExtra: (_p, scope) => `${o.signature}|${o.graph}/${o.node}${o.rootPath && scope.id ? '|nested' : ''}`,
     // the package's own nodes unpack what they need
     packed: 'keep',
     async cook(ctx) {
@@ -70,8 +78,14 @@ export function packageOutputDef(o: PackageOutput): NodeDef {
       });
       for (const w of r.warnings) ctx.warn(`[${w.node}] ${w.message}`);
       if (!r.ok || !r.geo) throw new NodeError(`${type} (${at}) failed: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
-      // texture paths relative to the version's folder would be read from the project's: they are made absolute
-      return rebaseTexturePaths(r.geo, (p) => o.scope.files.resolvePath(p));
+      // texture paths relative to the version's folder would be read from the project's: they name the version's files.
+      // Inside another package's scope they are absolute (that package names them for the root in turn, its own and
+      // those of the packages it uses alike); for the root, as the root names them.
+      const forRoot = !ctx.scope.id ? o.rootPath : undefined;
+      return rebaseTexturePaths(r.geo, (p, relative) => {
+        const abs = relative ? o.scope.files.resolvePath(p) : p;
+        return forRoot ? forRoot(abs) : abs;
+      });
     },
   };
 }
