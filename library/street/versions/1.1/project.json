@@ -1,0 +1,13 @@
+{
+  "id": "street",
+  "graph": "kit",
+  "bake": {},
+  "title": "Street kit",
+  "description": "TopoTopo's street kit: roads with kerbs and sidewalks, lamp posts, bollards, benches, street signs, fences and hanging cables.",
+  "tags": [
+    "kit"
+  ],
+  "links": [],
+  "created": "2026-10-28",
+  "package": "topotopo/street"
+}

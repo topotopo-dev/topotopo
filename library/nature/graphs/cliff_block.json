@@ -78,6 +78,6 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "band m rest" } }
   },
   "output": "out",
-  "outputs": { "cliff_block": { "node": "out", "label": "Cliff block" } },
+  "outputs": { "cliff_block": { "node": "out", "label": "Cliff block", "kind": "mesh", "tags": ["cliff", "rock", "mountain", "lowpoly"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 20 } }
 }

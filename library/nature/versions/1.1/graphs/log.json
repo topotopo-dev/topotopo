@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "description": "Felled log lying along X: a tapered trunk with ridged bark, light end grain and a few branch stubs. Pivot at the centre of the base (the log rests on y = 0). Pieces: log_trunk (bark, ends wood_end), log_stubs (bark). The trunk is closed.",
+  "params": {
+    "log_length": { "type": "float", "default": 2.4, "min": 0.4, "max": 8, "desc": "length along X (m)" },
+    "radius": { "type": "float", "default": 0.2, "min": 0.05, "max": 0.8, "desc": "radius at the thick end (m)" },
+    "taper": {
+      "type": "float",
+      "default": 0.2,
+      "min": 0,
+      "max": 0.6,
+      "desc": "how much thinner the other end is (fraction of radius)"
+    },
+    "roughness": {
+      "type": "float",
+      "default": 0.12,
+      "min": 0,
+      "max": 0.3,
+      "desc": "bark displacement as a fraction of radius"
+    },
+    "stubs": { "type": "int", "default": 3, "min": 0, "max": 10, "desc": "branch stubs" },
+    "seed": { "type": "int", "default": 0, "min": 0, "max": 1000, "desc": "random seed (bark noise, stubs)" }
+  },
+  "vars": { "log_length": 2.4, "radius": 0.2, "taper": 0.2, "roughness": 0.12, "stubs": 3, "seed": 0 },
+  "nodes": {
+    "trunk": {
+      "type": "tube",
+      "params": {
+        "axis": "x",
+        "radius": "=radius",
+        "radius_top": "=radius * (1 - taper)",
+        "height": "=log_length",
+        "rows": "=Math.max(2, Math.round(log_length / radius))",
+        "cols": 14,
+        "caps": true,
+        "center": [0, "=radius", 0]
+      }
+    },
+    "bark": {
+      "type": "noise_displace",
+      "in": ["trunk"],
+      "params": {
+        "amplitude": "=radius * roughness",
+        "frequency": ["=1.2 / radius", "=6 / radius", "=6 / radius"],
+        "fractal": "ridged",
+        "octaves": 2,
+        "seed": "=seed"
+      }
+    },
+    "trunk_ends": {
+      "type": "wrangle",
+      "in": ["bark"],
+      "params": { "run_over": "prims", "code": "if (primpoints(0, @primnum).length > 4) @group_ends = 1;" }
+    },
+    "trunk_name": {
+      "type": "attrib_create",
+      "in": ["trunk_ends"],
+      "params": { "name": "name", "class": "prim", "value": "log_trunk" }
+    },
+    "trunk_bark": {
+      "type": "material",
+      "in": ["trunk_name"],
+      "params": { "name": "bark", "base_color": "#5b4332", "roughness": 0.95 }
+    },
+    "trunk_mat": {
+      "type": "material",
+      "in": ["trunk_bark"],
+      "params": { "name": "wood_end", "group": "ends", "base_color": "#c9a87a", "roughness": 0.9 }
+    },
+    "none": { "type": "points", "params": { "positions": [] } },
+    "stub_pts": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "stubs on the upper part of the trunk, pointing outwards",
+      "params": {
+        "run_over": "detail",
+        "code": "const L = log_length, R = radius;\nfor (let i = 0; i < Math.round(stubs); i++) {\n  const t = 0.15 + 0.7 * rand(i, seed, 1), a = radians(-40 + 260 * rand(i, seed, 2));\n  const x = -L / 2 + t * L, r = R * (1 - taper * t) * 0.85;\n  const dir = [0, Math.sin(a), Math.cos(a)];\n  const q = addpoint(0, [x, R + dir[1] * r, dir[2] * r]);\n  setpointattrib(0, 'orient', q, dihedral([0, 1, 0], normalize([0.25 * (rand(i, seed, 3) - 0.5), dir[1], dir[2]])));\n  setpointattrib(0, 'pscale', q, R * (0.45 + 0.3 * rand(i, seed, 4)));\n}"
+      }
+    },
+    "stub": {
+      "type": "tube",
+      "params": { "radius": 0.55, "radius_top": 0.4, "height": 0.9, "cols": 7, "center": [0, 0.45, 0] }
+    },
+    "stubs_geo": { "type": "copy_to_points", "in": ["stub", "stub_pts"] },
+    "stubs_name": {
+      "type": "attrib_create",
+      "in": ["stubs_geo"],
+      "params": { "name": "name", "class": "prim", "value": "log_stubs" }
+    },
+    "stubs_mat": {
+      "type": "material",
+      "in": ["stubs_name"],
+      "params": { "name": "bark", "base_color": "#5b4332", "roughness": 0.95 }
+    },
+    "all": { "type": "merge", "in": ["trunk_mat", "stubs_mat"] },
+    "ground": {
+      "type": "transform",
+      "in": ["all"],
+      "params": { "translate": [0, "=-bbox('trunk_mat').min.y", 0] }
+    },
+    "facets": { "type": "normal", "in": ["ground"], "params": { "cusp_angle": 40 } },
+    "paint": {
+      "type": "wrangle",
+      "in": ["facets"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (m) @Cd = m.baseColor;"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "copynum", "groups": "ends" } }
+  },
+  "output": "out",
+  "outputs": { "log": { "node": "out", "label": "Log", "kind": "mesh", "tags": ["log", "deadwood", "wood", "lowpoly"] } }
+}

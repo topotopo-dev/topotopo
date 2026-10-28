@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-231 node types and 41 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+231 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -24,7 +24,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file) · [scene_null](#scene_null)
-- [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
+- [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/kit](#topotopoarchitecturekit) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/kit](#topotoponaturekit) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/kit](#topotopopropskit) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/kit](#topotopostreetkit) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
 - [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_crop](#tex_crop) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
@@ -9427,13 +9427,13 @@ copies one's graph into the project's assets to edit.
 
 ### topotopo/architecture
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `architecture`
 
 TopoTopo's architecture kit, its 17 outputs side by side at their defaults.
 
 The package's default output and its preview, from arch to window_frame along +X, 1 m apart.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-The default output of package topotopo/architecture 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+The default output of package topotopo/architecture 1.1: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9445,15 +9445,15 @@ None.
 
 ### topotopo/architecture/arch
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `arch`, `opening`, `masonry`, `stone`, `modular`
 
 Stone arch: a wall block with a round, pointed (equilateral gothic) or flat-topped opening cut by a 2D boolean and extruded, with impost blocks at the spring line and a keystone.
 
 ![topotopo/architecture/arch](../library/architecture/thumbs/arch.png)
 
 Pivot at the centre of the base (the opening is centred on x = 0, depth along Z). Pieces: arch (stone), arch_trim (stone_dark). Every piece is closed.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "arch" of package topotopo/architecture 1.0 (Arch): it cooks node "out" of the package's graph "arch"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "arch" of package topotopo/architecture 1.1 (Arch): it cooks node "out" of the package's graph "arch"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9473,15 +9473,15 @@ None (generator).
 
 ### topotopo/architecture/beam_truss
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `truss`, `beam`, `structural`, `steel`, `timber`, `industrial`
 
 Planar truss in the XY plane: top and bottom chords, verticals and diagonals in Warren, Pratt or Howe layout, swept with a steel I-section or a square timber section.
 
 ![topotopo/architecture/beam_truss](../library/architecture/thumbs/beam_truss.png)
 
 Spans x = -span/2 … span/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "beam_truss" of package topotopo/architecture 1.0 (Truss): it cooks node "out" of the package's graph "beam_truss"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "beam_truss" of package topotopo/architecture 1.1 (Truss): it cooks node "out" of the package's graph "beam_truss"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9500,15 +9500,15 @@ None (generator).
 
 ### topotopo/architecture/brick_wall
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `wall`, `brick`, `masonry`, `modular`
 
 Brick wall from x = 0 to x = wall_length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core.
 
 ![topotopo/architecture/brick_wall](../library/architecture/thumbs/brick_wall.png)
 
 One wythe deep (headers are drawn as half bricks). Pivot at the start of the wall, on the ground, centred in thickness. Pieces: brick_wall_bricks (brick), brick_wall_mortar (mortar). Every piece is a closed box.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "brick_wall" of package topotopo/architecture 1.0 (Brick wall): it cooks node "out" of the package's graph "brick_wall"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "brick_wall" of package topotopo/architecture 1.1 (Brick wall): it cooks node "out" of the package's graph "brick_wall"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9529,15 +9529,15 @@ None (generator).
 
 ### topotopo/architecture/door_frame
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `door`, `wall-opening`, `modular`, `building`
 
 Door for a wall opening: jambs and head that fill the opening (width × height), a panelled leaf hinged on the left (-X) that swings towards -Z by open_angle, and lever handles on both sides.
 
 ![topotopo/architecture/door_frame](../library/architecture/thumbs/door_frame.png)
 
 Pivot at the bottom centre of the opening, centred in depth. Pieces: door_frame (paint_white), door_leaf (door_paint), door_handle (brass). Every piece is a closed box.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "door_frame" of package topotopo/architecture 1.0 (Door): it cooks node "out" of the package's graph "door_frame"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "door_frame" of package topotopo/architecture 1.1 (Door): it cooks node "out" of the package's graph "door_frame"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9556,15 +9556,15 @@ None (generator).
 
 ### topotopo/architecture/hex_grid_floor
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `floor`, `paving`, `hexagonal`, `tiles`
 
 Hexagonal paving: flat-topped hexagonal prisms on a hex lattice filling a rectangle (tiles whose centre lies inside), with gaps and random height and tint.
 
 ![topotopo/architecture/hex_grid_floor](../library/architecture/thumbs/hex_grid_floor.png)
 
 Pivot at the centre of the base. Piece: hex_tiles (paving). Every tile is a closed prism.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "hex_grid_floor" of package topotopo/architecture 1.0 (Hexagonal paving): it cooks node "out" of the package's graph "hex_grid_floor"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "hex_grid_floor" of package topotopo/architecture 1.1 (Hexagonal paving): it cooks node "out" of the package's graph "hex_grid_floor"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9584,15 +9584,15 @@ None (generator).
 
 ### topotopo/architecture/house
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `house`, `building`, `residential`, `footprint`, `modular`
 
 House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_skeleton hip roof that follows the footprint exactly (straight skeleton: L-shapes, courtyards and any simple polygon get correct valleys and ridges).
 
 ![topotopo/architecture/house](../library/architecture/thumbs/house.png)
 
 Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are this kit's own wall_segment and roof_skeleton outputs, so a change to those changes every house. Pivot: the footprint's origin on the ground. Pieces come from those outputs (wall, window_frame, door_frame, roof).
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "house" of package topotopo/architecture 1.0 (House): it cooks node "out" of the package's graph "house"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "house" of package topotopo/architecture 1.1 (House): it cooks node "out" of the package's graph "house"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9613,17 +9613,35 @@ Output "house" of package topotopo/architecture 1.0 (House): it cooks node "out"
 | `overhang` | float | `0.5` | 0..2 |  |  | eave overhang (m) |
 | `door` | bool | `true` |  |  |  | a door on the first footprint edge |
 
+### topotopo/architecture/kit
+
+category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `architecture`
+
+TopoTopo's architecture kit, its 17 outputs side by side at their defaults.
+
+The package's default output and its preview, from arch to window_frame along +X, 1 m apart.
+topotopo/architecture 1.1: kinds and tags
+Output "kit" of package topotopo/architecture 1.1 (Architecture kit): it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
 ### topotopo/architecture/pillar
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `pillar`, `column`, `classical`, `stone`
 
 Classical pillar: a round, fluted or square shaft with an optional plinth base and capital.
 
 ![topotopo/architecture/pillar](../library/architecture/thumbs/pillar.png)
 
 Pivot at the centre of the base. Pieces: pillar_shaft, pillar_base, pillar_capital (all stone_light). Every piece is closed.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "pillar" of package topotopo/architecture 1.0 (Pillar): it cooks node "out" of the package's graph "pillar"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "pillar" of package topotopo/architecture 1.1 (Pillar): it cooks node "out" of the package's graph "pillar"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9642,15 +9660,15 @@ None (generator).
 
 ### topotopo/architecture/railing
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `railing`, `balustrade`, `along-curve`, `metal`
 
 Railing along a curve (input 0; without one, a straight run of `run_length` along +X from the origin): posts at even spacing including both ends, a handrail on top, lower rails and balusters.
 
 ![topotopo/architecture/railing](../library/architecture/thumbs/railing.png)
 
 Sits on the curve (pivot = the curve). Pieces: railing_posts, railing_rails, railing_balusters (all metal_dark).
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "railing" of package topotopo/architecture 1.0 (Railing): it cooks node "out" of the package's graph "railing"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "railing" of package topotopo/architecture 1.1 (Railing): it cooks node "out" of the package's graph "railing"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9671,15 +9689,15 @@ Output "railing" of package topotopo/architecture 1.0 (Railing): it cooks node "
 
 ### topotopo/architecture/roof_gable
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `roof`, `gable-roof`, `building`, `modular`
 
 Gable roof for a width × depth footprint: two pitched slabs meeting at a ridge along X with a ridge cap, overhanging eaves and verges, and optional triangular gable walls under it.
 
 ![topotopo/architecture/roof_gable](../library/architecture/thumbs/roof_gable.png)
 
 Pivot at the centre of the wall-top plane (put it on top of the walls); the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on top, wood_dark on edges and underside), roof_ridge (roof_tiles), roof_gables (plaster). Every piece is closed.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "roof_gable" of package topotopo/architecture 1.0 (Gable roof): it cooks node "out" of the package's graph "roof_gable"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "roof_gable" of package topotopo/architecture 1.1 (Gable roof): it cooks node "out" of the package's graph "roof_gable"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9698,15 +9716,15 @@ None (generator).
 
 ### topotopo/architecture/roof_hip
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `roof`, `hip-roof`, `building`, `modular`
 
 Hip roof for a width × depth footprint: four slopes at the same pitch meeting at a ridge along the longer side (a pyramid on a square), a fascia band and a flat soffit under overhanging eaves, and a ridge cap.
 
 ![topotopo/architecture/roof_hip](../library/architecture/thumbs/roof_hip.png)
 
 Built as one closed solid (the attic is filled); there is no straight skeleton node yet, so footprints are rectangles. Pivot at the centre of the wall-top plane; the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on the slopes, wood_dark fascia and soffit), roof_ridge (roof_tiles). Every piece is closed.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "roof_hip" of package topotopo/architecture 1.0 (Hip roof): it cooks node "out" of the package's graph "roof_hip"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "roof_hip" of package topotopo/architecture 1.1 (Hip roof): it cooks node "out" of the package's graph "roof_hip"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9724,15 +9742,15 @@ None (generator).
 
 ### topotopo/architecture/roof_skeleton
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `roof`, `hip-roof`, `footprint`, `building`
 
 Straight-skeleton hip roof from an optional XZ footprint, including concave outlines and courtyard holes.
 
 ![topotopo/architecture/roof_skeleton](../library/architecture/thumbs/roof_skeleton.png)
 
 Without input it uses a width by depth rectangle. Negative offset distance adds the overhang before the roof is built; a connected extrusion gives the roof shell thickness along averaged vertex normals. Pivot is the wall-top plane. Every face carries the source contour edge as edge; the roof is one closed shell per connected footprint.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "roof_skeleton" of package topotopo/architecture 1.0 (Roof on a footprint): it cooks node "paint" of the package's graph "roof_skeleton"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "roof_skeleton" of package topotopo/architecture 1.1 (Roof on a footprint): it cooks node "paint" of the package's graph "roof_skeleton"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9752,15 +9770,15 @@ Output "roof_skeleton" of package topotopo/architecture 1.0 (Roof on a footprint
 
 ### topotopo/architecture/scaffold
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `scaffold`, `construction`, `industrial`, `modular`
 
 Tube-and-fitting scaffold: standards (verticals) on base plates, ledgers along X and transoms along Z at every lift, zig-zag face braces on the front (+Z), board decks on the lifts and guard rails at the top.
 
 ![topotopo/architecture/scaffold](../library/architecture/thumbs/scaffold.png)
 
 Runs along +X from x = 0. Pivot at the start, on the ground, centred in depth. Pieces: scaffold_tubes (galvanized), scaffold_boards (wood_light), scaffold_plates (metal_dark). Every piece is closed.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "scaffold" of package topotopo/architecture 1.0 (Scaffold): it cooks node "out" of the package's graph "scaffold"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "scaffold" of package topotopo/architecture 1.1 (Scaffold): it cooks node "out" of the package's graph "scaffold"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9780,15 +9798,15 @@ None (generator).
 
 ### topotopo/architecture/spiral_stairs
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `stairs`, `spiral`, `staircase`, `interior`
 
 Spiral staircase: wedge treads turning counter-clockwise (seen from above) around a central column, with an optional helical handrail on posts.
 
 ![topotopo/architecture/spiral_stairs](../library/architecture/thumbs/spiral_stairs.png)
 
 Pivot at the foot of the column. Pieces: spiral_treads (wood), spiral_column (metal_dark), spiral_railing (metal_dark). Every piece is closed.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "spiral_stairs" of package topotopo/architecture 1.0 (Spiral stairs): it cooks node "out" of the package's graph "spiral_stairs"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "spiral_stairs" of package topotopo/architecture 1.1 (Spiral stairs): it cooks node "out" of the package's graph "spiral_stairs"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9807,15 +9825,15 @@ None (generator).
 
 ### topotopo/architecture/stairs
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `stairs`, `staircase`, `concrete`, `wooden`
 
 Straight stairs climbing along +Z: a solid concrete flight (one watertight sawtooth solid) or open wooden treads between two stringers, with optional handrails on both sides.
 
 ![topotopo/architecture/stairs](../library/architecture/thumbs/stairs.png)
 
 Pivot at the bottom of the first step, centred in width. Pieces: stairs_flight (concrete) or stairs_treads (wood) + stairs_stringers (wood_dark), stairs_railing (metal_dark).
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "stairs" of package topotopo/architecture 1.0 (Stairs): it cooks node "out" of the package's graph "stairs"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "stairs" of package topotopo/architecture 1.1 (Stairs): it cooks node "out" of the package's graph "stairs"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9834,15 +9852,15 @@ None (generator).
 
 ### topotopo/architecture/tile_floor
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `floor`, `tiles`, `interior`
 
 Tiled floor: square tiles in a grid, offset (half-tile) or checker pattern with grout gaps, random height and tint, cut to the floor edges, on a grout bed.
 
 ![topotopo/architecture/tile_floor](../library/architecture/thumbs/tile_floor.png)
 
 Pivot at the centre of the base; the tile tops are at the bed thickness + tile thickness. Pieces: tile_floor_tiles (tile_light; tile_dark for the checker's dark squares), tile_floor_grout (grout). Every piece is a closed box.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "tile_floor" of package topotopo/architecture 1.0 (Tiled floor): it cooks node "out" of the package's graph "tile_floor"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "tile_floor" of package topotopo/architecture 1.1 (Tiled floor): it cooks node "out" of the package's graph "tile_floor"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9863,15 +9881,15 @@ None (generator).
 
 ### topotopo/architecture/wall_segment
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `wall`, `window`, `building`, `modular`
 
 Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this kit's window_frame and door_frame outputs.
 
 ![topotopo/architecture/wall_segment](../library/architecture/thumbs/wall_segment.png)
 
 The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "wall_segment" of package topotopo/architecture 1.0 (Wall): it cooks node "out" of the package's graph "wall_segment"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "wall_segment" of package topotopo/architecture 1.1 (Wall): it cooks node "out" of the package's graph "wall_segment"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9893,15 +9911,15 @@ None (generator).
 
 ### topotopo/architecture/window_frame
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `window`, `glass`, `wall-opening`, `modular`, `building`
 
 Window for a wall opening: a frame that fills the opening (width × height), mullions, a glass pane and a stone sill that sticks out at the front (+Z).
 
 ![topotopo/architecture/window_frame](../library/architecture/thumbs/window_frame.png)
 
 Pivot at the bottom centre of the opening, centred in depth. Pieces: window_frame (paint_white), window_glass (glass), window_sill (stone). Every piece is a closed box.
-topotopo/architecture 1.0: first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds
-Output "window_frame" of package topotopo/architecture 1.0 (Window): it cooks node "out" of the package's graph "window_frame"; its params are that graph's vars.
+topotopo/architecture 1.1: kinds and tags
+Output "window_frame" of package topotopo/architecture 1.1 (Window): it cooks node "out" of the package's graph "window_frame"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9922,13 +9940,13 @@ None (generator).
 
 ### topotopo/nature
 
-category: `package`
+category: `package` · kind: `scene` · tags: `kit`, `lineup`, `nature`
 
 TopoTopo's nature kit, its 8 outputs side by side at their defaults.
 
 The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-The default output of package topotopo/nature 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+The default output of package topotopo/nature 1.1: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9940,15 +9958,15 @@ None.
 
 ### topotopo/nature/bush
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `bush`, `foliage`, `vegetation`, `lowpoly`
 
 Low-poly bush: overlapping faceted blobs, cut flat at the ground.
 
 ![topotopo/nature/bush](../library/nature/thumbs/bush.png)
 
 Pivot at the centre of the base. Piece: bush (foliage_dark). Open at the bottom.
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "bush" of package topotopo/nature 1.0 (Bush): it cooks node "out" of the package's graph "bush"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "bush" of package topotopo/nature 1.1 (Bush): it cooks node "out" of the package's graph "bush"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9966,15 +9984,15 @@ None (generator).
 
 ### topotopo/nature/cliff_block
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `cliff`, `rock`, `mountain`, `lowpoly`
 
 Cliff block: a tall rock mass with ridged noise, horizontal strata ledges and banded colour, flat on the ground.
 
 ![topotopo/nature/cliff_block](../library/nature/thumbs/cliff_block.png)
 
 Pivot at the centre of the base. Piece: cliff (cliff_rock). Closed (watertight).
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "cliff_block" of package topotopo/nature 1.0 (Cliff block): it cooks node "out" of the package's graph "cliff_block"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "cliff_block" of package topotopo/nature 1.1 (Cliff block): it cooks node "out" of the package's graph "cliff_block"; its params are that graph's vars.
 
 **Inputs**
 
@@ -9993,15 +10011,15 @@ None (generator).
 
 ### topotopo/nature/forest_patch
 
-category: `package`
+category: `package` · kind: `instances` · tags: `forest`, `trees`, `conifer`, `vegetation`, `scatter`, `lowpoly`
 
 Forest on a surface (input 0; without one, a 30 × 30 m ground patch at y = 0): trees scattered by density with a minimum spacing on faces flatter than max_slope, kept upright with random yaw and height, as packed copies of three tree_lowpoly variants (conifer, round, poplar) picked by conifer_ratio, plus optional bushes between them.
 
 ![topotopo/nature/forest_patch](../library/nature/thumbs/forest_patch.png)
 
 Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Pieces: tree_trunk, tree_canopy, bush.
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "forest_patch" of package topotopo/nature 1.0 (Forest): it cooks node "out" of the package's graph "forest_patch"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "forest_patch" of package topotopo/nature 1.1 (Forest): it cooks node "out" of the package's graph "forest_patch"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10025,15 +10043,15 @@ Output "forest_patch" of package topotopo/nature 1.0 (Forest): it cooks node "ou
 
 ### topotopo/nature/grass_clumps
 
-category: `package`
+category: `package` · kind: `instances` · tags: `grass`, `foliage`, `vegetation`, `ground-cover`, `scatter`
 
 Grass clumps on a surface (input 0; without one, a 4 × 4 m ground patch at y = 0): each clump is a fan of thin two-sided blades leaning outwards; clumps are scattered by density on faces flatter than max_slope and copied as packed instances of two variants with random yaw and size.
 
 ![topotopo/nature/grass_clumps](../library/nature/thumbs/grass_clumps.png)
 
 Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: grass (grass, double sided).
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "grass_clumps" of package topotopo/nature 1.0 (Grass): it cooks node "out" of the package's graph "grass_clumps"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "grass_clumps" of package topotopo/nature 1.1 (Grass): it cooks node "out" of the package's graph "grass_clumps"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10053,17 +10071,35 @@ Output "grass_clumps" of package topotopo/nature 1.0 (Grass): it cooks node "out
 | `ground_size` | float | `4` | 0.5..20 |  |  | size of the ground patch used when nothing is connected (m) |
 | `seed` | int | `0` | 0..1000 |  |  | random seed |
 
+### topotopo/nature/kit
+
+category: `package` · kind: `scene` · tags: `kit`, `lineup`, `nature`
+
+TopoTopo's nature kit, its 8 outputs side by side at their defaults.
+
+The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.
+topotopo/nature 1.1: kinds and tags
+Output "kit" of package topotopo/nature 1.1 (Nature kit): it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
 ### topotopo/nature/log
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `log`, `deadwood`, `wood`, `lowpoly`
 
 Felled log lying along X: a tapered trunk with ridged bark, light end grain and a few branch stubs.
 
 ![topotopo/nature/log](../library/nature/thumbs/log.png)
 
 Pivot at the centre of the base (the log rests on y = 0). Pieces: log_trunk (bark, ends wood_end), log_stubs (bark). The trunk is closed.
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "log" of package topotopo/nature 1.0 (Log): it cooks node "out" of the package's graph "log"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "log" of package topotopo/nature 1.1 (Log): it cooks node "out" of the package's graph "log"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10082,15 +10118,15 @@ None (generator).
 
 ### topotopo/nature/rock
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `rock`, `stone`, `boulder`, `lowpoly`
 
 Low-poly rock: a noise-displaced icosphere, flattened, with faceted shading and a mottled tint.
 
 ![topotopo/nature/rock](../library/nature/thumbs/rock.png)
 
 Pivot at the centre of the base (sink lowers it into the ground). Piece: rock (rock). Closed (watertight).
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "rock" of package topotopo/nature 1.0 (Rock): it cooks node "out" of the package's graph "rock"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "rock" of package topotopo/nature 1.1 (Rock): it cooks node "out" of the package's graph "rock"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10109,15 +10145,15 @@ None (generator).
 
 ### topotopo/nature/scatter_rocks
 
-category: `package`
+category: `package` · kind: `instances` · tags: `rocks`, `stone`, `ground-cover`, `scatter`
 
 Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this kit's rock output) sunk slightly into the ground.
 
 ![topotopo/nature/scatter_rocks](../library/nature/thumbs/scatter_rocks.png)
 
 Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "scatter_rocks" of package topotopo/nature 1.0 (Scattered rocks): it cooks node "out" of the package's graph "scatter_rocks"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "scatter_rocks" of package topotopo/nature 1.1 (Scattered rocks): it cooks node "out" of the package's graph "scatter_rocks"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10138,15 +10174,15 @@ Output "scatter_rocks" of package topotopo/nature 1.0 (Scattered rocks): it cook
 
 ### topotopo/nature/tree_lowpoly
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `tree`, `conifer`, `deciduous`, `vegetation`, `lowpoly`
 
 Low-poly tree in three styles: round (a cluster of faceted blobs), conifer (stacked cones) and poplar (a tall narrow crown).
 
 ![topotopo/nature/tree_lowpoly](../library/nature/thumbs/tree_lowpoly.png)
 
 Pivot at the base of the trunk. Pieces: tree_trunk (bark), tree_canopy (foliage, or foliage_dark for conifers). Every piece is closed.
-topotopo/nature 1.0: first version: rocks, cliff blocks, trees, bushes, logs, and forests, grass and rock fields on a surface
-Output "tree_lowpoly" of package topotopo/nature 1.0 (Tree): it cooks node "out" of the package's graph "tree_lowpoly"; its params are that graph's vars.
+topotopo/nature 1.1: kinds and tags
+Output "tree_lowpoly" of package topotopo/nature 1.1 (Tree): it cooks node "out" of the package's graph "tree_lowpoly"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10164,13 +10200,13 @@ None (generator).
 
 ### topotopo/props
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `props`
 
 TopoTopo's props kit, its 5 outputs side by side at their defaults.
 
 The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.
-topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
-The default output of package topotopo/props 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+topotopo/props 1.1: kinds and tags
+The default output of package topotopo/props 1.1: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10182,15 +10218,15 @@ None.
 
 ### topotopo/props/barrel
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `barrel`, `container`, `wooden`, `prop`
 
 Wooden barrel: a bulged body of faceted staves with a recessed lid, and metal hoops.
 
 ![topotopo/props/barrel](../library/props/thumbs/barrel.png)
 
 Pivot at the centre of the base, axis Y. Pieces: barrel_body (wood), barrel_hoops (metal_dark). Every piece is closed.
-topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
-Output "barrel" of package topotopo/props 1.0 (Barrel): it cooks node "out" of the package's graph "barrel"; its params are that graph's vars.
+topotopo/props 1.1: kinds and tags
+Output "barrel" of package topotopo/props 1.1 (Barrel): it cooks node "out" of the package's graph "barrel"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10209,15 +10245,15 @@ None (generator).
 
 ### topotopo/props/crate
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `crate`, `container`, `wooden`, `prop`
 
 Wooden crate: plank walls with gaps on all six sides inside a frame of edge battens.
 
 ![topotopo/props/crate](../library/props/thumbs/crate.png)
 
 Pivot at the centre of the base. Pieces: crate_planks (wood), crate_frame (wood_dark). Every piece is a closed box.
-topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
-Output "crate" of package topotopo/props 1.0 (Crate): it cooks node "out" of the package's graph "crate"; its params are that graph's vars.
+topotopo/props 1.1: kinds and tags
+Output "crate" of package topotopo/props 1.1 (Crate): it cooks node "out" of the package's graph "crate"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10235,17 +10271,35 @@ None (generator).
 | `gap` | float | `0.01` | 0..0.03 |  |  | gap between planks (m) |
 | `seed` | int | `0` | 0..1000 |  |  | random seed of the plank tint |
 
+### topotopo/props/kit
+
+category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `props`
+
+TopoTopo's props kit, its 5 outputs side by side at their defaults.
+
+The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.
+topotopo/props 1.1: kinds and tags
+Output "kit" of package topotopo/props 1.1 (Props kit): it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
 ### topotopo/props/pallet
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `pallet`, `warehouse`, `wooden`, `prop`
 
 Block pallet (EUR style): bottom boards, a 3 × 3 grid of blocks, cross boards and a top deck.
 
 ![topotopo/props/pallet](../library/props/thumbs/pallet.png)
 
 Pivot at the centre of the base; deck boards run along X. Pieces: pallet_boards (wood_light), pallet_blocks (wood). Every piece is a closed box.
-topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
-Output "pallet" of package topotopo/props 1.0 (Pallet): it cooks node "out" of the package's graph "pallet"; its params are that graph's vars.
+topotopo/props 1.1: kinds and tags
+Output "pallet" of package topotopo/props 1.1 (Pallet): it cooks node "out" of the package's graph "pallet"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10264,15 +10318,15 @@ None (generator).
 
 ### topotopo/props/pipe_run
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `pipe`, `industrial`, `along-curve`, `metal`
 
 Pipe run along a polyline (input 0; without one, a default run that turns and rises): corners rounded into elbows of bend_radius, flanges at both ends and every flange_spacing metres, and floor stands under horizontal stretches.
 
 ![topotopo/props/pipe_run](../library/props/thumbs/pipe_run.png)
 
 Pivot = the curve (the default run starts at the origin, 0.5 m up). Pieces: pipe (pipe_paint), pipe_flanges (steel), pipe_supports (metal_dark). Every piece is closed.
-topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
-Output "pipe_run" of package topotopo/props 1.0 (Pipe run): it cooks node "out" of the package's graph "pipe_run"; its params are that graph's vars.
+topotopo/props 1.1: kinds and tags
+Output "pipe_run" of package topotopo/props 1.1 (Pipe run): it cooks node "out" of the package's graph "pipe_run"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10293,15 +10347,15 @@ Output "pipe_run" of package topotopo/props 1.0 (Pipe run): it cooks node "out" 
 
 ### topotopo/props/sandbag_wall
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `sandbags`, `barrier`, `cover`, `wall`
 
 Sandbag wall from x = 0 to x = wall_length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint.
 
 ![topotopo/props/sandbag_wall](../library/props/thumbs/sandbag_wall.png)
 
 Pivot at the start of the wall, on the ground, centred in depth. Piece: sandbags (burlap). Every bag is closed.
-topotopo/props 1.0: first version: barrels, crates, pallets, sandbag walls and pipe runs
-Output "sandbag_wall" of package topotopo/props 1.0 (Sandbag wall): it cooks node "out" of the package's graph "sandbag_wall"; its params are that graph's vars.
+topotopo/props 1.1: kinds and tags
+Output "sandbag_wall" of package topotopo/props 1.1 (Sandbag wall): it cooks node "out" of the package's graph "sandbag_wall"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10320,13 +10374,13 @@ None (generator).
 
 ### topotopo/street
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `street`
 
 TopoTopo's street kit, its 7 outputs side by side at their defaults.
 
 The package's default output and its preview, from bench to sign_post along +X, 1 m apart.
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-The default output of package topotopo/street 1.0: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+The default output of package topotopo/street 1.1: it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10338,15 +10392,15 @@ None.
 
 ### topotopo/street/bench
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `bench`, `seating`, `park`, `street-furniture`
 
 Park bench along X: wooden seat slats and an optional reclined backrest on cast-iron side frames (two, or three on long benches).
 
 ![topotopo/street/bench](../library/street/thumbs/bench.png)
 
 The seat faces +Z. Pivot at the centre of the base. Pieces: bench_slats (wood), bench_frames (metal_dark). Every piece is closed.
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-Output "bench" of package topotopo/street 1.0 (Bench): it cooks node "out" of the package's graph "bench"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+Output "bench" of package topotopo/street 1.1 (Bench): it cooks node "out" of the package's graph "bench"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10365,15 +10419,15 @@ None (generator).
 
 ### topotopo/street/bollard
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `bollard`, `barrier`, `street-furniture`
 
 Street bollard: a round post with a domed top or a square post with a pyramid cap, an optional reflective band and a base ring.
 
 ![topotopo/street/bollard](../library/street/thumbs/bollard.png)
 
 Pivot at the centre of the base. Pieces: bollard_body (metal_dark), bollard_band (reflective). Every piece is closed.
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-Output "bollard" of package topotopo/street 1.0 (Bollard): it cooks node "out" of the package's graph "bollard"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+Output "bollard" of package topotopo/street 1.1 (Bollard): it cooks node "out" of the package's graph "bollard"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10390,15 +10444,15 @@ None (generator).
 
 ### topotopo/street/cable
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `cable`, `power-line`, `utility-pole`, `street-furniture`
 
 Hanging cable between two points: a catenary that sags by `sag` below the straight line at mid-span, swept as a tube, with optional wooden poles (with a cross arm and insulators) standing on y = 0 under the ends.
 
 ![topotopo/street/cable](../library/street/thumbs/cable.png)
 
 With the default end points the pivot is the foot of the first pole. Pieces: cable (rubber), cable_poles (wood_dark), cable_insulators (ceramic). Every piece is closed.
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-Output "cable" of package topotopo/street 1.0 (Cable): it cooks node "out" of the package's graph "cable"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+Output "cable" of package topotopo/street 1.1 (Cable): it cooks node "out" of the package's graph "cable"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10417,15 +10471,15 @@ None (generator).
 
 ### topotopo/street/fence
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `fence`, `barrier`, `garden`, `along-curve`
 
 Fence along a curve (input 0; without one, a straight run of `run_length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails).
 
 ![topotopo/street/fence](../library/street/thumbs/fence.png)
 
 Posts at even spacing including both ends. Sits on the curve (pivot = the curve). Pieces: fence_posts, fence_infill (paint_white, wood or wood_dark by style).
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-Output "fence" of package topotopo/street 1.0 (Fence): it cooks node "out" of the package's graph "fence"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+Output "fence" of package topotopo/street 1.1 (Fence): it cooks node "out" of the package's graph "fence"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10444,17 +10498,35 @@ Output "fence" of package topotopo/street 1.0 (Fence): it cooks node "out" of th
 | `picket_spacing` | float | `0.15` | 0.08..0.5 |  |  | picket style: distance between pickets (m) |
 | `seed` | int | `0` | 0..1000 |  |  | random seed of the board tint |
 
+### topotopo/street/kit
+
+category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `street`
+
+TopoTopo's street kit, its 7 outputs side by side at their defaults.
+
+The package's default output and its preview, from bench to sign_post along +X, 1 m apart.
+topotopo/street 1.1: kinds and tags
+Output "kit" of package topotopo/street 1.1 (Street kit): it cooks node "kit" of the package's graph "kit"; its params are that graph's vars.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
+
 ### topotopo/street/lamp_post
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `lamp`, `street-light`, `lighting`, `street-furniture`
 
 Street lamp: a tapered pole on a flared base with 1–4 curved arms carrying shades and glowing glass (arms 0 = a lantern on top of the pole).
 
 ![topotopo/street/lamp_post](../library/street/thumbs/lamp_post.png)
 
 The first arm points along +X. Pivot at the centre of the base. Pieces: lamp_pole, lamp_arms, lamp_heads (metal_dark), lamp_glass (lamp_glass, emissive). Every piece is closed.
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-Output "lamp_post" of package topotopo/street 1.0 (Lamp post): it cooks node "out" of the package's graph "lamp_post"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+Output "lamp_post" of package topotopo/street 1.1 (Lamp post): it cooks node "out" of the package's graph "lamp_post"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10472,15 +10544,15 @@ None (generator).
 
 ### topotopo/street/road_strip
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `road`, `street`, `asphalt`, `sidewalk`, `along-curve`
 
 Road along a curve (input 0; without one, a gentle 24 m S-curve along X): an asphalt ribbon of `width` centred on the curve with solid white edge lines, dashed lane lines between `lanes` lanes, and kerbs with sidewalks on both sides.
 
 ![topotopo/street/road_strip](../library/street/thumbs/road_strip.png)
 
 Follows the curve's height (drape the curve on a terrain first). Pivot = the curve. Pieces: road_surface (asphalt), road_markings (road_paint), road_kerbs (concrete), road_sidewalks (paving).
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-Output "road_strip" of package topotopo/street 1.0 (Road): it cooks node "out" of the package's graph "road_strip"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+Output "road_strip" of package topotopo/street 1.1 (Road): it cooks node "out" of the package's graph "road_strip"; its params are that graph's vars.
 
 **Inputs**
 
@@ -10501,15 +10573,15 @@ Output "road_strip" of package topotopo/street 1.0 (Road): it cooks node "out" o
 
 ### topotopo/street/sign_post
 
-category: `package`
+category: `package` · kind: `mesh` · tags: `sign`, `street-sign`, `text`, `street-furniture`
 
 Street name sign: a post with a ball cap and a green blade (two crossed blades for a corner) carrying raised white lettering on both faces, scaled to fit.
 
 ![topotopo/street/sign_post](../library/street/thumbs/sign_post.png)
 
 The first blade faces ±Z. Pivot at the centre of the base. Pieces: sign_post (galvanized), sign_panel (sign_green), sign_text (sign_white). Every piece is closed.
-topotopo/street 1.0: first version: roads, lamp posts, bollards, benches, street signs, fences and cables
-Output "sign_post" of package topotopo/street 1.0 (Street sign): it cooks node "out" of the package's graph "sign_post"; its params are that graph's vars.
+topotopo/street 1.1: kinds and tags
+Output "sign_post" of package topotopo/street 1.1 (Street sign): it cooks node "out" of the package's graph "sign_post"; its params are that graph's vars.
 
 **Inputs**
 

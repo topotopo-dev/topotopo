@@ -3,7 +3,8 @@
 // (the package's default output, and its preview) lines the kit's outputs up side by side. Its published versions are
 // in library/<kit>/versions/; an installed TopoTopo ships those alone. This script keeps the derived files in step with
 // the kits' graphs and publishes their versions, which nothing else does:
-//   library/<kit>/graphs/kit.json        the line-up: every output at its defaults, side by side along +X
+//   library/<kit>/graphs/kit.json        the line-up: every output at its defaults, side by side along +X, also
+//                                        published as the output "kit" (its kind pinned, tagged)
 //   library/<kit>/thumbs/<output>.png    a 256 px matcap thumbnail of each output cooked at its defaults
 //   README.md                            the thumbnail tables between the kits markers
 //
@@ -69,8 +70,18 @@ export function typesUsed(g: GraphSpec, out = new Set<string>()): Set<string> {
 export const kitText = (k: Kit) => k.manifest.description.replace(/^[^:]*:\s*/, '');
 
 /**
+ * What a kit's line-up is: the kind its outputs share, or a scene when they are of several kinds (src/graph/outputs.ts;
+ * publishing checks it, as it checks every kind a kit pins).
+ */
+export const lineupKind = (k: Kit) => {
+  const kinds = new Set(k.outputs.map((o) => o.graph.outputs?.[o.name]?.kind));
+  return kinds.size === 1 ? [...kinds][0] ?? 'scene' : 'scene';
+};
+
+/**
  * The graph a kit shows: each output at its defaults, side by side along +X in name order, from x = 0 with GAP metres
- * between them (`sizes`: each output's bounding box along X, as cooked).
+ * between them (`sizes`: each output's bounding box along X, as cooked). Its output "kit" is the package's default
+ * output, with its kind pinned and its tags.
  */
 export function lineupGraph(k: Kit, sizes: Map<string, [number, number]>): GraphSpec {
   const nodes: Record<string, NodeSpec> = {};
@@ -85,6 +96,7 @@ export function lineupGraph(k: Kit, sizes: Map<string, [number, number]>): Graph
   return {
     description: `TopoTopo's ${k.name} kit, its ${k.outputs.length} outputs side by side at their defaults. The package's default output and its preview, from ${k.outputs[0].name} to ${k.outputs.at(-1)!.name} along +X, ${GAP} m apart.`,
     nodes, output: 'kit',
+    outputs: { kit: { node: 'kit', label: k.manifest.title, kind: lineupKind(k), tags: ['kit', 'lineup', k.name] } },
   };
 }
 /** A line-up as its file holds it: one node per line. */
@@ -94,7 +106,8 @@ export const lineupText = (g: GraphSpec) => [
   '  "nodes": {',
   Object.entries(g.nodes).map(([k, v]) => `    ${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(',\n'),
   '  },',
-  `  "output": ${JSON.stringify(g.output)}`,
+  `  "output": ${JSON.stringify(g.output)},`,
+  `  "outputs": ${JSON.stringify(g.outputs)}`,
   '}',
 ].join('\n') + '\n';
 

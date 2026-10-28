@@ -1,0 +1,24 @@
+{
+  "description": "TopoTopo's nature kit, its 8 outputs side by side at their defaults. The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.",
+  "nodes": {
+    "bush": {"type":"topotopo/nature/bush"},
+    "bush_at": {"type":"transform","in":["bush"],"params":{"translate":[0.746,0,0]}},
+    "cliff_block": {"type":"topotopo/nature/cliff_block"},
+    "cliff_block_at": {"type":"transform","in":["cliff_block"],"params":{"translate":[4.508,0,0]}},
+    "forest_patch": {"type":"topotopo/nature/forest_patch"},
+    "forest_patch_at": {"type":"transform","in":["forest_patch"],"params":{"translate":[25.695,0,0]}},
+    "grass_clumps": {"type":"topotopo/nature/grass_clumps"},
+    "grass_clumps_at": {"type":"transform","in":["grass_clumps"],"params":{"translate":[45.36,0,0]}},
+    "log": {"type":"topotopo/nature/log"},
+    "log_at": {"type":"transform","in":["log"],"params":{"translate":[49.82,0,0]}},
+    "rock": {"type":"topotopo/nature/rock"},
+    "rock_at": {"type":"transform","in":["rock"],"params":{"translate":[52.531,0,0]}},
+    "scatter_rocks": {"type":"topotopo/nature/scatter_rocks"},
+    "scatter_rocks_at": {"type":"transform","in":["scatter_rocks"],"params":{"translate":[58.445,0,0]}},
+    "tree_lowpoly": {"type":"topotopo/nature/tree_lowpoly"},
+    "tree_lowpoly_at": {"type":"transform","in":["tree_lowpoly"],"params":{"translate":[65.564,0,0]}},
+    "kit": {"type":"merge","in":["bush_at","cliff_block_at","forest_patch_at","grass_clumps_at","log_at","rock_at","scatter_rocks_at","tree_lowpoly_at"]}
+  },
+  "output": "kit",
+  "outputs": {"kit":{"node":"kit","label":"Nature kit","kind":"scene","tags":["kit","lineup","nature"]}}
+}

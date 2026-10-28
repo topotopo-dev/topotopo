@@ -103,7 +103,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "copynum" } }
   },
   "output": "out",
-  "outputs": { "door_frame": { "node": "out", "label": "Door" } },
+  "outputs": { "door_frame": { "node": "out", "label": "Door", "kind": "mesh", "tags": ["door", "wall-opening", "modular", "building"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 30, "elevation": 12 }

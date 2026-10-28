@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "description": "Straight-skeleton hip roof from an optional XZ footprint, including concave outlines and courtyard holes. Without input it uses a width by depth rectangle. Negative offset distance adds the overhang before the roof is built; a connected extrusion gives the roof shell thickness along averaged vertex normals. Pivot is the wall-top plane. Every face carries the source contour edge as edge; the roof is one closed shell per connected footprint.",
+  "params": {
+    "width": { "type": "float", "default": 8, "min": 1, "max": 40, "desc": "default footprint width along X (m)" },
+    "depth": { "type": "float", "default": 6, "min": 1, "max": 40, "desc": "default footprint depth along Z (m)" },
+    "pitch": { "type": "float", "default": 32, "min": 5, "max": 65, "desc": "roof face slope (degrees)" },
+    "overhang": { "type": "float", "default": 0.4, "min": 0, "max": 2, "desc": "outward footprint offset before roofing (m)" },
+    "thickness": { "type": "float", "default": 0.16, "min": 0.03, "max": 0.6, "desc": "shell extrusion along averaged vertex normals (m)" }
+  },
+  "vars": { "width": 8, "depth": 6, "pitch": 32, "overhang": 0.4, "thickness": 0.16 },
+  "nodes": {
+    "inp": { "type": "input", "params": { "index": 0, "label": "footprint: closed XZ polygons, optional" } },
+    "rect": { "type": "grid", "params": { "size": ["=width", "=depth"], "divisions": [1, 1] } },
+    "footprint": { "type": "switch", "in": ["inp", "rect"], "params": { "index": "=npoints('inp') > 2 ? 0 : 1" } },
+    "eaves": { "type": "straight_skeleton", "in": ["footprint"], "params": { "mode": "offset", "distance": "=-overhang" } },
+    "roof": { "type": "straight_skeleton", "in": ["eaves"], "params": { "mode": "roof", "pitch": "=pitch" } },
+    "shell": { "type": "poly_extrude", "in": ["roof"], "params": { "distance": "=thickness", "mode": "connected", "keep_back": true } },
+    "name": { "type": "attrib_create", "in": ["shell"], "params": { "name": "name", "class": "prim", "value": "roof" } },
+    "material": { "type": "material", "in": ["name"], "params": { "name": "roof_tiles", "base_color": "#9a4a35", "roughness": 0.8 } },
+    "paint": { "type": "color", "in": ["material"], "params": { "color": "#9a4a35" } }
+  },
+  "output": "paint",
+  "outputs": { "roof_skeleton": { "node": "paint", "label": "Roof on a footprint", "kind": "mesh", "tags": ["roof", "hip-roof", "footprint", "building"] } },
+  "meta": { "inputs": ["footprint"], "pivot": "wall_top", "watertight": true, "thumbnail_render": { "elevation": 30 } }
+}

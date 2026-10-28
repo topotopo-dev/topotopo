@@ -58,7 +58,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint scale orient copynum" } }
   },
   "output": "out",
-  "outputs": { "sandbag_wall": { "node": "out", "label": "Sandbag wall" } },
+  "outputs": { "sandbag_wall": { "node": "out", "label": "Sandbag wall", "kind": "mesh", "tags": ["sandbags", "barrier", "cover", "wall"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 25, "elevation": 20 }

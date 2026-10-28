@@ -62,6 +62,6 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint scale copynum" } }
   },
   "output": "out",
-  "outputs": { "hex_grid_floor": { "node": "out", "label": "Hexagonal paving" } },
+  "outputs": { "hex_grid_floor": { "node": "out", "label": "Hexagonal paving", "kind": "mesh", "tags": ["floor", "paving", "hexagonal", "tiles"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 40 } }
 }

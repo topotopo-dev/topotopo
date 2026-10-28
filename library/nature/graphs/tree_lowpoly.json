@@ -95,6 +95,6 @@
     }
   },
   "output": "out",
-  "outputs": { "tree_lowpoly": { "node": "out", "label": "Tree" } },
+  "outputs": { "tree_lowpoly": { "node": "out", "label": "Tree", "kind": "mesh", "tags": ["tree", "conifer", "deciduous", "vegetation", "lowpoly"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 15 } }
 }

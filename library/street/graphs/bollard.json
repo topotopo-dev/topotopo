@@ -129,6 +129,6 @@
     "out": { "type": "normal", "in": ["paint"], "params": { "cusp_angle": 45 } }
   },
   "output": "out",
-  "outputs": { "bollard": { "node": "out", "label": "Bollard" } },
+  "outputs": { "bollard": { "node": "out", "label": "Bollard", "kind": "mesh", "tags": ["bollard", "barrier", "street-furniture"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 20 } }
 }

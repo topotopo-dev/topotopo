@@ -133,6 +133,6 @@
     "out": { "type": "normal", "in": ["paint"], "params": { "cusp_angle": 50 } }
   },
   "output": "out",
-  "outputs": { "pillar": { "node": "out", "label": "Pillar" } },
+  "outputs": { "pillar": { "node": "out", "label": "Pillar", "kind": "mesh", "tags": ["pillar", "column", "classical", "stone"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 15 } }
 }

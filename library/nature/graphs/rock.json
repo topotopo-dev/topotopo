@@ -71,6 +71,6 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint rest" } }
   },
   "output": "out",
-  "outputs": { "rock": { "node": "out", "label": "Rock" } },
+  "outputs": { "rock": { "node": "out", "label": "Rock", "kind": "mesh", "tags": ["rock", "stone", "boulder", "lowpoly"] } },
   "meta": { "watertight": true }
 }

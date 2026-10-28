@@ -21,6 +21,6 @@
     "paint": { "type": "color", "in": ["material"], "params": { "color": "#9a4a35" } }
   },
   "output": "paint",
-  "outputs": { "roof_skeleton": { "node": "paint", "label": "Roof on a footprint" } },
+  "outputs": { "roof_skeleton": { "node": "paint", "label": "Roof on a footprint", "kind": "mesh", "tags": ["roof", "hip-roof", "footprint", "building"] } },
   "meta": { "inputs": ["footprint"], "pivot": "wall_top", "watertight": true, "thumbnail_render": { "elevation": 30 } }
 }

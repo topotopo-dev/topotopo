@@ -7,8 +7,9 @@
 // the origin inside the footprint); meta.watertight promises closed pieces; the default cook (cold cache) takes under
 // 1 s. Then every numeric param at its min and max, every enum option and every bool flipped must cook without errors
 // (and stay watertight when promised), and curve/surface outputs must also cook on their fixture input.
-// Per kit: topotopo/<folder>, one output per graph named as its file, the graph it shows lines its outputs up (its
-// default output cooks), and its working folder is its newest version; the thumbnails and the README table are current
+// Per kit: topotopo/<folder>, one output per graph named as its file with a pinned kind and tags (which its newest
+// version records, the line-up "kit" among them), the graph it shows lines its outputs up (its default output cooks),
+// and its working folder is its newest version; the thumbnails and the README table are current
 // (gen-kits --check). Also: the assets tool forks an output's graph into the project's assets, which keeps list, get,
 // save and delete for its own; the catalog and help list the outputs with their descriptions.
 import fs from 'node:fs';
@@ -104,7 +105,14 @@ for (const k of kits) {
   for (const o of k.outputs) {
     const outs = Object.keys(o.graph.outputs ?? {});
     check(outs.length === 1 && outs[0] === o.name && o.graph.outputs![o.name].node === o.graph.output, `${o.file}: one output, named as its file, its graph's output node (${outs.join(', ')})`);
+    const out = o.graph.outputs?.[o.name];
+    check(!!out?.kind && (out.tags?.length ?? 0) >= 3, `${o.file}: a pinned kind and at least 3 tags (${out?.kind}; ${out?.tags?.join(', ')})`);
   }
+  // what the newest version records: every output's kind and tags, the line-up ("kit") among them
+  const newest = k.versions.at(-1);
+  const recorded = newest ? Object.entries(newest.outputs) : [];
+  check(recorded.length === k.outputs.length + 1 && recorded.every(([, x]) => !!x.kind && !!x.tags?.length) && !!newest?.outputs.kit && newest.default.kind === newest.outputs.kit.kind,
+    `${k.package} ${newest?.version}: every output with its kind and tags, the line-up "kit" its default output (${recorded.filter(([, x]) => !x.kind || !x.tags?.length).map(([n]) => n).join(', ') || 'all recorded'})`);
   const sizes = new Map<string, [number, number]>();
   for (const o of k.outputs) {
     const r = await engine.cook({ nodes: { o: { type: o.type } }, output: 'o' });
@@ -231,6 +239,8 @@ if (!filter || 'stairs house'.includes(filter)) {
   const help = await txt('help', { nodes: ['topotopo/architecture/stairs', 'topotopo/nature/rock'] });
   check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this workspace: package topotopo\/nature is not in this project's uses/.test(help.text),
     'help documents an output, and says when the project does not use its kit yet');
+  check(/\ntopotopo\/nature\/rock ◦ — Low-poly rock[^\n]* \[kind mesh · tags rock, stone, boulder, lowpoly\]\n/.test(`\n${cat.text.split('\n').map((l) => l.trim()).join('\n')}\n`) && /\nkind instances · tags forest, trees, conifer/.test((await txt('help', { nodes: ['topotopo/nature/forest_patch'] })).text)
+    && /topotopo\/nature\/forest_patch/.test((await txt('catalog', { search: 'conifer' })).text), 'the catalog and help give an output\'s kind and tags, and the catalog\'s search finds a tag');
   // a bare name is no node type, and nothing makes it one: the error names the output of that name, used or not
   const bareType = (await e2.cook({ nodes: { r: { type: 'rock' } }, output: 'r' })).errors.map((e) => e.message).join('; ');
   check(/^unknown node type "rock" — did you mean topotopo\/nature\/rock[,?]/.test(bareType), `a bare name suggests the output of that name first: ${bareType}`);
