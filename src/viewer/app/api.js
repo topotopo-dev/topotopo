@@ -61,6 +61,22 @@ export const api = {
     const { status, j } = await json('/api/markers', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
     return status === 200 && j.ok ? j : fail(j.error ?? `${status}`);
   },
+  /** The project's packages: {project, packages, problems, running, compare} (project null: no project), or null */
+  async packages() { const { status, j } = await json('/api/packages'); return status === 200 ? j : null; },
+  /** The before/after of updating a package (to `to`, else the newest with the same big number), once it is done or stopped */
+  async compare(pkg, to) { const { status, j } = await json('/api/packages/compare', post({ package: pkg, ...(to ? { to } : {}) })); return status === 200 ? j : { ...fail(j.error ?? `${status}`), status }; },
+  /** {compare: the last before/after or null, running: the one in progress or null} */
+  async lastCompare() { const { status, j } = await json('/api/packages/compare'); return status === 200 ? j : { compare: null, running: null }; },
+  /** a place of a before/after as a GLB: side "a" (the version in use), "b" (the new one) or "overlay" */
+  compareGeo: (id, place, side) => glb('/api/packages/compare/geo?' + q({ id, place, side })),
+  /** Stop the before/after in progress: {ok, stopping} */
+  async stopCompare() { const { status, j } = await json('/api/packages/stop', post({})); return status === 200 ? j : fail(j.error ?? `${status}`); },
+  /** Apply an update the person looked at: {ok, text, from, to, big, mustChange} or {ok: false, error} */
+  async updatePackage(pkg, from, to) { const { status, j } = await json('/api/packages/update', post({ package: pkg, from, to })); return status === 200 ? j : fail(j.error ?? `${status}`); },
+  /** Follow a package's working folder for this session (on), or go back to its copy: {ok, text, followed} or {ok: false, error} */
+  async followPackage(pkg, on) { const { status, j } = await json('/api/packages/follow', post({ package: pkg, on })); return status === 200 ? j : fail(j.error ?? `${status}`); },
+  /** Drop the list of what the graphs must change, kept after a big update */
+  async dismissPackage(pkg) { const { status, j } = await json('/api/packages/dismiss', post({ package: pkg })); return status === 200 ? j : fail(j.error ?? `${status}`); },
   /** The event stream: on({open, error, message}); returns the EventSource. */
   events(on) {
     const es = new EventSource('/api/events');

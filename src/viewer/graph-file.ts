@@ -4,7 +4,7 @@
 // The rest of the file stays as it was written. The values a person tunes are session values over the graph
 // (Workspace.sessionVars): they survive every reload of the file, the viewer's own writes included. The graph uses the
 // packages of the project the file belongs to; one it names for the first time is added to the project, and a package
-// followed with --follow re-cooks the graph whenever its working folder changes.
+// followed with --follow (or the viewer's switch) re-cooks the graph whenever its working folder changes.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -161,10 +161,9 @@ export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): P
   for (const f of packages.following()) log(`following ${f.package}: its working folder ${f.dir} instead of its copy`);
   const source = new GraphFile(ws, file, opts.name, log);
   await source.load();
-  // a save in a followed working folder re-cooks the graph
-  packages.watch(() => { source.cook().catch((e) => log(errorText(e))); });
+  // the viewer cooks the graph again after a save in the working folder of a package it follows (src/viewer/packages.ts)
   const viewer = await startViewer(ws, opts.port, { inputsWhere: `beside ${path.basename(file)}`, source });
   log(`view: ${viewer.url}  (watching ${file}; files dropped on the page go to ${path.join(path.dirname(file), 'inputs') + path.sep}; Ctrl+C to stop)`);
   source.watch();
-  return { url: viewer.url, viewer, ws, source, close: () => { source.close(); packages.unwatch(); viewer.close(); } };
+  return { url: viewer.url, viewer, ws, source, close: () => { source.close(); viewer.close(); } };
 }

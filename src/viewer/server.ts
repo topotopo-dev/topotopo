@@ -9,6 +9,8 @@
 // the next node boundary. A new value supersedes the cook of the one before: the latest value wins.
 // Over a graph file (`topotopo view`, ViewerOptions.source) the controls set session values over the graph, which
 // survive reloads of the file; POST /api/vars/save writes them into its vars.
+// The packages the project uses (/api/packages*, src/viewer/packages.ts): their updates, the before/after of one and
+// Update, and following a package's working folder for the viewer's session.
 // Bound to 127.0.0.1 only; requests must name this server as their Host, and writes must come from its own page.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -29,7 +31,9 @@ import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { STOPPED, wiringOf } from '../graph/engine.ts';
 import type { NodeProgress } from '../graph/engine.ts';
+import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
+import { createPackages } from './packages.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';
@@ -204,6 +208,8 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   ws.listeners.add(graphChanged);
   const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source });
   let outputs = makeOutputs();
+  const makePackages = () => createPackages(ws, broadcast);
+  let packages = makePackages();
 
   // ---------------------------------------------------------------- the state of the cooks
   // {cook: {graph, running, last}} events: each node of the graph as it starts (before it can hold the thread for
@@ -478,6 +484,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       const u = new URL(req.url ?? '/', 'http://localhost');
       route = u.pathname;
       if (await outputs.handle(req, res, u, readJSON)) return;
+      if (await packages.handle(req, res, u, readJSON)) return;
       if (u.pathname === '/' || u.pathname === '/index.html') return send(200, fs.readFileSync(path.join(here, 'index.html')), MIME['.html']);
       // the page's modules and style sheet
       if (u.pathname.startsWith('/app/')) {
@@ -502,7 +509,8 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         const out = [...ws.graphs].map(([name, g]) => {
           const last = ws.lastReport.get(name);
           return {
-            name, output: last?.target ?? g.output ?? null, version: ws.versions.get(name) ?? 0,
+            // a cook that failed validation (a package update the graph must follow) has no target
+            name, output: last?.target || g.output || null, version: ws.versions.get(name) ?? 0,
             // vars: what the controls show; graphVars: the graph's own; overrides: the session values among them
             ...varsState(name), params: g.params ?? {},
             // "file": the controls set session values over a graph file (saveable when it names the file); "workspace":
@@ -512,7 +520,11 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
             nodes: Object.entries(g.nodes).map(([n, spec]) => {
               const def = ws.engine.resolveDef(spec.type);
               const r = last?.results.get(n);
-              return { name: n, type: spec.type, in: def ? wiringOf(spec, def).list : [], error: r?.error?.message ?? null, ms: r?.ms ?? null };
+              // the packages it names, as its type or in its nested graphs: the Scene tree marks those with an update
+              const named = packagesNamedIn({ nodes: { [n]: spec } });
+              // its error: from its cook, or from the graph's validation (a slider a package version does not have)
+              const error = r?.error?.message ?? (last && !last.ok ? last.errors.find((e) => e.node === n)?.message : undefined) ?? null;
+              return { name: n, type: spec.type, in: def ? wiringOf(spec, def).list : [], error, ms: r?.ms ?? null, ...(named.length ? { packages: named } : {}) };
             }),
           };
         });
@@ -651,6 +663,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       ws.listeners.delete(graphChanged);
       ws.activityListeners.delete(onActivity);
       outputs.close();
+      packages.close();
       clearTimeout(watchTimer);
       for (const t of cookTimers.values()) clearTimeout(t);
       cookTimers.clear(); cookSent.clear();
@@ -661,6 +674,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       ws.listeners.add(graphChanged);
       ws.activityListeners.add(onActivity);
       outputs = makeOutputs();
+      packages = makePackages();
       watchInputs();
       // the pages reconnect (EventSource retries) and reload graphs, layers and guides from the new workspace
       for (const c of clients) c.end();
@@ -669,6 +683,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     close: () => {
       closed = true;
       outputs.close();
+      packages.close();
       clearInterval(keepAlive);
       clearTimeout(watchTimer);
       for (const t of cookTimers.values()) clearTimeout(t);

@@ -1,8 +1,9 @@
 // The viewer page's browser-free logic (src/viewer/app/*.js): the keymap presets,
 // guide (marker) rules shared with the server, the grid step, selection set operations, the undo stack, mesh
 // topology (welding, pieces, the render tool's edge classes), the Controls rules, the status and cook state lines,
-// the output cards (kind line, heightfield layers, formats offered, download names) and the minimal edits the viewer
-// makes to a graph file (src/viewer/json-edit.ts). Also checks that the page's
+// the output cards (kind line, heightfield layers, formats offered, download names), the Packages tab (a package's
+// state, the Scene tree's mark, a before/after's places) and the minimal edits the viewer makes to a graph file
+// (src/viewer/json-edit.ts). Also checks that the page's
 // modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
 import fs from 'node:fs';
@@ -21,6 +22,7 @@ import * as status from '../src/viewer/app/status.js';
 import * as cooking from '../src/viewer/app/cooking.js';
 import * as info from '../src/viewer/app/output-info.js';
 import * as pop from '../src/viewer/app/export-popover.js';
+import * as pkgs from '../src/viewer/app/packages.js';
 import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -284,6 +286,42 @@ section('cook state line');
   const stopped = cooking.cookLine({ running: null, last: { ok: false, ms: 30, stopped: 'eroded' } });
   check(stopped.kind === 'stopped' && /stopped at eroded · the view shows the last finished cook/.test(stopped.text) && cooking.cookLine(null).kind === 'none',
     'a stop: where, and that the view shows the last finished cook');
+  const cmp = { package: 'studio/trees', from: '1.1', to: '1.3', done: 2, total: 8, what: 'graphs/main.json pine with studio/trees 1.3', elapsed: 1500, stopping: false };
+  const c1 = cooking.compareLine(cmp, 500);
+  check(c1.kind === 'running' && c1.text === 'before/after studio/trees 1.1 → 1.3 · 3/8 graphs/main.json pine with studio/trees 1.3 · 2.00 s' && /Stop ends it at the next node/.test(c1.title),
+    `a package update's before/after: the versions, the cook it is on, the time (${c1.text})`);
+  const c2 = cooking.compareLine({ ...cmp, stopping: true });
+  check(c2.kind === 'stopping' && c2.text === 'stopping the before/after of studio/trees 1.1 → 1.3 · 1.50 s' && cooking.compareLine({ ...cmp, total: 0, what: 'starting' }).text === 'before/after studio/trees 1.1 → 1.3 · starting · 1.50 s',
+    'stopping, and before the first cook');
+}
+
+section('the Packages tab: a package\'s state, the Scene tree\'s mark, a before/after\'s places');
+{
+  const p = (o: any) => ({ package: 'studio/trees', version: '1.1', newer: [], working: [{ library: '../lib', dir: '/lib/trees' }], followed: null, ...o });
+  check(pkgs.followLabel('studio/trees') === 'Use the trees I\'m editing' && pkgs.followLabel('faxcorp/pine') === 'Use the pine I\'m editing', 'the follow switch in the package\'s own name');
+  const cur = pkgs.packageState(p({})), small = pkgs.packageState(p({ small: '1.3', big: '2.0' })), big = pkgs.packageState(p({ big: '2.0' }));
+  check(cur.kind === 'current' && cur.text === 'up to date' && small.kind === 'small' && small.text === 'small update 1.3 · big update 2.0' && /1\.3 is the newest 1\.x; 2\.0 is a big version, a step of its own/.test(small.title) && big.kind === 'big',
+    'up to date; a small update (and a big one); a big one alone');
+  const fol = pkgs.packageState(p({ small: '1.3', followed: { library: '../lib', dir: '/lib/trees' } }));
+  check(fol.kind === 'followed' && fol.text === 'following its working folder · small update 1.3' && /cooks from \/lib\/trees \(library "\.\.\/lib"\) instead of the copy of 1\.1; every save there cooks the scene again; nothing about it is saved/.test(fol.title),
+    `followed: said first, its updates still listed (${fol.text})`);
+  check(pkgs.packageState(p({ error: 'no library this project lists has a package studio/trees' })).kind === 'error', 'a package its libraries do not have: the error');
+  const rows = new Map([['studio/trees', p({ small: '1.3' })], ['studio/rocks', p({ package: 'studio/rocks', followed: { library: '../lib', dir: '/lib/rocks' } })], ['nordic/moss', p({ package: 'nordic/moss' })]]);
+  const late = pkgs.nodeMark(['studio/trees'], rows), fm = pkgs.nodeMark(['studio/rocks'], rows);
+  check(late?.kind === 'small' && late.text === '↑ 1.3' && late.package === 'studio/trees' && /studio\/trees 1\.1 is in use: 1\.3 is a small update \(click: its before\/after in the Packages tab\)/.test(late.title) && fm?.text === 'working' && fm.kind === 'followed' && fm.package === 'studio/rocks',
+    'the Scene tree marks a node of a package with an update (↑ and the version) and one followed (working), and names the package the mark opens');
+  check(pkgs.nodeMark(['nordic/moss'], rows) === null && pkgs.nodeMark(undefined, rows) === null && pkgs.nodeMark(['studio/rocks', 'studio/trees'], rows)?.text === '↑ 1.3',
+    'none for a package up to date or a node of no package; an update first');
+  const t = { from: '1.1', to: '1.3' };
+  const place = (o: any) => ({ before: { ok: true, errors: [] }, after: { ok: true, errors: [] }, diff: { identical: false, verdict: 'shape changed by up to 50 cm (5.025% of the bbox diagonal)' }, views: { a: true, b: true, overlay: true }, ...o });
+  check(pkgs.placeVerdict(place({}), t).text === 'shape changed by up to 50 cm' && pkgs.placeVerdict(place({ diff: { identical: true, verdict: 'no geometric change (…)' } }), t).text === 'no change'
+    && pkgs.placeVerdict(place({ after: { ok: false } }), t).text === 'does not cook with 1.3' && pkgs.placeVerdict(place({ after: { ok: false }, before: { ok: false } }), t).kind === 'failed',
+    'a place says what changed, briefly; or which version it does not cook with');
+  check(pkgs.firstView(place({})) === 'overlay' && pkgs.firstView(place({ diff: { identical: true } })) === 'b' && pkgs.firstView(place({ views: { a: true, b: false, overlay: false } })) === 'a'
+    && pkgs.firstView(place({ views: { a: false, b: false, overlay: false } })) === null, 'a place shows the overlay where it changed, else b, else a');
+  check(pkgs.shortText({ target: t, places: [place({}), place({ diff: { identical: true } }), place({ after: { ok: false }, diff: null })] }) === '1 of the 3 compared changed, 1 does not cook with 1.3'
+    && pkgs.stepText({ big: true, up: true }) === 'a big update' && pkgs.stepText({ big: false, up: false }) === 'back to an older version' && pkgs.day('2026-10-28T03:12:50.931Z') === '2026-10-28',
+    'in short, as the CLI says it; the kind of step; a version\'s day');
 }
 
 section('graph file edits (json-edit.ts): only what changes');

@@ -40,9 +40,11 @@ export function createOutputPanel(ctx) {
   const host = document.getElementById('outputs'), details = document.getElementById('output-details');
   const image = createImageView(document.getElementById('viewport'), ctx.message);
   let list = [], formats = [], selected = null, directory = '', sequence = 0, lastList = '', initial = true, refreshing = null, refreshAgain = false, busy = false;
+  // a result shown alone that is no card of this tab (a place of an update's before/after, packages.js)
+  let other = null;
   const P = { active: null };
   const bar = document.createElement('div'), all = text('button', 'Export all'), barNote = text('span', '', 'dim');
-  bar.className = 'outputs-bar'; bar.append(all, barNote);
+  bar.className = 'outputs-bar'; bar.append(all, barNote, ctx.thumbSizeButton());
   const live = document.createElement('div'), saved = document.createElement('details'), savedRows = document.createElement('div');
   saved.className = 'saved-outputs'; saved.open = ctx.store.get('outputs.savedOpen', false);
   saved.append(text('summary', 'Saved files'), savedRows); saved.ontoggle = () => ctx.store.set('outputs.savedOpen', saved.open);
@@ -60,6 +62,7 @@ export function createOutputPanel(ctx) {
     details.replaceChildren(); details.hidden = !item;
     if (!item) return;
     details.append(text('strong', item.label));
+    if (item.details) { item.details(details); return; }
     const what = kindLine(item);
     if (what) details.append(text('p', what, 'output-kind'));
     if (item.heightfield && item.view === 'model' && !item.inputPath) {
@@ -146,7 +149,8 @@ export function createOutputPanel(ctx) {
     all.textContent = busy ? 'Exporting…' : 'Export all';
     all.title = withTarget.length ? `write every output that has an export target (${withTarget.length}) into ${directory}` : 'export an output with its button first: that sets its target';
     barNote.textContent = published.length ? `${withTarget.length} of ${published.length} with an export target` : '';
-    bar.hidden = !published.length; empty.hidden = !!list.length;
+    // the bar holds the thumbnail size while there are cards; Export all while some are published
+    all.hidden = barNote.hidden = !published.length; bar.hidden = !list.length; empty.hidden = !!list.length;
     for (const [name, entries] of grouped) {
       let group = groups.get(name);
       if (!group) {
@@ -235,7 +239,7 @@ export function createOutputPanel(ctx) {
     menu.firstChild.focus(); addEventListener('pointerdown', outside, true); addEventListener('blur', close);
   }
   P.select = async (id, update = false) => {
-    const item = input?.id === id ? input : list.find((v) => v.id === id); if (!item) return;
+    const item = input?.id === id ? input : other?.id === id ? other : list.find((v) => v.id === id); if (!item) return;
     const changedSelection = selected !== id;
     if (!update) ctx.rememberOutputView?.(selected);
     const seq = ++sequence;
@@ -250,13 +254,24 @@ export function createOutputPanel(ctx) {
     image.hide();
     if (item.view !== 'model') { ctx.hideModelPreview(); ctx.message(`${item.label}: ${kindLine(item) || 'a file'} · Download gets it`); return; }
     try {
-      const r = await fetch(url('geo', item, item.heightfield ? { heightfield_layer: P.layerOf(item) } : {}));
-      if (!r.ok) throw new Error((await r.json()).error);
-      const bytes = await r.arrayBuffer(); if (seq !== sequence) return;
+      let bytes;
+      if (item.load) bytes = await item.load();
+      else {
+        const r = await fetch(url('geo', item, item.heightfield ? { heightfield_layer: P.layerOf(item) } : {}));
+        if (!r.ok) throw new Error((await r.json()).error);
+        bytes = await r.arrayBuffer();
+      }
+      if (seq !== sequence) return;
       await ctx.previewOutput(item, bytes, update);
-      ctx.message(item.label);
+      ctx.message(item.message ?? item.label);
     } catch (e) { if (seq === sequence) ctx.message(e.message, 'err'); }
   };
+  /**
+   * Show a result that is no card here alone in the view, as a card is (packages.js: a place of a before/after):
+   * {id, label, view: 'model', status, revision, load() → GLB bytes, details(el) → what the details say, message?}.
+   * `update`: the same result again (another side of it), which keeps its camera.
+   */
+  P.isolate = (item, update = false) => { other = item; return P.select(item.id, update); };
   P.scene = () => {
     sequence++; initial = false; ctx.rememberOutputView?.(selected); selected = null; P.active = null;
     image.hide(); ctx.isolated = false; showDetails(null); render(); ctx.restoreScene();
@@ -270,7 +285,7 @@ export function createOutputPanel(ctx) {
         const signature = JSON.stringify(j.items);
         if (signature === lastList) return;
         lastList = signature; const before = P.active; list = j.items;
-        const after = input?.id === selected ? input : list.find((v) => v.id === selected); render(); ctx.emit('outputs');
+        const after = input?.id === selected ? input : other?.id === selected ? other : list.find((v) => v.id === selected); render(); ctx.emit('outputs');
         if (after && (after.revision !== before?.revision || after.status !== before?.status)) await P.select(after.id, true);
         else if (after) { P.active = after; showDetails(after); }
         else if (selected && !after) P.scene();

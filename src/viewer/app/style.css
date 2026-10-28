@@ -63,6 +63,10 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .row.part { border-left-color: rgba(240, 160, 48, 0.5); }
 .row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .mt { color: var(--dim); font-size: 11px; white-space: nowrap; }
+/* a node of a package with an update (in the accent colour), or one followed this session (in the guides' colour) */
+.row .pmark { flex: none; color: var(--sel); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.row .pmark:hover { text-decoration: underline; }
+.row .pmark.followed { color: var(--guide); }
 .row .err { color: var(--err); }
 .row.err .nm { color: var(--err); }
 .row .eye { flex: 0 0 16px; width: 16px; height: 16px; padding: 0; border: 0; background: none; display: grid; place-items: center; cursor: pointer; color: var(--dim); }

@@ -7,10 +7,11 @@
 // taken when the person says so.
 //
 // Graphs and assets cook in the project's root scope (as the workspace has them; a command reads them with
-// loadProject), with the version in use, and in a scope like it whose packages resolve the update's version. A graph
-// file elsewhere in the folder cooks in a scope of its folder, as `topotopo <file>` cooks it. A use inside a nested
-// graph (a foreach or solver body) is compared through the node that holds it. Each cook gets only what its node
-// needs, so another node's error stays out of it, and reuses the engine's cache.
+// loadProject, the viewer of a graph file into a scope of their own: BeforeAfterOptions.project), with the version in
+// use, and in a scope like it whose packages resolve the update's version. A graph file elsewhere in the folder cooks
+// in a scope of its folder, as `topotopo <file>` cooks it. A use inside a nested graph (a foreach or solver body) is
+// compared through the node that holds it. Each cook gets only what its node needs, so another node's error stays out
+// of it, and reuses the engine's cache.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -114,6 +115,12 @@ export interface BeforeAfterOptions {
   signal?: StopSignal;
   /** before each cook: the cooks done, of all, and what cooks now */
   progress?: (done: number, total: number, what: string) => void;
+  /**
+   * Where the project's graphs and assets are when the engine's root does not hold them (the viewer of a graph file
+   * keeps its workspace in a scratch folder): a scope that holds them (loadProject), whose packages are the project's
+   * resolver, and the project folder their relative paths read.
+   */
+  project?: { scope: Scope; folder: string };
 }
 
 // ---------------------------------------------------------------------------------------------- the project's uses
@@ -271,7 +278,7 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
   const t0 = performance.now();
   const t = pk.updateTarget(pkg, o.to);
   const { dir } = pk.project();
-  const engine = pk.engine, root = engine.root;
+  const engine = pk.engine, root = o.project?.scope ?? engine.root;
   const { before, after, key } = pk.updateResolvers(t);
   const problems: string[] = [];
   const { uses, units } = placesOf(dir, pkg, problems);
@@ -283,7 +290,7 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
     if (!s) {
       const like = (name: string, packages: PackageResolver) => (g.folder
         ? engine.createScope(`update ${name} ${key} ${g.folder}`, { folder: g.folder, packages })
-        : engine.createScope(`update ${name} ${key}`, { assets: root.assets, graphs: (n) => root.graphs?.(n), packages }));
+        : engine.createScope(`update ${name} ${key}${o.project ? ` ${o.project.folder}` : ''}`, { assets: root.assets, graphs: (n) => root.graphs?.(n), packages, ...(o.project ? { folder: o.project.folder } : {}) }));
       s = { before: !g.folder && before === pk.resolver ? root : like('before', before), after: like('after', after) };
       scopes.set(id, s);
     }
@@ -340,8 +347,8 @@ export function applyUpdate(pk: ProjectPackages, pkg: string, to?: string): { ta
 
 // ---------------------------------------------------------------------------------------------- what is said
 
-/** A node's params and wiring, short. */
-function setText(spec: NodeSpec): string {
+/** A node's params and wiring, short (with a space before it, empty when it sets none). */
+export function setText(spec: NodeSpec): string {
   const parts: string[] = [];
   if (spec.params && Object.keys(spec.params).length) parts.push(JSON.stringify(spec.params));
   if (spec.in !== undefined && spec.in !== null && (typeof spec.in !== 'object' || Object.keys(spec.in).length)) parts.push(`in ${JSON.stringify(spec.in)}`);

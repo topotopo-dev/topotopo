@@ -1,7 +1,7 @@
 // The cook state the page shows in the status bar and above the Controls: what is cooking (the node, the time), how
-// the last cook ended (its time, the failing node and message, where it was stopped). The server sends the state
-// ({cook} events, /api/graphs); between events the page counts the time itself. Plain functions, tested in Node
-// (test/viewer-logic.ts).
+// the last cook ended (its time, the failing node and message, where it was stopped), and the progress of a package
+// update's before/after. The server sends the state ({cook} and {compare} events, /api/graphs); between events the
+// page counts the time itself. Plain functions, tested in Node (test/viewer-logic.ts).
 
 /** "850 ms", "12.3 s", "2 min 05 s". */
 export function fmtDuration(ms) {
@@ -55,3 +55,24 @@ export function cookLine(state, since = 0) {
 
 /** True while a cook state shows a cook in progress (the page then ticks its time). */
 export const isRunning = (state) => !!state?.running;
+
+/**
+ * The line for the before/after of a package update in progress (src/viewer/packages.ts): {kind, text, title}, kind
+ * "running" or "stopping". `state`: {package, from, to, done, total, what, elapsed, stopping}; `since`: ms since it
+ * arrived, added to the time.
+ */
+export function compareLine(state, since = 0) {
+  const total = fmtDuration(state.elapsed + since);
+  const head = `${state.package}${state.from && state.to ? ` ${state.from} → ${state.to}` : ''}`;
+  if (state.stopping) {
+    return {
+      kind: 'stopping', text: `stopping the before/after of ${head} · ${total}`,
+      title: 'A node cannot be interrupted mid-way: the before/after stops when it has finished, and keeps the places it compared.',
+    };
+  }
+  const step = state.total ? `${Math.min(state.done + 1, state.total)}/${state.total} ` : '';
+  return {
+    kind: 'running', text: `before/after ${head} · ${step}${state.what} · ${total}`,
+    title: 'Every place the project uses the package cooks with the version in use and with the new one. Stop ends it at the next node; the places compared stay.',
+  };
+}

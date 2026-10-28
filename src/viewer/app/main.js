@@ -12,13 +12,14 @@ import { createSelect } from './select.js';
 import { createOutliner } from './outliner.js';
 import { createProps } from './props.js';
 import { createOutputPanel } from './outputs.js';
+import { createPackagesPanel } from './packages.js';
 import { createSelection, parseId } from './selection.js';
 import { createUndo } from './undo.js';
 import { EDITOR_NAMES } from './markers.js';
 import * as KM from './keymap.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
 import { connectedLine, graphsLine } from './status.js';
-import { cookLine, isRunning } from './cooking.js';
+import { compareLine, cookLine, isRunning } from './cooking.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -62,14 +63,15 @@ ctx.message = (text, kind = '', hold = 0) => {
 };
 // ------------------------------------------------------------------------------------------- cook state
 // What is cooking for each graph (the server's {cook} events, and /api/graphs), shown in the status bar and above the
-// Controls: the node, the time (counted on here between events), how the last cook ended. Stop stops it.
+// Controls: the node, the time (counted on here between events), how the last cook ended. Stop stops it. While the
+// before/after of a package update runs (packages.js), the lines show its progress and Stop stops it.
 const cooks = new Map(), cookLines = [$('status-cook'), $('controls-cook')];
 let cookTick = 0;
 ctx.cookState = (graph) => cooks.get(graph)?.state ?? null;
 function setCook(graph, state) { cooks.set(graph, { state, at: performance.now() }); renderCook(); }
 function renderCook() {
-  const c = cooks.get(ctx.graph?.name);
-  const line = cookLine(c?.state, c ? performance.now() - c.at : 0);
+  const c = cooks.get(ctx.graph?.name), compare = ctx.packages?.running;
+  const line = compare ? compareLine(compare, performance.now() - compare.at) : cookLine(c?.state, c ? performance.now() - c.at : 0);
   for (const el of cookLines) {
     el.className = `cookline ${line.kind}`;
     const t = el.querySelector('.ctext');
@@ -77,12 +79,16 @@ function renderCook() {
     el.title = line.title;
   }
   $('props').classList.toggle('cooking', line.kind === 'running' || line.kind === 'stopping');
-  const running = isRunning(c?.state);
+  ctx.packages?.renderLine();
+  const running = isRunning(c?.state) || !!compare;
   if (running && !cookTick) cookTick = setInterval(renderCook, 200);
   else if (!running && cookTick) { clearInterval(cookTick); cookTick = 0; }
 }
+ctx.renderCook = renderCook;
 for (const el of cookLines) el.querySelector('.cstop').onclick = async (e) => {
   e.currentTarget.blur();
+  // the before/after's cooks are not the graph's: it has a stop of its own
+  if (ctx.packages?.running) { ctx.packages.stop(); return; }
   const graph = ctx.graph.name;
   if (!graph) return;
   // at once: the server hears the stop only when the node it is on lets it (see the line's title)
@@ -171,6 +177,8 @@ ctx.select = createSelect(ctx);
 ctx.surfacePoint = ctx.select.surfacePoint;
 ctx.planePoint = ctx.select.planePoint;
 const outliner = createOutliner(ctx, { scene: $('tree'), inputs: $('inputs-list') });
+ctx.setTabShown = outliner.setTabShown;
+ctx.showTab = (name) => outliner.showTab(name);
 const props = createProps(ctx);
 
 // ------------------------------------------------------------------------------------------- graphs and the output
@@ -665,12 +673,13 @@ ctx.previewOutput = async (item, bytes, update) => {
 ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); ctx.requestRender(); };
 ctx.frameOutput = frameAll;
 ctx.outputs = createOutputPanel(ctx);
+ctx.packages = createPackagesPanel(ctx, $('packages'));
 
 const es = api.events({
   open() {
     ctx.message(connectedLine(ctx.graph.list.length));
     // after a reconnect the server may have restarted: fetch everything again
-    if (es.opened) { refreshGraphs().then(loadGeo); ctx.outputs.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
+    if (es.opened) { refreshGraphs().then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
     es.opened = true;
   },
   error() { ctx.message('disconnected (server stopped?)', 'err'); },
@@ -678,6 +687,8 @@ const es = api.events({
     if (ev.cook !== undefined) { setCook(ev.cook.graph, ev.cook); if (ev.cook.graph === ctx.graph.name) updateCook(); return; }
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
     if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); return; }
+    if (ev.compare !== undefined) { await ctx.packages.onCompare(ev.compare); renderCook(); return; }
+    if (ev.packages !== undefined) { ctx.packages.onEvent(ev); return; }
     await refreshGraphs();
     // after a stop the geometry in view stays: fetching it would cook what was just stopped
     if (ev.graph === ctx.graph.name && !ev.stopped) loadGeo();
@@ -691,6 +702,7 @@ props.render();
 ctx.requestRender();
 await refreshGraphs();
 await ctx.outputs.refresh();
+ctx.packages.refresh();
 loadGeo();
 ctx.layers.refresh();
 ctx.layers.loadWhere();

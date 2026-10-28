@@ -1,16 +1,21 @@
-/* the left panel's tabs: Scene, Outputs, Inputs */
-.phead.tabs { padding: 0 6px 0 0; gap: 0; align-items: stretch; }
-.phead.tabs [role=tab] { padding: 6px 10px 5px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--dim); font: inherit; letter-spacing: .06em; text-transform: uppercase; }
+/* the left panel's tabs: Scene, Outputs, Inputs, and Packages while the project uses packages, which shortens its
+   label when the panel is too narrow for all four */
+.phead.tabs { padding: 0; gap: 0; align-items: stretch; }
+.phead.tabs [role=tab] { flex: none; white-space: nowrap; padding: 6px 5px 5px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--dim); font: inherit; letter-spacing: .05em; text-transform: uppercase; }
+.phead.tabs #tab-packages { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .phead.tabs [role=tab]:hover { color: var(--text); }
 .phead.tabs [role=tab].on { color: var(--text); border-bottom-color: var(--sel); }
 .phead.tabs [role=tab]:focus-visible { outline: 1px solid var(--sel); outline-offset: -1px; }
 .phead.tabs [role=tab] .count { margin-left: 3px; color: var(--faint); letter-spacing: 0; }
-#thumb-size { margin: auto 0 auto auto; font-size: 10px; letter-spacing: 0; min-width: 48px; }
+.phead.tabs [role=tab] .count.late { color: var(--sel); }
+/* the cards' thumbnail size, at the end of the Outputs and Inputs bars */
+.thumb-size { flex: none; margin-left: auto; font-size: 10px; min-width: 48px; }
 .tabpane { flex: 1; }
 .tabpane[hidden] { display: none; }
 /* the bars at the top of the Outputs and Inputs tabs stay in view while the cards scroll */
 .outputs-bar, .inputs-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--panel); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .outputs-bar .primary, .inputs-bar .primary { flex: none; padding: 4px 12px; }
+.outputs-bar > button { flex: none; }
 .outputs-bar .dim, .inputs-bar .dim { font-size: 11px; }
 .primary { border-color: var(--sel); }
 button:disabled { opacity: .45; cursor: default; }
@@ -56,6 +61,53 @@ button:disabled { opacity: .45; cursor: default; }
 .export-writes { font-size: 11px; color: var(--text); overflow-wrap: anywhere; }
 .export-writes.part { color: var(--sel); }
 .export-writes.err { color: var(--err); }
+/* the Packages tab: a card per package the project uses, with its updates, the follow switch and a before/after */
+.packages-bar { position: sticky; top: 0; z-index: 1; padding: 8px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 11px; overflow-wrap: anywhere; }
+.pkg-card { display: flex; flex-direction: column; gap: 4px; margin: 6px 4px; padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 2px; }
+.pkg-head { display: flex; align-items: baseline; gap: 8px; }
+.pkg-name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.pkg-ver { font: var(--mono); }
+.pkg-state, .pkg-note, .pkg-sub { font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
+.pkg-state.small, .pkg-state.big { color: var(--sel); }
+.pkg-state.followed { color: var(--guide); }
+.pkg-state.error, .pkg-sub.err { color: var(--err); }
+.pkg-sub { margin-top: 4px; }
+.pkg-versions { display: flex; flex-direction: column; gap: 1px; }
+.pkg-v { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 6px; align-items: baseline; font-size: 11px; }
+.pkg-vn { font: var(--mono); }
+.pkg-vd { font: var(--mono); font-size: 10px; color: var(--faint); }
+.pkg-vt { overflow-wrap: anywhere; }
+.pkg-tag { padding: 0 4px; border: 1px solid var(--sel); border-radius: 2px; color: var(--sel); font-size: 10px; line-height: 14px; }
+.pkg-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.pkg-actions button { padding: 3px 10px; }
+.pkg-follow { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 11px; cursor: pointer; }
+.pkg-follow input { margin: 0; accent-color: var(--guide); }
+.pkg-follow:has(input:disabled) { color: var(--faint); cursor: default; }
+.pkg-list { margin: 2px 0; padding-left: 16px; font-size: 11px; overflow-wrap: anywhere; }
+.pkg-list.err { color: var(--err); }
+.pkg-must, .pkg-compare { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.pkg-must button { align-self: flex-start; padding: 2px 10px; }
+.pkg-ctitle { font-weight: 600; }
+.pkg-compare .cookline { height: 20px; }
+/* a place: its file and node, and what changed there on a line of its own */
+.pkg-place { display: flex; flex-direction: column; gap: 1px; padding: 3px 6px; border-left: 2px solid transparent; cursor: pointer; user-select: none; }
+.pkg-place:hover { background: var(--hover-bg); }
+.pkg-place.sel { background: var(--sel-bg); border-left-color: var(--sel); }
+.pkg-place:focus-visible { outline: 1px solid var(--sel); outline-offset: -1px; }
+.pkg-pn { overflow-wrap: anywhere; }
+.pkg-pv { font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
+.pkg-pv.changed { color: var(--sel); }
+.pkg-pv.failed { color: var(--err); }
+/* a place's details: a, b or both overlaid, and the overlay's colours (src/explain.ts DIFF_COLORS) */
+.pkg-views { display: flex; margin: 8px 0 4px; }
+.pkg-views button { flex: 1; padding: 3px 6px; border-radius: 0; }
+.pkg-views button + button { margin-left: -1px; }
+.pkg-views button.on { position: relative; }
+.pkg-legend { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 3px 6px; align-items: center; margin: 4px 0; font-size: 11px; color: var(--dim); }
+.pkg-legend .sw { width: 10px; height: 10px; border-radius: 1px; }
+.pkg-legend .sw.same { background: rgb(184 184 184); }
+.pkg-legend .sw.b { background: rgb(51 128 255); }
+.pkg-legend .sw.a { background: rgb(255 128 31); }
 /* the heightfield layer drawn in red, in the output's details */
 .layer-pick { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .layer-pick select { flex: 1; min-width: 0; }

@@ -377,6 +377,8 @@ export interface Outdated {
   newer: VersionInfo[];
   /** the libraries that hold the package, as project.json lists them */
   libraries: string[];
+  /** its working folders in those libraries (following one needs exactly one) */
+  working: { library: string; dir: string }[];
   /** why its versions could not be looked up */
   error?: string;
 }
@@ -959,7 +961,7 @@ export class ProjectPackages implements WorkspacePackages {
     let scanned: Scanned | null = null, why = '';
     if (Object.keys(uses).length) try { scanned = this.scanLibraries(); } catch (e: any) { why = e.message; }
     return Object.entries(uses).map(([pkg, version]) => {
-      const o: Outdated = { package: pkg, version, newer: [], libraries: [] };
+      const o: Outdated = { package: pkg, version, newer: [], libraries: [], working: [] };
       if (!scanned) return { ...o, error: why };
       try {
         const f = this.find(pkg, scanned);
@@ -968,6 +970,7 @@ export class ProjectPackages implements WorkspacePackages {
         const small = after.filter((v) => versionParts(v)[0] === big).at(-1), top = after.at(-1);
         o.newer = after.map((v) => f.versions.get(v)![0].info);
         o.libraries = [...new Set(f.working.map((w) => w.library))];
+        o.working = f.working;
         if (small) o.small = small;
         if (top && versionParts(top)[0] > big) o.big = top;
       } catch (e: any) { o.error = e.message; }
@@ -1070,8 +1073,7 @@ export class ProjectPackages implements WorkspacePackages {
 
   /** The version record of a copy the project holds, null when it is missing. */
   copyInfo(pkg: string, v: string): VersionInfo | null {
-    if (!this.dir) return null;
-    try { return readVersionInfo(copyAt(this.root.packages, pkg, v)); } catch { return null; }
+    return this.dir ? copyRecord(this.dir, pkg, v) : null;
   }
 
   /** The lock's entries for the versions the project uses, and those they use. */
@@ -1088,6 +1090,11 @@ export class ProjectPackages implements WorkspacePackages {
     for (const [pkg, v] of Object.entries(this.root.uses)) visit(pkg, v, true);
     return out;
   }
+}
+
+/** The record of a version a project holds a copy of (packages/<owner>/<name>/<version>/), null when it holds none. */
+export function copyRecord(dir: string, pkg: string, v: string): VersionInfo | null {
+  try { return readVersionInfo(copyAt(path.join(dir, 'packages'), pkg, v)); } catch { return null; }
 }
 
 /** The versions in a package's versions/ folder; unreadable records are problems. */
@@ -1119,15 +1126,15 @@ export function openPackages(engine: Engine, start: string, opts: { follow?: str
 }
 
 /**
- * A project's assets and graphs in an engine's root scope as a workspace has them, read without writing anything (a
- * workspace makes its folders): for a command that cooks the project's graphs and leaves the project as it is. Says
- * what could not be read.
+ * A project's assets and graphs in a scope (default: the engine's root) as a workspace has them, read without writing
+ * anything (a workspace makes its folders): for a command that cooks the project's graphs and leaves the project as it
+ * is, or for the viewer of a graph file, whose workspace is not the project. Says what could not be read.
  */
-export function loadProject(engine: Engine, dir: string): string[] {
+export function loadProject(engine: Engine, dir: string, scope: Scope = engine.root): string[] {
   const problems: string[] = [];
   const graphs = readGraphs(dir, problems);
-  engine.root.graphs = (n) => graphs.get(n);
-  registerAssets(engine, engine.root, dir, problems);
+  scope.graphs = (n) => graphs.get(n);
+  registerAssets(engine, scope, dir, problems);
   return problems;
 }
 

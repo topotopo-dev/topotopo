@@ -31,8 +31,9 @@ const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + 
 // The workspace can change while the server runs (library {action:"open"} opens a gallery project): every tool and
 // the live viewer then work on the new folder. Each workspace has its own engine (asset registry, base directory,
 // packages, cache); the worker pool is shared by the process. Workspaces follow what other processes write into them
-// (Workspace.watch: the gallery's editor, a person editing JSON), and the packages a session follows (library
-// {action:"follow"}) re-cook when their working folders change.
+// (Workspace.watch: the gallery's editor, a person editing JSON). The packages a session follows (library
+// {action:"follow"}) resolve to their working folders as they are at each cook; the live viewer cooks its graphs again
+// when one of those folders changes.
 let engine: Engine, ws: Workspace, packages: ProjectPackages, tools: ToolDef[];
 let viewer: Viewer | null = null;
 const ensureViewer = async () => {
@@ -51,18 +52,16 @@ async function openWorkspace(dir: string) {
   w.packages = pk;
   const loaded = w.load();
   w.watch();
-  pk.watch(() => { for (const g of w.graphs.keys()) { w.lastReport.delete(g); w.bump(g); } });
   log(`workspace ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets, ${loaded.shelf} shelf assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.manifest?.uses ?? {}).length} packages used` : ''}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
   for (const x of pk.check()) log('package problem:', x);
-  const prev = ws as Workspace | undefined, prevPackages = packages as ProjectPackages | undefined;
+  const prev = ws as Workspace | undefined;
   engine = e;
   ws = w;
   packages = pk;
   tools = [...makeTools(w, { onPreview: ensureViewer }), library];
   viewer?.setWorkspace(w);
   prev?.unwatch();
-  prevPackages?.unwatch();
   return loaded;
 }
 await openWorkspace(wsDir);

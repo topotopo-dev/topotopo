@@ -26,11 +26,11 @@
     <button class="tb" id="help" title="the keymap (?)">?</button>
   </header>
   <aside id="outliner" class="panel">
-    <div class="phead tabs" role="tablist" aria-label="Scene, outputs and inputs">
+    <div class="phead tabs" role="tablist" aria-label="Scene, outputs, inputs and packages">
       <button role="tab" id="tab-scene" data-tab="scene" aria-controls="tree">Scene</button>
       <button role="tab" id="tab-outputs" data-tab="outputs" aria-controls="outputs-pane">Outputs <span class="count"></span></button>
       <button role="tab" id="tab-inputs" data-tab="inputs" aria-controls="inputs-pane">Inputs <span class="count"></span></button>
-      <button id="thumb-size" title="Cycle thumbnail size" aria-label="Cycle thumbnail size">56 px</button>
+      <button role="tab" id="tab-packages" data-tab="packages" aria-controls="packages-pane" hidden>Packages <span class="count"></span></button>
     </div>
     <div class="pscroll tabpane" id="tree" data-pane="scene" role="tabpanel" aria-labelledby="tab-scene"></div>
     <div class="pscroll tabpane" id="outputs-pane" data-pane="outputs" role="tabpanel" aria-labelledby="tab-outputs"><div id="outputs"></div></div>
@@ -39,6 +39,7 @@
       <input id="input-file" type="file" multiple hidden accept=".glb,.gltf,.obj,.stl,.ply,.geo,.bgeo,.blend,.csv,.json,.png,.jpg,.jpeg,.webp">
       <div id="inputs-list"></div>
     </div>
+    <div class="pscroll tabpane" id="packages-pane" data-pane="packages" role="tabpanel" aria-labelledby="tab-packages"><div id="packages"></div></div>
     <div class="grip v" data-grip="left" title="drag to resize"></div>
   </aside>
   <main id="viewport">

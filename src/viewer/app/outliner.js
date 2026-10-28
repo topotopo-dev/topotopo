@@ -1,6 +1,7 @@
-// The left panel: three tabs. Scene is the outliner tree: the output (the node being
-// shown), the graph's nodes (click one to show its result; the square is its display flag) and the guides. Outputs
-// is the published results (outputs.js). Inputs is the files in inputs/ (reference layers) with Add input.
+// The left panel's tabs. Scene is the outliner tree: the output (the node being shown), the graph's nodes (click one to
+// show its result; the square is its display flag; a node of a package with an update carries the mark packages.js
+// gives it) and the guides. Outputs is the published results (outputs.js). Inputs is the files in inputs/ (reference
+// layers) with Add input. Packages (packages.js) shows while the project uses packages.
 // Rows carry a visibility eye, a display mode and the name; selecting a row selects in the viewport and back.
 // Rows are kept and updated in place, so an open menu survives a refresh.
 import { opOf } from './selection.js';
@@ -14,12 +15,15 @@ const EYE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-w
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 export function createOutliner(ctx, panes) {
-  // the tabs: one pane shown, remembered per browser; arrow keys move between tabs
+  // the tabs: one pane shown, remembered per browser; arrow keys move between tabs. A hidden tab (Packages, while the
+  // project uses none) stays the one wanted: it shows again when its tab does.
   const tabs = [...document.querySelectorAll('#outliner [data-tab]')], paneEls = [...document.querySelectorAll('#outliner [data-pane]')];
-  let tab = ctx.store.get('outliner.tab', 'outputs');
-  const showTab = (name, focus = false) => {
-    if (!tabs.some((t) => t.dataset.tab === name)) name = 'outputs';
-    tab = name; ctx.store.set('outliner.tab', name);
+  let tab = ctx.store.get('outliner.tab', 'outputs'), wanted = tab;
+  const visibleTabs = () => tabs.filter((t) => !t.hidden);
+  const showTab = (name, focus = false, chosen = true) => {
+    if (!visibleTabs().some((t) => t.dataset.tab === name)) name = 'outputs';
+    tab = name;
+    if (chosen) { wanted = name; ctx.store.set('outliner.tab', name); }
     for (const t of tabs) { const on = t.dataset.tab === name; t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus(); }
     for (const p of paneEls) p.hidden = p.dataset.pane !== name;
   };
@@ -28,20 +32,38 @@ export function createOutliner(ctx, panes) {
     t.onkeydown = (e) => {
       if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
       e.preventDefault();
-      const i = tabs.indexOf(t), next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      const on = visibleTabs(), i = on.indexOf(t), next = on[(i + (e.key === 'ArrowRight' ? 1 : on.length - 1)) % on.length];
       showTab(next.dataset.tab, true);
     };
   }
-  showTab(tab);
+  showTab(tab, false, false);
+  /** Show or hide a tab (Packages); hiding the one in view shows Outputs. */
+  const setTabShown = (name, on) => {
+    const t = tabs.find((x) => x.dataset.tab === name);
+    if (!t || t.hidden === !on) return;
+    t.hidden = !on;
+    if (!on && tab === name) showTab('outputs', false, false);
+    else if (on && wanted === name) showTab(name, false, false);
+  };
   const tabCount = (name, n) => { const c = document.querySelector(`#tab-${name} .count`); if (c) c.textContent = n ? String(n) : ''; };
   const picker = document.getElementById('input-file');
   document.getElementById('add-input').onclick = () => picker.click();
   picker.onchange = () => { ctx.layers.upload([...picker.files], []); picker.value = ''; };
-  const sizes = [32, 56, 88], sizeButton = document.getElementById('thumb-size');
+  // the cards' thumbnail size: one for the Outputs and Inputs cards, cycled by a button in each tab's bar
+  const sizes = [32, 56, 88];
   let size = ctx.store.get('outliner.thumbnailSize', 56);
   if (!sizes.includes(size)) size = 56;
-  const applySize = () => { document.getElementById('outliner').style.setProperty('--thumb-size', size + 'px'); sizeButton.textContent = size + ' px'; };
-  sizeButton.onclick = () => { size = sizes[(sizes.indexOf(size) + 1) % sizes.length]; ctx.store.set('outliner.thumbnailSize', size); applySize(); };
+  const applySize = () => {
+    document.getElementById('outliner').style.setProperty('--thumb-size', size + 'px');
+    for (const b of document.querySelectorAll('.thumb-size')) b.textContent = size + ' px';
+  };
+  ctx.thumbSizeButton = () => {
+    const b = el('button', 'thumb-size', size + ' px');
+    b.type = 'button'; b.title = 'Cycle thumbnail size'; b.setAttribute('aria-label', 'Cycle thumbnail size');
+    b.onclick = () => { b.blur(); size = sizes[(sizes.indexOf(size) + 1) % sizes.length]; ctx.store.set('outliner.thumbnailSize', size); applySize(); };
+    return b;
+  };
+  document.querySelector('.inputs-bar').append(ctx.thumbSizeButton());
   applySize();
   const closed = new Set(ctx.store.get('outliner.closed', []));
   const sections = new Map();
@@ -136,10 +158,13 @@ export function createOutliner(ctx, panes) {
       const nodes = g?.nodes ?? [];
       s.count.textContent = nodes.length || '';
       sync(s, nodes.map((n) => ({ key: n.name, n })), ({ n: first }) => {
-        const row = el('div', 'row'), flag = el('span', 'flag'), nm = el('span', 'nm'), mt = el('span', 'mt');
-        row.append(flag, nm, mt);
-        let name = first.name;
+        const row = el('div', 'row'), flag = el('span', 'flag'), nm = el('span', 'nm'), mt = el('span', 'mt'), pm = el('span', 'pmark');
+        row.append(flag, nm, mt, pm);
+        let name = first.name, marked = null;
         row.addEventListener('pointerdown', (e) => { if (e.button === 0) ctx.graph.show(name); });
+        // the mark opens the package's card (and leaves the node shown as it is)
+        pm.addEventListener('pointerdown', (e) => e.stopPropagation());
+        pm.onclick = () => { if (marked) ctx.packages?.reveal(marked); };
         return {
           el: row,
           update({ n }) {
@@ -149,7 +174,14 @@ export function createOutliner(ctx, panes) {
             nm.textContent = n.name + (n.name === g.output ? '  ◂ output' : '');
             mt.textContent = n.type + (n.ms != null ? ` · ${n.ms.toFixed(0)} ms` : '');
             row.classList.toggle('err', !!n.error);
-            row.title = n.error ?? `${n.type}${n.in?.length ? ' ← ' + n.in.filter(Boolean).join(', ') : ''} — click to show its result`;
+            // a package with an update (or followed this session): the mark after its type
+            const mark = n.packages ? ctx.packages?.nodeMark(n) ?? null : null;
+            marked = mark?.package ?? null;
+            pm.hidden = !mark;
+            pm.className = `pmark ${mark?.kind ?? ''}`;
+            pm.textContent = mark?.text ?? '';
+            pm.title = mark?.title ?? '';
+            row.title = (n.error ?? `${n.type}${n.in?.length ? ' ← ' + n.in.filter(Boolean).join(', ') : ''} — click to show its result`) + (mark ? `\n${mark.title}` : '');
           },
         };
       });
@@ -233,5 +265,5 @@ export function createOutliner(ctx, panes) {
       if (!G.list.length) note(s, 'none yet — Shift+1 null, Shift+2 curve, Shift+3 area, Shift+4 volume; agents read them as inputs/markers.json');
     }
   }
-  return { render };
+  return { render, showTab, setTabShown };
 }
