@@ -1,6 +1,9 @@
 // Writing exports for the CLI, the MCP server and the viewer: serialize with the export tool's options, then write
 // each file through a .part beside it, renamed into place. Published targets (io/targets.ts) write inside exports/
 // only, and every target is serialized before any file is written, so a failed cook or format changes nothing.
+// exports/ is the project's (exportsFolderFor): the folder of the nearest project.json above the graph, so a graph in
+// <project>/graphs/ exports into <project>/exports/, from the CLI, the MCP server and the viewer alike; a graph file in
+// no project exports beside itself.
 // Every export records how it was made (io/source.ts): the caller passes the source block, and a target builds its own
 // from the graph it is published from.
 import fs from 'node:fs';
@@ -17,6 +20,28 @@ import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
+
+/** The project a path lies in: the nearest folder holding project.json, the path's own or one above it; null for none. */
+export function projectFolderOf(p: string): string | null {
+  let d = path.resolve(p);
+  if (fs.statSync(d, { throwIfNoEntry: false })?.isFile()) d = path.dirname(d);
+  for (;;) {
+    if (fs.existsSync(path.join(d, 'project.json'))) return d;
+    const up = path.dirname(d);
+    if (up === d) return null;
+    d = up;
+  }
+}
+
+/**
+ * Where a graph file's exports go: its project's exports/ folder (the nearest project.json above it), else exports/
+ * beside the graph. One rule for the CLI (--export-all, its receipts), `topotopo view` and the MCP server (whose
+ * workspace is the project folder).
+ */
+export function exportsFolderFor(graphFile: string): string {
+  const file = path.resolve(graphFile);
+  return path.join(projectFolderOf(path.dirname(file)) ?? path.dirname(file), 'exports');
+}
 
 /**
  * The files an export writes, nothing written yet; `a` holds the export tool's snake_case options. Every option the

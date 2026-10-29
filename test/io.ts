@@ -294,7 +294,7 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-io-targets-'));
   try {
     const gs: GraphSpec = { nodes: { b: { type: 'box' } }, vars: { k: 1 }, outputs: { part: { node: 'b', export: { format: 'obj', path: 'parts/b.obj', up_axis: 'z' } } } };
-    const part = publishedOutputs('g', gs, 'b')[1];
+    const part = publishedOutputs('g', gs, 'b').find((p) => p.output === 'part')!;
     const prepared = await prepareTarget(g, 'g', part as typeof part & { target: NonNullable<typeof part.target> }, dir, engine.host, { frame: 5 });
     const man = json(prepared.files.find((f) => f.path === prepared.sourceManifest)!.bytes).source;
     check(prepared.sourceManifest === path.join(dir, 'parts', 'b.obj.source.json') && man.graph === 'g' && man.output === 'part' && man.node === 'b' && man.frame === 5 && man.fps === 24

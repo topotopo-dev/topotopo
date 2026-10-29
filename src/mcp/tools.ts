@@ -245,7 +245,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     let chosen = published;
     if (!a.all) {
       const p = a.output === undefined ? published[0] : published.find((x) => x.output === a.output);
-      if (!p) return text(`graph "${name}" publishes no output "${a.output}" (outputs: ${published.slice(1).map((x) => x.output).join(', ') || 'none'})`, true);
+      if (!p) return text(`graph "${name}" publishes no output "${a.output}" (outputs: ${published.filter((x) => x.output !== null).map((x) => `${x.output}${x.default ? ' (default)' : ''}`).join(', ') || 'none'})`, true);
       if (!p.target) return text(`${a.output === undefined ? 'the default output' : `output "${a.output}"`} of "${name}" has no export target: set one with ${hint(a.output)}, or pass path`, true);
       chosen = [p];
     }

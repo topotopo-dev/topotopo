@@ -160,24 +160,31 @@ export function resolveTarget(t: ExportTarget, stem: string): ResolvedTarget {
 }
 
 export interface PublishedOutput {
-  /** null for the graph's default output (graph.export), else the id in graph.outputs */
+  /** the id in graph.outputs, or null for a default output that is no named output (its target is graph.export) */
   output: string | null;
   node: string;
   label: string;
+  /** the graph's default output (its output node): one entry, a named output when one is that node */
+  default: boolean;
   target: ResolvedTarget | null;
   /** the graph it is published from: a target export records it in its source block (io/source.ts) */
   spec: GraphSpec;
 }
 
-/** A graph's default output (its files named after the graph) and its named outputs, each with its target if valid. */
+/**
+ * A graph's results, the default output first, each once and with its target if valid. The default output (the graph's
+ * output node) is the first named output of that node, when there is one, and keeps its own target (or graph.export,
+ * named after the graph, when it has none); otherwise it is an entry of its own, named after the graph, whose target
+ * is graph.export.
+ */
 export function publishedOutputs(graph: string, spec: GraphSpec, defaultNode: string): PublishedOutput[] {
   const valid = (t: unknown) => (t !== undefined && t !== null && !targetError(t) ? (t as ExportTarget) : null);
   const main = valid(spec.export);
-  return [
-    { output: null, node: defaultNode, label: 'Main output', target: main ? resolveTarget(main, graph) : null, spec },
-    ...Object.entries(spec.outputs ?? {}).map(([id, o]) => {
-      const t = valid(o?.export);
-      return { output: id, node: o.node, label: o.label ?? id, target: t ? resolveTarget(t, id) : null, spec };
-    }),
-  ];
+  const named = Object.entries(spec.outputs ?? {}), dflt = named.find(([, o]) => o?.node === defaultNode)?.[0];
+  const outputs: PublishedOutput[] = named.map(([id, o]) => {
+    const own = valid(o?.export), t = own ?? (id === dflt ? main : null);
+    return { output: id, node: o.node, label: o.label ?? id, default: id === dflt, target: t ? resolveTarget(t, own ? id : graph) : null, spec };
+  });
+  if (dflt !== undefined) return [...outputs.filter((p) => p.default), ...outputs.filter((p) => !p.default)];
+  return [{ output: null, node: defaultNode, label: graph, default: true, target: main ? resolveTarget(main, graph) : null, spec }, ...outputs];
 }

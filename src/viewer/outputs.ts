@@ -1,7 +1,7 @@
 // Output catalogue, previews, downloads and exports. Geometry stays server-side; cards and previews are lazy.
-// A published output's card says what it is (io/kinds.ts: a mesh, a heightfield, packed instances, points, curves, an
-// image or several of these, and its size; and when it is not the kind its graph pins) and offers the formats that
-// write it. Its Download gets the export as a browser download (the file itself, or a zip of its files: a sidecar, a
+// A graph's results are cards, one per result (io/targets.ts publishedOutputs: the default output once, marked so). A
+// card says what its result is (io/kinds.ts: its kind, mesh, instances, points, curves, terrain, textures, volume or
+// scene, and its size; its tags; when it is not the kind its graph pins) and offers the formats that write it. Its Download gets the export as a browser download (the file itself, or a zip of its files: a sidecar, a
 // textures folder), with the record of how it was made; its Export writes its target in the graph (io/targets.ts) into
 // exports/, Export all every target, and a first export sets the target in the graph so the next click just writes
 // again. Saved files (exports/, renders) are cards too: a sidecar or manifest beside an export (io/sidecars.ts) is
@@ -29,8 +29,10 @@ import { encodePNG } from '../render/png.ts';
 import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
 import { fittingFormats, kindMismatch, outputKind } from '../io/kinds.ts';
-import { packagesUsed } from '../graph/packages.ts';
+import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
+import { ProjectPackages } from '../gallery/packages.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
+import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
 import type { SidecarRole } from '../io/sidecars.ts';
 import { STOPPED } from '../graph/engine.ts';
@@ -57,10 +59,20 @@ export interface OutputEntry {
   origin?: 'published' | 'saved'; id: string; label: string; graph?: string; node?: string; parent?: string;
   /** how the page shows it: as a 3D model, a 2D image, or only as files to download */
   view: 'model' | 'image' | 'file';
-  /** what it is (io/kinds.ts) once cooked; "metadata" for a sidecar or manifest without its export */
-  kind?: OutputKind | 'metadata';
-  /** what it is in a few words ("heightfield 2049 × 2049, 2 m"), and its bounding size (x, y, z metres) */
+  /** its kind (io/kinds.ts, the words everything shows) once cooked, "empty" for nothing; "metadata" for a sidecar or manifest without its export */
+  kind?: Kind | 'empty' | 'metadata';
+  /** the parts it holds (io/kinds.ts): what the page can show of it */
+  parts?: OutputKind;
+  /** its size in a few words ("2049 × 2049 samples, 2 m apart"), and its bounding size (x, y, z metres) */
   about?: string; size?: [number, number, number] | null;
+  /** the graph's default output (its output node) */
+  default?: boolean;
+  /** a named output's tags (its "tags" in the graph's outputs) */
+  tags?: string[];
+  /** it shows the last finished result, not the values now: its cook was stopped */
+  stale?: boolean;
+  /** the packages it uses whose working folder this session shows live: it holds their unpublished edits, and so do its exports */
+  live?: string[];
   /** a named output: the kind its graph pins ("kind" in its outputs), and what it says when it cooks to another */
   pinned?: string; warning?: string;
   /** its heightfield (samples, spacing, layers with their ranges): the page colours the terrain by a layer */
@@ -116,6 +128,8 @@ function heightmapAbout(sidecar: string): string | undefined {
 export interface OutputsOptions {
   /** the graph file a graph comes from (topotopo view): a target set on the page goes into it as a minimal edit */
   source?: GraphSource;
+  /** the graph whose results cook first (the project's default graph, which the page shows first) */
+  first?: () => string | null | undefined;
 }
 
 export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsOptions = {}) {
@@ -137,7 +151,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     for (const [name, img] of referenceableImages(item.geo)) {
       const id = idFor(item.entry.id, name);
       items.set(id, { owner: item, img, entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, node: item.entry.node,
-        label: name, view: 'image', kind: 'image', about: `image ${img.width} × ${img.height}`, generated: true, status: 'ready', revision: item.entry.revision,
+        label: name, view: 'image', about: `${img.width} × ${img.height} px`, generated: true, status: 'ready', revision: item.entry.revision,
         width: img.width, height: img.height, layers: [...img.layers.keys()], layer: img.mainLayer, image: name } });
     }
   };
@@ -147,7 +161,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
    */
   const describe = (e: OutputEntry, g: Geometry) => {
     const info = outputKind(g);
-    e.kind = info.kind; e.about = info.text; e.size = info.size;
+    e.kind = info.published ?? 'empty'; e.parts = info.kind; e.about = info.text; e.size = info.size;
     if (info.heightfield) e.heightfield = info.heightfield; else delete e.heightfield;
     if (e.exportable) e.formats = fittingFormats(info);
     const said = e.pinned ? kindMismatch(e.pinned, info) : null;
@@ -161,6 +175,8 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
   const unstop = (item: Item, at?: string) => {
     const prev = item.prev, e = item.entry;
     if (!prev) { e.status = 'error'; e.error = `${STOPPED}${at ? ` at ${at}` : ''}: change a value (or the graph) to cook it`; return; }
+    // it shows the last finished result: out of date with the values now
+    prev.entry.stale = true;
     items.set(e.id, prev);
     for (const v of items.values()) if (v.owner === item) { v.owner = prev; v.entry.status = 'ready'; delete v.entry.error; }
   };
@@ -184,9 +200,10 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         if (!r.ok || !r.geo) throw new Error(r.errors.map((x) => `${x.node}: ${x.message}`).join('\n') || 'no geometry');
         delete item.prev;
         item.geo = r.geo;
-        e.status = 'ready'; delete e.error;
+        e.status = 'ready'; delete e.error; delete e.stale;
         // a saved file that says what it is already (a heightmap by its sidecar) keeps that
         const info = item.file && e.kind ? outputKind(r.geo) : describe(e, r.geo);
+        if (item.file && !e.parts) e.parts = info.kind;
         const firstImage = referenceableImages(r.geo).values().next().value;
         if (info.kind === 'image' && firstImage) {
           item.img = firstImage; e.view = 'image'; e.width = firstImage.width; e.height = firstImage.height;
@@ -238,7 +255,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     const label = targetFormat(format) ? FORMAT_LABELS[targetFormat(format)!] : path.extname(main).slice(1).toUpperCase() || 'file';
     return { file: main, files: ordered, entry: {
       id, origin: 'saved', label: a.label, graph: a.graph, node: a.node, status: 'ready', revision,
-      view: meta ? 'file' : viewOf(main), ...(meta ? { kind: 'metadata' as const } : heightmapSidecar ? { kind: 'heightfield' as const } : imageExt.test(main) ? { kind: 'image' as const } : {}),
+      view: meta ? 'file' : viewOf(main), ...(meta ? { kind: 'metadata' as const } : heightmapSidecar ? { kind: 'terrain' as const } : imageExt.test(main) ? { kind: 'textures' as const } : {}),
       about: meta ? `${SIDECAR_NAMES[role.get(main)!]}: ${SIDECAR_TEXT[role.get(main)!]}` : (heightmapSidecar && heightmapAbout(heightmapSidecar)) || `${label}${ordered.length > 1 ? ` · ${ordered.length} files` : ''}`,
       summary: a.format === 'reference' ? 'Reference image' : `Saved ${a.format ?? path.extname(main).slice(1)} output`,
       files: fileList,
@@ -262,19 +279,34 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     // the packages: an update, or a save in a working folder the session follows, changes what they resolve to
     const workspaceRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
-    for (const [graph, spec] of ws.graphs) {
+    // the packages shown live this session (their working folders): the results that use them hold unpublished edits
+    const following = ws.packages instanceof ProjectPackages ? ws.packages.following().map((f) => f.package) : [];
+    // the graph the page shows first cooks first: its cards are queued before the others'
+    const first = opts.first?.();
+    const graphs = [...ws.graphs].sort(([a], [b]) => Number(b === first) - Number(a === first));
+    for (const [graph, spec] of graphs) {
+      const live = following.length ? packagesNamedIn(spec).filter((x) => following.includes(x)) : [];
       for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name)) {
         const id = idFor('graph', graph, p.output === null ? 'default' : 'named', p.output ?? 'main'); alive.add(id);
         const key = workspaceRevision, old = items.get(id);
-        const pinned = p.output === null ? undefined : spec.outputs?.[p.output]?.kind;
-        const meta = { label: p.label, output: p.output, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null, saved: lastSaved(records, graph, p), ...(pinned ? { pinned } : {}) };
+        const named = p.output === null ? undefined : spec.outputs?.[p.output], pinned = named?.kind, tags = named?.tags;
+        const meta = {
+          label: p.label, output: p.output, default: p.default, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null,
+          saved: lastSaved(records, graph, p), ...(pinned ? { pinned } : {}), ...(Array.isArray(tags) && tags.length ? { tags } : {}), ...(live.length ? { live } : {}),
+        };
         // the same inputs, or a graph held after a stop (the card keeps what it shows until something changes)
-        if (old?.key === key || (old && ws.held(graph))) { Object.assign(old.entry, meta); if (!meta.saved) delete old.entry.saved; continue; }
+        if (old?.key === key || (old && ws.held(graph))) {
+          Object.assign(old.entry, meta);
+          if (!meta.saved) delete old.entry.saved;
+          if (!meta.tags) delete old.entry.tags;
+          if (!meta.live) delete old.entry.live;
+          continue;
+        }
         // while it cooks again, the card keeps what it said (summary, kind, formats), so the details shown for it keep
         // their size; the card it replaces comes back if a person stops the cook
         const prev = old?.prev ?? (old?.entry.status === 'ready' ? old : undefined);
         const kept: Partial<OutputEntry> = {};
-        if (old) for (const k of ['summary', 'kind', 'about', 'size', 'heightfield', 'formats', 'width', 'height', 'layers', 'layer'] as const) if (old.entry[k] !== undefined) (kept as any)[k] = old.entry[k];
+        if (old) for (const k of ['summary', 'kind', 'parts', 'about', 'size', 'heightfield', 'formats', 'width', 'height', 'layers', 'layer', 'warning'] as const) if (old.entry[k] !== undefined) (kept as any)[k] = old.entry[k];
         const item: Item = { geo: old?.geo, img: old?.img, key, prev, entry: { id, origin: 'published', graph, node: p.node, view: old?.entry.view ?? 'model', generated: true, exportable: true, status: 'loading', revision: key, ...kept, ...meta } };
         if (!meta.saved) delete item.entry.saved;
         // Carry last valid images until the replacement cook completes.
@@ -302,7 +334,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
         const revision = digest(stamp(file));
         if (items.get(id)?.entry.revision === revision) continue;
         items.set(id, { file, files: [file], entry: { id, origin: item.entry.origin, parent: item.entry.id, graph: item.entry.graph, label: path.basename(file),
-          view: viewOf(file), ...(imageExt.test(file) ? { kind: 'image' as const } : { about: path.extname(file).slice(1).toUpperCase() }), status: 'ready', revision,
+          view: viewOf(file), ...(imageExt.test(file) ? {} : { about: path.extname(file).slice(1).toUpperCase() }), status: 'ready', revision,
           files: [{ id: artifactId(file), name: path.basename(file), size: stat.size }], download: { name: path.basename(file), zip: false } } });
       }
     }

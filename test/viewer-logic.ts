@@ -295,37 +295,45 @@ section('cook state line');
     'stopping, and before the first cook');
 }
 
-section('the Packages tab: a package\'s state, the Scene tree\'s mark, a before/after\'s places');
+section('the Packages tab: a package\'s state and source, the Scene tree\'s mark, an update\'s places');
 {
   const p = (o: any) => ({ package: 'studio/trees', version: '1.1', newer: [], working: [{ library: '../lib', dir: '/lib/trees' }], followed: null, ...o });
-  check(pkgs.followLabel('studio/trees') === 'Use the trees I\'m editing' && pkgs.followLabel('faxcorp/pine') === 'Use the pine I\'m editing', 'the follow switch in the package\'s own name');
   const cur = pkgs.packageState(p({})), small = pkgs.packageState(p({ small: '1.3', big: '2.0' })), big = pkgs.packageState(p({ big: '2.0' }));
-  check(cur.kind === 'current' && cur.text === 'up to date' && small.kind === 'small' && small.text === 'small update 1.3 · big update 2.0' && /1\.3 is the newest 1\.x; 2\.0 is a big version, a step of its own/.test(small.title) && big.kind === 'big',
-    'up to date; a small update (and a big one); a big one alone');
+  check(cur.kind === 'current' && cur.text === 'up to date' && small.kind === 'update' && small.text === 'update available' && /1\.3 is the newest 1\.x; 2\.0 is a big version, a step of its own/.test(small.title) && big.kind === 'update',
+    'the badge: up to date, or update available (a small one, a big one)');
   const fol = pkgs.packageState(p({ small: '1.3', followed: { library: '../lib', dir: '/lib/trees' } }));
-  check(fol.kind === 'followed' && fol.text === 'following its working folder · small update 1.3' && /cooks from \/lib\/trees \(library "\.\.\/lib"\) instead of the copy of 1\.1; every save there cooks the scene again; nothing about it is saved/.test(fol.title),
-    `followed: said first, its updates still listed (${fol.text})`);
+  check(fol.kind === 'live' && fol.text === 'live' && /shows the edits of \/lib\/trees \(library "\.\.\/lib"\) instead of the published copy of 1\.1/.test(fol.title) && /1\.3 is the newest/.test(fol.title),
+    `live: said even when an update exists (${fol.text})`);
   check(pkgs.packageState(p({ error: 'no library this project lists has a package studio/trees' })).kind === 'error', 'a package its libraries do not have: the error');
   check(pkgs.librariesText(['topotopo', '../lib']) === 'TopoTopo\'s built-in library, library "../lib"' && pkgs.packageState(p({ package: 'topotopo/nature', libraries: ['topotopo'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
-    && cur.title === '1.1 is the newest version in the project\'s libraries', 'a card names the libraries that hold its package, TopoTopo\'s built-in library by what it is');
-  const named = pkgs.outputLine('studio/trees', { type: 'studio/trees/pine', kind: 'mesh', tags: ['conifer'] }), dflt = pkgs.outputLine('studio/trees', { type: 'studio/trees', tags: [] });
-  check(JSON.stringify(named) === '{"name":"pine","kind":"mesh","tags":["conifer"]}' && JSON.stringify(dflt) === '{"name":"(default)","kind":"","tags":[]}', 'an output on a card: its name in the package, its kind and tags');
-  const rows = new Map([['studio/trees', p({ small: '1.3' })], ['studio/rocks', p({ package: 'studio/rocks', followed: { library: '../lib', dir: '/lib/rocks' } })], ['nordic/moss', p({ package: 'nordic/moss' })]]);
+    && cur.title === '1.1 is the newest version in the project\'s libraries', 'the badge names the libraries that hold its package, TopoTopo\'s built-in library by what it is');
+  check(/published copy of 1\.1: it changes only when you update/.test(pkgs.sourceText(p({}))) && /showing edits from lib\/trees as they are saved · exports use these edits too, marked unpublished · this session only/.test(pkgs.sourceText(p({ followed: { library: '../lib', dir: '/lib/trees' } }))),
+    'the source switch says what each state means');
+  check(!/you are editing|I'm editing/.test(pkgs.savedOffer('studio/trees')) && /new edits in its working folder that are not published yet/.test(pkgs.savedOffer('studio/trees')), 'the offer after a save does not assume the reader is its author');
+  const named = pkgs.outputLine('studio/trees', { type: 'studio/trees/pine', kind: 'mesh', tags: ['conifer'], used: true }), dflt = pkgs.outputLine('studio/trees', { type: 'studio/trees', tags: [] });
+  check(JSON.stringify(named) === '{"name":"pine","kind":"mesh","tags":["conifer"],"used":true}' && JSON.stringify(dflt) === '{"name":"(default)","kind":"","tags":[],"used":false}', 'an output in a box: its name in the package, its kind, tags and whether the project uses it');
+  const rows = new Map([['studio/trees', p({ small: '1.3' })], ['studio/rocks', p({ package: 'studio/rocks', small: '1.2', followed: { library: '../lib', dir: '/lib/rocks' } })], ['nordic/moss', p({ package: 'nordic/moss' })]]);
   const late = pkgs.nodeMark(['studio/trees'], rows), fm = pkgs.nodeMark(['studio/rocks'], rows);
-  check(late?.kind === 'small' && late.text === '↑ 1.3' && late.package === 'studio/trees' && /studio\/trees 1\.1 is in use: 1\.3 is a small update \(click: its before\/after in the Packages tab\)/.test(late.title) && fm?.text === 'working' && fm.kind === 'followed' && fm.package === 'studio/rocks',
-    'the Scene tree marks a node of a package with an update (↑ and the version) and one followed (working), and names the package the mark opens');
-  check(pkgs.nodeMark(['nordic/moss'], rows) === null && pkgs.nodeMark(undefined, rows) === null && pkgs.nodeMark(['studio/rocks', 'studio/trees'], rows)?.text === '↑ 1.3',
-    'none for a package up to date or a node of no package; an update first');
-  const t = { from: '1.1', to: '1.3' };
-  const place = (o: any) => ({ before: { ok: true, errors: [] }, after: { ok: true, errors: [] }, diff: { identical: false, verdict: 'shape changed by up to 50 cm (5.025% of the bbox diagonal)' }, views: { a: true, b: true, overlay: true }, ...o });
-  check(pkgs.placeVerdict(place({}), t).text === 'shape changed by up to 50 cm' && pkgs.placeVerdict(place({ diff: { identical: true, verdict: 'no geometric change (…)' } }), t).text === 'no change'
+  check(late?.kind === 'update' && late.text === '↑ 1.3' && late.package === 'studio/trees' && /studio\/trees 1\.1 is in use: 1\.3 is a small update \(click: its box in the Packages tab\)/.test(late.title) && fm?.text === 'live' && fm.kind === 'live' && fm.package === 'studio/rocks' && /1\.2 is out/.test(fm.title),
+    'the Scene tree marks a node of a package with an update (↑ and the version) and one shown live ("live", also when an update exists)');
+  check(pkgs.nodeMark(['nordic/moss'], rows) === null && pkgs.nodeMark(undefined, rows) === null && pkgs.nodeMark(['studio/rocks', 'studio/trees'], rows)?.text === 'live',
+    'none for a package up to date or a node of no package; live first');
+  check(pkgs.fmtChange(1.618) === '1.62 m' && pkgs.fmtChange(0.36) === '36 cm' && pkgs.fmtChange(0.004) === 'under 1 cm' && pkgs.fmtChange(12) === '12 m', 'changes in metres, centimetres under 1 m');
+  const t = { package: 'studio/trees', from: '1.1', to: '1.3' };
+  const place = (o: any) => ({ before: { ok: true, errors: [] }, after: { ok: true, errors: [] }, diff: { identical: false, verdict: 'shape changed by up to 50 cm (5.025% of the bbox diagonal)', hausdorff: 0.5 }, views: { a: true, b: true, overlay: true }, ...o });
+  check(pkgs.placeVerdict(place({}), t).text === 'shape changed by up to 50 cm' && pkgs.placeVerdict(place({ diff: { identical: false, verdict: 'shape changed by up to 1.618 m (9% of the bbox diagonal), and the topology differs', hausdorff: 1.618 } }), t).text === 'shape changed by up to 1.62 m, and its faces differ'
+    && pkgs.placeVerdict(place({ diff: { identical: true, verdict: 'no geometric change (…)' } }), t).text === 'no change'
     && pkgs.placeVerdict(place({ after: { ok: false } }), t).text === 'does not cook with 1.3' && pkgs.placeVerdict(place({ after: { ok: false }, before: { ok: false } }), t).kind === 'failed',
-    'a place says what changed, briefly; or which version it does not cook with');
+    'a place says what changed in one line, in metres or centimetres; or which version it does not cook with');
   check(pkgs.firstView(place({})) === 'overlay' && pkgs.firstView(place({ diff: { identical: true } })) === 'b' && pkgs.firstView(place({ views: { a: true, b: false, overlay: false } })) === 'a'
     && pkgs.firstView(place({ views: { a: false, b: false, overlay: false } })) === null, 'a place shows the overlay where it changed, else b, else a');
-  check(pkgs.shortText({ target: t, places: [place({}), place({ diff: { identical: true } }), place({ after: { ok: false }, diff: null })] }) === '1 of the 3 compared changed, 1 does not cook with 1.3'
+  check(pkgs.shortText({ target: t, places: [place({}), place({ diff: { identical: true } }), place({ after: { ok: false }, diff: null })] }) === '3 places: 1 does not cook with 1.3, 1 changes, 1 stays the same'
+    && pkgs.shortText({ target: t, places: [place({ diff: { identical: true } })] }) === 'nothing changes in the place the project uses it' && /no graph of the project uses studio\/trees/.test(pkgs.shortText({ target: t, places: [] }))
     && pkgs.stepText({ big: true, up: true }) === 'a big update' && pkgs.stepText({ big: false, up: false }) === 'back to an older version' && pkgs.day('2026-10-28T03:12:50.931Z') === '2026-10-28',
-    'in short, as the CLI says it; the kind of step; a version\'s day');
+    'an update in a line; the kind of step; a version\'s day');
+  check(pkgs.agentLine({ target: { package: 'ux/crates', to: '2.0' }, mustChange: ['graphs/main.json row: sets slider "count"'] }, 'game') === 'update ux/crates to 2.0 in game and fix: graphs/main.json row: sets slider "count"',
+    'a big update gives a line to copy for the agent');
+  check(pkgs.usedByText([{ graph: 'main', node: 'row' }, { graph: 'main', node: 'one' }], true) === 'row, one' && pkgs.usedByText([{ graph: 'a', node: 'x' }], false) === 'a › x', 'the nodes that use a package');
 }
 
 section('graph file edits (json-edit.ts): only what changes');
@@ -352,28 +360,34 @@ section('graph file edits (json-edit.ts): only what changes');
   check(JSON.stringify(applyJSONEdits({ a: { b: 1 }, c: 2 }, [{ path: ['a', 'd'], value: 3 }, { path: ['c'] }])) === '{"a":{"b":1,"d":3}}', 'applyJSONEdits: the value the edited text must read as');
 }
 
-section('status line (section 4)');
+section('the tab\'s title, the welcome, and messages that clear themselves (section 4)');
 {
-  check(status.graphsLine('', 0) === status.NO_GRAPHS_LINE && status.graphsLine(status.LIVE_LINE, 0) === status.NO_GRAPHS_LINE,
-    'no graph: the hint, whatever was shown');
-  check(status.graphsLine(status.NO_GRAPHS_LINE, 1) === status.LIVE_LINE, 'the first graph replaces the hint with the live line');
-  check(status.graphsLine(status.LIVE_LINE, 3) === null && status.graphsLine('undid guide', 2) === null && status.graphsLine('keymap: Maya (? shows it)', 1) === null,
-    'with graphs, any other line stays');
-  check(status.connectedLine(0) === status.NO_GRAPHS_LINE && status.connectedLine(2) === status.LIVE_LINE,
-    'connecting shows the hint without graphs and the live line with them');
-  // startup runs the graph fetch and the stream's open in either order; both orders end on the same line
-  const ends = (n: number) => {
-    const fetchFirst = status.connectedLine(n), openFirst = status.graphsLine(status.connectedLine(0), n) ?? status.connectedLine(0);
-    return [fetchFirst, openFirst];
-  };
-  check(ends(0).every((l) => l === status.NO_GRAPHS_LINE) && ends(1).every((l) => l === status.LIVE_LINE), 'either startup order ends on the line that fits the workspace');
+  const welcome = await import('../src/viewer/app/welcome.js');
+  const kits = [{ name: 'topotopo/street', title: 'Street kit', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
+  const proj = { project: { id: 'lantern', title: 'Lantern', graph: 'main', package: null }, folder: 'C:\\work\\lantern', file: null, kits };
+  const loose = { project: null, folder: '/home/me/stuff', file: null, kits };
+  check(welcome.pageTitle(proj) === 'Lantern · TopoTopo' && welcome.pageTitle(loose) === 'stuff · TopoTopo' && welcome.pageTitle({ project: null, folder: '/tmp/x', file: 'house.json' }) === 'house.json · TopoTopo',
+    'the tab is titled after the project (a graph file, a folder)');
+  check(welcome.defaultGraph(proj, ['a', 'main']) === 'main' && welcome.defaultGraph(proj, ['a', 'b']) === 'a' && welcome.defaultGraph(loose, []) === null, 'the project\'s default graph is shown first');
+  const wp = welcome.welcomeOf(proj), wf = welcome.welcomeOf(loose);
+  check(wp.kind === 'project' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.kits.length === 1,
+    'a project without graphs: its name, ask your agent, TopoTopo\'s kits');
+  check(wf.kind === 'folder' && /not a TopoTopo project/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no project says so and how to make it one');
+  check(status.messageLife('saved 2 values', 'ok') === 6000 && status.messageLife('no such node', 'err') === 12000 && status.messageLife('undid move', '', 2000) === 6000 && status.messageLife('x', '', 9000) === 9000,
+    'a message clears itself: 6 s, an error 12 s, longer when held');
+  check(status.messageLife('exporting crate…', 'busy') === Infinity && status.messageLife(status.DISCONNECTED_LINE, 'err') === Infinity && status.messageLife('', 'err') === 0,
+    'work in progress stays until its result replaces it; so does the disconnected line, until the page reconnects');
 }
 
 section('output cards: what an output is, its formats and downloads');
 {
   const hf = { name: 'heightfield', width: 21, height: 21, cell: 1, layers: [{ name: 'height', min: -1, max: 2 }, { name: 'flow', min: 0, max: 3.25 }, { name: 'mask', min: 0, max: 1 }] };
-  check(info.kindLine({ about: 'heightfield 21 × 21, 1 m', size: [20, 3, 20] }) === 'heightfield 21 × 21, 1 m · 20.0 × 3.00 × 20.0 m' && info.kindLine({ view: 'file' }) === 'file'
+  check(info.kindLine({ kind: 'terrain', about: '21 × 21 samples, 1 m apart', size: [20, 3, 20] }) === 'terrain · 21 × 21 samples, 1 m apart · 20.0 × 3.00 × 20.0 m' && info.kindLine({ view: 'file' }) === 'file'
     && info.kindLine({ kind: 'metadata' }) === 'metadata', 'a card says what it is and its size');
+  check(info.kindTagsLine({ kind: 'mesh', tags: ['crate', 'wood'] }) === 'mesh [crate, wood]' && info.kindTagsLine({ kind: 'terrain', tags: [] }) === 'terrain' && info.kindTagsLine({ tags: ['x'] }) === 'kind not pinned [x]',
+    'kind and tags in words, as the CLI says them');
+  check(info.kindBadge({ kind: 'scene' }) === 'scene' && info.kindBadge({ kind: 'metadata' }) === '' && info.kindBadge({}) === ''
+    && info.detailLine({ kind: 'terrain', about: '21 × 21 samples, 1 m apart', size: [20, 3, 20] }) === '21 × 21 samples, 1 m apart · 20.0 × 3.00 × 20.0 m', 'the kind is a badge, the size the line beside it');
   check(JSON.stringify(info.layerChoices(hf)) === JSON.stringify([{ value: 'mask', label: 'mask' }, { value: 'flow', label: 'flow (0 .. 3.25)' }, { value: 'none', label: 'none' }]),
     'the layers a terrain shows in red: the mask first, others with their range, then none (never the height itself)');
   check(info.shownLayer(hf, undefined) === 'mask' && info.shownLayer(hf, 'flow') === 'flow' && info.shownLayer(hf, 'gone') === 'mask' && info.shownLayer(hf, 'none') === 'none'
@@ -385,6 +399,8 @@ section('output cards: what an output is, its formats and downloads');
   check(pop.offeredFormats(card, formats).length === 1 && pop.offeredFormats({ ...card, target: { format: 'png16', path: 'land.png' } }, formats).at(-1).misfit
     && pop.offeredFormats({ ...card, formats: undefined }, formats).length === 2, 'a card offers the formats that write it, and marks its target\'s format when that one does not (all of them before a first cook)');
   check(pop.writesLine(png) === '16-bit PNG + JSON sidecar · not the instances' && pop.writesLine(glb) === 'binary glTF', 'a format\'s line: what it writes, and what it leaves out');
+  const inside = { ...glb, writes: 'binary glTF with its textures and how it was made inside (+ .source.json in exports/)' };
+  check(pop.writesLine(inside, true) === 'binary glTF with its textures and how it was made inside' && /in exports\//.test(pop.writesLine(inside)), 'a download does not say what an export adds in exports/');
   check(pop.downloadName(card, glb) === 'land.glb' && pop.downloadName(card, png) === 'land.zip' && pop.downloadName({ ...card, target: { format: 'glb', path: 'parts/rock.glb' } }, glb) === 'rock.glb'
     && pop.downloadName({ ...card, output: 'trees', target: { format: 'csv', path: 'pcg/trees.points.json' } }, { ...png, format: 'csv' }) === 'trees.zip', 'download names: the target\'s file, else the output\'s stem; a zip unless one file');
   check(pop.downloadSpec({ target: { format: 'obj', path: 'a/b.obj', options: { up_axis: 'z' } } }, 'obj').up_axis === 'z' && pop.downloadSpec({ target: { format: 'obj', path: 'a.obj', options: {} } }, 'glb') === 'glb',

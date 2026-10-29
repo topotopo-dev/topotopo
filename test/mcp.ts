@@ -166,6 +166,10 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
     inst: { type: 'copy_to_points', in: ['sn', 'pts'], params: { pack: true } },
     out: { type: 'merge', in: ['n', 'inst'] },
   } } });
+  // an unknown output lists every named one, the named default output included
+  await call('build', { name: 'named_default', graph: { nodes: { b: { type: 'box' }, c: { type: 'sphere' } }, output: 'b', outputs: { crate: { node: 'b', export: 'glb' }, ball: { node: 'c' } } } });
+  const noOut = await call('export', { graph: 'named_default', output: 'nope' });
+  check(noOut.isError && /publishes no output "nope" \(outputs: crate \(default\), ball\)/.test(noOut.txt), `export: an unknown output lists them all, the default one first (${noOut.txt.slice(0, 120)})`);
   const b1 = await call('export', { graph: 'ue', format: 'unreal_landscape', path: 'exports/level' });
   const man = path.join(wsDir, 'exports', 'level', 'landscape.json');
   check(!ue.isError && !b1.isError && fs.existsSync(man) && fs.existsSync(path.join(wsDir, 'exports', 'level', 'meshes', 'shrub.glb')) && /Unreal Landscape bundle/.test(b1.txt) && /not an exact fit/.test(b1.txt),

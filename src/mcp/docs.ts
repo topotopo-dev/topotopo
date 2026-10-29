@@ -14,7 +14,7 @@ WORKFLOW
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
-OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, heightfield, instances, points, curves, image, mixed; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, volume, scene; a mesh with scene_null sockets is a mesh) pins what it must cook to: build warns and publishing blocks when it does not.
+OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, volume, scene; a mesh with scene_null sockets is a mesh) pins what it must cook to: build warns and publishing blocks when it does not.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
@@ -948,14 +948,17 @@ OUT OF DATE AND UPDATE: what a project uses changes only by an update, after a b
   nothing uses any more. It is refused when project.json uses another version by then. After a big update the graphs
   report what they must change until they do.
 
-IN THE VIEWER (preview, topotopo edit, topotopo view on a graph in a project): the Packages tab, shown while the project
-uses packages, lists each with the version in use, its outputs with their kinds and tags, its updates and the notes of
-the newer versions, and the Scene tree marks the nodes of a package that has an update. The card of an output that
-cooks to another kind than its "kind" says so. Before/after compares every place with the version in use (a) and the
-new one (b), with its progress in the cook line and Stop; a place shows alone in the view as a, as b or both overlaid,
-with what changed. Update applies it and the scene cooks again; a big version is a button of its own, and what the
-graphs must change stays listed after it. "Use the trees I'm editing" follows the package's working folder for the
-viewer's session (never saved); a save in a working folder it does not follow offers that switch.
+IN THE VIEWER (preview, topotopo edit, topotopo view on a graph in a project): the Packages tab, in every project, has
+Find packages (TopoTopo's kits and every library) and a box per package used: the version in use with a badge (up to
+date, update available, live), the nodes that use it, its outputs with their kinds and tags (those in use marked), and
+Update only when a newer version exists. The Scene tree marks the nodes of a package with an update or a live folder.
+The card of an output that cooks to another kind than its "kind" says so. Update first compares every place with the
+version in use (a) and the new one (b), its progress in the cook line and Stop; a place shows alone in the view as a,
+as b or both overlaid, with what changed in a line; it applies only when the person confirms, and a big version whose
+graphs must change asks once more and gives the person a line to copy for you. "Source: Published | Live folder" shows
+a package's working folder for the viewer's session (never saved; not offered for TopoTopo's kits outside TopoTopo's
+repository); results and exports that use it are marked as holding unpublished edits, and a save in a working folder
+the session does not follow is offered in that package's box.
 
 EXPORTS record the package versions their graph used in the source block: "packages": {"studio/trees@1.3": "<hash>"}.
 
@@ -1070,10 +1073,11 @@ CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pie
   export: `EXPORT
 export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic
   "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
-PATHS: relative paths inside a graph (file nodes, material maps, image files) read from its project folder: the nearest
-  folder with a project.json at or above the graph file, else the graph file's folder (MCP: the workspace). Export
-  targets write into exports/ of that same folder, never beside a graph in a subfolder. The same rule holds for the CLI,
-  the MCP server and the viewer. The CLI's own --render / --export / --underlay paths are relative to the current folder.
+PATHS: one rule for the CLI, the MCP server and the viewer: relative paths inside a graph (file nodes, material maps,
+  image files) read from its project folder, the nearest folder with a project.json at or above the graph file, else
+  the graph file's folder (MCP: the workspace); exports/ is that project's (a graph in <project>/graphs/ exports into
+  <project>/exports/, never beside itself), and exports/.outputs.json records the files by their project paths. The
+  CLI's own --render / --export / --underlay paths are relative to the current folder.
 export {path:"exports/thing.glb"} — format from the extension:
   glb / gltf    glTF 2.0 via gltf-transform (recommended for Unreal, Blender, web)
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)

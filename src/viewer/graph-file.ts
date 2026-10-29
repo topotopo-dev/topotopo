@@ -15,6 +15,7 @@ import { createNodeHost } from '../host/node.ts';
 import { openPackages } from '../gallery/packages.ts';
 import { Workspace } from '../workspace.ts';
 import { startViewer } from './server.ts';
+import { exportsFolderFor } from '../host/export-targets.ts';
 import type { Viewer } from './server.ts';
 import { applyJSONEdits, editJSONText } from './json-edit.ts';
 import type { JSONEdit } from './json-edit.ts';
@@ -154,7 +155,8 @@ export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): P
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
   const packages = openPackages(engine, dir, { follow: opts.follow });
-  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: path.join(dir, 'exports') });
+  // exports go into the project's exports/ (a graph file in no project: beside it), as the CLI's do
+  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: exportsFolderFor(file) });
   ws.packages = packages;
   ws.load();
   for (const p of packages.check()) log(`warning: ${p}`);

@@ -7,7 +7,7 @@
 import { createImageView } from './image-view.js';
 import { fmtBytes } from './units.js';
 import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
-import { kindLine, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, detailLine, kindBadge, kindTagsLine, liveText, layerChoices, shownLayer } from './output-info.js';
 import { inputImageURL } from './layers.js';
 
 const url = (route, item, more = {}) => `/api/output/${route}?` + new URLSearchParams({ id: item.id, rev: item.revision, ...more });
@@ -48,7 +48,7 @@ export function createOutputPanel(ctx) {
   const live = document.createElement('div'), saved = document.createElement('details'), savedRows = document.createElement('div');
   saved.className = 'saved-outputs'; saved.open = ctx.store.get('outputs.savedOpen', false);
   saved.append(text('summary', 'Saved files'), savedRows); saved.ontoggle = () => ctx.store.set('outputs.savedOpen', saved.open);
-  const empty = text('div', 'Nothing published yet: a graph\'s output shows here once it cooks.', 'empty');
+  const empty = text('div', 'No outputs yet: the results of the project\'s graphs show here once your agent has built one.', 'empty');
   const cards = new Map(), groups = new Map(); let input = null;
   host.append(bar, empty, live, saved);
   Object.defineProperty(P, 'count', { get: () => list.filter((v) => v.exportable).length });
@@ -76,8 +76,10 @@ export function createOutputPanel(ctx) {
       row.append(text('span', 'Layer in red', 'dim'), choice);
       details.append(row);
     }
-    details.append(text('p', item.error ?? item.summary ?? '', item.error ? 'err' : 'dim'));
-    if (item.exportable) details.append(text('p', item.target ? `Export writes ${targetFile(item)} (${item.target.format})` : 'no export target yet: Export sets one; Download needs none', 'dim'));
+    if (item.error) details.append(text('p', item.error, 'err'));
+    else if (item.summary) { const f = document.createElement('details'); f.className = 'fold'; f.append(text('summary', 'Geometry details'), text('pre', item.summary, 'summary')); details.append(f); }
+    if (item.exportable) details.append(text('p', item.target ? `Export writes ${targetFile(item)} (${item.target.format})` : 'Export asks for a format and a file in exports/ the first time; Download gives you a copy without that', 'dim'));
+    if (item.live?.length) details.append(text('p', liveText(item), 'live'));
     if (item.files) {
       if (item.origin === 'saved' && !item.parent) details.append(text('p', `in ${directory}`, 'dim'));
       for (const f of item.files) {
@@ -141,6 +143,9 @@ export function createOutputPanel(ctx) {
 
   function render() {
     const used = new Set(), usedGroups = new Set(), grouped = new Map();
+    // the project's default graph first
+    const first = ctx.project?.project?.graph;
+    if (first && list.some((v) => v.origin === 'published' && v.graph === first)) grouped.set(first, []);
     for (const item of list) {
       const name = item.origin === 'published' ? item.graph ?? 'Outputs' : '__saved';
       if (!grouped.has(name)) grouped.set(name, []); grouped.get(name).push(item);
@@ -155,10 +160,12 @@ export function createOutputPanel(ctx) {
     for (const [name, entries] of grouped) {
       let group = groups.get(name);
       if (!group) {
-        const box = document.createElement('div'), rows = document.createElement('div');
-        if (name !== '__saved') box.append(text('div', name, 'output-group'));
-        box.append(rows); group = { box, rows }; groups.set(name, group);
+        const box = document.createElement('div'), rows = document.createElement('div'), head = text('div', name, 'output-group');
+        if (name !== '__saved') box.append(head);
+        box.append(rows); group = { box, rows, head }; groups.set(name, group);
       }
+      // a graph whose one result is named after it needs no heading of its own
+      group.head.hidden = entries.filter((v) => !v.parent).length === 1 && entries[0].label === name;
       usedGroups.add(name);
       const parent = name === '__saved' ? savedRows : live;
       if (group.box.parentElement !== parent) parent.append(group.box);
@@ -171,13 +178,18 @@ export function createOutputPanel(ctx) {
         used.add(item.id); let card = cards.get(item.id);
         if (!card) {
           const row = document.createElement('div'); row.className = 'output-card'; row.tabIndex = 0; row.setAttribute('role', 'button'); row.dataset.output = item.id;
-          const thumb = document.createElement('img'); thumb.loading = 'lazy'; thumb.alt = '';
-          const icon = text('span', 'FILE', 'file-icon'), body = text('span', '', 'output-body'), label = text('span', '', 'output-label'), info = text('small', '', 'dim');
+          // the picture keeps what it showed while the result cooks again; a mark over it says it is cooking
+          const pic = text('span', '', 'output-pic'), thumb = document.createElement('img'); thumb.loading = 'lazy'; thumb.alt = '';
+          const icon = text('span', 'FILE', 'file-icon'), cooking = text('span', 'cooking…', 'output-cooking');
+          pic.append(thumb, icon, cooking);
+          const body = text('span', '', 'output-body'), head = text('span', '', 'output-head'), label = text('span', '', 'output-label');
+          const badges = text('span', '', 'output-badges'), info = text('small', '', 'dim'), tags = text('span', '', 'output-tags');
           const target = text('button', '', 'output-target'), actions = text('span', '', 'output-actions');
           const down = text('button', 'Download', 'primary output-download'), go = text('button', 'Export', 'output-export');
           target.title = 'change where this output exports'; go.type = target.type = down.type = 'button';
-          actions.append(down, go); body.append(label, info, target, actions); row.append(thumb, icon, body);
-          card = { row, thumb, icon, label, info, target, down, go, item }; cards.set(item.id, card);
+          head.append(label, badges);
+          actions.append(down, go); body.append(head, info, tags, target, actions); row.append(pic, body);
+          card = { row, thumb, icon, label, badges, info, tags, target, down, go, item }; cards.set(item.id, card);
           down.onclick = () => downloadItem(card.item, down);
           go.onclick = () => exportItem(card.item, go);
           target.onclick = () => exportItem(card.item, go, true);
@@ -187,9 +199,10 @@ export function createOutputPanel(ctx) {
           thumb.onerror = () => { thumb.hidden = true; icon.hidden = false; };
         }
         card.item = item;
-        const { row, thumb, icon, label, info, target, down, go } = card;
-        const what = kindLine(item);
+        const { row, thumb, icon, label, badges, info, tags, target, down, go } = card;
+        const what = kindLine(item), detail = detailLine(item);
         row.classList.toggle('selected', item.id === selected); row.classList.toggle('child', !!item.parent);
+        row.classList.toggle('cooking', item.status === 'loading'); row.classList.toggle('stale', !!item.stale && item.status !== 'loading');
         row.setAttribute('aria-label', `${item.label} — ${what || item.view}`); row.setAttribute('aria-pressed', String(item.id === selected));
         go.hidden = target.hidden = !item.exportable; go.disabled = busy || item.status === 'loading';
         go.title = item.target ? `write ${targetFile(item)} again (overwrites it)` : `choose a format and a file in ${directory || 'exports/'}, then export`;
@@ -201,14 +214,29 @@ export function createOutputPanel(ctx) {
           : item.download ? `download ${item.download.name}` : `download ${item.label}.png`;
         down.setAttribute('aria-label', `Download ${item.label}`);
         target.textContent = item.exportable ? targetLine(item) : ''; target.classList.toggle('unset', !item.target);
-        const src = ['model', 'image'].includes(item.view) && item.status !== 'loading' ? item.view === 'image' && !item.generated ? url('file', item) : url('thumb', item) : '';
-        if (thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
+        // while it cooks the card keeps its picture and its lines (the mark over the picture says it is cooking)
+        const src = ['model', 'image'].includes(item.view) ? item.view === 'image' && !item.generated ? url('file', item) : url('thumb', item) : '';
+        if (item.status !== 'loading' && thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
+        if (item.status === 'loading' && !thumb.dataset.source) { thumb.hidden = true; icon.hidden = false; }
         icon.textContent = item.view === 'model' ? '3D' : item.view === 'image' ? 'IMG' : (item.kind === 'metadata' ? 'JSON' : (item.files?.[0]?.name.split('.').pop() ?? 'file').toUpperCase().slice(0, 5));
         label.textContent = item.label;
-        // an output that is not the kind its graph pins says so (publishing the project's package would block on it)
-        const warned = !item.error && item.status !== 'loading' && item.warning;
-        info.textContent = item.error ?? (item.status === 'loading' ? 'Cooking…' : warned ? `${what} · not a "${item.pinned}"` : what);
-        info.className = item.error ? 'err' : warned ? 'warn' : 'dim'; info.title = item.error ?? (warned ? `${what}\n${item.warning}` : what);
+        // the default output, and the kind in the words everything uses
+        const marks = [];
+        // the default among a graph's several results
+        if (item.default && entries.filter((v) => !v.parent && v.exportable).length > 1) { const b = text('span', 'default', 'badge default'); b.title = 'the graph\'s default output: what the graph shows and exports when no output is named'; marks.push(b); }
+        const kind = kindBadge(item);
+        if (kind) { const b = text('span', kind, 'badge kind'); b.title = 'what it is'; marks.push(b); }
+        // it uses a package shown live: unpublished edits, in its exports too
+        if (item.live?.length) { const b = text('span', 'unpublished edits', 'badge live'); b.title = liveText(item); marks.push(b); }
+        badges.replaceChildren(...marks);
+        tags.replaceChildren(...(item.tags ?? []).map((t) => text('span', t, 'tag')));
+        tags.title = item.tags?.length ? kindTagsLine(item) : '';
+        tags.hidden = !item.tags?.length;
+        // an output that is not the kind its graph pins says so (publishing the project's package would block on it); one
+        // whose cook was stopped shows the last finished result
+        const warned = !item.error && item.warning;
+        info.textContent = item.error ?? (item.stale ? `out of date: its cook was stopped · ${detail}` : warned ? `not a "${item.pinned}" · ${detail}` : detail || (item.status === 'loading' ? 'cooking…' : ''));
+        info.className = item.error ? 'err' : warned || item.stale ? 'warn' : 'dim'; info.title = item.error ?? (warned ? `${what}\n${item.warning}` : item.stale ? 'its cook was stopped: the card shows the last finished result; change a value to cook it again' : what);
         const next = previous ? previous.nextSibling : group.rows.firstChild; if (row !== next) group.rows.insertBefore(row, next); previous = row;
       }
     }
@@ -250,11 +278,12 @@ export function createOutputPanel(ctx) {
     if (changedSelection) { image.hide(); ctx.hideModelPreview(); }
     selected = id; P.active = item; ctx.isolated = true; ctx.guides.setMode(null);
     render(); showDetails(item);
-    if (item.status === 'loading') { ctx.message('Preparing ' + item.label, 'busy'); return; }
+    // it shows once it has cooked (the card says it is cooking)
+    if (item.status === 'loading') { ctx.emit('output'); return; }
     if (item.status === 'error') { ctx.message(item.error, 'err'); return; }
     await ctx.outputGraph?.(item);
     if (seq !== sequence) return;
-    if (item.view === 'image') { ctx.hideModelPreview(); image.show(item); ctx.message(item.label); ctx.emit('output'); return; }
+    if (item.view === 'image') { ctx.hideModelPreview(); image.show(item); ctx.emit('output'); return; }
     image.hide();
     if (item.view !== 'model') { ctx.hideModelPreview(); ctx.message(`${item.label}: ${kindLine(item) || 'a file'} · Download gets it`); return; }
     try {
@@ -267,7 +296,6 @@ export function createOutputPanel(ctx) {
       }
       if (seq !== sequence) return;
       await ctx.previewOutput(item, bytes, update);
-      ctx.message(item.message ?? item.label);
     } catch (e) { if (seq === sequence) ctx.message(e.message, 'err'); }
   };
   /**
@@ -278,7 +306,7 @@ export function createOutputPanel(ctx) {
   P.isolate = (item, update = false) => { other = item; return P.select(item.id, update); };
   P.scene = () => {
     sequence++; initial = false; ctx.rememberOutputView?.(selected); selected = null; P.active = null;
-    image.hide(); ctx.isolated = false; showDetails(null); render(); ctx.restoreScene();
+    image.hide(); ctx.isolated = false; showDetails(null); render(); ctx.restoreScene(); ctx.emit('output');
   };
   P.refresh = async () => {
     if (refreshing) { refreshAgain = true; return refreshing; }
@@ -293,13 +321,23 @@ export function createOutputPanel(ctx) {
         if (after && (after.revision !== before?.revision || after.status !== before?.status)) await P.select(after.id, true);
         else if (after) { P.active = after; showDetails(after); }
         else if (selected && !after) P.scene();
-        else if (initial && list.length) { initial = false; const main = list.find((v) => v.generated && !v.parent); if (main) await P.select(main.id); }
+        else if (initial && list.length) {
+          // first the graph the page shows (the project's default graph), its default output
+          initial = false;
+          const top = list.filter((v) => v.generated && !v.parent), main = top.find((v) => v.graph === ctx.graph.name && v.output === null) ?? top.find((v) => v.graph === ctx.graph.name) ?? top[0];
+          if (main) await P.select(main.id);
+        }
       } catch (e) { ctx.message(e.message, 'err'); }
       finally { refreshing = null; if (refreshAgain) { refreshAgain = false; void P.refresh(); } }
     })();
     return refreshing;
   };
-  document.getElementById('scene-view').onclick = P.scene;
+  // Scene: back to the whole scene, the graph's output (not a node shown on its own) with the layers and guides
+  document.getElementById('scene-view').onclick = (e) => {
+    e.currentTarget.blur();
+    if (P.active) P.scene();
+    if (ctx.graph.node) ctx.graph.show(ctx.graph.current()?.output ?? null);
+  };
   P.openInput = async (path, update = false) => {
     const f = ctx.layers.list.find((v) => v.path === path); if (!f) return;
     input = { id: 'input:' + path, inputPath: path, label: path, view: 'image', kind: 'image', status: 'ready', revision: `${f.mtime}:${f.size}`, sourceURL: inputImageURL(f), summary: ctx.layers.info.get(path)?.summary ?? ctx.layers.fileText(f) };

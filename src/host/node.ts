@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { ExprSandbox, Host, WorkerPool } from './types.ts';
 import { createNodePool, poolOptionsFromEnv } from './pool.ts';
+import { projectFolderOf } from './export-targets.ts';
 import type { NodePoolOptions } from './pool.ts';
 import { REALM_CONTROL, SCRIPT_REALM_SETUP } from '../core/snippet-lib.ts';
 import { makeCurl, makeNoise } from '../core/noise.ts';
@@ -79,16 +80,12 @@ let envPool: WorkerPool | undefined | null = null;
  * The folder relative file paths resolve against, for a graph (or workspace) in `dir`: its project folder, the nearest
  * folder at or above `dir` with a project.json, else `dir` itself. One rule for the CLI (the graph file's folder), the
  * MCP server (the workspace) and the viewer (the graph file's folder): a graph in a project's graphs/ reads
- * "inputs/ref.png" from the project's inputs/, wherever it is cooked from.
+ * "inputs/ref.png" from the project's inputs/, wherever it is cooked from, and exports into the project's exports/
+ * (export-targets.ts exportsFolderFor).
  */
 export function projectBaseDir(dir: string): string {
-  let d = path.resolve(dir);
-  for (;;) {
-    if (fs.existsSync(path.join(d, 'project.json'))) return d;
-    const up = path.dirname(d);
-    if (up === d) return path.resolve(dir);
-    d = up;
-  }
+  // the project lookup is the one export targets use (exports/ of the same folder): one function for both rules
+  return projectFolderOf(dir) ?? path.resolve(dir);
 }
 
 export interface NodeHostOptions {

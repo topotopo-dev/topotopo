@@ -158,8 +158,16 @@ try {
     check(t.version === '1.0' && t.note === 'first' && /^\d{4}-\d\d-\d\dT/.test(t.published) && t.small === '1.1' && !t.big && t.newer.map((x: any) => `${x.version} ${x.note} ${x.big}`).join() === '1.1 rounder crowns false',
       `studio/trees: 1.0 in use, its note and date; a small update 1.1 and its note (${JSON.stringify(t).slice(0, 200)})`);
     check(r.version === '1.0' && !r.small && r.big === '2.0' && r.newer[0].big === true && r.newer[0].note === 'the size slider is now radius', 'studio/rocks: a big update 2.0, marked big');
-    check(JSON.stringify(t.outputs) === JSON.stringify([{ type: 'studio/trees/pine', label: 'Pine', kind: 'mesh', tags: [] }]) && JSON.stringify(r.outputs) === JSON.stringify([{ type: 'studio/rocks/boulder', kind: 'mesh', tags: [] }]),
-      `the outputs of the version in use, with their kinds and tags (${JSON.stringify(t.outputs)})`);
+    check(JSON.stringify(t.outputs) === JSON.stringify([{ type: 'studio/trees/pine', label: 'Pine', kind: 'mesh', tags: [], used: true }]) && JSON.stringify(r.outputs) === JSON.stringify([{ type: 'studio/rocks/boulder', kind: 'mesh', tags: [], used: true }]),
+      `the outputs of the version in use, with their kinds and tags, marked where the project uses them (${JSON.stringify(t.outputs)})`);
+    check(JSON.stringify(t.usedBy.map((u: any) => `${u.graph} › ${u.node}`).sort()) === JSON.stringify(['main › pine', 'main › small_pine', 'scene › t', 'yard › t']) && t.usedBy.every((u: any) => u.type === 'studio/trees/pine'),
+      `the nodes of the project's graphs that use a package (${t.usedBy.map((u: any) => `${u.graph} › ${u.node}`)})`);
+    check(!t.kit && t.canFollow && s.project.title === 'forest' && s.project.package === null, 'a package with one working folder can show it live; the project by its title');
+    const found = (await get('/api/packages/search?q=tree')).j;
+    const hits = found.libraries.flatMap((l: any) => l.hits.map((h: any) => `${l.standing}:${h.type}${h.used ? `@${h.used}` : ''}`));
+    check(hits.includes('listed:studio/trees/pine@1.0') && hits.some((h: string) => h.startsWith('builtin:topotopo/nature/')),
+      `Find packages: the project's libraries and TopoTopo's kits, and what the project uses (${hits.join(', ')})`);
+    check((await get('/api/packages/author')).status === 400, 'a project that is no package has no author panel');
     check(t.working.length === 1 && t.working[0].dir === TREES && t.working[0].library === '../lib' && t.followed === null && JSON.stringify(t.libraries) === '["../lib"]',
       'its working folder in the libraries the project lists; not followed');
     const g = (await get('/api/graphs')).j.find((x: any) => x.name === 'main');

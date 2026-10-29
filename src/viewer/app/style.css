@@ -32,6 +32,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #top .tb select { color: var(--text); max-width: 180px; }
 #top .readout { font: var(--mono); color: var(--dim); min-width: 84px; }
 #top .mode { color: var(--sel); }
+#top button.tb.on { border-color: var(--sel); color: var(--sel); }
 .grow { flex: 1; }
 
 /* panels */
@@ -42,8 +43,9 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .phead .count { margin-left: auto; letter-spacing: 0; }
 .pscroll { overflow: auto; min-height: 0; }
 #tree { flex: 1; }
-#props-body { flex: 0 0 var(--split); }
-#controls { flex: 1; }
+/* the Controls first, as tall as they need up to the split; Properties below, scrolling */
+#controls { flex: 0 1 auto; max-height: var(--split); min-height: 32px; }
+#props-scroll { flex: 1; }
 .grip { position: absolute; z-index: 5; }
 .grip.v { top: 0; bottom: 0; width: 6px; cursor: col-resize; }
 #outliner .grip.v { right: -3px; }
@@ -66,7 +68,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 /* a node of a package with an update (in the accent colour), or one followed this session (in the guides' colour) */
 .row .pmark { flex: none; color: var(--sel); font-size: 11px; white-space: nowrap; cursor: pointer; }
 .row .pmark:hover { text-decoration: underline; }
-.row .pmark.followed { color: var(--guide); }
+.row .pmark.live { color: var(--guide); }
 .row .err { color: var(--err); }
 .row.err .nm { color: var(--err); }
 .row .eye { flex: 0 0 16px; width: 16px; height: 16px; padding: 0; border: 0; background: none; display: grid; place-items: center; cursor: pointer; color: var(--dim); }
@@ -101,6 +103,17 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .vw .lbl { position: absolute; transform: translate(8px, -50%); padding: 0 4px; font: var(--font); color: var(--text); background: rgba(31, 33, 36, 0.78); border-radius: 2px; white-space: nowrap; }
 .vw .lbl.sel { color: var(--sel); }
 .vw .lbl.dimen { transform: translate(-50%, -130%); font: var(--mono); color: var(--sel); }
+/* while there is no graph: the project's name, what to do, TopoTopo's kits (welcome.js) */
+#welcome { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 24px; overflow: auto; background: rgba(43, 45, 49, 0.82); }
+.welcome-box { max-width: 560px; padding: 20px 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; font-size: 13px; line-height: 1.5; }
+.welcome-box h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.welcome-box h2 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+.welcome-box p { margin: 8px 0; }
+.welcome-box code { font: var(--mono); color: var(--text); background: var(--bg); padding: 1px 4px; border-radius: 2px; overflow-wrap: anywhere; }
+.welcome-sub { color: var(--dim); font: var(--mono); overflow-wrap: anywhere; }
+.welcome-lead { font-size: 14px; color: var(--sel); }
+.welcome-kits { margin: 0; padding-left: 18px; }
+.welcome-kits li { margin: 4px 0; }
 #boxsel { position: absolute; border: 1px dashed var(--sel); background: rgba(240, 160, 48, 0.06); pointer-events: none; }
 #viewport.placing #gl { cursor: crosshair; }
 #viewport.nav #gl { cursor: move; }
@@ -124,6 +137,9 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .attrs td { padding: 1px 4px 1px 0; vertical-align: top; overflow-wrap: anywhere; }
 .attrs td:first-child { color: var(--dim); white-space: nowrap; }
 .summary { margin: 0; font: var(--mono); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* the geometry summary, folded under its one-line kind */
+.fold > summary { cursor: pointer; color: var(--dim); font-size: 11px; user-select: none; margin: 4px 0; }
+.fold > summary:hover { color: var(--text); }
 .hint { color: var(--dim); font-size: 11px; overflow-wrap: anywhere; }
 .bad { border-color: var(--err) !important; }
 .danger:hover { border-color: var(--err); color: var(--err); }
@@ -140,8 +156,9 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 /* above the controls: the cook state (always one line, so nothing below moves) and, over a graph file, the session */
 #controls-bar { position: relative; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 3px 8px 4px; border-bottom: 1px solid var(--line); }
 #controls-bar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; pointer-events: none; }
-#props.cooking #controls-bar::after { background: linear-gradient(90deg, transparent, var(--sel), transparent) no-repeat; background-size: 35% 100%; animation: cookbar 1.4s linear infinite; }
-@keyframes cookbar { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+/* while a cook runs: a still accent line. Nothing on the page moves on its own while a cook runs (an animation repaints
+   the page every frame, which takes the processor from the cook); the time the cook line counts shows it is alive */
+#props.cooking #controls-bar::after { background: var(--sel); opacity: .7; }
 #controls-bar .cookline { height: 20px; }
 .sessionline { display: flex; align-items: center; gap: 6px; height: 22px; }
 .sessionline .stext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
@@ -153,7 +170,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .cookline .cdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
 .cookline .cstop { display: none; flex: none; padding: 0 8px; height: 18px; line-height: 1; }
 .cookline.running, .cookline.stopping { color: var(--sel); }
-.cookline.running .cdot, .cookline.stopping .cdot { background: var(--sel); animation: cookpulse 1s ease-in-out infinite; }
+.cookline.running .cdot, .cookline.stopping .cdot { background: var(--sel); }
 .cookline.running .cstop { display: inline-block; }
 .cookline.failed { color: var(--err); }
 .cookline.failed .cdot { background: var(--err); }
@@ -161,8 +178,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .cookline.stopped .cdot { background: var(--dim); border-radius: 1px; }
 .cookline.ok .cdot { background: var(--ok); }
 .cookline.none .cdot { visibility: hidden; }
-@keyframes cookpulse { 50% { opacity: .3; } }
-#status .cookline { max-width: 55%; }
+#status .cookline { max-width: 60%; }
 .ctl > .cw { flex: 1; display: flex; gap: 4px; align-items: center; min-width: 0; }
 .cw input { padding: 1px 4px; }
 .cw input[type=range] { flex: 1; min-width: 40px; padding: 0; border: 0; background: none; accent-color: var(--sel); }
@@ -181,15 +197,18 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 
 /* status bar */
 #status { grid-area: status; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; color: var(--dim); }
-#msg { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-#msg.err { color: var(--err); }
-#msg.ok { color: var(--ok); }
-#msg.busy { color: var(--sel); }
 #cook { overflow: hidden; text-overflow: ellipsis; min-width: 0; font: var(--mono); }
 #cook .err { color: var(--err); }
+/* messages: over the view's lower left, clearing themselves (status.js) */
+#notes { position: absolute; left: 8px; bottom: 8px; z-index: 5; display: flex; align-items: flex-start; gap: 6px; max-width: min(640px, calc(100% - 96px)); padding: 5px 4px 5px 10px; background: rgba(38, 40, 44, 0.94); border: 1px solid var(--line); border-radius: 3px; color: var(--text); }
+#msg { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 6.5em; overflow: hidden; }
+#notes.err { border-color: var(--err); } #notes.err #msg { color: var(--err); }
+#notes.ok #msg { color: var(--ok); }
+#notes.busy #msg { color: var(--sel); }
 #ask { display: flex; gap: 6px; align-items: center; color: var(--text); }
 #ask[hidden] { display: none; }
 #ask button { padding: 0 8px; }
+#msg-close { flex: none; width: 18px; height: 18px; }
 
 /* drop zone */
 #drop { position: fixed; inset: 8px; z-index: 20; display: none; align-items: center; justify-content: center; text-align: center; border: 2px dashed var(--sel); background: rgba(240, 160, 48, 0.06); color: var(--sel); font-size: 15px; pointer-events: none; }
