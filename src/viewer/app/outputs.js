@@ -7,7 +7,7 @@
 import { createImageView } from './image-view.js';
 import { fmtBytes } from './units.js';
 import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
-import { kindLine, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, detailLine, kindBadge, layerChoices, shownLayer } from './output-info.js';
 import { inputImageURL } from './layers.js';
 
 const url = (route, item, more = {}) => `/api/output/${route}?` + new URLSearchParams({ id: item.id, rev: item.revision, ...more });
@@ -77,7 +77,7 @@ export function createOutputPanel(ctx) {
       details.append(row);
     }
     details.append(text('p', item.error ?? item.summary ?? '', item.error ? 'err' : 'dim'));
-    if (item.exportable) details.append(text('p', item.target ? `Export writes ${targetFile(item)} (${item.target.format})` : 'no export target yet: Export sets one; Download needs none', 'dim'));
+    if (item.exportable) details.append(text('p', item.target ? `Export writes ${targetFile(item)} (${item.target.format})` : 'Export asks for a format and a file in exports/ the first time; Download gives you a copy without that', 'dim'));
     if (item.files) {
       if (item.origin === 'saved' && !item.parent) details.append(text('p', `in ${directory}`, 'dim'));
       for (const f of item.files) {
@@ -158,10 +158,12 @@ export function createOutputPanel(ctx) {
     for (const [name, entries] of grouped) {
       let group = groups.get(name);
       if (!group) {
-        const box = document.createElement('div'), rows = document.createElement('div');
-        if (name !== '__saved') box.append(text('div', name, 'output-group'));
-        box.append(rows); group = { box, rows }; groups.set(name, group);
+        const box = document.createElement('div'), rows = document.createElement('div'), head = text('div', name, 'output-group');
+        if (name !== '__saved') box.append(head);
+        box.append(rows); group = { box, rows, head }; groups.set(name, group);
       }
+      // a graph whose one result is named after it needs no heading of its own
+      group.head.hidden = entries.filter((v) => !v.parent).length === 1 && entries[0].label === name;
       usedGroups.add(name);
       const parent = name === '__saved' ? savedRows : live;
       if (group.box.parentElement !== parent) parent.append(group.box);
@@ -174,13 +176,18 @@ export function createOutputPanel(ctx) {
         used.add(item.id); let card = cards.get(item.id);
         if (!card) {
           const row = document.createElement('div'); row.className = 'output-card'; row.tabIndex = 0; row.setAttribute('role', 'button'); row.dataset.output = item.id;
-          const thumb = document.createElement('img'); thumb.loading = 'lazy'; thumb.alt = '';
-          const icon = text('span', 'FILE', 'file-icon'), body = text('span', '', 'output-body'), label = text('span', '', 'output-label'), info = text('small', '', 'dim');
+          // the picture keeps what it showed while the result cooks again; a mark over it says it is cooking
+          const pic = text('span', '', 'output-pic'), thumb = document.createElement('img'); thumb.loading = 'lazy'; thumb.alt = '';
+          const icon = text('span', 'FILE', 'file-icon'), cooking = text('span', 'cooking…', 'output-cooking');
+          pic.append(thumb, icon, cooking);
+          const body = text('span', '', 'output-body'), head = text('span', '', 'output-head'), label = text('span', '', 'output-label');
+          const badges = text('span', '', 'output-badges'), info = text('small', '', 'dim'), tags = text('span', '', 'output-tags');
           const target = text('button', '', 'output-target'), actions = text('span', '', 'output-actions');
           const down = text('button', 'Download', 'primary output-download'), go = text('button', 'Export', 'output-export');
           target.title = 'change where this output exports'; go.type = target.type = down.type = 'button';
-          actions.append(down, go); body.append(label, info, target, actions); row.append(thumb, icon, body);
-          card = { row, thumb, icon, label, info, target, down, go, item }; cards.set(item.id, card);
+          head.append(label, badges);
+          actions.append(down, go); body.append(head, info, tags, target, actions); row.append(pic, body);
+          card = { row, thumb, icon, label, badges, info, tags, target, down, go, item }; cards.set(item.id, card);
           down.onclick = () => downloadItem(card.item, down);
           go.onclick = () => exportItem(card.item, go);
           target.onclick = () => exportItem(card.item, go, true);
@@ -190,9 +197,10 @@ export function createOutputPanel(ctx) {
           thumb.onerror = () => { thumb.hidden = true; icon.hidden = false; };
         }
         card.item = item;
-        const { row, thumb, icon, label, info, target, down, go } = card;
-        const what = kindLine(item);
+        const { row, thumb, icon, label, badges, info, tags, target, down, go } = card;
+        const what = kindLine(item), detail = detailLine(item);
         row.classList.toggle('selected', item.id === selected); row.classList.toggle('child', !!item.parent);
+        row.classList.toggle('cooking', item.status === 'loading'); row.classList.toggle('stale', !!item.stale && item.status !== 'loading');
         row.setAttribute('aria-label', `${item.label} — ${what || item.view}`); row.setAttribute('aria-pressed', String(item.id === selected));
         go.hidden = target.hidden = !item.exportable; go.disabled = busy || item.status === 'loading';
         go.title = item.target ? `write ${targetFile(item)} again (overwrites it)` : `choose a format and a file in ${directory || 'exports/'}, then export`;
@@ -204,14 +212,26 @@ export function createOutputPanel(ctx) {
           : item.download ? `download ${item.download.name}` : `download ${item.label}.png`;
         down.setAttribute('aria-label', `Download ${item.label}`);
         target.textContent = item.exportable ? targetLine(item) : ''; target.classList.toggle('unset', !item.target);
-        const src = ['model', 'image'].includes(item.view) && item.status !== 'loading' ? item.view === 'image' && !item.generated ? url('file', item) : url('thumb', item) : '';
-        if (thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
+        // while it cooks the card keeps its picture and its lines (the mark over the picture says it is cooking)
+        const src = ['model', 'image'].includes(item.view) ? item.view === 'image' && !item.generated ? url('file', item) : url('thumb', item) : '';
+        if (item.status !== 'loading' && thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
+        if (item.status === 'loading' && !thumb.dataset.source) { thumb.hidden = true; icon.hidden = false; }
         icon.textContent = item.view === 'model' ? '3D' : item.view === 'image' ? 'IMG' : (item.kind === 'metadata' ? 'JSON' : (item.files?.[0]?.name.split('.').pop() ?? 'file').toUpperCase().slice(0, 5));
         label.textContent = item.label;
-        // an output that is not the kind its graph pins says so (publishing the project's package would block on it)
-        const warned = !item.error && item.status !== 'loading' && item.warning;
-        info.textContent = item.error ?? (item.status === 'loading' ? 'Cooking…' : warned ? `${what} · not a "${item.pinned}"` : what);
-        info.className = item.error ? 'err' : warned ? 'warn' : 'dim'; info.title = item.error ?? (warned ? `${what}\n${item.warning}` : what);
+        // the default output, and the kind in the words everything uses
+        const marks = [];
+        // the default among a graph's several results
+        if (item.default && entries.filter((v) => !v.parent && v.exportable).length > 1) { const b = text('span', 'default', 'badge default'); b.title = 'the graph\'s default output: what the graph shows and exports when no output is named'; marks.push(b); }
+        const kind = kindBadge(item);
+        if (kind) { const b = text('span', kind, 'badge kind'); b.title = 'what it is'; marks.push(b); }
+        badges.replaceChildren(...marks);
+        tags.replaceChildren(...(item.tags ?? []).map((t) => text('span', t, 'tag')));
+        tags.hidden = !item.tags?.length;
+        // an output that is not the kind its graph pins says so (publishing the project's package would block on it); one
+        // whose cook was stopped shows the last finished result
+        const warned = !item.error && item.warning;
+        info.textContent = item.error ?? (item.stale ? `out of date: its cook was stopped · ${detail}` : warned ? `not a "${item.pinned}" · ${detail}` : detail || (item.status === 'loading' ? 'cooking…' : ''));
+        info.className = item.error ? 'err' : warned || item.stale ? 'warn' : 'dim'; info.title = item.error ?? (warned ? `${what}\n${item.warning}` : item.stale ? 'its cook was stopped: the card shows the last finished result; change a value to cook it again' : what);
         const next = previous ? previous.nextSibling : group.rows.firstChild; if (row !== next) group.rows.insertBefore(row, next); previous = row;
       }
     }

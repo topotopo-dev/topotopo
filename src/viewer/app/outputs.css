@@ -37,9 +37,23 @@ button:disabled { opacity: .45; cursor: default; }
 .output-card.selected { border-color: var(--sel); background: var(--sel-bg); }
 .output-card.child { margin-left: 12px; width: calc(100% - 16px); }
 .output-card img { width: var(--thumb-size); height: var(--thumb-size); object-fit: contain; background: var(--view); flex: none; }
+/* the picture: kept while the result cooks again, with a mark over it; dimmed when it is out of date */
+.output-pic { position: relative; flex: none; display: flex; }
+.output-cooking { display: none; position: absolute; left: 0; right: 0; bottom: 0; padding: 1px 3px; background: rgba(31, 33, 36, 0.85); color: var(--sel); font-size: 10px; text-align: center; }
+.output-card.cooking .output-cooking { display: block; }
+.output-card.stale .output-pic { opacity: .55; }
 .output-card .output-body { display: flex; flex: 1; flex-direction: column; min-width: 0; justify-content: center; gap: 3px; }
+.output-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .output-card .output-label { overflow-wrap: anywhere; }
+.output-badges { display: inline-flex; gap: 4px; }
+.badge { padding: 0 4px; border: 1px solid var(--faint); border-radius: 2px; color: var(--dim); font-size: 10px; line-height: 14px; white-space: nowrap; }
+.badge.default { border-color: var(--sel); color: var(--sel); }
+.badge.kind { color: var(--text); }
+.badge.live { border-color: var(--guide); color: var(--guide); }
+.output-tags, .pkg-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+.output-tags .tag, .pkg-tags .tag { padding: 0 4px; border-radius: 2px; background: var(--panel2); color: var(--dim); font-size: 10px; line-height: 14px; }
 .output-card small { overflow: hidden; text-overflow: ellipsis; max-height: 32px; }
+.output-card small.warn { color: var(--sel); }
 .output-actions { display: flex; gap: 6px; margin-top: 2px; }
 .output-actions button { padding: 2px 10px; }
 .output-target { align-self: flex-start; max-width: 100%; padding: 0; border: 0; background: none; color: var(--dim); font-size: 11px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }

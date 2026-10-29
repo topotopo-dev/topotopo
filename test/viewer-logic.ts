@@ -383,8 +383,10 @@ section('status line (section 4)');
 section('output cards: what an output is, its formats and downloads');
 {
   const hf = { name: 'heightfield', width: 21, height: 21, cell: 1, layers: [{ name: 'height', min: -1, max: 2 }, { name: 'flow', min: 0, max: 3.25 }, { name: 'mask', min: 0, max: 1 }] };
-  check(info.kindLine({ about: 'heightfield 21 × 21, 1 m', size: [20, 3, 20] }) === 'heightfield 21 × 21, 1 m · 20.0 × 3.00 × 20.0 m' && info.kindLine({ view: 'file' }) === 'file'
+  check(info.kindLine({ kind: 'terrain', about: '21 × 21 samples, 1 m apart', size: [20, 3, 20] }) === 'terrain · 21 × 21 samples, 1 m apart · 20.0 × 3.00 × 20.0 m' && info.kindLine({ view: 'file' }) === 'file'
     && info.kindLine({ kind: 'metadata' }) === 'metadata', 'a card says what it is and its size');
+  check(info.kindBadge({ kind: 'scene' }) === 'scene' && info.kindBadge({ kind: 'metadata' }) === '' && info.kindBadge({}) === ''
+    && info.detailLine({ kind: 'terrain', about: '21 × 21 samples, 1 m apart', size: [20, 3, 20] }) === '21 × 21 samples, 1 m apart · 20.0 × 3.00 × 20.0 m', 'the kind is a badge, the size the line beside it');
   check(JSON.stringify(info.layerChoices(hf)) === JSON.stringify([{ value: 'mask', label: 'mask' }, { value: 'flow', label: 'flow (0 .. 3.25)' }, { value: 'none', label: 'none' }]),
     'the layers a terrain shows in red: the mask first, others with their range, then none (never the height itself)');
   check(info.shownLayer(hf, undefined) === 'mask' && info.shownLayer(hf, 'flow') === 'flow' && info.shownLayer(hf, 'gone') === 'mask' && info.shownLayer(hf, 'none') === 'none'

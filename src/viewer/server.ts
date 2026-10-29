@@ -211,10 +211,15 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   // a graph changed: after a stop the page keeps the geometry it has instead of fetching (and cooking) it again
   const graphChanged = (ev: { graph: string; version: number }) => broadcast({ ...ev, ...(ws.held(ev.graph) ? { stopped: true } : {}) });
   ws.listeners.add(graphChanged);
-  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source });
-  let outputs = makeOutputs();
-  const makePackages = () => createPackages(ws, broadcast);
-  let packages = makePackages();
+  /** The project the viewer shows: that of the packages attached to the workspace, else the one its folder is in. */
+  const projectOf = (refresh = false) => {
+    const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
+    if (refresh && pk?.dir) pk.refresh();
+    const dir = pk ? pk.dir : projectDirOf(ws.dir);
+    let m = pk?.manifest ?? null;
+    if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no project to name */ }
+    return m && dir ? { id: m.id, title: m.title, description: m.description, graph: m.graph, package: m.package ?? null, dir } : null;
+  };
   // TopoTopo's kits, read once: they change only with TopoTopo itself
   let kits: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
   /**
@@ -222,16 +227,14 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
    * file of `topotopo view`, and TopoTopo's kits.
    */
   const projectInfo = () => {
-    // the project of the packages attached to the workspace, else the one its folder is in
-    const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
-    if (pk?.dir) pk.refresh();
-    const dir = pk ? pk.dir : projectDirOf(ws.dir);
-    let m = pk?.manifest ?? null;
-    if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no project to name */ }
-    const project = m && dir ? { id: m.id, title: m.title, description: m.description, graph: m.graph, package: m.package ?? null, dir } : null;
     kits ??= listKits().map((k) => ({ name: k.name, title: k.title, description: k.description, version: k.version, outputs: kitOutputsText(k) }));
-    return { project, folder: ws.dir, file: opts.source?.label ?? null, kits };
+    return { project: projectOf(true), folder: ws.dir, file: opts.source?.label ?? null, kits };
   };
+  // the project's default graph cooks its cards first
+  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => projectOf()?.graph });
+  let outputs = makeOutputs();
+  const makePackages = () => createPackages(ws, broadcast);
+  let packages = makePackages();
 
   // ---------------------------------------------------------------- the state of the cooks
   // {cook: {graph, running, last}} events: each node of the graph as it starts (before it can hold the thread for

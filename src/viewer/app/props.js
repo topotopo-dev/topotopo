@@ -128,7 +128,7 @@ export function createProps(ctx) {
     const graph = ctx.graph.current();
     g.append(row('graph', graph?.name ?? ''), row('node', ctx.graph.shownNode() ?? ''), displayRow(DISPLAY_MODES, o.display, (m) => o.setDisplay(m)));
     // what it is (the server's decision from the cooked geometry), and a heightfield's layer drawn in red
-    if (o.about) g.append(row('is', kindLine({ about: o.about.text, size: o.about.size })));
+    if (o.about) g.append(row('is', kindLine({ kind: o.about.published ?? 'empty', about: o.about.text, size: o.about.size })));
     if (o.about?.heightfield && !ctx.isolated) {
       const s = el('select');
       for (const c of layerChoices(o.about.heightfield)) s.append(new Option(c.label, c.value));
