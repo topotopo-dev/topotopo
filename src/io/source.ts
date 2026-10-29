@@ -17,6 +17,7 @@
 // rows: <name>.meshes.json; unreal_landscape: its landscape.json); every other export gets <file>.source.json next to
 // it (textures, a folder: source.json inside it), and glb / gltf also carry it in asset.extras.source. Nothing in the
 // block depends on the time or the machine: the same graph and values give the same bytes. Pure: no file system.
+import { isGraph } from '../graph/types.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { norm } from '../graph/params.ts';
 import { sha256Hex } from '../core/sha256.ts';
@@ -79,7 +80,6 @@ export function graphSha256(spec: GraphSpec): string {
   return sha256Hex(canonicalJSON(spec));
 }
 
-const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';
 
 /** The seed params a graph sets (param names compared as the engine does), by node path, keys sorted. */
 export function graphSeeds(spec: GraphSpec): Record<string, unknown> {

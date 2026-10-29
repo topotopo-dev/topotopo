@@ -12,6 +12,7 @@
 // in a scope of its folder, as `topotopo <file>` cooks it. A use inside a nested graph (a foreach or solver body) is
 // compared through the node that holds it. Each cook gets only what its node needs, so another node's error stays out
 // of it, and reuses the engine's cache.
+import { isGraph } from '../graph/types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -45,7 +46,6 @@ const MAX_GRAPH_BYTES = 16 * 2 ** 20;
 /** Packed results are compared expanded, up to this many triangles. */
 const MAX_TRIANGLES = 4_000_000;
 
-const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object' && !Array.isArray((v as GraphSpec).nodes);
 
 type GraphKind = 'graph' | 'asset' | 'file';
 

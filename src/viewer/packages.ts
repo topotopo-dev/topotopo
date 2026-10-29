@@ -21,6 +21,7 @@
 //   POST /api/packages/dismiss       {package}: drop the list of what the graphs must change kept after a big update
 // Events: {packages: n} when what the tab shows changed, with saved: "owner/name" after a save in the working folder of
 // a package the session does not follow; {compare: {...}} the progress of a before/after and its end.
+import { isGraph } from '../graph/types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type http from 'node:http';
@@ -29,7 +30,7 @@ import { diffOverlay } from '../explain.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
 import type { Scope } from '../graph/scope.ts';
 import { readManifest } from '../project.ts';
-import { ProjectPackages, compareVersions, loadProject, publishPackage, publishedVersions, searchPackages, startsBigVersion, workingHash } from '../packages/registry.ts';
+import { compareVersions, isDefaultOutput, loadProject, ProjectPackages, publishedVersions, publishPackage, searchPackages, startsBigVersion, workingHash } from '../packages/registry.ts';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import type { GraphSpec } from '../graph/types.ts';
@@ -125,7 +126,7 @@ const sameDir = (a: string, b: string) => (process.platform === 'win32' ? a.toLo
 const versionRow = (v: VersionInfo): VersionRow => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: !!v.big });
 /** A version's outputs by the node type a graph names them with, with their kinds and tags (PackageRow.outputs). */
 const outputRows = (pkg: string, v: VersionInfo, used: Set<string> = new Set()): NonNullable<PackageRow['outputs']> => {
-  const isDefault = (o: { graph: string; node: string }) => o.graph === v.default.graph && o.node === v.default.node;
+  const isDefault = (o: { graph: string; node: string }) => isDefaultOutput(v, o);
   // used: a graph names it, or names the package alone and it is the default output
   const row = (type: string, o: VersionInfo['default'], dflt: boolean) => ({
     type, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [], ...(used.has(type) || (dflt && used.has(pkg)) ? { used: true } : {}),
@@ -134,7 +135,6 @@ const outputRows = (pkg: string, v: VersionInfo, used: Set<string> = new Set()):
   return Object.values(v.outputs).some(isDefault) ? rows : [row(pkg, v.default, true), ...rows];
 };
 const byName = <T extends { package: string }>(a: T, b: T) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0);
-const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';
 /**
  * The package output types a node names, as its type and in its nested graphs (foreach and solver bodies), as
  * "owner/name/output" or "owner/name".

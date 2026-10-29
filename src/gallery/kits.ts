@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { readManifest } from '../project.ts';
-import { builtinVersions } from '../packages/registry.ts';
+import { builtinVersions, isDefaultOutput } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 
 /** An output of a kit's newest version, by the node type a graph names it with ("topotopo/street/bench"). */
@@ -50,7 +50,7 @@ export function listKits(builtin = BUILTIN_LIBRARY.path): Kit[] {
       const m = readManifest(dir);
       if (!m.package) continue;
       const versions = builtinVersions(m.package, builtin), newest = versions.at(-1);
-      const isDefault = (o: { graph: string; node: string }) => !!newest && o.graph === newest.default.graph && o.node === newest.default.node;
+      const isDefault = (o: { graph: string; node: string }) => !!newest && isDefaultOutput(newest, o);
       const outputs: KitOutput[] = newest ? Object.entries(newest.outputs).map(([k, o]) => {
         const thumb = path.join(dir, 'thumbs', `${k}.png`);
         return {

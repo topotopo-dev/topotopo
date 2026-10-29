@@ -131,6 +131,9 @@ export interface GraphMeta {
  */
 export type ExportTarget = string | { format: string; path?: string; [option: string]: unknown };
 
+/** A value shaped like a graph: an object with a nodes object (a nested graph in a node's params). */
+export const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';
+
 export interface GraphSpec {
   /** the graph format a tool wrote it in (informational: graphs are read as they are, with no migrations) */
   version?: number;

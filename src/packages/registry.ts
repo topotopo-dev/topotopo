@@ -53,7 +53,7 @@ import { imageRef, referenceableImages } from '../core/image.ts';
 import { NAME_RE } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { VERSION_RE, copiesFor, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
+import { VERSION_RE, copiesFor, isPackageName, parseUses, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
 import { scanLibrary } from '../gallery/library.ts';
 import type { GalleryConfig } from '../config.ts';
 import type { Libraries, LibraryAt, ProjectManifest } from '../project.ts';
@@ -105,6 +105,12 @@ export interface VersionInfo {
   topotopo: string;
 }
 
+/** Is `o` the version's default output (the graph project.json shows, at its output node)? */
+export const isDefaultOutput = (v: Pick<VersionInfo, 'default'>, o: { graph: string; node: string }) => o.graph === v.default.graph && o.node === v.default.node;
+/** The named output that is the default one too, or null when the default output is one of its own. */
+export const defaultOutputName = (v: Pick<VersionInfo, 'outputs' | 'default'>): string | null =>
+  Object.entries(v.outputs).find(([, o]) => isDefaultOutput(v, o))?.[0] ?? null;
+
 // ------------------------------------------------------------------------------------------------------- versions
 
 const versionParts = (v: string) => v.split('.').map(Number);
@@ -114,7 +120,6 @@ export const startsBigVersion = (v: string) => { const [big, small] = versionPar
 const newestOf = (vs: Iterable<string>) => [...vs].sort(compareVersions).at(-1);
 
 /** A package name "owner/name" (no output). */
-const isPackageName = (s: string) => { const n = parsePackageName(s); return typeof n !== 'string' && n.output === null; };
 
 function readVersionInfo(dir: string): VersionInfo {
   const file = path.join(dir, 'version.json');
@@ -292,13 +297,6 @@ function copyTree(from: string, to: string, keep: (rel: string) => boolean = () 
 
 export const lockFile = (dir: string) => path.join(dir, 'packages', 'lock.json');
 
-const usesOf = (v: unknown, where: string): Record<string, string> => {
-  if (v === undefined) return {};
-  if (!v || typeof v !== 'object' || Array.isArray(v) || Object.entries(v).some(([k, x]) => !isPackageName(k) || typeof x !== 'string' || !VERSION_RE.test(x)))
-    throw new Error(`${where}: "uses" must be {"owner/name": "1.3"}`);
-  return sortKeys(v as Record<string, string>);
-};
-
 /** A folder's packages/lock.json (empty when there is none); throws naming the file when it is not valid. */
 export function readLock(dir: string): Lock {
   const file = lockFile(dir);
@@ -312,7 +310,7 @@ export function readLock(dir: string): Lock {
     if (!isPackageName(pkg) || !vs || typeof vs !== 'object' || Array.isArray(vs)) throw new Error(shape);
     for (const [v, e] of Object.entries<any>(vs)) {
       if (!VERSION_RE.test(v) || !e || typeof e.hash !== 'string' || typeof e.library !== 'string') throw new Error(shape);
-      (out.packages[pkg] ??= {})[v] = { hash: e.hash, library: e.library, uses: usesOf(e.uses, `${file} ${pkg} ${v}`) };
+      (out.packages[pkg] ??= {})[v] = { hash: e.hash, library: e.library, uses: parseUses(e.uses, `${file} ${pkg} ${v}`) };
     }
   }
   return out;
@@ -2047,7 +2045,7 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
       if (before && before.kind !== now.kind) r.warnings.push(`${k} is now ${now.kind} (it was ${before.kind} in ${prev.version}): a project that relies on what it is may have to change, and the version is big`);
     };
     for (const x of outs.named) was(outputWhat(x), outputs[x.name!], prev.outputs[x.name!]);
-    if (!sameNamed(outs.default) && !Object.values(prev.outputs).some((p) => p.graph === prev.default.graph && p.node === prev.default.node)) was(outputWhat(outs.default), def, prev.default);
+    if (!sameNamed(outs.default) && defaultOutputName(prev) === null) was(outputWhat(outs.default), def, prev.default);
   }
   Object.assign(r, { version, outputs, default: def });
   if (bytes > MAX_VERSION_BYTES) r.warnings.push(`the version holds ${(bytes / 2 ** 20).toFixed(0)} MB (above ${MAX_VERSION_BYTES / 2 ** 20} MB): every project that uses it keeps a copy`);
@@ -2096,7 +2094,7 @@ export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick
   const out: string[] = [];
   const one = (what: string, x: OutputInfo | undefined, y: OutputInfo | undefined) => { if (x && y && x.kind !== y.kind) out.push(`${what}: ${x.kind} → ${y.kind}`); };
   for (const [k, o] of Object.entries(b.outputs)) one(`output "${k}"`, a.outputs[k], o);
-  const named = (v: Pick<VersionInfo, 'outputs' | 'default'>) => Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node);
+  const named = (v: Pick<VersionInfo, 'outputs' | 'default'>) => defaultOutputName(v) !== null;
   if (!named(a) && !named(b)) one('the default output', a.default, b.default);
   return out;
 }
@@ -2106,7 +2104,7 @@ export function publishText(r: PublishResult): string {
   const kind = !r.previous ? 'the first version' : r.bigBecause.length ? `big, after ${r.previous}` : `small, after ${r.previous}`;
   const said = [
     ...(r.outputs ? ['outputs:', ...Object.entries(r.outputs).map(([k, o]) => `  ${k}  ${kindTagsText(o)}${o.label ? `  "${o.label}"` : ''}`)] : []),
-    ...(r.default && r.outputs && !Object.values(r.outputs).some((o) => o.graph === r.default!.graph && o.node === r.default!.node) ? [`  (default: "${r.default.node}" of graph "${r.default.graph}")  ${kindTagsText(r.default)}`] : []),
+    ...(r.default && r.outputs && defaultOutputName({ outputs: r.outputs, default: r.default }) === null ? [`  (default: "${r.default.node}" of graph "${r.default.graph}")  ${kindTagsText(r.default)}`] : []),
     ...(r.bigBecause.length ? ['big because:', ...r.bigBecause.map((c) => `  ${c}`)] : []),
     ...(r.changes.length ? ['changes:', ...r.changes.map((c) => `  ${c}`)] : []),
     ...(r.warnings.length ? ['warnings:', ...r.warnings.map((w) => `  ${w}`)] : []),
@@ -2134,7 +2132,7 @@ export function publishText(r: PublishResult): string {
 /** How many outputs a version publishes: its named outputs, and its default output when it is none of them. */
 const outputCount = (v: Pick<VersionInfo, 'outputs' | 'default'>) => {
   const named = Object.values(v.outputs);
-  const n = named.length + (named.some((o) => o.graph === v.default.graph && o.node === v.default.node) ? 0 : 1);
+  const n = named.length + (defaultOutputName(v) !== null ? 0 : 1);
   return `${n} output${n === 1 ? '' : 's'}`;
 };
 
@@ -2212,7 +2210,7 @@ export function packageText(pk: ProjectPackages, pkg: string, mcp = false): stri
   else if (!inUse) lines.push('no version published yet');
   if (shown) {
     lines.push(`outputs of ${shown.version}:`);
-    const isDefault = (o: OutputInfo) => o.graph === shown.default.graph && o.node === shown.default.node;
+    const isDefault = (o: OutputInfo) => isDefaultOutput(shown, o);
     const one = (type: string, o: OutputInfo) => {
       const params = Object.keys(o.sliders), inputs = o.inputs.map((i) => i.label || `input ${i.index}`);
       return `  ${type}  ${kindTagsText(o)}${o.label ? `  "${o.label}"` : ''}${params.length ? `  params ${params.join(', ')}` : ''}${inputs.length ? `  inputs ${inputs.join(', ')}` : ''}${isDefault(o) ? `  (also ${pkg}, its default output)` : ''}`;
@@ -2324,7 +2322,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
       let pm: ProjectManifest | null = null;
       try { pm = readManifest(place.dir); } catch (e: any) { problems.add(e.message); }
       const v = place.info, about = [pm?.title ?? '', ...(pm?.tags ?? [])];
-      const isDefault = (o: OutputInfo) => o.graph === v.default.graph && o.node === v.default.node;
+      const isDefault = (o: OutputInfo) => isDefaultOutput(v, o);
       const found: [string, OutputInfo, string | undefined][] = Object.entries(v.outputs).map(([k, o]) => [`${f.package}/${k}`, o, isDefault(o) ? f.package : undefined]);
       if (!Object.values(v.outputs).some(isDefault)) found.unshift([f.package, v.default, undefined]);
       for (const [type, o, alias] of found) {

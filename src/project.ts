@@ -110,6 +110,24 @@ const str = (v: unknown, key: string, def = ''): string => {
   return v;
 };
 
+/** "owner/name": a package name (no output). */
+export const isPackageName = (s: string) => { const n = parsePackageName(s); return typeof n !== 'string' && n.output === null; };
+
+/**
+ * A "uses" map checked ({"owner/name": "1.3"}), sorted by name; throws naming the entry that is wrong (`where`: the file
+ * it is in, when it is not project.json).
+ */
+export function parseUses(v: unknown, where = ''): Record<string, string> {
+  const at = where ? `${where}: ` : '';
+  if (v === undefined || v === null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) throw new Error(`${at}"uses" must be {"owner/name": "1.3"}`);
+  for (const [k, x] of Object.entries(v)) {
+    if (!isPackageName(k)) throw new Error(`${at}"uses": "${k}" is not a package name (owner/name)`);
+    if (typeof x !== 'string' || !VERSION_RE.test(x)) throw new Error(`${at}"uses": "${k}" needs a version such as "1.3", got ${JSON.stringify(x)}`);
+  }
+  return Object.fromEntries(Object.entries(v as Record<string, string>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
 /** project.json checked and normalised; throws naming the problem. `fallbackId` is used when it has no id. */
 export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('project.json must be an object');
@@ -128,14 +146,8 @@ export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
   if (b.node !== undefined) bake.node = str(b.node, 'bake.node');
   if (b.frame !== undefined) { if (!Number.isFinite(b.frame)) throw new Error('"bake.frame" must be a number'); bake.frame = b.frame; }
   const pkg = raw.package === undefined ? undefined : str(raw.package, 'package');
-  const isPackage = (s: string) => { const n = parsePackageName(s); return typeof n !== 'string' && n.output === null; };
-  if (pkg !== undefined && !isPackage(pkg)) throw new Error(`"package" "${pkg}" must be "owner/name": each part lower-case letters, digits, - and _, starting with a letter or digit`);
-  const uses = raw.uses ?? {};
-  if (!uses || typeof uses !== 'object' || Array.isArray(uses)) throw new Error('"uses" must be {"owner/name": "1.3"}');
-  for (const [k, v] of Object.entries(uses)) {
-    if (!isPackage(k)) throw new Error(`"uses": "${k}" is not a package name (owner/name)`);
-    if (typeof v !== 'string' || !VERSION_RE.test(v)) throw new Error(`"uses": "${k}" needs a version such as "1.3", got ${JSON.stringify(v)}`);
-  }
+  if (pkg !== undefined && !isPackageName(pkg)) throw new Error(`"package" "${pkg}" must be "owner/name": each part lower-case letters, digits, - and _, starting with a letter or digit`);
+  const uses = parseUses(raw.uses);
   // each entry's form is checked where the libraries are looked in (libraryEntry): one that is wrong is said there, and
   // the others still work
   const libraries = raw.libraries ?? [];
@@ -148,7 +160,7 @@ export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
     links: links.map((l: any) => ({ label: typeof l.label === 'string' && l.label ? l.label : l.url, url: l.url })),
     created: str(raw.created, 'created'),
     ...(pkg !== undefined ? { package: pkg } : {}),
-    uses: Object.fromEntries(Object.entries(uses as Record<string, string>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    uses,
     libraries: libraries as string[],
   };
 }

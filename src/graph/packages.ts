@@ -12,6 +12,7 @@
 // A package's graphs name its own outputs by full name too (a kit whose pieces build on each other: a house of the
 // kit's walls): they resolve to the same version, or the same working folder, with no entry in its uses. Outputs that
 // name each other in a loop do not resolve (ownOutputsNamed finds what each output names).
+import { isGraph } from './types.ts';
 import { Geometry } from '../core/geometry.ts';
 import { rebaseTexturePaths } from '../core/materials.ts';
 import { codeVarNames } from '../core/usercode.ts';
@@ -114,7 +115,6 @@ export function packageOutputDef(o: PackageOutput): NodeDef {
   };
 }
 
-const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';
 
 /** The packages ("owner/name") a graph names as node types, in its nested graphs too (foreach and solver bodies). */
 export function packagesNamedIn(graph: GraphSpec): string[] {
