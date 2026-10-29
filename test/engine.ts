@@ -10,7 +10,7 @@ import '../src/nodes/index.ts';
 import { Engine, resolveTime, STOPPED } from '../src/graph/engine.ts';
 import type { CookOptions, CookReport } from '../src/graph/engine.ts';
 import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
-import { createNodeHost } from '../src/host/node.ts';
+import { createNodeHost, projectBaseDir } from '../src/host/node.ts';
 import { GRAPH_VERSION } from '../src/graph/types.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { migrateGraph, migrateGraphDetailed } from '../src/graph/migrate.ts';
@@ -863,6 +863,9 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const look = cli(g, '--output', 'field', '--views', 'top', '--size', '128', '--render', path.join(dir, 'field_top.png'));
   check(look.status === 0 && /heightfield "heightfield": 41×41 samples/.test(look.stdout) && fs.existsSync(path.join(dir, 'field_top.png')), '--output renders and inspects the named output');
   // mistakes are named
+  const nodeAsOut = cli(g, '--output', 'ground'), outAsNode = cli(g, '--node', 'mesh');
+  check(nodeAsOut.status === 1 && /has no output "ground", but a node of that name: --node ground/.test(nodeAsOut.stderr)
+    && outAsNode.status === 1 && /has no node "mesh", but an output of that name: --output mesh/.test(outAsNode.stderr), `--output naming a node suggests --node, and the reverse (${nodeAsOut.stderr.trim()})`);
   const badOut = cli(g, '--output', 'mesj');
   check(badOut.status === 1 && /no output "mesj" \(did you mean mesh\?\); its outputs: mesh, field/.test(badOut.stderr), `--output: an unknown name lists the outputs (${badOut.stderr.trim()})`);
   const noOuts = path.join(dir, 'plain.json');
@@ -909,10 +912,32 @@ section('CLI several renders per cook, triangle budget');
     `two --render flags: one cook, two files (${(two.stdout.match(/^cooked /gm) ?? []).length} cook line)`);
   check(/rendered .*r_a\.png.*color by height/.test(two.stdout) && !/rendered .*r_b\.png.*color by/.test(two.stdout) && sizeOf(a)[0] === 200 && sizeOf(b)[0] === 160,
     `per-render options: colour only on the first, size 200 / 160 (${sizeOf(a)[0]} / ${sizeOf(b)[0]}); shared --views top on both`);
+  check(/warning: --size after the last --render apply to .*r_b\.png only; options before the first --render apply to every render/.test(two.stderr), `options after the last of several --render: a warning (${two.stderr.trim().slice(0, 120)})`);
+  const one = cli(g, '--views', 'top', '--render', a, '--size', '120');
+  check(one.status === 0 && !/warning/.test(one.stderr), 'one --render: options after it are its own, no warning');
   const capped = cli(g, '--views', 'top', '--size', '120', '--render', a);
   const lifted = cli(g, '--views', 'top', '--size', '120', '--render', a, '--max-triangles', '2000000');
   check(/rendering .* of 3\.6k instances/.test(capped.stdout) && lifted.status === 0 && !/rendering .* of/.test(lifted.stdout),
     '--max-triangles: 1.15M instance triangles draw as a subset by default and in full with a 2M budget');
+}
+
+section('relative paths read from the project folder');
+{
+  // a graph in a project's graphs/ reads "inputs/…" from the project, cooked from anywhere; export targets go to its exports/
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const proj = path.join(tmp, 'proj');
+  fs.mkdirSync(path.join(proj, 'graphs'), { recursive: true });
+  fs.mkdirSync(path.join(proj, 'inputs'), { recursive: true });
+  const init = cli('init', proj);
+  fs.writeFileSync(path.join(proj, 'inputs', 'tri.obj'), 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
+  const g = path.join(proj, 'graphs', 'piece.json');
+  fs.writeFileSync(g, JSON.stringify({ nodes: { f: { type: 'file', params: { path: 'inputs/tri.obj' } } }, output: 'f', export: 'obj' }));
+  const r = cli(g, '--export-all');
+  check(init.status === 0 && r.status === 0 && /3 points, 1 prims/.test(r.stdout) && fs.existsSync(path.join(proj, 'exports', 'piece.obj')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
+    `a graph in graphs/ reads inputs/ of its project, and --export-all writes the project's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
+  check(projectBaseDir(path.join(proj, 'graphs')) === proj && projectBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'projectBaseDir: the nearest project.json, else the folder itself');
+  const e = new Engine(createNodeHost({ baseDir: path.join(proj, 'graphs') }));
+  check(e.host.resolvePath('inputs/tri.obj') === path.join(proj, 'inputs', 'tri.obj'), 'the node host resolves relative paths against the project folder');
 }
 
 section('progress and stop: CookOptions.onNode, signal, ctx.checkpoint');

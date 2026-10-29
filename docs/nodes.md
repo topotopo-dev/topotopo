@@ -7393,7 +7393,7 @@ Houdini: HeightField File. One sample per pixel; image column = X, row = Z with 
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the workspace) or URL |
+| `path` | path | `""` |  |  | `file`, `filename` | PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph's folder |
 | `layer` | string | `"height"` |  |  |  | layer to write |
 | `height_min` | float | `0` |  |  | `min`, `low` | value for black (0) |
 | `height_max` | float | `10` |  |  | `max`, `high` | value for white (1) |
@@ -9305,7 +9305,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | file or folder path (relative to the workspace) or file URL; folder mode needs directory support in the host |
+| `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the project folder (the nearest folder with a project.json at or above the graph), else from the graph's folder (MCP: the workspace); folder mode needs directory support in the host |
 | `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
@@ -10617,7 +10617,7 @@ Houdini: Attribute from Map; Unreal PCG: Get Texture Data + Sample Texture. proj
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename`, `map`, `texture`, `image` | PNG file (relative to the workspace) or URL |
+| `path` | path | `""` |  |  | `file`, `filename`, `map`, `texture`, `image` | PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph's folder |
 | `name` | string | `""` |  |  | `attrib`, `attribute`, `output` | output attribute ("" = Cd for channel rgb, else mask) |
 | `channel` | enum | `"luminance"` |  | `luminance`, `r`, `g`, `b`, `a`, `rgb` |  | which channel (rgb writes a vector) |
 | `projection` | enum | `"uv"` |  | `uv`, `xz`, `xy`, `yz` | `mapping` | uv attribute or a planar projection (xz = top view) |

@@ -158,7 +158,8 @@ input button): meshes, guide curves and points drawn in Blender, Houdini or Unre
 heightmaps. Every tool answer ends with a note when inputs/ has files new or changed since your last call. Before building a
 landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path} tells what one holds (polygons, open
 polylines, loose points, packed prims; bbox in metres; attributes; every name and role value; materials). Read a file
-with a file node, the path relative to the workspace: {"type":"file","params":{"path":"inputs/guides.glb"}}.
+with a file node: {"type":"file","params":{"path":"inputs/guides.glb"}} (relative paths read from the project folder,
+the nearest folder with a project.json at or above the graph, else the graph's folder; the list gives the exact path).
 MARKERS: what a person places by clicking in the live viewer (Site / Path / Zone / Volume modes) is written as
   inputs/markers.json with the same name and role attributes (sites: points with pscale and orient; paths open and
   zones closed polylines; volumes closed boxes), so describe it and read it like any other input.
@@ -1031,6 +1032,10 @@ Heightfields draw at most heightfield_res quads per side (default 256; "full" = 
   in the legend) and "none" none.
 Examples: render {views:["persp","section"], section_axis:"z", wireframe:"hard", label_groups:true}
           render {views:"turntable", shading:"matcap"} · render {glyphs:"N", clip:{axis:"x", offset:0.5}}
+CLI: several renders per cook: the options after a --render apply to that render, up to the next --render; options before the
+  first --render apply to every render. Example: both renders 1200x600; side.png the front view over the reference,
+  beauty.png a pbr three-quarter view:
+    topotopo g.json --size 1200x600 --render side.png --views front --underlay ref.png --render beauty.png --views front_left --shading pbr
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
   --shading pbr --exposure 0.5 --views front_left --size 1600x600 --transparent --no-grid --sockets
   --azimuth -90 --elevation 10 --look-at 0.6,0.15,0 --zoom 4 --ortho-scale 0.5
@@ -1040,6 +1045,10 @@ CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pie
   export: `EXPORT
 export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic
   "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
+PATHS: relative paths inside a graph (file nodes, material maps, image files) read from its project folder: the nearest
+  folder with a project.json at or above the graph file, else the graph file's folder (MCP: the workspace). Export
+  targets write into exports/ of that same folder, never beside a graph in a subfolder. The same rule holds for the CLI,
+  the MCP server and the viewer. The CLI's own --render / --export / --underlay paths are relative to the current folder.
 export {path:"exports/thing.glb"} — format from the extension:
   glb / gltf    glTF 2.0 via gltf-transform (recommended for Unreal, Blender, web)
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)
@@ -1081,7 +1090,7 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
 MATERIALS: the material node writes prim "material" + the detail table. Vertex colours win: prims whose Cd is not all
   white export baseColor white × COLOR_0 with the material's metallic/roughness/emissive; otherwise baseColor = the
   material colour. alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
-TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the workspace/graph; the mesh
+TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the project folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
   map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
   keep the paths in the material table. glTF import records texture paths (or "embedded:<name>") without decoding.

@@ -39,7 +39,7 @@ import { Engine } from './graph/engine.ts';
 import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { KINDS } from './graph/outputs.ts';
-import { createNodeHost } from './host/node.ts';
+import { createNodeHost, projectBaseDir } from './host/node.ts';
 import { renderGeometryAsync } from './render/raster.ts';
 import { parseViews } from './render/raster.ts';
 import type { RenderOptions } from './render/raster.ts';
@@ -86,7 +86,9 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           --json: the uv, budget or scene report as JSON',
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
-    '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
+    '         [--export-all] (every output with an export target in the graph, into exports/ of its project folder)',
+    '         relative paths in the graph (file nodes, maps) read from its project folder: the nearest folder with a project.json at or',
+    '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
     '         [--follow owner/name] (use that package\'s working folder in the project\'s libraries instead of its copy, for this run; repeat it)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
@@ -101,8 +103,11 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          [--max-triangles 600000] (packed instances drawn; above it an evenly spread subset)',
     '                          [--heightfield-res 256|full] (heightfields: quads drawn per side, default 256, said in the footer when a field has more; full = every sample)',
     '                          [--heightfield-layer flow] (heightfields: the layer drawn in red, default mask; none draws none)',
-    '         several renders per cook: repeat --render; options after a --render apply to it, options before the first apply to all',
-    '           e.g. --views top --render h.png --color-by height --render r.png --color-by river',
+    '         several renders per cook: repeat --render; the options after a --render apply to that render (up to the next --render),',
+    '           options before the first --render apply to every render. Example (both 1200x600):',
+    '             --size 1200x600 --render side.png --views front --underlay ref.png --render beauty.png --views front_left --shading pbr',
+    '           side.png: the front view over the reference; beauty.png: a pbr three-quarter view. Options after the last of several',
+    '           --render apply to it alone (a warning says so)',
     '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails)',
     '         export options: [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
@@ -237,12 +242,15 @@ async function cook() {
   if (argv.includes('--output') && (outputName === undefined || outputName.startsWith('--'))) fail('--output needs the name of one of the graph\'s outputs');
   if (outputName !== undefined && opt('--node') !== undefined) fail('use either --node or --output, not both');
   let target = opt('--node');
+  if (target !== undefined && graph?.nodes && !Object.hasOwn(graph.nodes, target) && graph?.outputs && Object.hasOwn(graph.outputs, target))
+    fail(`--node: ${file} has no node "${target}", but an output of that name: --output ${target}`);
   if (outputName !== undefined) {
     const outs: Record<string, any> = graph?.outputs && typeof graph.outputs === 'object' ? graph.outputs : {};
     const o = Object.hasOwn(outs, outputName) ? outs[outputName] : undefined;
     if (!o || typeof o.node !== 'string') {
       const names = Object.keys(outs), s = didYouMean(outputName, names);
-      fail(`--output: ${file} has no output "${outputName}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; ${names.length ? `its outputs: ${names.join(', ')}` : 'it publishes no "outputs" (--node picks any node)'}`);
+      const isNode = !!graph?.nodes && typeof graph.nodes === 'object' && Object.hasOwn(graph.nodes, outputName);
+      fail(`--output: ${file} has no output "${outputName}"${isNode ? `, but a node of that name: --node ${outputName}` : s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; ${names.length ? `its outputs: ${names.join(', ')}` : 'it publishes no "outputs" (--node picks any node)'}`);
     }
     target = o.node;
   }
@@ -294,6 +302,12 @@ async function cook() {
     for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
   }
 
+  /** Every render flag (renderFlags reads them, plus --views, --color-by, --checker). */
+  const RENDER_FLAGS = ['--wireframe', '--hard-angle', '--section', '--clip', '--glyphs', '--glyph-attrib', '--glyph-scale', '--max-glyphs', '--labels', '--max-labels',
+    '--shading', '--ao-radius', '--size', '--render-scale', '--azimuth', '--elevation', '--zoom', '--look-at', '--ortho-scale', '--texture', '--max-triangles', '--exposure',
+    '--heightfield-res', '--heightfield-layer', '--underlay', '--underlay-opacity', '--underlay-fit', '--legend', '--points', '--annotate', '--textures', '--transparent',
+    '--sockets', '--no-view-labels', '--no-grid', '--views', '--color-by', '--checker'];
+
   /** Render overlay flags → render tool arguments → RenderOptions (src/render/options.ts). */
   function renderFlags(get: (f: string) => string | undefined, has: (f: string) => boolean): RenderOptions {
     const a: Record<string, unknown> = {};
@@ -314,6 +328,12 @@ async function cook() {
   // --render; options before the first --render apply to all of them. With one --render this is the old behaviour.
   const renderAt = argv.flatMap((x, i) => (x === '--render' ? [i] : []));
   const sharedArgs = argv.slice(0, renderAt.length ? renderAt[0] : argv.length);
+  // with several renders, options after the last --render belong to that render only: say so (a person who meant them
+  // for every render puts them before the first --render)
+  if (renderAt.length > 1) {
+    const last = argv.slice(renderAt[renderAt.length - 1] + 2).filter((x) => RENDER_FLAGS.includes(x));
+    if (last.length) console.error(`warning: ${last.join(' ')} after the last --render apply to ${argv[renderAt[renderAt.length - 1] + 1]} only; options before the first --render apply to every render`);
+  }
   const renders = renderAt.map((start, n) => {
     const seg = argv.slice(start, n + 1 < renderAt.length ? renderAt[n + 1] : argv.length);
     if (!seg[1] || seg[1].startsWith('--')) fail('--render needs an output path (e.g. --render out.png)');
@@ -324,9 +344,9 @@ async function cook() {
   async function writeOutputs(r: CookReport, frame?: number) {
     const geo = r.geo!;
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
-    // Receipts for the viewer's saved files, only for files inside exports/ beside the graph: a run whose output goes
+    // Receipts for the viewer's saved files, only for files inside exports/ of the project folder: a run whose output goes
     // elsewhere leaves no exports/ folder behind (the viewer lists that folder's files without receipts too).
-    const exportsDir = path.join(path.dirname(path.resolve(file)), 'exports');
+    const exportsDir = path.join(projectBaseDir(path.dirname(path.resolve(file))), 'exports');
     const record = (paths: string[], format: string) => {
       const inside = paths.every((p) => { const rel = path.relative(exportsDir, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); });
       if (inside) new ArtifactStore(exportsDir).record(paths, { graph: graphName(file), node: r.target, format });
@@ -407,9 +427,9 @@ async function cook() {
     if (argv.includes('--export-all')) await exportAll();
   }
 
-  /** --export-all: every published output with an export target (io/targets.ts), into exports/ beside the graph. */
+  /** --export-all: every published output with an export target (io/targets.ts), into exports/ of the project folder. */
   async function exportAll() {
-    const name = graphName(file), exportsDir = path.join(path.dirname(path.resolve(file)), 'exports');
+    const name = graphName(file), exportsDir = path.join(projectBaseDir(path.dirname(path.resolve(file))), 'exports');
     const published = publishedOutputs(name, graph, engine.findOutput(graph).name);
     if (!published.some((p) => p.target)) fail(`--export-all: no output of ${file} has an export target; add "export": "glb" to the graph (default output) or to an entry of "outputs"`);
     const prepared: PreparedTarget[] = [];

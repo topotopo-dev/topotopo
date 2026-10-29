@@ -1020,15 +1020,16 @@ section('the CLI: init, use, packages, publish, --follow, --catalog');
   const cook = cli([path.join(CLI, 'graphs', 'main.json'), '--export', exp]);
   const rec = fs.existsSync(exp + '.source.json') ? readJSON(exp + '.source.json').source : {};
   check(cook.code === 0 && JSON.stringify(rec.packages) === JSON.stringify({ 'nordic/rocks@1.0': readLock(CLI).packages['nordic/rocks']['1.0'].hash }), `a graph-file cook records the packages it used: ${JSON.stringify(rec.packages)} ${cook.code ? cook.out : ''}`);
-  // the texture of a package output names the copy relative to the root's folder (here graphs/, the graph file's), so
-  // exports that carry texture paths name no folder of this machine
-  const moss = '../packages/nordic/rocks/1.0/inputs/moss.png';
+  // the texture of a package output names the copy relative to the root's folder (the project folder: relative paths
+  // read from the nearest project.json above the graph file), so exports that carry texture paths name no folder of
+  // this machine
+  const moss = 'packages/nordic/rocks/1.0/inputs/moss.png';
   for (const ext of ['json', 'geo']) {
     const out = path.join(CLI, 'exports', `rock.${ext}`);
     const r = cli([path.join(CLI, 'graphs', 'main.json'), '--export', out]);
     const txt = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
     const named = txt.split('moss.png').length - 1, relative = txt.split(moss).length - 1;
-    check(r.code === 0 && named > 0 && named === relative && fs.existsSync(path.resolve(CLI, 'graphs', moss)), `a .${ext} export of a package output is portable: its texture is ${moss} (${relative} of ${named})`);
+    check(r.code === 0 && named > 0 && named === relative && fs.existsSync(path.resolve(CLI, moss)), `a .${ext} export of a package output is portable: its texture is ${moss} (${relative} of ${named})`);
   }
   const before = listing(CLI);
   const dry = cli(['publish', CLI, '--check']);
