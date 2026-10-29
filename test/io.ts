@@ -232,8 +232,8 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     && JSON.stringify(src.export) === '{"format":"glb","options":{"up_axis":"z"}}' && src.topotopo === '9.9.9',
     `source block: the engine's time defaults, sorted vars, seeds by node path as written (nested bodies too), the options given (${JSON.stringify(src)})`);
   const reordered: GraphSpec = { vars: { relief: 6, seed: 3 }, nodes: { box: { type: 'box' }, loop: spec.nodes.loop, hills: { type: 'heightfield_noise', params: { amplitude: '=relief', seed: '=seed' } } } };
-  check(src.graph_sha256 === nodeSha(canonicalJSON({ version: 1, ...spec })) && graphSha256(reordered) === src.graph_sha256,
-    'graph_sha256: SHA-256 of the canonical, version-stamped graph JSON; key order does not change it');
+  check(src.graph_sha256 === nodeSha(canonicalJSON(spec)) && graphSha256(reordered) === src.graph_sha256,
+    'graph_sha256: SHA-256 of the canonical graph JSON; key order does not change it');
 
   // --var values and overrides (src/graph/vars.ts)
   const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test((e as Error).message); } };

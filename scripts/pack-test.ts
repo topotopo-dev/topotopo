@@ -131,7 +131,7 @@ try {
 import { Engine, allNodeDefs } from '${NAME}';
 import meta from '${NAME}/package.json' with { type: 'json' };
 import { createNodeHost } from './node_modules/${NAME}/dist/host/node.js';
-import { BUILTIN_LIBRARY } from './node_modules/${NAME}/dist/gallery/library.js';
+import { BUILTIN_LIBRARY } from './node_modules/${NAME}/dist/config.js';
 import { createNodePool } from './node_modules/${NAME}/dist/host/pool.js';
 import { kernelsWasmURL, kernelsWasmVariant, getLoadedKernels } from './node_modules/${NAME}/dist/wasm/kernels.js';
 import { fileURLToPath } from 'node:url';
