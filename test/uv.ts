@@ -434,5 +434,30 @@ const named = (g: Geometry, name: string) => { const a = g.prims.add('name', 'st
   check(tu <= 1 && tv <= 1 && !!atl && new Set(atl.data as Int32Array).size > 1, `uv_unwrap overflow stack: ${atl ? new Set(atl.data as Int32Array).size : 0} atlases, all in 0..1 (prim atlas)`);
 }
 
+// decimating after the unwrap: a plain reduction folds the uv of a torus; keep_uv (the default) never does, says where
+// it held the reduction back, and reaches the plain count where no fold is in the way
+{
+  const nodes = (ratio: number, keep: boolean, node = 'decimate'): GraphSpec['nodes'] => ({
+    t: { type: 'torus', params: { rows: 24, cols: 48 } },
+    n: { type: 'wrangle', in: ['t'], params: { run_over: 'prims', code: 's@name = "ring";' } },
+    u: { type: 'uv_unwrap', in: ['n'], params: { resolution: 512 } },
+    out: node === 'lod'
+      ? { type: 'lod', in: ['u'], params: { mode: 'switch', level: 1, levels: 2, ratios: [1, ratio], keep_uv: keep } }
+      : { type: 'decimate', in: ['u'], params: { ratio, max_error: 1, keep_uv: keep } },
+  });
+  const src = uvReport((await cook({ ...nodes(1, true), out: { type: 'null', in: ['u'] } })).geo);
+  for (const ratio of [0.1, 0.05]) {
+    const plain = await cook(nodes(ratio, false)), kept = await cook(nodes(ratio, true));
+    const rp = uvReport(plain.geo), rk = uvReport(kept.geo);
+    check(src.overlap.pairs === 0 && rp.overlap.pairs > 0, `decimate keep_uv off, ratio ${ratio}: a plain reduction folds the clean uv of an unwrapped torus (${rp.overlap.pairs} overlapping pairs, ${plain.geo.numPrims} triangles)`);
+    check(rk.overlap.pairs === 0 && rk.mirrored === 0 && rk.collapsed === 0, `decimate keep_uv, ratio ${ratio}: no folds (${rk.overlap.pairs} overlapping pairs, ${rk.mirrored} mirrored), ${kept.geo.numPrims} triangles`);
+    const held = kept.warnings.find((w) => w.includes('folds the uv'));
+    if (kept.geo.numPrims > plain.geo.numPrims * 1.02 + 2) check(!!held && held.includes('"ring"') && held.includes('largest: prim'), `decimate keep_uv, ratio ${ratio}: the warning names the part and the largest fold: ${held?.slice(0, 160)}`);
+    else check(kept.geo.numPrims <= plain.geo.numPrims * 1.02 + 2 && !held, `decimate keep_uv, ratio ${ratio}: reaches the plain count (${kept.geo.numPrims} vs ${plain.geo.numPrims}) without a warning`);
+  }
+  const lp = await cook(nodes(0.05, false, 'lod')), lk = await cook(nodes(0.05, true, 'lod'));
+  check(uvReport(lp.geo).overlap.pairs > 0 && uvReport(lk.geo).overlap.pairs === 0 && lk.warnings.some((w) => w.includes('folds the uv') && w.includes('"ring"')), `lod keep_uv: a level of the unwrapped torus keeps the uv clean (plain: ${uvReport(lp.geo).overlap.pairs} overlapping pairs) and says where it held back`);
+}
+
 console.log(fail ? `\n${fail} uv check(s) failed` : '\nuv: all checks passed');
 process.exit(fail ? 1 : 0);

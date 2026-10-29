@@ -14,6 +14,11 @@ import { GeoBuilder } from './geometry.ts';
 import type { Geometry } from './geometry.ts';
 import { triangulate } from './topology.ts';
 import { primRegions, vertexAttribsDiffer } from './remesh.ts';
+import { readUV } from './uv.ts';
+import { trianglesUV, uvOverlapPairs, uvPairText, uvTriangleAreas } from './uvoverlap.ts';
+import { chartRoots } from './uvreport.ts';
+import { partsOf, primWhere } from './report.ts';
+import { TriBVH, closestScratch } from './spatial.ts';
 
 export interface SteerAttrib { name: string; weight: number }
 
@@ -50,6 +55,8 @@ export interface DecimateResult {
   /** attributes that were used to steer, and requested ones that could not be */
   used: string[];
   skipped: string[];
+  /** input point of each output point */
+  srcPoint: Int32Array;
 }
 
 export class DecimateError extends Error {}
@@ -260,7 +267,9 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     const prim = p1 === p2 ? p1 : p0;
     b.addPrim([map[rvPt[r0]], map[rvPt[r1]], map[rvPt[r2]]], true, prim, [v0, v1, v2]);
   }
-  return { geo: b.build(), error, errorAbs, trisIn: nt, trisOut, used: steer.used, skipped: steer.skipped };
+  const geo = b.build(), srcPoint = new Int32Array(geo.numPoints);
+  for (let p = 0; p < np; p++) if (map[p] >= 0) srcPoint[map[p]] = p;
+  return { geo, error, errorAbs, trisIn: nt, trisOut, used: steer.used, skipped: steer.skipped, srcPoint };
 }
 
 /**
@@ -350,4 +359,220 @@ export function decimatePoints(g: Geometry, o: PointDecimateOptions): { geo: Geo
   const keep = new Uint8Array(n);
   for (const i of keepIdx) keep[i] = 1;
   return { geo: g.subsetPoints(keep), kept: keepIdx.length, used };
+}
+
+export interface UVFolds {
+  /** overlapping uv triangle pairs, and triangles wound against the rest of their chart (flipped) */
+  pairs: number;
+  flipped: number;
+  /** per triangle of tris: in an overlapping pair or flipped */
+  bad: Uint8Array;
+  /** the largest overlapping pair (triangle ids), or null */
+  largest: [number, number] | null;
+  tris: Uint32Array;
+  triPrim: Uint32Array;
+  uv: Float64Array;
+}
+
+/**
+ * Where the uv of g overlaps itself or flips: overlapping triangle pairs (exact, core/uvoverlap.ts) and triangles
+ * whose uv winding is opposite to the majority of their chart (charts: triangles joined by uv-continuous edges, so a
+ * mirrored island as a whole is not flipped). null without uv.
+ */
+export function uvFolds(g: Geometry): UVFolds | null {
+  const uv = readUV(g);
+  if (!uv) return null;
+  const { tris, triPrim } = triangulate(g), nt = triPrim.length;
+  const U = trianglesUV(uv, tris), { ok, signed } = uvTriangleAreas(U, nt);
+  const root = chartRoots(g.vertexPoint, tris, U, nt), sum = new Map<number, number>();
+  for (let t = 0; t < nt; t++) if (ok[t]) sum.set(root(t), (sum.get(root(t)) ?? 0) + Math.sign(signed[t]));
+  const bad = new Uint8Array(nt), valid: number[] = [];
+  let flipped = 0, pairs = 0, big = 0, largest: [number, number] | null = null;
+  for (let t = 0; t < nt; t++) {
+    if (!ok[t]) continue;
+    valid.push(t);
+    if (Math.sign(signed[t]) * (sum.get(root(t)) ?? 0) < 0) { bad[t] = 1; flipped++; }
+  }
+  uvOverlapPairs(U, valid, signed, (a, b, area) => { pairs++; bad[a] = 1; bad[b] = 1; if (area > big) { big = area; largest = [a, b]; } });
+  return { pairs, flipped, bad, largest, tris, triPrim, uv };
+}
+
+export interface UVKept {
+  /** the input uv had no overlaps, so the output was checked */
+  checked: boolean;
+  /** reduction steps taken, and steps dropped because they folded the uv even with the points around the folds locked */
+  steps: number;
+  dropped: number;
+  /** decimations run, and points locked around folds */
+  runs: number;
+  locked: number;
+  /** a plain (one-step) reduction of the input: its triangle count and its folds (null when it kept the uv clean) */
+  plainTris: number;
+  plainFolds: UVFolds | null;
+  plainGeo: Geometry | null;
+}
+
+/** Steps a reduction that folds the uv is split into, and the lock rings tried (in turn) on a step that folds. */
+const KEEP_UV_STEPS = 8;
+const KEEP_UV_RINGS = [1, 1, 2, 2, 3, 4];
+
+/** Points of g's prims around each point: CSR start / prim lists. */
+function pointPrims(g: Geometry): { start: Int32Array; prims: Int32Array } {
+  const np = g.numPoints, vp = g.vertexPoint, start = new Int32Array(np + 1);
+  for (let v = 0; v < g.numVertices; v++) start[vp[v] + 1]++;
+  for (let p = 0; p < np; p++) start[p + 1] += start[p];
+  const fill = start.slice(0, np), prims = new Int32Array(g.numVertices), vprim = g.vertexPrims();
+  for (let v = 0; v < g.numVertices; v++) prims[fill[vp[v]]++] = vprim[v];
+  return { start, prims };
+}
+
+/**
+ * Lock the points of `cur` that res removed within `rings` rings (through shared prims) of the input points of res's
+ * folded triangles. Returns how many points were newly locked.
+ */
+function lockAroundFolds(cur: Geometry, res: DecimateResult, f: UVFolds, rings: number, lock: Uint8Array): number {
+  const adj = pointPrims(cur), vp = cur.vertexPoint, seen = new Uint8Array(cur.numPoints);
+  let front: number[] = [], added = 0;
+  // only points the step removed are locked: a kept point did not make the fold, and locking it would only hold
+  // the next run back
+  const alive = new Uint8Array(cur.numPoints);
+  for (let i = 0; i < res.srcPoint.length; i++) alive[res.srcPoint[i]] = 1;
+  const take = (p: number) => { if (!lock[p] && !alive[p]) { lock[p] = 1; added++; } };
+  for (let t = 0; t < f.bad.length; t++) {
+    if (!f.bad[t]) continue;
+    for (let k = 0; k < 3; k++) {
+      const p = res.srcPoint[res.geo.vertexPoint[f.tris[t * 3 + k]]];
+      if (!seen[p]) { seen[p] = 1; front.push(p); take(p); }
+    }
+  }
+  for (let d = 1; d <= rings; d++) {
+    const next: number[] = [];
+    for (const p of front)
+      for (let i = adj.start[p]; i < adj.start[p + 1]; i++) {
+        const pr = adj.prims[i];
+        for (let v = cur.primStart[pr]; v < cur.primStart[pr + 1]; v++) {
+          const q = vp[v];
+          if (seen[q]) continue;
+          seen[q] = 1; next.push(q); take(q);
+        }
+      }
+    front = next;
+  }
+  return added;
+}
+
+/**
+ * How far a reduction of g strays from it: `to(m, srcOf)` is the largest distance (scene units) from a point of g's
+ * polygons to the surface of m (srcOf: the g point of each m point), over the pieces of g (connected through shared
+ * points) that kept a point in m; a piece pruned away whole is left out, as meshoptimizer's prune allows. `scale` is
+ * meshoptimizer's mesh extent, the unit of relative errors.
+ */
+function deviationFrom(g: Geometry): { scale: number; to: (m: Geometry, srcOf: Int32Array) => number } {
+  const np = g.numPoints, vp = g.vertexPoint, P = g.P, parent = new Int32Array(np), inPoly = new Uint8Array(np);
+  for (let p = 0; p < np; p++) parent[p] = p;
+  const find = (x: number) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (let pr = 0; pr < g.numPrims; pr++) {
+    if (!g.primClosed[pr] || g.primSize(pr) < 3) continue;
+    for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) {
+      inPoly[vp[v]] = 1;
+      const a = find(vp[v]), b = find(vp[g.primStart[pr]]);
+      if (a !== b) parent[a] = b;
+    }
+  }
+  const pts: number[] = [];
+  for (let p = 0; p < np; p++) if (inPoly[p]) pts.push(p);
+  const pos = new Float32Array(pts.length * 3);
+  pts.forEach((p, i) => { pos[i * 3] = P[p * 3]; pos[i * 3 + 1] = P[p * 3 + 1]; pos[i * 3 + 2] = P[p * 3 + 2]; });
+  const scale = (pts.length ? MeshoptSimplifier.getScale(pos, 3) : 0) || 1;
+  return {
+    scale,
+    to: (m, srcOf) => {
+      const alive = new Uint8Array(np);
+      for (let i = 0; i < srcOf.length; i++) alive[find(srcOf[i])] = 1;
+      const bvh = new TriBVH(m), s = closestScratch();
+      let worst = 0;
+      for (const p of pts) if (alive[find(p)] && bvh.closestInto(P[p * 3], P[p * 3 + 1], P[p * 3 + 2], Infinity, s) >= 0 && s.d2 > worst) worst = s.d2;
+      return Math.sqrt(worst);
+    },
+  };
+}
+
+/**
+ * decimateMesh that keeps a clean uv atlas clean. meshoptimizer rejects flips in 3D only, and a kept corner keeps its
+ * uv, so a collapse can fold the uv around it (most of all where the uv map bends: bevels, curved chart borders).
+ * When the input uv has no overlaps and the plain decimation folds it (uvFolds), the reduction runs again in up to
+ * KEEP_UV_STEPS steps, the triangle count falling by the same factor each step. A step that folds the uv runs again
+ * with the points it removed around its folds locked, the rings growing (KEEP_UV_RINGS); a step that still folds is
+ * dropped (its locks stay for the next try on the same mesh; a step taken starts the next one with only the caller's
+ * locks, since the danger moves with the mesh). Every step taken is checked, so the result has no folds the input did
+ * not have; the price is a triangle count above the target where the uv held the reduction (kept.plainTris says what
+ * a plain reduction reached). keep false: the plain reduction, unchecked.
+ */
+export function decimateKeepUV(g: Geometry, o: DecimateOptions, keep = true): DecimateResult & { uv: UVKept } {
+  const plain = decimateMesh(g, o);
+  const kept: UVKept = { checked: false, steps: 1, dropped: 0, runs: 1, locked: 0, plainTris: plain.trisOut, plainFolds: null, plainGeo: null };
+  const before = !keep || o.sloppy || o.group || plain.trisOut >= plain.trisIn ? null : uvFolds(g);
+  if (!before || before.pairs > 0) return { ...plain, uv: kept };
+  kept.checked = true;
+  const clean = (f: UVFolds) => f.pairs === 0 && f.flipped <= before.flipped;
+  const plainFolds = uvFolds(plain.geo)!;
+  if (clean(plainFolds)) return { ...plain, uv: kept };
+  kept.plainFolds = plainFolds; kept.plainGeo = plain.geo; kept.steps = 0;
+  const target = Math.max(1, o.targetCount > 0 ? Math.floor(o.targetCount) : Math.floor(plain.trisIn * Math.max(0, Math.min(1, o.ratio))));
+  const userLock = (srcPts: Int32Array) => Uint8Array.from(srcPts, (p) => (o.lockPoints && o.lockPoints[p] ? 1 : 0));
+  let srcOf = Int32Array.from({ length: g.numPoints }, (_, i) => i), cur = g, curLock = userLock(srcOf);
+  let curTris = plain.trisIn, err = 0, errAbs = 0, last: DecimateResult | null = null;
+  // max_error holds for the whole reduction: each step may use all of it, and a step taken must keep every input point
+  // within it of the output surface (measured, since step errors do not simply add up)
+  const dev = deviationFrom(g), limit = o.errorAbsolute ? o.maxError : o.maxError * dev.scale;
+  for (let step = 1; step <= KEEP_UV_STEPS && curTris > target; step++) {
+    const left = KEEP_UV_STEPS - step + 1;
+    const stepTarget = step === KEEP_UV_STEPS ? target : Math.max(target, Math.round(curTris * Math.pow(target / curTris, 1 / left)));
+    const so: DecimateOptions = { ...o, ratio: 1, targetCount: stepTarget, group: null };
+    const lock = curLock.slice();
+    let res: DecimateResult | null = null;
+    for (let attempt = 0; ; attempt++) {
+      const r = decimateMesh(cur, { ...so, lockPoints: lock });
+      kept.runs++;
+      const f = uvFolds(r.geo)!;
+      if (clean(f)) { res = r; break; }
+      if (attempt >= KEEP_UV_RINGS.length) break;
+      kept.locked += lockAroundFolds(cur, r, f, KEEP_UV_RINGS[attempt], lock);
+    }
+    if (!res) { kept.dropped++; curLock = lock; continue; }
+    const nextSrc = Int32Array.from(res.srcPoint, (p) => srcOf[p]), d = dev.to(res.geo, nextSrc);
+    if (d > limit * (1 + 1e-9)) break;
+    // the step's output is the next step's input, with its input points and the caller's locks
+    srcOf = nextSrc;
+    curLock = userLock(srcOf);
+    errAbs = d; err = d / dev.scale;
+    const progress = res.trisOut < curTris;
+    cur = res.geo; curTris = res.trisOut; last = res;
+    kept.steps++;
+    if (!progress) break;
+  }
+  // no step taken (each one folded the uv): the input, triangulated
+  if (!last) {
+    const none = decimateMesh(g, { ...o, ratio: 1, targetCount: 0, prune: false });
+    kept.runs++;
+    return { ...none, uv: kept };
+  }
+  return { ...last, error: err, errorAbs: errAbs, trisIn: plain.trisIn, srcPoint: srcOf, uv: kept };
+}
+
+/**
+ * Where and why decimateKeepUV held the reduction back, in words (the parts a plain reduction folds and its largest
+ * fold), or '' when it did not: the plain reduction kept the uv clean, or the steps reached about the same count.
+ */
+export function uvKeptText(r: DecimateResult & { uv: UVKept }): string {
+  const k = r.uv, f = k.plainFolds, pg = k.plainGeo;
+  if (!f || !pg || r.trisOut <= k.plainTris * 1.02 + 2) return '';
+  const badPrims: number[] = [];
+  let firstBad = -1;
+  for (let t = 0; t < f.bad.length; t++) if (f.bad[t]) { badPrims.push(f.triPrim[t]); if (firstBad < 0) firstBad = t; }
+  const parts = partsOf(pg, badPrims);
+  const where = f.largest ? uvPairText(pg, f.uv, f.tris, f.triPrim, f.largest[0], f.largest[1]) : firstBad >= 0 ? primWhere(pg, f.triPrim[firstBad]) : '';
+  const n = (x: number) => x.toLocaleString('en-US');
+  return `a plain reduction to ${n(k.plainTris)} triangles folds the uv (${n(f.pairs)} overlapping triangle pairs, ${n(f.flipped)} flipped triangles${parts ? `; parts ${parts}` : ''}; largest: ${where}), ` +
+    `so it went in ${k.steps} steps that keep the uv clean${k.dropped ? ` (${k.dropped} more folded and were dropped)` : ''}, to ${n(r.trisOut)} triangles`;
 }

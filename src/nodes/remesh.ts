@@ -4,7 +4,7 @@ import { Attribute, Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { RemeshError, isotropicRemesh } from '../core/remesh.ts';
-import { DecimateError, decimateMesh, decimatePoints, parseSteerAttribs, reductionLocks } from '../core/decimate.ts';
+import { DecimateError, decimateKeepUV, decimatePoints, parseSteerAttribs, reductionLocks, uvKeptText } from '../core/decimate.ts';
 import type { DecimateOptions } from '../core/decimate.ts';
 import { repairMesh, repairSummary } from '../core/repair.ts';
 import type { FuseMode, NonManifoldMode, SelfIntersectMode } from '../core/repair.ts';
@@ -102,7 +102,12 @@ defineNode({
     'max_error stops early (relative to the mesh extent, or in scene units with error_absolute); the achieved error ' +
     'is written to detail "error" (and "error_abs" in scene units). prune lets whole small pieces vanish; ' +
     'aggressive (sloppy) ignores topology and seams to reach any target. group decimates only those prims (points ' +
-    'shared with other prims stay; sparse speeds up small groups of big meshes). mode points (or auto on a point ' +
+    'shared with other prims stay; sparse speeds up small groups of big meshes). keep_uv: a collapse keeps its ' +
+    'corners\' uv, so it can fold the uv where the map bends (bevels, curved chart borders) even with uv steering; when ' +
+    'the input uv has no overlaps, the reduction is checked and, where it folds, goes in steps that lock the points ' +
+    'around each fold, so the output has none (it may stop above the target there; the warning names the parts; ' +
+    'not with group or aggressive). ' +
+    'Reducing before uv_unwrap gives the full reduction. mode points (or auto on a point ' +
     'cloud) thins points with simplifyPoints, keeping an even spread and the point_attributes (Cd, pscale).',
   aliases: ['polyreduce', 'simplify', 'reduce', 'decimate_points'],
   inputs: [{ name: 'geo', desc: 'polygon mesh or point cloud' }],
@@ -117,6 +122,7 @@ defineNode({
     sparse: { type: 'bool', default: false, desc: 'faster when the group is a small part of a big mesh (use error_absolute for consistent errors)', advanced: true },
     regularize: { type: 'bool', default: false, desc: 'favour evenly sized triangles over exact shape', advanced: true },
     aggressive: { type: 'bool', default: false, desc: 'sloppy mode: ignores topology and seams, reaches any target', aliases: ['sloppy'] },
+    keep_uv: { type: 'bool', default: true, desc: 'when the input uv has no overlaps, keep the output free of uv folds: where a collapse would fold the uv, reduce in steps around it (can stop above the target); off = one plain reduction (not checked with group or aggressive)' },
     group: P.group('prim', 'prims to decimate ("" = all); points shared with other prims stay'),
     lock: { type: 'group', default: '', groupClass: 'point', desc: 'point group that must not move or disappear ("" = none)', aliases: ['lock_points'] },
     mode: { type: 'enum', options: ['auto', 'mesh', 'points'], default: 'auto', desc: 'auto = points when the input has no polygons; points thins a point cloud' },
@@ -139,8 +145,10 @@ defineNode({
       lockBorder: p.lock_border, prune: p.prune, sparse: p.sparse, regularize: p.regularize, sloppy: p.aggressive,
       attributes: guard(() => parseSteerAttribs(p.attributes)), group: mask(g, 'prim', p.group), lockPoints: pointMaskOrNone(g, p.lock),
     };
-    const r = guard(() => decimateMesh(g, opts));
+    const r = guard(() => decimateKeepUV(g, opts, !!p.keep_uv));
     if (r.skipped.length) warn(`decimate: attributes ${r.skipped.join(', ')} cannot steer (only float point/vertex attributes, 32 floats in total)`);
+    const held = uvKeptText(r);
+    if (held) warn(`decimate: ${held}. Reduce before uv_unwrap for the full reduction, or set keep_uv off to allow the folds`);
     const out = r.geo;
     (out.detail.add('error', 'float', 1).data as Float64Array)[0] = r.error;
     (out.detail.add('error_abs', 'float', 1).data as Float64Array)[0] = r.errorAbs;
@@ -233,7 +241,8 @@ defineNode({
     'way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): ' +
     'the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its ' +
     'target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open ' +
-    'borders, with point counts (or the max_error limit). Detail "lod" is a JSON list of {level, ratio | screen_size, ' +
+    'borders, with point counts (or the max_error limit), or the parts where a plain reduction folds the uv (keep_uv, ' +
+    'as in decimate: a level never folds a clean uv atlas). Detail "lod" is a JSON list of {level, ratio | screen_size, ' +
     'triangles, error}; detail int[] "lod_tris" the triangle counts.',
   aliases: ['lod_tree', 'polyreduce_lod', 'lod_create', 'lods'],
   inputs: [{ name: 'geo', desc: 'polygon mesh' }],
@@ -247,6 +256,7 @@ defineNode({
     attributes: { type: 'string', default: 'uv N Cd', desc: 'float point/vertex attributes that steer the reduction, with optional weights ("uv:2 N:0.5")' },
     lock_border: { type: 'bool', default: false, desc: 'keep open borders fixed in every level' },
     prune: { type: 'bool', default: true, desc: 'let small disconnected pieces (leaves, bolts) vanish in coarse levels' },
+    keep_uv: { type: 'bool', default: true, desc: 'when the input uv has no overlaps, keep every level free of uv folds (as decimate keep_uv: reduce in steps around a fold; a level can stop above its target); off = plain reductions' },
     mode: { type: 'enum', options: ['merge', 'switch'], default: 'merge', desc: 'merge = all levels in one geometry; switch = only "level"' },
     level: { type: 'int', default: 0, min: 0, desc: 'switch mode: the level to output' },
     name_format: { type: 'string', default: '{name}_lod{level}', desc: 'prim name of each level: {name} = the input prim name (or base_name), {level} = the level number (merge needs {level})', aliases: ['name_pattern', 'suffix_format'] },
@@ -291,21 +301,24 @@ defineNode({
         lockBorder: p.lock_border, prune: p.prune && !(bySize ? false : ratios[k] >= 1), sparse: false, regularize: false, sloppy: false,
         attributes: steer, group: null, lockPoints: null,
       };
-      const r = guard(() => decimateMesh(g, opts));
+      const r = guard(() => decimateKeepUV(g, opts, !!p.keep_uv));
       const lg = r.geo;
+      const uvHeld = uvKeptText(r);
       // a ratio level well short of its target: say what held it
-      const want = Math.round(ratios[k] * r.trisIn);
-      if (!bySize && ratios[k] < 1 && r.trisOut > want * 1.1 + 2) {
+      const want = Math.round(ratios[k] * r.trisIn), short = (x: number) => x > want * 1.1 + 2;
+      if (!bySize && ratios[k] < 1 && short(r.trisOut)) {
         const pct = (x: number) => `${Math.round((100 * x) / Math.max(1, r.trisIn))} %`;
         let why: string;
-        if (p.max_error < 1 && r.error >= p.max_error * 0.999) why = `the error limit max_error ${p.max_error} was reached`;
+        if (uvHeld && !short(r.uv.plainTris)) why = uvHeld;
+        else if (p.max_error < 1 && r.error >= p.max_error * 0.999) why = `the error limit max_error ${p.max_error} was reached`;
         else {
           locks ??= reductionLocks(g);
           const held = locks.slice(0, 5).map((l) => `${l.cause} (${l.points.toLocaleString('en-US')} points)`).join(', ');
           why = held ? `the reduction cannot collapse across ${held}${p.lock_border && locks.some((l) => l.cause === 'open borders') ? '; lock_border keeps the open borders whole' : ''}` : 'the mesh has nothing left to collapse at this error';
+          if (uvHeld) why += `; and ${uvHeld}`;
         }
-        warn(`lod: level ${k} stopped at ${r.trisOut.toLocaleString('en-US')} triangles (${pct(r.trisOut)} of ${r.trisIn.toLocaleString('en-US')}), short of its ${pct(want)} target: ${why}. Fewer seams reduce further: compute normals after lod (normal node) rather than before, reduce before uv_unwrap or with fewer charts, drop groups and prim strings the levels do not need (group_delete, attrib_delete)`);
-      }
+        warn(`lod: level ${k} stopped at ${r.trisOut.toLocaleString('en-US')} triangles (${pct(r.trisOut)} of ${r.trisIn.toLocaleString('en-US')}), short of its ${pct(want)} target: ${why}. Fewer seams reduce further: compute normals after lod (normal node) rather than before, reduce before uv_unwrap or with fewer charts, drop groups and prim strings the levels do not need (group_delete, attrib_delete)${uvHeld ? '; keep_uv off allows the uv folds' : ''}`);
+      } else if (uvHeld) warn(`lod: level ${k}: ${uvHeld}. Reduce before uv_unwrap for the full reduction, or set keep_uv off to allow the folds`);
       // tag the level: prim lod + name from name_format
       const lod = lg.prims.add('lod', 'int', 1);
       (lod.data as Int32Array).fill(k);
