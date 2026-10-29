@@ -14,6 +14,9 @@ import { boundaryLoops, primArea, primNormals, topologyReport, triangleReport, t
 import { readFileSync } from 'node:fs';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
 import { summarize, inspect } from '../src/inspect.ts';
+import { pointWhere, posText, primCentroid, primWhere, solidReport } from '../src/core/report.ts';
+import { exportGeometryAsync } from '../src/io/export.ts';
+import { importGeometryAsync } from '../src/io/import.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
 const engine = new Engine(createNodeHost());
@@ -536,6 +539,38 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   for (const [k, cnt] of directed) { const [x, y] = k.split('>'); if (cnt !== 1 || directed.get(`${y}>${x}`) !== 1) windingOk = false; }
   check(cover < 1e-9 && windingOk, `bracket bevel: every polygon's triangles cover its projected area (worst relative error ${cover.toExponential(2)}); triangle mesh closed with consistent winding`);
   check(/346 render\/export triangles; .* 0 degenerate, 0 near-degenerate/.test(inspect(g, { detail: 'topology' })), 'inspect topology reports render/export triangle health');
+}
+
+// ---------------------------------------------------------------- findings name the part and a position; seam welding
+{
+  const named = { b: { type: 'box' }, n: { type: 'attrib_create', in: ['b'], params: { name: 'name', class: 'prim', value: 'crate' } } } as Record<string, NodeSpec>;
+  const holed = await cook({ ...named, out: { type: 'delete', in: ['n'], params: { group: '0' } } }, 'out');
+  const s = solidReport(holed);
+  check(!s.closed && s.openEdges === 4 && s.seamEdges === 0 && /^edge \d+–\d+ of "crate" \(prim \d+\) at \(-?\d+\.\d{3}, -?\d+\.\d{3}, -?\d+\.\d{3}\)$/.test(s.firstOpen ?? ''), `solidReport: 4 open edges, the first named with its part and position (${s.firstOpen})`);
+  const t = inspect(holed, { detail: 'topology' });
+  check(/NOT a closed solid:\n {4}4 open edges \(after welding seam splits\), first edge .* of "crate" .* at \(.*\): fill_holes/.test(t), 'inspect topology: why it is not closed, where and the fix');
+  // a box split at every uv seam (as a re-imported GLB is): its open edges are seam splits, not holes
+  const box = await cook({ ...named, out: { type: 'uv_project', in: ['n'], params: { method: 'box' } } }, 'out');
+  const back = await importGeometryAsync(await exportGeometryAsync(box, 'glb', {}) as Uint8Array, 'glb', {});
+  const w = solidReport(back);
+  check(!w.closed && w.closedAfterWeld && w.openEdges === 0 && w.seamEdges === 24 && w.pieces === 1, `a re-imported GLB box: 24 seam-split edges welded, 0 open, 1 piece (open ${w.openEdges}, seams ${w.seamEdges}, pieces ${w.pieces})`);
+  const tb = inspect(back, { detail: 'topology' });
+  check(/CLOSED solid after welding seam splits: 0 open edges \(after welding seam splits; 24 boundary edges are uv\/normal seam splits\)/.test(tb) && /volume 1\.00/.test(tb), 'inspect topology welds seam splits before counting open edges');
+  // flipped faces and an inward piece are named with where they are
+  const flip = await cook({ ...named, r: { type: 'reverse', in: ['n'], params: { group: '0' } }, out: { type: 'null', in: ['r'] } }, 'out');
+  check(/inconsistent winding .* first edge .* of "crate" .* at \(.*\): clean with fix_winding/.test(inspect(flip, { detail: 'topology' })), 'flipped faces: count, part, position and fix');
+  const inward = await cook({ ...named, out: { type: 'reverse', in: ['n'] } }, 'out');
+  check(/1 closed piece facing inward, first prim \d+ of "crate" at .*: reverse it/.test(inspect(inward, { detail: 'topology' })), 'an inward-facing closed piece is named');
+  // where helpers
+  check(primWhere(holed, 0) === `prim 0 of "crate" at ${posText(primCentroid(holed, 0))}` && /^point 3 of "crate" at \(/.test(pointWhere(holed, 3, 0)), `primWhere / pointWhere (${primWhere(holed, 0)})`);
+  // the solid ops error states the cause, where and the fix
+  const r = await engine.cook({ nodes: { ...named, h: { type: 'delete', in: ['n'], params: { group: '0' } }, c: { type: 'box', params: { size: [0.4, 2, 0.4] } }, out: { type: 'boolean', in: ['h', 'c'], params: { operation: 'subtract' } } }, output: 'out' });
+  const msg = r.errors.map((e) => `${e.message} (${e.hint ?? ''})`).join(' ');
+  check(!r.ok && /not a closed solid \(manifold\): 4 open edges \(after welding seam splits\), first edge .* of "crate" .* at \(.*\): fill_holes/.test(msg), `boolean of an open mesh: the cause with its position and fix (${msg.slice(0, 160)})`);
+  // the assert node names the first offender
+  const as = await engine.cook({ nodes: { ...named, h: { type: 'delete', in: ['n'], params: { group: '0' } }, out: { type: 'assert', in: ['h'], params: { watertight: true, on_fail: 'warn' } } }, output: 'out' });
+  const aw = as.warnings.map((x) => x.message).join(' ');
+  check(/watertight: .*first edge .* of "crate" .* at \(/.test(aw), `assert watertight names the first open edge (${aw.slice(0, 140)})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

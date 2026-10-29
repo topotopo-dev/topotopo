@@ -9,6 +9,7 @@ import { evalExpr, vecOut } from '../graph/params.ts';
 import { codeVarNames, pickVars } from '../core/usercode.ts';
 import { pointNormals, primArea } from '../core/topology.ts';
 import { halfEdges } from '../core/halfedge.ts';
+import { edgeWhere, pointWhere, primWhere } from '../core/report.ts';
 import {
   CURVATURE_TYPES, RayScene, SurfaceQuery, bboxDiagonal, fmt, curvatureOfType, discreteCurvature, duplicatePoints,
   fillFromNearestValid, newNearest, nonManifoldPoints, percentileFit, pieceReport, rayMeasure, selfIntersections,
@@ -339,6 +340,9 @@ defineNode({
     let prCache: PieceReport | null = null;
     const pieces = () => prCache ?? (prCache = pieceReport(g));
     const fail = (name: string, msg: string) => fails.push(`${name}: ${msg}`);
+    /** the first prim / point set in a mask, in words: its part and position (core/report.ts) */
+    const firstPrimOf = (m: Uint8Array) => { const q = m.indexOf(1); return q >= 0 ? `; first ${primWhere(g, q)}` : ''; };
+    const firstPointOf = (m: Uint8Array) => { const q = m.indexOf(1); return q >= 0 ? `; first ${pointWhere(g, q)}` : ''; };
     const tol = p.tolerance;
 
     if (p.watertight) {
@@ -354,20 +358,23 @@ defineNode({
         if (be) bits.push(`${be} boundary edges in ${loops} hole(s)`);
         if (nme) bits.push(`${nme} edges shared by 3+ polygons`);
         if (lines) bits.push(`${lines} polylines`);
-        fail('watertight', `${bits.join(', ')}; ${open} of ${pr.pieces.length} piece(s) open`);
         const he = halfEdges(g);
-        for (let e = 0; e < he.numEdges; e++) if (he.edgeValence(e) !== 2) for (const f of he.edgeFaces(e)) primFail[f] = 1;
+        let firstEdge = -1;
+        for (let e = 0; e < he.numEdges; e++) if (he.edgeValence(e) !== 2) { if (firstEdge < 0) firstEdge = e; for (const f of he.edgeFaces(e)) primFail[f] = 1; }
         for (let q = 0; q < g.numPrims; q++) if (!g.primClosed[q]) primFail[q] = 1;
+        const where = firstEdge >= 0 ? `; first ${edgeWhere(g, he.edgeA[firstEdge], he.edgeB[firstEdge], he.edgeFaces(firstEdge)[0] ?? -1)}` : firstPrimOf(primFail);
+        fail('watertight', `${bits.join(', ')}; ${open} of ${pr.pieces.length} piece(s) open${where}`);
       }
     }
     if (p.manifold) {
       checks++;
       const he = halfEdges(g);
-      let multi = 0;
-      for (let e = 0; e < he.numEdges; e++) if (he.edgeValence(e) > 2) { multi++; for (const f of he.edgeFaces(e)) primFail[f] = 1; }
+      let multi = 0, firstMulti = -1;
+      for (let e = 0; e < he.numEdges; e++) if (he.edgeValence(e) > 2) { multi++; if (firstMulti < 0) firstMulti = e; for (const f of he.edgeFaces(e)) primFail[f] = 1; }
       const bow = nonManifoldPoints(g);
       for (const q of bow) ptFail[q] = 1;
-      if (multi || bow.length) fail('manifold', `${multi} edges shared by 3+ polygons, ${bow.length} bowtie point(s)`);
+      const where = firstMulti >= 0 ? `; first ${edgeWhere(g, he.edgeA[firstMulti], he.edgeB[firstMulti], he.edgeFaces(firstMulti)[0] ?? -1)}` : bow.length ? `; first ${pointWhere(g, bow[0])}` : '';
+      if (multi || bow.length) fail('manifold', `${multi} edges shared by 3+ polygons, ${bow.length} bowtie point(s)${where}`);
     }
     if (p.no_flipped) {
       checks++;
@@ -377,11 +384,12 @@ defineNode({
         const bits: string[] = [];
         if (pr.flippedEdges) bits.push(`${pr.flippedEdges} edges between oppositely wound polygons`);
         if (inward.length) bits.push(`${inward.length} closed piece(s) facing inward (volume ${inward.slice(0, 3).map(({ x }) => fmt(x.volume)).join(', ')}${inward.length > 3 ? ', …' : ''}; use reverse)`);
-        fail('no_flipped', bits.join('; '));
+        const mark = new Uint8Array(g.numPrims);
         for (let q = 0; q < g.numPrims; q++) {
           const pc = pr.primPiece[q] >= 0 ? pr.pieces[pr.primPiece[q]] : null;
-          if (pr.flippedPrims[q] || (pc && pc.closed && pc.volume < 0 && !pc.cavity)) primFail[q] = 1;
+          if (pr.flippedPrims[q] || (pc && pc.closed && pc.volume < 0 && !pc.cavity)) { primFail[q] = 1; mark[q] = 1; }
         }
+        fail('no_flipped', bits.join('; ') + firstPrimOf(mark));
       }
     }
     const count = (label: string, have: number, lim: number, atLeast: boolean) => {
@@ -397,46 +405,47 @@ defineNode({
     if (bmin || bmax) {
       checks++;
       const P = g.P;
-      let outside = 0;
+      let outside = 0, firstOut = -1;
       for (let i = 0; i < g.numPoints; i++) {
         let out = false;
         for (let c = 0; c < 3; c++) {
           const x = P[i * 3 + c];
           if ((bmin && x < bmin[c] - tol) || (bmax && x > bmax[c] + tol)) out = true;
         }
-        if (out) { outside++; ptFail[i] = 1; }
+        if (out) { outside++; ptFail[i] = 1; if (firstOut < 0) firstOut = i; }
       }
       if (outside) {
         const b = g.bbox();
-        fail('bbox', `${outside} point(s) outside${bmin ? ` min ${v3(bmin)}` : ''}${bmax ? ` max ${v3(bmax)}` : ''}; geometry spans ${v3(b.min)} .. ${v3(b.max)}`);
+        fail('bbox', `${outside} point(s) outside${bmin ? ` min ${v3(bmin)}` : ''}${bmax ? ` max ${v3(bmax)}` : ''}; geometry spans ${v3(b.min)} .. ${v3(b.max)}; first ${pointWhere(g, firstOut)}`);
       }
     }
     if (p.min_edge_length > 0) {
       checks++;
       const r = shortEdges(g, p.min_edge_length);
       if (r.count) {
-        fail('min_edge_length', `${r.count} edge(s) shorter than ${fmt(p.min_edge_length)} (shortest ${fmt(r.shortest)})`);
+        fail('min_edge_length', `${r.count} edge(s) shorter than ${fmt(p.min_edge_length)} (shortest ${fmt(r.shortest)})${firstPrimOf(r.prims)}`);
         for (let q = 0; q < g.numPrims; q++) if (r.prims[q]) primFail[q] = 1;
       }
     }
     if (p.no_degenerate) {
       checks++;
-      let zero = 0;
+      let zero = 0, firstZero = -1;
       const amin = tol * tol;
       for (let q = 0; q < g.numPrims; q++) {
         if (!g.primClosed[q]) continue;
-        if (g.primSize(q) < 3 || primArea(g, q) <= amin) { zero++; primFail[q] = 1; }
+        if (g.primSize(q) < 3 || primArea(g, q) <= amin) { zero++; primFail[q] = 1; if (firstZero < 0) firstZero = q; }
       }
       const dup = duplicatePoints(g, tol);
       for (let i = 0; i < g.numPoints; i++) if (dup.mask[i]) ptFail[i] = 1;
-      if (zero || dup.count) fail('no_degenerate', `${zero} zero-area polygon(s), ${dup.count} point(s) within ${fmt(tol)} of another${dup.count ? ' (fuse them)' : ''}`);
+      const where = firstZero >= 0 ? `; first ${primWhere(g, firstZero)}` : firstPointOf(dup.mask);
+      if (zero || dup.count) fail('no_degenerate', `${zero} zero-area polygon(s), ${dup.count} point(s) within ${fmt(tol)} of another${dup.count ? ' (fuse them)' : ''}${where}`);
     }
     if (p.no_self_intersections) {
       checks++;
       const r = selfIntersections(g, p.max_tests, { strict: p.strict_intersections });
       const capped = r.capped ? ` (search stopped after ${r.tested.toLocaleString('en-US')} candidate pairs: there may be more)` : '';
       if (r.pairs) {
-        fail('no_self_intersections', `${r.pairs} pair(s) of ${p.strict_intersections ? 'intersecting or touching' : 'crossing'} triangles${capped}`);
+        fail('no_self_intersections', `${r.pairs} pair(s) of ${p.strict_intersections ? 'intersecting or touching' : 'crossing'} triangles${capped}${firstPrimOf(r.prims)}`);
         for (let q = 0; q < g.numPrims; q++) if (r.prims[q]) primFail[q] = 1;
       } else if (r.capped) warn(`no_self_intersections: none found, but the search stopped after ${r.tested.toLocaleString('en-US')} candidate pairs (raise max_tests to check everything)`);
     }
@@ -450,7 +459,7 @@ defineNode({
         if (f.attr.type === 'string') fail('attrib', `"${p.attrib}" is a string attribute: attrib_min/max need numbers`);
         else {
           const a = f.attr, d = a.data as Float64Array, s = a.size, n = a.count;
-          let bad = 0, mn = Infinity, mx = -Infinity;
+          let bad = 0, mn = Infinity, mx = -Infinity, firstBad = -1;
           const vp = f.cls === 'vertex' ? g.vertexPrims() : null;
           for (let i = 0; i < n; i++) {
             const x = d[i * s];
@@ -458,12 +467,14 @@ defineNode({
             if (x > mx) mx = x;
             if ((lo !== null && !(x >= lo)) || (hi !== null && !(x <= hi))) {
               bad++;
+              if (firstBad < 0) firstBad = i;
               if (f.cls === 'point') ptFail[i] = 1;
               else if (f.cls === 'prim') primFail[i] = 1;
               else if (vp) primFail[vp[i]] = 1;
             }
           }
-          if (bad) fail('attrib', `${bad} ${f.cls} value(s) of "${p.attrib}"${s > 1 ? '[0]' : ''} outside ${lo !== null ? fmt(lo) : '-inf'} .. ${hi !== null ? fmt(hi) : 'inf'} (range ${fmt(mn)} .. ${fmt(mx)})`);
+          const where = firstBad < 0 || f.cls === 'detail' ? '' : `; first ${f.cls === 'point' ? pointWhere(g, firstBad) : primWhere(g, f.cls === 'prim' ? firstBad : vp![firstBad])}`;
+          if (bad) fail('attrib', `${bad} ${f.cls} value(s) of "${p.attrib}"${s > 1 ? '[0]' : ''} outside ${lo !== null ? fmt(lo) : '-inf'} .. ${hi !== null ? fmt(hi) : 'inf'} (range ${fmt(mn)} .. ${fmt(mx)})${where}`);
         }
       }
     }

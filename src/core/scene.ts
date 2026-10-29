@@ -14,6 +14,7 @@
 import type { Geometry } from './geometry.ts';
 import { Geometry as Geo, defaultValueFor } from './geometry.ts';
 import type { Quat, Vec3 } from './math.ts';
+import { posText } from './report.ts';
 
 export const EMPTY_ATTRIB = 'scene_empty';
 export const PARENT_ATTRIB = 'parent';
@@ -50,7 +51,7 @@ export function sceneEmpties(g: Geometry): SceneEmpty[] {
   const out: SceneEmpty[] = [];
   for (let i = 0; i < g.numPoints; i++) {
     if (!flag[i]) continue;
-    if (used[i]) throw new Error(`scene empty: point ${i} ("${str('name', i)}") is marked ${EMPTY_ATTRIB} but used by a primitive; empties must be isolated points`);
+    if (used[i]) throw new Error(`scene empty "${str('name', i)}" (point ${i} at ${posText([g.P[i * 3], g.P[i * 3 + 1], g.P[i * 3 + 2]])}) is marked ${EMPTY_ATTRIB} but used by a primitive; empties must be isolated points`);
     const extras: SceneEmpty['extras'] = {};
     for (const [k, a] of g.points.map) {
       if (EMPTY_RESERVED.has(k) || a.isArray) continue;

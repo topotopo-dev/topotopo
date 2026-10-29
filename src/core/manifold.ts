@@ -2,7 +2,8 @@
 // level sets, 2D cross-sections). Float point/vertex attributes ride through as
 // manifold "properties" so they are interpolated across new intersection edges.
 import { Geometry } from './geometry.ts';
-import { topologyReport, triangulate } from './topology.ts';
+import { triangulate } from './topology.ts';
+import { solidCauses, solidReport } from './report.ts';
 import type { Vec3 } from './math.ts';
 
 let wasm: any = null;
@@ -112,11 +113,15 @@ export function toManifold(g: Geometry, L: PropLayout = propLayout([g])): any {
     m.__pfId = id;
     return m;
   } catch (e: any) {
-    const r = topologyReport(g);
-    const err = new NotManifoldError(
-      `input is not a closed solid (manifold): ${r.boundaryEdges} open/boundary edges, ${r.nonManifoldEdges} non-manifold edges, ${r.degenerate} degenerate faces.`,
-    );
-    err.hint = 'Solid ops need watertight meshes. Try fuse (weld points), fill_holes, clean, or remesh through sdf_from_mesh → sdf_to_mesh. Open surfaces can use clip instead of boolean.';
+    // why: each cause with its count, where the first one is and its fix (core/report.ts)
+    const r = solidReport(g), causes = solidCauses(r);
+    const seamsOnly = !causes.length && r.seamEdges > 0;
+    const err = new NotManifoldError(`input is not a closed solid (manifold): ${seamsOnly
+      ? `its ${r.seamEdges} open edges are uv/normal seam splits (coincident points not welded), first ${r.firstOpen ?? 'at a seam'}`
+      : causes.length ? causes.join('; ') : 'the mesh kernel rejected it (self-intersecting or touching faces)'}.`);
+    err.hint = seamsOnly
+      ? 'fuse the points (or file {weld:true} on import) to join the seams; Solid ops need watertight meshes.'
+      : 'Solid ops need watertight meshes: fix the causes above, or remesh through sdf_from_mesh → sdf_to_mesh. Open surfaces can use clip instead of boolean.';
     throw err;
   }
 }

@@ -12,6 +12,7 @@ import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
 import { imageSummary } from './core/image.ts';
 import { sdfGridSummary } from './core/sdfgrid.ts';
 import { uvReport, uvReportText } from './core/uvreport.ts';
+import { openEdgesText, partsOf, primWhere, solidCauses, solidReport } from './core/report.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const v3 = (a: number[]) => `(${a.map(fmtNum).join(', ')})`;
@@ -182,23 +183,7 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
       }
     }
   }
-  if (detail === 'topology' || detail === 'all') {
-    const r = topologyReport(g);
-    out.push('topology:');
-    out.push(`  ${r.closed ? 'CLOSED manifold surface (watertight)' : `open/non-manifold: ${r.boundaryEdges} boundary edges, ${r.nonManifoldEdges} non-manifold edges`}`);
-    out.push(`  ${r.pieces} connected piece(s); ${r.edges} edges; ${r.degenerate} degenerate prims; ${r.unusedPoints} unused points`);
-    const t = triangleReport(g);
-    if (t.triangles) {
-      const ids = (a: number[]) => (a.length ? ` (prims ${a.slice(0, 12).join(' ')}${a.length > 12 ? ' …' : ''})` : '');
-      out.push(`  ${t.triangles} render/export triangles; min area ${fmtNum(t.minArea)}, min quality ${fmtNum(t.minQuality)}; ${t.degenerate} degenerate${ids(t.degeneratePrims)}, ${t.nearDegenerate} near-degenerate${ids(t.nearDegeneratePrims)}`);
-    }
-    const flipped = halfEdges(g).flippedEdges.size;
-    if (flipped) out.push(`  ${flipped} edge(s) with inconsistent winding between neighbouring polygons (use reverse on part of the mesh or clean fix_winding)`);
-    let area = 0;
-    for (let p = 0; p < g.numPrims; p++) area += primArea(g, p);
-    out.push(`  surface area ${fmtNum(area)}${r.closed ? `; volume ${fmtNum(signedVolume(g))}${signedVolume(g) < 0 ? ' (NEGATIVE: faces point inward — use reverse)' : ''}` : ''}`);
-    if (r.closed && r.pieces === 1) out.push(`  euler ${r.euler} → genus ${(2 - r.euler) / 2}`);
-  }
+  if (detail === 'topology' || detail === 'all') out.push('topology:', ...topologyLines(g));
   if (detail === 'uv') {
     const r = uvReport(g, { attribute: o.uvAttrib, resolution: o.uvResolution });
     out.push(...uvReportText(r));
@@ -229,6 +214,36 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     }
   }
   return out.join('\n');
+}
+
+/**
+ * The topology section: closed solid or not and why (open edges after welding uv/normal seam splits, non-manifold
+ * edges, winding flips, inward pieces, degenerate faces: each with the first one's part and position and the fix),
+ * pieces, render/export triangle health, area, volume, genus.
+ */
+export function topologyLines(g: Geometry): string[] {
+  const out: string[] = [];
+  const r = topologyReport(g), s = solidReport(g);
+  const causes = solidCauses(s);
+  if (!s.polys) out.push(`  no polygons (${r.lines} polylines, ${g.numPoints} points): not a surface`);
+  else if (s.closedAfterWeld) {
+    out.push(s.closed ? '  CLOSED solid (watertight: every polygon edge shared by exactly two polygons)'
+      : `  CLOSED solid after welding seam splits: ${openEdgesText(s)}; fuse the points to make it closed as it is`);
+    // a closed mesh can still have flipped faces, face inward or hold degenerate faces
+    out.push(...causes.map((c) => `    ${c}`));
+  } else out.push('  NOT a closed solid:', ...causes.map((c) => `    ${c}`));
+  out.push(`  ${s.pieces} connected piece(s) after welding seam splits${r.pieces !== s.pieces ? ` (${r.pieces} as the points are)` : ''}; ${r.edges} edges; ${r.degenerate} degenerate prims; ${r.unusedPoints} unused points`);
+  const t = triangleReport(g);
+  if (t.triangles) {
+    const first = (a: number[]) => (a.length ? ` (first ${primWhere(g, a[0])}${a.length > 1 ? `; parts: ${partsOf(g, a) || `${a.length} prims`}` : ''})` : '');
+    out.push(`  ${t.triangles} render/export triangles; min area ${fmtNum(t.minArea)}, min quality ${fmtNum(t.minQuality)}; ${t.degenerate} degenerate${first(t.degeneratePrims)}, ${t.nearDegenerate} near-degenerate${first(t.nearDegeneratePrims)}`);
+  }
+  let area = 0;
+  for (let p = 0; p < g.numPrims; p++) area += primArea(g, p);
+  const vol = s.closedAfterWeld ? signedVolume(g) : NaN;
+  out.push(`  surface area ${fmtNum(area)}${s.closedAfterWeld ? `; volume ${fmtNum(vol)}${vol < 0 ? ' (NEGATIVE: faces point inward, use reverse)' : ''}` : ''}`);
+  if (r.closed && r.pieces === 1) out.push(`  euler ${r.euler} → genus ${(2 - r.euler) / 2}`);
+  return out;
 }
 
 /** Edge listing: index, point pair, length, polygon count, dihedral angle, edge groups. */
