@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-233 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+234 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -12,7 +12,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
-- [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
+- [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_string](#attrib_string) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [measure](#measure-nodes): [assert](#assert) · [curvature](#curvature) · [distance](#distance) · [occlusion](#occlusion)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
 - [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [reverse](#reverse) · [solidify](#solidify) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
@@ -3313,6 +3313,73 @@ Rename an attribute.
     }
   },
   "output": "renamed"
+}
+```
+
+### attrib_string
+
+category: `attribute` · aliases: `string_edit`, `attrib_string_edit`, `name_pieces`, `rename_pieces`, `attribstringedit`
+
+Write or edit a string attribute per element: a pattern with the element's number, its piece number and other attributes ("hull_{piece:03}"), then find/replace and case. Names for pieces, LODs and engine suffixes in one node.
+
+Houdini: Attribute String Edit + a name wrangle. For each element of class (in group) the value is built in three steps: format, when set, makes it from a pattern ("" keeps the current value); find/replace edits it (plain text, or a JavaScript regular expression with regex, $1 for groups); case lowers or raises it. Placeholders in format: {value} the current value, {index} the element number, {piece} the number of the element's piece, {pieces} how many there are, and {<attribute>} any attribute of the element (prim, then point and detail; a tuple joins with "_"). A width pads numbers with zeros: {piece:03} → 007. Pieces are connected pieces (prims sharing points), or with piece_attrib the distinct values of that attribute (class, copynum, a name), numbered in order of first appearance; start offsets {index} and {piece} (1 counts from one). Examples: name 146 convex hulls for Godot in one node {format:"hull_{piece:03}-convcolonly"}; LOD names to lower case {find:"_LOD", replace:"_lod"}; a prefix on every part {format:"gun_{value}"}; copies {format:"crate_{copynum}"}.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `name` | string | `"name"` |  |  | `attrib`, `attribute` | string attribute to write (created when missing) |
+| `class` | enum | `"prim"` |  | `point`, `prim`, `vertex`, `detail` |  | attribute class |
+| `format` | string | `""` |  |  | `pattern`, `template` | pattern of the new value, e.g. "hull_{piece:03}" ("" = keep the current value; placeholders {value} {index} {piece} {pieces} {<attribute>}, width {index:03}) |
+| `piece_attrib` | string | `""` |  |  | `piece_attribute`, `by` | what makes a piece for {piece}: "" = connected pieces, else an attribute whose distinct values are the pieces (class, copynum, name) |
+| `start` | int | `0` |  |  | `offset`, `first` | first number of {index} and {piece} (1 counts from one) |
+| `find` | string | `""` |  |  | `search`, `from` | text to replace in the value ("" = none) |
+| `replace` | string | `""` |  |  | `to`, `replace_with` | what find becomes (every occurrence) |
+| `regex` | bool | `false` |  |  | `regexp`, `use_regex` | find is a JavaScript regular expression (replace may use $1, $2 …) |
+| `case` | enum | `"keep"` |  | `keep`, `lower`, `upper` | `letter_case` | change the letter case last |
+| `group` | group | `""` |  |  |  | only elements in this group (point and prim classes) |
+
+**Writes:** string attribute <name> on <class>
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 2
+      }
+    },
+    "shards": {
+      "type": "voronoi_fracture",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "count": 8,
+        "gap": 0.02
+      }
+    },
+    "hulls": {
+      "type": "attrib_string",
+      "in": [
+        "shards"
+      ],
+      "params": {
+        "format": "hull_{piece:03}-convcolonly"
+      }
+    }
+  },
+  "output": "hulls"
 }
 ```
 

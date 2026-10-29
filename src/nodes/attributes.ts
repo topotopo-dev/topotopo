@@ -911,6 +911,162 @@ defineNode({
   },
 });
 
+/** Text of an attribute value for a name pattern: integers as they are, floats to 6 significant digits, tuples joined by "_". */
+function valueText(v: unknown): string {
+  const one = (x: unknown) => (typeof x === 'number' ? (Number.isInteger(x) ? String(x) : String(+x.toPrecision(6))) : String(x ?? ''));
+  return Array.isArray(v) ? v.map(one).join('_') : one(v);
+}
+
+defineNode({
+  type: 'attrib_string',
+  category: 'attribute',
+  packed: 'keep',
+  summary: 'Write or edit a string attribute per element: a pattern with the element\'s number, its piece number and other attributes ("hull_{piece:03}"), then find/replace and case. Names for pieces, LODs and engine suffixes in one node.',
+  description:
+    'Houdini: Attribute String Edit + a name wrangle. For each element of class (in group) the value is built in three ' +
+    'steps: format, when set, makes it from a pattern ("" keeps the current value); find/replace edits it (plain text, ' +
+    'or a JavaScript regular expression with regex, $1 for groups); case lowers or raises it. Placeholders in format: ' +
+    '{value} the current value, {index} the element number, {piece} the number of the element\'s piece, {pieces} how ' +
+    'many there are, and {<attribute>} any attribute of the element (prim, then point and detail; a tuple joins with ' +
+    '"_"). A width pads numbers with zeros: {piece:03} → 007. Pieces are connected pieces (prims sharing points), or ' +
+    'with piece_attrib the distinct values of that attribute (class, copynum, a name), numbered in order of first ' +
+    'appearance; start offsets {index} and {piece} (1 counts from one). Examples: name 146 convex hulls for Godot in one ' +
+    'node {format:"hull_{piece:03}-convcolonly"}; LOD names to lower case {find:"_LOD", replace:"_lod"}; a prefix on ' +
+    'every part {format:"gun_{value}"}; copies {format:"crate_{copynum}"}.',
+  aliases: ['string_edit', 'attrib_string_edit', 'name_pieces', 'rename_pieces', 'attribstringedit'],
+  inputs: [{ name: 'geo', desc: 'geometry' }],
+  params: {
+    name: { type: 'string', default: 'name', desc: 'string attribute to write (created when missing)', aliases: ['attrib', 'attribute'] },
+    class: { ...CLS, default: 'prim' },
+    format: { type: 'string', default: '', desc: 'pattern of the new value, e.g. "hull_{piece:03}" ("" = keep the current value; placeholders {value} {index} {piece} {pieces} {<attribute>}, width {index:03})', aliases: ['pattern', 'template'] },
+    piece_attrib: { type: 'string', default: '', desc: 'what makes a piece for {piece}: "" = connected pieces, else an attribute whose distinct values are the pieces (class, copynum, name)', aliases: ['piece_attribute', 'by'] },
+    start: { type: 'int', default: 0, desc: 'first number of {index} and {piece} (1 counts from one)', aliases: ['offset', 'first'] },
+    find: { type: 'string', default: '', desc: 'text to replace in the value ("" = none)', aliases: ['search', 'from'] },
+    replace: { type: 'string', default: '', desc: 'what find becomes (every occurrence)', aliases: ['to', 'replace_with'] },
+    regex: { type: 'bool', default: false, desc: 'find is a JavaScript regular expression (replace may use $1, $2 …)', aliases: ['regexp', 'use_regex'] },
+    case: { type: 'enum', options: ['keep', 'lower', 'upper'], default: 'keep', desc: 'change the letter case last', aliases: ['letter_case'] },
+    group: { type: 'group', default: '', desc: 'only elements in this group (point and prim classes)' },
+  },
+  outputs: 'string attribute <name> on <class>',
+  example: {
+    nodes: {
+      ball: { type: 'sphere', params: { type: 'ico', level: 2 } },
+      shards: { type: 'voronoi_fracture', in: ['ball'], params: { count: 8, gap: 0.02 } },
+      hulls: { type: 'attrib_string', in: ['shards'], params: { format: 'hull_{piece:03}-convcolonly' } },
+    },
+    output: 'hulls',
+  },
+  cook: ({ input, p, type }) => {
+    const g = input(0).clone();
+    const name = String(p.name ?? '').trim();
+    if (!name) throw new NodeError(`${type}: name is empty`);
+    const cls = p.class as AttribClass;
+    const n = elemCount(g, cls);
+    const old = g.table(cls).get(name);
+    if (old && old.type !== 'string') throw new NodeError(`${type}: ${cls} attribute "${name}" is ${old.type}, not a string`, 'write another name, or attrib_delete it first');
+    const cur = old && !old.isArray ? (old.data as string[]) : null;
+    const sel = cls === 'point' || cls === 'prim' ? mask(g, cls, p.group) : null;
+    const start = Math.trunc(p.start) || 0;
+    // pieces: connected pieces, or the distinct values of piece_attrib, numbered by first appearance
+    let piece: Int32Array | null = null, pieces = 0;
+    const fmt = String(p.format ?? '');
+    if (/\{pieces?(:\d+)?\}/.test(fmt)) {
+      piece = new Int32Array(n);
+      const pa = String(p.piece_attrib ?? '').trim();
+      if (pa) {
+        const order = cls === 'point' ? ['point', 'prim', 'detail'] : cls === 'vertex' ? ['vertex', 'point', 'prim', 'detail'] : ['prim', 'point', 'detail'];
+        const f = g.findAttrib(pa, order as AttribClass[]);
+        if (!f) throw new NodeError(`${type}: no attribute "${pa}" for piece_attrib`, 'e.g. class (connectivity), copynum (copy nodes) or name');
+        const ids = new Map<string, number>();
+        for (let i = 0; i < n; i++) {
+          const e = elemIndex(g, cls, f.cls, i);
+          const key = JSON.stringify(f.attr.get(e));
+          let id = ids.get(key);
+          if (id === undefined) { id = ids.size; ids.set(key, id); }
+          piece[i] = id;
+        }
+        pieces = ids.size;
+      } else {
+        const c = connectivity(g);
+        const ids = new Map<number, number>();
+        for (let i = 0; i < n; i++) {
+          const raw = cls === 'point' ? c.ptClass[i] : cls === 'prim' ? c.primClass[i] : cls === 'vertex' ? c.primClass[vertexPrim(g, i)] : 0;
+          let id = ids.get(raw);
+          if (id === undefined) { id = ids.size; ids.set(raw, id); }
+          piece[i] = id;
+        }
+        pieces = ids.size;
+      }
+    }
+    // the placeholders, checked once
+    const order: AttribClass[] = cls === 'point' ? ['point', 'prim', 'detail'] : cls === 'vertex' ? ['vertex', 'point', 'prim', 'detail'] : cls === 'detail' ? ['detail'] : ['prim', 'point', 'detail'];
+    const tokens = [...fmt.matchAll(/\{([A-Za-z_][\w]*)(?::(\d+))?\}/g)];
+    const lookups = new Map<string, { cls: AttribClass; attr: Attribute }>();
+    for (const [, key] of tokens) {
+      if (['value', 'index', 'piece', 'pieces'].includes(key) || lookups.has(key)) continue;
+      const f = g.findAttrib(key, order);
+      if (!f) throw new NodeError(`${type}: format "${fmt}" names {${key}}, which is no attribute here`, `placeholders: {value} {index} {piece} {pieces} or an attribute (${[...g.table(cls).map.keys()].slice(0, 12).join(', ') || 'none'})`);
+      lookups.set(key, f as { cls: AttribClass; attr: Attribute });
+    }
+    let re: RegExp | null = null;
+    const find = String(p.find ?? '');
+    if (find && p.regex) {
+      try { re = new RegExp(find, 'g'); } catch (e: any) { throw new NodeError(`${type}: find is not a valid regular expression: ${e.message}`); }
+    }
+    const pad = (x: number, w: string | undefined) => (w ? String(x).padStart(Number(w), '0') : String(x));
+    const out = cur ? cur.slice() : new Array<string>(n).fill('');
+    for (let i = 0; i < n; i++) {
+      if (sel && !sel[i]) continue;
+      let s = cur ? cur[i] : '';
+      if (fmt) {
+        s = fmt.replace(/\{([A-Za-z_][\w]*)(?::(\d+))?\}/g, (_m, key: string, w: string | undefined) => {
+          if (key === 'value') return cur ? cur[i] : '';
+          if (key === 'index') return pad(i + start, w);
+          if (key === 'piece') return pad(piece![i] + start, w);
+          if (key === 'pieces') return pad(pieces, w);
+          const f = lookups.get(key)!;
+          const v = f.attr.get(elemIndex(g, cls, f.cls, i));
+          return typeof v === 'number' && Number.isInteger(v) ? pad(v, w) : valueText(v);
+        });
+      }
+      if (find) s = re ? s.replace(re, String(p.replace ?? '')) : s.split(find).join(String(p.replace ?? ''));
+      if (p.case === 'lower') s = s.toLowerCase(); else if (p.case === 'upper') s = s.toUpperCase();
+      out[i] = s;
+    }
+    g.table(cls).set(name, new Attribute('string', 1, out, ''));
+    return g;
+  },
+});
+
+/** The prim of vertex v. */
+function vertexPrim(g: Geometry, v: number): number {
+  let lo = 0, hi = g.numPrims - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (g.primStart[mid] <= v) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+
+/** First prim using each point (-1 = none), cached per geometry. */
+const firstPrims = new WeakMap<Geometry, Int32Array>();
+function pointPrim(g: Geometry, pt: number): number {
+  let a = firstPrims.get(g);
+  if (!a) {
+    a = new Int32Array(g.numPoints).fill(-1);
+    for (let pr = g.numPrims - 1; pr >= 0; pr--) for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) a[g.vertexPoint[v]] = pr;
+    firstPrims.set(g, a);
+  }
+  return Math.max(0, a[pt]);
+}
+
+/** The element of class `to` that element i of class `from` reads (a point reads its first prim, a prim its first point). */
+function elemIndex(g: Geometry, from: AttribClass, to: AttribClass, i: number): number {
+  if (to === 'detail') return 0;
+  if (from === to) return i;
+  if (from === 'vertex') return to === 'point' ? g.vertexPoint[i] : vertexPrim(g, i);
+  if (from === 'prim' && to === 'point') return g.vertexPoint[g.primStart[i]] ?? 0;
+  if (from === 'point' && to === 'prim') return pointPrim(g, i);
+  return 0;
+}
+
 defineNode({
   type: 'sort',
   category: 'topology',

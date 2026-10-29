@@ -1,4 +1,4 @@
-// Remeshing, decimation, repair and LOD tests: remesh_isotropic, decimate, mesh_repair, lod.
+// Remeshing, decimation, repair and LOD tests: remesh_isotropic, decimate, mesh_repair, lod; naming pieces (attrib_string).
 //   node test/remesh.ts
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
@@ -394,7 +394,24 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   let farPts = 0;
   for (let pr = 0; pr < bolt.numPrims; pr++) if (lv[pr] === 1) for (const pt of bolt.primPoints(pr)) if (bolt.P[pt * 3] > 1.2) farPts++;
   check(farPts === 0, 'lod prune: a 4 mm bolt is gone from the coarse level of a hard-normal mesh');
-  const ss = await cook({ s: src.s, l: { type: 'lod', in: ['s'], params: { screen_sizes: [1, 0.3, 0.05] } } }, 'l');
+}
+
+// ---------------------------------------------------------------- naming pieces: attrib_string
+{
+  const shards: Record<string, NodeSpec> = { ball: { type: 'sphere', params: { type: 'ico', level: 2 } }, shards: { type: 'voronoi_fracture', in: ['ball'], params: { count: 8, gap: 0.02 } } };
+  const hulls = await cook({ ...shards, h: { type: 'attrib_string', in: ['shards'], params: { format: 'hull_{piece:03}-convcolonly' } } }, 'h');
+  const hn = [...new Set(hulls.prims.get('name')!.data as string[])].sort();
+  check(hn.length === 8 && hn[0] === 'hull_000-convcolonly' && hn[7] === 'hull_007-convcolonly', `attrib_string: connected pieces numbered in one node (${hn[0]} … ${hn[7]})`);
+  const lodFix = await cook({ b: { type: 'box' }, n: { type: 'attrib_create', in: ['b'], params: { name: 'name', class: 'prim', value: 'Gun_LOD0.001' } }, s: { type: 'attrib_string', in: ['n'], params: { find: '\\.\\d+$', regex: true, case: 'lower' } } }, 's');
+  check((lodFix.prims.get('name')!.data as string[]).every((x) => x === 'gun_lod0'), 'attrib_string: regex find/replace, then lower case');
+  const copies = await cook({ b: { type: 'box' }, c: { type: 'copy_xform', in: ['b'], params: { count: 3, translate: [2, 0, 0] } }, s: { type: 'attrib_string', in: ['c'], params: { format: 'crate_{copynum}_of_{pieces}', group: '@P.x>1' } } }, 's');
+  const cn = copies.prims.get('name')!.data as string[];
+  check(cn.filter((x) => x === '').length === 6 && cn.includes('crate_1_of_3') && cn.includes('crate_2_of_3'), 'attrib_string: attribute placeholders ({copynum}), {pieces}, and group limits the writes');
+  const pts = await cook({ b: { type: 'box' }, c: { type: 'copy_xform', in: ['b'], params: { count: 3, translate: [2, 0, 0] } }, s: { type: 'attrib_string', in: ['c'], params: { class: 'point', name: 'tag', format: 'p{piece:02}', piece_attrib: 'copynum', start: 1 } } }, 's');
+  check([...new Set(pts.points.get('tag')!.data as string[])].join() === 'p01,p02,p03', 'attrib_string: point class, pieces by piece_attrib, start 1');
+  const bad = await engine.cook({ nodes: { b: { type: 'box' }, s: { type: 'attrib_string', in: ['b'], params: { format: '{nope}' } } }, output: 's' });
+  check(!bad.ok && /names \{nope\}/.test(bad.errors[0]?.message ?? ''), 'attrib_string: an unknown placeholder is an error');
+  const ss = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 4 } }, l: { type: 'lod', in: ['s'], params: { screen_sizes: [1, 0.3, 0.05] } } }, 'l');
   const sl = ss.prims.get('lod')!.data as Int32Array, sc = [0, 0, 0];
   for (const x of sl) sc[x]++;
   check(sc[0] >= sc[1] && sc[1] > sc[2] && sc[2] > 0, `lod screen_sizes: error-driven levels ${sc.join(' ≥ ')}`);

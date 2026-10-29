@@ -218,6 +218,7 @@ export const PARAMS: Record<string, any> = {
   remesh_quad: { target_length: 0.2, smooth_iterations: 4 },
   mesh_repair: { self_intersections: 'report' },
   lod: { levels: 3 },
+  attrib_string: { format: 'part_{piece:02}_{index}', case: 'upper' },
   mask: { by: 'slope', min: 0, max: 45, falloff: 15 },
   // attribute_from_map and image_file: { path } is filled in by createFixtureEngine() (an RGBA PNG written to the temp dir)
   orient: { random_yaw: [0, 360], tilt: [0, 10], scale_min: 0.8, scale_max: 1.2 },
