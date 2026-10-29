@@ -5,7 +5,7 @@
 //   topotopo library new <library> <folder/name> [--title t] [--tags a,b] [--description d]
 //   topotopo library bake <project folder> | --stale | --all          bake previews in this process
 //   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a project (the gallery's editor)
-// and a project's packages (src/gallery/packages.ts, src/gallery/update.ts), as PACKAGE_COMMANDS says them:
+// and a project's packages (src/packages/registry.ts, src/packages/update.ts), as PACKAGE_COMMANDS says them:
 //   topotopo init [folder] [--package owner/name]                     make a folder a project, or set the package it is
 //   topotopo libraries add|remove <folder or name> [folder]           the libraries the project finds packages in
 //   topotopo use owner/name [folder] [--version 1.1]                  add a package from the libraries the project lists
@@ -24,7 +24,7 @@ import path from 'node:path';
 import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig } from '../config.ts';
-import { createProject, isStale, readBakeState, scanAll } from './library.ts';
+import { createProject, isStale, readBakeState, scanAll } from '../gallery/library.ts';
 import { initProject, libraryEntryFor, projectDirOf, readManifest, slugify } from '../project.ts';
 import type { GalleryConfig } from '../config.ts';
 
@@ -102,7 +102,7 @@ const versionGiven = (folder: string | undefined, meant: string) => {
 async function projectPackages(project: string) {
   const { Engine } = await import('../graph/engine.ts');
   const { createNodeHost } = await import('../host/node.ts');
-  const { openPackages } = await import('./packages.ts');
+  const { openPackages } = await import('./registry.ts');
   const engine = new Engine(createNodeHost({ baseDir: project }));
   await engine.init();
   return { engine, pk: openPackages(engine, project), close: async () => { await engine.host.pool?.close(); } };
@@ -123,7 +123,7 @@ export async function galleryCommand(argv: string[], prog: string, io: Io = cons
     }
     if (!cfg.libraries.length) io.out(`no libraries yet: register a folder with \`${prog} library add <name> <folder>\` (or pass --library <folder>)`);
     const port = a.opt('--port') !== undefined ? Number(a.opt('--port')) : cfg.gallery.port;
-    const { startGallery, runningGallery } = await import('./server.ts');
+    const { startGallery, runningGallery } = await import('../gallery/server.ts');
     try {
       const g = await startGallery({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
       const n = cfg.libraries.length;
@@ -172,7 +172,7 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
       return 0;
     }
     if (sub === 'bake') {
-      const { bakeProject } = await import('./bake.ts');
+      const { bakeProject } = await import('../gallery/bake.ts');
       let dirs: string[];
       if (a.has('--all') || a.has('--stale')) dirs = scanAll(cfg).flatMap((s) => s.projects).filter((p) => a.has('--all') || isStale(p)).map((p) => p.dir);
       else if (x) dirs = [projectOf(x, prog)];
@@ -199,7 +199,7 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
     const { createNodeHost } = await import('../host/node.ts');
     const { Session } = await import('../session.ts');
     const { startViewer } = await import('../viewer/server.ts');
-    const { openPackages } = await import('./packages.ts');
+    const { openPackages } = await import('./registry.ts');
     const engine = new Engine(createNodeHost({ baseDir: dir }));
     await engine.init();
     const ws = new Session(dir, engine);
@@ -296,7 +296,7 @@ export async function packagesCommand(argv: string[], prog: string, io: Io = con
     // a package name first (one that is no folder here), then the folder
     const first = a.rest[0], named = first !== undefined && isPackage(first) && !isDir(path.resolve(first));
     const pkg = named ? first : undefined, folder = named ? a.rest[1] : a.rest[0];
-    const { packagesText, packageText } = await import('./packages.ts');
+    const { packagesText, packageText } = await import('./registry.ts');
     const { pk, close } = await projectPackages(projectOf(folder, prog));
     try { io.out(pkg ? packageText(pk, pkg) : packagesText(pk)); return 0; } finally { await close(); }
   })) ?? 0;
@@ -309,7 +309,7 @@ export async function packagesCommand(argv: string[], prog: string, io: Io = con
 export async function publishCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const a = args(argv, ['--note'], ['--big', '--dry-run'], `usage: ${prog} publish [folder] --note "what changed" [--big] [--dry-run]`);
-    const { publishPackage, publishText } = await import('./packages.ts');
+    const { publishPackage, publishText } = await import('./registry.ts');
     const { pk, close } = await projectPackages(projectOf(a.rest[0], prog));
     try {
       const r = await publishPackage(pk, { note: a.opt('--note'), big: a.has('--big'), dryRun: a.has('--dry-run') });
@@ -330,7 +330,7 @@ export async function searchCommand(argv: string[], prog: string, io: Io = conso
     const last = a.rest.at(-1), folder = last !== undefined && asPath(last) ? last : undefined;
     const words = folder === undefined ? a.rest : a.rest.slice(0, -1);
     if (folder !== undefined && !isDir(path.resolve(folder))) fail(`no folder ${path.resolve(folder)}`);
-    const { searchPackages, searchText } = await import('./packages.ts');
+    const { searchPackages, searchText } = await import('./registry.ts');
     io.out(searchText(searchPackages(projectDirOf(path.resolve(folder ?? '.')), { query: words.join(' '), kind: a.opt('--kind'), tag: a.opt('--tag') })));
     return 0;
   })) ?? 0;
@@ -360,7 +360,7 @@ export async function updateCommand(argv: string[], prog: string, io: Io = conso
     if (!pkg) fail(usage);
     versionGiven(folder, `a version is named with --to, ${prog} update ${pkg} --to ${/^\d+$/.test(folder ?? '') ? `${folder}.0` : folder}`);
     const { applyUpdate, beforeAfter, beforeAfterText, overlayRenders } = await import('./update.ts');
-    const { NothingToUpdate, loadProject } = await import('./packages.ts');
+    const { NothingToUpdate, loadProject } = await import('./registry.ts');
     const project = projectOf(folder, prog);
     const { engine, pk, close } = await projectPackages(project);
     try {

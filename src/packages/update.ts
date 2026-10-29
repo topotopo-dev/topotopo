@@ -1,4 +1,4 @@
-// Out of date and Update (the registry is src/gallery/packages.ts): the newer versions of the packages a project uses,
+// Out of date and Update (the registry is src/packages/registry.ts): the newer versions of the packages a project uses,
 // and the before/after of an update. The before/after finds every place the project uses the package (each node of
 // its type in the project's graphs, assets and graph files, nested graphs included, with its params and inputs as they
 // are), cooks each with the version in use and with the version the update goes to, says what changed (diffGeometry)
@@ -31,8 +31,8 @@ import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../session.ts';
 import { program } from '../project.ts';
-import { compareInterfaces, compareVersions, kindChanges, libraryText } from './packages.ts';
-import type { ProjectPackages, UpdateTarget } from './packages.ts';
+import { compareInterfaces, compareVersions, kindChanges, libraryText } from './registry.ts';
+import type { ProjectPackages, UpdateTarget } from './registry.ts';
 
 /**
  * Folders a search for graph files does not enter: anywhere, those holding data and exports (a graph file has its own

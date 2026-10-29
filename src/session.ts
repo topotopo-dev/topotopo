@@ -189,7 +189,7 @@ export function graphFiles(dir: string): Map<string, string> {
 }
 
 /**
- * The packages of the project a session's folder belongs to (src/gallery/packages.ts), attached by whoever opens it: a graph
+ * The packages of the project a session's folder belongs to (src/packages/registry.ts), attached by whoever opens it: a graph
  * set or edited through the project that names a package the project does not use yet adds it (first use).
  */
 export interface SessionPackages {
@@ -231,7 +231,7 @@ export class Session {
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
   /** told when the cooks of a graph start, move to another node (with that node's event), are asked to stop and end (see activity) */
   activityListeners = new Set<(graph: string, ev?: NodeProgress) => void>();
-  /** the packages of the project the session's folder belongs to, when whoever opened it attached them (src/gallery/packages.ts) */
+  /** the packages of the project the session's folder belongs to, when whoever opened it attached them (src/packages/registry.ts) */
   packages: SessionPackages | null = null;
   /**
    * Session values: var values a person set in the live viewer over a graph file (`topotopo view`). They shadow the

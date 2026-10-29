@@ -7,7 +7,7 @@ import zlib from 'node:zlib';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { INPUTS_EXAMPLE } from '../src/mcp/docs.ts';
-import { builtinVersions } from '../src/gallery/packages.ts';
+import { builtinVersions } from '../src/packages/registry.ts';
 
 /** A 16-bit grey PNG made by hand (signature, IHDR, IDAT, IEND), the way a heightmap arrives. */
 function grey16PNG(w: number, h: number, values: number[]): Buffer {

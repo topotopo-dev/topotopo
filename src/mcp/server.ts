@@ -20,8 +20,8 @@ import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
 import { startProject, setProgram } from '../project.ts';
-import { openPackages } from '../gallery/packages.ts';
-import type { ProjectPackages } from '../gallery/packages.ts';
+import { openPackages } from '../packages/registry.ts';
+import type { ProjectPackages } from '../packages/registry.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
@@ -37,7 +37,7 @@ setProgram(import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo');
 // itself (graphs/, assets/, exports/, inputs/), or nothing at all, as a new one does: then its graphs use packages,
 // TopoTopo's own among them, as they come. A folder in a project works in that project's folder. A folder with
 // anything else in it (a repository, a folder of the person's) stays as it is: library {action:"init"} makes it a
-// project when the person says so (startProject, src/gallery/library.ts). The first tool reply says what happened.
+// project when the person says so (startProject, src/project.ts). The first tool reply says what happened.
 const start = startProject(path.resolve(named ?? path.join(process.cwd(), 'topotopo')), named ? {} : { name: path.basename(process.cwd()) });
 log(start.log);
 const wsDir = start.dir;

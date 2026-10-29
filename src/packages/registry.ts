@@ -1,7 +1,7 @@
 // Packages on disk (the engine side is src/graph/packages.ts): the copies of the package versions a project uses and
 // their lock, the libraries a project finds packages in, adding a package on first use, following a package's working
 // folder for one session, publishing a version (with the kind, tags and description of each output, and a dry run),
-// the newer versions of what a project uses and updating to one (the before/after is src/gallery/update.ts), and
+// the newer versions of what a project uses and updating to one (the before/after is src/packages/update.ts), and
 // searching the outputs of every library.
 //
 //   <package>/project.json                          "package": "studio/trees" (set by the author), "uses", "libraries"
@@ -55,7 +55,7 @@ import { NAME_RE } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { VERSION_RE, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
-import { scanLibrary } from './library.ts';
+import { scanLibrary } from '../gallery/library.ts';
 import type { GalleryConfig } from '../config.ts';
 import type { ProjectManifest } from '../project.ts';
 

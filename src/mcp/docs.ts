@@ -1,7 +1,7 @@
 // LLM-facing documentation: operating guide, topic pages, and generated node references.
 import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
-import { PACKAGE_COMMANDS } from '../gallery/cli.ts';
+import { PACKAGE_COMMANDS } from '../packages/commands.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 

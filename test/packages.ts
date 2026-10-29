@@ -1,4 +1,4 @@
-// Packages (src/graph/packages.ts, src/gallery/packages.ts). The engine: package output names and their errors, a
+// Packages (src/graph/packages.ts, src/packages/registry.ts). The engine: package output names and their errors, a
 // scope's package resolver, a package output's node type (its sliders, inputs, scope, signature and texture paths), the
 // packages a graph names and uses, "publish": false. The registry: publishing (the version rule, --big, blocks and
 // warnings, version.json, the hash, what a version holds), a package's graphs naming its own outputs (in its project, in
@@ -36,13 +36,13 @@ import { Session } from '../src/session.ts';
 import { addLibrary, loadConfig } from '../src/config.ts';
 import { libraryEntry, parseManifest, readManifest } from '../src/project.ts';
 import { scanLibrary } from '../src/gallery/library.ts';
-import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/gallery/packages.ts';
+import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/packages/registry.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { libraryTool } from '../src/mcp/library.ts';
 import { catalogText, topicText } from '../src/mcp/docs.ts';
-import { PACKAGE_COMMANDS, commands } from '../src/gallery/cli.ts';
-import type { ProjectPackages, PublishResult } from '../src/gallery/packages.ts';
-import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/gallery/update.ts';
+import { PACKAGE_COMMANDS, commands } from '../src/packages/commands.ts';
+import type { ProjectPackages, PublishResult } from '../src/packages/registry.ts';
+import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/packages/update.ts';
 import { ROOT } from './fixtures.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-packages-'));
@@ -81,7 +81,7 @@ section('names');
 
 section('the engine: a scope resolves package outputs through its packages');
 {
-  // a version's folder, scope, asset and graphs, by hand: what the registry (src/gallery/packages.ts) builds from disk
+  // a version's folder, scope, asset and graphs, by hand: what the registry (src/packages/registry.ts) builds from disk
   const base = path.join(tmp, 'engine'), vdir = path.join(base, 'kit');
   write(path.join(base, 'inputs', 'mark.obj'), triangle(1));
   write(path.join(vdir, 'inputs', 'mark.obj'), triangle(3));
@@ -1098,7 +1098,7 @@ section('search: every library, by words, kind and tag; what the project can use
 }
 
 // ------------------------------------------------------------------ the CLI
-/** A package command run in this process (src/gallery/cli.ts): its exit code, and what it said on stdout and stderr. */
+/** A package command run in this process (src/packages/commands.ts): its exit code, and what it said on stdout and stderr. */
 const run = async (cmd: string, args: string[], cwd = ROOT) => {
   const out: string[] = [], err: string[] = [];
   const was = process.cwd();
@@ -1217,7 +1217,7 @@ section('the package commands: every list of them says them the same way');
   const lists: [string, string, string][] = [
     ['src/cli.ts (its header)', read('src/cli.ts'), '//   node src/cli.ts '],
     ['--help', help, 'node src/cli.ts '],
-    ['src/gallery/cli.ts (its header)', read('src/gallery/cli.ts'), '//   topotopo '],
+    ['src/packages/commands.ts (its header)', read('src/packages/commands.ts'), '//   topotopo '],
     ['README.md', read('README.md'), 'topotopo '],
     ['help topic "packages"', topicText('packages') ?? '', 'topotopo '],
   ];

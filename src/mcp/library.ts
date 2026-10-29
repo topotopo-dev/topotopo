@@ -1,5 +1,5 @@
 // The `library` tool: the person's libraries of projects (src/gallery/library.ts) and the packages of the open project
-// (src/gallery/packages.ts, src/gallery/update.ts). An agent lists and searches every library, reads a project, makes
+// (src/packages/registry.ts, src/packages/update.ts). An agent lists and searches every library, reads a project, makes
 // new ones, edits their project.json, bakes previews, and opens a project: the server's folder becomes that project's
 // folder, so build/edit/render/export work on it; or it makes the server's folder a project (init), when the person says
 // so: only a project's graphs use packages. In the open project it publishes a version of its package (or a dry run of
@@ -16,9 +16,9 @@ import { createProject, graphNames, isStale, listFiles, readBakeState, readGraph
 import type { GalleryConfig } from '../config.ts';
 import type { LibraryScan, Project } from '../gallery/library.ts';
 import { KINDS } from '../graph/outputs.ts';
-import { NothingToUpdate, packageText, packagesText, publishPackage, publishText, searchPackages, searchText } from '../gallery/packages.ts';
-import type { ProjectPackages } from '../gallery/packages.ts';
-import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders, removePackage } from '../gallery/update.ts';
+import { NothingToUpdate, packageText, packagesText, publishPackage, publishText, searchPackages, searchText } from '../packages/registry.ts';
+import type { ProjectPackages } from '../packages/registry.ts';
+import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders, removePackage } from '../packages/update.ts';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) });
 

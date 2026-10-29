@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { readManifest } from '../project.ts';
-import { builtinVersions } from './packages.ts';
-import type { VersionInfo } from './packages.ts';
+import { builtinVersions } from '../packages/registry.ts';
+import type { VersionInfo } from '../packages/registry.ts';
 
 /** An output of a kit's newest version, by the node type a graph names it with ("topotopo/street/bench"). */
 export interface KitOutput {

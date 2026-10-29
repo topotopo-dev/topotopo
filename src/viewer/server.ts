@@ -36,7 +36,7 @@ import type { NodeProgress } from '../graph/engine.ts';
 import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
-import { ProjectPackages } from '../gallery/packages.ts';
+import { ProjectPackages } from '../packages/registry.ts';
 import { listKits, kitOutputsText } from '../gallery/kits.ts';
 import { projectDirOf, readManifest } from '../project.ts';
 import { renderGeometry } from '../render/raster.ts';

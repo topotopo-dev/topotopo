@@ -23,7 +23,7 @@ import { expandPacked } from '../src/core/packed.ts';
 import { pieceReport } from '../src/core/analysis.ts';
 import { readMaterials } from '../src/core/materials.ts';
 import { initProject, readManifest } from '../src/project.ts';
-import { openPackages } from '../src/gallery/packages.ts';
+import { openPackages } from '../src/packages/registry.ts';
 import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import type { GraphSpec } from '../src/graph/types.ts';

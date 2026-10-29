@@ -1,5 +1,5 @@
 // Packages, the engine side: the node type of a package output, and the packages a graph names and uses. The host's
-// package registry (src/gallery/packages.ts) reads the versions from disk and gives each scope its PackageResolver
+// package registry (src/packages/registry.ts) reads the versions from disk and gives each scope its PackageResolver
 // (src/graph/scope.ts): the project's root resolves names by the project's uses, a version by its own.
 //
 // A package is a project with a full name ("owner/name") and published versions: frozen copies of its graphs, assets

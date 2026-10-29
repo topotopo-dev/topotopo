@@ -30,7 +30,7 @@ import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
 import { fittingFormats, kindMismatch, outputKind } from '../io/kinds.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
-import { ProjectPackages } from '../gallery/packages.ts';
+import { ProjectPackages } from '../packages/registry.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';

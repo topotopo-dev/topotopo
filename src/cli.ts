@@ -25,10 +25,10 @@
 //   node src/cli.ts mcp [--project dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
-//   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/gallery/cli.ts)
+//   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/packages/commands.ts)
 //   node src/cli.ts library add|list|new|bake …           registered libraries and projects; edit [folder] opens the
 //                                                         live viewer on a project
-// A project and its packages (src/gallery/cli.ts, src/gallery/packages.ts, src/gallery/update.ts):
+// A project and its packages (src/packages/commands.ts, src/packages/registry.ts, src/packages/update.ts):
 //   node src/cli.ts init [folder] [--package owner/name]
 //   node src/cli.ts libraries add|remove <folder or name> [folder]
 //   node src/cli.ts use owner/name [folder] [--version 1.1]
@@ -60,9 +60,9 @@ import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { exportSource } from './io/source.ts';
 import { packagesUsed } from './graph/packages.ts';
-import { PACKAGE_COMMANDS } from './gallery/cli.ts';
+import { PACKAGE_COMMANDS } from './packages/commands.ts';
 import { setProgram } from './project.ts';
-import { openPackages } from './gallery/packages.ts';
+import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
 import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
@@ -197,9 +197,9 @@ if (argv[0] === 'view') {
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
 } else if (['gallery', 'library', 'edit', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'update'].includes(argv[0])) {
-  // the gallery website, its libraries and its editor; a project's packages (src/gallery/cli.ts). A command that ends
+  // the gallery website, its libraries and its editor; a project's packages (src/packages/commands.ts). A command that ends
   // gives its exit code; the gallery and the editor keep running
-  const { commands } = await import('./gallery/cli.ts');
+  const { commands } = await import('./packages/commands.ts');
   const code = await commands[argv[0]](argv.slice(1), prog);
   if (typeof code === 'number') process.exit(code);
 } else if (argv[0] === 'mcp') {

@@ -1,5 +1,5 @@
-// The project's packages in the live viewer (the registry is src/gallery/packages.ts, Update's before/after
-// src/gallery/update.ts): what the page's Packages tab shows, each package the project uses with the version in use and
+// The project's packages in the live viewer (the registry is src/packages/registry.ts, Update's before/after
+// src/packages/update.ts): what the page's Packages tab shows, each package the project uses with the version in use and
 // its outputs' kinds and tags, the updates its libraries have and their notes, its working folder and whether this
 // session follows it; the before/after of an update, with progress events and a stop of its own (its cooks are not the
 // session's, so the session's stop does not reach them); applying it; and the follow switch. Following lasts as
@@ -29,13 +29,13 @@ import { diffOverlay } from '../explain.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
 import type { Scope } from '../graph/scope.ts';
 import { readManifest } from '../project.ts';
-import { ProjectPackages, compareVersions, loadProject, publishPackage, publishedVersions, searchPackages, startsBigVersion, workingHash } from '../gallery/packages.ts';
+import { ProjectPackages, compareVersions, loadProject, publishPackage, publishedVersions, searchPackages, startsBigVersion, workingHash } from '../packages/registry.ts';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import type { GraphSpec } from '../graph/types.ts';
-import type { VersionInfo } from '../gallery/packages.ts';
-import { applyUpdate, beforeAfter, setText } from '../gallery/update.ts';
-import type { BeforeAfter, CookedSide, UsePlace } from '../gallery/update.ts';
+import type { VersionInfo } from '../packages/registry.ts';
+import { applyUpdate, beforeAfter, setText } from '../packages/update.ts';
+import type { BeforeAfter, CookedSide, UsePlace } from '../packages/update.ts';
 import { previewGLB } from '../render/preview.ts';
 import type { Session } from '../session.ts';
 

@@ -1,7 +1,7 @@
 // What a published output says about itself beside its node and label (GraphSpec.outputs): its kind, which publishing
 // detects from the cooked output (io/kinds.ts publishedKind) and an author may pin ("kind": "mesh") to have it checked,
 // its tags, free words that search finds it by, and its description. Engine.validate checks them wherever a graph is
-// read; publishing (src/gallery/packages.ts) blocks on them as well.
+// read; publishing (src/packages/registry.ts) blocks on them as well.
 
 /**
  * The kinds of a published output: a mesh, packed instances, points, curves, a terrain (heightfields), textures (images

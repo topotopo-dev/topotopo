@@ -237,7 +237,7 @@ export function projectDirOf(start: string): string | null {
 const IGNORED = ['.gallery/', '.cache/', 'packages/.cache.json', 'packages/.lock'];
 /**
  * What a project's .gitattributes holds: its published versions and its package copies are kept byte for byte, their
- * line ends never changed by a checkout (their hashes read text with LF line ends anyway, src/gallery/packages.ts).
+ * line ends never changed by a checkout (their hashes read text with LF line ends anyway, src/packages/registry.ts).
  */
 const ATTRIBUTES = ['versions/** -text', 'packages/** -text'];
 

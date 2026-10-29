@@ -20,7 +20,7 @@ import { encodePNG } from '../render/png.ts';
 import { bakeKey, galleryDir, readBakeState } from './library.ts';
 import { readManifest, writeAtomic } from '../project.ts';
 import type { BakeState } from './library.ts';
-import { openPackages } from './packages.ts';
+import { openPackages } from '../packages/registry.ts';
 
 export const THUMB_SIZE = 512;
 /** a preview.glb above this is not written (the page shows the thumbnail instead) */
