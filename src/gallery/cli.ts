@@ -190,19 +190,19 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
   });
 }
 
-/** `edit [folder]`: the live viewer on a project's workspace, following changes other processes make to it. */
+/** `edit [folder]`: the live viewer on a project, following changes other processes make to it. */
 export async function editCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
   return run(io, async () => {
     const a = args(argv, ['--port'], ['--json'], `usage: ${prog} edit [folder] [--port 7341] [--json]`);
     const dir = projectOf(a.rest[0], prog);
     const { Engine } = await import('../graph/engine.ts');
     const { createNodeHost } = await import('../host/node.ts');
-    const { Workspace } = await import('../workspace.ts');
+    const { Session } = await import('../session.ts');
     const { startViewer } = await import('../viewer/server.ts');
     const { openPackages } = await import('./packages.ts');
     const engine = new Engine(createNodeHost({ baseDir: dir }));
     await engine.init();
-    const ws = new Workspace(dir, engine);
+    const ws = new Session(dir, engine);
     ws.packages = openPackages(engine, dir);
     ws.load();
     ws.watch();

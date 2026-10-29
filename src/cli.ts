@@ -22,7 +22,7 @@
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter | --help-topic export | --version
-//   node src/cli.ts mcp [--workspace dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
+//   node src/cli.ts mcp [--project dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
 //   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/gallery/cli.ts)
@@ -140,7 +140,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a project: its packages' outputs too, --help-node owner/name/output)`,
-    `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
+    `       ${prog} mcp [--project dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
     `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's projects, stable links for a board)`,
     `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <project>|--stale|--all   (registered libraries)`,
@@ -203,7 +203,7 @@ if (argv[0] === 'view') {
   const code = await commands[argv[0]](argv.slice(1), prog);
   if (typeof code === 'number') process.exit(code);
 } else if (argv[0] === 'mcp') {
-  // `topotopo mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
+  // `topotopo mcp [--project dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin
   process.argv.splice(2, 1);
   await import('./mcp/server.ts');

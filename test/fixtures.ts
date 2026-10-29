@@ -284,7 +284,7 @@ export const PARAMS: Record<string, any> = {
   inflate: { steps: 12, pressure: 1.3 },
 };
 
-/** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */
+/** Node types that cannot cook standalone (subgraph input, references to project graphs). */
 export const SKIP = new Set(['input', 'graph_ref']);
 
 /**

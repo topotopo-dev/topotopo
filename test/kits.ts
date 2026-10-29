@@ -24,7 +24,7 @@ import { pieceReport } from '../src/core/analysis.ts';
 import { readMaterials } from '../src/core/materials.ts';
 import { initProject, readManifest } from '../src/gallery/library.ts';
 import { openPackages } from '../src/gallery/packages.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { SHOWN, checkKits, lineupGraph, lineupText, readKits } from '../scripts/gen-kits.ts';
@@ -207,7 +207,7 @@ if (!filter || 'stairs house'.includes(filter)) {
   initProject(wsDir);
   const e2 = new Engine(createNodeHost({ baseDir: wsDir }));
   await e2.init();
-  const ws = new Workspace(wsDir, e2);
+  const ws = new Session(wsDir, e2);
   ws.packages = openPackages(e2, wsDir);
   ws.load();
   const tools = makeTools(ws);
@@ -237,7 +237,7 @@ if (!filter || 'stairs house'.includes(filter)) {
   check(/\[package\]/.test(cat.text) && /topotopo\/architecture\/wall_segment ◦ — Straight wall from x = 0 to x = wall_length/.test(cat.text) && /topotopo\/nature\/rock ◦ — Low-poly rock/.test(cat.text),
     'catalog lists the kits\' outputs with their descriptions');
   const help = await txt('help', { nodes: ['topotopo/architecture/stairs', 'topotopo/nature/rock'] });
-  check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this workspace: package topotopo\/nature is not in this project's uses/.test(help.text),
+  check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this project: package topotopo\/nature is not in this project's uses/.test(help.text),
     'help documents an output, and says when the project does not use its kit yet');
   check(/\ntopotopo\/nature\/rock ◦ — Low-poly rock[^\n]* {2}\(mesh \[rock, stone, boulder, low-poly\]\)\n/.test(`\n${cat.text.split('\n').map((l) => l.trim()).join('\n')}\n`) && /\nwhat it is: instances \[forest, trees, conifer/.test((await txt('help', { nodes: ['topotopo/nature/forest_patch'] })).text)
     && /topotopo\/nature\/forest_patch/.test((await txt('catalog', { search: 'conifer' })).text), 'the catalog and help give an output\'s kind and tags, and the catalog\'s search finds a tag');

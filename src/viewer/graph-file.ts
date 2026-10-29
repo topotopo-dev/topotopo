@@ -1,8 +1,8 @@
 // `topotopo view <graph.json>`: the live viewer on one graph file, which stays the only source of the graph. GraphFile
-// loads the file into a scratch workspace, follows its saves (the person's editor, an agent) and writes what the page
+// loads the file into a scratch session, follows its saves (the person's editor, an agent) and writes what the page
 // changes back into it as minimal edits (json-edit.ts): an export target, the values "Save values to graph" keeps.
 // The rest of the file stays as it was written. The values a person tunes are session values over the graph
-// (Workspace.sessionVars): they survive every reload of the file, the viewer's own writes included. The graph uses the
+// (Session.sessionVars): they survive every reload of the file, the viewer's own writes included. The graph uses the
 // packages of the project the file belongs to; one it names for the first time is added to the project, and a package
 // followed with --follow (or the viewer's switch) re-cooks the graph whenever its working folder changes.
 import fs from 'node:fs';
@@ -13,21 +13,21 @@ import { Engine } from '../graph/engine.ts';
 import { migrateGraph } from '../graph/migrate.ts';
 import { createNodeHost } from '../host/node.ts';
 import { openPackages } from '../gallery/packages.ts';
-import { Workspace } from '../workspace.ts';
+import { Session } from '../session.ts';
 import { startViewer } from './server.ts';
 import { exportsFolderFor } from '../host/export-targets.ts';
 import type { Viewer } from './server.ts';
 import { applyJSONEdits, editJSONText } from './json-edit.ts';
 import type { JSONEdit } from './json-edit.ts';
 
-/** Where a graph's source lives when it is not the workspace's graphs/ folder (ViewerOptions.source). */
+/** Where a graph's source lives when it is not the project's graphs/ folder (ViewerOptions.source). */
 export interface GraphSource {
-  /** the workspace graph it holds */
+  /** the project graph it holds */
   graph: string;
   /** its file name, for the page ("boxes.json") */
   label: string;
   /**
-   * Write these changes into the source, then store the graph as the source now has it (Workspace.setGraph, which
+   * Write these changes into the source, then store the graph as the source now has it (Session.setGraph, which
    * also lets session values the graph now holds go). Throws when it cannot write.
    */
   save(edits: JSONEdit[]): void;
@@ -39,7 +39,7 @@ export class GraphFile implements GraphSource {
   readonly graph: string;
   readonly label: string;
   readonly file: string;
-  private ws: Workspace;
+  private ws: Session;
   private log: (line: string) => void;
   /** the file's text as last read or written: a change event that finds it again is the viewer's own write */
   private text: string | null = null;
@@ -48,7 +48,7 @@ export class GraphFile implements GraphSource {
   private loading: Promise<void> | null = null;
   private again = false;
 
-  constructor(ws: Workspace, file: string, graph: string, log: (line: string) => void = (l) => console.log(l)) {
+  constructor(ws: Session, file: string, graph: string, log: (line: string) => void = (l) => console.log(l)) {
     this.ws = ws;
     this.file = path.resolve(file);
     this.graph = graph;
@@ -57,7 +57,7 @@ export class GraphFile implements GraphSource {
   }
 
   /**
-   * Read the file into the workspace graph and cook it, unless it holds what the graph already is. A file that is not
+   * Read the file into the project graph and cook it, unless it holds what the graph already is. A file that is not
    * valid JSON (half saved, a typo) keeps the last good version. Loads never overlap: a change during one loads again.
    */
   load(): Promise<void> {
@@ -136,7 +136,7 @@ export class GraphFile implements GraphSource {
 }
 
 export interface ViewGraphFileOptions {
-  /** the graph's name in the workspace and on the page (the file name, made a valid graph name) */
+  /** the graph's name in the project and on the page (the file name, made a valid graph name) */
   name: string;
   port?: number;
   /** where status lines go (default: stdout) */
@@ -146,17 +146,17 @@ export interface ViewGraphFileOptions {
 }
 
 /**
- * `topotopo view <graph.json>`: cook the file, serve the live viewer on it and follow its saves. The workspace is a
+ * `topotopo view <graph.json>`: cook the file, serve the live viewer on it and follow its saves. The session is a
  * scratch folder; inputs/ and exports/ are beside the graph file (inputs/ made by the first file dropped on the page).
  */
-export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): Promise<{ url: string; viewer: Viewer; ws: Workspace; source: GraphFile; close: () => void }> {
+export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): Promise<{ url: string; viewer: Viewer; ws: Session; source: GraphFile; close: () => void }> {
   const log = opts.log ?? ((l: string) => console.log(l));
   const dir = path.dirname(path.resolve(file));
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
   const packages = openPackages(engine, dir, { follow: opts.follow });
   // exports go into the project's exports/ (a graph file in no project: beside it), as the CLI's do
-  const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: exportsFolderFor(file) });
+  const ws = new Session(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: exportsFolderFor(file) });
   ws.packages = packages;
   ws.load();
   for (const p of packages.check()) log(`warning: ${p}`);

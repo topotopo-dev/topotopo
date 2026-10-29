@@ -51,8 +51,8 @@ import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
 import { readMaterials } from '../core/materials.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { imageRef, referenceableImages } from '../core/image.ts';
-import { NAME_RE } from '../workspace.ts';
-import type { Workspace, WorkspacePackages } from '../workspace.ts';
+import { NAME_RE } from '../session.ts';
+import type { Session, SessionPackages } from '../session.ts';
 import {
   BUILTIN_LIBRARY, VERSION_RE, libraryEntry, loadConfig, manifestFile, program, projectDirOf, readManifest, renameInto, scanLibrary, withProjectLock, writeAtomic,
   writeManifest,
@@ -64,7 +64,7 @@ export const MAX_VERSION_BYTES = 50 * 2 ** 20;
 /** The owner of TopoTopo's own packages: nobody else publishes under it. */
 export const RESERVED_OWNER = 'topotopo';
 /** How a folder becomes a project, said where only a project will do. */
-const makeProject = () => `${program()} init <folder> (MCP: library {action:"init"} for the open workspace, when the person says so) makes the folder a project (project.json)`;
+const makeProject = () => `${program()} init <folder> (MCP: library {action:"init"} for the server's folder, when the person says so) makes the folder a project (project.json)`;
 /** A library as messages name it: library "game", and TopoTopo's built-in library by its name and what it is. */
 export const libraryText = (name: string) => `library "${name}"${name === BUILTIN_LIBRARY.name ? ' (TopoTopo\'s built-in library)' : ''}`;
 
@@ -639,7 +639,7 @@ export class NothingToUpdate extends Error {
  * copied version (its own assets, graphs, files and uses), adding packages on first use, the session's followed
  * working folders. openPackages attaches one to an engine.
  */
-export class ProjectPackages implements WorkspacePackages {
+export class ProjectPackages implements SessionPackages {
   readonly engine: Engine;
   /** the project folder; null when the folder belongs to no project */
   readonly dir: string | null;
@@ -688,9 +688,9 @@ export class ProjectPackages implements WorkspacePackages {
   /** "project lantern (D:/lib/props/lantern)" */
   get label(): string { return this.manifest ? `project ${this.manifest.id}` : 'this folder'; }
 
-  /** WorkspacePackages: why the graphs cannot use packages (a folder in no project, a project.json that is not valid). */
+  /** SessionPackages: why the graphs cannot use packages (a folder in no project, a project.json that is not valid). */
   notice(): string | null {
-    if (!this.dir) return `this workspace is in no project, so its graphs cannot use packages yet, TopoTopo's own among them: ${makeProject()}`;
+    if (!this.dir) return `this folder is in no project, so its graphs cannot use packages yet, TopoTopo's own among them: ${makeProject()}`;
     return this.error ? `the project's packages cannot be read: ${this.error}` : null;
   }
 
@@ -1051,7 +1051,7 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
-   * WorkspacePackages: add the packages a graph names that the project does not use yet, once the graph is valid as a
+   * SessionPackages: add the packages a graph names that the project does not use yet, once the graph is valid as a
    * dry run checks it (dryRun: those packages at the version first use adds, read where their library holds them). A
    * graph that does not validate adds nothing and writes nothing; why a package could not be added is said when the
    * graph names it.
@@ -1128,7 +1128,7 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
-   * WorkspacePackages.dryRun: the packages a graph is checked with where nothing may be written (a dry run, a trial of
+   * SessionPackages.dryRun: the packages a graph is checked with where nothing may be written (a dry run, a trial of
    * a person's values). A package it names for the first time is the version its first use would add, the newest in
    * the libraries the project looks in (TopoTopo's built-in library among them), read where that library holds it:
    * nothing is copied, and project.json and the lock stay as they are. The notes say what build or edit add, and
@@ -1354,7 +1354,7 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
-   * WorkspacePackages: read again what changed on disk: project.json and the lock, followed working folders, and the
+   * SessionPackages: read again what changed on disk: project.json and the lock, followed working folders, and the
    * project's own graphs when they name its own outputs.
    */
   refresh(): boolean {
@@ -1366,7 +1366,7 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
-   * WorkspacePackages: a stamp of what package names resolve to: project.json and the lock as they are on disk now,
+   * SessionPackages: a stamp of what package names resolve to: project.json and the lock as they are on disk now,
    * and the files of the followed working folders and of the project's own package as refresh() last found them.
    */
   revision(): string {
@@ -1744,9 +1744,9 @@ export function openPackages(engine: Engine, start: string, opts: { follow?: str
 }
 
 /**
- * A project's assets and graphs in a scope (default: the engine's root) as a workspace has them, read without writing
- * anything (a workspace makes its folders): for a command that cooks the project's graphs and leaves the project as it
- * is, or for the viewer of a graph file, whose workspace is not the project. Says what could not be read.
+ * A project's assets and graphs in a scope (default: the engine's root) as a session has them, read without writing
+ * anything (a session makes its folders): for a command that cooks the project's graphs and leaves the project as it
+ * is, or for the viewer of a graph file, whose session folder is not the project. Says what could not be read.
  */
 export function loadProject(engine: Engine, dir: string, scope: Scope = engine.root): string[] {
   const problems: string[] = [];
@@ -2364,7 +2364,7 @@ export function searchText(r: SearchResult, mcp = false): string {
   const lines = [hits.length
     ? `search ${asked}: ${hits.length} output${hits.length === 1 ? '' : 's'} in ${r.libraries.filter((l) => l.hits.length).length} of the ${r.libraries.length} libraries looked in${r.project ? `, for ${r.project}` : ''}`
     : `search ${asked}: no output matches in ${r.libraries.map((l) => libraryText(l.name)).join(', ')}`];
-  if (!r.project) lines.push(`this folder is in no project, and only a project's graphs use packages: ${mcp ? 'library {action:"init"} makes the open workspace one, when the person says so' : makeProject()}`);
+  if (!r.project) lines.push(`this folder is in no project, and only a project's graphs use packages: ${mcp ? "library {action:\"init\"} makes the server's folder one, when the person says so" : makeProject()}`);
   for (const l of r.libraries) {
     if (!l.hits.length) continue;
     const standing = l.standing === 'builtin' ? 'TopoTopo\'s own packages, which every project can use: a graph that names one adds it'

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { galleryDir, isStale, listFiles, loadConfig, readBakeState, scanLibrary } from './library.ts';
-import { graphFiles } from '../workspace.ts';
+import { graphFiles } from '../session.ts';
 import type { BakeState, GalleryConfig, LibraryScan, Project } from './library.ts';
 import { builtinVersions, compareVersions, copyRecord, publishedVersions, startsBigVersion } from './packages.ts';
 import type { VersionInfo } from './packages.ts';

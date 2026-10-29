@@ -1,12 +1,12 @@
 // Gallery libraries (src/gallery/library.ts, bake.ts): the config, scanning a library (projects, collections, what a
-// scan skips, id collisions), project.json validation, creating projects, the MCP server's workspace rule, the bake
+// scan skips, id collisions), project.json validation, creating projects, the MCP server's project rule, the bake
 // key, and baking previews (a valid PNG and meshopt GLB; a failed bake keeps the previous files and says why).
 //   node test/library.ts
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  addLibrary, bakeKey, createProject, initWorkspace, isStale, loadConfig, notWorkspaceFiles, parseManifest, projectDirOf, readBakeState, readManifest, scanLibrary, slugify,
+  addLibrary, bakeKey, createProject, startProject, isStale, loadConfig, notProjectFiles, parseManifest, projectDirOf, readBakeState, readManifest, scanLibrary, slugify,
   writeManifest,
 } from '../src/gallery/library.ts';
 import { bakeProject, BakeQueue } from '../src/gallery/bake.ts';
@@ -85,35 +85,35 @@ section('manifest');
   check(back.description === 'Oil lantern' && back.custom?.keep === true, 'writing a manifest keeps keys it does not know');
 }
 
-section('the workspace of the MCP server: a project when it holds nothing but what a workspace makes itself');
+section('the project of the MCP server: a project when it holds nothing but what a project makes itself');
 {
   const ws = (name: string, files: Record<string, string> = {}) => {
-    const d = path.join(tmp, 'workspaces', name);
+    const d = path.join(tmp, 'projects', name);
     fs.mkdirSync(d, { recursive: true });
     for (const [f, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), text); }
     return d;
   };
-  const fresh = path.join(tmp, 'workspaces', 'fresh'), empty = ws('empty');
+  const fresh = path.join(tmp, 'projects', 'fresh'), empty = ws('empty');
   const own = ws('own', { 'graphs/main.json': JSON.stringify(BOX), 'assets/rock.json': JSON.stringify(BOX), 'exports/renders/main-b.png': 'png', 'inputs/guides.obj': 'v 0 0 0', '.DS_Store': '', 'Thumbs.db': '' });
   const repo = ws('repo', { 'README.md': '# a game', 'graphs/main.json': JSON.stringify(BOX) }), git = ws('git', { '.git/HEAD': 'ref: refs/heads/main' });
-  check([fresh, empty, own].every((d) => !notWorkspaceFiles(d).length), 'a workspace\'s own folders (and files an operating system leaves) are nothing else, as are no files and no folder');
-  check(notWorkspaceFiles(repo).join() === 'README.md' && notWorkspaceFiles(git).join() === '.git/', `anything else is: ${notWorkspaceFiles(repo)}, ${notWorkspaceFiles(git)}`);
+  check([fresh, empty, own].every((d) => !notProjectFiles(d).length), 'a project\'s own folders (and files an operating system leaves) are nothing else, as are no files and no folder');
+  check(notProjectFiles(repo).join() === 'README.md' && notProjectFiles(git).join() === '.git/', `anything else is: ${notProjectFiles(repo)}, ${notProjectFiles(git)}`);
   for (const d of [fresh, empty, own]) {
-    const s = initWorkspace(d);
-    check(/^made the workspace .* a project \(project\.json\)/.test(s.log) && s.dir === d && /became a project, ".*", when the server started .* Next: build into graph "main"/.test(s.note ?? '') && fs.existsSync(path.join(d, 'project.json')),
+    const s = startProject(d);
+    check(/^made the folder .* a project \(project\.json\)/.test(s.log) && s.dir === d && /became a project, ".*", when the server started .* Next: build into graph "main"/.test(s.note ?? '') && fs.existsSync(path.join(d, 'project.json')),
       `${path.basename(d)}: made a project, and the first reply will say so and what to do next`);
   }
   check(readManifest(own).id === 'own' && fs.existsSync(path.join(own, 'graphs', 'main.json')) && fs.existsSync(path.join(own, 'assets', 'rock.json')), 'its graphs and assets stay where they are');
   check(readManifest(fresh).graph === 'main' && JSON.parse(fs.readFileSync(path.join(fresh, 'graphs', 'main.json'), 'utf8')).output === 'box', 'a new one gets a starter graph, the one project.json shows');
-  const named = ws('parent/workspace');
-  check(readManifest(initWorkspace(named, { name: 'parent' }).dir).id === 'parent' && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
+  const named = ws('parent/project');
+  check(readManifest(startProject(named, { name: 'parent' }).dir).id === 'parent' && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
   for (const d of [repo, git]) {
-    const s = initWorkspace(d);
-    check(/is in no project and holds .*, which a workspace does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own kits .* Ask the person before making it a project; library \{action:"init"\} then does it/.test(s.note ?? '') && !fs.existsSync(path.join(d, 'project.json')),
+    const s = startProject(d);
+    check(/is in no project and holds .*, which TopoTopo does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own kits .* Ask the person before making it a project; library \{action:"init"\} then does it/.test(s.note ?? '') && !fs.existsSync(path.join(d, 'project.json')),
       `${path.basename(d)}: left as it is (${s.log.slice(s.log.indexOf(' holds'))})`);
   }
-  check(/^the workspace .* is a project$/.test(initWorkspace(own).log) && initWorkspace(own).note === null, 'a project stays as it is, with nothing to tell');
-  const sub = ws('own/levels'), inSub = initWorkspace(sub);
+  check(/^the folder .* is a project$/.test(startProject(own).log) && startProject(own).note === null, 'a project stays as it is, with nothing to tell');
+  const sub = ws('own/levels'), inSub = startProject(sub);
   check(inSub.dir === own && /is in the project .*own: working in the project's folder$/.test(inSub.log) && /The server works in the project .*own, the project that holds the folder it was given/.test(inSub.note ?? '') && !fs.existsSync(path.join(sub, 'project.json')),
     'a folder in a project becomes no project of its own: the server works in the project\'s folder, and says so');
 }

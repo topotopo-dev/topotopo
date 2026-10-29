@@ -6,7 +6,7 @@
 // must change. Nothing is written: the new version is read where its library holds it. Applying is a step of its own,
 // taken when the person says so.
 //
-// Graphs and assets cook in the project's root scope (as the workspace has them; a command reads them with
+// Graphs and assets cook in the project's root scope (as a session has them; a command reads them with
 // loadProject, the viewer of a graph file into a scope of their own: BeforeAfterOptions.project), with the version in
 // use, and in a scope like it whose packages resolve the update's version. A graph file elsewhere in the folder cooks
 // in a scope of its folder, as `topotopo <file>` cooks it. A use inside a nested graph (a foreach or solver body) is
@@ -29,7 +29,7 @@ import type { PackageResolver, Scope } from '../graph/scope.ts';
 import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
-import { NAME_RE } from '../workspace.ts';
+import { NAME_RE } from '../session.ts';
 import { program } from './library.ts';
 import { compareInterfaces, compareVersions, kindChanges, libraryText } from './packages.ts';
 import type { ProjectPackages, UpdateTarget } from './packages.ts';
@@ -119,7 +119,7 @@ export interface BeforeAfterOptions {
   progress?: (done: number, total: number, what: string) => void;
   /**
    * Where the project's graphs and assets are when the engine's root does not hold them (the viewer of a graph file
-   * keeps its workspace in a scratch folder): a scope that holds them (loadProject), whose packages are the project's
+   * keeps its session in a scratch folder): a scope that holds them (loadProject), whose packages are the project's
    * resolver, and the project folder their relative paths read.
    */
   project?: { scope: Scope; folder: string };

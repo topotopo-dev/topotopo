@@ -37,7 +37,7 @@ fs.mkdirSync(path.join(libDir, 'lib'));
 fs.writeFileSync(path.join(wsDir, 'notes.md'), 'what this folder is for\n');
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [path.join(root, 'src/mcp/server.ts'), '--workspace', wsDir],
+  args: [path.join(root, 'src/mcp/server.ts'), '--project', wsDir],
   env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile },
   stderr: 'pipe',
 });
@@ -64,7 +64,7 @@ check(tools.length >= 9, `tools: ${tools.map((t) => t.name).join(', ')}`);
 
 const cat = await call('catalog', {});
 check(cat.txt.includes('copy_to_points') && cat.txt.includes('[sdf]'), 'catalog lists nodes');
-check(cat.txt.includes('[package]') && cat.txt.includes('topotopo/architecture/wall_segment ◦ — Straight wall from x = 0'), 'catalog lists the outputs of TopoTopo\'s own packages with their descriptions, in a workspace in no project too');
+check(cat.txt.includes('[package]') && cat.txt.includes('topotopo/architecture/wall_segment ◦ — Straight wall from x = 0'), 'catalog lists the outputs of TopoTopo\'s own packages with their descriptions, in a project in no project too');
 const help = await call('help', { nodes: ['scatter', 'copytopoints', 'nope_node'], topic: 'wrangle' });
 check(help.txt.includes('## scatter') && help.txt.includes('## copy_to_points') && help.txt.includes('unknown node "nope_node"'), 'help resolves nodes + aliases');
 
@@ -112,7 +112,7 @@ const ov = await call('render', { node: 'rocks', views: ['persp', 'section'], se
 check(!!ov.img && !ov.isError && /overlays: shading matcap .*section x=.*wire hard>30/.test(ov.txt) && /label_pieces: first 5 of/.test(ov.txt), `render tool overlays: ${ov.txt.split('\n').find((l) => l.includes('overlays'))?.slice(0, 120)}`);
 const pngSize = (img: any) => { const b = Buffer.from(img.data, 'base64'); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
 const ul = await call('render', { node: 'rocks', views: 'front_left', size: '300x150', underlay: 'render.png', underlay_opacity: 0.4, sockets: true });
-check(!!ul.img && !ul.isError && pngSize(ul.img).join('x') === '300x188' && /no scene empties/.test(ul.txt), `render tool: size "WxH", a named view, an underlay read from the workspace, sockets (${ul.img ? pngSize(ul.img).join('x') : ul.txt.slice(0, 120)})`);
+check(!!ul.img && !ul.isError && pngSize(ul.img).join('x') === '300x188' && /no scene empties/.test(ul.txt), `render tool: size "WxH", a named view, an underlay read from the project, sockets (${ul.img ? pngSize(ul.img).join('x') : ul.txt.slice(0, 120)})`);
 const ulBad = await call('render', { node: 'rocks', underlay: 'missing.png' });
 check(ulBad.isError && /underlay "[^"]*missing\.png" cannot be read/.test(ulBad.txt), 'render tool: a missing underlay is an error naming it');
 const ovBad = await call('render', { node: 'rocks', shading: 'toon' });
@@ -204,24 +204,24 @@ check(!as.isError && as.txt.includes('saved asset "pills"'), 'asset saved');
 const useAsset = await call('build', { name: 'asset_test', graph: { nodes: { g: { type: 'grid', params: { divisions: [3, 3] } }, p: { type: 'pills', in: ['g'], params: { r: 0.2 } } } } });
 check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as node: ${useAsset.txt.split('\n')[0]}`);
 
-// only a project's graphs use packages: in a workspace that is none, naming one says how it becomes one; init makes it one
+// only a project's graphs use packages: in a folder that is none, naming one says how it becomes one; init makes it one
 {
   const probe = { name: 'pkg_probe', graph: { nodes: { t: { type: 'studio/none/thing' } } } };
   const outside = await call('build', probe);
-  check(outside.isError && /package studio\/none: this graph is in no project, and only projects use packages/.test(outside.txt) && /library \{action:"init"\} for the open workspace/.test(outside.txt),
-    `a package named outside a project says how the workspace becomes one: ${outside.txt.split('\n').slice(1, 3).join(' ')}`);
+  check(outside.isError && /package studio\/none: this graph is in no project, and only projects use packages/.test(outside.txt) && /library \{action:"init"\} for the server's folder/.test(outside.txt),
+    `a package named outside a project says how the project becomes one: ${outside.txt.split('\n').slice(1, 3).join(' ')}`);
   const init = await call('library', { action: 'init' });
-  check(!init.isError && fs.existsSync(path.join(wsDir, 'project.json')) && /^made the workspace .* a project, id "/.test(init.txt) && fs.existsSync(path.join(wsDir, 'assets', 'pills.json')),
-    `library init makes the open workspace a project: ${init.txt.slice(0, 80)}…`);
+  check(!init.isError && fs.existsSync(path.join(wsDir, 'project.json')) && /^made the folder .* a project, id "/.test(init.txt) && fs.existsSync(path.join(wsDir, 'assets', 'pills.json')),
+    `library init makes the server's folder a project: ${init.txt.slice(0, 80)}…`);
   const again = await call('library', { action: 'init' });
-  check(again.isError && /is in a project already: .*project\.json/.test(again.txt), 'init refuses a workspace that is a project');
+  check(again.isError && /is in a project already: .*project\.json/.test(again.txt), 'init refuses a project that is a project');
   const inside = await call('build', probe);
   check(inside.isError && /package studio\/none is not in this project's uses/.test(inside.txt), `in the project, a package is looked for in its libraries: ${inside.txt.split('\n')[1]}`);
   const kept = await call('build', { name: 'asset_test', graph: { nodes: { g: { type: 'grid', params: { divisions: [3, 3] } }, p: { type: 'pills', in: ['g'], params: { r: 0.2 } } } } });
-  check(!kept.isError, 'the workspace keeps its graphs and assets');
+  check(!kept.isError, 'the project keeps its graphs and assets');
 }
 
-// human input: files people drop into <workspace>/inputs, listed and described for the agent
+// human input: files people drop into <project>/inputs, listed and described for the agent
 {
   const inDir = path.join(wsDir, 'inputs');
   const empty = await call('inputs', { action: 'list' });
@@ -329,7 +329,7 @@ if (url) {
   check(ev.includes('"graph":"main"'), `viewer SSE update event: ${ev}`);
 }
 
-// libraries: create opens the project as the workspace; build lands in it; the viewer follows
+// libraries: create opens the project as the project; build lands in it; the viewer follows
 {
   const empty = await call('library', { action: 'list' });
   check(empty.txt.includes('library "game"') && empty.txt.includes('0 projects'), 'library list: the configured library');
@@ -453,23 +453,23 @@ if (url) {
 
 await client.close();
 
-// a new workspace becomes a project when the server starts, named or not: the default one (no --workspace, no
-// TOPOTOPO_WORKSPACE), <cwd>/workspace, which is not there yet, and a named folder that is empty
+// a new project becomes a project when the server starts, named or not: the default one (no --project, no
+// TOPOTOPO_PROJECT), <cwd>/project, which is not there yet, and a named folder that is empty
 for (const named of [false, true]) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-default-'));
-  const dir = named ? fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-empty-')) : path.join(cwd, 'workspace');
+  const dir = named ? fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-empty-')) : path.join(cwd, 'topotopo');
   const own = new Client({ name: 'topotopo-test-new', version: '0.0.1' });
-  await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts'), ...(named ? ['--workspace', dir] : [])], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile }, stderr: 'pipe' }));
+  await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts'), ...(named ? ['--project', dir] : [])], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile }, stderr: 'pipe' }));
   const r: any = await own.callTool({ name: 'library', arguments: { action: 'packages' } });
   const txt = r.content.map((c: any) => c.text ?? '').join('\n');
   const pj = path.join(dir, 'project.json'), id = fs.existsSync(pj) ? JSON.parse(fs.readFileSync(pj, 'utf8')).id : null;
   const title = fs.existsSync(pj) ? JSON.parse(fs.readFileSync(pj, 'utf8')).title : null;
   check(!r.isError && !!id && new RegExp(`^project ${id} \\(.*\\)\\nuses no packages yet`).test(txt) && /became a project, ".*", when the server started/.test(txt) && (named || title === path.basename(cwd)),
-    `${named ? 'a named empty folder' : 'the default workspace (named after the folder it is in)'} is made a project, and the first reply says so: ${txt.split('\n')[0]}`);
+    `${named ? 'a named empty folder' : 'the default folder, <cwd>/topotopo (named after the folder it is in),'} is made a project, and the first reply says so: ${txt.split('\n')[0]}`);
   const b: any = await own.callTool({ name: 'build', arguments: { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } } } });
   const bt = b.content.map((c: any) => c.text ?? '').join('\n');
   check(!b.isError && /✓ graph "main"/.test(bt) && new RegExp(`note: added topotopo/nature ${NV}`).test(bt), `its graphs use TopoTopo's own packages as they come: ${bt.split('\n')[0]}`);
   await own.close();
 }
-console.log(`\n${failures ? failures + ' FAILURES' : 'ALL PASSED'} — workspace ${wsDir}`);
+console.log(`\n${failures ? failures + ' FAILURES' : 'ALL PASSED'} — project ${wsDir}`);
 process.exit(failures ? 1 : 0);

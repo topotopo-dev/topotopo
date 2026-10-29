@@ -1,5 +1,5 @@
 // Libraries of projects. A library is a folder listed in the user's config; a project is any
-// folder below it holding a project.json, and is itself a TopoTopo workspace (graphs/ assets/ inputs/ exports/) plus
+// folder below it holding a project.json, and holds the folders TopoTopo works with (graphs/ assets/ inputs/ exports/) plus
 // attachments/ (concept art, references, source files) and .gallery/ (thumb.png, preview.glb, bake.json: derived).
 // A project that is a package also holds its published versions/ and, when it uses packages, their copies in packages/
 // (src/gallery/packages.ts).
@@ -13,7 +13,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ID_RE, parsePackageName } from '../graph/scope.ts';
-import { NAME_RE, WORKSPACE_FOLDERS } from '../workspace.ts';
+import { NAME_RE, PROJECT_FOLDERS } from '../session.ts';
 
 /** Bumped when the baked files change shape (render options, GLB options), so every project bakes again. */
 export const BAKE_VERSION = 1;
@@ -430,7 +430,7 @@ function projectRepoFiles(dir: string) {
 }
 
 /**
- * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the workspace folders, attachments/, a
+ * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the project folders, attachments/, a
  * .gitignore for the derived files and a .gitattributes that keeps its versions and copies byte for byte. `graph` (a
  * graph spec) becomes graphs/main.json. Fails when the folder holds a project already or the id is taken in the library.
  */
@@ -516,19 +516,19 @@ export function initProject(dir: string, o: { package?: string; name?: string } 
 const SYSTEM_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
 
 /**
- * What a folder holds that a workspace does not make itself (its folders graphs/, assets/, exports/, inputs/), by name,
+ * What a folder holds that TopoTopo does not make itself (its folders graphs/, assets/, exports/, inputs/), by name,
  * a folder's with a slash: none for a folder that holds nothing else, nothing at all, or does not exist yet. Files an
  * operating system leaves in folders do not count.
  */
-export function notWorkspaceFiles(dir: string): string[] {
+export function notProjectFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true })
-    .filter((e) => !(e.isDirectory() && WORKSPACE_FOLDERS.includes(e.name)) && !SYSTEM_FILES.has(e.name))
+    .filter((e) => !(e.isDirectory() && PROJECT_FOLDERS.includes(e.name)) && !SYSTEM_FILES.has(e.name))
     .map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
 }
 
-/** Where the MCP server works, and what it says about it (initWorkspace). */
-export interface WorkspaceStart {
+/** Where the MCP server works, and what it says about it (startProject). */
+export interface ProjectStart {
   /** the folder to work in: the one given, or the root of the project it lies in */
   dir: string;
   /** what happened, for the server's log */
@@ -538,34 +538,34 @@ export interface WorkspaceStart {
 }
 
 /**
- * The MCP server's rule for its workspace when it starts, named or not (scripts/preview.ts applies it too). A folder in
+ * The MCP server's rule for its folder when it starts, named or not (scripts/preview.ts applies it too). A folder in
  * a project works in that project's root, which holds its graphs, assets and packages. A folder in no project that holds
- * nothing but what a workspace makes itself (graphs/, assets/, exports/, inputs/), or nothing at all, becomes a project
+ * nothing but what TopoTopo makes itself (graphs/, assets/, exports/, inputs/), or nothing at all, becomes a project
  * (initProject; `name`: its id and title, else the folder's name), so that its graphs use packages, TopoTopo's own among
  * them, as they come. A folder with anything else in it (a repository, a folder of the person's) stays as it is:
  * library {action:"init"} makes it a project when the person says so.
  */
-export function initWorkspace(dir: string, o: { name?: string } = {}): WorkspaceStart {
+export function startProject(dir: string, o: { name?: string } = {}): ProjectStart {
   const abs = path.resolve(dir);
   const outer = projectDirOf(abs);
-  if (outer === abs) return { dir: abs, log: `the workspace ${abs} is a project`, note: null };
+  if (outer === abs) return { dir: abs, log: `the folder ${abs} is a project`, note: null };
   if (outer) return {
-    dir: outer, log: `the workspace ${abs} is in the project ${outer}: working in the project's folder`,
+    dir: outer, log: `the folder ${abs} is in the project ${outer}: working in the project's folder`,
     note: `The server works in the project ${outer}, the project that holds the folder it was given (${abs}): a project's graphs, assets, inputs and packages are those of its own folder.`,
   };
-  const other = notWorkspaceFiles(abs);
+  const other = notProjectFiles(abs);
   if (other.length) {
     const held = `${other.slice(0, 3).join(', ')}${other.length > 3 ? ` and ${other.length - 3} more` : ''}`;
     return {
-      dir: abs, log: `the workspace ${abs} is in no project and holds ${held}, which a workspace does not make: left as it is`,
-      note: `The workspace ${abs} is in no project, so its graphs cannot use packages, TopoTopo's own kits ("topotopo/nature/rock" …) among them: it holds ${held}, which a workspace does not make, so the server left it as it is. Ask the person before making it a project; library {action:"init"} then does it (project.json, graphs/, .gitignore, .gitattributes).`,
+      dir: abs, log: `the folder ${abs} is in no project and holds ${held}, which TopoTopo does not make: left as it is`,
+      note: `The folder ${abs} is in no project, so its graphs cannot use packages, TopoTopo's own kits ("topotopo/nature/rock" …) among them: it holds ${held}, which TopoTopo does not make (it makes graphs/, assets/, exports/, inputs/), so the server left it as it is. Ask the person before making it a project; library {action:"init"} then does it (project.json, graphs/, .gitignore, .gitattributes).`,
     };
   }
   let made: ReturnType<typeof initProject>;
-  try { made = initProject(abs, { name: o.name }); } catch (e: any) { return { dir: abs, log: `the workspace ${abs} could not be made a project: ${e.message}`, note: `The workspace ${abs} could not be made a project, so its graphs cannot use packages: ${e.message}` }; }
+  try { made = initProject(abs, { name: o.name }); } catch (e: any) { return { dir: abs, log: `the folder ${abs} could not be made a project: ${e.message}`, note: `The folder ${abs} could not be made a project, so its graphs cannot use packages: ${e.message}` }; }
   return {
-    dir: abs, log: `made the workspace ${abs} a project (project.json): it held nothing but what a workspace makes itself`,
-    note: `The workspace ${abs} became a project, "${made.manifest.id}", when the server started (project.json, graphs/${made.manifest.graph}.json): it held nothing but a workspace's own folders. Its graphs use packages as they come, TopoTopo's own kits ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish the project as a package, library {action:"set", package:"<owner>/${made.manifest.id}"}; to use packages from another library, library {action:"set", libraries:[...]} when the person names it.`,
+    dir: abs, log: `made the folder ${abs} a project (project.json): it held nothing but what TopoTopo makes itself`,
+    note: `The folder ${abs} became a project, "${made.manifest.id}", when the server started (project.json, graphs/${made.manifest.graph}.json): it held nothing but TopoTopo's own folders. Its graphs use packages as they come, TopoTopo's own kits ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish the project as a package, library {action:"set", package:"<owner>/${made.manifest.id}"}; to use packages from another library, library {action:"set", libraries:[...]} when the person names it.`,
   };
 }
 

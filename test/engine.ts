@@ -25,7 +25,7 @@ import { catalogText, nodeDoc, TOPICS } from '../src/mcp/docs.ts';
 import { SNIPPET_LIB_NAMES } from '../src/core/snippet-lib.ts';
 import { JS_GLOBALS } from '../src/core/usercode.ts';
 import { renderNodeReference } from '../scripts/gen-docs.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
 
@@ -694,12 +694,12 @@ section('graph versioning');
   const wsDir = path.join(tmp, 'ws');
   fs.mkdirSync(path.join(wsDir, 'graphs'), { recursive: true });
   fs.writeFileSync(path.join(wsDir, 'graphs', 'old.json'), JSON.stringify({ nodes: { b: { type: 'box' } } }));
-  const ws = new Workspace(wsDir, await newEngine());
+  const ws = new Session(wsDir, await newEngine());
   ws.load();
-  check(ws.getGraph('old').version === 1, 'workspace load migrates graphs');
+  check(ws.getGraph('old').version === 1, 'project load migrates graphs');
   ws.setGraph('fresh', { nodes: { b: { type: 'box' } } });
   const saved = JSON.parse(fs.readFileSync(path.join(wsDir, 'graphs', 'fresh.json'), 'utf8'));
-  check(saved.version === 1, 'workspace save writes the version');
+  check(saved.version === 1, 'project save writes the version');
 
   // rename keeps expression references working
   ws.setGraph('refs', { nodes: { base: { type: 'box' }, top: { type: 'sphere', params: { center: [0, "=bbox('base').max.y", 0], radius: "=ch('base/size')[0] / 4" } } }, output: 'top' });

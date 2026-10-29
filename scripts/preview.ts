@@ -1,27 +1,27 @@
-// Open the live viewer on a workspace without an MCP client; optionally load the examples.
-//   node scripts/preview.ts [--workspace dir] [--examples]
-// The workspace (default: workspace/ in the repository) becomes a project by the MCP server's rule (initWorkspace: in no
-// project, and holding nothing but a workspace's own folders), so the examples that use TopoTopo's own packages cook
+// Open the live viewer on a project without an MCP client; optionally load the examples.
+//   node scripts/preview.ts [--project dir] [--examples]
+// The folder (default: project/ in the repository) becomes a project by the MCP server's rule (startProject: in no
+// project, and holding nothing but TopoTopo's own folders), so the examples that use TopoTopo's own packages cook
 // there: their first use copies the kits into it.
 import fs from 'node:fs';
 import path from 'node:path';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { initWorkspace } from '../src/gallery/library.ts';
+import { startProject } from '../src/gallery/library.ts';
 import { openPackages } from '../src/gallery/packages.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import { startViewer } from '../src/viewer/server.ts';
 
 const argv = process.argv.slice(2);
-const i = argv.indexOf('--workspace');
+const i = argv.indexOf('--project');
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const start = initWorkspace(path.resolve(i >= 0 ? argv[i + 1] : path.join(root, 'workspace')));
+const start = startProject(path.resolve(i >= 0 ? argv[i + 1] : path.join(root, 'project')));
 console.log(start.log);
 const wsDir = start.dir;
 const engine = new Engine(createNodeHost({ baseDir: wsDir }));
 await engine.init();
-const ws = new Workspace(wsDir, engine);
+const ws = new Session(wsDir, engine);
 ws.packages = openPackages(engine, wsDir);
 ws.load();
 if (argv.includes('--examples')) {
@@ -36,4 +36,4 @@ if (argv.includes('--examples')) {
   }
 }
 const v = await startViewer(ws);
-console.log(`preview: ${v.url}  (workspace ${wsDir}; Ctrl+C to stop)`);
+console.log(`preview: ${v.url}  (project ${wsDir}; Ctrl+C to stop)`);

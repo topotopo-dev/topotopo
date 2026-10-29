@@ -249,10 +249,10 @@ section('Controls rules (section 8)');
   check(vars.kindOf({ type: 'enum', options: [4, 8, 16] }, 8) === 'select' && nums.valueOf('16') === 16 && nums.textOf(8) === '8' && !nums.byIndex && nums.valueOf('5') === undefined
     && texts.valueOf('high') === 'high' && idx.byIndex && idx.valueOf('high') === 1 && idx.textOf(0) === 'low' && vars.blank({ type: 'enum', options: [4, 8] }) === 4,
     'menus: numeric options give numbers (16, not "16"), text options their text, a number var with text options the index');
-  // over a graph file ↺ goes back to the file's value; in a workspace to the declared default
+  // over a graph file ↺ goes back to the file's value; in a project to the declared default
   check(vars.baseValue('file', { default: 1 }, { s: 3 }, 's') === 3 && vars.baseValue('file', { default: 1 }, {}, 's') === 1 && vars.baseValue('file', { type: 'bool' }, {}, 'b') === false
-    && vars.baseValue('workspace', { default: 1 }, { s: 3 }, 's') === 1 && vars.baseValue('workspace', null, { s: 3 }, 's') === undefined,
-    'what ↺ goes back to: the graph file\'s value (else the default, else a blank), in a workspace the declared default');
+    && vars.baseValue('project', { default: 1 }, { s: 3 }, 's') === 1 && vars.baseValue('project', null, { s: 3 }, 's') === undefined,
+    'what ↺ goes back to: the graph file\'s value (else the default, else a blank), in a project the declared default');
   check(vars.rowShape({ type: 'float', min: 0, max: 10 }, 2) === vars.rowShape({ type: 'float', min: 0, max: 10 }, 7) && vars.rowShape({ type: 'float', min: 0, max: 10 }, 2) !== vars.rowShape({ type: 'float', min: 0, max: 20 }, 2)
     && vars.rowShape(null, [1, 2]) !== vars.rowShape(null, [1, 2, 3]) && vars.rowShape(null, 'a') !== vars.rowShape(null, '#ff0000'),
     'a row keeps its element while its shape stays: a new value keeps it, a new range, vector length or widget builds it again');

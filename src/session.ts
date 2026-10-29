@@ -1,4 +1,4 @@
-// A workspace: named graphs (persisted as JSON files), saved assets, the human's input files, and the engine
+// A session: a folder's named graphs (persisted as JSON files), saved assets, the human's input files, and the engine
 // that cooks them. Shared by the MCP server, the live viewer and the CLI.
 //   <dir>/graphs/<name>.json   graphs        <dir>/assets/<name>.json   saved assets
 //   <dir>/<name>.json          in a project (a folder with project.json), its graph files beside project.json are
@@ -39,7 +39,7 @@ export interface EditOp {
 
 export const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 
-/** A file under <workspace>/inputs. */
+/** A file under <project>/inputs. */
 export interface InputFile {
   /** posix path relative to inputs/ (a file node reads it as "inputs/" + path) */
   path: string;
@@ -69,9 +69,9 @@ export function inputKind(ext: string): InputFile['kind'] {
   return GEOMETRY_EXTS.has(ext) ? 'geometry' : IMAGE_EXTS.has(ext) ? 'image' : 'other';
 }
 
-export interface WorkspaceOptions {
+export interface SessionOptions {
   /**
-   * The inputs folder when it is not <dir>/inputs. `topotopo view` keeps its workspace in a scratch folder but puts
+   * The inputs folder when it is not <dir>/inputs. `topotopo view` keeps its session in a scratch folder but puts
    * inputs/ beside the graph file, where the graph's file nodes read "inputs/<name>" and the files outlive the viewer.
    * load() does not create a folder given here: the first file written into it does (the viewer's upload route), so a
    * graph that never gets a drop leaves no empty inputs/ beside it.
@@ -82,13 +82,13 @@ export interface WorkspaceOptions {
 }
 
 /**
- * Who a workspace cook is for (Workspace.cook): "edit" a person's change in the viewer, "preview" what the viewer shows
+ * Who a session cook is for (Session.cook): "edit" a person's change in the viewer, "preview" what the viewer shows
  * (a node, an output card), "export" an export, "cook" anything else (a reload, an agent's tool). A stop or a newer
- * value stops cooks by kind (Workspace.stop).
+ * value stops cooks by kind (Session.stop).
  */
 export type CookKind = 'cook' | 'edit' | 'preview' | 'export';
 
-/** The cooks of one graph in progress (Workspace.activity). */
+/** The cooks of one graph in progress (Session.activity). */
 export interface CookActivity {
   /** cooks in progress, and their kinds */
   cooks: number;
@@ -106,7 +106,7 @@ export interface CookActivity {
   superseded: boolean;
 }
 
-/** How the last cook of a whole graph (no target) ended (Workspace.lastCook). */
+/** How the last cook of a whole graph (no target) ended (Session.lastCook). */
 export interface CookOutcome {
   ok: boolean;
   ms: number;
@@ -150,7 +150,7 @@ export function varDeclaration(g: GraphSpec, k: string): string | null {
   return JSON.stringify([vd?.type ?? null, vd?.min ?? null, vd?.max ?? null, vd?.options ?? null, kind]);
 }
 
-/** Thrown by Workspace.edit when the edited graph does not validate; the stored graph is unchanged. */
+/** Thrown by Session.edit when the edited graph does not validate; the stored graph is unchanged. */
 export class EditRejected extends Error {
   errors: Issue[];
   constructor(errors: Issue[], notes: string[] = []) {
@@ -160,8 +160,8 @@ export class EditRejected extends Error {
   }
 }
 
-/** The folders a workspace makes in its own folder (Workspace.load): graphs, assets, exports and inputs. */
-export const WORKSPACE_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
+/** The folders a project makes in its own folder (Session.load): graphs, assets, exports and inputs. */
+export const PROJECT_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
 
 /** A graph file's text holds a graph: an object with "nodes" (project.json and other JSON files do not). */
 const holdsGraph = (j: unknown) => !!j && typeof j === 'object' && !Array.isArray(j) && !!(j as any).nodes && typeof (j as any).nodes === 'object';
@@ -189,10 +189,10 @@ export function graphFiles(dir: string): Map<string, string> {
 }
 
 /**
- * The packages of the project a workspace belongs to (src/gallery/packages.ts), attached by whoever opens it: a graph
- * set or edited through the workspace that names a package the project does not use yet adds it (first use).
+ * The packages of the project a session's folder belongs to (src/gallery/packages.ts), attached by whoever opens it: a graph
+ * set or edited through the project that names a package the project does not use yet adds it (first use).
  */
-export interface WorkspacePackages {
+export interface SessionPackages {
   /**
    * add the packages a graph names that the project does not use yet, once the graph validates (nothing is written for
    * one that does not); says what was added
@@ -209,7 +209,7 @@ export interface WorkspacePackages {
    * newest version (nothing copied): what help says about an output search found; null when none has it
    */
   describe(name: string): NodeDef | null;
-  /** why the workspace's graphs cannot use packages, and how that changes (null when they can) */
+  /** why the project's graphs cannot use packages, and how that changes (null when they can) */
   notice(): string | null;
   /** read again what changed on disk (project.json, the lock, working folders followed this session); true if anything did */
   refresh(): boolean;
@@ -220,7 +220,7 @@ export interface WorkspacePackages {
   revision(): string;
 }
 
-export class Workspace {
+export class Session {
   dir: string;
   engine: Engine;
   graphs = new Map<string, GraphSpec>();
@@ -231,11 +231,11 @@ export class Workspace {
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
   /** told when the cooks of a graph start, move to another node (with that node's event), are asked to stop and end (see activity) */
   activityListeners = new Set<(graph: string, ev?: NodeProgress) => void>();
-  /** the packages of the project the workspace belongs to, when whoever opened it attached them (src/gallery/packages.ts) */
-  packages: WorkspacePackages | null = null;
+  /** the packages of the project the session's folder belongs to, when whoever opened it attached them (src/gallery/packages.ts) */
+  packages: SessionPackages | null = null;
   /**
    * Session values: var values a person set in the live viewer over a graph file (`topotopo view`). They shadow the
-   * graph's vars in this workspace's cooks without changing the graph, and stay when the graph is replaced (a reload
+   * graph's vars in this project's cooks without changing the graph, and stay when the graph is replaced (a reload
    * of the file) unless the var's declaration changed (varDeclaration), the var is gone, or the graph now holds the
    * same value itself. graph → var → value and the declaration it was set under.
    */
@@ -250,11 +250,11 @@ export class Workspace {
   private lastYield = 0;
   /** graphs kept in a project's own folder (graphFiles): their file, where they are saved; the others go in graphs/ */
   private besideProject = new Map<string, string>();
-  /** the inputs folder given to the constructor (WorkspaceOptions.inputs), if any */
+  /** the inputs folder given to the constructor (SessionOptions.inputs), if any */
   private inputsAt: string | undefined;
   private exportsAt: string | undefined;
 
-  constructor(dir: string, engine: Engine, opts: WorkspaceOptions = {}) {
+  constructor(dir: string, engine: Engine, opts: SessionOptions = {}) {
     this.dir = path.resolve(dir);
     this.engine = engine;
     this.inputsAt = opts.inputs === undefined ? undefined : path.resolve(opts.inputs);
@@ -262,7 +262,7 @@ export class Workspace {
     engine.root.graphs = (n) => this.graphs.get(n);
   }
 
-  // the folders of WORKSPACE_FOLDERS
+  // the folders of PROJECT_FOLDERS
   get graphDir() { return path.join(this.dir, 'graphs'); }
   get assetDir() { return path.join(this.dir, 'assets'); }
   get exportDir() { return this.exportsAt ?? path.join(this.dir, 'exports'); }
@@ -273,7 +273,7 @@ export class Workspace {
   get inputDir() { return this.inputsAt ?? path.join(this.dir, 'inputs'); }
 
   load() {
-    // the workspace's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
+    // the project's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
     // is made by the first file written into it
     for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir, ...(this.inputsAt ? [] : [this.inputDir])]) fs.mkdirSync(d, { recursive: true });
     const assetErrors: string[] = [];
@@ -637,7 +637,7 @@ export class Workspace {
    * writes nothing), add the packages the graph now names to the project (first use), store, cook at `frame`, then
    * notify the listeners. They hear after the cook so that what they read (lastReport, cached geometry) is the new
    * version's; a cook that throws still notifies, since the graph was stored. A cook that was stopped (`signal`,
-   * Workspace.stop) does not: whoever stopped it cooks again or tells the listeners.
+   * Session.stop) does not: whoever stopped it cooks again or tells the listeners.
    */
   async edit(name: string, ops: EditOp[], opts: { frame?: number; kind?: CookKind; signal?: StopSignal } = {}): Promise<{ graph: GraphSpec; notes: string[]; report: CookReport }> {
     const { graph, notes } = this.applyEdits(name, ops);
@@ -654,7 +654,7 @@ export class Workspace {
   /**
    * The scope a graph is checked in where nothing may be written (a dry run, a trial of a person's values): the
    * engine's root, whose packages include those the graph names for the first time at the version build or edit would
-   * add (WorkspacePackages.dryRun), with notes that say so, under an id of its own. Nothing is copied or written.
+   * add (SessionPackages.dryRun), with notes that say so, under an id of its own. Nothing is copied or written.
    */
   dryScope(graph: GraphSpec): { scope: Scope; notes: string[] } {
     const root = this.engine.root, d = this.packages?.dryRun(graph);
@@ -663,7 +663,7 @@ export class Workspace {
   }
 
   /**
-   * Cook a graph (its output, or `target`) with its session values, as a cook of `kind`. Workspace.stop and `signal`
+   * Cook a graph (its output, or `target`) with its session values, as a cook of `kind`. Session.stop and `signal`
    * stop it at a node boundary; activity() reports it while it runs. A cook of the whole graph records its outcome
    * (lastCook) and, unless it was stopped, its report (lastReport), when no cook started after it has done so first.
    */
@@ -709,7 +709,7 @@ export class Workspace {
 
   /**
    * Follow what other processes write into graphs/ and assets/, and in a project the graph files beside project.json (a
-   * second Workspace on the same folder: the gallery's editor next to an MCP server, or a person editing the JSON). A
+   * second Session on the same folder: the gallery's editor next to an MCP server, or a person editing the JSON). A
    * graph file whose content differs from the stored graph replaces it and notifies the listeners; a removed file
    * removes the graph. Our own writes read back equal, so they change nothing. An asset whose content changed is
    * registered again and every graph is notified (any may use it); a removed asset stays registered until the next

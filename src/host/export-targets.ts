@@ -36,7 +36,7 @@ export function projectFolderOf(p: string): string | null {
 /**
  * Where a graph file's exports go: its project's exports/ folder (the nearest project.json above it), else exports/
  * beside the graph. One rule for the CLI (--export-all, its receipts), `topotopo view` and the MCP server (whose
- * workspace is the project folder).
+ * folder is the project folder).
  */
 export function exportsFolderFor(graphFile: string): string {
   const file = path.resolve(graphFile);

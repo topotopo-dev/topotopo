@@ -2,7 +2,7 @@
 // uses, the version in use and its note, the updates and the notes of the newer versions, its working folder, whether
 // the session follows it), the package names on the node list (the Scene tree's mark), the before/after of an update
 // (the places and what changed, progress events, a place's GLB with each version and both overlaid, nothing written),
-// its stop (its own: its cooks are not the workspace's) and a newer one taking its place, Update (the copies, the graphs
+// its stop (its own: its cooks are not the project's) and a newer one taking its place, Update (the copies, the graphs
 // cooked again, a node's error after a big one, the must-change list kept until dismissed), the follow switch (a save
 // in the followed working folder cooks the scene again; off: the copy), the offer after a save in a working folder the
 // session does not follow, a version published while the viewer runs, the errors, a viewer outside a project, and the
@@ -17,7 +17,7 @@ import { Engine } from '../src/graph/engine.ts';
 import { defineNode } from '../src/graph/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import { readManifest } from '../src/gallery/library.ts';
 import { openPackages, publishPackage } from '../src/gallery/packages.ts';
 import type { ProjectPackages } from '../src/gallery/packages.ts';
@@ -62,12 +62,12 @@ const project = (dir: string, manifest: Record<string, unknown>, graphs: Record<
 };
 const setGraph = (dir: string, name: string, g: GraphSpec) => json(path.join(dir, 'graphs', `${name}.json`), g);
 const engines: Engine[] = [];
-async function open(dir: string): Promise<{ engine: Engine; pk: ProjectPackages; ws: Workspace }> {
+async function open(dir: string): Promise<{ engine: Engine; pk: ProjectPackages; ws: Session }> {
   const engine = new Engine(createNodeHost({ baseDir: dir, workers: 0 }));
   await engine.init();
   engines.push(engine);
   const pk = openPackages(engine, dir);
-  const ws = new Workspace(dir, engine);
+  const ws = new Session(dir, engine);
   ws.packages = pk;
   ws.load();
   return { engine, pk, ws };
@@ -342,14 +342,14 @@ section('a viewer whose graphs are in no project: nothing to show');
   fs.mkdirSync(loose);
   const engine = new Engine(createNodeHost({ baseDir: loose, workers: 0 }));
   await engine.init();
-  const ws = new Workspace(loose, engine);
+  const ws = new Session(loose, engine);
   ws.packages = openPackages(engine, loose);
   ws.load();
   const lv = await startViewer(ws, 0);
   try {
     const s = await (await fetch(`${lv.url}api/packages`)).json() as any;
     const c = await fetch(`${lv.url}api/packages/compare`, { method: 'POST', body: '{"package":"studio/trees"}' });
-    check(s.project === null && !s.packages.length && c.status === 400 && /in no project: topotopo init <folder> \(MCP: library \{action:"init"\} for the open workspace, when the person says so\) makes the folder a project/.test((await c.json() as any).error),
+    check(s.project === null && !s.packages.length && c.status === 400 && /in no project: topotopo init <folder> \(MCP: library \{action:"init"\} for the open project, when the person says so\) makes the folder a project/.test((await c.json() as any).error),
       'no project: no packages, and a before/after says how to make one');
   } finally { lv.close(); }
 }
@@ -365,7 +365,7 @@ section('topotopo view: a graph file in the project; the before/after cooks the 
     const yard = r.places?.find((c: any) => c.file === 'graphs/yard.json'), scene = r.places?.find((c: any) => c.file === 'scene.json');
     // the yard sets the crown itself (from the stand asset), so only the scene, which takes the default, changes
     check(r.ok && yard?.before.ok && yard.after.ok && yard.diff.identical && scene?.before.ok && scene.after.ok && !scene.diff.identical,
-      `its workspace is a scratch folder: a graph of the project still reads the project's graphs and assets (${yard?.before.errors.join('; ') || 'ok'})`);
+      `its project is a scratch folder: a graph of the project still reads the project's graphs and assets (${yard?.before.errors.join('; ') || 'ok'})`);
   } finally { view.close(); }
 }
 

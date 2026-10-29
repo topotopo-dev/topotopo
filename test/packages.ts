@@ -32,7 +32,7 @@ import type { GraphSpec, NodeDef } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import { addLibrary, libraryEntry, loadConfig, parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
 import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/gallery/packages.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -226,12 +226,12 @@ function project(dir: string, manifest: Record<string, unknown>, graphs: Record<
 const setGraph = (dir: string, name: string, g: GraphSpec) => json(path.join(dir, 'graphs', `${name}.json`), g);
 const editManifest = (dir: string, f: (m: any) => void) => { const m = readJSON(path.join(dir, 'project.json')); f(m); json(path.join(dir, 'project.json'), m); };
 
-interface Opened { engine: Engine; pk: ProjectPackages; ws: Workspace }
-/** An engine, the packages of the project `dir` belongs to, and a workspace on it, as the tools open them. */
+interface Opened { engine: Engine; pk: ProjectPackages; ws: Session }
+/** An engine, the packages of the project `dir` belongs to, and a project on it, as the tools open them. */
 async function open(dir: string, follow: string[] = [], builtin?: string): Promise<Opened> {
   const engine = await newEngine(dir);
   const pk = openPackages(engine, dir, { follow, builtin });
-  const ws = new Workspace(dir, engine);
+  const ws = new Session(dir, engine);
   ws.packages = pk;
   ws.load();
   return { engine, pk, ws };
@@ -488,7 +488,7 @@ section('a pinned kind: publishing blocks on another kind, build warns, a kind n
   const p = await publish(PINNED, 'pinned');
   check(!p.ok && p.blocks.length === 1 && /^output "trees" \(graph "main"\): its "kind" is "mesh", and it cooks to instances \(5 instances of 1 source\): change what it cooks, or its "kind"/.test(p.blocks[0]) && !exists(PINNED, 'versions'),
     `publishing blocks an output that is not the kind its author pinned: ${p.blocks.join(' | ')}`);
-  // build in a workspace on the project warns before that, for the output it cooks and for another
+  // build in a project on the project warns before that, for the output it cooks and for another
   const o = await open(PINNED);
   const tools = makeTools(o.ws), build = tools.find((t) => t.name === 'build')!;
   const said = (await build.run({ graph: scatter('mesh') })).content.map((c: any) => c.text ?? '').join('\n');
@@ -1008,7 +1008,7 @@ section('TopoTopo\'s built-in library: looked in without listing it; copies and 
   fs.mkdirSync(loose);
   const lo = await open(loose, [], BUILTIN);
   const notHere = await lo.engine.cook(scene);
-  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no project, and only projects use packages \(hint: topotopo init <folder> \(MCP: library \{action:"init"\} for the open workspace, when the person says so\) makes the folder a project/.test(errorOf(notHere)),
+  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no project, and only projects use packages \(hint: topotopo init <folder> \(MCP: library \{action:"init"\} for the open project, when the person says so\) makes the folder a project/.test(errorOf(notHere)),
     `outside a project it is offered too, and naming it says how to make the folder a project: ${errorOf(notHere)}`);
   // a TopoTopo release with a new version: an update, never a silent change
   setGraph(KIT, 'main', cube(2));
@@ -1461,7 +1461,7 @@ section('build and edit add a package only for a graph that validates; nothing i
 
 section('publishing cooks the package as a project that uses it does, in its own scope');
 {
-  // the package's own bark asset is a box; a workspace opened on a folder inside the project has a bark of its own that
+  // the package's own bark asset is a box; a project opened on a folder inside the project has a bark of its own that
   // cooks to nothing: publishing cooks the package's, so it publishes
   const NEST = path.join(dirs.lib, 'nest');
   project(NEST, { package: 'studio/nest' }, { main: { nodes: { b: { type: 'bark' } }, output: 'b', outputs: { bark: { node: 'b', kind: 'mesh', tags: ['bark'] } } } }, {
@@ -1469,7 +1469,7 @@ section('publishing cooks the package as a project that uses it does, in its own
     'levels/assets/bark.json': JSON.stringify({ nodes: { b: { type: 'box' }, d: { type: 'delete', in: ['b'], params: { group: '*' } } }, output: 'd' }),
   });
   const o = await open(path.join(NEST, 'levels'));
-  check(o.pk.dir === NEST && !(await o.engine.cook({ nodes: { b: { type: 'bark' } } })).geo?.numPrims, 'a workspace inside the project has a bark of its own, which cooks to nothing');
+  check(o.pk.dir === NEST && !(await o.engine.cook({ nodes: { b: { type: 'bark' } } })).geo?.numPrims, 'a project inside the project has a bark of its own, which cooks to nothing');
   const p = await publishPackage(o.pk, { note: 'nested' });
   check(p.ok && p.version === '1.0' && p.outputs?.bark.kind === 'mesh', `publishing cooks the package's own bark: ${p.blocks.join('; ') || p.version}`);
 }
@@ -1531,7 +1531,7 @@ section('the library tool: the libraries a project lists, set when the person sa
   const LT = path.join(dirs.repo, 'tool-project');
   project(LT, {}, {});
   const o = await open(LT);
-  const tool = libraryTool({ workspace: () => o.ws, packages: () => o.pk, open: async () => ({ graphs: 0, assets: 0 }) });
+  const tool = libraryTool({ session: () => o.ws, packages: () => o.pk, open: async () => ({ graphs: 0, assets: 0 }) });
   const say = async (a: any) => { try { const r = await tool.run(a); return { err: !!r.isError, text: r.content.map((c: any) => c.text ?? '').join('\n') }; } catch (e: any) { return { err: true, text: String(e.message) }; } };
   const set = await say({ action: 'set', libraries: ['../lib', 'game'] });
   check(!set.err && JSON.stringify(readManifest(LT).libraries) === '["../lib","game"]' && /lists "\.\.\/lib", "game" in project\.json "libraries"/.test(set.text), `set {libraries} writes project.json: ${set.text.split('\n').at(-1)}`);

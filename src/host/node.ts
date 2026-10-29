@@ -77,9 +77,9 @@ function blenderScript(): string {
 let envPool: WorkerPool | undefined | null = null;
 
 /**
- * The folder relative file paths resolve against, for a graph (or workspace) in `dir`: its project folder, the nearest
+ * The folder relative file paths resolve against, for a graph (or a session's folder) in `dir`: its project folder, the nearest
  * folder at or above `dir` with a project.json, else `dir` itself. One rule for the CLI (the graph file's folder), the
- * MCP server (the workspace) and the viewer (the graph file's folder): a graph in a project's graphs/ reads
+ * MCP server (its folder) and the viewer (the graph file's folder): a graph in a project's graphs/ reads
  * "inputs/ref.png" from the project's inputs/, wherever it is cooked from, and exports into the project's exports/
  * (export-targets.ts exportsFolderFor).
  */
@@ -89,7 +89,7 @@ export function projectBaseDir(dir: string): string {
 }
 
 export interface NodeHostOptions {
-  /** the graph's (or workspace's) folder: relative paths resolve against its project folder (projectBaseDir) */
+  /** the graph's (or the session's) folder: relative paths resolve against its project folder (projectBaseDir) */
   baseDir?: string;
   /**
    * Worker threads for Host.pool. Default: TOPOTOPO_WORKERS (availableParallelism() - 1 when unset), shared by every

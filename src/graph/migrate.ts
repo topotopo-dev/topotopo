@@ -1,8 +1,8 @@
 // Graph format versioning. Every graph document carries `version`; older documents are upgraded
 // in place by the registered migrations, in order, then stamped with GRAPH_VERSION.
 //
-// Migrations run on whole documents (a workspace graph, an asset graph, a file given to the CLI):
-// Engine.cook at depth 0, Workspace load/save, MCP build. Nested graphs (foreach/solver bodies,
+// Migrations run on whole documents (a project graph, an asset graph, a file given to the CLI):
+// Engine.cook at depth 0, Session load/save, MCP build. Nested graphs (foreach/solver bodies,
 // node params of type "graph") belong to their parent document, so a migration that changes nodes
 // must walk into them itself (see forEachNode). Nested cooks never migrate again.
 import { GRAPH_VERSION } from './types.ts';

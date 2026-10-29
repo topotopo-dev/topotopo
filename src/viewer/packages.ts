@@ -2,7 +2,7 @@
 // src/gallery/update.ts): what the page's Packages tab shows, each package the project uses with the version in use and
 // its outputs' kinds and tags, the updates its libraries have and their notes, its working folder and whether this
 // session follows it; the before/after of an update, with progress events and a stop of its own (its cooks are not the
-// workspace's, so the workspace's stop does not reach them); applying it; and the follow switch. Following lasts as
+// session's, so the session's stop does not reach them); applying it; and the follow switch. Following lasts as
 // long as the viewer and is never saved. The working folders of the packages the project uses are watched: a save in
 // one the session follows cooks the graphs that use it again, a save in another is told to the pages (they offer to
 // follow it), and a version published there is a new update.
@@ -37,7 +37,7 @@ import type { VersionInfo } from '../gallery/packages.ts';
 import { applyUpdate, beforeAfter, setText } from '../gallery/update.ts';
 import type { BeforeAfter, CookedSide, UsePlace } from '../gallery/update.ts';
 import { previewGLB } from '../render/preview.ts';
-import type { Workspace } from '../workspace.ts';
+import type { Session } from '../session.ts';
 
 /** A version on a package's card: its number, note and date; `big` when it starts a big version, `marked` by its author. */
 export interface VersionRow { version: string; note: string; published: string; big: boolean; marked: boolean }
@@ -151,7 +151,7 @@ const packageOf = (type: string) => type.split('/').slice(0, 2).join('/');
 const TOPOTOPO_REPO = path.dirname(BUILTIN_LIBRARY.path);
 const inside = (dir: string, root: string) => { const r = path.relative(root, dir); return !r.startsWith('..') && !path.isAbsolute(r); };
 
-export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
+export function createPackages(ws: Session, broadcast: (ev: object) => void) {
   const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
   let closed = false, n = 0, shown = '', lastStamp = '';
   /** what the graphs must change for a big update applied in this viewer, by package */
@@ -305,8 +305,8 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
   const send = (r: Run) => { r.progress.elapsed = performance.now() - r.t0; broadcast({ compare: r.progress }); };
 
   /**
-   * Where the project's graphs and assets cook: the engine's root when the workspace is the project folder (the MCP
-   * server, topotopo edit), else (topotopo view keeps its workspace in a scratch folder) a scope of the project folder
+   * Where the project's graphs and assets cook: the engine's root when the session's folder is the project folder (the MCP
+   * server, topotopo edit), else (topotopo view keeps its session in a scratch folder) a scope of the project folder
    * with its graphs and assets, read again for each before/after.
    */
   const projectOption = (p: ProjectPackages) => {

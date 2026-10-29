@@ -1,7 +1,7 @@
 // Verification tools for agents: explain (describe a cooked geometry in words) and diff (compare two graph
 // versions, nodes or frames, with an optional overlay render). Registered by makeTools in tools.ts.
 import zlib from 'node:zlib';
-import type { Workspace } from '../workspace.ts';
+import type { Session } from '../session.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { renderGeometry } from '../render/raster.ts';
 import type { ViewName } from '../render/raster.ts';
@@ -23,7 +23,7 @@ function parseRef(r: any, what: string): GeoRef {
 }
 
 /** Cook a graph (or one of its nodes) at a frame; errors carry the failing nodes. */
-async function cookRef(ws: Workspace, ref: GeoRef): Promise<{ geo: Geometry; label: string }> {
+async function cookRef(ws: Session, ref: GeoRef): Promise<{ geo: Geometry; label: string }> {
   const name = ref.graph ?? 'main';
   const r = await ws.engine.cook(ws.getGraph(name), { target: ref.node || undefined, frame: ref.frame });
   const label = `${name}/${r.target}${r.frame !== 1 ? ` @ frame ${r.frame}` : ''}`;
@@ -39,7 +39,7 @@ const REF_SCHEMA = {
   ],
 };
 
-export function verifyTools(ws: Workspace): ToolDef[] {
+export function verifyTools(ws: Session): ToolDef[] {
   return [
     {
       name: 'explain',

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import '../nodes/index.ts';
 import { Engine } from '../graph/engine.ts';
 import { createNodeHost } from '../host/node.ts';
-import { Workspace } from '../workspace.ts';
+import { Session } from '../session.ts';
 import { previewGLB, thumbOptions } from '../render/preview.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
@@ -48,7 +48,7 @@ export async function bakeProject(dir: string): Promise<BakeState> {
     await engine.init();
     // the packages the project uses, from its copies (a bake adds none)
     openPackages(engine, dir);
-    const ws = new Workspace(dir, engine);
+    const ws = new Session(dir, engine);
     ws.load();
     const name = m.bake.graph ?? m.graph;
     const g = ws.graphs.get(name);

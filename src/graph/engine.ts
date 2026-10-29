@@ -439,7 +439,7 @@ const PSUF = '\u0000params';
 export class Engine {
   host: Host;
   cache = new GeoCache();
-  /** the workspace's scope: the assets, graphs and files of every cook that is not given another (CookOptions.scope) */
+  /** the project's scope: the assets, graphs and files of every cook that is not given another (CookOptions.scope) */
   readonly root: Scope;
   /** base signatures of nodes found to depend on time while cooking */
   timeDeps = new Set<string>();

@@ -1,14 +1,14 @@
 // The `library` tool: the person's libraries of projects (src/gallery/library.ts) and the packages of the open project
 // (src/gallery/packages.ts, src/gallery/update.ts). An agent lists and searches every library, reads a project, makes
-// new ones, edits their project.json, bakes previews, and opens a project: the server's workspace becomes that project
-// folder, so build/edit/render/export work on it; or it makes the open workspace a project (init), when the person says
+// new ones, edits their project.json, bakes previews, and opens a project: the server's folder becomes that project's
+// folder, so build/edit/render/export work on it; or it makes the server's folder a project (init), when the person says
 // so: only a project's graphs use packages. In the open project it publishes a version of its package (or a dry run of
 // it), searches the outputs of every library and says which the project can use, lists and adds the packages it uses,
 // follows a package's working folder for the session, says which packages are out of date, and shows the before/after
 // of an update, which it applies only when the person says so.
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Workspace } from '../workspace.ts';
+import type { Session } from '../session.ts';
 import type { ToolDef, ToolResult, Content } from './tools.ts';
 import {
   createProject, graphNames, initProject, isStale, listFiles, loadConfig, ownPackageName, parseManifest, program, projectDirOf, readBakeState, readGraph,
@@ -23,11 +23,11 @@ import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) });
 
 export interface LibraryToolHost {
-  /** the workspace the other tools use now */
-  workspace(): Workspace;
-  /** the packages of the project the workspace belongs to */
+  /** the session the other tools use now (its folder, graphs, assets and engine) */
+  session(): Session;
+  /** the packages of the project the session's folder belongs to */
   packages(): ProjectPackages;
-  /** make a folder the workspace of every tool (and of the live viewer) */
+  /** make a folder the one every tool (and the live viewer) works in */
   open(dir: string): Promise<{ graphs: number; assets: number }>;
 }
 
@@ -37,7 +37,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
     const b = `http://127.0.0.1:${cfg.gallery.port}`;
     return { page: `${b}/p/${p.lib}/${p.id}`, embed: `${b}/embed/${p.lib}/${p.id}`, thumb: `${b}/p/${p.lib}/${p.id}/thumb.png` };
   };
-  const currentDir = () => projectDirOf(host.workspace().dir);
+  const currentDir = () => projectDirOf(host.session().dir);
   const statusOf = (p: Project) => { const s = readBakeState(p.dir); return !s ? 'not baked' : !s.ok ? 'bake failed' : isStale(p) ? 'stale' : 'baked'; };
   /**
    * {library, id}, {path}, or nothing (the open project). The libraries are scanned for an id; for a folder, only to
@@ -51,7 +51,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
       throw new Error(`no project "${a.id}"${a.library ? ` in library "${a.library}"` : ''}. library {action:"list"} lists them`);
     }
     const dir = a.path ? projectDirOf(path.resolve(a.path)) : currentDir();
-    if (!dir) throw new Error(a.path ? `${a.path}: no project.json there or above` : 'give {library, id}: the open workspace is in no project (library {action:"init"} makes it one, when the person says so)');
+    if (!dir) throw new Error(a.path ? `${a.path}: no project.json there or above` : 'give {library, id}: the server\'s folder is in no project (library {action:"init"} makes it one, when the person says so)');
     let all: Project[] = [];
     try { all = scans().flatMap((s) => s.projects); } catch { /* named without its library */ }
     const p = all.find((x) => x.dir === dir);
@@ -63,10 +63,10 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
 
   return {
     name: 'library',
-    description: 'The person\'s libraries of projects (the TopoTopo Gallery website shows them; a board links to them). A library is a folder; a project is a folder in it with project.json (title, description, tags, links to concept art/board pages) and is a workspace of its own (graphs/, assets/, inputs/, exports/, attachments/ for concept art and references). ' +
+    description: 'The person\'s libraries of projects (the TopoTopo Gallery website shows them; a board links to them). A library is a folder; a project is a folder in it with project.json (title, description, tags, links to concept art/board pages) and is a project of its own (graphs/, assets/, inputs/, exports/, attachments/ for concept art and references). ' +
       'list {query?, tag?, library?}: every project with status and gallery URL. get {library, id} (or the open project): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
-      'open {library, id} | {path}: make that project the workspace of every tool and the live viewer, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new project, opened. ' +
-      'init {package?}: make the open workspace a project (project.json, graphs/main.json, .gitignore, .gitattributes), when it is none and the person says so: only a project\'s graphs use packages (TopoTopo\'s own included), and a build that names one in a workspace outside any project fails saying so. ' +
+      'open {library, id} | {path}: make that project the folder every tool and the live viewer work in, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new project, opened. ' +
+      'init {package?}: make the server\'s folder a project (project.json, graphs/main.json, .gitignore, .gitattributes), when it is none and the person says so: only a project\'s graphs use packages (TopoTopo\'s own included), and a build that names one in a project outside any project fails saying so. ' +
       'set {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?, libraries?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the package the project is, set once by its author; libraries = the libraries the project finds packages in, ["../lib", "game"]: a path from the project for a library in the same repository, else a registered name; set it only when the person names the library). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). ' +
       `Packages of the open project: packages (what it uses and can use, one line each: version, outputs, up to date or the newer version that is out), packages {package} (one package: its versions and notes, its outputs with their kinds, tags, params and inputs); search {query?, kind?, tag?}: the outputs of every library (TopoTopo\'s built-in one, those the project lists, every registered one) by words, kind (${KINDS.join(', ')}) and tag, each with its full name, kind, tags, label, version and description, and whether the project can use it, else the "libraries" entry that would list its library; use {package:"owner/name", version?} adds one (a graph that names "owner/name/output" adds it too); remove {package} removes one no graph of the project names; follow {package, on} uses a package\'s working folder instead of its copy for this session. ` +
       'publish {dry_run:true, note?, big?} is a dry run: every check and cook, the version number it would get, its changes, blocks and warnings, nothing written. Publishing is permanent: run the dry run first, show it to the person, and publish {note, big?} only when they say so. ' +
@@ -158,7 +158,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           const r = await host.open(p.dir);
           let page = '';
           try { page = ` Gallery page: ${urlsOf(libs().cfg, p).page}`; } catch { /* no config to read the port from */ }
-          return text(`opened ${p.lib ? `${p.lib}/` : ''}${p.id} ("${p.manifest.title}"): the workspace of every tool is now ${p.dir} (${r.graphs} graphs, ${r.assets} assets). ` +
+          return text(`opened ${p.lib ? `${p.lib}/` : ''}${p.id} ("${p.manifest.title}"): every tool now works in ${p.dir} (${r.graphs} graphs, ${r.assets} assets). ` +
             `Build into graph "${p.manifest.graph}" (the one the gallery shows); put reference images in attachments/ and guide files in inputs/.${page}`);
         }
         case 'create': {
@@ -173,12 +173,12 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Gallery page: ${urlsOf(cfg, p).page}`);
         }
         case 'init': {
-          const dir = host.workspace().dir, inside = projectDirOf(dir);
-          if (inside) throw new Error(`the workspace ${dir} is in a project already: ${path.join(inside, 'project.json')}${a.package ? `; library {action:"set", package:"${a.package}"} names the package it is` : ''}`);
+          const dir = host.session().dir, inside = projectDirOf(dir);
+          if (inside) throw new Error(`the folder ${dir} is in a project already: ${path.join(inside, 'project.json')}${a.package ? `; library {action:"set", package:"${a.package}"} names the package it is` : ''}`);
           const { manifest } = initProject(dir, { package: a.package });
-          // the tools take in the project (its packages) as a workspace opened afresh
+          // the tools take in the project (its packages) as a folder opened afresh
           const r = await host.open(dir);
-          return text(`made the workspace ${dir} a project, id "${manifest.id}"${manifest.package ? `, package ${manifest.package}` : ''} (project.json, graphs/${manifest.graph}.json; ${r.graphs} graphs, ${r.assets} assets): ` +
+          return text(`made the folder ${dir} a project, id "${manifest.id}"${manifest.package ? `, package ${manifest.package}` : ''} (project.json, graphs/${manifest.graph}.json; ${r.graphs} graphs, ${r.assets} assets): ` +
             'its graphs use packages now. A build that names one adds it on first use: TopoTopo\'s own (topotopo/…) from TopoTopo\'s built-in library, others from the libraries its project.json lists, which library {action:"set", libraries:[...]} sets when the person names them. library {action:"packages"} shows them');
         }
         case 'set': {
@@ -210,7 +210,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
             if (to === undefined || a.from === undefined) throw new Error('apply:true needs "from" and "to": the version in use and the version of the before/after the person saw');
             const r = applyUpdate(host.packages(), pkg, { from: String(a.from), to });
             // every graph may use it: they cook again, and the viewer shows it
-            const ws = host.workspace();
+            const ws = host.session();
             for (const g of ws.graphs.keys()) { ws.lastReport.delete(g); ws.bump(g); }
             return text(r.text);
           }
@@ -240,7 +240,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           if (!a.package) throw new Error('"package" is required: "owner/name"');
           const said = host.packages().follow(String(a.package), a.on !== false);
           // every graph may use it: they cook again, and the viewer shows it
-          const ws = host.workspace();
+          const ws = host.session();
           for (const g of ws.graphs.keys()) { ws.lastReport.delete(g); ws.bump(g); }
           return text(said);
         }
