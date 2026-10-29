@@ -5,6 +5,7 @@ import { Geometry } from './core/geometry.ts';
 import type { AttribClass, Attribute, Volume } from './core/geometry.ts';
 import type { Vec3 } from './core/math.ts';
 import { buildEdges, primArea } from './core/topology.ts';
+import { pointWhere } from './core/report.ts';
 import {
   RayScene, SurfaceQuery, bboxDiagonal, directedDistance, duplicatePoints, fmt, mirrorSymmetry, newNearest, pieceReport,
   principalAxes, quantile, rayMeasure, sampleSurface,
@@ -425,7 +426,7 @@ export function diffGeometry(a: Geometry, b: Geometry, labels: [string, string] 
       if (d > eps) moved++;
       if (d > mx) { mx = d; at = i; }
     }
-    out.push(`points (same count, matched by number): ${n(moved)} of ${n(a.numPoints)} moved; max ${fmtLen(mx)}${mx > 0 ? ` (point ${at})` : ''}, mean ${fmtLen(sum / a.numPoints)}`);
+    out.push(`points (same count, matched by number): ${n(moved)} of ${n(a.numPoints)} moved; max ${fmtLen(mx)}${mx > 0 ? ` (${pointWhere(a, at)} in a)` : ''}, mean ${fmtLen(sum / a.numPoints)}`);
   }
   const sameCounts = a.numPoints === b.numPoints && a.numPrims === b.numPrims && a.numVertices === b.numVertices;
   const diag = Math.max(bboxDiagonal(a), bboxDiagonal(b));

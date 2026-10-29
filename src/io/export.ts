@@ -101,7 +101,8 @@ export function exportPLY(g: Geometry, o: ExportOptions = {}): Uint8Array {
   g = expandForExport(g, o, 'ply');
   const np = g.numPoints;
   const N = g.points.get('N'), Cd = g.points.get('Cd');
-  const custom = o.custom === true ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && (a.type === 'float' || a.type === 'int') && a.size <= 4) : [];
+  // PLY carries its extra properties by default (custom_attribs false drops them)
+  const custom = o.custom !== false ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && (a.type === 'float' || a.type === 'int') && a.size <= 4) : [];
   const props: string[] = ['property float x', 'property float y', 'property float z'];
   if (N && N.size === 3) props.push('property float nx', 'property float ny', 'property float nz');
   if (Cd && Cd.size >= 3) props.push('property uchar red', 'property uchar green', 'property uchar blue');

@@ -2,7 +2,7 @@
   "version": 1,
   "meta": {
     "description": "Left: sharp dual-contour voxel remesh. Centre: marching cubes from the same grid. Right: dilated, eroded and blurred distances. Two boxes intersect a torus.",
-    "render": { "views": ["persp"], "size": 1200, "azimuth": 25, "elevation": 28 }
+    "render": { "views": ["persp"], "size": "1400x640", "azimuth": 25, "elevation": 28 }
   },
   "nodes": {
     "box_a": { "type": "box", "params": { "size": [1.5, 1.35, 0.7], "center": [-0.35, 0.12, 0] } },

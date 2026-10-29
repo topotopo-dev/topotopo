@@ -1198,13 +1198,14 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   check(/^no folder .*nowhere$/.test((await run('search', ['conifer', './nowhere'], CLI)).err), 'a folder that does not exist is an error');
   const wrong = await run('search', ['--kind', 'material'], CLI);
   check(wrong.code === 1 && /"material" is not a kind: mesh, instances/.test(wrong.err), `search --kind with no such kind: ${wrong.err}`);
-  // the texture of a package output names the copy relative to the root's folder (a graph file's, here graphs/), so
-  // exports that carry texture paths name no folder of this machine
+  // the texture of a package output names the copy relative to the root's folder (the project folder: relative paths
+  // read from the nearest project.json at or above the graph file), so exports that carry texture paths name no folder
+  // of this machine
   const ge = await newEngine(path.join(CLI, 'graphs'));
   openPackages(ge, path.join(CLI, 'graphs'));
   const rock = await ge.cook(readJSON(path.join(CLI, 'graphs', 'main.json')));
   const moss = rock.geo ? readMaterials(rock.geo).moss?.textures?.baseColor : '';
-  check(moss === '../packages/nordic/rocks/1.0/inputs/moss.png' && fs.existsSync(path.resolve(CLI, 'graphs', moss)), `a package output's texture is portable: ${moss}`);
+  check(moss === 'packages/nordic/rocks/1.0/inputs/moss.png' && fs.existsSync(path.resolve(CLI, moss)), `a package output's texture is portable: ${moss}`);
 }
 
 section('the package commands: every list of them says them the same way');

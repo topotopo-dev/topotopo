@@ -72,6 +72,7 @@ import type { AttribClass, AttribType } from '../core/geometry.ts';
 import { resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { TANGENT_ATTRIB, cornerTangents, loadMikkTSpace, tangentProblem, transformTangents, vertexUV } from '../core/tangents.ts';
 import { gltfV } from '../core/texcoord.ts';
+import { posText, primWhere } from '../core/report.ts';
 import { DEFAULT_MATERIAL, materialAlphaMode, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
 import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4invert, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
@@ -530,7 +531,9 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
       if (!uv) return null; // reported once, as a textured primitive without uv
       const { tangents, diag } = cornerTangents(geo, tris, nrm, uv);
       if (diag.uvNonFinite || diag.uvDegenerate) {
-        o.warn?.(`glTF: ${where}: ${diag.uvDegenerate} of ${diag.triangles} triangles have collapsed uvs${diag.uvNonFinite ? ` and ${diag.uvNonFinite} non-finite uvs` : ''}; their ${diag.fallbackCorners} corners get a fallback tangent (the normal map has no orientation there)`);
+        // where the first one is: its prim's part and position (core/report.ts)
+        const first = diag.firstBad >= 0 ? `, first ${primWhere(geo, geo.vertexPrims()[tris[diag.firstBad * 3]])}` : '';
+        o.warn?.(`glTF: ${where}: ${diag.uvDegenerate} of ${diag.triangles} triangles have collapsed uvs${diag.uvNonFinite ? ` and ${diag.uvNonFinite} non-finite uvs` : ''}${first}; their ${diag.fallbackCorners} corners get a fallback tangent (the normal map has no orientation there): unwrap them (uv_unwrap) or give them uv area`);
       } else if (diag.fallbackCorners) o.warn?.(`glTF: ${where}: MikkTSpace left ${diag.fallbackCorners} corners without a tangent; a fallback was written`);
       return {
         semantic: 'TANGENT', size: 4, int: false, perPoint: false,
@@ -640,7 +643,7 @@ function writeEmpties(doc: Document, scene: ReturnType<Document['createScene']>,
   }
   const byName = new Map<string, SceneEmpty[]>();
   for (const e of empties) {
-    if (!e.name) throw new Error(`glTF: scene empty at point ${e.point} has no name`);
+    if (!e.name) throw new Error(`glTF: the scene empty at ${posText(e.P)} (point ${e.point}) has no name: give scene_null a name`);
     const l = byName.get(e.name);
     if (l) l.push(e); else byName.set(e.name, [e]);
   }

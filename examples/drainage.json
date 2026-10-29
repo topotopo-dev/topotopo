@@ -1,6 +1,6 @@
 {
   "description": "Drainage on the demo massif: left, the original ground with D8 flow stopping in pits; right, shallow depressions filled with an epsilon slope and deeper basins retained as lakes. Both tiles use the same drainage colour scale: grey-green hillsides, gold tributaries and orange rivers; blue is standing lake water. The deep bowl and small pits are deliberate edits to the shared massif. The filled heightfield is node filled; water_surface raises only the display mesh by the lake depth, leaving the saved ground and lake layers separate.",
-  "meta": { "render": { "views": ["persp"], "azimuth": 0, "elevation": 65, "size": 1100, "grid": false } },
+  "meta": { "render": { "views": ["persp"], "azimuth": 0, "elevation": 65, "size": "1400x720", "grid": false } },
   "nodes": {
     "field": { "type": "heightfield", "params": { "size": [20, 20], "resolution": 0.125 } },
     "massif": { "type": "heightfield_layer", "in": ["field"], "params": { "expression": "2.2 * (1 - smoothstep(1, 11, sqrt(x * x + (z + 1) * (z + 1))))" } },

@@ -159,7 +159,8 @@ input button): meshes, guide curves and points drawn in Blender, Houdini or Unre
 heightmaps. Every tool answer ends with a note when inputs/ has files new or changed since your last call. Before building a
 landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path} tells what one holds (polygons, open
 polylines, loose points, packed prims; bbox in metres; attributes; every name and role value; materials). Read a file
-with a file node, the path relative to the workspace: {"type":"file","params":{"path":"inputs/guides.glb"}}.
+with a file node: {"type":"file","params":{"path":"inputs/guides.glb"}} (relative paths read from the project folder,
+the nearest folder with a project.json at or above the graph, else the graph's folder; the list gives the exact path).
 MARKERS: what a person places by clicking in the live viewer (Site / Path / Zone / Volume modes) is written as
   inputs/markers.json with the same name and role attributes (sites: points with pscale and orient; paths open and
   zones closed polylines; volumes closed boxes), so describe it and read it like any other input.
@@ -1030,13 +1031,19 @@ Which node:
   uv_transform translate/scale/rotate existing uv.
 Typical: geo → uv_unwrap → render {views:"quad_uv", checker:true}.  Manual: delete uv → uv_flatten {seams:[...]} → uv_layout.
 SEE IT: render views "uv" (or "quad_uv" = persp + uv): the 0..1 square with a 0.1 grid and UDIM labels, polygons filled
-by chart/island colour, island borders yellow, overlapping uv in RED (footer/notes give the overlap %).
+by chart/island colour, island borders yellow, overlapping uv in RED (footer/notes give the overlap %); overlap that is
+expected is amber: charts of a repeating texture (they run across tile borders: the label says TILING) and LODs that
+share the uv space (prim names ending _lod0, _lod1 …).
 render checker:true shades 3D views with an 8×8 uv checker: squares should look square and equal-sized
 (stretch = rectangles, density = cell size, mirrored charts flip the red/green gradient).
-MEASURE IT: inspect {detail:"uv", resolution:1024, json:true}: exact overlaps (triangle pairs, their prims and areas,
-folds inside one chart included; shared edges are not overlaps), collapsed / non-finite / out-of-tile triangles, UDIM
-tiles, charts, mirrored triangles, utilization (exact for a clean atlas in 0..1, else a labelled raster ESTIMATE) and
-per-piece (prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
+MEASURE IT: inspect {detail:"uv", resolution:1024, json:true}: exact overlaps (triangle pairs with the part and world
+position of each, and their areas; folds inside one chart included; shared edges are not overlaps), split into
+overlap.inTile (between atlas charts, each inside one tile: what a bake suffers), overlap.tiling (a chart runs across
+tile borders, as uv_project over many tiles does: a repeating texture, flagged tiling:true; expected) and
+overlap.acrossLods (prims named _lod0 / _lod1 … share the uv space on purpose); collapsed / non-finite / out-of-tile
+triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, utilization (exact for a
+clean atlas in 0..1, else a labelled raster ESTIMATE) and per-piece (prim "name") surface, uv area and texel density.
+An analysis that hits its bounds says INCOMPLETE.
 CLI: --inspect uv --uv-resolution 1024 [--json].
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
@@ -1044,10 +1051,30 @@ Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
 overlays and notes pieces, open edges and back-facing % (also returned as text notes).
 VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
-  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>. azimuth/elevation/zoom, look_at [x,y,z],
-  ortho_scale (world width of ortho views), size (pixels per view), scale 2 (a 2× image).
+  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>, and the three-quarter views
+  front_left, front_right, back_left, back_right (persp at azimuth -45, 45, -135, 135).
   "texture" draws images flat (texture:"<image>" | "image/layer" | "<material>" picks; a geometry holding only images
   renders as it by default); textures:true shows base colour maps on the mesh. Help topic "textures".
+FRAMING: every 3D view fits the bounds: the bbox corners fill the view with a small margin, so nothing is cropped.
+  azimuth: degrees around +Y; 0 = the camera on +Z looking at the front, 90 = on +X (the right side), 180 = the back,
+    -90 = the left; default 35. elevation: degrees above the horizon (default 25; 90 looks straight down).
+    e.g. render {views:"persp", azimuth:-90, elevation:10} looks at the left side from just above.
+  zoom: relative to the fit (1 = fit, 0.5 = half size). Above 1 it magnifies around look_at and crops, so it only
+    applies with look_at (or ortho_scale); without them it is held at 1 and a note says so.
+  look_at: [x, y, z] in world metres (x right, y up, z towards the front; Y-up like everything else); the view centres
+    on it and still fits the bounds around it. e.g. render {views:"persp", look_at:[0.6, 0.15, 0], zoom:4} (a muzzle).
+  ortho_scale: the world width in metres across an ortho or section view (default: fit the bounds).
+    e.g. render {views:"front", ortho_scale:0.5} shows 50 cm across the front view, at any size.
+  size: pixels per view, n or "WxH": size:"1600x600" gives wide views a long prop fills (the fit follows the aspect);
+    scale 2 makes a 2× image.
+BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no ground grid or axis gizmo; the footer
+  stays). grid:false drops the persp ground grid. underlay:"inputs/side.png" draws a reference image (PNG, relative to
+  the workspace) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
+  rectangle the bounds cover in that view, keeping its aspect, so a reference cropped to the object lines up with it),
+  "width" / "height" (its width or height spans the bounds'), "view" (the whole view). Pick the view that matches the
+  picture: render {views:"front", underlay:"inputs/side.png", size:"1600x500"}.
+SOCKETS: sockets:true draws scene empties (scene_null: attachment points) as dots with their name and orient axes
+  (X red, Y green, Z blue), through the surface. pbr renders hide empties unless sockets is set.
 QUESTION → OPTION
   How dense / clean is the topology? Where are the triangles, poles, slivers?  wireframe:"all" (every edge, 1 px)
   Which edges are creases?                         wireframe:"hard" (dihedral > hard_angle, default 30) + crease/hard/sharp edge groups
@@ -1072,7 +1099,11 @@ QUESTION → OPTION
                    roughness map, metallic, emissive, unlit) under a fixed camera-relative studio rig (key, fill, rim and a
                    sky/ground environment), GGX specular, ACES, exposure (stops, default 0). Deterministic: the same graph
                    gives the same PNG. Texture files are read from disk; transparency is not evaluated (shaded opaque,
-                   with a note), nor are missing or non-PNG maps (named in the notes).
+                   with a note), nor are missing or non-PNG maps (named in the notes). color_by and highlight tint
+                   the shaded material (the attribute colour lit by the material's brightness); checker is not shown.
+POLYGON EDGES: wireframe "auto" (the default) draws polygon edges on meshes under 6,000 polygons, never under shading
+  "pbr" or textures:true (they would read as marks in the material); the footer says EDGES AUTO when it draws them.
+  wireframe:false hides them, true draws them always.
 Labels never overlap: ones without room are skipped (note says how many; raise size or lower max_labels).
 view_labels:false drops each view's name label and the persp axis gizmo (clean thumbnails, e.g. those of TopoTopo's own packages).
 Heightfields draw at most heightfield_res quads per side (default 256; "full" = every sample): a larger field is
@@ -1081,16 +1112,24 @@ Heightfields draw at most heightfield_res quads per side (default 256; "full" = 
   in the legend) and "none" none.
 Examples: render {views:["persp","section"], section_axis:"z", wireframe:"hard", label_groups:true}
           render {views:"turntable", shading:"matcap"} · render {glyphs:"N", clip:{axis:"x", offset:0.5}}
+CLI: several renders per cook: the options after a --render apply to that render, up to the next --render; options before the
+  first --render apply to every render. Example: both renders 1200x600; side.png the front view over the reference,
+  beauty.png a pbr three-quarter view:
+    topotopo g.json --size 1200x600 --render side.png --views front --underlay ref.png --render beauty.png --views front_left --shading pbr
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
-  --shading pbr --exposure 0.5
+  --shading pbr --exposure 0.5 --views front_left --size 1600x600 --transparent --no-grid --sockets
+  --azimuth -90 --elevation 10 --look-at 0.6,0.15,0 --zoom 4 --ortho-scale 0.5
+  --underlay ref.png --underlay-opacity 0.6 --underlay-fit width (CLI paths are relative to the current folder)
   --no-view-labels --heightfield-res full --heightfield-layer flow`,
 
   export: `EXPORT
 export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic
   "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
-  exports/ is the project's: the folder of the nearest project.json above the graph (a graph in <project>/graphs/
-  exports into <project>/exports/); a graph file in no project exports beside itself. The CLI's --export-all, the
-  viewer and this tool follow the one rule, and exports/.outputs.json records the files by their project paths.
+PATHS: one rule for the CLI, the MCP server and the viewer: relative paths inside a graph (file nodes, material maps,
+  image files) read from its project folder, the nearest folder with a project.json at or above the graph file, else
+  the graph file's folder (MCP: the workspace); exports/ is that project's (a graph in <project>/graphs/ exports into
+  <project>/exports/, never beside itself), and exports/.outputs.json records the files by their project paths. The
+  CLI's own --render / --export / --underlay paths are relative to the current folder.
 export {path:"exports/thing.glb"} — format from the extension:
   glb / gltf    glTF 2.0 via gltf-transform (recommended for Unreal, Blender, web)
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)
@@ -1099,8 +1138,8 @@ export {path:"exports/thing.glb"} — format from the extension:
   obj usda ply stl json (lossless topotopo)
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
-  custom_attribs (default false: glTF / PLY / USD write only their standard channels; true adds every other numeric
-  attribute, below), materials (default true), vertex_colors (glTF, default false: prims with a named material are
+  custom_attribs (extra numeric attributes: default off for glb / gltf / usda and the GLBs of instance rows and bundles,
+  on for ply; below), materials (default true), vertex_colors (glTF, default false: prims with a named material are
   written in that material, their Cd dropped; true keeps Cd as COLOR_0 there too, below), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
@@ -1111,13 +1150,18 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
   --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
   cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
   (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
-  export: {format, options}, topotopo (the version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
+  export: {format, options: every option the format reads, the given ones and the defaults of the rest}, topotopo (the
+  version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
   instance rows in <name>.meshes.json, unreal_landscape in landscape.json; every other export writes <file>.source.json
   next to the file ({format:"topotopo-export-source", version, files, source}; a textures folder: source.json inside
   it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
-  graph, values and options give the same bytes. Replay on the command line: topotopo <graph>.json --output <output>
-  (or --node <node>) --frame <frame> --fps <fps>, one --var <name>=<value as JSON> per var, and --export <path> with the
-  same options. These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
+  graph, values and options give the same bytes, and a later version changing a default does not change what the
+  record replays. Replay on the command line: topotopo <graph>.json --output <output> (or --node <node>) --frame <frame>
+  --fps <fps>, one --var <name>=<value as JSON> per var, --format <format>, every option as its flag (up_axis "z" →
+  --up-axis z, custom_attribs false → --no-custom-attribs, layers ["a","b"] → --layers a,b) and --export <path>. e.g.
+    topotopo graphs/crate.json --node h --frame 1 --fps 24 --format glb --compress none --custom-attribs
+      --instancing packed --materials --no-quantize --scale 100 --split-by-name --tangents auto --up-axis z --export crate.glb
+  These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
   them with it (kind "metadata"), and a file node reading one says what to read instead.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
@@ -1140,7 +1184,7 @@ MATERIALS: the material node writes prim "material" + the detail table. A named 
   white or tinted copy of the material). Prims without a material, and every prim with vertex_colors:true, keep their
   Cd: not all white → baseColor white × COLOR_0 with the material's metallic/roughness/emissive (one constant Cd is
   folded into the factor). alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
-TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the workspace/graph; the mesh
+TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the project folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
   map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
   keep the paths in the material table. glTF import records texture paths (or "embedded:<name>") without decoding.
@@ -1232,6 +1276,11 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    vars by their bare name: "npoints == count * 8").
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
+   Every failed check names its first offender: the part (prim "name", groups) and its world position.
+   inspect {detail:"topology"} says whether the mesh is a closed solid and, when not, why: open edges (counted after
+   welding the vertex splits of uv/normal seams, which a re-imported GLB has), non-manifold edges, flipped faces, pieces
+   facing inward, degenerate faces, each with a count, where the first one is and the fix. Solid ops (boolean …) give
+   the same causes when they refuse a mesh.
 2. EXPLAIN AFTER A BUILD/EDIT: explain {graph, node?} describes the result in words, e.g.
    "reads as: one closed piece, box-like, 2 × 1 × 1 m, 3 cm thin walls, mirror-symmetric in x, z", then pieces,
    watertight/genus/boundary loops, flipped normals, symmetry planes, principal axis + aspect, sampled thickness,
@@ -1241,6 +1290,17 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    sample), Hausdorff + mean distance, per-point displacement (same point count), verdict. a/b: "graph", "graph/node" or {graph, node, frame} (two nodes or two frames work too).
    render:true overlays them: grey = unchanged, blue = only in b, orange = only in a.
 4. RENDER for what text cannot tell (proportions, style); inspect for one attribute's numbers.
+5. INSPECT {detail} (CLI --inspect <detail>):
+   summary (default)  one screen: counts and triangles, bbox in metres to the millimetre, parts (prim "name"),
+                      materials and their maps, images, uv state (charts, in-tile overlap, tiling, utilization), closed
+                      or open edges (after welding seam splits)
+   budget             triangles per part (prim "name": each exports as its own mesh), split per LOD when the names
+                      end in _lod0, _lod1 …, and per node (the triangles each node adds over its inputs), sorted, with
+                      totals; packed instances count expanded. json:true (CLI --json) appends it as JSON
+   scene              the glb export read back from its bytes: the node tree (meshes, sockets and their parents, world
+                      and local positions), triangles per mesh, materials with factors and maps, images with size;
+                      export_options (CLI: the export flags) as the export takes them
+   topology / uv / attributes / elements / all   (see above and help topic "uv")
 MEASURE NODES (category measure) turn shape into attributes for masks and colour:
   curvature   type mean|gaussian|principal_min|principal_max|convexity (1/m; normalize → 0..1) — wear on convex edges
   occlusion   mode occlusion → ao 0..1 | cavity → cavity 0..1 | thickness → metres (rays inward; closed meshes);

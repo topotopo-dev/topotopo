@@ -303,7 +303,7 @@ defineNode({
   aliases: ['attribfrommap', 'attrib_from_image', 'texture_to_attrib', 'attrib_from_map', 'attribute_from_image', 'texture_sample'],
   inputs: [{ name: 'geo', desc: 'points or mesh' }],
   params: {
-    path: { type: 'path', default: '', desc: 'PNG file (relative to the workspace) or URL', aliases: ['file', 'filename', 'map', 'texture', 'image'] },
+    path: { type: 'path', default: '', desc: 'PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph\'s folder', aliases: ['file', 'filename', 'map', 'texture', 'image'] },
     name: { type: 'string', default: '', desc: 'output attribute ("" = Cd for channel rgb, else mask)', aliases: ['attrib', 'attribute', 'output'] },
     channel: { type: 'enum', options: ['luminance', 'r', 'g', 'b', 'a', 'rgb'], default: 'luminance', desc: 'which channel (rgb writes a vector)' },
     projection: { type: 'enum', options: ['uv', 'xz', 'xy', 'yz'], default: 'uv', desc: 'uv attribute or a planar projection (xz = top view)', aliases: ['mapping'] },
@@ -323,7 +323,7 @@ defineNode({
   outputs: 'point (or vertex) float <name> (vec3 for channel rgb)',
   example: { type: 'attribute_from_map', in: ['ground_pts'], params: { path: 'density.png', projection: 'xz', size: [100, 100], name: 'density' } },
   async cook({ input, p, scope, type, warn }) {
-    if (!p.path) throw new NodeError(`${type}: path is empty`, 'a PNG file relative to the workspace, e.g. "maps/density.png"');
+    if (!p.path) throw new NodeError(`${type}: path is empty`, 'a PNG file relative to the project folder, e.g. "inputs/density.png"');
     const bytes = await scope.files.readFile(p.path).catch((e: any) => { throw new NodeError(`${type}: cannot read "${p.path}": ${e.message}`); });
     let img;
     try { img = decodePNG(bytes); } catch (e: any) { throw new NodeError(`${type}: ${e.message}`); }

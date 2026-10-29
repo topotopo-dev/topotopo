@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // Command line: cook a graph JSON file, then render / export / inspect.
 //   node src/cli.ts <graph.json> [--node name | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]
-//                   [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
+//                   [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
-//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800] [--render-scale 2] [--heightfield-res 256|full]
+//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
+//                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
-//                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
-//                   [--inspect summary|attributes|topology|all|uv [--uv-resolution 1024] [--json]]
+//                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--no-materials]
+//                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
+//                   (every option of the export tool has a flag; booleans take --name / --no-name)
+//                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--json]]
 //   --output picks a named output (the graph's "outputs"); --var overrides a graph var for this run (src/graph/vars.ts).
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   Packed instances to .csv/.points.json: one row per instance + <name>.meshes.json + <name>_meshes/<Mesh>.glb.
@@ -64,8 +67,9 @@ import { ArtifactStore } from './host/artifacts.ts';
 import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
-import { publishedOutputs } from './io/targets.ts';
-import { inspect } from './inspect.ts';
+import { exportOptionsFromFlags, publishedOutputs } from './io/targets.ts';
+import { budgetReport, inspect, nodeBudgetInput, summarize } from './inspect.ts';
+import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
 import { uvReport } from './core/uvreport.ts';
 import { didYouMean } from './graph/params.ts';
 import { parseVarArg, withVars } from './graph/vars.ts';
@@ -88,29 +92,50 @@ if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
-    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all|topology|uv] [--uv-resolution 1024] [--json] (uv: overlaps, utilization, texel density; --json: the report as JSON)',
+    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb]',
+    '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--json]',
+    '           summary: one screen (counts, triangles, bbox in mm, parts, materials, images, uv state, closed or open edges)',
+    '           topology: a closed solid or why not (open edges after welding seam splits, non-manifold, flipped, inward), with where',
+    '           uv: overlaps (in-tile, tiling, across LODs), utilization, texel density; budget: triangles per part, per LOD and per node',
+    '           scene: the glb export read back (nodes and parents, meshes, materials, maps, images; takes the export options)',
+    '           --json: the uv, budget or scene report as JSON',
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
-    '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
+    '         [--export-all] (every output with an export target in the graph, into exports/ of its project folder)',
+    '         relative paths in the graph (file nodes, maps) read from its project folder: the nearest folder with a project.json at or',
+    '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
     '         [--follow owner/name] (use that package\'s working folder in the project\'s libraries instead of its copy, for this run; repeat it)',
     '         [--locked] (a build machine: a package the graph names that the project does not use, or a copy missing or edited by hand, fails the run instead of being added)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
-    '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
+    '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
+    '                          views: persp front back left right top bottom front_left front_right back_left back_right uv section texture persp@<az>',
+    '                          framing: every 3D view fits the bounds; [--zoom 1] is relative to that fit (above 1 only with --look-at or --ortho-scale)',
+    '                          [--azimuth 35] (degrees around +Y: 0 = camera on +Z at the front, 90 = on +X, the right side) [--elevation 25] (degrees above the horizon)',
+    '                          [--look-at x,y,z] (world metres, Y up, +Z front) [--ortho-scale 0.5] (metres across an ortho view)',
+    '                          [--transparent] (PNG with alpha) [--no-grid] [--sockets] (scene empties as labelled dots with orient axes)',
+    '                          [--underlay ref.png] (a reference PNG behind the 3D views) [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]',
     '                          [--textures] (base colour maps on meshes) [--texture name|image/layer|material] (adds the texture view)',
     '                          [--max-triangles 600000] (packed instances drawn; above it an evenly spread subset)',
     '                          [--heightfield-res 256|full] (heightfields: quads drawn per side, default 256, said in the footer when a field has more; full = every sample)',
     '                          [--heightfield-layer flow] (heightfields: the layer drawn in red, default mask; none draws none)',
-    '         several renders per cook: repeat --render; options after a --render apply to it, options before the first apply to all',
-    '           e.g. --views top --render h.png --color-by height --render r.png --color-by river',
     '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails)',
-    '         export options: [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '         several renders per cook: repeat --render; the options after a --render apply to that render (up to the next --render),',
+    '           options before the first --render apply to every render. Example (both 1200x600):',
+    '             --size 1200x600 --render side.png --views front --underlay ref.png --render beauty.png --views front_left --shading pbr',
+    '           side.png: the front view over the reference; beauty.png: a pbr three-quarter view. Options after the last of several',
+    '           --render apply to it alone (a warning says so)',
+    '         export options (every option of the export tool; booleans as --name / --no-name):',
+    '                         [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '                         [--custom-attribs | --no-custom-attribs] (extra numeric attributes; glTF and USD default off, PLY on) [--materials | --no-materials]',
+    '                         [--split-by-name | --no-split-by-name] [--precision 32|64] (geo) [--layer height] [--height-min 0] [--height-max 100] [--heightfield 0]',
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
     '                         [--instances rows|expand] [--no-meshes] (csv/points.json of packed instances: one row per instance + meshes sidecar + GLBs)',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json; heightfields .png (png16) .r16,',
     '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle; --tile-size 1008 for tiled Landscape);',
     '                       images: --format textures --export out/maps (one PNG per image; --layers a,b or * for extra layers)',
-    '       every export records how it was made (graph, graph hash, output, node, frame, fps, vars, seeds, options, version) in its sidecar',
+    '       every export records how it was made (graph, graph hash, output, node, frame, fps, vars, seeds, every option with its default, version)',
+    '                       in its sidecar; replay: --output/--node, --frame, --fps, --var per var, --format and each option as its flag',
     '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a project: its packages' outputs too, --help-node owner/name/output)`,
@@ -227,12 +252,15 @@ async function cook() {
   if (argv.includes('--output') && (outputName === undefined || outputName.startsWith('--'))) fail('--output needs the name of one of the graph\'s outputs');
   if (outputName !== undefined && opt('--node') !== undefined) fail('use either --node or --output, not both');
   let target = opt('--node');
+  if (target !== undefined && graph?.nodes && !Object.hasOwn(graph.nodes, target) && graph?.outputs && Object.hasOwn(graph.outputs, target))
+    fail(`--node: ${file} has no node "${target}", but an output of that name: --output ${target}`);
   if (outputName !== undefined) {
     const outs: Record<string, any> = graph?.outputs && typeof graph.outputs === 'object' ? graph.outputs : {};
     const o = Object.hasOwn(outs, outputName) ? outs[outputName] : undefined;
     if (!o || typeof o.node !== 'string') {
       const names = Object.keys(outs), s = didYouMean(outputName, names);
-      fail(`--output: ${file} has no output "${outputName}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; ${names.length ? `its outputs: ${names.join(', ')}` : 'it publishes no "outputs" (--node picks any node)'}`);
+      const isNode = !!graph?.nodes && typeof graph.nodes === 'object' && Object.hasOwn(graph.nodes, outputName);
+      fail(`--output: ${file} has no output "${outputName}"${isNode ? `, but a node of that name: --node ${outputName}` : s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; ${names.length ? `its outputs: ${names.join(', ')}` : 'it publishes no "outputs" (--node picks any node)'}`);
     }
     target = o.node;
   }
@@ -261,10 +289,42 @@ async function cook() {
   const single = frameArg !== undefined ? Number(frameArg) : undefined;
   if (single !== undefined && !Number.isFinite(single)) fail(`--frame expects a number, got "${frameArg}"`);
 
+  // --inspect <detail>: checked before cooking
+  const INSPECT_DETAILS = ['summary', 'attributes', 'topology', 'all', 'uv', 'budget', 'scene'];
+  const inspectDetail = opt('--inspect');
+  if (argv.includes('--inspect') && (inspectDetail === undefined || !INSPECT_DETAILS.includes(inspectDetail))) {
+    const s = inspectDetail ? didYouMean(inspectDetail, INSPECT_DETAILS) : [];
+    fail(`--inspect needs one of ${INSPECT_DETAILS.join(', ')}${inspectDetail ? `, got "${inspectDetail}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}` : ''}`);
+  }
+  const uvRes = opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined;
+
+  /** The --inspect report of a cook: text, or the uv / budget / scene report as JSON with --json. */
+  async function inspectText(r: CookReport): Promise<string> {
+    const geo = r.geo!, json = argv.includes('--json');
+    if (inspectDetail === 'scene') {
+      // the glb export with the export options given, read back
+      const res = await serializeExport(geo, 'glb', 'scene.glb', exportArgs(), engine.host);
+      const glb = res.files.find((f) => /\.glb$/i.test(f.path));
+      if (!glb) return 'scene: the glb export wrote no file';
+      const rep = glbSceneReport(glb.bytes);
+      const warn = res.warnings.map((w) => `warning: ${w}`);
+      return json ? JSON.stringify(rep, null, 2) : [...sceneReportText(rep), ...warn].join('\n');
+    }
+    if (inspectDetail === 'uv' && json) return JSON.stringify(uvReport(geo, { resolution: uvRes }), null, 2);
+    if (inspectDetail === 'budget' && json) return JSON.stringify(budgetReport(geo, nodeBudgetInput(graph, r.results)), null, 2);
+    return inspect(geo, { detail: inspectDetail as any, uvResolution: uvRes, nodes: inspectDetail === 'budget' ? nodeBudgetInput(graph, r.results) : undefined });
+  }
+
   function report(r: CookReport) {
     for (const e of r.errors) console.error(`error [${e.node}] ${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`);
     for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
   }
+
+  /** Every render flag (renderFlags reads them, plus --views, --color-by, --checker). */
+  const RENDER_FLAGS = ['--wireframe', '--hard-angle', '--section', '--clip', '--glyphs', '--glyph-attrib', '--glyph-scale', '--max-glyphs', '--labels', '--max-labels',
+    '--shading', '--ao-radius', '--size', '--render-scale', '--azimuth', '--elevation', '--zoom', '--look-at', '--ortho-scale', '--texture', '--max-triangles', '--exposure',
+    '--heightfield-res', '--heightfield-layer', '--underlay', '--underlay-opacity', '--underlay-fit', '--legend', '--points', '--annotate', '--textures', '--transparent',
+    '--sockets', '--no-view-labels', '--no-grid', '--views', '--color-by', '--checker'];
 
   /** Render overlay flags → render tool arguments → RenderOptions (src/render/options.ts). */
   function renderFlags(get: (f: string) => string | undefined, has: (f: string) => boolean): RenderOptions {
@@ -273,9 +333,12 @@ async function cook() {
       ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
       ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
       ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'],
-      ['--heightfield-res', 'heightfield_res'], ['--heightfield-layer', 'heightfield_layer']]) if (get(f) !== undefined) a[k] = get(f);
-    for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures']]) if (has(f)) a[k] = true;
+      ['--heightfield-res', 'heightfield_res'], ['--heightfield-layer', 'heightfield_layer'], ['--underlay-opacity', 'underlay_opacity'], ['--underlay-fit', 'underlay_fit']]) if (get(f) !== undefined) a[k] = get(f);
+    for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures'], ['--transparent', 'transparent'], ['--sockets', 'sockets']]) if (has(f)) a[k] = true;
     if (has('--no-view-labels')) a.view_labels = false;
+    if (has('--no-grid')) a.grid = false;
+    // a reference image path is relative to the current folder, as the output paths are
+    if (get('--underlay') !== undefined) a.underlay = path.resolve(get('--underlay')!);
     try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
   }
 
@@ -283,6 +346,12 @@ async function cook() {
   // --render; options before the first --render apply to all of them. With one --render this is the old behaviour.
   const renderAt = argv.flatMap((x, i) => (x === '--render' ? [i] : []));
   const sharedArgs = argv.slice(0, renderAt.length ? renderAt[0] : argv.length);
+  // with several renders, options after the last --render belong to that render only: say so (a person who meant them
+  // for every render puts them before the first --render)
+  if (renderAt.length > 1) {
+    const last = argv.slice(renderAt[renderAt.length - 1] + 2).filter((x) => RENDER_FLAGS.includes(x));
+    if (last.length) console.error(`warning: ${last.join(' ')} after the last --render apply to ${argv[renderAt[renderAt.length - 1] + 1]} only; options before the first --render apply to every render`);
+  }
   const renders = renderAt.map((start, n) => {
     const seg = argv.slice(start, n + 1 < renderAt.length ? renderAt[n + 1] : argv.length);
     if (!seg[1] || seg[1].startsWith('--')) fail('--render needs an output path (e.g. --render out.png)');
@@ -320,8 +389,6 @@ async function cook() {
       const raw = (opt('--format') ?? exportFormatFromPath(ex)).toLowerCase();
       const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
       if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
-      if (argv.includes('--tile-size') && opt('--tile-size') === undefined) fail('--tile-size requires a number of quads (e.g. 1008)');
-      if (opt('--tangents') !== undefined && !['auto', 'preserve', 'none'].includes(opt('--tangents')!)) fail(`--tangents must be auto, preserve or none (got "${opt('--tangents')}")`);
       // the export tool's options (the MCP export tool and export targets use the same names and code)
       const a = exportArgs();
       const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph), version: TOPOTOPO_VERSION });
@@ -336,20 +403,8 @@ async function cook() {
 
   /** The export flags given, as the export tool's options (snake_case, as export targets and the MCP export tool name them). */
   function exportArgs(): Record<string, unknown> {
-    const a: Record<string, unknown> = {};
-    const up = opt('--up-axis');
-    if (up === 'y' || up === 'z') a.up_axis = up;
-    for (const [f, k] of [['--compress', 'compress'], ['--tangents', 'tangents'], ['--layer', 'layer']]) if (opt(f) !== undefined) a[k] = opt(f);
-    for (const [f, k] of [['--scale', 'scale'], ['--tile-size', 'tile_size']]) if (opt(f) !== undefined) a[k] = Number(opt(f));
-    if (opt('--attributes') !== undefined) a.attributes = opt('--attributes')!.split(/[\s,]+/).filter(Boolean);
-    if (opt('--layers') !== undefined) a.layers = opt('--layers')!.split(',');
-    if (argv.includes('--quantize')) a.quantize = true;
-    if (argv.includes('--pcg') || argv.includes('--pcg-struct')) a.pcg = true;
-    if (argv.includes('--pcg-struct')) a.pcg_struct = true;
-    if (opt('--instancing') === 'expand') a.instancing = 'expand';
-    if (opt('--instances') === 'expand') a.instances = 'expand';
-    if (argv.includes('--no-meshes')) a.meshes = false;
-    return a;
+    // every option of the export tool has a flag: --name value, booleans --name / --no-name (io/targets.ts)
+    try { return exportOptionsFromFlags(argv); } catch (e) { return fail(`export: ${(e as Error).message}`); }
   }
 
   if (framesArg) {
@@ -359,7 +414,7 @@ async function cook() {
       if (!r.ok || !r.geo) return;
       const cooked = [...r.results.values()].filter((n) => !n.cached && !n.error).length;
       console.log(`frame ${f}: ${r.target} in ${r.ms.toFixed(0)} ms (${cooked} node(s) cooked) — ${r.geo.numPoints} points, ${r.geo.numPrims} prims`);
-      if (opt('--inspect')) console.log(inspect(r.geo, { detail: opt('--inspect') as any }));
+      if (inspectDetail) console.log(await inspectText(r));
       await writeOutputs(r, f);
     }, { target, fps });
     console.log(`cooked ${file} frames ${range.start}-${range.end}${range.step !== 1 ? `:${range.step}` : ''}: ${res.frames - res.failed.length}/${res.frames} ok`);
@@ -370,8 +425,8 @@ async function cook() {
     if (!r.ok || !r.geo) process.exit(1);
     const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
     console.log(`cooked ${file} → ${outputName !== undefined ? `output "${outputName}" (${r.target})` : r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''}${vars} in ${r.ms.toFixed(0)} ms`);
-    if (opt('--inspect') === 'uv' && argv.includes('--json')) console.log(JSON.stringify(uvReport(r.geo, { resolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }), null, 2));
-    else console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary', uvResolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }));
+    // without --inspect the short summary; --inspect <detail> the report (src/inspect.ts, io/inspect-scene.ts)
+    console.log(inspectDetail ? await inspectText(r) : summarize(r.geo));
     await writeOutputs(r);
     if (argv.includes('--export-all')) await exportAll();
   }

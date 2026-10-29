@@ -50,6 +50,8 @@ export interface TangentDiagnostics {
   uvDegenerate: number;
   /** corners that received the fallback tangent */
   fallbackCorners: number;
+  /** the first triangle with a non-finite or collapsed uv, or -1 (warnings say where it is) */
+  firstBad: number;
 }
 
 /**
@@ -60,16 +62,16 @@ export interface TangentDiagnostics {
 export function mikkTangents(pos: ArrayLike<number>, nrm: ArrayLike<number>, uv: ArrayLike<number>): { tangents: Float32Array; diag: TangentDiagnostics } {
   if (!mod) throw new Error('MikkTSpace is not loaded: await loadMikkTSpace() first (exportGLB, renderPBR and bake_normal do)');
   const nt = Math.floor(pos.length / 9);
-  const diag: TangentDiagnostics = { triangles: nt, uvNonFinite: 0, uvDegenerate: 0, fallbackCorners: 0 };
+  const diag: TangentDiagnostics = { triangles: nt, uvNonFinite: 0, uvDegenerate: 0, fallbackCorners: 0, firstBad: -1 };
   const bad = new Uint8Array(nt);
   const P = Float32Array.from(pos), N = Float32Array.from(nrm), T = Float32Array.from(uv);
   for (let t = 0; t < nt; t++) {
     let finite = true;
     for (let k = 0; k < 6; k++) if (!Number.isFinite(T[t * 6 + k])) { finite = false; T[t * 6 + k] = 0; }
-    if (!finite) { diag.uvNonFinite++; bad[t] = 1; continue; }
+    if (!finite) { diag.uvNonFinite++; bad[t] = 1; if (diag.firstBad < 0) diag.firstBad = t; continue; }
     const u0 = T[t * 6], v0 = T[t * 6 + 1], du1 = T[t * 6 + 2] - u0, dv1 = T[t * 6 + 3] - v0, du2 = T[t * 6 + 4] - u0, dv2 = T[t * 6 + 5] - v0;
     const e2 = du1 * du1 + dv1 * dv1 + du2 * du2 + dv2 * dv2 + (du2 - du1) ** 2 + (dv2 - dv1) ** 2;
-    if (!(Math.abs(du1 * dv2 - du2 * dv1) > UV_DEGENERATE * e2)) { diag.uvDegenerate++; bad[t] = 1; }
+    if (!(Math.abs(du1 * dv2 - du2 * dv1) > UV_DEGENERATE * e2)) { diag.uvDegenerate++; bad[t] = 1; if (diag.firstBad < 0) diag.firstBad = t; }
   }
   for (let i = 0; i < N.length; i += 3) {
     const l = Math.hypot(N[i], N[i + 1], N[i + 2]);

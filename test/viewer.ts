@@ -139,7 +139,7 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       const glb = new Uint8Array(await (await fetch(`${url}/api/input?path=tri.obj`)).arrayBuffer());
       check(new TextDecoder().decode(glb.slice(0, 4)) === 'glTF', `GET /api/input returns a GLB (${glb.length} bytes)`);
       const info = (await getJSON('/api/input_info?path=tri.obj')).j;
-      check(/3 points, 1 prims/.test(info.summary) && /size 1\.00 × 1\.00 × 0\.00/.test(info.summary), 'GET /api/input_info summarises it (counts, bbox)');
+      check(/3 points, 1 prims/.test(info.summary) && /size 1\.000 × 1\.000 × 0\.000 m/.test(info.summary), 'GET /api/input_info summarises it (counts, bbox)');
       const again = await upload('tri.obj', TRI_OBJ + 'v 0 0 1\n');
       const forced = await upload('tri.obj', TRI_OBJ + 'v 0 0 1\nf 1 2 4\n', true);
       const info2 = (await getJSON('/api/input_info?path=tri.obj')).j;
@@ -275,7 +275,7 @@ section('session values: kept by var name, dropped when their declaration change
   ws.setSessionVars('g', { s: 4, n: 3, c: [0, 1, 0] });
   check(JSON.stringify(ws.sessionVars('g')) === '{"s":4,"n":3,"c":[0,1,0]}' && ws.effectiveGraph('g').vars!.s === 4 && ws.getGraph('g').vars!.s === 1, 'session values shadow the vars; the graph keeps its own');
   const r = await ws.cook('g');
-  check(r.ok && /size 4\.00 × 4\.00 × 4\.00/.test(summarize(r.geo!)) && ws.lastReport.get('g') === r && ws.lastCook.get('g')?.ok, 'cooks use them (a 4 m box)');
+  check(r.ok && /size 4\.000 × 4\.000 × 4\.000 m/.test(summarize(r.geo!)) && ws.lastReport.get('g') === r && ws.lastCook.get('g')?.ok, 'cooks use them (a 4 m box)');
   ws.setGraph('g', spec({ params: { s: { type: 'float', min: 0, max: 10, label: 'Size', desc: 'the size of the box', step: 0.5 } } }));
   check(JSON.stringify(ws.sessionVars('g')) === '{"s":4,"n":3,"c":[0,1,0]}', 'a reload with a new label, desc or step keeps them');
   ws.setGraph('g', spec({ params: { n: { type: 'int', min: 0, max: 9, desc: 'count' } } }));
@@ -357,7 +357,7 @@ section('cooks over HTTP: progress events, Stop, the latest value wins');
     check(!cookEvents().some((e) => e.cook.last?.stopped) && cookEvents().some((e) => e.cook.running?.superseded || e.cook.running?.elapsed > 0),
       'a superseded cook is not reported as stopped');
     const info = await (await fetch(`${v.url}api/info?graph=slow`)).json() as any;
-    check(/size 4\.00 × 4\.00 × 4\.00/.test(info.summary), 'the latest value is what the view shows');
+    check(/size 4\.000 × 4\.000 × 4\.000 m/.test(info.summary), 'the latest value is what the view shows');
     // Stop while a node that checks between its steps cooks: it ends at once
     events.length = 0;
     const third = postVars({ s: 5 });
@@ -373,7 +373,7 @@ section('cooks over HTTP: progress events, Stop, the latest value wins');
     const steps0 = counts.steps;
     const info2 = await (await fetch(`${v.url}api/info?graph=slow`)).json() as any;
     await sleep(1800); // the outputs panel's refresh
-    check(/size 4\.00 × 4\.00 × 4\.00/.test(info2.summary) && counts.steps === steps0, `after a stop, the view's output is the last finished cook and nothing cooks on its own (${counts.steps - steps0} cooks)`);
+    check(/size 4\.000 × 4\.000 × 4\.000 m/.test(info2.summary) && counts.steps === steps0, `after a stop, the view's output is the last finished cook and nothing cooks on its own (${counts.steps - steps0} cooks)`);
     // Stop while a node holds the thread: it runs to its end, the cook stops at the next node
     events.length = 0;
     const fourth = postVars({ s: 6 });
@@ -556,7 +556,7 @@ section('a dropped PNG and an image-only graph show as textured quads');
     const j = await glbJSON('api/input?path=albedo.png');
     check(quad(j, 'albedo'), `GET /api/input returns one flat quad with the image as an unlit base colour map (${JSON.stringify(j?.materials?.map((m: any) => m.name))})`);
     const info = await (await fetch(v.url + 'api/input_info?path=albedo.png')).json() as any;
-    check(/image "albedo": 4×2, layers: C rgba/.test(info.summary), `GET /api/input_info summarises the image (${info.summary?.split('\n')[1]})`);
+    check(/images \(1\): "albedo" 4×2/.test(info.summary), `GET /api/input_info summarises the image (${info.summary?.split('\n')[1]})`);
     check(quad(await glbJSON('api/geo?graph=tex'), 'noise'), 'a graph whose output is only an image shows it the same way (GET /api/geo)');
   } finally { v.close(); }
 }

@@ -3653,7 +3653,7 @@ category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, 
 
 Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the graph/workspace): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the project folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.
 
 **Inputs**
 
@@ -7551,7 +7551,7 @@ Houdini: HeightField File. One sample per pixel; image column = X, row = Z with 
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the workspace) or URL |
+| `path` | path | `""` |  |  | `file`, `filename` | PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph's folder |
 | `layer` | string | `"height"` |  |  |  | layer to write |
 | `height_min` | float | `0` |  |  | `min`, `low` | value for black (0) |
 | `height_max` | float | `10` |  |  | `max`, `high` | value for white (1) |
@@ -9465,7 +9465,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | file or folder path (relative to the workspace) or file URL; folder mode needs directory support in the host |
+| `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the project folder (the nearest folder with a project.json at or above the graph), else from the graph's folder (MCP: the workspace); folder mode needs directory support in the host |
 | `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
@@ -10777,7 +10777,7 @@ Houdini: Attribute from Map; Unreal PCG: Get Texture Data + Sample Texture. proj
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename`, `map`, `texture`, `image` | PNG file (relative to the workspace) or URL |
+| `path` | path | `""` |  |  | `file`, `filename`, `map`, `texture`, `image` | PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph's folder |
 | `name` | string | `""` |  |  | `attrib`, `attribute`, `output` | output attribute ("" = Cd for channel rgb, else mask) |
 | `channel` | enum | `"luminance"` |  | `luminance`, `r`, `g`, `b`, `a`, `rgb` |  | which channel (rgb writes a vector) |
 | `projection` | enum | `"uv"` |  | `uv`, `xz`, `xy`, `yz` | `mapping` | uv attribute or a planar projection (xz = top view) |
@@ -12588,7 +12588,7 @@ Houdini COP: File; Substance: Bitmap. The image is named after this node, like e
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the workspace, e.g. "inputs/brick.png") or URL |
+| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the project folder, e.g. "inputs/brick.png") or URL |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `layers` | enum | `"auto"` |  | `auto`, `grey`, `rgba` | `channels` | auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels |
 | `srgb` | bool | `true` |  |  |  | the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never) |

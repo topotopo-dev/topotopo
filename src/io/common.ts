@@ -16,7 +16,8 @@ export interface ExportOptions {
   cuspAngle?: number;
   /**
    * include extra numeric attributes: glTF `_NAME` vertex and per-instance accessors, PLY properties, USD primvars
-   * (the export tool's custom_attribs). Default false in every format: only the standard channels are written.
+   * (the export tool's custom_attribs, the CLI's --custom-attribs). Default false for glTF and USD (only the standard
+   * channels), true for PLY (io/targets.ts records the defaults per format).
    */
   custom?: boolean;
   /** glTF: write NORMAL (N if present, else computed with cuspAngle). false = only when N exists. Default true. */
