@@ -275,19 +275,15 @@ export class Session {
     // the project's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
     // is made by the first file written into it
     for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir, ...(this.inputsAt ? [] : [this.inputDir])]) fs.mkdirSync(d, { recursive: true });
-    const assetErrors: string[] = [];
-    for (const f of fs.readdirSync(this.assetDir).filter((f) => f.endsWith('.json'))) {
-      try {
-        const spec = JSON.parse(fs.readFileSync(path.join(this.assetDir, f), 'utf8'));
-        this.engine.registerAsset(path.basename(f, '.json'), spec);
-      } catch (e: any) { assetErrors.push(`${f}: ${e.message}`); }
-    }
+    // as a package version reads them (registerAssets): an asset that uses one registered later is tried again
+    const assetErrors: string[] = [], graphErrors: string[] = [];
+    registerAssets(this.engine, this.engine.root, this.dir, assetErrors);
     for (const [name, file] of graphFiles(this.dir)) {
       try { this.graphs.set(name, JSON.parse(fs.readFileSync(file, 'utf8'))); }
-      catch { continue; /* skip unreadable */ }
+      catch (e: any) { graphErrors.push(`${path.relative(this.dir, file).split(path.sep).join('/')}: ${e.message}`); continue; }
       if (path.dirname(file) === this.dir) this.besideProject.set(name, file);
     }
-    return { graphs: this.graphs.size, assets: this.engine.assetsIn().length, assetErrors };
+    return { graphs: this.graphs.size, assets: this.engine.assetsIn().length, assetErrors, graphErrors };
   }
 
   /** Where a graph is saved: its file beside project.json, or graphs/<name>.json. */
@@ -778,5 +774,25 @@ export class Session {
     for (const t of this.watchTimers.values()) clearTimeout(t);
     this.watchers = [];
     this.watchTimers.clear();
+  }
+}
+
+/** Register a folder's assets/*.json into a scope; an asset that uses one registered later is tried again. */
+export function registerAssets(engine: Engine, scope: Scope, dir: string, problems: string[]) {
+  let pending: { name: string; graph: GraphSpec }[] = [];
+  let files: string[] = [];
+  try { files = fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json')).sort(); } catch { /* no assets */ }
+  for (const f of files) {
+    try { pending.push({ name: f.slice(0, -5), graph: JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8')) }); }
+    catch (e: any) { problems.push(`assets/${f}: ${e.message}`); }
+  }
+  for (let pass = 0; pending.length; pass++) {
+    const failed: { name: string; graph: GraphSpec; error: string }[] = [];
+    for (const a of pending) {
+      try { engine.registerAsset(a.name, a.graph, { scope }); }
+      catch (e: any) { failed.push({ ...a, error: e.message }); }
+    }
+    if (failed.length === pending.length || pass > 8) { for (const a of failed) problems.push(`assets/${a.name}.json: ${a.error}`); break; }
+    pending = failed;
   }
 }

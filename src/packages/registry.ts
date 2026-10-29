@@ -50,7 +50,7 @@ import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
 import { readMaterials } from '../core/materials.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { imageRef, referenceableImages } from '../core/image.ts';
-import { NAME_RE } from '../session.ts';
+import { graphFiles, registerAssets } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { VERSION_RE, copiesFor, isPackageName, parseUses, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
@@ -346,16 +346,12 @@ function usesClosure(uses: Record<string, string>, lock: Lock): [string, string]
 
 // -------------------------------------------------------------------------------------------- what a package holds
 
-/** A graph folder's graphs by name (top level of graphs/); unreadable ones are problems. */
+/** A project's graphs by name (graphs/ and the graph files beside project.json); unreadable ones are problems. */
 function readGraphs(dir: string, problems: string[]): Map<string, GraphSpec> {
   const out = new Map<string, GraphSpec>();
-  let files: string[] = [];
-  try { files = fs.readdirSync(path.join(dir, 'graphs')).filter((f) => f.endsWith('.json')).sort(); } catch { /* no graphs */ }
-  for (const f of files) {
-    const name = f.slice(0, -5);
-    if (!NAME_RE.test(name)) continue;
-    try { out.set(name, JSON.parse(fs.readFileSync(path.join(dir, 'graphs', f), 'utf8'))); }
-    catch (e: any) { problems.push(`graphs/${f}: ${e.message}`); }
+  for (const [name, file] of graphFiles(dir)) {
+    try { out.set(name, JSON.parse(fs.readFileSync(file, 'utf8'))); }
+    catch (e: any) { problems.push(`${path.relative(dir, file).split(path.sep).join('/')}: ${e.message}`); }
   }
   return out;
 }
@@ -473,26 +469,6 @@ function materialMaps(g: Geometry): OutputInfo['maps'] {
     out[name] = slots;
   }
   return out;
-}
-
-/** Register a folder's assets/*.json into a scope; an asset that uses one registered later is tried again. */
-function registerAssets(engine: Engine, scope: Scope, dir: string, problems: string[]) {
-  let pending: { name: string; graph: GraphSpec }[] = [];
-  let files: string[] = [];
-  try { files = fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json')).sort(); } catch { /* no assets */ }
-  for (const f of files) {
-    try { pending.push({ name: f.slice(0, -5), graph: JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8')) }); }
-    catch (e: any) { problems.push(`assets/${f}: ${e.message}`); }
-  }
-  for (let pass = 0; pending.length; pass++) {
-    const failed: { name: string; graph: GraphSpec; error: string }[] = [];
-    for (const a of pending) {
-      try { engine.registerAsset(a.name, a.graph, { scope }); }
-      catch (e: any) { failed.push({ ...a, error: e.message }); }
-    }
-    if (failed.length === pending.length || pass > 8) { for (const a of failed) problems.push(`assets/${a.name}.json: ${a.error}`); break; }
-    pending = failed;
-  }
 }
 
 // ------------------------------------------------------------------------------------------------------- registry

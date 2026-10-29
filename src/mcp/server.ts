@@ -64,6 +64,7 @@ async function openSession(dir: string) {
   const { session: w, packages: pk, loaded } = openProject(e, dir, { watch: true });
   log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.manifest?.uses ?? {}).length} packages used` : '; in no project'}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
+  for (const x of loaded.graphErrors) log('graph not read:', x);
   for (const x of pk.check()) log('package problem:', x);
   const prev = ws as Session | undefined;
   engine = e;
