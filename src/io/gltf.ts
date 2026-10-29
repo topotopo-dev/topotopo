@@ -23,11 +23,13 @@
 //   Materials: the prim "material" attribute names a material of the detail table "materials" (core/materials.ts).
 //   Colour space: TopoTopo colours (Cd, material base/emissive colours) are display values; glTF defines
 //   baseColorFactor, emissiveFactor and COLOR_0 as linear, so they are converted on export and back on import.
-//   Vertex colours win: a primitive with Cd gets baseColorFactor white × COLOR_0, the material supplies the PBR
-//   scalars; the original material is kept in material extras (topotopo.material) for lossless re-import.
-//   A primitive whose Cd is one constant colour writes it as the baseColorFactor instead of COLOR_0 (the same
-//   colour under glTF's factor × COLOR_0, and visible in engines whose default materials ignore vertex colours,
-//   such as Unreal's Interchange); primitive extras (topotopo.Cd) restore it as point Cd on import.
+//   A named material wins over Cd: a primitive whose prim "material" names a material of the table is written with
+//   that material as it is, and its Cd / Alpha are not exported (option vertexColors writes them there too).
+//   Elsewhere, and with vertexColors, vertex colours win: a primitive with Cd gets baseColorFactor white × COLOR_0,
+//   the material supplies the PBR scalars; the original material is kept in material extras (topotopo.material) for
+//   lossless re-import. A primitive whose Cd is one constant colour writes it as the baseColorFactor instead of
+//   COLOR_0 (the same colour under glTF's factor × COLOR_0, and visible in engines whose default materials ignore
+//   vertex colours, such as Unreal's Interchange); primitive extras (topotopo.Cd) restore it as point Cd on import.
 //   Options: quantize (KHR_mesh_quantization), compress 'meshopt' (EXT_meshopt_compression, implies quantize),
 //   compress 'draco' (KHR_draco_mesh_compression, only when the optional draco3dgltf package is installed).
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
@@ -278,9 +280,18 @@ interface MatState {
   /** texture bytes by path (exportGLB preloads them); undefined = no texture support in this call */
   data?: Map<string, Uint8Array | null>;
   textures: Map<string, Texture | null>;
+  /** textures by byte length, for the byte-for-byte check that writes each distinct image once */
+  byLength: Map<number, { bytes: Uint8Array; tex: Texture }[]>;
   uris: Set<string>;
   warn?: (msg: string) => void;
 }
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
 
 /** Image MIME type from the first bytes (PNG or JPEG), or null. */
 export function imageMime(b: Uint8Array): string | null {
@@ -289,7 +300,10 @@ export function imageMime(b: Uint8Array): string | null {
   return null;
 }
 
-/** The glTF texture for an image path (created once per path), or null when its bytes are missing or not PNG/JPEG. */
+/**
+ * The glTF texture for an image path (created once per path, and once per distinct image: a path whose bytes equal an
+ * earlier one's, e.g. each LOD's copy of a map, shares its texture), or null when its bytes are missing or not PNG/JPEG.
+ */
 function textureFor(st: MatState, path: string): Texture | null {
   if (!st.data) return null;
   let t = st.textures.get(path);
@@ -299,12 +313,18 @@ function textureFor(st: MatState, path: string): Texture | null {
   const mime = bytes ? imageMime(bytes) : null;
   if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image; material exported without it`);
   if (bytes && mime) {
-    const base = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
-    const ext = mime === 'image/png' ? '.png' : '.jpg';
-    let uri = base + ext, k = 1;
-    while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
-    st.uris.add(uri);
-    t = st.doc.createTexture(base).setImage(bytes).setMimeType(mime).setURI(uri);
+    const same = st.byLength.get(bytes.length)?.find((c) => sameBytes(c.bytes, bytes));
+    if (same) t = same.tex;
+    else {
+      const base = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
+      const ext = mime === 'image/png' ? '.png' : '.jpg';
+      let uri = base + ext, k = 1;
+      while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
+      st.uris.add(uri);
+      t = st.doc.createTexture(base).setImage(bytes).setMimeType(mime).setURI(uri);
+      const list = st.byLength.get(bytes.length);
+      if (list) list.push({ bytes, tex: t }); else st.byLength.set(bytes.length, [{ bytes, tex: t }]);
+    }
   }
   st.textures.set(path, t);
   return t;
@@ -418,7 +438,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const useMaterials = o.materials !== false;
   const st: MatState = {
     doc, table: useMaterials ? mergeMaterialTables([g, ...g.packedSources]) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material,
-    data: o.textureData, textures: new Map(), uris: new Set(), warn: o.warn,
+    data: o.textureData, textures: new Map(), byLength: new Map(), uris: new Set(), warn: o.warn,
   };
   let noUV = 0;
   const custom = o.custom === true;
@@ -455,6 +475,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     }
     const hasN = !!(geo.vertices.get('N') ?? geo.points.get('N'));
     let normals: Float64Array | null = null;
+    // a named material decides the colour of its primitives: their Cd / Alpha are written only with vertexColors
+    const colorFor = (mat: string): Channel | null => (color && (o.vertexColors === true || !(mat && st.table[mat])) ? color : null);
     const finishColor = (out: PrimOut, mat: string) => {
       // vertex colours win where they are set; all-white Cd lets the material colour through
       const ci = color ? out.channels.indexOf(color) : -1;
@@ -532,7 +554,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
         if (tan) chans.push(tan);
         if (uv0) chans.push(uv0);
         if (uv1) chans.push(uv1);
-        if (color) chans.push(color);
+        const col = colorFor(gr.mat);
+        if (col) chans.push(col);
         chans.push(...customs);
         const e = emit(chans, tris, vprim, geo, true);
         const out: PrimOut = { mode: Primitive.Mode.TRIANGLES, channels: chans, data: e.data, count: e.count, indices: e.idx, material: null };
@@ -550,7 +573,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
         const chans: Channel[] = [posCh];
         const uv0 = uvCh('uv', 'TEXCOORD_0');
         if (uv0) chans.push(uv0);
-        if (color) chans.push(color);
+        const col = colorFor(gr.mat);
+        if (col) chans.push(col);
         chans.push(...customs);
         const strips = lineMode === 'strip' && curves.length <= MAX_LINE_STRIPS;
         const batches = strips ? curves.map((c) => [c]) : [curves];

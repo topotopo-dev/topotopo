@@ -69,10 +69,10 @@ const srcPolys = scene.primClosed.reduce((s, c) => s + c, 0);
 const srcCurves = scene.numPrims - srcPolys;
 
 // ---------------------------------------------------------------- glTF
-const variants: [string, ExportOptions][] = [['plain', { custom: true }], ['quantized', { quantize: true, custom: true }], ['meshopt', { compress: 'meshopt', custom: true }]];
+const variants: [string, ExportOptions][] = [['plain', { custom: true, vertexColors: true }], ['quantized', { quantize: true, custom: true, vertexColors: true }], ['meshopt', { compress: 'meshopt', custom: true, vertexColors: true }]];
 {
   const plain = await importGeometryAsync(await exportGeometryAsync(scene, 'glb'), 'glb');
-  check(!plain.points.has('heat') && !plain.points.has('tag') && plain.points.has('Cd'), 'glb by default: standard channels only, no custom "heat" or "tag"');
+  check(!plain.points.has('heat') && !plain.points.has('tag') && !plain.points.has('Cd') && plain.points.has('uv'), 'glb by default: standard channels only (no custom "heat" or "tag"; the materials win over Cd)');
 }
 for (const [label, opts] of variants) {
   const bytes = await exportGeometryAsync(scene, 'glb', opts);
@@ -784,15 +784,34 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
   // glTF factors are linear: the display value 0.54 is written as its sRGB-decoded linear value
   const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   const gj = (bytes: Uint8Array) => { const n = new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true); return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + n))); };
-  const lb = await exportGeometryAsync(leaf, 'glb');
+  const lb = await exportGeometryAsync(leaf, 'glb', { vertexColors: true });
   const lj = gj(lb);
   const prim = lj.meshes[0].primitives[0];
   const factor = lj.materials[prim.material].pbrMetallicRoughness.baseColorFactor;
   check(!('COLOR_0' in prim.attributes) && Math.abs(factor[1] - lin(0.54)) < 1e-6 && prim.extras?.topotopo?.Cd?.length === 3,
-    `constant Cd: no COLOR_0, factor carries it, linear (${factor.map((x: number) => x.toFixed(3))})`);
+    `vertex colours: constant Cd: no COLOR_0, factor carries it, linear (${factor.map((x: number) => x.toFixed(3))})`);
   const lback = await importGeometryAsync(lb, 'glb');
   const cd = lback.points.get('Cd');
   check(!!cd && Math.abs((cd.data as Float64Array)[1] - 0.54) < 1e-6 && readMaterials(lback).foliage?.baseColor[1] === 0.54, 'constant Cd and the material survive a re-import');
+  // by default a named material wins: Cd left from colouring parts is not exported, and no second material appears
+  const parts = await cook({
+    nodes: {
+      a: { type: 'box' }, b: { type: 'box', params: { center: [2, 0, 0] } },
+      ca: { type: 'color', in: ['a'], params: { color: [1, 0, 0] } }, cb: { type: 'color', in: ['b'], params: { color: [0, 0, 1] } },
+      both: { type: 'merge', in: ['ca', 'cb'] }, m: { type: 'material', in: ['both'], params: { name: 'steel', base_color: [0.5, 0.5, 0.5], metallic: 1 } },
+      plain: { type: 'box', params: { center: [4, 0, 0] } }, pc: { type: 'color', in: ['plain'], params: { color: [0, 1, 0] } },
+      out: { type: 'merge', in: ['m', 'pc'] },
+    },
+    output: 'out',
+  });
+  const pj = gj(await exportGeometryAsync(parts, 'glb', { splitByName: false }));
+  const pprims = pj.meshes.flatMap((m: any) => m.primitives);
+  const steel = pprims.filter((p: any) => pj.materials[p.material].name === 'steel');
+  const steelMats = new Set(steel.map((p: any) => p.material));
+  const other = pprims.find((p: any) => pj.materials[p.material].name !== 'steel');
+  check(steel.length === 1 && steelMats.size === 1 && !('COLOR_0' in steel[0].attributes) && Math.abs(pj.materials[steel[0].material].pbrMetallicRoughness.baseColorFactor[0] - lin(0.5)) < 1e-6,
+    `a named material wins over Cd: one "steel" material at its own colour, no COLOR_0 (${pj.materials.map((m: any) => m.name).join(', ')})`);
+  check(!!other && Math.abs(pj.materials[other.material].pbrMetallicRoughness.baseColorFactor[1] - 1) < 1e-6, 'prims without a material keep their Cd (folded into the factor)');
   const varied = await cook({
     nodes: { b: { type: 'box' }, c: { type: 'attrib_randomize', in: ['b'], params: { name: 'Cd', min: [0, 0, 0], max: [1, 1, 1], seed: 1 } } },
     output: 'c',
@@ -813,11 +832,13 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
     },
     output: 'c',
   });
-  const plainJ = gj(await exportGeometryAsync(tinted, 'glb'));
-  const engJ = gj(await exportGeometryAsync(tinted, 'glb', { materialColorWins: true }));
+  const plainJ = gj(await exportGeometryAsync(tinted, 'glb', { vertexColors: true }));
+  const engJ = gj(await exportGeometryAsync(tinted, 'glb', { vertexColors: true, materialColorWins: true }));
+  const defJ = gj(await exportGeometryAsync(tinted, 'glb'));
   const fOf = (j: any) => j.materials[j.meshes[0].primitives[0].material].pbrMetallicRoughness.baseColorFactor ?? [1, 1, 1, 1];
   check(fOf(plainJ)[1] === 1 && Math.abs(fOf(engJ)[1] - lin(0.54)) < 1e-6 && 'COLOR_0' in engJ.meshes[0].primitives[0].attributes,
-    `materialColorWins: factor ${fOf(engJ).slice(0, 3).map((x: number) => x.toFixed(2))} with COLOR_0 kept (default stays white × COLOR_0)`);
+    `vertex colours + materialColorWins: factor ${fOf(engJ).slice(0, 3).map((x: number) => x.toFixed(2))} with COLOR_0 kept (vertex colours alone: white × COLOR_0)`);
+  check(Math.abs(fOf(defJ)[1] - lin(0.54)) < 1e-6 && !('COLOR_0' in defJ.meshes[0].primitives[0].attributes), 'by default the material colour, without COLOR_0');
 }
 
 // ---------------------------------------------------------------- export:demo in a temp dir

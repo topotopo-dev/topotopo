@@ -23,7 +23,7 @@ export async function serializeExport(geo: Geometry, format: ExportFormat, p: st
   const outDir = format === 'unreal_landscape' && !/\.json$/i.test(p) ? p : path.dirname(p);
   const res = await exportFilesAsync(geo, format, p, {
     upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
-    materials: a.materials, compress: a.compress, quantize: a.quantize, tangents: a.tangents, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct,
+    materials: a.materials, vertexColors: a.vertex_colors, compress: a.compress, quantize: a.quantize, tangents: a.tangents, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct,
     precision: a.precision, instancing: a.instancing, instances: a.instances, meshes: a.meshes,
     layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield, tile_size: a.tile_size,
     deflate: (d) => zlib.deflateSync(d, { level: 6 }),

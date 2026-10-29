@@ -144,7 +144,7 @@ export async function unrealLandscapeBundle(g: Geometry, o: ExportOptions & Heig
   // meshes and instances of the same geometry
   let objects: string | null = null, expanded: string | null = null, statics: string | null = null, instances: Record<string, any> | null = null;
   // Unreal's default glTF materials ignore vertex colours: the material colour must be the factor
-  const glbOpts: ExportOptions = { materials: o.materials, readFile: o.readFile, warn: o.warn, custom: o.custom, materialColorWins: true };
+  const glbOpts: ExportOptions = { materials: o.materials, readFile: o.readFile, warn: o.warn, custom: o.custom, vertexColors: o.vertexColors, materialColorWins: true };
   if (g.numPrims > 0) {
     files.push({ path: 'objects.glb', bytes: await exportGLB(g, glbOpts) });
     objects = 'objects.glb';

@@ -485,6 +485,15 @@ let tg: Geometry;
   const ij = JSON.parse(new TextDecoder().decode(instGlb.subarray(20, 20 + new DataView(instGlb.buffer, instGlb.byteOffset).getUint32(12, true))));
   check(inst.numPacked === 3 && (ij.images ?? []).length === 3 && !iw.length, 'packed copies of a textured mesh export their textures (EXT_mesh_gpu_instancing)');
   check(imagesOf(unpacked).map((i) => i.name).sort().join(',') === 'brick_color,brick_normal,brick_orm' && unpacked.numPrims === 72, 'unpack carries the source images once');
+  // levels of detail: textured LOD branches merged carry each map once, and the GLB holds one image per distinct map
+  const lods = await geo({ ...textured, l0: { type: 'lod', in: ['mat'], params: { mode: 'switch', level: 0, levels: 2 } }, l1: { type: 'lod', in: ['mat'], params: { mode: 'switch', level: 1, levels: 2 } }, both: { type: 'merge', in: ['l0', 'l1'] } }, 'both');
+  const lj = JSON.parse(new TextDecoder().decode((await exportGeometryAsync(lods, 'glb')).subarray(20, 20 + new DataView((await exportGeometryAsync(lods, 'glb')).buffer).getUint32(12, true))));
+  check(imagesOf(lods).length === 3 && lj.images.length === 3 && lj.meshes.length === 2, `merged textured LODs: 3 images in the geometry and the GLB, 2 meshes (${lj.images.length} images)`);
+  // two materials whose maps are the same pixels under other names: one image in the GLB
+  const twin = await geo({ ...textured, copy: { type: 'tex_output', in: ['maps'], params: { image: 'brick_color', name: 'brick_color_copy', keep_only: true } }, m2: { type: 'texture_to_material', in: ['mat', 'copy'], params: { material: 'brick2', base_color: 'brick_color_copy', group: '@P.y>0' } } }, 'm2');
+  const twj = JSON.parse(new TextDecoder().decode((await exportGeometryAsync(twin, 'glb')).subarray(20, 20 + new DataView((await exportGeometryAsync(twin, 'glb')).buffer).getUint32(12, true))));
+  const baseTex = (n: string) => twj.materials.find((m: any) => m.name === n).pbrMetallicRoughness.baseColorTexture.index;
+  check(twj.images.length === 3 && baseTex('brick') === baseTex('brick2'), 'identical pixels under two image names are written once (one texture for both materials)');
   // USD: PNGs next to the .usda, referenced relative to it, ORM through r/g/b
   const usdPath = path.join(tmp, 'out', 'brick.usda');
   const u = await exportFilesAsync(tg, 'usda', usdPath, { deflate: (d) => zlib.deflateSync(d) });

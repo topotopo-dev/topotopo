@@ -36,9 +36,16 @@ export interface ExportOptions {
   /** glTF: write materials from the prim "material" attribute and the detail table (default true) */
   materials?: boolean;
   /**
-   * glTF: a named material's base colour is the factor even where Cd varies (COLOR_0 is still written). For engines
-   * whose default materials ignore vertex colours (Unreal Interchange), where glTF's white factor × COLOR_0 imports
-   * white; spec viewers then show factor × COLOR_0. The unreal_landscape bundle sets it. Default false.
+   * glTF: also write Cd / Alpha (COLOR_0) on primitives whose prim "material" names a material of the table (the
+   * export tool's vertex_colors). Default false: a named material decides their colour as it is and their Cd is not
+   * written (no COLOR_0, no white-factor or tinted copy of the material); primitives without one keep their Cd.
+   */
+  vertexColors?: boolean;
+  /**
+   * glTF with vertexColors: a named material's base colour is the factor even where Cd varies (COLOR_0 is still
+   * written). For engines whose default materials ignore vertex colours (Unreal Interchange), where glTF's white
+   * factor × COLOR_0 imports white; spec viewers then show factor × COLOR_0. The unreal_landscape bundle sets it.
+   * Default false.
    */
   materialColorWins?: boolean;
   /** glTF: polylines as one LINE_STRIP per curve ('strip', default) or one LINES primitive ('lines') */

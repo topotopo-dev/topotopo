@@ -1033,7 +1033,8 @@ export {path:"exports/thing.glb"} — format from the extension:
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs (default false: glTF / PLY / USD write only their standard channels; true adds every other numeric
-  attribute, below), materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
+  attribute, below), materials (default true), vertex_colors (glTF, default false: prims with a named material are
+  written in that material, their Cd dropped; true keeps Cd as COLOR_0 there too, below), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
@@ -1056,7 +1057,8 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or
   a uniquely named mesh, with the local TRS that keeps their geometry-space placement; set point attributes → node extras;
   missing, ambiguous or cyclic parents and GPU-instanced parents are errors; import brings them back. N → NORMAL (else computed, 60° cusp),
-  uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. TANGENT (tangents "auto", the default): MikkTSpace
+  uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0 (not on prims with a named material unless vertex_colors,
+  MATERIALS below). TANGENT (tangents "auto", the default): MikkTSpace
   tangents (xyz + handedness w) for every primitive whose material has a normal map, computed per corner before
   vertices are welded (uv seams, hard normals and mirrored islands keep their own frames), the same frame bake_normal
   bakes in; a valid point/vertex "tangent" float[4] (from an import) is written on other primitives. "preserve" writes
@@ -1066,9 +1068,11 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   float or the smallest int type), mesh extras keep the original names and types, and packed instances carry their
   anchor attributes as per-instance accessors. The attributes only scene empties use (scene_empty, parent, orient, scale,
   their extras) never become mesh channels.
-MATERIALS: the material node writes prim "material" + the detail table. Vertex colours win: prims whose Cd is not all
-  white export baseColor white × COLOR_0 with the material's metallic/roughness/emissive; otherwise baseColor = the
-  material colour. alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
+MATERIALS: the material node writes prim "material" + the detail table. A named material wins: its prims export in that
+  material as it is and their Cd / Alpha are dropped (Cd left from colouring parts does not become COLOR_0 or a second,
+  white or tinted copy of the material). Prims without a material, and every prim with vertex_colors:true, keep their
+  Cd: not all white → baseColor white × COLOR_0 with the material's metallic/roughness/emissive (one constant Cd is
+  folded into the factor). alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
 TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the workspace/graph; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
   map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json

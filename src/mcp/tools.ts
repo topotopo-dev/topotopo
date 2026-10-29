@@ -432,6 +432,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           split_by_name: { type: 'boolean', description: 'separate meshes per prim "name" (default true)' },
           custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: also write the extra numeric attributes (glTF _NAME vertex and per-instance accessors, PLY properties, USD primvars); default false: only the standard channels' },
           materials: { type: 'boolean', description: 'glTF: write materials from the prim "material" attribute + table (default true)' },
+          vertex_colors: { type: 'boolean', description: 'glTF: also write Cd as COLOR_0 on prims that have a named material (default false: the material decides their colour; prims without one keep their Cd)' },
           compress: { type: 'string', enum: ['none', 'meshopt', 'draco'], description: 'glTF: meshopt = EXT_meshopt_compression + quantization; draco needs the optional draco3dgltf package' },
           quantize: { type: 'boolean', description: 'glTF: KHR_mesh_quantization (smaller, lossy) without compression' },
           tangents: { type: 'string', enum: ['auto', 'preserve', 'none'], description: 'glTF TANGENT: auto (default) = MikkTSpace for normal-mapped materials, a valid supplied "tangent" attribute elsewhere; preserve = the supplied attribute wherever it exists (malformed = error); none = never' },
