@@ -76,7 +76,7 @@ npx topotopo --catalog                                      # node types by cate
 npx topotopo --help-node scatter                            # one node's params, defaults and example
 npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
-npx topotopo graph.json --export-all                        # every output's export target, into exports/ beside it
+npx topotopo graph.json --export-all                        # every output's export target, into its project's exports/
 npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
 npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
@@ -131,8 +131,9 @@ made (see below); in the Saved files and Inputs lists a sidecar or `.source.json
 A heightfield's details have a layer picker: the terrain shows that layer (the mask by default) in red. **Inputs**
 lists your files in `inputs/`, with **Add input** (or drop files anywhere on the page); the agent is told about new
 ones in its next tool answer. Images open in a 2D viewer with layers and channels (generated textures default to
-RGB; use A to inspect packed alpha/AO); JPEG/WebP are for viewing only. For `topotopo view graph.json`, `inputs/`
-and `exports/` are beside that graph.
+RGB; use A to inspect packed alpha/AO); JPEG/WebP are for viewing only. Exports always go into the project's
+`exports/`: the folder of the nearest `project.json` above the graph, from the viewer, the CLI and the agent alike (a
+graph file in no project exports beside itself). For `topotopo view graph.json`, `inputs/` is beside that graph.
 
 The **Controls** panel holds the graph's exposed vars. Above them, and in the status bar, the cook in progress: the
 node cooking and the time so far, then the last cook's time, or the failing node and its message. **Stop** ends a cook

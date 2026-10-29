@@ -312,8 +312,20 @@ let noTargets = ''; try { cli('--export-all'); } catch (e: any) { noTargets = St
 check(/no output of .* has an export target/.test(noTargets), 'CLI --export-all without targets says where to add one');
 fs.writeFileSync(cliGraph, JSON.stringify({ nodes: { b: { type: 'box' }, s: { type: 'sphere' } }, output: 'b', export: 'glb', outputs: { ball: { node: 's', export: { format: 'obj', path: 'parts/ball.obj' } } } }));
 cli('--export-all');
-check(fs.existsSync(path.join(cliExports, 'g.glb')) && fs.existsSync(path.join(cliExports, 'parts', 'ball.obj')), 'CLI --export-all writes every target into exports/ beside the graph');
+check(fs.existsSync(path.join(cliExports, 'g.glb')) && fs.existsSync(path.join(cliExports, 'parts', 'ball.obj')), 'CLI --export-all writes every target into exports/ beside a graph that is in no project');
 check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' && a.graph === 'g'), 'CLI target exports are registered like the viewer\'s');
+{
+  // a graph in a project exports into the project's exports/, not beside itself; the receipts hold project paths
+  const proj = path.join(tmp, 'proj'), graphFile = path.join(proj, 'graphs', 'tower.json');
+  fs.mkdirSync(path.dirname(graphFile), { recursive: true });
+  fs.writeFileSync(path.join(proj, 'project.json'), JSON.stringify({ id: 'proj', title: 'Proj', graph: 'tower' }));
+  fs.writeFileSync(graphFile, JSON.stringify({ nodes: { b: { type: 'box' } }, output: 'b', export: 'glb' }));
+  execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), graphFile, '--export-all'], { stdio: 'pipe' });
+  const receipts = fs.readFileSync(path.join(proj, 'exports', '.outputs.json'), 'utf8');
+  check(fs.existsSync(path.join(proj, 'exports', 'tower.glb')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')), 'a graph in a project exports into the project\'s exports/, not beside the graph');
+  check(receipts.includes('"exports/tower.glb"') && !receipts.includes(JSON.stringify(tmp).slice(1, -1)) && !receipts.includes(tmp)
+    && new ArtifactStore(path.join(proj, 'exports')).records()[0].files[0] === path.join(proj, 'exports', 'tower.glb'), 'the receipts hold paths relative to the project, read back as this machine\'s');
+}
 
 // What an output is and the formats that fit it (io/kinds.ts), checked against the exporters themselves: every format
 // offered for an output writes some of it (its export succeeds and differs from an export of nothing).

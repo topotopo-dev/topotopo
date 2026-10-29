@@ -1008,6 +1008,9 @@ CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pie
   export: `EXPORT
 export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic
   "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
+  exports/ is the project's: the folder of the nearest project.json above the graph (a graph in <project>/graphs/
+  exports into <project>/exports/); a graph file in no project exports beside itself. The CLI's --export-all, the
+  viewer and this tool follow the one rule, and exports/.outputs.json records the files by their project paths.
 export {path:"exports/thing.glb"} — format from the extension:
   glb / gltf    glTF 2.0 via gltf-transform (recommended for Unreal, Blender, web)
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)

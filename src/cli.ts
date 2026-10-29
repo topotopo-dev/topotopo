@@ -50,7 +50,7 @@ import { exportSource } from './io/source.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { openPackages } from './gallery/packages.ts';
 import { ArtifactStore } from './host/artifacts.ts';
-import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
+import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
 import { publishedOutputs } from './io/targets.ts';
@@ -281,9 +281,9 @@ async function cook() {
   async function writeOutputs(r: CookReport, frame?: number) {
     const geo = r.geo!;
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
-    // Receipts for the viewer's saved files, only for files inside exports/ beside the graph: a run whose output goes
-    // elsewhere leaves no exports/ folder behind (the viewer lists that folder's files without receipts too).
-    const exportsDir = path.join(path.dirname(path.resolve(file)), 'exports');
+    // Receipts for the viewer's saved files, only for files inside the project's exports/ (exportsFolderFor): a run whose
+    // output goes elsewhere leaves no exports/ folder behind (the viewer lists that folder's files without receipts too).
+    const exportsDir = exportsFolderFor(file);
     const record = (paths: string[], format: string) => {
       const inside = paths.every((p) => { const rel = path.relative(exportsDir, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); });
       if (inside) new ArtifactStore(exportsDir).record(paths, { graph: graphName(file), node: r.target, format });
@@ -364,9 +364,9 @@ async function cook() {
     if (argv.includes('--export-all')) await exportAll();
   }
 
-  /** --export-all: every published output with an export target (io/targets.ts), into exports/ beside the graph. */
+  /** --export-all: every published output with an export target (io/targets.ts), into the project's exports/ (exportsFolderFor). */
   async function exportAll() {
-    const name = graphName(file), exportsDir = path.join(path.dirname(path.resolve(file)), 'exports');
+    const name = graphName(file), exportsDir = exportsFolderFor(file);
     const published = publishedOutputs(name, graph, engine.findOutput(graph).name);
     if (!published.some((p) => p.target)) fail(`--export-all: no output of ${file} has an export target; add "export": "glb" to the graph (default output) or to an entry of "outputs"`);
     const prepared: PreparedTarget[] = [];
@@ -378,8 +378,9 @@ async function cook() {
       prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, graph) }));
     }
     writeTargets(prepared, exportsDir);
-    const rel = (f: string) => path.join('exports', path.relative(exportsDir, f));
-    for (const p of prepared) console.log(`exported ${p.label} → ${path.join('exports', ...p.target.path.split('/'))} — ${p.summary}${p.sourceFile ? `; source: ${rel(p.sourceFile)}` : ''}`);
+    // paths as the person finds them from where they ran the command
+    const rel = (f: string) => path.relative(process.cwd(), f) || f;
+    for (const p of prepared) console.log(`exported ${p.label} → ${rel(path.join(exportsDir, ...p.target.path.split('/')))} — ${p.summary}${p.sourceFile ? `; source: ${rel(p.sourceFile)}` : ''}`);
     const skipped = published.filter((p) => !p.target).map((p) => p.label);
     if (skipped.length) console.log(`no export target (skipped): ${skipped.join(', ')}`);
   }
