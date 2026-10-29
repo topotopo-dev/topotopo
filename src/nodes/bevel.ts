@@ -36,7 +36,7 @@ defineNode({
     mode: { type: 'enum', options: ['edges', 'points'], default: 'edges', desc: 'bevel edges, or truncate points', aliases: ['bevel_type', 'class'] },
     offset: { type: 'float', default: 0.1, min: 0, desc: 'distance from the edge across each adjacent face (points mode: along each edge)', aliases: ['distance', 'width', 'radius', 'size', 'amount'] },
     offset_mode: { type: 'enum', options: ['distance', 'fraction'], default: 'distance', desc: 'distance = offset in scene units; fraction = offset x the shortest edge at the edge\'s points (stays proportional on small faces)', aliases: ['distance_mode', 'offsetmode'] },
-    clamp: { type: 'bool', default: true, desc: 'shrink the offsets where bevels would cross their neighbours, only at the edges involved (Houdini Clamp Offset, applied locally); warns when it does', aliases: ['clamp_offset', 'clamp_overlap'] },
+    clamp: { type: 'bool', default: true, desc: 'shrink the offsets where bevels would cross their neighbours, or the edge facing them across a narrow face (the two rims of a thin band), only at the edges involved (Houdini Clamp Offset, applied locally); warns when it does', aliases: ['clamp_offset', 'clamp_overlap'] },
     divisions: { type: 'int', default: 0, min: 0, max: 64, desc: '0 = flat chamfer (one strip of quads per edge); n = round profile with n+1 strips', aliases: ['segments', 'divs', 'subdivisions'] },
     shape: { type: 'float', default: 0, min: -1, max: 1, desc: 'profile convexity for round bevels: 0 = circular arc, 1 = bulges out to a nearly square corner, -0.5 = straight, -1 = concave cove', aliases: ['profile_shape', 'convexity', 'profile'] },
   },

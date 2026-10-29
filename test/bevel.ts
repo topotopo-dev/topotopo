@@ -337,7 +337,8 @@ const d = 0.1;
     c: { type: 'curve', params: { points: [[0, 0, 0], [0.3, 0, 0], [0.3, 0.2, 0], [0.151, 0.2, 0], [0.15, 0.201, 0], [0, 0.2, 0]], closed: true } },
     e: { type: 'extrude', in: ['c'], params: { height: 0.2 } },
   }, { offset: 0.01, divisions: 1, group: 'angle>40' });
-  const touched = notch.warnings.reduce((n, w) => n + Number(/(?:at |^)(\d+) edge/.exec(w)?.[1] ?? 0), 0);
+  // edges the corner clamp reduced or left sharp, and both edges of each pair the facing clamp reduced
+  const touched = notch.warnings.reduce((n, w) => n + Number(/(?:at |^)(\d+) edge/.exec(w)?.[1] ?? 0) + 2 * Number(/at (\d+) pair/.exec(w)?.[1] ?? 0), 0);
   check(!notch.warnings.some((w) => /clamped/.test(w)) && touched > 0 && touched <= 8 && topologyReport(notch.geo).degenerate === 0,
     `a short edge reduces or leaves sharp only the bevels next to it (${notch.warnings.join('; ') || 'no warnings'})`);
 }

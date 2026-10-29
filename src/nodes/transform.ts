@@ -431,8 +431,11 @@ defineNode({
   },
   outputs: 'prim copynum',
   example: { type: 'copy_xform', params: { count: 12, translate: [0, 0.2, 0], rotate: [0, 30, 0] } },
-  cook: ({ input, p }) => {
+  cook: ({ input, p, warn }) => {
     const g = input(0);
+    const still = (v: number[], k: number) => v.every((x) => x === k);
+    // points stacked on purpose (to jitter or scatter them next) are fine; stacked meshes are a slip
+    if (p.count > 1 && g.numPrims && still(p.translate, 0) && still(p.rotate, 0) && still(p.scale, 1)) warn(`the ${p.count} copies stack in place: translate, rotate and scale are all at rest (translate is 0 by default); set the step between copies`);
     const step = m4trs(p.translate, p.rotate, p.scale, p.pivot);
     let m = m4trs([0, 0, 0], [0, 0, 0], [1, 1, 1]);
     const parts: Geometry[] = [];
