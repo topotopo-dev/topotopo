@@ -7,7 +7,6 @@
 // (u, v) pairs are Float64Array(numVertices * 2).
 import type { Geometry } from './geometry.ts';
 import { primArea, triangulate } from './topology.ts';
-import { rng } from './random.ts';
 
 // ---------------------------------------------------------------- uv io
 
@@ -585,20 +584,6 @@ export function farthestPair(pos: Float64Array, cand: ArrayLike<number> | null, 
 
 // ---------------------------------------------------------------- packing
 
-export interface LayoutOptions {
-  /** rotate islands to their minimum-area bounding rectangle, and allow 90° turns when packing */
-  rotate: boolean;
-  /** uniform: equal texel density (UV area ∝ 3D area); keep: keep relative island scale */
-  scaleMode: 'uniform' | 'keep';
-  /** gap between islands (and half of it to the tile border) in UV units of one tile */
-  padding: number;
-  /** number of UDIM tiles to fill (1 = the 0..1 square) */
-  udims: number;
-  /** random orderings tried; the tightest packing wins */
-  iterations: number;
-  seed: number;
-}
-
 export interface Island {
   prims: number[];
   /** distinct vertices (corners) of the island */
@@ -691,157 +676,57 @@ export function minAreaRectAngle(hull: number[]): number {
 export interface Rect { w: number; h: number; id: number }
 export interface Placed { x: number; y: number; rot: boolean; bin: number }
 
-/** Skyline bottom-left packing of rects into `bins` squares of side W. Returns placements or null if they don't fit. */
+/**
+ * Skyline bottom-left packing of rects into `bins` rectangles of W × H. Returns placements (by rect id) or null if they
+ * do not fit. The skyline is a list of segments [x0, x1) at height y that tile [0, W) exactly; a rect rests on the
+ * highest segment under its whole span, so no two rects overlap.
+ */
 export function skylinePack(rects: Rect[], W: number, bins: number, allowRotate: boolean, H = W): Placed[] | null {
   const out: Placed[] = new Array(rects.length);
   let bin = 0;
-  let sky: { x: number; y: number; w: number }[] = [{ x: 0, y: 0, w: W }];
-  const eps = W * 1e-9;
+  let sky: { x0: number; x1: number; y: number }[] = [{ x0: 0, x1: W, y: 0 }];
   for (const r of rects) {
-    let placed = false;
-    while (!placed) {
-      let best: { i: number; y: number; top: number; x: number; rot: boolean; w: number; h: number } | null = null;
-      for (const rot of allowRotate && Math.abs(r.w - r.h) > eps ? [false, true] : [false]) {
+    for (;;) {
+      let best: { x: number; y: number; top: number; rot: boolean; w: number } | null = null;
+      for (const rot of allowRotate && r.w !== r.h ? [false, true] : [false]) {
         const w = rot ? r.h : r.w, h = rot ? r.w : r.h;
-        if (w > W + eps || h > H + eps) continue;
+        if (!(w <= W && h <= H)) continue;
         for (let i = 0; i < sky.length; i++) {
-          const x = sky[i].x;
-          if (x + w > W + eps) break;
-          let y = 0, rem = w, j = i;
-          while (rem > eps && j < sky.length) { y = Math.max(y, sky[j].y); rem -= sky[j].w; j++; }
-          if (y + h > H + eps) continue;
+          const x = sky[i].x0;
+          if (x + w > W) break;
+          let y = 0;
+          for (let j = i; j < sky.length && sky[j].x0 < x + w; j++) if (sky[j].y > y) y = sky[j].y;
           const top = y + h;
-          if (!best || top < best.top - eps || (Math.abs(top - best.top) <= eps && x < best.x)) best = { i, y, top, x, rot, w, h };
+          if (top > H) continue;
+          if (!best || top < best.top || (top === best.top && x < best.x)) best = { x, y, top, rot, w };
         }
       }
       if (!best) {
-        bin++;
-        if (bin >= bins) return null;
-        sky = [{ x: 0, y: 0, w: W }];
+        if (++bin >= bins) return null;
+        sky = [{ x0: 0, x1: W, y: 0 }];
         continue;
       }
       out[r.id] = { x: best.x, y: best.y, rot: best.rot, bin };
-      // update the skyline: new segment [x, x+w) at height top
-      const nx = best.x, nw = best.w, ny = best.top;
-      const next: { x: number; y: number; w: number }[] = [];
+      // the new segment [x, x + w) at the rect's top; the segments it covers are clipped exactly
+      const n0 = best.x, n1 = best.x + best.w;
+      const next: { x0: number; x1: number; y: number }[] = [];
       for (const s of sky) {
-        const s0 = s.x, s1 = s.x + s.w;
-        if (s1 <= nx + eps || s0 >= nx + nw - eps) { next.push(s); continue; }
-        if (s0 < nx) next.push({ x: s0, y: s.y, w: nx - s0 });
-        if (s1 > nx + nw) next.push({ x: nx + nw, y: s.y, w: s1 - nx - nw });
+        if (s.x1 <= n0 || s.x0 >= n1) { next.push(s); continue; }
+        if (s.x0 < n0) next.push({ x0: s.x0, x1: n0, y: s.y });
+        if (s.x1 > n1) next.push({ x0: n1, x1: s.x1, y: s.y });
       }
-      next.push({ x: nx, y: ny, w: nw });
-      next.sort((a, b) => a.x - b.x);
+      next.push({ x0: n0, x1: n1, y: best.top });
+      next.sort((p, q) => p.x0 - q.x0);
       sky = [];
       for (const s of next) {
+        if (!(s.x1 > s.x0)) continue;
         const last = sky[sky.length - 1];
-        if (last && Math.abs(last.y - s.y) <= eps) last.w += s.w;
+        if (last && last.y === s.y) last.x1 = s.x1;
         else sky.push({ ...s });
       }
-      placed = true;
+      break;
     }
   }
-  return out;
-}
-
-/**
- * Pack islands into the 0..1 tile (or UDIM tiles 1001.. going right then up, 10 per row). Returns new
- * per-vertex uv (vertices outside every island keep their input uv).
- */
-export function packIslands(uv: Float64Array, islands: Island[], o: LayoutOptions): Float64Array {
-  const out = uv.slice();
-  const nI = islands.length;
-  if (!nI) return out;
-  // 1. orient and measure each island
-  const ang = new Float64Array(nI), minx = new Float64Array(nI), miny = new Float64Array(nI), w = new Float64Array(nI), h = new Float64Array(nI), sc = new Float64Array(nI);
-  let densSum = 0, densN = 0;
-  for (let k = 0; k < nI; k++) {
-    const isl = islands[k];
-    const pts = new Float64Array(isl.verts.length * 2);
-    isl.verts.forEach((v, i) => { pts[i * 2] = uv[v * 2]; pts[i * 2 + 1] = uv[v * 2 + 1]; });
-    const a = o.rotate && pts.length >= 4 ? minAreaRectAngle(convexHull2D(pts)) : 0;
-    const c = Math.cos(a), s = Math.sin(a);
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (let i = 0; i < pts.length; i += 2) {
-      const x = pts[i] * c - pts[i + 1] * s, y = pts[i] * s + pts[i + 1] * c;
-      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-    }
-    if (!(x0 <= x1)) { x0 = x1 = y0 = y1 = 0; }
-    ang[k] = a; minx[k] = x0; miny[k] = y0; w[k] = x1 - x0; h[k] = y1 - y0;
-    if (isl.areaUV > 1e-18 && isl.area3 > 1e-18) { densSum += Math.sqrt(isl.area3 / isl.areaUV); densN++; }
-  }
-  const meanDens = densN ? densSum / densN : 1;
-  for (let k = 0; k < nI; k++) {
-    const isl = islands[k];
-    if (o.scaleMode === 'uniform') sc[k] = isl.areaUV > 1e-18 && isl.area3 > 1e-18 ? Math.sqrt(isl.area3 / isl.areaUV) : meanDens;
-    else sc[k] = 1;
-    w[k] *= sc[k]; h[k] *= sc[k];
-  }
-  // normalise scale so sizes are O(1) (keeps tolerances meaningful)
-  let maxDim = 0;
-  for (let k = 0; k < nI; k++) maxDim = Math.max(maxDim, w[k], h[k]);
-  if (!(maxDim > 0)) maxDim = 1;
-  for (let k = 0; k < nI; k++) { sc[k] /= maxDim; w[k] /= maxDim; h[k] /= maxDim; }
-  const bins = Math.max(1, Math.floor(o.udims));
-  const pad = Math.max(0, o.padding);
-  // 2. orderings
-  const base = Array.from({ length: nI }, (_, i) => i).sort((a, b) => Math.max(h[b], w[b]) - Math.max(h[a], w[a]) || h[b] - h[a] || a - b);
-  const R = rng(o.seed * 7919 + 17);
-  let bestSide = Infinity, bestPlace: Placed[] | null = null;
-  const iters = Math.max(1, Math.min(64, Math.floor(o.iterations)));
-  let area = 0, maxSide = 0;
-  for (let k = 0; k < nI; k++) { area += w[k] * h[k]; maxSide = Math.max(maxSide, o.rotate ? Math.max(w[k], h[k]) : Math.max(w[k], h[k])); }
-  for (let it = 0; it < iters; it++) {
-    const order = base.slice();
-    if (it > 0) {
-      // perturb: random adjacent swaps weighted towards small displacements
-      for (let s = 0; s < nI; s++) {
-        const i = Math.floor(R() * nI), j = Math.min(nI - 1, i + 1 + Math.floor(R() * Math.max(1, nI * 0.1)));
-        [order[i], order[j]] = [order[j], order[i]];
-      }
-    }
-    const pack = (S: number) => {
-      const inflate = pad * S;
-      const rects: Rect[] = order.map((k, i) => ({ w: w[k] + inflate, h: h[k] + inflate, id: i }));
-      if (o.rotate) for (const r of rects) if (r.h > r.w) { const t = r.w; r.w = r.h; r.h = t; (r as any).pre = true; }
-      const res = skylinePack(rects, S, bins, o.rotate);
-      if (!res) return null;
-      return res.map((pl, i) => ({ ...pl, rot: (rects[i] as any).pre ? !pl.rot : pl.rot }));
-    };
-    // bracket the side length, then bisect
-    let lo = Math.max(maxSide, Math.sqrt(area / bins)) / (1 + pad * 2 + 1e-9);
-    let hi = Math.max(lo * 1.05, 1e-9);
-    let found = pack(hi);
-    let guard = 0;
-    while (!found && guard++ < 60) { lo = hi; hi *= 1.25; found = pack(hi); }
-    if (!found) continue;
-    for (let b = 0; b < 14 && hi - lo > hi * 2e-3; b++) {
-      const mid = (lo + hi) / 2;
-      const f = pack(mid);
-      if (f) { hi = mid; found = f; } else lo = mid;
-    }
-    if (hi < bestSide) {
-      bestSide = hi;
-      bestPlace = order.map((_, i) => found![i]);
-      (bestPlace as any).order = order;
-    }
-  }
-  if (!bestPlace) return out;
-  const order: number[] = (bestPlace as any).order;
-  const S = bestSide, inflate = pad * S;
-  order.forEach((k, i) => {
-    const pl = bestPlace![i];
-    const isl = islands[k];
-    const c = Math.cos(ang[k]), s = Math.sin(ang[k]);
-    const tu = pl.bin % 10, tv = Math.floor(pl.bin / 10);
-    for (const v of isl.verts) {
-      const x = uv[v * 2] * c - uv[v * 2 + 1] * s, y = uv[v * 2] * s + uv[v * 2 + 1] * c;
-      let px = (x - minx[k]) * sc[k], py = (y - miny[k]) * sc[k];
-      if (pl.rot) { const t = px; px = h[k] - py; py = t; }
-      out[v * 2] = (pl.x + inflate / 2 + px) / S + tu;
-      out[v * 2 + 1] = (pl.y + inflate / 2 + py) / S + tv;
-    }
-  });
   return out;
 }
 

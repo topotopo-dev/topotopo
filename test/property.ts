@@ -23,6 +23,7 @@ import type { GraphSpec, NodeDef, NodeSpec, ParamDef } from '../src/graph/types.
 import { INPUTS, PARAMS, SKIP, addFixture, checkGeo, createFixtureEngine } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff } from './fingerprint.ts';
 import { spatialProperties } from './spatial-props.ts';
+import { uvPackProperties } from './uvpack-props.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -322,6 +323,10 @@ if (ONLY === undefined) {
   const ts = performance.now();
   spatialProperties(SEED, 90, (cond, msg) => { if (!cond) failures++; console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); });
   console.log(`(spatial checks ${((performance.now() - ts) / 1000).toFixed(1)}s)\n`);
+  // uv packing: skyline rects and raster-packed islands never overlap and keep their padding
+  const tu = performance.now();
+  uvPackProperties(SEED, 30, (cond, msg) => { if (!cond) failures++; console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); });
+  console.log(`(uv packing checks ${((performance.now() - tu) / 1000).toFixed(1)}s)\n`);
 }
 
 const indices = ONLY !== undefined ? [ONLY] : Array.from({ length: COUNT }, (_, i) => i);

@@ -228,6 +228,59 @@ const sameTopology = (a: Geometry, b: Geometry) =>
   check(umax > 1 && umax <= 3 && vmax <= 1, `uv_layout udims 3: islands spread over UDIM 1001..1003 (u max ${umax.toFixed(2)}, v max ${vmax.toFixed(2)})`);
 }
 
+// uv_layout never overlaps: many identical thin strips (the skyline packer once stacked equal islands on each other)
+{
+  const { geo: g, warnings } = await cook({
+    strip: { type: 'grid', params: { size: [1, 0.02], divisions: [8, 1] } },
+    uvp: { type: 'uv_project', in: ['strip'], params: { method: 'planar', axis: 'y' } },
+    copies: { type: 'copy_xform', in: ['uvp'], params: { count: 120, translate: [0, 0, 0.05] } },
+    box: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0, -1] } },
+    boxuv: { type: 'uv_unwrap', in: ['box'] },
+    m: { type: 'merge', in: ['copies', 'boxuv'] },
+    out: { type: 'uv_layout', in: ['m'], params: { padding: 4, resolution: 1024 } },
+  });
+  const rep = uvReport(g);
+  const isl = new Set(g.prims.get('island')!.data as Int32Array).size;
+  check(rep.overlap.pairs === 0 && rep.outOfTile === 0 && warnings.length === 0, `uv_layout: ${isl} islands (120 identical thin strips) never overlap (${rep.overlap.pairs} pairs, ${rep.outOfTile} outside 0..1, warnings: ${warnings.join('; ') || 'none'})`);
+  check(rep.utilization.method === 'exact' && rep.utilization.value > 0.5, `uv_layout: thin strips cover ${(rep.utilization.value * 100).toFixed(1)}% of the tile (> 50%)`);
+}
+
+// uv_layout with a group: the other prims keep their uv and the packed islands keep clear of them
+{
+  const nodes: GraphSpec['nodes'] = {
+    b: { type: 'box', params: { divisions: [2, 2, 2] } },
+    bu: { type: 'uv_unwrap', in: ['b'], params: { padding: 4, resolution: 512 } },
+    s: { type: 'sphere', params: { type: 'ico', level: 2, center: [3, 0, 0] } },
+    su: { type: 'uv_unwrap', in: ['s'] },
+    m: { type: 'merge', in: ['bu', 'su'] },
+    out: { type: 'uv_layout', in: ['m'], params: { group: '@P.x>1.5', padding: 8, resolution: 512 } },
+  };
+  const { geo: g, warnings } = await cook(nodes);
+  const { geo: fixed } = await cook(nodes, 'bu');
+  const a = readUV(g)!, b0 = readUV(fixed)!;
+  let moved = 0;
+  for (let i = 0; i < b0.length; i++) if (a[i] !== b0[i]) moved++;
+  const rep = uvReport(g);
+  check(moved === 0, `uv_layout group: the ${fixed.numVertices} corners outside the group keep their uv (${moved / 2} moved)`);
+  check(rep.overlap.pairs === 0 && warnings.length === 0, `uv_layout group: the packed sphere keeps clear of the fixed box charts (${rep.overlap.pairs} overlapping pairs; warnings: ${warnings.join('; ') || 'none'})`);
+}
+
+// uv_layout reports overlaps it keeps from the input (pieces joined by island_attrib), naming the part
+{
+  const { geo: g, warnings } = await cook({
+    a: { type: 'grid', params: { size: [1, 1], divisions: [2, 2] } },
+    b: { type: 'grid', params: { size: [1, 1], divisions: [2, 2], center: [0, 0.5, 0] } },
+    m: { type: 'merge', in: ['a', 'b'] },
+    uvp: { type: 'uv_project', in: ['m'], params: { method: 'planar', axis: 'y' } },
+    chart: { type: 'attrib_create', in: ['uvp'], params: { name: 'chart', class: 'prim', type: 'int', value: 0 } },
+    named: { type: 'attrib_create', in: ['chart'], params: { name: 'name', class: 'prim', value: 'panel' } },
+    out: { type: 'uv_layout', in: ['named'], params: { island_attrib: 'chart' } },
+  });
+  const w = warnings.find((x) => x.includes('already in the input')) ?? '';
+  check(w.includes('"panel"') && w.includes('island_attrib "chart"') && /near uv \(/.test(w), `uv_layout: overlaps kept from the input are reported with the part and uv position ("${w.slice(0, 160)}…")`);
+  check(uvReport(g).overlap.pairs > 0, 'uv_layout: the joined pieces still overlap (packing moves each island whole)');
+}
+
 // ---------------------------------------------------------------- GLB round trip
 {
   const { geo: g } = await cook({ b: { type: 'box', params: { divisions: [2, 1, 1] } }, out: { type: 'uv_unwrap', in: ['b'] } });

@@ -24,6 +24,7 @@
 import type { Geometry } from './geometry.ts';
 import { triangulate } from './topology.ts';
 import { primWhere } from './report.ts';
+import { COLLAPSED_Q, uvOverlapPairs } from './uvoverlap.ts';
 import type { Triangulation } from './topology.ts';
 
 export interface UVReportOptions {
@@ -89,31 +90,6 @@ export interface UVReport {
   utilization: { method: 'exact' | 'raster-estimate' | 'none'; value: number; rasterSize?: number; note: string };
   pieces: UVPiece[];
   resolution?: [number, number];
-}
-
-/** Relative tolerances: a uv triangle is collapsed below this (doubled area / squared edges); an overlap counts above this fraction of the smaller triangle's area. */
-const COLLAPSED_Q = 1e-9;
-const OVERLAP_REL = 1e-7;
-
-/** Area of the intersection of two counter-clockwise triangles (6 numbers each) by convex clipping. */
-function triIntersectionArea(a: Float64Array | number[], b: Float64Array | number[]): number {
-  let poly: number[] = [a[0], a[1], a[2], a[3], a[4], a[5]];
-  for (let e = 0; e < 3 && poly.length >= 6; e++) {
-    const ax = b[e * 2], ay = b[e * 2 + 1], bx = b[((e + 1) % 3) * 2], by = b[((e + 1) % 3) * 2 + 1];
-    const out: number[] = [];
-    const n = poly.length / 2;
-    for (let i = 0; i < n; i++) {
-      const cx = poly[i * 2], cy = poly[i * 2 + 1], dx = poly[((i + 1) % n) * 2], dy = poly[((i + 1) % n) * 2 + 1];
-      const sc = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax), sd = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
-      if (sc >= 0) out.push(cx, cy);
-      if ((sc >= 0) !== (sd >= 0)) { const t = sc / (sc - sd); out.push(cx + (dx - cx) * t, cy + (dy - cy) * t); }
-    }
-    poly = out;
-  }
-  if (poly.length < 6) return 0;
-  let s = 0;
-  for (let i = 0, n = poly.length / 2; i < n; i++) { const j = (i + 1) % n; s += poly[i * 2] * poly[j * 2 + 1] - poly[j * 2] * poly[i * 2 + 1]; }
-  return Math.abs(s) / 2;
 }
 
 /**
@@ -260,13 +236,9 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
   const classOf = (ta: number, tb: number): UVOverlap['kind'] =>
     kind[ta] === 2 || kind[tb] === 2 ? 'tiling' : lod && lod[triPrim[ta]] >= 0 && lod[triPrim[tb]] >= 0 && lod[triPrim[ta]] !== lod[triPrim[tb]] ? 'acrossLods' : 'inTile';
 
-  // overlaps: grid candidates, exact clipping
+  // overlaps: grid candidates, exact clipping (core/uvoverlap.ts)
   const valid: number[] = [];
-  let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
-  for (let t = 0; t < nt; t++) if (ok[t]) {
-    valid.push(t);
-    for (let k = 0; k < 3; k++) { const u = U[t * 6 + k * 2], v = U[t * 6 + k * 2 + 1]; if (u < minU) minU = u; if (u > maxU) maxU = u; if (v < minV) minV = v; if (v > maxV) maxV = v; }
-  }
+  for (let t = 0; t < nt; t++) if (ok[t]) valid.push(t);
   const ccw = new Float64Array(nt * 6);
   for (const t of valid) {
     const o6 = t * 6;
@@ -274,55 +246,22 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
     else { ccw[o6] = U[o6]; ccw[o6 + 1] = U[o6 + 1]; ccw[o6 + 2] = U[o6 + 4]; ccw[o6 + 3] = U[o6 + 5]; ccw[o6 + 4] = U[o6 + 2]; ccw[o6 + 5] = U[o6 + 3]; }
   }
   if (valid.length > 1) {
-    const span = Math.max(maxU - minU, maxV - minV, 1e-12);
-    const cells = Math.max(1, Math.min(1024, Math.ceil(Math.sqrt(valid.length / 2))));
-    const cs = span / cells;
-    const nx = Math.max(1, Math.min(1024, Math.ceil((maxU - minU) / cs) || 1)), ny = Math.max(1, Math.min(1024, Math.ceil((maxV - minV) / cs) || 1));
-    const cellOf = (u: number, n: number, lo: number) => Math.max(0, Math.min(n - 1, Math.floor((u - lo) / cs)));
-    const bb = new Float64Array(nt * 4);
-    const counts = new Int32Array(nx * ny + 1);
-    for (const t of valid) {
-      const o6 = t * 6;
-      const u0 = Math.min(U[o6], U[o6 + 2], U[o6 + 4]), u1 = Math.max(U[o6], U[o6 + 2], U[o6 + 4]), v0 = Math.min(U[o6 + 1], U[o6 + 3], U[o6 + 5]), v1 = Math.max(U[o6 + 1], U[o6 + 3], U[o6 + 5]);
-      bb[t * 4] = u0; bb[t * 4 + 1] = v0; bb[t * 4 + 2] = u1; bb[t * 4 + 3] = v1;
-      for (let y = cellOf(v0, ny, minV); y <= cellOf(v1, ny, minV); y++) for (let x = cellOf(u0, nx, minU); x <= cellOf(u1, nx, minU); x++) counts[y * nx + x + 1]++;
-    }
-    for (let i = 0; i < nx * ny; i++) counts[i + 1] += counts[i];
-    const items = new Int32Array(counts[nx * ny]), fill = counts.slice(0, nx * ny);
-    for (const t of valid) {
-      const u0 = bb[t * 4], v0 = bb[t * 4 + 1], u1 = bb[t * 4 + 2], v1 = bb[t * 4 + 3];
-      for (let y = cellOf(v0, ny, minV); y <= cellOf(v1, ny, minV); y++) for (let x = cellOf(u0, nx, minU); x <= cellOf(u1, nx, minU); x++) items[fill[y * nx + x]++] = t;
-    }
-    let tests = 0, stopped = false;
-    for (let c = 0; c < nx * ny; c++) {
-      const s = counts[c], e = counts[c + 1], cx = c % nx, cy = Math.floor(c / nx);
-      for (let i = s; i < e; i++) for (let j = i + 1; j < e; j++) {
-        const ta = items[i], tb = items[j];
-        // bounding boxes overlap with positive extent, and this cell owns the pair
-        const lu = Math.max(bb[ta * 4], bb[tb * 4]), lv = Math.max(bb[ta * 4 + 1], bb[tb * 4 + 1]);
-        if (lu >= Math.min(bb[ta * 4 + 2], bb[tb * 4 + 2]) || lv >= Math.min(bb[ta * 4 + 3], bb[tb * 4 + 3])) continue;
-        if (cellOf(lu, nx, minU) !== cx || cellOf(lv, ny, minV) !== cy) continue;
-        rep.overlap.candidatePairs++;
-        if (tests >= maxTests) { stopped = true; continue; }
-        tests++;
-        const A = triIntersectionArea(ccw.subarray(ta * 6, ta * 6 + 6), ccw.subarray(tb * 6, tb * 6 + 6));
-        if (A > OVERLAP_REL * Math.min(Math.abs(signed[ta]), Math.abs(signed[tb]))) {
-          const t0 = Math.min(ta, tb), t1 = Math.max(ta, tb), same = find(t0) === find(t1), k = classOf(t0, t1);
-          rep.overlap.pairs++; rep.overlap.area += A;
-          rep.overlap[k].pairs++; rep.overlap[k].area += A;
-          if (same) rep.overlap.sameChartPairs++;
-          // examples: the bake-relevant (inTile) pairs before the expected ones
-          const ex = { triangles: [t0, t1] as [number, number], prims: [triPrim[t0], triPrim[t1]] as [number, number], area: A, sameChart: same, kind: k, where: ['', ''] as [string, string] };
-          if (rep.overlap.examples.length < maxEx) rep.overlap.examples.push(ex);
-          else if (k === 'inTile') {
-            const j = rep.overlap.examples.findIndex((e) => e.kind !== 'inTile');
-            if (j >= 0) rep.overlap.examples[j] = ex;
-          }
-        }
+    const scan = uvOverlapPairs(U, valid, signed, (t0, t1, A) => {
+      const same = find(t0) === find(t1), k = classOf(t0, t1);
+      rep.overlap.pairs++; rep.overlap.area += A;
+      rep.overlap[k].pairs++; rep.overlap[k].area += A;
+      if (same) rep.overlap.sameChartPairs++;
+      // examples: the bake-relevant (inTile) pairs before the expected ones
+      const ex = { triangles: [t0, t1] as [number, number], prims: [triPrim[t0], triPrim[t1]] as [number, number], area: A, sameChart: same, kind: k, where: ['', ''] as [string, string] };
+      if (rep.overlap.examples.length < maxEx) rep.overlap.examples.push(ex);
+      else if (k === 'inTile') {
+        const j = rep.overlap.examples.findIndex((e) => e.kind !== 'inTile');
+        if (j >= 0) rep.overlap.examples[j] = ex;
       }
-    }
-    rep.overlap.testedPairs = tests;
-    if (stopped) { rep.complete = false; rep.reasons.push(`overlap test stopped after ${tests.toLocaleString('en-US')} exact pair tests (maxPairTests) of ${rep.overlap.candidatePairs.toLocaleString('en-US')} candidate pairs`); }
+    }, { maxTests });
+    rep.overlap.candidatePairs = scan.candidatePairs;
+    rep.overlap.testedPairs = scan.testedPairs;
+    if (scan.stopped) { rep.complete = false; rep.reasons.push(`overlap test stopped after ${scan.testedPairs.toLocaleString('en-US')} exact pair tests (maxPairTests) of ${scan.candidatePairs.toLocaleString('en-US')} candidate pairs`); }
     const rank = (e: UVOverlap) => (e.kind === 'inTile' ? 0 : 1);
     rep.overlap.examples.sort((x, y) => rank(x) - rank(y) || y.area - x.area || x.triangles[0] - y.triangles[0] || x.triangles[1] - y.triangles[1]);
     for (const e of rep.overlap.examples) e.where = [triWhere(e.triangles[0]), triWhere(e.triangles[1])];

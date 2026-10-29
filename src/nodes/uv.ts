@@ -3,12 +3,15 @@
 import type { Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
-import { primArea, primNormals } from '../core/topology.ts';
+import { primArea, primNormals, triangulate } from '../core/topology.ts';
 import {
-  buildCharts, chartNeedsCut, cutGraph, edgeGroupTest, findIslands, lscm, normaliseCharts, packIslands,
+  buildCharts, chartNeedsCut, cutGraph, edgeGroupTest, findIslands, lscm, normaliseCharts,
   pairsWhere, pointPairTest, polygonSides, primComponents, cornerClasses, readUV, uvSeamPairs, writeUV,
 } from '../core/uv.ts';
 import type { Island, Sides } from '../core/uv.ts';
+import { packCharts } from '../core/uvpack.ts';
+import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
+import { primWhere } from '../core/report.ts';
 import { loadXatlas, runXatlas } from '../core/xatlas.ts';
 import type { XatlasChartOptions } from '../core/xatlas.ts';
 import { mask, P } from './util.ts';
@@ -76,16 +79,68 @@ function islandsFrom(g: Geometry, uv: Float64Array, comp: Int32Array, count: num
   return out;
 }
 
-function paddingUV(padding: number, units: string, resolution: number) {
-  const pad = units === 'uv' ? padding : padding / Math.max(1, resolution);
-  return Math.max(0, Math.min(0.2, pad));
+/** Padding in texels of `resolution` (units "uv": a fraction of the tile), at most a fifth of the tile. */
+function paddingTexels(padding: number, units: string, resolution: number) {
+  const res = Math.max(1, resolution);
+  const pad = units === 'uv' ? padding * res : padding;
+  return Math.max(0, Math.min(0.2 * res, pad));
 }
 
 const LAYOUT_PARAMS = {
-  padding: { type: 'float' as const, default: 4, min: 0, desc: 'gap between islands, in texels at `resolution` (or uv units with units:"uv")' },
+  padding: { type: 'float' as const, default: 4, min: 0, desc: 'gap between islands, in texels at `resolution` (or uv units with units:"uv"); half of it, rounded up, to the tile border' },
   units: { type: 'enum' as const, options: ['texels', 'uv'], default: 'texels', desc: 'unit of padding' },
-  resolution: { type: 'int' as const, default: 1024, min: 16, max: 16384, desc: 'texture size the padding is measured against' },
+  resolution: { type: 'int' as const, default: 1024, min: 16, max: 16384, desc: 'texture size: padding is in its texels, and islands are placed on its texel grid (at most 2048 cells per tile)' },
 };
+
+interface LayoutRun {
+  rotate: boolean;
+  scaleMode: 'uniform' | 'keep';
+  /** texels, and the texture size they are measured at */
+  padding: number;
+  resolution: number;
+  tiles: number;
+  iterations: number;
+  seed: number;
+  /** per island texel weight and fixed angle (radians, NaN = by rotate), or null */
+  weights?: ArrayLike<number> | null;
+  angles?: ArrayLike<number> | null;
+  /** names for messages: the node, and island_attrib when islands come from it */
+  node: string;
+  islandAttrib?: string;
+}
+
+/**
+ * Lay islands out with the raster packer (core/uvpack.ts); prims in no island keep their uv and are obstacles. The
+ * result is checked exactly (core/uvoverlap.ts): overlaps between islands (never expected: a packing bug) and overlaps
+ * inside islands (kept from the input) are reported with the parts they are in.
+ */
+function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandOfPrim: Int32Array, o: LayoutRun, warn: (m: string) => void): Float64Array {
+  if (!islands.length) return uv;
+  const tri = triangulate(g);
+  const per: number[][] = islands.map(() => []);
+  const obstacles: number[] = [];
+  for (let t = 0; t < tri.triPrim.length; t++) {
+    const k = islandOfPrim[tri.triPrim[t]];
+    if (k >= 0) per[k].push(tri.tris[t * 3], tri.tris[t * 3 + 1], tri.tris[t * 3 + 2]);
+    else for (let c = 0; c < 3; c++) { const v = tri.tris[t * 3 + c]; obstacles.push(uv[v * 2], uv[v * 2 + 1]); }
+  }
+  const r = packCharts(uv, islands.map((isl, k) => ({ verts: isl.verts, tris: per[k], area3: isl.area3, areaUV: isl.areaUV })), {
+    resolution: o.resolution, padding: o.padding, turns: o.rotate, orient: o.rotate ? 'min_rect' : 'keep', scaleMode: o.scaleMode,
+    tiles: o.tiles, iterations: o.iterations, seed: o.seed, weights: o.weights ?? null, angles: o.angles ?? null,
+    obstacles: obstacles.length ? Float64Array.from(obstacles) : null,
+  });
+  if (!r.packed) {
+    const why = obstacles.length ? 'the prims outside the group and the padding leave no room' : `${o.padding} texels of padding at resolution ${o.resolution} leave no room`;
+    warn(`${o.node}: the ${islands.length} islands do not fit ${o.tiles > 1 ? `${o.tiles} tiles` : 'the tile'} at any scale (${why}); uv unchanged`);
+    return uv;
+  }
+  const chk = uvOverlapCheck(r.uv, tri.tris, tri.triPrim, islandOfPrim);
+  if (chk.across && chk.firstAcross) warn(`${o.node}: ${chk.across} triangle pairs of different islands overlap after packing; this is a bug, please report it with the graph. Largest: ${uvPairText(g, r.uv, tri.tris, tri.triPrim, chk.firstAcross.t[0], chk.firstAcross.t[1])}`);
+  if (chk.within && chk.firstWithin) warn(`${o.node}: ${chk.within} overlapping triangle pairs inside islands were already in the input (folds${o.islandAttrib ? `, or pieces joined by island_attrib "${o.islandAttrib}"` : ''}); packing moves each island whole, so they stay. Largest: ${uvPairText(g, r.uv, tri.tris, tri.triPrim, chk.firstWithin.t[0], chk.firstWithin.t[1])}`);
+  const used = r.uvArea / Math.max(1, r.tilesUsed);
+  if (r.cappedBy >= 0 && used < 0.5) warn(`${o.node}: islands cover ${(used * 100).toFixed(0)}% of the tile because the longest island (${primWhere(g, islands[r.cappedBy].prims[0])}) spans the tile and sets the scale; cut it with seams for a denser layout`);
+  return r.uv;
+}
 
 // ---------------------------------------------------------------- uv_unwrap
 
@@ -324,7 +379,10 @@ defineNode({
     let out = uv;
     if (p.layout && islands.length) {
       const fresh = islandsFrom(g, uv, comp, charts.length);
-      out = packIslands(uv, fresh, { rotate: true, scaleMode: 'uniform', padding: paddingUV(p.padding, p.units, p.resolution), udims: 1, iterations: 4, seed: 0 });
+      out = layoutIslands(g, uv, fresh, comp, {
+        rotate: true, scaleMode: 'uniform', padding: paddingTexels(p.padding, p.units, p.resolution), resolution: p.resolution,
+        tiles: 1, iterations: 4, seed: 0, node: 'uv_flatten',
+      }, warn);
     }
     writeUV(g, out);
     if (gm) {
@@ -345,21 +403,25 @@ defineNode({
 defineNode({
   type: 'uv_layout',
   category: 'uv',
-  summary: 'Pack UV islands into the 0..1 square (or UDIM tiles): rotate to minimal bounds, equalise texel density, skyline packing.',
+  summary: 'Pack UV islands into the 0..1 square (or UDIM tiles) without overlaps: rotate to minimal bounds, equalise texel density, fill every gap.',
   description:
     'Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is rotated to its ' +
-    'minimum-area bounding rectangle (rotate), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area) and packed bottom-left ' +
-    'on a skyline; iterations tries perturbed orders and keeps the tightest. UDIM tiles fill 1001, 1002, … (u offset), ten per row.',
+    'minimum-area bounding rectangle (rotate), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area) and placed on the ' +
+    'texel grid of `resolution`: bottom-left, into any gap its shape fits (inside rings, between the arms of other islands), `padding` texels ' +
+    'from every other island and half of it from the tile border, so islands never overlap. The scale is the largest at which every island ' +
+    'fits; iterations tries other island orders and keeps the densest. Prims outside `group` keep their uv and the islands keep clear of them. ' +
+    'The result is checked: overlaps inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the ' +
+    'part they are in. UDIM tiles fill 1001, 1002, … (u offset), ten per row; an island goes to the first tile it fits.',
   aliases: ['uvlayout', 'uvpack', 'uv_pack', 'pack_uv'],
   inputs: [{ name: 'geo', desc: 'geometry with uv' }],
   params: {
     island_attrib: { type: 'string', default: '', desc: 'prim attribute defining islands (e.g. "chart"); "" = connected uv regions' },
-    group: P.group('prim', 'prims to lay out (others keep their uv)'),
+    group: P.group('prim', 'prims to lay out; the others keep their uv and the islands keep clear of them (with padding)'),
     rotate: { type: 'bool', default: true, desc: 'rotate islands to their minimum bounding rectangle and allow 90° turns' },
     scale_mode: { type: 'enum', options: ['uniform', 'keep'], default: 'uniform', desc: 'uniform = same texel density on every island (by 3D area); keep = keep the relative uv scale' },
     ...LAYOUT_PARAMS,
     udims: { type: 'int', default: 1, min: 1, max: 100, desc: 'number of UDIM tiles to fill (1 = the 0..1 square)' },
-    iterations: { type: 'int', default: 4, min: 1, max: 64, desc: 'packing orders tried (the first is sorted by size); the tightest wins' },
+    iterations: { type: 'int', default: 4, min: 1, max: 64, desc: 'island orders tried (longest side first, then tallest, largest box, largest area, then shuffles by seed); the densest wins' },
     seed: P.seed(),
     write_island: { type: 'bool', default: true, desc: 'write prim int attribute island' },
   },
@@ -377,10 +439,10 @@ defineNode({
       else warn(`island_attrib "${p.island_attrib}" is not a numeric prim attribute; using uv connectivity`);
     }
     const { islands, islandOfPrim } = findIslands(g, uv, attr, gm);
-    const out = packIslands(uv, islands, {
-      rotate: p.rotate, scaleMode: p.scale_mode, padding: paddingUV(p.padding, p.units, p.resolution),
-      udims: p.udims, iterations: p.iterations, seed: Math.floor(Number(p.seed) || 0),
-    });
+    const out = layoutIslands(g, uv, islands, islandOfPrim, {
+      rotate: p.rotate, scaleMode: p.scale_mode, padding: paddingTexels(p.padding, p.units, p.resolution), resolution: p.resolution,
+      tiles: p.udims, iterations: p.iterations, seed: Math.floor(Number(p.seed) || 0), node: 'uv_layout', islandAttrib: attr ? p.island_attrib : undefined,
+    }, warn);
     writeUV(g, out);
     if (p.write_island) writePrimInt(g, 'island', islandOfPrim);
     return g;
