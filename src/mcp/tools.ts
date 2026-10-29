@@ -499,7 +499,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
             return text([...ws.graphs].map(([k, g]) => {
               const r = ws.lastReport.get(k);
               return `${k}: ${Object.keys(g.nodes).length} nodes, output ${g.output ?? '(auto)'}${r ? `, last cook ${r.ok ? 'ok' : 'FAILED'}${r.geo ? ` (${r.geo.numPoints} pts, ${r.geo.numPrims} prims)` : ''}` : ''}`;
-            }).join('\n') + `\nworkspace: ${ws.dir}`);
+            }).join('\n') + `\nfolder: ${ws.dir}`);
           }
           case 'get': return text(JSON.stringify(ws.getGraph(a.name ?? 'main'), null, 1));
           case 'delete': ws.deleteGraph(a.name); return text(`deleted graph "${a.name}"`);
