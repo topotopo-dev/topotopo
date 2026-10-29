@@ -366,6 +366,22 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(note(render(box, { views: ['front'], size: T, sockets: true }), /no scene empties/), 'sockets without empties: a note');
 }
 
+// ---------------------------------------------------------------- notes name the part and a position
+{
+  const named = { b: { type: 'box' }, n: { type: 'attrib_create', in: ['b'], params: { name: 'name', class: 'prim', value: 'crate' } } } as GraphSpec['nodes'];
+  const holed = await cook({ ...named, out: { type: 'delete', in: ['n'], params: { group: '0' } } });
+  const r = render(holed, { views: ['persp'], size: T, annotate: true });
+  check(note(r, /^4 open edges \(after welding seam splits\), first edge .* of "crate" \(prim \d+\) at \(/), `open edges: count after welding, part and position (${r.notes.find((x) => /open edges/.test(x))})`);
+  const inward = await cook({ ...named, out: { type: 'reverse', in: ['n'] } });
+  const ri = render(inward, { views: ['persp'], size: T, annotate: true });
+  check(note(ri, /back faces of closed pieces \(blue\): flipped normals\? First prim \d+ of "crate" at \(.*\); parts: "crate" \d+ prims; reverse/), `back faces: the parts and where (${ri.notes.find((x) => /back faces/.test(x))?.slice(0, 150)})`);
+  // the uv view of tiling uv (a repeating texture over several tiles): no red overlap, said as tiling
+  const tiled = await cook({ b: { type: 'box', params: { size: [3, 3, 3] } }, out: { type: 'uv_project', in: ['b'], params: { method: 'box', scale: [0.5, 0.5] } } });
+  const uvr = render(tiled, { views: ['uv'], size: T });
+  const isRedOv = ([r, g, b]: RGB) => r > 200 && g < 90 && b < 90;
+  check(note(uvr, /tiling uv: \d+ triangles lie in charts that run across tile borders/) && !note(uvr, /overlaps \(red/) && count(uvr, isRedOv, 0, 0, T, T) === 0, 'uv view of tiling uv: no red overlap, a tiling note');
+}
+
 // ---------------------------------------------------------------- helpers: tool arguments, winding fill, label placement
 {
   const o = renderArgs({ views: 'turntable', section: 'z:0.25', wireframe: 'hard', hard_angle: '40', labels: 'groups,pieces,points,attrib:name', look_at: '1,2,3', clip: 'x:2:abs', shading: 'ao' });

@@ -364,7 +364,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'inspect',
-      description: 'Inspect any node\'s output as text: summary; detail "attributes" (min/max/mean, unique strings), "topology" (watertight/manifold, pieces, volume, area, genus, render/export triangle health), "elements" (list values for a range), "all", or "uv" (exact uv overlaps with triangle pairs and areas, collapsed / non-finite / out-of-tile triangles, charts, utilization, per-piece texel density with resolution; json:true appends the machine-readable report).',
+      description: 'Inspect any node\'s output as text: summary; detail "attributes" (min/max/mean, unique strings), "topology" (a closed solid or why not: open edges counted after welding the vertex splits of uv/normal seams, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part (prim name/group) and world position of the first one and the fix; pieces, volume, area, genus, render/export triangle health), "elements" (list values for a range), "all", or "uv" (exact uv overlaps split into in-tile (atlas) overlap, tiling overlap (charts across tile borders: a repeating texture, flagged tiling) and overlap across LODs (_lodN names), each listed with parts and positions; collapsed / non-finite / out-of-tile triangles, charts, utilization, per-piece texel density with resolution; json:true appends the machine-readable report).',
       inputSchema: {
         type: 'object',
         properties: {

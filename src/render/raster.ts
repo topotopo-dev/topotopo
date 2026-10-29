@@ -16,10 +16,12 @@ import { halfEdges } from '../core/halfedge.ts';
 import type { HalfEdgeMesh } from '../core/halfedge.ts';
 import { drawText, textWidth } from './font.ts';
 import { readUV, polygonSides, uvSeamPairs } from '../core/uv.ts';
+import { chartKinds, chartRoots, primLods } from '../core/uvreport.ts';
 import { expandForRender } from '../core/packed.ts';
 import { qNormalize, qRotate } from '../core/math.ts';
 import type { Quat, Vec3 } from '../core/math.ts';
 import { PLANE_UV, sliceTriangles, windingGrid } from './section.ts';
+import { openEdgesText, partsOf, primWhere, solidReport } from '../core/report.ts';
 import type { Slice } from './section.ts';
 import { LabelPlacer, ambientOcclusion, dotOv, drawLabel, drawLegend, lineOv } from './overlay.ts';
 import type { DepthTol, LegendItem, RGB } from './overlay.ts';
@@ -437,19 +439,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   if (nTri > 4e6) notes.push(`large mesh (${nTri} triangles) — render may be slow`);
   const vnorm = nTri ? resolveVertexNormals(g, 50) : new Float64Array(0);
   const nrmOf = (v: number, out: number[]) => { out[0] = vnorm[v * 3]; out[1] = vnorm[v * 3 + 1]; out[2] = vnorm[v * 3 + 2]; };
-  // back faces are only suspicious on closed pieces; open sheets/cards are shaded two-sided
-  const conn = nTri ? connectivity(g) : null;
-  const closedPiece = new Uint8Array(conn ? conn.count : 0).fill(1);
-  let openEdges = 0, nonManifoldEdges = 0;
-  if (conn && nTri) {
-    const E0 = buildEdges(g);
-    for (let e = 0; e < E0.a.length; e++) if (E0.count[e] !== 2) closedPiece[conn.primClass[E0.firstPrim[e]]] = 0;
-    if (annotate)
-      for (let e = 0; e < E0.a.length; e++) {
-        if (E0.count[e] === 1 && g.primClosed[E0.firstPrim[e]]) openEdges++;
-        else if (E0.count[e] > 2) nonManifoldEdges++;
-      }
-  }
+  // back faces are only suspicious on closed pieces (closed once the vertex splits of uv / normal seams are welded, as
+  // an imported mesh has them); open sheets / cards are shaded two-sided. The pieces are the welded ones (core/report.ts).
+  const solid = nTri ? solidReport(g, { tri: { tris, triPrim }, flips: false }) : null;
+  const pieceOf = solid ? solid.primPiece : new Int32Array(0), closedPiece = solid ? solid.pieceClosed : new Uint8Array(0);
 
   // --- colours per vertex (Cd, colour-by, highlight)
   const vprim = g.vertexPrims();
@@ -652,7 +645,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const key = `${k}:${c}`;
     let s = slices.get(key);
     if (!s) {
-      s = nTri && conn ? sliceTriangles(Pd, g.vertexPoint, tris, (t) => conn.primClass[triPrim[t]], k, c) : { n: 0, seg: new Float64Array(0), piece: new Int32Array(0) };
+      s = nTri && solid ? sliceTriangles(Pd, g.vertexPoint, tris, (t) => pieceOf[triPrim[t]], k, c) : { n: 0, seg: new Float64Array(0), piece: new Int32Array(0) };
       slices.set(key, s);
     }
     return s;
@@ -793,7 +786,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     }
   }
   if (o.labelPieces && np) {
-    const cn = conn ?? connectivity(g);
+    const cn = connectivity(g);
     const n = Math.min(cn.count, maxLabels);
     const idx: number[][] = Array.from({ length: n }, () => []);
     for (let i = 0; i < np; i++) if (cn.ptClass[i] < n) idx[cn.ptClass[i]].push(i);
@@ -902,6 +895,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const legendView = views.findIndex((v) => v !== 'uv' && v !== 'texture');
   const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'texture' && v !== 'section' && !(clipK >= 0 && isPerspView(v))) : -1;
   let backPix = 0, shadedPix = 0;
+  /** the prims whose back faces show (blue), by pixel count, in the view that counts them */
+  const backPrims = new Map<number, number>();
   let labelsSkipped = 0;
 
   views.forEach((vname, vi) => {
@@ -1034,7 +1029,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const tn = [0, 0, 0];
     const chk = [0, 0, 0];
     const pbrUV0 = [0, 0], pbrUV1 = [0, 0], pbrUV2 = [0, 0], pbrV = [0, 0, 0], pbrRGB = [0, 0, 0];
-    const bf = vi === backView ? new Uint8Array(W * H) : null;
+    const bf = vi === backView ? new Uint8Array(W * H) : null, bfPrim = bf ? new Int32Array(W * H) : null;
     for (let t = 0; t < nTri; t++) {
       const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2];
       const a = g.vertexPoint[va], b = g.vertexPoint[vb], c = g.vertexPoint[vc];
@@ -1060,7 +1055,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const back = dot3(fnw, toCam) < 0;
       const material = materialNames ? materialTable[materialNames[triPrim[t]]] : undefined;
       const alphaMask = material?.alphaMode === 'MASK';
-      const suspicious = back && !material?.doubleSided && conn !== null && closedPiece[conn.primClass[triPrim[t]]] === 1;
+      const suspicious = back && !material?.doubleSided && solid !== null && closedPiece[pieceOf[triPrim[t]]] === 1;
       if (flatN) {
         const p = triPrim[t] * 3;
         na[0] = nb[0] = nc[0] = flatN[p]; na[1] = nb[1] = nc[1] = flatN[p + 1]; na[2] = nb[2] = nc[2] = flatN[p + 2];
@@ -1114,7 +1109,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             if (alpha < (material!.alphaCutoff ?? 0.5)) continue;
           }
           zb[zi] = depth;
-          if (bf) bf[zi] = suspicious ? 1 : 0;
+          if (bf) { bf[zi] = suspicious ? 1 : 0; bfPrim![zi] = triPrim[t]; }
           if (pbrS) {
             let dudx = 0, dvdx = 0, dudy = 0, dvdy = 0;
             if (pbrS.hasUV) {
@@ -1181,7 +1176,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         }
       }
     }
-    if (bf) for (let i = 0; i < W * H; i++) if (zb[i] > -Infinity) { shadedPix++; backPix += bf[i]; }
+    if (bf) for (let i = 0; i < W * H; i++) if (zb[i] > -Infinity) {
+      shadedPix++; backPix += bf[i];
+      if (bf[i]) backPrims.set(bfPrim![i], (backPrims.get(bfPrim![i]) ?? 0) + 1);
+    }
 
     // screen-space ambient occlusion on the shaded surface (before lines and points, which stay crisp)
     if (shadingMode === 'ao' && nTri) {
@@ -1479,8 +1477,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     // second line: a decimated heightfield, then the active overlays and up to three geometry notes
     const gn: string[] = [];
     if (annotate) {
-      if (np) { const pieces = conn ? conn.count : connectivity(g).count; gn.push(`${pieces} PIECE${pieces === 1 ? '' : 'S'}`); }
-      if (closedPrims) gn.push(openEdges ? `${openEdges} OPEN EDGES` : nonManifoldEdges ? `${nonManifoldEdges} NON-MANIFOLD EDGES` : 'NO OPEN EDGES');
+      if (np) { const pieces = solid ? solid.pieces : connectivity(g).count; gn.push(`${pieces} PIECE${pieces === 1 ? '' : 'S'}`); }
+      if (closedPrims && solid) {
+        // open edges after welding seam splits (an imported mesh's uv / normal seams are not holes), with where
+        const welded = solid.seamEdges ? ' (SEAM SPLITS WELDED)' : '';
+        gn.push(solid.openEdges ? `${solid.openEdges} OPEN EDGES${welded}` : solid.nonManifoldEdges ? `${solid.nonManifoldEdges} NON-MANIFOLD EDGES` : `NO OPEN EDGES${welded}`);
+        if (solid.openEdges) notes.push(`${openEdgesText(solid)}, first ${solid.firstOpen}`);
+        if (solid.nonManifoldEdges) notes.push(`${solid.nonManifoldEdges} non-manifold edge(s), first ${solid.firstNonManifold}`);
+      }
       const capAll = capCells + capFlipCells;
       const bp = shadedPix ? (backPix / shadedPix) * 100 : 0;
       if (capFlipCells && capAll) {
@@ -1488,7 +1492,12 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         gn.push(`CUT ${pct.toFixed(1)}% INSIDE-OUT`);
         notes.push(`section: ${pct.toFixed(1)}% of the cut area is inside-out (blue): flipped normals`);
       } else if (bp >= 0.05) gn.push(`BACK-FACING ${bp.toFixed(1)}% OF PIXELS`);
-      if (bp >= 0.05) notes.push(`${bp.toFixed(1)}% of the shaded pixels in the ${views[backView]} view are back faces of closed pieces (blue): flipped normals?`);
+      if (bp >= 0.05) {
+        // which parts, and where the most visible one is
+        const top = [...backPrims].sort((x, y) => y[1] - x[1] || x[0] - y[0]);
+        const parts = partsOf(g, top.map(([p]) => p));
+        notes.push(`${bp.toFixed(1)}% of the shaded pixels in the ${views[backView]} view are back faces of closed pieces (blue): flipped normals? ${top.length ? `First ${primWhere(g, top[0][0])}${parts ? `; parts: ${parts} prims` : ''}; ` : ''}reverse those faces or clean fix_winding`);
+      }
     }
     const overlays = [...ovDesc, ...gn.slice(0, 3)].join('  ·  ');
     const line = [hfFooter ? hfLine : '', annotate ? overlays : ''].filter(Boolean).join('  ·  ');
@@ -1672,9 +1681,18 @@ function drawUVView(
   const chartOf = !useColorOf && chartA && chartA.type === 'int' && chartA.size === 1 ? (chartA.data as Int32Array) : null;
   const owner = new Int32Array(W * H).fill(-1);
   const cnt = new Uint8Array(W * H);
+  // overlap kinds (core/uvreport.ts): between atlas charts (red), or expected: a tiling chart (one that runs across
+  // tile borders) or prims of different LODs (amber)
+  const nt = tris.length / 3, U = new Float64Array(nt * 6);
+  for (let c = 0; c < nt * 3; c++) { U[c * 2] = uv[tris[c] * 2]; U[c * 2 + 1] = uv[tris[c] * 2 + 1]; }
+  const kinds = chartKinds(U, nt, chartRoots(g.vertexPoint, tris, U, nt)), lods = primLods(g);
+  const first = new Int32Array(W * H).fill(-1), firstKind = new Uint8Array(W * H), flag = new Uint8Array(W * H);
+  let tilingTris = 0;
+  for (let t = 0; t < nt; t++) if (kinds[t] === 2) tilingTris++;
+  const pairFlag = (pa: number, ka: number, pb: number, kb: number) => (ka === 2 || kb === 2 || (lods && lods[pa] >= 0 && lods[pb] >= 0 && lods[pa] !== lods[pb]) ? 2 : 1);
   for (let t = 0; t < tris.length; t += 3) {
     const va = tris[t], vb = tris[t + 1], vc = tris[t + 2];
-    const prim = vprim[va];
+    const prim = vprim[va], kind = kinds[t / 3];
     const ax = X(uv[va * 2]), ay = Y(uv[va * 2 + 1]), bx = X(uv[vb * 2]), by = Y(uv[vb * 2 + 1]), cx = X(uv[vc * 2]), cy = Y(uv[vc * 2 + 1]);
     if (![ax, ay, bx, by, cx, cy].every(Number.isFinite)) continue;
     const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
@@ -1694,6 +1712,8 @@ function drawUVView(
         if (w0 <= 0 || w1 <= 0 || 1 - w0 - w1 <= 0) continue;
         const zi = py * W + px;
         if (owner[zi] === prim) continue;
+        if (first[zi] < 0) { first[zi] = prim; firstKind[zi] = kind; }
+        else if (first[zi] !== prim) flag[zi] |= pairFlag(first[zi], firstKind[zi], prim, kind);
         owner[zi] = prim;
         if (cnt[zi] < 255) cnt[zi]++;
         const i = zi * 3;
@@ -1701,13 +1721,19 @@ function drawUVView(
       }
     }
   }
-  let covered = 0, overlap = 0;
+  let covered = 0, overlap = 0, expected = 0;
   for (let i = 0; i < cnt.length; i++) {
     if (!cnt[i]) continue;
     covered++;
     if (cnt[i] < 2) continue;
-    overlap++;
-    col[i * 3] += (1 - col[i * 3]) * 0.8; col[i * 3 + 1] += (0.12 - col[i * 3 + 1]) * 0.8; col[i * 3 + 2] += (0.12 - col[i * 3 + 2]) * 0.8;
+    if (flag[i] & 1) {
+      overlap++;
+      col[i * 3] += (1 - col[i * 3]) * 0.8; col[i * 3 + 1] += (0.12 - col[i * 3 + 1]) * 0.8; col[i * 3 + 2] += (0.12 - col[i * 3 + 2]) * 0.8;
+    } else {
+      // expected overlap (tiling, LODs): a light amber wash, not the red of a real overlap
+      expected++;
+      col[i * 3] += (0.95 - col[i * 3]) * 0.35; col[i * 3 + 1] += (0.7 - col[i * 3 + 1]) * 0.35; col[i * 3 + 2] += (0.25 - col[i * 3 + 2]) * 0.35;
+    }
   }
   // polygon edges, then island borders (uv seams and open borders) on top
   if (g.numPrims <= 60000) {
@@ -1729,7 +1755,9 @@ function drawUVView(
   for (let i = 0; i < S.bv.length; i++) edge(S.bv[i], S.bw[i]);
   tileLabels();
   const tiles = span === 1 && u0 === 0 && v0 === 0 ? '0..1' : `${span}×${span} TILES FROM ${u0},${v0}`;
-  const ov = covered ? (overlap / covered) * 100 : 0;
-  if (ov >= 0.05) notes.push(`uv view: ${ov.toFixed(1)}% of the covered uv area overlaps (red)`);
-  return `UV  ${tiles}${ov >= 0.05 ? `  OVERLAP ${ov.toFixed(1)}%` : ''}`;
+  const ov = covered ? (overlap / covered) * 100 : 0, ex = covered ? (expected / covered) * 100 : 0;
+  if (ov >= 0.05) notes.push(`uv view: ${ov.toFixed(1)}% of the covered uv area overlaps (red; inspect detail "uv" names the parts and where)`);
+  if (tilingTris) notes.push(`uv view: tiling uv: ${tilingTris} triangles lie in charts that run across tile borders (a repeating texture, not an atlas); their overlap is expected (amber)`);
+  if (ex >= 0.05 && lods) notes.push('uv view: LODs share the uv space; their overlap is expected (amber)');
+  return `UV  ${tiles}${ov >= 0.05 ? `  OVERLAP ${ov.toFixed(1)}%` : ''}${tilingTris ? '  TILING' : ''}${ex >= 0.05 && !tilingTris ? '  LOD OVERLAP OK' : ''}`;
 }

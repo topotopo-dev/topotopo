@@ -950,13 +950,19 @@ Which node:
   uv_transform translate/scale/rotate existing uv.
 Typical: geo → uv_unwrap → render {views:"quad_uv", checker:true}.  Manual: delete uv → uv_flatten {seams:[...]} → uv_layout.
 SEE IT: render views "uv" (or "quad_uv" = persp + uv): the 0..1 square with a 0.1 grid and UDIM labels, polygons filled
-by chart/island colour, island borders yellow, overlapping uv in RED (footer/notes give the overlap %).
+by chart/island colour, island borders yellow, overlapping uv in RED (footer/notes give the overlap %); overlap that is
+expected is amber: charts of a repeating texture (they run across tile borders: the label says TILING) and LODs that
+share the uv space (prim names ending _lod0, _lod1 …).
 render checker:true shades 3D views with an 8×8 uv checker: squares should look square and equal-sized
 (stretch = rectangles, density = cell size, mirrored charts flip the red/green gradient).
-MEASURE IT: inspect {detail:"uv", resolution:1024, json:true}: exact overlaps (triangle pairs, their prims and areas,
-folds inside one chart included; shared edges are not overlaps), collapsed / non-finite / out-of-tile triangles, UDIM
-tiles, charts, mirrored triangles, utilization (exact for a clean atlas in 0..1, else a labelled raster ESTIMATE) and
-per-piece (prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
+MEASURE IT: inspect {detail:"uv", resolution:1024, json:true}: exact overlaps (triangle pairs with the part and world
+position of each, and their areas; folds inside one chart included; shared edges are not overlaps), split into
+overlap.inTile (between atlas charts, each inside one tile: what a bake suffers), overlap.tiling (a chart runs across
+tile borders, as uv_project over many tiles does: a repeating texture, flagged tiling:true; expected) and
+overlap.acrossLods (prims named _lod0 / _lod1 … share the uv space on purpose); collapsed / non-finite / out-of-tile
+triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, utilization (exact for a
+clean atlas in 0..1, else a labelled raster ESTIMATE) and per-piece (prim "name") surface, uv area and texel density.
+An analysis that hits its bounds says INCOMPLETE.
 CLI: --inspect uv --uv-resolution 1024 [--json].
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
@@ -1166,6 +1172,11 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    vars by their bare name: "npoints == count * 8").
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
+   Every failed check names its first offender: the part (prim "name", groups) and its world position.
+   inspect {detail:"topology"} says whether the mesh is a closed solid and, when not, why: open edges (counted after
+   welding the vertex splits of uv/normal seams, which a re-imported GLB has), non-manifold edges, flipped faces, pieces
+   facing inward, degenerate faces, each with a count, where the first one is and the fix. Solid ops (boolean …) give
+   the same causes when they refuse a mesh.
 2. EXPLAIN AFTER A BUILD/EDIT: explain {graph, node?} describes the result in words, e.g.
    "reads as: one closed piece, box-like, 2 × 1 × 1 m, 3 cm thin walls, mirror-symmetric in x, z", then pieces,
    watertight/genus/boundary loops, flipped normals, symmetry planes, principal axis + aspect, sampled thickness,

@@ -118,5 +118,28 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   check(/uv "uv": COMPLETE analysis of 4 triangles/.test(txt) && /small: 2 tris, surface 1 m², uv 0.25, 512 texels\/m/.test(txt) && /utilization 50.00% \(exact\)/.test(txt), 'inspect detail "uv" prints the report');
 }
 
+// ---------------------------------------------------------------- tiling uv, LODs, findings with parts and positions
+{
+  // two faces of a repeating texture: each chart spans 3 tiles, and both land on the same uv
+  const tiling = uvReport(mesh([quad(0, 0, 0, 0, 3, 1, 'wall'), quad(5, 0, 0, 0, 3, 1, 'wall')]));
+  check(tiling.tiling && tiling.tilingCharts === 2 && tiling.overlap.inTile.pairs === 0 && tiling.overlap.tiling.pairs > 0 && tiling.overlap.pairs === tiling.overlap.tiling.pairs,
+    `tiling uv: flagged, its overlap is tiling overlap, none in tiles (${tiling.overlap.tiling.pairs} pairs)`);
+  const tt = inspect(mesh([quad(0, 0, 0, 0, 3, 1, 'wall'), quad(5, 0, 0, 0, 3, 1, 'wall')]), { detail: 'uv' });
+  check(/TILING: 2 charts run across tile borders/.test(tt) && /overlaps in tiles \(atlas, what a bake suffers\): 0 triangle pairs/.test(tt) && /overlaps of tiling charts \(expected\)/.test(tt), 'inspect uv says TILING and keeps the atlas overlap at 0');
+  // a UDIM layout is not tiling: overlap inside tile 1002 is an atlas overlap
+  const udim = uvReport(mesh([quad(0, 0, 1.1, 0.1, 1.6, 0.6), quad(5, 0, 1.3, 0.1, 1.8, 0.6)]));
+  check(!udim.tiling && udim.overlap.inTile.pairs > 0 && udim.overlap.tiling.pairs === 0, 'charts inside a UDIM tile are an atlas: their overlap counts');
+  // merged LODs share the uv space
+  const lods = uvReport(mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'crate_lod0'), quad(5, 0, 0, 0, 0.5, 0.5, 'crate_LOD1'), quad(9, 0, 0.25, 0, 0.75, 0.5, 'lid_lod0')]));
+  check(lods.overlap.acrossLods.pairs > 0 && lods.overlap.inTile.pairs > 0 && lods.overlap.examples[0].kind === 'inTile' && /"lid_lod0"|"crate_lod0"/.test(lods.overlap.examples[0].where.join()),
+    `LOD0 and LOD1 overlap as expected; lid_lod0 over crate_lod0 is a real overlap, listed first (${lods.overlap.acrossLods.pairs} across LODs, ${lods.overlap.inTile.pairs} in tiles)`);
+  // findings say the part and where
+  const two = uvReport(mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'lid'), quad(5, 0, 0.25, 0, 0.75, 0.5, 'base')]));
+  const w = two.overlap.examples[0].where.join(' × ');
+  check(/prim \d of "(lid|base)" at \(\d\.\d{3}, 0\.000, 0\.\d{3}\) × prim \d of "(lid|base)" at \(/.test(w), `overlap examples name the parts and world positions (${w})`);
+  const col = uvReport(mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'a'), { P: [[3, 0, 0], [4, 0, 0], [4, 0, 1]], uv: [[0.6, 0.6], [0.7, 0.7], [0.8, 0.8]], name: 'strap' }]));
+  check(/^prim 1 of "strap" at \(3\.667, 0\.000, 0\.333\)$/.test(col.firstCollapsed ?? ''), `the first collapsed triangle is named with its position (${col.firstCollapsed})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
