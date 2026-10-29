@@ -417,6 +417,58 @@ class Ctx {
 
 // ---------------------------------------------------------------- edge bevel
 
+/**
+ * Offsets of bevelled edges of one face that face each other (running opposite ways, each on the other's inner side,
+ * overlapping along their length) are scaled down until they add up to the gap between the edges. Returns how many
+ * pairs were scaled.
+ */
+function clampFacing(g: Geometry, he: HalfEdgeMesh, bevE: Uint8Array, offE: Float64Array): number {
+  const P = g.P;
+  const pt = (i: number): V3 => [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]];
+  let pairs = 0;
+  const nrm = [0, 0, 0];
+  for (let f = 0; f < g.numPrims; f++) {
+    const hs = he.faceHalfEdges(f).filter((h) => bevE[he.heEdge[h]]);
+    if (hs.length < 2) continue;
+    primNewell(g, f, nrm);
+    const N = unit(nrm as V3, [0, 0, 1]);
+    const seg = hs.map((h) => {
+      const a = pt(he.heOrigin[h]), b = pt(he.dest(h)), d = unit(sub(b, a), [1, 0, 0]);
+      return { e: he.heEdge[h], a, b, d, m: cross3(N, d), A: he.heOrigin[h], B: he.dest(h) };
+    });
+    for (let i = 0; i < seg.length; i++)
+      for (let j = i + 1; j < seg.length; j++) {
+        const s1 = seg[i], s2 = seg[j];
+        if (s1.A === s2.A || s1.A === s2.B || s1.B === s2.A || s1.B === s2.B) continue;
+        if (dot(s1.d, s2.d) > -0.8) continue; // not facing: corners between them are the corner clamp's
+        // each on the other's inner side, and overlapping along the first one's direction
+        const mid1 = scale(add(s1.a, s1.b), 0.5), mid2 = scale(add(s2.a, s2.b), 0.5);
+        if (dot(s1.m, sub(mid2, mid1)) <= 0 || dot(s2.m, sub(mid1, mid2)) <= 0) continue;
+        const t0 = dot(sub(s2.a, s1.a), s1.d), t1 = dot(sub(s2.b, s1.a), s1.d), L = len(sub(s1.b, s1.a));
+        if (Math.max(t0, t1) <= 0 || Math.min(t0, t1) >= L) continue;
+        const gap = segmentGap(s1.a, s1.b, s2.a, s2.b);
+        const need = offE[s1.e] + offE[s2.e];
+        if (!(need > gap) || !(gap > 0)) continue;
+        const k = (gap / need) * 0.999;
+        offE[s1.e] *= k; offE[s2.e] *= k;
+        pairs++;
+      }
+  }
+  return pairs;
+}
+
+/** Smallest distance between segments ab and cd. */
+function segmentGap(a: V3, b: V3, c: V3, d: V3): number {
+  const u = sub(b, a), v = sub(d, c), w = sub(a, c);
+  const A = dot(u, u), B = dot(u, v), Cc = dot(v, v), D = dot(u, w), E = dot(v, w), den = A * Cc - B * B;
+  let s = den > 1e-30 ? (B * E - Cc * D) / den : 0, t: number;
+  s = Math.max(0, Math.min(1, s));
+  t = Cc > 1e-30 ? (B * s + E) / Cc : 0;
+  if (t < 0) { t = 0; s = A > 1e-30 ? Math.max(0, Math.min(1, -D / A)) : 0; }
+  else if (t > 1) { t = 1; s = A > 1e-30 ? Math.max(0, Math.min(1, (B - D) / A)) : 0; }
+  return len(sub(add(a, scale(u, s)), add(c, scale(v, t))));
+}
+
 /** Edges whose two faces bend less than this (degrees) are flat: the default selection leaves them alone. */
 export const FLAT_EDGE_DEG = 0.01;
 
@@ -477,6 +529,10 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
   };
   for (let e = 0; e < ne; e++)
     if (bevE[e]) offE[e] = offsetMode === 'fraction' ? opts.offset * Math.min(minFanLen(he.edgeA[e]), minFanLen(he.edgeB[e])) : opts.offset;
+  // two bevelled edges facing each other across a narrow part of a face (the rims of a thin band) share no point, so
+  // the corner clamp below never sees them: their offsets may add up to at most the gap between them
+  let nFacing = 0;
+  if (opts.clamp ?? true) nFacing = clampFacing(g, he, bevE, offE);
 
   const C = new Ctx(g, opts.divisions ?? 0, opts.shape ?? 0);
   const n = C.n;
@@ -604,6 +660,7 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
   let reduced = 0, minLocal = 1;
   for (let e = 0; e < ne; e++)
     if (bevE[e] && offE[e] < off0[e] * 0.9999) { reduced++; minLocal = Math.min(minLocal, offE[e] / off0[e]); }
+  if (nFacing) warnings.push(`offset reduced at ${nFacing} pair(s) of edges facing each other across a narrow face (a thin band or rim), so their bevels meet instead of crossing`);
   if (reduced) warnings.push(`offset reduced at ${reduced} edge(s) (to ${(minLocal * 100).toFixed(1)}% at least) so neighbouring bevels do not overlap; the other edges keep the full offset`);
   if (nDropped) warnings.push(`${nDropped} edge(s) left sharp: a neighbouring edge is too short to fit the bevel (zero-length edges from duplicate points? fuse first)`);
   if (nDropped) {

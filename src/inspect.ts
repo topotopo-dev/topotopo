@@ -9,7 +9,8 @@
 //   detail "attributes" adds the attribute statistics and each image's layer ranges
 import { Geometry } from './core/geometry.ts';
 import type { AttribClass, Attribute } from './core/geometry.ts';
-import { primArea, signedVolume, topologyReport, triangleReport } from './core/topology.ts';
+import { primArea, signedVolume, topologyReport, triangleReport, triangulate } from './core/topology.ts';
+import { selfIntersections } from './core/analysis.ts';
 import { evalGroup } from './core/groups.ts';
 import { edgeList } from './core/edges.ts';
 import { halfEdges } from './core/halfedge.ts';
@@ -418,8 +419,10 @@ export function topologyLines(g: Geometry): string[] {
   else if (s.closedAfterWeld) {
     out.push(s.closed ? '  CLOSED solid (watertight: every polygon edge shared by exactly two polygons)'
       : `  CLOSED solid after welding seam splits: ${openEdgesText(s)}; fuse the points to make it closed as it is`);
-    // a closed mesh can still have flipped faces, face inward or hold degenerate faces
+    // a closed mesh can still have flipped faces, face inward, hold degenerate faces or cross itself
     out.push(...causes.map((c) => `    ${c}`));
+    const x = crossingText(g);
+    if (x) out.push(`    ${x}`);
   } else out.push('  NOT a closed solid:', ...causes.map((c) => `    ${c}`));
   out.push(`  ${s.pieces} connected piece(s) after welding seam splits${r.pieces !== s.pieces ? ` (${r.pieces} as the points are)` : ''}; ${r.edges} edges; ${r.degenerate} degenerate prims; ${r.unusedPoints} unused points`);
   const t = triangleReport(g);
@@ -434,6 +437,20 @@ export function topologyLines(g: Geometry): string[] {
   if (r.closed && r.pieces === 1) out.push(`  euler ${r.euler} → genus ${(2 - r.euler) / 2}`);
   return out;
 }
+
+/**
+ * Faces of a closed mesh that cross each other ("" when none): booleans reject such a mesh even though every edge is
+ * shared by two faces. Meshes above CROSSING_CHECK_MAX triangles are not searched.
+ */
+export function crossingText(g: Geometry): string {
+  const nt = triangulate(g).tris.length / 3;
+  if (nt > CROSSING_CHECK_MAX) return `(faces crossing each other not searched above ${CROSSING_CHECK_MAX.toLocaleString('en-US')} triangles)`;
+  const x = selfIntersections(g);
+  if (!x.pairs) return '';
+  const first = x.prims.indexOf(1);
+  return `${x.pairs}${x.capped ? '+' : ''} pair(s) of faces CROSS each other, first ${primWhere(g, first)}: booleans reject it; a bevel or offset too big for a thin part does this (a smaller offset, or remesh)`;
+}
+const CROSSING_CHECK_MAX = 400_000;
 
 /** Edge listing: index, point pair, length, polygon count, dihedral angle, edge groups. */
 function edgeElements(g: Geometry, o: InspectOptions): string[] {

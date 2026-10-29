@@ -11,6 +11,8 @@ import type { NodeSpec } from '../src/graph/types.ts';
 import { primArea, signedVolume, topologyReport, triangleReport, triangulate } from '../src/core/topology.ts';
 import { mergeTriangles } from '../src/core/polymerge.ts';
 import { removeSmallFaces } from '../src/nodes/topology.ts';
+import { selfIntersections } from '../src/core/analysis.ts';
+import { topologyLines } from '../src/inspect.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -113,6 +115,31 @@ const SLIDE: Record<string, NodeSpec> = {
   const plain = (await cook({ box: { type: 'box' }, bev: { type: 'poly_bevel', in: ['box'], params: { offset: 0.05 } } }, 'bev')).geo;
   // 12 box edges of 3 segments each (36 strips) and 8 corners; the flat grid lines inside the faces stay
   check(grp(grid, 'prim', 'bevel') === 44 && grp(plain, 'prim', 'bevel') === 20, `bevel default: flat edges skipped (${grp(grid, 'prim', 'bevel')} bevel prims on the grid box, ${grp(plain, 'prim', 'bevel')} on the plain box)`);
+}
+
+{
+  // a frame whose top rim is a 1.5 mm band, bevelled 0.8 mm on both of its edges: the bevels meet, never cross
+  const nodes: Record<string, NodeSpec> = {
+    outer: { type: 'shape2d', params: { shape: 'rect', size: [0.04, 0.03], plane: 'xy' } },
+    inner: { type: 'shape2d', params: { shape: 'rect', size: [0.03, 0.0255], plane: 'xy', center: [0, -0.00075, 0] } },
+    both: { type: 'merge', in: ['outer', 'inner'] },
+    frame: { type: 'extrude', in: ['both'], params: { height: 0.0135, center: true } },
+    bev: { type: 'poly_bevel', in: ['frame'], params: { group: 'angle>35', offset: 0.0008, divisions: 3 } },
+    self: { type: 'boolean', in: ['bev'] },
+    wild: { type: 'poly_bevel', in: ['frame'], params: { group: 'angle>35', offset: 0.0009, divisions: 3, clamp: false } },
+    selfWild: { type: 'boolean', in: ['wild'] },
+  };
+  const { geo, warnings } = await cook(nodes, 'bev');
+  check(solid(geo) && selfIntersections(geo).pairs === 0, 'bevel: the two rims of a thin band are clamped to meet, no faces cross');
+  check(/facing each other across a narrow face/.test(warnings), `bevel: says it reduced the facing pairs (${warnings})`);
+  check(solid((await cook(nodes, 'self')).geo), 'bevel of a thin band: a boolean takes it');
+  check(/its faces cross each other: \d+\+? pair\(s\), first prim \d+/.test(await cookError(nodes, 'selfWild')), 'boolean on a mesh crossing itself: says where the faces cross');
+  check(/pair\(s\) of faces CROSS each other, first prim/.test(topologyLines((await cook(nodes, 'wild')).geo).join(' ')), 'inspect topology: a closed mesh that crosses itself says so');
+}
+{
+  const { warnings } = await cook({ b: { type: 'box' }, c: { type: 'copy_xform', in: ['b'], params: { count: 3 } } }, 'c');
+  const ring = await cook({ b: { type: 'box' }, c: { type: 'copy_xform', in: ['b'], params: { count: 6, rotate: [0, 60, 0] } } }, 'c');
+  check(/the 3 copies stack in place/.test(warnings) && !ring.warnings, 'copy_xform: copies that stack in place warn; a rotate-only ring does not');
 }
 
 // ---------------------------------------------------------------- clean keeps a closed mesh closed
