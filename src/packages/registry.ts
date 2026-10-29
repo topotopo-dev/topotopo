@@ -53,7 +53,7 @@ import { imageRef, referenceableImages } from '../core/image.ts';
 import { NAME_RE } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { VERSION_RE, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
+import { VERSION_RE, copiesFor, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
 import { scanLibrary } from '../gallery/library.ts';
 import type { GalleryConfig } from '../config.ts';
 import type { Libraries, LibraryAt, ProjectManifest } from '../project.ts';
@@ -639,6 +639,8 @@ export class ProjectPackages implements SessionPackages {
   readonly engine: Engine;
   /** the project folder; null when the folder belongs to no project */
   readonly dir: string | null;
+  /** the folder whose packages/ holds the project's copies and their lock (copiesFor) */
+  readonly store: string | null;
   /** the folder of TopoTopo's built-in library, which every project looks in */
   readonly builtin: string;
   manifest: ProjectManifest | null = null;
@@ -674,10 +676,11 @@ export class ProjectPackages implements SessionPackages {
   constructor(engine: Engine, dir: string | null, opts: { builtin?: string } = {}) {
     this.engine = engine;
     this.dir = dir === null ? null : path.resolve(dir);
+    this.store = this.dir === null ? null : copiesFor(this.dir);
     this.builtin = path.resolve(opts.builtin ?? BUILTIN_LIBRARY.path);
-    this.root = { label: 'this project', uses: {}, packages: this.dir ? path.join(this.dir, 'packages') : '', lock: { packages: {} }, follows: true };
+    this.root = { label: 'this project', uses: {}, packages: this.store ? path.join(this.store, 'packages') : '', lock: { packages: {} }, follows: true };
     this.resolver = { resolve: (name) => this.resolveIn(this.root, name), names: () => this.namesIn(this.root), offered: () => this.offered() };
-    if (this.dir) readShaCache(this.dir);
+    if (this.store) readShaCache(this.store);
     this.reload();
   }
 
@@ -708,7 +711,7 @@ export class ProjectPackages implements SessionPackages {
       this.manifest = readManifest(this.dir);
       const pkg = this.manifest.package;
       // the project that is a package: its graphs name their own outputs, which cook from its graphs as they are now
-      this.root = { ...this.root, uses: this.manifest.uses, lock: readLock(this.dir), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
+      this.root = { ...this.root, uses: this.manifest.uses, lock: readLock(this.store!), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
       this.error = null;
     } catch (e: any) { this.error = e.message; this.root = { ...this.root, uses: {}, lock: { packages: {} }, self: undefined }; }
   }
@@ -716,7 +719,7 @@ export class ProjectPackages implements SessionPackages {
   private diskStamp(): string {
     if (!this.dir) return '';
     const st = (f: string) => { const s = fs.statSync(f, { throwIfNoEntry: false }); return s ? `${s.size}:${s.mtimeMs}` : '-'; };
-    return `${st(manifestFile(this.dir))}|${st(lockFile(this.dir))}`;
+    return `${st(manifestFile(this.dir))}|${st(lockFile(this.store!))}`;
   }
 
   /**
@@ -1010,16 +1013,16 @@ export class ProjectPackages implements SessionPackages {
     for (const p of this.followed.keys()) start.push(this.loadFollowed(p));
     if (this.root.self && this.selfStamp) start.push(this.root.self.get());
     const out = this.problemsOf(start);
-    writeShaCache(this.dir);
+    writeShaCache(this.store!);
     return out;
   }
 
   /** The copies the project's uses need, checked now: one the lock does not list, one missing, one edited by hand. */
   verifyCopies(): string[] {
-    const { dir } = this.project();
-    const packages = path.join(dir, 'packages');
+    const { dir } = this.project(), store = this.store!;
+    const packages = path.join(store, 'packages');
     let lock: Lock, closure: [string, string][];
-    try { lock = readLock(dir); closure = usesClosure(readManifest(dir).uses, lock); } catch (e: any) { return [e.message]; }
+    try { lock = readLock(store); closure = usesClosure(readManifest(dir).uses, lock); } catch (e: any) { return [e.message]; }
     const out: string[] = [];
     for (const [pkg, v] of closure) {
       const at = copyAt(packages, pkg, v);
@@ -1077,16 +1080,16 @@ export class ProjectPackages implements SessionPackages {
     if (at && isPackageName(at[1])) throw new Error(`"${pkg}" is not a package name: name the version apart, ${program()} use ${at[1]} --version ${at[2] || '<version>'} (MCP: library {action:"use", package:"${at[1]}", version:"${at[2]}"})`);
     if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name (lower-case letters, digits, - and _)`);
     if (o.version !== undefined && !VERSION_RE.test(o.version)) throw new Error(`"${o.version}" is not a version: write big.small, such as ${/^\d+$/.test(o.version) ? `${o.version}.0` : '1.1'}`);
-    return withProjectLock(dir, () => {
+    return withProjectLock(this.store!, () => {
       const m = readManifest(dir);
       if (pkg === m.package) throw new Error(`this project is the package ${pkg}: its graphs name its own outputs by full name, with no entry in "uses"`);
       const inUse = m.uses[pkg];
       if (inUse !== undefined && o.version !== undefined && o.version !== inUse)
         throw new Error(`this project uses ${pkg} ${inUse}: ${program()} update ${pkg} --to ${o.version} shows the before/after of going to ${o.version}, and applies it when asked`);
       if (inUse !== undefined) {
-        const packages = path.join(dir, 'packages');
+        const packages = path.join(this.store!, 'packages');
         let complete = false;
-        try { complete = usesClosure({ [pkg]: inUse }, readLock(dir)).every(([p, w]) => fs.existsSync(path.join(copyAt(packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
+        try { complete = usesClosure({ [pkg]: inUse }, readLock(this.store!)).every(([p, w]) => fs.existsSync(path.join(copyAt(packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
         if (complete) return { version: inUse, copied: [], text: `${this.label} already uses ${pkg} ${inUse}` };
       }
       const { version: v, place } = this.versionToAdd(pkg, inUse ?? o.version);
@@ -1096,7 +1099,7 @@ export class ProjectPackages implements SessionPackages {
         writeManifest(dir, m);
       }
       this.reload();
-      writeShaCache(dir);
+      writeShaCache(this.store!);
       const deps = copied.filter((c) => c !== `${pkg} ${v}`);
       return {
         version: v, copied,
@@ -1154,7 +1157,7 @@ export class ProjectPackages implements SessionPackages {
 
   /** Copy a version as published, and the versions it holds copies of, into the project; record them in the lock. */
   private copyIn(pkg: string, v: string, place: Place): string[] {
-    const dir = this.dir!;
+    const store = this.store!;
     if (versionHash(place.dir) !== place.info.hash)
       throw new Error(`${pkg} ${v} in ${place.dir} (${libraryText(place.library)}) was changed after publishing: its files do not match the hash in its version.json, so it is not copied`);
     type Wanted = { pkg: string; v: string; from: string; hash: string; uses: Record<string, string>; keep?: (rel: string) => boolean };
@@ -1172,7 +1175,7 @@ export class ProjectPackages implements SessionPackages {
       wanted.push(w);
     };
     for (const key of byKey.keys()) visit(key);
-    const lock = readLock(dir), packages = path.join(dir, 'packages');
+    const lock = readLock(store), packages = path.join(store, 'packages');
     const copied: string[] = [];
     for (const w of wanted) {
       if (!fs.existsSync(path.join(w.from, 'version.json'))) throw new Error(`${pkg} ${v} in library "${place.library}" lists ${w.pkg} ${w.v} in its packages/lock.json but holds no copy of it (${w.from})`);
@@ -1190,7 +1193,7 @@ export class ProjectPackages implements SessionPackages {
       // the lock keeps the library a copy came from
       if (!have || copied.includes(`${w.pkg} ${w.v}`)) (lock.packages[w.pkg] ??= {})[w.v] = { hash: w.hash, library: place.library, uses: w.uses };
     }
-    writeLock(dir, lock);
+    writeLock(store, lock);
     return copied;
   }
 
@@ -1540,7 +1543,7 @@ export class ProjectPackages implements SessionPackages {
    * When the lock misses a version, every copy stays.
    */
   private dropUnused(before: [string, string][], uses: Record<string, string>): string[] {
-    const dir = this.dir!, packages = path.join(dir, 'packages'), lock = readLock(dir);
+    const store = this.store!, packages = path.join(store, 'packages'), lock = readLock(store);
     let keep: Set<string>;
     try { keep = new Set(usesClosure(uses, lock).map(([p, v]) => `${p}@${v}`)); } catch { return []; }
     const deleted: string[] = [];
@@ -1553,7 +1556,7 @@ export class ProjectPackages implements SessionPackages {
       this.loaded.delete(`${p}@${v}`);
       deleted.push(`${p} ${v}`);
     }
-    writeLock(dir, lock);
+    writeLock(store, lock);
     return deleted;
   }
 

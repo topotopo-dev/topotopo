@@ -464,3 +464,10 @@ export function librariesFor(dir: string): Libraries {
   return out;
 }
 
+/**
+ * The folder whose packages/ holds a project's package copies and their lock (packages/lock.json): the project's own
+ * folder. Where a workspace keeps one shared copy for all its projects (slice 2) this is the one place that changes.
+ */
+export function copiesFor(project: string): string {
+  return path.resolve(project);
+}
