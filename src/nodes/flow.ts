@@ -10,7 +10,6 @@ import { IMPORT_FORMATS, importFormatFromPath, importGeometryAsync } from '../io
 import { readImageFile } from '../io/textures.ts';
 import type { HostFiles } from '../host/types.ts';
 import { scopeSig } from '../graph/scope.ts';
-import { mergeMaterialTables, writeMaterials } from '../core/materials.ts';
 import { fusePoints } from './transform.ts';
 import { DEFAULT_TRANSFER, composePackedXforms, expandPacked } from '../core/packed.ts';
 
@@ -19,6 +18,7 @@ defineNode({
   category: 'flow',
   packed: 'keep',
   summary: 'Combine any number of inputs into one geometry (attributes, groups and material tables are unioned).',
+  description: 'Material tables are unioned and images (texture nodes) combined. What several inputs share (the same image, the same material) is kept once. A name two inputs use for different things is made distinct, so each piece keeps its own maps and material: package outputs or asset instances whose maps are all called "basecolor" get theirs renamed "<material>_basecolor" (else "basecolor_2" …), different materials of one name "<name>_2", and the input\'s material table and prim "material" follow. Two different images under one name inside one input are warned about, as texture nodes and materials then cannot tell them apart.',
   aliases: ['combine', 'join'],
   inputs: [{ name: 'inputs', desc: 'any number of geometries', multi: true }],
   params: {},
@@ -30,11 +30,12 @@ defineNode({
     },
     output: 'both',
   },
-  cook: ({ inputs }) => {
+  cook: ({ inputs, warn }) => {
     const geos = inputs.filter((g): g is Geometry => !!g);
     const out = Geometry.merge(geos);
-    const table = mergeMaterialTables(geos);
-    if (Object.keys(table).length) writeMaterials(out, table);
+    const seen = new Set<string>(), twice = new Set<string>();
+    for (const v of out.volumes) if (v.kind === 'image') { if (seen.has(v.name)) twice.add(v.name); else seen.add(v.name); }
+    if (twice.size) warn(`merge: different images share the name ${[...twice].map((n) => `"${n}"`).join(', ')}; give them their own names (an image takes its node's name unless its name param is set)`);
     return out;
   },
 });
@@ -498,9 +499,6 @@ defineNode({
       }
       parts.push(folderNames(await read(childPath(p.path, file), fmt), file));
     }
-    const g = Geometry.merge(parts);
-    const materials = mergeMaterialTables(parts);
-    if (Object.keys(materials).length) writeMaterials(g, materials);
-    return g;
+    return Geometry.merge(parts);
   },
 });

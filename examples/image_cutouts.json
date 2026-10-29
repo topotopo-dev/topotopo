@@ -70,7 +70,7 @@
         "perforated_crop"
       ],
       "params": {
-        "strength": 0.04,
+        "depth": 0.0006,
         "tileable": false,
         "name": "perforated_normal"
       }
@@ -229,7 +229,7 @@
         "islands_crop"
       ],
       "params": {
-        "strength": 0.04,
+        "depth": 0.0006,
         "tileable": false,
         "name": "islands_normal"
       }
@@ -391,7 +391,7 @@
         "strips_crop"
       ],
       "params": {
-        "strength": 0.04,
+        "depth": 0.0006,
         "tileable": false,
         "name": "strips_normal"
       }
@@ -556,6 +556,7 @@
       ],
       "params": {
         "image": "cutouts_color",
+        "name": "cutouts_color",
         "radius": 8
       }
     },
@@ -567,6 +568,7 @@
       ],
       "params": {
         "image": "cutouts_normal",
+        "name": "cutouts_normal",
         "mask_image": "cutouts_color",
         "mask_channel": "alpha",
         "radius": 8
@@ -580,6 +582,7 @@
       ],
       "params": {
         "image": "cutouts_roughness",
+        "name": "cutouts_roughness",
         "mask_image": "cutouts_color",
         "mask_channel": "alpha",
         "radius": 8

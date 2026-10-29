@@ -4,7 +4,7 @@ import { Attribute, Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { RemeshError, isotropicRemesh } from '../core/remesh.ts';
-import { DecimateError, decimateMesh, decimatePoints, parseSteerAttribs } from '../core/decimate.ts';
+import { DecimateError, decimateMesh, decimatePoints, parseSteerAttribs, reductionLocks } from '../core/decimate.ts';
 import type { DecimateOptions } from '../core/decimate.ts';
 import { repairMesh, repairSummary } from '../core/repair.ts';
 import type { FuseMode, NonManifoldMode, SelfIntersectMode } from '../core/repair.ts';
@@ -219,17 +219,22 @@ const DEFAULT_RATIOS = [1, 0.5, 0.25, 0.125];
 defineNode({
   type: 'lod',
   category: 'topology',
-  summary: 'Levels of detail in one go: decimated copies tagged with prim lod and name suffix _LOD0, _LOD1 … (merged), or one level (switch).',
+  summary: 'Levels of detail in one go: decimated copies tagged with prim lod and named {name}_lod0, {name}_lod1 … (merged), or one level (switch); optionally of one group only.',
   description:
     'Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the ' +
     'decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ' +
     'ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep ' +
     'halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, ' +
     'like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height ' +
-    'allows. merge outputs all levels together with prim int "lod" and prim "name" = input name (or base_name) + ' +
-    '"_LOD<k>", so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level; spacing ' +
-    'offsets level k by k·spacing for side-by-side previews. switch outputs only level "level". Detail "lod" is a ' +
-    'JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.',
+    'allows. Every level\'s prims get prim int "lod" and prim "name" = name_format with {name} = the prim\'s input name ' +
+    '(or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that ' +
+    'split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; ' +
+    'spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same ' +
+    'way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): ' +
+    'the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its ' +
+    'target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open ' +
+    'borders, with point counts (or the max_error limit). Detail "lod" is a JSON list of {level, ratio | screen_size, ' +
+    'triangles, error}; detail int[] "lod_tris" the triangle counts.',
   aliases: ['lod_tree', 'polyreduce_lod', 'lod_create', 'lods'],
   inputs: [{ name: 'geo', desc: 'polygon mesh' }],
   params: {
@@ -244,13 +249,15 @@ defineNode({
     prune: { type: 'bool', default: true, desc: 'let small disconnected pieces (leaves, bolts) vanish in coarse levels' },
     mode: { type: 'enum', options: ['merge', 'switch'], default: 'merge', desc: 'merge = all levels in one geometry; switch = only "level"' },
     level: { type: 'int', default: 0, min: 0, desc: 'switch mode: the level to output' },
-    base_name: { type: 'string', default: 'mesh', desc: 'name for prims without a "name" attribute (becomes mesh_LOD0 …)', aliases: ['name'] },
+    name_format: { type: 'string', default: '{name}_lod{level}', desc: 'prim name of each level: {name} = the input prim name (or base_name), {level} = the level number (merge needs {level})', aliases: ['name_pattern', 'suffix_format'] },
+    base_name: { type: 'string', default: 'mesh', desc: 'the {name} of prims without a "name" attribute (mesh_lod0 …)', aliases: ['name'] },
+    group: P.group('prim', 'prims to make levels of ("" = all); the others pass through once, unchanged'),
     spacing: { type: 'vec3', default: [0, 0, 0], desc: 'offset of level k = k * spacing (side-by-side previews; keep 0 for export)', aliases: ['offset'] },
   },
-  outputs: 'prim int lod, prim string name (…_LOD<k>); detail string lod (JSON per level), detail int[] lod_tris',
+  outputs: 'prim int lod, prim string name (name_format, default {name}_lod{level}); detail string lod (JSON per level), detail int[] lod_tris',
   example: { type: 'lod', params: { levels: 4, ratios: [1, 0.5, 0.25, 0.1], spacing: [2.5, 0, 0] } },
-  cook: ({ input, p, stat }) => {
-    const g = input(0);
+  cook: ({ input, p, stat, warn }) => {
+    const all = input(0);
     const steer = guard(() => parseSteerAttribs(p.attributes));
     const sizes = Array.isArray(p.screen_sizes) ? p.screen_sizes.map(Number).filter((x: number) => x > 0) : [];
     const n = sizes.length ? sizes.length : Math.max(1, Math.floor(p.levels));
@@ -261,9 +268,21 @@ defineNode({
       ratios.push(Number.isFinite(r) && r >= 0 ? Math.min(1, r) : k ? ratios[k - 1] / 2 : 1);
     }
     const levels = p.mode === 'switch' ? [Math.min(n - 1, Math.max(0, Math.floor(p.level)))] : Array.from({ length: n }, (_, k) => k);
+    const fmt = String(p.name_format ?? '').trim();
+    if (!fmt) throw new NodeError('lod: name_format is empty', 'e.g. "{name}_lod{level}" (gun_lod0) or "{name}" in switch mode to keep the names');
+    if (levels.length > 1 && !fmt.includes('{level}')) throw new NodeError(`lod: name_format "${fmt}" has no {level}, so every level would get the same name`, 'e.g. "{name}_lod{level}"; switch mode can keep the names with "{name}"');
+    // group: only those prims get levels; the rest passes through once
+    const sel = mask(all, 'prim', p.group);
+    let g = all, rest: Geometry | null = null;
+    if (sel) {
+      if (!sel.some((x) => x)) throw new NodeError(`lod: group "${p.group}" matches no prim`);
+      g = all.subsetPrims(sel);
+      rest = all.subsetPrims(Uint8Array.from(sel, (x) => (x ? 0 : 1)));
+    }
     const info: any[] = [], tris: number[] = [], geos: Geometry[] = [];
     const nameAttr = g.prims.get('name');
     const baseNames = nameAttr && nameAttr.type === 'string' ? (nameAttr.data as string[]) : null;
+    let locks: ReturnType<typeof reductionLocks> | null = null;
     for (const k of levels) {
       const bySize = sizes.length > 0;
       const opts: DecimateOptions = {
@@ -274,14 +293,27 @@ defineNode({
       };
       const r = guard(() => decimateMesh(g, opts));
       const lg = r.geo;
-      // tag the level: prim lod + name suffix
+      // a ratio level well short of its target: say what held it
+      const want = Math.round(ratios[k] * r.trisIn);
+      if (!bySize && ratios[k] < 1 && r.trisOut > want * 1.1 + 2) {
+        const pct = (x: number) => `${Math.round((100 * x) / Math.max(1, r.trisIn))} %`;
+        let why: string;
+        if (p.max_error < 1 && r.error >= p.max_error * 0.999) why = `the error limit max_error ${p.max_error} was reached`;
+        else {
+          locks ??= reductionLocks(g);
+          const held = locks.slice(0, 5).map((l) => `${l.cause} (${l.points.toLocaleString('en-US')} points)`).join(', ');
+          why = held ? `the reduction cannot collapse across ${held}${p.lock_border && locks.some((l) => l.cause === 'open borders') ? '; lock_border keeps the open borders whole' : ''}` : 'the mesh has nothing left to collapse at this error';
+        }
+        warn(`lod: level ${k} stopped at ${r.trisOut.toLocaleString('en-US')} triangles (${pct(r.trisOut)} of ${r.trisIn.toLocaleString('en-US')}), short of its ${pct(want)} target: ${why}. Fewer seams reduce further: compute normals after lod (normal node) rather than before, reduce before uv_unwrap or with fewer charts, drop groups and prim strings the levels do not need (group_delete, attrib_delete)`);
+      }
+      // tag the level: prim lod + name from name_format
       const lod = lg.prims.add('lod', 'int', 1);
       (lod.data as Int32Array).fill(k);
       const names = new Array<string>(lg.numPrims);
       const srcName = lg.prims.get('name');
       for (let pr = 0; pr < lg.numPrims; pr++) {
         const base = baseNames && srcName && srcName.type === 'string' ? (srcName.data as string[])[pr] || p.base_name : p.base_name;
-        names[pr] = `${base}_LOD${k}`;
+        names[pr] = fmt.replaceAll('{name}', base).replaceAll('{level}', String(k));
       }
       lg.prims.set('name', new Attribute('string', 1, names, ''));
       const off = p.spacing as number[];
@@ -293,6 +325,7 @@ defineNode({
       tris.push(r.trisOut);
       geos.push(lg);
     }
+    if (rest && (rest.numPrims || rest.numPoints)) geos.unshift(rest);
     const out = geos.length === 1 ? geos[0] : Geometry.merge(geos);
     for (const a of ['error', 'error_abs']) out.detail.delete(a);
     (out.detail.add('lod', 'string', 1).data as string[])[0] = JSON.stringify(info);

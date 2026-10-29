@@ -61,7 +61,7 @@ const source = img(5, 3, 'source', 4, (i, c) => i * 4 + c);
 source.set('id', Float32Array.from({ length: 15 }, (_, i) => i));
 const sourceGeo = geo(source, img(1, 1, 'other'));
 const sourceBefore = fingerprint(sourceGeo);
-const cropped = await cook('tex_crop', [sourceGeo], { origin: [-1, 1], size: [4, 3], name: 'crop' });
+const cropped = await cook('tex_crop', [sourceGeo], { image: 'source', origin: [-1, 1], size: [4, 3], name: 'crop' });
 test('crop: exact top-left rectangle, all layers and zero outside', () => {
   const c = findImage(cropped, 'crop')!;
   assert.equal(c.width, 4); assert.equal(c.height, 3);
@@ -69,18 +69,19 @@ test('crop: exact top-left rectangle, all layers and zero outside', () => {
   eq(c.layer('C')!.subarray(4, 8), source.layer('C')!.subarray(20, 24));
   assert.ok(findImage(cropped, 'other')); assert.deepEqual(fingerprint(sourceGeo), sourceBefore);
 });
-const cropDefault = await cook('tex_crop', [sourceGeo]);
-test('crop: defaults preserve every source value', () => {
-  eq(findImage(cropDefault)!.layer('C')!, source.layer('C')!);
-  eq(findImage(cropDefault)!.layer('id')!, source.layer('id')!);
+const cropDefault = await cook('tex_crop', [sourceGeo], { image: 'source' });
+test('crop: defaults preserve every source value; the result takes the node name', () => {
+  eq(findImage(cropDefault, 'out')!.layer('C')!, source.layer('C')!);
+  eq(findImage(cropDefault, 'out')!.layer('id')!, source.layer('id')!);
 });
+await rejects('tex_crop', [sourceGeo], {}, /holds 2 images \("source", "other"\)/);
 test('crop: nearest keeps discrete IDs; filtered resize area-averages without wrapping', () => {
   const s = img(2, 2, 'a');
   eq(cropImage(s, 0, 0, 2, 2, 4, 2, true, 'b').layer('C')!, [0, 0, 1, 1, 2, 2, 3, 3]);
   eq(cropImage(s, 0, 0, 2, 2, 1, 1, false, 'b').layer('C')!, [1.5]);
 });
-await rejects('tex_crop', [sourceGeo], { origin: [9, 0] }, /at least 1/);
-await rejects('tex_crop', [sourceGeo], { size: [8192, 8192] }, /too large/);
+await rejects('tex_crop', [sourceGeo], { image: 'source', origin: [9, 0] }, /at least 1/);
+await rejects('tex_crop', [sourceGeo], { image: 'source', size: [8192, 8192] }, /too large/);
 
 // Dilation: exact nearest sites including deterministic ties, no alpha loss.
 const rgba = img(7, 5, 'rgba', 4, (i, c) => c === 3 ? (i === 8 || i === 26 ? 1 : 0) : i + c / 4);
@@ -201,7 +202,8 @@ test('pack: channels align, native pixels survive and UV transforms address orig
       assert.ok(xx >= 0 && xx < 16 && yy >= 0 && yy < 8);
     }
     for (const slot of ['color', 'data'] as const) {
-      const src = findImage(maps, items[i].maps[slot])!, atlas = findImage(packed, 'atlas_' + slot)!, ch = src.channels('C');
+      // the atlas images are named <node>_<label> (the node is "out")
+      const src = findImage(maps, items[i].maps[slot])!, atlas = findImage(packed, 'out_' + slot)!, ch = src.channels('C');
       for (let row = 0; row < h; row++) for (let col = 0; col < w; col++) {
         const out: number[] = [];
         sampleUV(atlas.layer('C')!, ch, 16, 8, off[0] + ((col + 0.5) / w) * scale[0], off[1] + (1 - (row + 0.5) / h) * scale[1], out, false, true);

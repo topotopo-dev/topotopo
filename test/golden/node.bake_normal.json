@@ -38,9 +38,10 @@
         "kind": "image",
         "layers": {
           "C": "6058ee466ac8b5b4",
-          "mask": "b25f6e8801636ef6"
+          "mask": "b25f6e8801636ef6",
+          "missed": "9005a1b59538744f"
         },
-        "name": "normal"
+        "name": "target"
       }
     ]
   },

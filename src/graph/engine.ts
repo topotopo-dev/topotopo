@@ -1,7 +1,8 @@
 // Graph evaluation: validation, lazy pull-based cooking, content-addressed caching, time.
 //
 // Every node result is keyed by a signature = hash(type, resolved params, input
-// signatures[, the vars its code reads][, expression references]). Editing one parameter therefore re-cooks
+// signatures[, the vars its code reads][, expression references][, the node's name, for a node that names its result
+// after itself: NodeDef.usesNodeName]). Editing one parameter therefore re-cooks
 // only the nodes downstream of it, and identical sub-results (e.g. loop iterations) are shared. "=expr" params
 // are keyed by their values; code reads vars by their bare name, so a code node is keyed by the vars its code
 // names (NodeDef.usesVars), and changing another var leaves it cached.
@@ -1055,7 +1056,9 @@ export class Engine {
     // vars read by the node's code: all of them (loop bodies, scripts), or those its code names
     const varsSig = def.usesVars === true ? stableStringify(vars)
       : typeof def.usesVars === 'function' ? stableStringify(pickVars(vars, codeVarNames(def.usesVars(rp.values), vars))) : '';
-    const material = def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : '');
+    // a result named after its node (an image's default name) is not shared with an identical node of another name
+    const nameSig = def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '';
+    const material = def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : '') + nameSig;
     const plainSig = String(hashString(material));
     if (this.scopeDeps.has(plainSig)) readScope = true;
     const scopedSig = () => (scopeSig(scope) ? String(hashString(material + scopeSig(scope))) : plainSig);

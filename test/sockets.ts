@@ -151,7 +151,19 @@ const BODY: Record<string, NodeSpec> = {
   const g = await cook({ ...BODY, a: { type: 'scene_null', in: ['both'], params: { name: 'wick', parent: 'housing', translation: [0, 0, -0.2], rotation: [0, -90, 0] } } }, 'a');
   const d = await doc(await exportGLB(g));
   const sem = d.getRoot().listMeshes().flatMap((m) => m.listPrimitives().flatMap((p) => p.listSemantics()));
-  check(!sem.some((x) => /^_(SCENE_EMPTY|ORIENT|SCALE)$/.test(x)), `mesh primitives carry no _SCENE_EMPTY, _ORIENT or _SCALE (${[...new Set(sem)].join(', ')})`);
+  check(!sem.some((x) => /^_/.test(x)), `default export: mesh primitives carry no custom channels (${[...new Set(sem)].join(', ')})`);
+  // asked for custom attributes: the mesh's own come along, the empties' marker, parent, orient, scale and extras do not
+  const worn = await cook({
+    ...BODY,
+    wear: { type: 'attrib_create', in: ['both'], params: { name: 'wear', class: 'point', value: 0.25 } },
+    a: { type: 'scene_null', in: ['wear'], params: { name: 'wick', parent: 'housing', translation: [0, 0, -0.2], rotation: [0, -90, 0], scale: [2, 2, 2] } },
+    fwd: { type: 'wrangle', in: ['a'], params: { snippet: 'if (i@scene_empty) v@forward = set(0, 0, -1);' } },
+  }, 'fwd');
+  const dc = await doc(await exportGLB(worn, { custom: true }));
+  const semc = [...new Set(dc.getRoot().listMeshes().flatMap((m) => m.listPrimitives().flatMap((p) => p.listSemantics())))];
+  check(semc.includes('_WEAR') && !semc.some((x) => /^_(SCENE_EMPTY|PARENT|ORIENT|SCALE|FORWARD)$/.test(x)), `custom attributes: the mesh's own _WEAR, none of the empties' (${semc.join(', ')})`);
+  const wick = nodeNamed(dc, 'wick')[0];
+  check(wick && close((wick.getExtras() as any)?.forward ?? [], [0, 0, -1]), 'the empty keeps its extra as node extras');
   // the gallery's preview GLB merges every mesh into one node: a mesh-parented empty goes on the root, in place
   const pv = await doc(await previewGLB(g));
   const m = nodeNamed(pv, 'wick')[0];

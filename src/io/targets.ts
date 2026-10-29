@@ -26,7 +26,7 @@ export function targetFormat(f: unknown): ExportFormat | null {
 }
 
 // the export tool's options (src/mcp/tools.ts), by value type
-const BOOLEAN = ['split_by_name', 'materials', 'custom_attribs', 'quantize', 'pcg', 'pcg_struct', 'meshes'];
+const BOOLEAN = ['split_by_name', 'materials', 'custom_attribs', 'vertex_colors', 'quantize', 'pcg', 'pcg_struct', 'meshes'];
 const CHOICES: Record<string, unknown[]> = { up_axis: ['y', 'z'], compress: ['none', 'meshopt', 'draco'], tangents: ['auto', 'preserve', 'none'], instancing: ['packed', 'expand'], instances: ['rows', 'expand'], precision: [32, 64] };
 const NUMBER = ['scale', 'height_min', 'height_max', 'tile_size', 'heightfield'];
 const NAMES = ['attributes', 'layers'];

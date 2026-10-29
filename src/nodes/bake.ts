@@ -19,22 +19,23 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { andThen } from '../graph/parallel.ts';
+import { partsOf, primWhere } from '../core/report.ts';
 import { P, mask } from './util.ts';
-import { imageGeo, nameParam, resolutionParam, size2 } from './texture.ts';
+import { NAMED_BY_NODE, imageGeo, nameParam, outName, resolutionParam, size2 } from './texture.ts';
 
 /** Most samples a bake may rasterise (output texels × supersample²): 4096², about 1 GB of per-sample arrays at full coverage. */
 const MAX_SAMPLES = 4096 * 4096;
 
 // ---------------------------------------------------------------- shared params
 
-const BAKE_PARAMS = (name: string): Record<string, ParamDef> => ({
+const BAKE_PARAMS = (): Record<string, ParamDef> => ({
   resolution: resolutionParam(1024),
   supersample: { type: 'int', default: 1, min: 1, max: 4, desc: 'samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work)', aliases: ['ssaa', 'antialiasing', 'subsampling'] },
   padding: { type: 'int', default: 4, min: 0, max: 256, desc: 'dilate islands by this many texels (no background bleeding in mipmaps)', aliases: ['dilation', 'margin', 'edge_padding'] },
   uv_attrib: { type: 'string', default: 'uv', desc: 'vertex or point uv attribute to bake into', aliases: ['uv_name', 'uvattrib'] },
   group: P.group('prim', 'prims to bake ("" = all); the others leave their texels empty'),
   keep_mesh: { type: 'bool', default: false, desc: 'output the input mesh with the image added (off: only the image)', aliases: ['keep_input', 'keep'] },
-  name: nameParam(name),
+  name: nameParam(),
 });
 
 const INPUTS = [
@@ -44,6 +45,12 @@ const INPUTS = [
 
 const cageParam = (): ParamDef => ({ type: 'float', default: 0, min: 0, desc: 'high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal)', aliases: ['cage_distance', 'max_frontal_distance', 'ray_distance'] });
 const cageNormalsParam = (): ParamDef => ({ type: 'enum', options: ['averaged', 'mesh'], default: 'averaged', desc: 'high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh\'s own normals', aliases: ['ray_normals', 'average_normals'] });
+/** The params of every bake that reads a high-res mesh on input 1. */
+const HIGH_PARAMS = (): Record<string, ParamDef> => ({
+  cage: cageParam(), cage_normals: cageNormalsParam(),
+  cage_attrib: { type: 'string', default: 'cage', desc: 'high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03}', aliases: ['cage_attribute'] },
+  match_name: { type: 'bool', default: false, desc: 'high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours)', aliases: ['match_names', 'by_name'] },
+});
 
 /** The setup every bake shares: triangles, uv, covered samples, per-sample position and normal. */
 interface Bake {
@@ -57,6 +64,8 @@ interface Bake {
   readonly P: Float64Array;
   readonly N: Float64Array;
   diag: number;
+  /** per sample, 1 where the projection onto the high-res mesh found nothing (the "missed" layer) */
+  missed?: Float32Array;
 }
 
 function readUVNamed(g: Geometry, name: string): Float64Array | null {
@@ -104,12 +113,13 @@ function setup(ctx: CookContext): Bake {
 function finish(b: Bake, vals: ArrayLike<number>, ch: number, background: number[], extra: Record<string, { vals: ArrayLike<number>; ch: number; background: number[] }> = {}): Geometry {
   const { ctx, s } = b, p = ctx.p;
   const { data, coverage } = resolve(s, vals, ch);
-  const name = String(p.name ?? '').trim() || ctx.type.replace(/^bake_/, '');
-  const img = new Image(s.W, s.H, name);
+  const img = new Image(s.W, s.H, outName(ctx));
   const pad = Math.max(0, Math.round(p.padding));
   dilate(data, ch, s.W, s.H, coverage, pad, background);
   img.set(MAIN_LAYER, data);
-  for (const [k, e] of Object.entries(extra)) {
+  // with a high-res mesh: where the projection found nothing, to see which parts need a larger cage
+  const layers = b.missed ? { ...extra, missed: { vals: b.missed, ch: 1, background: [0] } } : extra;
+  for (const [k, e] of Object.entries(layers)) {
     const r = resolve(s, e.vals, e.ch);
     dilate(r.data, e.ch, s.W, s.H, coverage, pad, e.background);
     img.set(k, r.data);
@@ -138,14 +148,63 @@ function highOf(ctx: CookContext): Geometry | null {
  * when the kernel ran on this thread.
  */
 function project(b: Bake, high: Geometry, cage: number, normals: boolean) {
+  const { ctx } = b, n = b.s.n;
   const scene = RayScene.of(high);
-  const HN = normals ? pointNormalsOf(high) : new Float64Array(0);
-  const R = rayDirs(b);
-  const D = new Float64Array(b.s.n), NO = new Float64Array(normals ? b.s.n * 3 : 0);
-  const run = b.ctx.parallelMap('bake_project', {
-    count: b.s.n, args: { cage }, inputs: { P: b.P, N: R }, results: normals ? { D, NO } : { D }, shared: { ...scene.toArrays(), HN },
-  });
-  return andThen(run, () => ({ D, NO, scene, R }));
+  const R = rayDirs(b), C = cagesOf(b, cage);
+  const D = new Float64Array(n), NO = new Float64Array(normals ? n * 3 : 0);
+  const done = () => {
+    const missed = new Float32Array(n);
+    for (let i = 0; i < n; i++) if (!(D[i] === D[i])) missed[i] = 1;
+    b.missed = missed;
+    let count = 0;
+    for (let i = 0; i < n; i++) count += missed[i];
+    ctx.stat('missed', count);
+    return { D, NO, scene, R };
+  };
+  // match_name: each named piece of the mesh projects onto the high prims of the same name only
+  const lowName = b.g.prims.get('name'), highName = high.prims.get('name');
+  if (!ctx.p.match_name || !lowName || lowName.type !== 'string' || !highName || highName.type !== 'string') {
+    if (ctx.p.match_name) ctx.warn(`${ctx.type}: match_name needs a prim "name" on the mesh and on the high mesh; every high prim is matched`);
+    const run = ctx.parallelMap('bake_project', {
+      count: n, args: { cage }, inputs: { P: b.P, N: R, C }, results: normals ? { D, NO } : { D }, shared: { ...scene.toArrays(), HN: normals ? pointNormalsOf(high) : new Float64Array(0) },
+    });
+    return andThen(run, done);
+  }
+  const ln = lowName.data as string[], hn = highName.data as string[];
+  const bySample = new Map<string, number[]>();
+  for (let i = 0; i < n; i++) {
+    const k = ln[b.triPrim[b.s.tri[i]]] ?? '';
+    const l = bySample.get(k);
+    if (l) l.push(i); else bySample.set(k, [i]);
+  }
+  const lonely: string[] = [], runs: (unknown | Promise<unknown>)[] = [];
+  for (const [nm, idx] of bySample) {
+    const sel = Uint8Array.from(hn, (x) => (x === nm ? 1 : 0));
+    if (!sel.some((x) => x)) { lonely.push(nm || '(no name)'); for (const i of idx) D[i] = NaN; continue; }
+    const sub = high.subsetPrims(sel), sc = RayScene.of(sub), m = idx.length;
+    const Ps = new Float64Array(m * 3), Ns = new Float64Array(m * 3), Cs = C ? new Float64Array(m) : undefined;
+    idx.forEach((i, k) => { for (let c = 0; c < 3; c++) { Ps[k * 3 + c] = b.P[i * 3 + c]; Ns[k * 3 + c] = R[i * 3 + c]; } if (Cs) Cs[k] = C![i]; });
+    const Ds = new Float64Array(m), NOs = new Float64Array(normals ? m * 3 : 0);
+    const run = ctx.parallelMap('bake_project', {
+      count: m, args: { cage }, inputs: { P: Ps, N: Ns, C: Cs }, results: normals ? { D: Ds, NO: NOs } : { D: Ds }, shared: { ...sc.toArrays(), HN: normals ? pointNormalsOf(sub) : new Float64Array(0) },
+    });
+    runs.push(andThen(run, () => idx.forEach((i, k) => { D[i] = Ds[k]; if (normals) for (let c = 0; c < 3; c++) NO[i * 3 + c] = NOs[k * 3 + c]; })));
+  }
+  if (lonely.length) ctx.warn(`${ctx.type}: match_name: no high prims named ${lonely.slice(0, 8).map((x) => `"${x}"`).join(', ')}${lonely.length > 8 ? ' …' : ''}; those pieces bake as misses`);
+  return runs.some((r) => r instanceof Promise) ? Promise.all(runs).then(done) : done();
+}
+
+/**
+ * Per-sample cage distances where the mesh carries the cage_attrib attribute (prim, point or vertex; e.g. set per part
+ * with attrib_create {name: "cage", class: "prim", group}): its value where > 0, else the node's cage. Null without one.
+ */
+function cagesOf(b: Bake, cage: number): Float64Array | undefined {
+  const name = String(b.ctx.p.cage_attrib ?? '').trim();
+  const f = name ? b.g.findAttrib(name, ['vertex', 'point', 'prim', 'detail']) : null;
+  if (!f || f.attr.type === 'string' || f.attr.isArray) return undefined;
+  const C = interpolate(b.s, b.tris, vertexValues(b.g, name, 1)!, 1);
+  for (let i = 0; i < C.length; i++) if (!(C[i] > 0)) C[i] = cage;
+  return C;
 }
 
 /** Cage ray directions per sample: averaged normals (default; no gaps at hard edges) or the mesh's own normals. */
@@ -181,6 +240,18 @@ const chain = <T>(x: T | Promise<T>, f: (v: T) => Geometry | Promise<Geometry>):
 
 const cageOf = (b: Bake) => (b.ctx.p.cage > 0 ? b.ctx.p.cage : 0.02 * b.diag);
 
+/** Where the projection missed, for its warning: the parts with missed samples (counts) and the first one's place. */
+function missWhere(b: Bake): string {
+  const m = b.missed;
+  if (!m) return '';
+  const prims: number[] = [];
+  let first = -1;
+  for (let i = 0; i < b.s.n; i++) if (m[i]) { if (first < 0) first = i; prims.push(b.triPrim[b.s.tri[i]]); }
+  if (first < 0) return '';
+  const parts = partsOf(b.g, prims);
+  return `; ${parts ? `samples by part: ${parts}; ` : ''}the first at ${primWhere(b.g, b.triPrim[b.s.tri[first]], b.P.subarray(first * 3, first * 3 + 3))}`;
+}
+
 /** Samples moved onto the high mesh (P, N) where the projection hit; the low surface elsewhere. */
 function onHigh(b: Bake, high: Geometry) {
   return andThen(project(b, high, cageOf(b), true), ({ D, NO, scene, R }) => {
@@ -191,16 +262,16 @@ function onHigh(b: Bake, high: Geometry) {
       if (!(d === d)) { miss++; continue; }
       for (let c = 0; c < 3; c++) { P[i * 3 + c] += R[i * 3 + c] * d; N[i * 3 + c] = NO[i * 3 + c]; }
     }
-    if (miss) b.ctx.warn(`${b.ctx.type}: ${miss} of ${b.s.n} samples found no high-res surface within the cage (${cageOf(b).toPrecision(3)} m); they use the low surface (raise cage)`);
+    if (miss) b.ctx.warn(`${b.ctx.type}: ${miss} of ${b.s.n} samples found no high-res surface within the cage (${cageOf(b).toPrecision(3)} m${b.ctx.p.cage_attrib && b.g.findAttrib(b.ctx.p.cage_attrib, ['vertex', 'point', 'prim', 'detail']) ? `, or attribute "${b.ctx.p.cage_attrib}"` : ''}); they use the low surface${missWhere(b)}. Layer "missed" shows where: raise cage there (cage_attrib per part)`);
     return { P, N, scene, D, miss };
   });
 }
 
 function defineBake(def: Omit<NodeDef, 'category' | 'inputs'> & { inputs?: NodeDef['inputs'] }) {
-  defineNode({ category: 'texture', inputs: INPUTS, ...def } as NodeDef);
+  defineNode({ category: 'texture', inputs: INPUTS, usesNodeName: NAMED_BY_NODE, ...def } as NodeDef);
 }
 
-const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. ';
+const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. ';
 
 // ---------------------------------------------------------------- ray bakes
 
@@ -233,7 +304,7 @@ const RAY_PARAMS: Record<string, ParamDef> = {
   bias: { type: 'float', default: 0, min: 0, desc: 'ray start offset along the normal against self-hits (0 = auto: 1e-4 of the bbox diagonal)' },
   seed: P.seed(),
   invert: { type: 'bool', default: false, desc: 'write 1 - value' },
-  cage: cageParam(), cage_normals: cageNormalsParam(),
+  ...HIGH_PARAMS(),
 };
 
 defineBake({
@@ -245,12 +316,12 @@ defineBake({
     'that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.',
   aliases: ['ao_bake', 'bake_ambient_occlusion', 'bake_occlusion'],
   params: {
-    ...BAKE_PARAMS('ao'),
+    ...BAKE_PARAMS(),
     ...RAY_PARAMS,
     max_distance: { type: 'float', default: 0, min: 0, desc: 'hits farther than this do not occlude (metres; 0 = unlimited)', aliases: ['max_occluder_distance', 'distance', 'radius'] },
     cone_angle: { type: 'float', default: 0, min: 0, max: 90, desc: 'half-angle of the ray cone in degrees (0 = auto: 90, the hemisphere)', aliases: ['spread', 'angle'] },
   },
-  outputs: 'image <name> (default "ao"): C grey 0..1 (1 = open), mask',
+  outputs: 'image <name> (default: the node name): C grey 0..1 (1 = open), mask',
   example: {
     nodes: {
       crate: { type: 'topotopo/props/crate' },
@@ -271,12 +342,12 @@ defineBake({
     '(translucency, subsurface masks).',
   aliases: ['thickness_bake', 'bake_thick'],
   params: {
-    ...BAKE_PARAMS('thickness'),
+    ...BAKE_PARAMS(),
     ...RAY_PARAMS,
     max_distance: { type: 'float', default: 0, min: 0, desc: 'thickness that maps to 1 (metres; 0 = auto: 25% of the bbox diagonal)', aliases: ['distance', 'radius'] },
     cone_angle: { type: 'float', default: 0, min: 0, max: 90, desc: 'half-angle of the ray cone in degrees (0 = auto: 30)', aliases: ['spread', 'angle'] },
   },
-  outputs: 'image <name> (default "thickness"): C grey 0..1, mask',
+  outputs: 'image <name> (default: the node name): C grey 0..1, mask',
   example: {
     nodes: {
       ring: { type: 'torus' },
@@ -298,17 +369,21 @@ defineBake({
     'edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, ' +
     'weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; ' +
     'layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side ' +
-    'of a thin plank) are ignored; points are matched by position, so unwelded boxes work. tex_histogram_scan or ' +
-    'tex_levels on "convex" make an edge-wear mask.',
+    'of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by ' +
+    'default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet ' +
+    'or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt ' +
+    'gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, ' +
+    'on "concave" a dirt or cavity mask.',
   aliases: ['curvature_bake', 'bake_edges', 'edge_wear_bake'],
   params: {
-    ...BAKE_PARAMS('curvature'),
+    ...BAKE_PARAMS(),
     radius: { type: 'float', default: 0, min: 0, desc: 'how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal)', aliases: ['width', 'edge_width', 'distance'] },
     strength: { type: 'float', default: 1, min: 0, desc: 'contrast multiplier', aliases: ['intensity', 'contrast'] },
     min_angle: { type: 'float', default: 0.5, min: 0, max: 179, desc: 'edges bending less than this (degrees) are ignored' },
-    cage: cageParam(), cage_normals: cageNormalsParam(),
+    intersections: { type: 'bool', default: true, desc: 'also find the concave creases where separate parts cut into each other (kitbashed meshes)', aliases: ['crossings', 'intersection_creases'] },
+    ...HIGH_PARAMS(),
   },
-  outputs: 'image <name> (default "curvature"): C grey (0.5 = flat), convex, concave, mask',
+  outputs: 'image <name> (default: the node name): C grey (0.5 = flat), convex, concave, mask',
   example: {
     nodes: {
       box: { type: 'box' },
@@ -323,11 +398,14 @@ defineBake({
     const high = highOf(ctx);
     const go = (P: Float64Array, N: Float64Array, src: Geometry) => {
       const r = p.radius > 0 ? p.radius : 0.01 * b.diag;
-      const edges = curvatureEdges(src, 1e-6 * (bboxDiagonal(src) || 1), p.min_angle);
+      const counts = { shared: 0, crossing: 0, capped: false };
+      const edges = curvatureEdges(src, 1e-6 * (bboxDiagonal(src) || 1), p.min_angle, !!p.intersections, counts);
+      if (counts.capped) ctx.warn(`${ctx.type}: the search for crossing parts stopped early on this large mesh; some creases where parts cut into each other may be missing`);
       const grid = edgeGrid(edges, r);
       const args: CurvatureArgs = { radius: r, facing: 0.25, origin: grid.origin, cell: grid.cell, dims: grid.dims };
       const V = new Float64Array(b.s.n);
       ctx.stat('edges', edges.count);
+      ctx.stat('crossing_edges', counts.crossing);
       const run = ctx.parallelMap('bake_curvature', {
         count: b.s.n, args, inputs: { P, N }, results: { V }, shared: { E: edges.E, D: edges.D, K: edges.K, FN: edges.FN, start: grid.start, items: grid.items },
       });
@@ -360,10 +438,10 @@ defineBake({
   aliases: ['position_bake', 'bake_world_position'],
   inputs: [INPUTS[0]],
   params: {
-    ...BAKE_PARAMS('position'),
+    ...BAKE_PARAMS(),
     mode: { type: 'enum', options: ['bbox', 'uniform', 'world'], default: 'bbox', desc: 'how positions map to colour', aliases: ['normalize'] },
   },
-  outputs: 'image <name> (default "position"): C RGBA, mask',
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       crate: { type: 'topotopo/props/crate' },
@@ -394,8 +472,8 @@ defineBake({
   summary: 'Bake world-space normals into uv space as RGB (0.5 + 0.5 n): the mesh\'s own, or the high-res input\'s along the cage.',
   description: 'Substance Painter "World Space Normal". ' + BAKE_DOC + 'Without input 1 the mesh\'s interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.',
   aliases: ['world_normal_bake', 'bake_worldspace_normal'],
-  params: { ...BAKE_PARAMS('world_normal'), cage: cageParam(), cage_normals: cageNormalsParam() },
-  outputs: 'image <name> (default "world_normal"): C RGBA, mask',
+  params: { ...BAKE_PARAMS(), ...HIGH_PARAMS() },
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       ball: { type: 'sphere', params: { rows: 8, cols: 16 } },
@@ -429,11 +507,11 @@ defineBake({
     'read OpenGL; Unreal DirectX (or flip green on import).',
   aliases: ['normal_bake', 'bake_tangent_normal', 'bake_normal_map'],
   params: {
-    ...BAKE_PARAMS('normal'),
-    cage: cageParam(), cage_normals: cageNormalsParam(),
+    ...BAKE_PARAMS(),
+    ...HIGH_PARAMS(),
     format: { type: 'enum', options: ['opengl', 'directx'], default: 'opengl', desc: 'green channel convention', aliases: ['convention'] },
   },
-  outputs: 'image <name> (default "normal"): C RGBA, mask',
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       low: { type: 'box', params: { divisions: [2, 2, 2] } },
@@ -490,11 +568,11 @@ defineBake({
     'or use it as displacement.',
   aliases: ['height_bake', 'bake_displacement', 'displacement_bake'],
   params: {
-    ...BAKE_PARAMS('height'),
-    cage: cageParam(), cage_normals: cageNormalsParam(),
+    ...BAKE_PARAMS(),
+    ...HIGH_PARAMS(),
     mode: { type: 'enum', options: ['cage', 'normalize'], default: 'cage', desc: 'how distances map to 0..1', aliases: ['range'] },
   },
-  outputs: 'image <name> (default "height"): C grey 0..1, distance (metres), mask',
+  outputs: 'image <name> (default: the node name): C grey 0..1, distance (metres), mask',
   example: {
     nodes: {
       low: { type: 'box', params: { divisions: [2, 2, 2] } },
@@ -514,7 +592,7 @@ defineBake({
       const n = b.s.n, dist = new Float32Array(n), C = new Float32Array(n);
       let lo = Infinity, hi = -Infinity, miss = 0;
       for (let i = 0; i < n; i++) { const d = D[i]; if (d === d) { if (d < lo) lo = d; if (d > hi) hi = d; } else miss++; }
-      if (miss) ctx.warn(`${ctx.type}: ${miss} of ${n} samples found no high-res surface within the cage (${cage.toPrecision(3)} m)`);
+      if (miss) ctx.warn(`${ctx.type}: ${miss} of ${n} samples found no high-res surface within the cage (${cage.toPrecision(3)} m)${missWhere(b)}; layer "missed" shows where`);
       const span = hi > lo ? hi - lo : 1;
       for (let i = 0; i < n; i++) {
         const d = D[i];
@@ -535,8 +613,8 @@ defineBake({
   description: 'Substance Painter "ID" (by uv island). ' + BAKE_DOC + 'Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).',
   aliases: ['island_id_bake', 'bake_id', 'id_bake', 'bake_uv_islands'],
   inputs: [INPUTS[0]],
-  params: { ...BAKE_PARAMS('island_id'), seed: P.seed() },
-  outputs: 'image <name> (default "island_id"): C RGBA, id (island number), mask',
+  params: { ...BAKE_PARAMS(), seed: P.seed() },
+  outputs: 'image <name> (default: the node name): C RGBA, id (island number), mask',
   example: {
     nodes: {
       crate: { type: 'topotopo/props/crate' },
@@ -573,12 +651,12 @@ defineBake({
   aliases: ['mask_bake', 'bake_group', 'bake_attribute', 'attribute_bake'],
   inputs: [INPUTS[0]],
   params: {
-    ...BAKE_PARAMS('mask'),
+    ...BAKE_PARAMS(),
     mask_group: { type: 'group', default: '', groupClass: 'prim', desc: 'prims that read 1 (e.g. "planks", "@P.y>0.5")', aliases: ['from_group', 'mask_prims'] },
     attrib: { type: 'string', default: '', desc: 'numeric attribute to bake when mask_group is empty', aliases: ['attribute', 'from_attrib'] },
     component: { type: 'int', default: 0, min: -1, max: 15, desc: 'vector component of attrib (-1 = luminance of the first three)' },
   },
-  outputs: 'image <name> (default "mask"): C grey, mask',
+  outputs: 'image <name> (default: the node name): C grey, mask',
   example: {
     nodes: {
       box: { type: 'box' },
@@ -614,11 +692,11 @@ defineBake({
   aliases: ['vertex_color_bake', 'bake_color', 'bake_cd', 'color_bake'],
   inputs: [INPUTS[0]],
   params: {
-    ...BAKE_PARAMS('vertex_color'),
+    ...BAKE_PARAMS(),
     attrib: { type: 'string', default: 'Cd', desc: 'colour attribute', aliases: ['attribute', 'color_attrib'] },
     alpha_attrib: { type: 'string', default: 'Alpha', desc: 'alpha attribute (missing = 1)' },
   },
-  outputs: 'image <name> (default "vertex_color"): C RGBA, mask',
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       ball: { type: 'sphere', params: { rows: 12, cols: 24 } },

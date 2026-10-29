@@ -37,10 +37,10 @@
         },
         "kind": "image",
         "layers": {
-          "C": "6e8766057393037f",
+          "C": "105b29256d321b9f",
           "id": "dfe46a8d68df27b7"
         },
-        "name": "pattern"
+        "name": "target"
       }
     ]
   },

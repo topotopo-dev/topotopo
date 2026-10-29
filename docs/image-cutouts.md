@@ -95,6 +95,8 @@ Use `texture_to_material` to attach the atlas images.
 `tex_dilate` copies the nearest valid source into a band of `radius` pixels. It uses RGBA alpha by default,
 or an explicit same-sized mask through input 1 with `mask_image`, `mask_layer` and `mask_channel`.
 Validity is strictly greater than `mask_threshold`. Grey source images require an explicit mask.
+Like every texture filter it names its result after its own node; to pad one image of the atlas in place, set
+`name` to that image's name (the example's `{"image":"cutouts_color","name":"cutouts_color"}`).
 
 Valid pixels and pixels outside the band are untouched. `preserve_alpha:true` retains every original alpha
 value while padding RGB. The nearest-site tie rule is topmost then leftmost. For atlas data/normal maps use

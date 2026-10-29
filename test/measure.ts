@@ -258,13 +258,13 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   const noise = (seed: number) => geo({ t: { type: 'tex_noise', params: { resolution: 32, seed } } });
   const n1 = await noise(1), n2 = await noise(2);
   const dn = diffGeometry(n1, n2), sn = diffGeometry(n1, await noise(1));
-  check(!dn.identical && /volumes: ~ image "noise": layer C by up to/.test(dn.text) && /no points on either side; the volumes changed/.test(dn.text), `diff: a changed image (${dn.text.split('\n').find((l) => l.startsWith('volumes'))})`);
+  check(!dn.identical && /volumes: ~ image "t": layer C by up to/.test(dn.text) && /no points on either side; the volumes changed/.test(dn.text), `diff: a changed image (${dn.text.split('\n').find((l) => l.startsWith('volumes'))})`);
   check(sn.identical && /volumes: same \(1 image\(s\)\)/.test(sn.text) && /no geometric change \(same counts, schema, volumes/.test(sn.text), 'diff: the same image is no change');
   const hf = (amp: number) => geo({ h: { type: 'heightfield', params: { size: [8, 8], samples: [9, 9] } }, n: { type: 'heightfield_noise', in: ['h'], params: { amplitude: amp } } }, 'n');
   const dh = diffGeometry(await hf(1), await hf(2));
   check(!dh.identical && /~ heightfield "\w+": layer height by up to [\d.]+ c?m/.test(dh.text), `diff: a changed heightfield (${dh.text.split('\n').find((l) => l.startsWith('volumes'))})`);
   const grown = diffGeometry(n1, await geo({ t: { type: 'tex_noise', params: { resolution: 64, seed: 1 } } }));
-  check(/~ image "noise": 32 × 32 px → 64 × 64 px/.test(grown.text), 'diff: an image of another size');
+  check(/~ image "t": 32 × 32 px → 64 × 64 px/.test(grown.text), 'diff: an image of another size');
 }
 
 console.log(`\nmeasure: ${pass} passed, ${fail} failed`);

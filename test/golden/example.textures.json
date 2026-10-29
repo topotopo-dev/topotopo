@@ -61,7 +61,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "91aad593bb5fa4b5",
+          "C": "15eaa93a4f5b7044",
           "id": "3bad228129d6f7fb"
         },
         "name": "brick_normal"
@@ -93,7 +93,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "40dc1eae49a17974"
+          "C": "f2393ba41b2e76a6"
         },
         "name": "crate_color"
       },
@@ -108,7 +108,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "62f0eb458a0a2ac7"
+          "C": "2962c2c8c1bd167e"
         },
         "name": "crate_orm"
       }

@@ -442,6 +442,22 @@ export function histogramScanFn(position: number, contrast: number): (x: number)
   return (x) => clamp01((x - (1 - position)) / width + 0.5);
 }
 
+/**
+ * The value cut that leaves `coverage` (0..1) of the samples above it: the (1 - coverage) quantile, midway between the
+ * two sorted samples it separates. Coverage 0 and 1 put it a transition width (from contrast) beyond the range, so
+ * nothing or everything turns white. Equal samples straddling the cut read 0.5 (not white).
+ */
+export function coverageCut(a: Float32Array, coverage: number, contrast: number): number {
+  const n = a.length;
+  if (!n) return 0.5;
+  const s = Float32Array.from(a).sort();
+  const width = Math.max(1e-4, 1 - clamp01(contrast));
+  const black = n - Math.round(clamp01(coverage) * n);
+  if (black >= n) return s[n - 1] + width;
+  if (black <= 0) return s[0] - width;
+  return (s[black - 1] + s[black]) / 2;
+}
+
 // ---------------------------------------------------------------- neighbourhood filters
 
 /**
@@ -518,13 +534,13 @@ function sobel(g: Float32Array, w: number, h: number, i: number, j: number, wrap
 }
 
 /**
- * Tangent-space normal map (RGBA, 0.5 + 0.5 n) from a grey height: Sobel slopes scaled by strength (1 = a height
- * rise of 1 over 1/64 of the image width tilts the normal 45°, at any resolution). OpenGL convention (+Y up = +v)
- * unless directx.
+ * Tangent-space normal map (RGBA, 0.5 + 0.5 n) from a grey height in physical units: a value of 1 stands `depth`
+ * metres high and the image width spans `size` metres, so the slope is the Sobel height step per texel × depth /
+ * (size / w), the same at any resolution for the same relief. OpenGL convention (+Y up = +v) unless directx.
  */
-export function normalFromHeight(g: Float32Array, w: number, h: number, strength: number, directx: boolean, wrap: boolean): Float32Array {
+export function normalFromHeight(g: Float32Array, w: number, h: number, depth: number, size: number, directx: boolean, wrap: boolean): Float32Array {
   const out = new Float32Array(w * h * 4);
-  const k = (strength * w) / 64; // Sobel / 8 is dh per pixel; a rise of 1 over w/64 pixels then gives slope 1 (45°)
+  const k = (depth * w) / Math.max(1e-12, size); // Sobel / 8 is the value step per texel; × depth / texel size = metres per metre
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       sobel(g, w, h, i, j, wrap); const gx = SB[0], gy = SB[1];
@@ -535,6 +551,50 @@ export function normalFromHeight(g: Float32Array, w: number, h: number, strength
       const o = (j * w + i) * 4;
       out[o] = 0.5 + (0.5 * nx) / l; out[o + 1] = 0.5 + (0.5 * ny) / l; out[o + 2] = 0.5 + 0.5 / l; out[o + 3] = 1;
     }
+  return out;
+}
+
+export const NORMAL_BLEND_MODES = ['rnm', 'udn', 'linear'];
+
+/**
+ * A detail normal map over a base one (tangent space, RGBA holding 0.5 + 0.5 n; the base's alpha is kept). The
+ * detail's tilt is scaled by `strength` (its x and y; 0 = flat, 2 = twice as steep), then:
+ *   rnm     reoriented normal mapping (Barré-Brisebois and Hill, 2012): the detail is rotated onto the base normal, so
+ *           both reliefs keep their full depth (a flat detail returns the base exactly)
+ *   udn     (base.xy + detail.xy, base.z) normalised: cheaper, flattens a strong detail on steep base slopes
+ *   linear  (base + detail) normalised: softens both (a flat detail halves the base's tilt)
+ * The mask (0..1 per pixel, or none = 1) mixes from the base to that result. Both maps must use the same green
+ * convention (OpenGL or DirectX): every mode treats x and y alike, so the result keeps it.
+ */
+export function blendNormals(A: Float32Array, B: Float32Array, M: Float32Array | null, mode: string, strength: number): Float32Array {
+  const n = A.length / 4, out = new Float32Array(A.length);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    let bx = A[o] * 2 - 1, by = A[o + 1] * 2 - 1, bz = A[o + 2] * 2 - 1;
+    const bl = Math.hypot(bx, by, bz) || 1;
+    bx /= bl; by /= bl; bz /= bl;
+    let dx = (B[o] * 2 - 1) * strength, dy = (B[o + 1] * 2 - 1) * strength, dz = Math.max(1e-4, B[o + 2] * 2 - 1);
+    const dl = Math.hypot(dx, dy, dz);
+    dx /= dl; dy /= dl; dz /= dl;
+    let rx: number, ry: number, rz: number;
+    if (mode === 'udn') { rx = bx + dx; ry = by + dy; rz = bz; }
+    else if (mode === 'linear') { rx = bx + dx; ry = by + dy; rz = bz + dz; }
+    else {
+      // t = base + (0, 0, 1), u = detail × (-1, -1, 1), r = t (t · u) / t.z - u
+      const tx = bx, ty = by, tz = bz + 1, ux = -dx, uy = -dy, uz = dz;
+      const k = (tx * ux + ty * uy + tz * uz) / Math.max(1e-6, tz);
+      rx = tx * k - ux; ry = ty * k - uy; rz = tz * k - uz;
+    }
+    let rl = Math.hypot(rx, ry, rz) || 1;
+    rx /= rl; ry /= rl; rz /= rl;
+    const m = M ? Math.max(0, Math.min(1, M[i])) : 1;
+    if (m < 1) {
+      rx = bx + (rx - bx) * m; ry = by + (ry - by) * m; rz = bz + (rz - bz) * m;
+      rl = Math.hypot(rx, ry, rz) || 1;
+      rx /= rl; ry /= rl; rz /= rl;
+    }
+    out[o] = 0.5 + 0.5 * rx; out[o + 1] = 0.5 + 0.5 * ry; out[o + 2] = 0.5 + 0.5 * rz; out[o + 3] = A[o + 3];
+  }
   return out;
 }
 

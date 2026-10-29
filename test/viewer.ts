@@ -537,7 +537,7 @@ section('a dropped PNG and an image-only graph show as textured quads');
   await engine.init();
   const ws = new Workspace(path.join(tmp, 'wspng'), engine);
   ws.load();
-  ws.setGraph('tex', { nodes: { n: { type: 'tex_noise', params: { resolution: [32, 16] } } } });
+  ws.setGraph('tex', { nodes: { noise: { type: 'tex_noise', params: { resolution: [32, 16] } } } });
   const v = await startViewer(ws, 0);
   /** The JSON chunk of a GLB response. */
   const glbJSON = async (p: string) => {
