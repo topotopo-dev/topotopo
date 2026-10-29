@@ -1466,7 +1466,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // footer
   const fy = outH - footerH + 4 * ui;
   const ext = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
-  const stats = `${np} PTS  ${g.numPrims} PRIMS  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bmin[0] + bmax[0]) / 2)},${fmtNum((bmin[1] + bmax[1]) / 2)},${fmtNum((bmin[2] + bmax[2]) / 2)}${autoEdgesShown ? '  EDGES AUTO' : ''}`;
+  // EDGES AUTO early on the line, so a long title cannot push it off the image
+  const stats = `${np} PTS  ${g.numPrims} PRIMS${autoEdgesShown ? '  EDGES AUTO' : ''}  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bmin[0] + bmax[0]) / 2)},${fmtNum((bmin[1] + bmax[1]) / 2)},${fmtNum((bmin[2] + bmax[2]) / 2)}`;
   drawText(out, outW, outH, 6 * ui, fy, (o.title ? o.title.toUpperCase() + '  ' : '') + stats, [0.85, 0.85, 0.85], 2 * ui, false);
   if (legend) {
     const lx = outW - textWidth(legend, 2 * ui) - 8 * ui;
