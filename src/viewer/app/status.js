@@ -3,8 +3,8 @@
 
 /** While the event stream is connected. */
 export const LIVE_LINE = 'live — updates on every build, edit and file save';
-/** While the workspace has no graph. */
-export const NO_GRAPHS_LINE = 'no graphs yet — build one via MCP';
+/** While the project has no graph. */
+export const NO_GRAPHS_LINE = 'no graphs yet: ask your agent to build one';
 
 /** The line when the event stream (re)connects: the hint while there is no graph, else the live line. */
 export const connectedLine = (graphCount) => (graphCount ? LIVE_LINE : NO_GRAPHS_LINE);

@@ -354,6 +354,17 @@ section('graph file edits (json-edit.ts): only what changes');
 
 section('status line (section 4)');
 {
+  const welcome = await import('../src/viewer/app/welcome.js');
+  const kits = [{ name: 'topotopo/street', title: 'Street kit', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
+  const proj = { project: { id: 'lantern', title: 'Lantern', graph: 'main', package: null }, folder: 'C:\\work\\lantern', file: null, kits };
+  const loose = { project: null, folder: '/home/me/stuff', file: null, kits };
+  check(welcome.pageTitle(proj) === 'Lantern · TopoTopo' && welcome.pageTitle(loose) === 'stuff · TopoTopo' && welcome.pageTitle({ project: null, folder: '/tmp/x', file: 'house.json' }) === 'house.json · TopoTopo',
+    'the tab is titled after the project (a graph file, a folder)');
+  check(welcome.defaultGraph(proj, ['a', 'main']) === 'main' && welcome.defaultGraph(proj, ['a', 'b']) === 'a' && welcome.defaultGraph(loose, []) === null, 'the project\'s default graph is shown first');
+  const wp = welcome.welcomeOf(proj), wf = welcome.welcomeOf(loose);
+  check(wp.kind === 'project' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.kits.length === 1,
+    'a project without graphs: its name, ask your agent, TopoTopo\'s kits');
+  check(wf.kind === 'folder' && /not a TopoTopo project/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no project says so and how to make it one');
   check(status.graphsLine('', 0) === status.NO_GRAPHS_LINE && status.graphsLine(status.LIVE_LINE, 0) === status.NO_GRAPHS_LINE,
     'no graph: the hint, whatever was shown');
   check(status.graphsLine(status.NO_GRAPHS_LINE, 1) === status.LIVE_LINE, 'the first graph replaces the hint with the live line');

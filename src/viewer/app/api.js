@@ -26,6 +26,8 @@ export const api = {
    * or null. vars: what the controls show; graphVars: the graph's own; mode "file": session values over a graph file.
    */
   async graphs() { const { status, j } = await json('/api/graphs'); return status === 200 && Array.isArray(j) ? j : null; },
+  /** {project: {id, title, description, graph, package, dir} | null, folder, file, kits} or null */
+  async project() { const { status, j } = await json('/api/project'); return status === 200 ? j : null; },
   /** the last cook of a graph: {ok, ms, target, errors, warnings} */
   async report(graph) { const { status, j } = await json('/api/report?' + q({ graph })); return status === 200 ? j : null; },
   /** the output (or a node) as a GLB; heightfields with `layer` in red (default the mask) */

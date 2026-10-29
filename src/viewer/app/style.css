@@ -101,6 +101,17 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .vw .lbl { position: absolute; transform: translate(8px, -50%); padding: 0 4px; font: var(--font); color: var(--text); background: rgba(31, 33, 36, 0.78); border-radius: 2px; white-space: nowrap; }
 .vw .lbl.sel { color: var(--sel); }
 .vw .lbl.dimen { transform: translate(-50%, -130%); font: var(--mono); color: var(--sel); }
+/* while there is no graph: the project's name, what to do, TopoTopo's kits (welcome.js) */
+#welcome { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 24px; overflow: auto; background: rgba(43, 45, 49, 0.82); }
+.welcome-box { max-width: 560px; padding: 20px 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; font-size: 13px; line-height: 1.5; }
+.welcome-box h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.welcome-box h2 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+.welcome-box p { margin: 8px 0; }
+.welcome-box code { font: var(--mono); color: var(--text); background: var(--bg); padding: 1px 4px; border-radius: 2px; overflow-wrap: anywhere; }
+.welcome-sub { color: var(--dim); font: var(--mono); overflow-wrap: anywhere; }
+.welcome-lead { font-size: 14px; color: var(--sel); }
+.welcome-kits { margin: 0; padding-left: 18px; }
+.welcome-kits li { margin: 4px 0; }
 #boxsel { position: absolute; border: 1px dashed var(--sel); background: rgba(240, 160, 48, 0.06); pointer-events: none; }
 #viewport.placing #gl { cursor: crosshair; }
 #viewport.nav #gl { cursor: move; }

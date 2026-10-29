@@ -10,7 +10,9 @@
 // Over a graph file (`topotopo view`, ViewerOptions.source) the controls set session values over the graph, which
 // survive reloads of the file; POST /api/vars/save writes them into its vars.
 // The packages the project uses (/api/packages*, src/viewer/packages.ts): their updates, the before/after of one and
-// Update, and following a package's working folder for the viewer's session.
+// Update, and following a package's working folder for the viewer's session. /api/project says which project the
+// viewer shows (the page's title, its default graph, and what an empty project or a folder that is no project says),
+// with TopoTopo's kits for the welcome.
 // Bound to 127.0.0.1 only; requests must name this server as their Host, and writes must come from its own page.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -34,6 +36,9 @@ import type { NodeProgress } from '../graph/engine.ts';
 import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
+import { ProjectPackages } from '../gallery/packages.ts';
+import { listKits, kitOutputsText } from '../gallery/kits.ts';
+import { projectDirOf, readManifest } from '../gallery/library.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';
@@ -210,6 +215,23 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   let outputs = makeOutputs();
   const makePackages = () => createPackages(ws, broadcast);
   let packages = makePackages();
+  // TopoTopo's kits, read once: they change only with TopoTopo itself
+  let kits: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
+  /**
+   * GET /api/project: the project the viewer shows (null for a folder that is in no project), the folder, the graph
+   * file of `topotopo view`, and TopoTopo's kits.
+   */
+  const projectInfo = () => {
+    // the project of the packages attached to the workspace, else the one its folder is in
+    const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
+    if (pk?.dir) pk.refresh();
+    const dir = pk ? pk.dir : projectDirOf(ws.dir);
+    let m = pk?.manifest ?? null;
+    if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no project to name */ }
+    const project = m && dir ? { id: m.id, title: m.title, description: m.description, graph: m.graph, package: m.package ?? null, dir } : null;
+    kits ??= listKits().map((k) => ({ name: k.name, title: k.title, description: k.description, version: k.version, outputs: kitOutputsText(k) }));
+    return { project, folder: ws.dir, file: opts.source?.label ?? null, kits };
+  };
 
   // ---------------------------------------------------------------- the state of the cooks
   // {cook: {graph, running, last}} events: each node of the graph as it starts (before it can hold the thread for
@@ -507,6 +529,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
         req.on('close', () => clients.delete(res));
         return;
       }
+      if (u.pathname === '/api/project') return json(200, projectInfo());
       if (u.pathname === '/api/graphs') {
         const out = [...ws.graphs].map(([name, g]) => {
           const last = ws.lastReport.get(name);

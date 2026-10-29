@@ -20,7 +20,7 @@ import { GeoBuilder } from '../src/core/geometry.ts';
 import { primNormals } from '../src/core/topology.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
-import { Workspace, varDeclaration } from '../src/workspace.ts';
+import { Workspace, graphFiles, varDeclaration } from '../src/workspace.ts';
 import type { EditOp } from '../src/workspace.ts';
 import { inputFileName, startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
@@ -702,6 +702,46 @@ section('two workspaces on one folder (Workspace.watch)');
     check(await until(() => b.engine.root.assets.has('peg'), 5000), 'an asset written by another process is registered');
     fs.rmSync(path.join(dir, 'graphs', 'main.json'));
     check(await until(() => !b.graphs.has('main'), 5000), 'a removed graph file removes the graph');
+  } finally { a.unwatch(); b.unwatch(); }
+}
+
+section('a project\'s graph files beside project.json (examples/ keeps its graphs there)');
+{
+  const dir = path.join(tmp, 'beside');
+  fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
+  const box = (s: number) => JSON.stringify({ nodes: { b: { type: 'box', params: { size: [s, s, s] } } }, output: 'b' });
+  fs.writeFileSync(path.join(dir, 'tower.json'), box(1));
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({ title: 'not a graph' }));
+  fs.writeFileSync(path.join(dir, 'twice.json'), box(3));
+  fs.writeFileSync(path.join(dir, 'graphs', 'twice.json'), box(4));
+  fs.mkdirSync(path.join(dir, 'more'));
+  fs.writeFileSync(path.join(dir, 'more', 'deep.json'), box(5));
+  check(!graphFiles(dir).has('tower'), 'a folder that is no project: only graphs/ holds graphs');
+  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify({ id: 'beside', title: 'Beside', graph: 'tower' }));
+  const files = graphFiles(dir);
+  check([...files.keys()].sort().join() === 'tower,twice' && files.get('twice') === path.join(dir, 'graphs', 'twice.json') && files.get('tower') === path.join(dir, 'tower.json'),
+    `in a project: graph files beside project.json too, not below it, not other JSON; graphs/ wins a name both have (${[...files].map(([k, f]) => `${k}=${path.relative(dir, f)}`).join(', ')})`);
+  const open = async () => { const e = new Engine(createNodeHost({ baseDir: dir })); await e.init(); const w = new Workspace(dir, e); w.load(); w.watch(); return w; };
+  const a = await open(), b = await open();
+  try {
+    check(a.graphs.has('tower') && a.graphs.has('twice') && !a.graphs.has('notes') && !a.graphs.has('deep'), 'a workspace on the project loads them');
+    await a.edit('tower', [{ op: 'set', node: 'b', params: { size: [2, 2, 2] } }]);
+    check(JSON.parse(fs.readFileSync(path.join(dir, 'tower.json'), 'utf8')).nodes.b.params.size[0] === 2 && !fs.existsSync(path.join(dir, 'graphs', 'tower.json')),
+      'an edit is saved into the graph\'s own file, not into graphs/');
+    check(await until(() => b.graphs.get('tower')?.nodes.b.params?.size?.[0] === 2, 5000), 'another workspace on the project follows the file');
+    fs.writeFileSync(path.join(dir, 'gate.json'), box(6));
+    check(await until(() => b.graphs.has('gate'), 5000), 'a graph file saved beside project.json appears');
+    fs.rmSync(path.join(dir, 'gate.json'));
+    check(await until(() => !b.graphs.has('gate'), 5000), 'and goes when its file is removed');
+    a.setGraph('fresh', JSON.parse(box(1)));
+    check(fs.existsSync(path.join(dir, 'graphs', 'fresh.json')), 'a new graph goes into graphs/');
+    const v = await startViewer(a, 0);
+    try {
+      const info: any = await (await fetch(v.url + 'api/project')).json();
+      check(info.project?.id === 'beside' && info.project.graph === 'tower' && info.folder === dir && Array.isArray(info.kits),
+        `GET /api/project: the project, its default graph and the folder (${JSON.stringify({ ...info, kits: info.kits?.length })})`);
+      check(info.kits.some((k: any) => k.name === 'topotopo/street' && /outputs: bench/.test(k.outputs)), 'and TopoTopo\'s kits with their outputs');
+    } finally { v.close(); }
   } finally { a.unwatch(); b.unwatch(); }
 }
 

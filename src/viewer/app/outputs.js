@@ -48,7 +48,7 @@ export function createOutputPanel(ctx) {
   const live = document.createElement('div'), saved = document.createElement('details'), savedRows = document.createElement('div');
   saved.className = 'saved-outputs'; saved.open = ctx.store.get('outputs.savedOpen', false);
   saved.append(text('summary', 'Saved files'), savedRows); saved.ontoggle = () => ctx.store.set('outputs.savedOpen', saved.open);
-  const empty = text('div', 'Nothing published yet: a graph\'s output shows here once it cooks.', 'empty');
+  const empty = text('div', 'No outputs yet: the results of the project\'s graphs show here once your agent has built one.', 'empty');
   const cards = new Map(), groups = new Map(); let input = null;
   host.append(bar, empty, live, saved);
   Object.defineProperty(P, 'count', { get: () => list.filter((v) => v.exportable).length });
@@ -141,6 +141,9 @@ export function createOutputPanel(ctx) {
 
   function render() {
     const used = new Set(), usedGroups = new Set(), grouped = new Map();
+    // the project's default graph first
+    const first = ctx.project?.project?.graph;
+    if (first && list.some((v) => v.origin === 'published' && v.graph === first)) grouped.set(first, []);
     for (const item of list) {
       const name = item.origin === 'published' ? item.graph ?? 'Outputs' : '__saved';
       if (!grouped.has(name)) grouped.set(name, []); grouped.get(name).push(item);
@@ -293,7 +296,12 @@ export function createOutputPanel(ctx) {
         if (after && (after.revision !== before?.revision || after.status !== before?.status)) await P.select(after.id, true);
         else if (after) { P.active = after; showDetails(after); }
         else if (selected && !after) P.scene();
-        else if (initial && list.length) { initial = false; const main = list.find((v) => v.generated && !v.parent); if (main) await P.select(main.id); }
+        else if (initial && list.length) {
+          // first the graph the page shows (the project's default graph), its default output
+          initial = false;
+          const top = list.filter((v) => v.generated && !v.parent), main = top.find((v) => v.graph === ctx.graph.name && v.output === null) ?? top.find((v) => v.graph === ctx.graph.name) ?? top[0];
+          if (main) await P.select(main.id);
+        }
       } catch (e) { ctx.message(e.message, 'err'); }
       finally { refreshing = null; if (refreshAgain) { refreshAgain = false; void P.refresh(); } }
     })();

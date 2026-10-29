@@ -20,6 +20,7 @@ import * as KM from './keymap.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
 import { connectedLine, graphsLine } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
+import { pageTitle, defaultGraph, renderWelcome } from './welcome.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -208,7 +209,7 @@ const refreshGraphs = ctx.coalesce(async () => {
   const sel = $('graph');
   // the options are rebuilt only when the graphs change, so an open list stays open
   if (names.join('\n') !== [...sel.options].map((o) => o.value).join('\n')) sel.replaceChildren(...names.map((n) => new Option(n, n)));
-  if (!names.includes(G.name)) { G.name = local.get('graph', null); if (!names.includes(G.name)) G.name = names[0] ?? null; G.node = null; }
+  if (!names.includes(G.name)) { G.name = local.get('graph', null); if (!names.includes(G.name)) G.name = defaultGraph(ctx.project, names); G.node = null; }
   sel.value = G.name ?? '';
   const g = G.current();
   if (G.node && !g?.nodes.some((n) => n.name === G.node)) G.node = null;
@@ -218,8 +219,18 @@ const refreshGraphs = ctx.coalesce(async () => {
   props.controls.render(g, issued);
   const line = graphsLine(msgEl.textContent, list.length);
   if (line) ctx.message(line);
+  renderWelcome($('welcome'), ctx.project, !list.length);
   ctx.emit('graphs');
 });
+// the project shown: the tab's title, the graph shown first, the welcome while there is no graph
+ctx.project = null;
+const refreshProject = async () => {
+  const info = await api.project();
+  if (!info) return;
+  ctx.project = info;
+  document.title = pageTitle(info);
+  renderWelcome($('welcome'), info, !ctx.graph.list.length);
+};
 $('graph').onchange = (e) => {
   if (ctx.outputs?.active) ctx.outputs.scene();
   ctx.graph.name = e.target.value; ctx.graph.node = null;
@@ -679,7 +690,7 @@ const es = api.events({
   open() {
     ctx.message(connectedLine(ctx.graph.list.length));
     // after a reconnect the server may have restarted: fetch everything again
-    if (es.opened) { refreshGraphs().then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
+    if (es.opened) { refreshProject().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
     es.opened = true;
   },
   error() { ctx.message('disconnected (server stopped?)', 'err'); },
@@ -700,6 +711,7 @@ syncTop();
 outliner.render();
 props.render();
 ctx.requestRender();
+await refreshProject();
 await refreshGraphs();
 await ctx.outputs.refresh();
 ctx.packages.refresh();
