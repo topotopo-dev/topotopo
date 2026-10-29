@@ -291,6 +291,8 @@ try {
     const h1 = height(await info());
     events.length = 0;
     setGraph(TREES, 'main', trees(2.5));
+    // what the file watcher sets off, at once (the offer below waits for the real watcher)
+    v.pokePackages('studio/trees', 'graphs/main.json');
     check(await until(() => events.some((e) => e.graph === 'main'), 8000), 'a save in the working folder: the graph is cooked again and the pages hear it');
     const h2 = height(await info());
     check(h2 > h1 && events.every((e) => !e.saved), `the scene shows the working folder (height ${h1} → ${h2}); no offer for a folder followed`);
@@ -317,6 +319,7 @@ try {
   {
     events.length = 0;
     check(await publish(TREES, 'big crowns') === '1.2', 'studio/trees 1.2 published from its working folder');
+    v.pokePackages();
     check(await until(() => events.some((e) => e.packages !== undefined && !e.saved), 8000) && (await row('studio/trees')).small === '1.2', 'the pages hear it, and 1.2 is a small update');
   }
 } finally {

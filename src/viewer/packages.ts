@@ -381,6 +381,15 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
   return {
     /** what the Packages tab shows (GET /api/packages) */
     state,
+    /**
+     * What a change in a package's working folder sets off (`rel`: the file, as the watcher names it), and the check
+     * the timer makes, at once: for a test, or a host that knows a folder changed, without waiting for the watchers.
+     */
+    poke(pkg?: string, rel?: string) {
+      if (pkg) onWorking(pkg, rel ?? '');
+      pk?.poke();
+      check();
+    },
     close() {
       closed = true;
       if (run) run.signal.aborted = true;
