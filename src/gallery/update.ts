@@ -22,14 +22,16 @@ import type { DiffResult } from '../explain.ts';
 import { wiringOf } from '../graph/engine.ts';
 import type { CookReport, NodeProgress, StopSignal } from '../graph/engine.ts';
 import { migrateGraph } from '../graph/migrate.ts';
-import { didYouMean, resolveParamName, scanValue } from '../graph/params.ts';
+import { upstreamOf } from '../graph/packages.ts';
+import { didYouMean, resolveParamName } from '../graph/params.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import type { PackageResolver, Scope } from '../graph/scope.ts';
 import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../workspace.ts';
-import { compareInterfaces, compareVersions, kindChanges, libraryText, outputsLine } from './packages.ts';
+import { program } from './library.ts';
+import { compareInterfaces, compareVersions, kindChanges, libraryText } from './packages.ts';
 import type { ProjectPackages, UpdateTarget } from './packages.ts';
 
 /**
@@ -199,7 +201,8 @@ function placesOf(dir: string, pkg: string, problems: string[]): { uses: UsePlac
 
 /**
  * What the project's graphs must change for the version the update goes to: outputs they use that it does not have,
- * sliders they set that it does not have (with did-you-mean over its sliders), inputs they wire that it does not have.
+ * params they set that it does not have (with did-you-mean over its params), values they set that its narrower range
+ * clamps or that are options it no longer has, inputs they wire that it does not have.
  */
 function mustChange(uses: UsePlace[], before: PackageResolver, after: PackageResolver, t: UpdateTarget): { must: string[]; problems: string[] } {
   const must: string[] = [], problems: string[] = [], at = `${t.package} ${t.to}`;
@@ -216,10 +219,22 @@ function mustChange(uses: UsePlace[], before: PackageResolver, after: PackageRes
     }
     // a use that does not resolve now does not resolve after either: the update changes nothing about it
     if ('error' in was) continue;
-    for (const k of Object.keys(u.spec.params ?? {})) {
-      if (!resolveParamName(was, k) || resolveParamName(now, k)) continue;
-      const s = didYouMean(k, Object.keys(now.params));
-      must.push(`${where}: sets slider "${k}", which ${at} does not have${s.length ? ` — did you mean ${s.map((x) => `"${x}"`).join(' or ')}?` : ''} (its sliders: ${Object.keys(now.params).join(', ') || 'none'})`);
+    for (const [k, value] of Object.entries(u.spec.params ?? {})) {
+      if (!resolveParamName(was, k)) continue;
+      const pn = resolveParamName(now, k);
+      if (!pn) {
+        const s = didYouMean(k, Object.keys(now.params));
+        must.push(`${where}: sets param "${k}", which ${at} does not have${s.length ? ` — did you mean ${s.map((x) => `"${x}"`).join(' or ')}?` : ''} (its params: ${Object.keys(now.params).join(', ') || 'none'})`);
+        continue;
+      }
+      // a value the new version takes otherwise: clamped to a narrower range, or an option it no longer has
+      const p = now.params[pn];
+      if (typeof value === 'number') {
+        const clamped = Math.min(p.max ?? Infinity, Math.max(p.min ?? -Infinity, value));
+        if (clamped !== value) must.push(`${where}: sets "${k}" ${value}, which ${at} clamps to ${clamped} (its range is ${p.min ?? ''}..${p.max ?? ''})`);
+      }
+      if (p.options && (typeof value === 'number' || (typeof value === 'string' && !value.startsWith('='))) && !p.options.includes(value as any))
+        must.push(`${where}: sets "${k}" ${JSON.stringify(value)}, an option ${at} does not have (its options: ${p.options.map((x) => JSON.stringify(x)).join(', ')})`);
     }
     wiringOf(u.spec, was).list.forEach((ref, i) => {
       if (!ref) return;
@@ -235,17 +250,7 @@ function mustChange(uses: UsePlace[], before: PackageResolver, after: PackageRes
 
 /** The graph with only what `target` needs, upstream: its inputs and the nodes its expressions read. */
 function needed(g: GraphSpec, target: string): GraphSpec {
-  const keep = new Set<string>(), todo = [target];
-  while (todo.length) {
-    const n = todo.pop()!;
-    if (keep.has(n) || !Object.hasOwn(g.nodes, n)) continue;
-    keep.add(n);
-    const spec = g.nodes[n];
-    const wired = typeof spec?.in === 'string' ? [spec.in] : Array.isArray(spec?.in) ? spec.in : spec?.in && typeof spec.in === 'object' ? Object.values(spec.in) : [];
-    for (const w of wired) if (typeof w === 'string') todo.push(w);
-    const refs = scanValue(Object.values(spec?.params ?? {}));
-    todo.push(...refs.geo, ...refs.ch.map((c) => c.node));
-  }
+  const keep = new Set(upstreamOf(g, target));
   const out: GraphSpec = { ...g, nodes: Object.fromEntries(Object.entries(g.nodes).filter(([k]) => keep.has(k))), output: target };
   delete out.outputs;
   delete out.export;
@@ -279,7 +284,7 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
   const t = pk.updateTarget(pkg, o.to);
   const { dir } = pk.project();
   const engine = pk.engine, root = o.project?.scope ?? engine.root;
-  const { before, after, key } = pk.updateResolvers(t);
+  const { before, after, key, problems: versionProblems } = pk.updateResolvers(t);
   const problems: string[] = [];
   const { uses, units } = placesOf(dir, pkg, problems);
   // graphs and assets: the project's root, and a scope like it with the update's packages; graph files: their folder
@@ -325,24 +330,41 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
   const ic = t.fromInfo ? compareInterfaces(t.fromInfo, t.toInfo) : { big: [], small: [] };
   return {
     target: t, project: pk.label, uses, compared, total, interfaceBig: ic.big, interfaceSmall: ic.small, mustChange: m.must, stopped,
-    problems: [...new Set([...problems, ...m.problems, ...pk.apartProblems])], ms: performance.now() - t0,
+    problems: [...new Set([...problems, ...m.problems, ...versionProblems()])], ms: performance.now() - t0,
   };
 }
 
 /**
- * Apply an update, the step after its before/after: copy the version in with what it uses, name it in "uses" and the
- * lock, delete the copies nothing uses any more, and say what the graphs must change for it (a big version is applied
- * anyway: the graphs report those errors until they change).
+ * Apply an update, the step after its before/after, from the version in use to the version it showed (both named: what
+ * the person saw, and refused when project.json uses another version now): copy the version in with what it uses, name
+ * it in "uses" and the lock, delete the copies nothing uses any more, and say what the graphs must change for it (a big
+ * version is applied anyway: the graphs report those errors until they change). The CLI, the library tool and the
+ * viewer apply updates through it.
  */
-export function applyUpdate(pk: ProjectPackages, pkg: string, to?: string): { target: UpdateTarget; text: string; mustChange: string[] } {
-  const t = pk.updateTarget(pkg, to);
+export function applyUpdate(pk: ProjectPackages, pkg: string, o: { from: string; to: string }): { target: UpdateTarget; text: string; mustChange: string[] } {
+  if (typeof o?.from !== 'string' || typeof o?.to !== 'string') throw new Error('applying an update needs "from" and "to": the version in use and the version of the before/after the person saw');
   const { dir } = pk.project();
+  pk.refresh();
+  const now = pk.manifest?.uses[pkg];
+  if (now !== undefined && now !== o.from) throw new Error(`project.json uses ${pkg} ${now} now, not ${o.from}: look at the before/after again`);
+  const t = pk.updateTarget(pkg, o.to);
   const { before, after } = pk.updateResolvers(t);
   const m = mustChange(placesOf(dir, pkg, []).uses, before, after, t);
   const r = pk.applyUpdate(t);
   const lines = [r.text];
   if (m.must.length) lines.push(`the project's graphs must change for ${t.package} ${t.to}; until they do, they report these errors:`, ...m.must.map((x) => `  ${x}`));
   return { target: t, text: lines.join('\n'), mustChange: m.must };
+}
+
+/**
+ * Remove a package the project uses (ProjectPackages.remove): refused while a graph of the project still names it (in
+ * graphs/, assets/ or a graph file in its folder, nested graphs included), which it lists.
+ */
+export function removePackage(pk: ProjectPackages, pkg: string): { deleted: string[]; text: string } {
+  const { dir } = pk.project();
+  pk.refresh();
+  const places = typeof parsePackageName(pkg) === 'string' ? [] : placesOf(dir, pkg, []).uses.map((u) => `${u.file} ${u.node}`);
+  return pk.remove(pkg, places);
 }
 
 // ---------------------------------------------------------------------------------------------- what is said
@@ -383,7 +405,7 @@ export function beforeAfterText(r: BeforeAfter, closing: string): string {
       if (c.notes.length) lines.push(`    (${c.notes.join('; ')})`);
     }
     const changed = r.compared.filter((c) => c.diff && !c.diff.identical).length, failed = r.compared.filter((c) => !c.after.ok).length;
-    lines.push(`in short: ${changed} of the ${r.compared.length} compared changed${failed ? `, ${failed} do not cook with ${t.to}` : ''}${r.stopped ? `; stopped after ${r.compared.length} of ${r.total / 2} comparisons: the others are not listed` : ''}`);
+    lines.push(`in short: ${changed} of the ${r.compared.length} compared changed${failed ? `, ${failed} ${failed === 1 ? 'does' : 'do'} not cook with ${t.to}` : ''}${r.stopped ? `; stopped after ${r.compared.length} of ${r.total / 2} comparisons: the others are not listed` : ''}`);
   }
   if (r.problems.length) lines.push('problems:', ...r.problems.map((p) => `  ${p}`));
   lines.push(closing);
@@ -406,28 +428,37 @@ export function overlayRenders(r: BeforeAfter, max = 6): { title: string; png: U
     });
 }
 
-/** The out-of-date packages of a project as the CLI (or, `mcp`, the library tool) says them. */
-export function outdatedText(pk: ProjectPackages, mcp = false): string {
-  const list = pk.outdated();
-  if (!list.length) return `${pk.label} uses no packages`;
-  const late = list.filter((o) => o.small || o.big);
-  const lines = [`${pk.label}: ${late.length ? `${late.length} of the ${list.length} packages it uses ${late.length === 1 ? 'is' : 'are'} out of date` : `every package it uses is the newest in its libraries`}`];
-  for (const o of list) {
-    if (o.error) { lines.push(`  ${o.package} ${o.version}: ${o.error}`); continue; }
-    const ups = [o.small ? `small update ${o.small}` : '', o.big ? `big update ${o.big}` : ''].filter(Boolean);
-    lines.push(`  ${o.package} ${o.version}: ${ups.join(', ') || 'up to date'}  [${o.libraries.map(libraryText).join(', ')}]`);
-    // each newer version's outputs of another kind, and the outputs of the version in use with their kinds and tags
-    const inUse = pk.copyInfo(o.package, o.version);
-    let was = inUse;
+/**
+ * The out-of-date packages of a project as the CLI (or, `mcp`, the library tool) says them: each with the notes of the
+ * versions after the one in use (and the outputs of another kind), then one line for those up to date, what could not
+ * be checked, and the update to run for each. `folder`: the project folder as the command named it, for those lines.
+ */
+export function outdatedText(pk: ProjectPackages, mcp = false, folder?: string): string {
+  const problems: string[] = [];
+  const list = pk.outdated(problems);
+  if (!list.length) return `${pk.label} uses no packages${problems.length ? `\ncould not check ${problems.length}:\n${problems.map((p) => `  ${p}`).join('\n')}` : ''}`;
+  const late = list.filter((o) => o.small || o.big), fine = list.filter((o) => !o.error && !o.small && !o.big), failed = list.filter((o) => o.error);
+  const counts = [late.length ? `${late.length} out of date` : '', fine.length ? `${fine.length} up to date` : '', failed.length || problems.length ? `could not check ${failed.length + problems.length}` : ''].filter(Boolean);
+  const lines = [`${pk.label} uses ${list.length} package${list.length === 1 ? '' : 's'}: ${counts.join(', ')}`];
+  for (const o of late) {
+    lines.push(`  ${o.package} ${o.version}: ${[o.small ? `${o.small} is out` : '', o.big ? `${o.big} is out (big)` : ''].filter(Boolean).join(', ')}  [${o.libraries.map(libraryText).join(', ')}]`);
+    // each newer version's note, and its outputs of another kind
+    let was = pk.copyInfo(o.package, o.version);
     for (const v of o.newer) {
       const kinds = was ? kindChanges(was, v) : [];
       lines.push(`    ${v.version}  "${v.note}"${kinds.length ? `  (another kind: ${kinds.join('; ')})` : ''}`);
       was = v;
     }
-    if (inUse) lines.push(`    outputs of ${o.version}: ${outputsLine(inUse)}`);
   }
-  if (late.length) lines.push(mcp
-    ? 'library {action:"update", package:"owner/name"} shows the before/after of the small update, with to:"<version>" of a big one; nothing changes until the person says so (apply:true)'
-    : 'topotopo update owner/name [folder] shows the before/after of the small update, --to <version> of a big one; nothing changes until --apply');
+  if (fine.length) lines.push(`${fine.length} up to date: ${fine.map((o) => `${o.package} ${o.version}`).join(', ')}`);
+  if (failed.length || problems.length) lines.push(`could not check ${failed.length + problems.length}:`, ...failed.map((o) => `  ${o.package} ${o.version}: ${o.error}`), ...problems.map((p) => `  ${p}`));
+  const at = folder ? ` ${/\s/.test(folder) ? JSON.stringify(folder) : folder}` : '';
+  for (const o of late) {
+    const to = o.small ?? o.big!;
+    lines.push(mcp
+      ? `library {action:"update", package:"${o.package}"${o.small ? '' : `, to:"${to}"`}} shows the before/after of ${o.version} → ${to}; nothing changes until the person says so`
+      : `${program()} update ${o.package}${at}${o.small ? '' : ` --to ${to}`} shows the before/after of ${o.version} → ${to}; nothing changes until you apply it`);
+    if (o.small && o.big) lines.push(mcp ? `  the big one: library {action:"update", package:"${o.package}", to:"${o.big}"}` : `  the big one: ${program()} update ${o.package}${at} --to ${o.big}`);
+  }
   return lines.join('\n');
 }

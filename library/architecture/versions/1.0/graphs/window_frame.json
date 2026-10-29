@@ -93,7 +93,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "copynum" } }
   },
   "output": "out",
-  "outputs": { "window_frame": { "node": "out", "label": "Window" } },
+  "outputs": { "window_frame": { "node": "out", "label": "Window", "kind": "mesh", "tags": ["window", "glass", "wall-opening", "modular", "building"] } },
   "meta": {
     "watertight": true,
     "pivot": "opening",

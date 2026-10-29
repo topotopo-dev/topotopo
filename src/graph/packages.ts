@@ -14,6 +14,7 @@
 // name each other in a loop do not resolve (ownOutputsNamed finds what each output names).
 import { Geometry } from '../core/geometry.ts';
 import { rebaseTexturePaths } from '../core/materials.ts';
+import { codeVarNames } from '../core/usercode.ts';
 import { graphInterface } from './engine.ts';
 import type { Engine } from './engine.ts';
 import type { Kind } from './outputs.ts';
@@ -66,17 +67,20 @@ export interface PackageOutput {
 export const packageAt = (o: Pick<PackageOutput, 'package' | 'version'>) => (o.version === null ? `${o.package} (working folder)` : `${o.package} ${o.version}`);
 
 /**
- * The node type of a package output: its graph's vars are its params and its input nodes the inputs, as for assets. A
- * graph that describes itself gives the catalog's summary (its description's first sentence) and the rest of the text.
+ * The node type of a package output: the vars of its graph that its node reads (varsRead) are its params, and its
+ * graph's input nodes the inputs, as for assets. A graph that describes itself gives the catalog's summary (its
+ * description's first sentence) and the rest of the text.
  */
 export function packageOutputDef(o: PackageOutput): NodeDef {
   const type = o.output === null ? o.package : `${o.package}/${o.output}`;
   const at = packageAt(o);
-  const { params, inputs } = graphInterface(o.spec);
+  const { params: all, inputs } = graphInterface(o.spec);
+  const read = new Set(varsRead(o.spec, o.node));
+  const params = Object.fromEntries(Object.entries(all).filter(([k]) => read.has(k)));
   const what = `${o.output === null ? 'the default output' : `output "${o.output}"`} of package ${at}${o.label ? ` (${o.label})` : ''}`;
   const desc = typeof o.spec.description === 'string' ? o.spec.description.trim() : '';
   const split = /^(.+?[.!?])\s+(.+)$/s.exec(desc);
-  const cooks = `it cooks node "${o.node}" of the package's graph "${o.graph}"; its params are that graph's vars.`;
+  const cooks = `it cooks node "${o.node}" of the package's graph "${o.graph}"; its params are the vars of that graph the node reads.`;
   return {
     type,
     category: 'package',
@@ -131,7 +135,7 @@ export function packagesNamedIn(graph: GraphSpec): string[] {
 }
 
 /** The nodes of a graph a cook of `node` reaches: the node, its inputs and the nodes its expressions read, upstream. */
-function upstreamOf(g: GraphSpec, node: string): string[] {
+export function upstreamOf(g: GraphSpec, node: string): string[] {
   const keep = new Set<string>(), todo = [node];
   while (todo.length) {
     const n = todo.pop()!;
@@ -144,6 +148,39 @@ function upstreamOf(g: GraphSpec, node: string): string[] {
     todo.push(...refs.geo, ...refs.ch.map((c) => c.node));
   }
   return [...keep];
+}
+
+/**
+ * The vars of a graph that a cook of its node `node` reads: the vars named in the "=expr" params, code and other text
+ * params of the nodes it reaches (upstream), and in the nested graphs of those nodes (all of their nodes: a foreach
+ * body reads its graph's vars). They are the params of a package output that cooks that node; a var the node does not
+ * read changes nothing about it. Sorted.
+ */
+export function varsRead(graph: GraphSpec, node: string): string[] {
+  const vars = graph.vars ?? {};
+  if (!Object.keys(vars).length) return [];
+  const out = new Set<string>();
+  const names = (s: string) => { for (const n of codeVarNames(s, vars)) out.add(n); };
+  // a param's value: "=expr" anywhere; whole text where text is read as code or an expression (code, groups, strings)
+  const value = (v: unknown, text: boolean, depth: number) => {
+    if (depth > 64) return;
+    if (typeof v === 'string') { if (v.startsWith('=') || text) names(v); }
+    else if (Array.isArray(v)) for (const x of v) value(x, text, depth + 1);
+    else if (isGraph(v)) for (const n of Object.keys(v.nodes)) nodeParams(v, n, depth + 1);
+    else if (v && typeof v === 'object') for (const x of Object.values(v)) value(x, text, depth + 1);
+  };
+  const nodeParams = (g: GraphSpec, n: string, depth: number) => {
+    const spec = g.nodes[n];
+    if (!spec || typeof spec !== 'object' || !spec.params || typeof spec.params !== 'object') return;
+    const def = typeof spec.type === 'string' ? getNodeDef(spec.type) : undefined;
+    for (const [k, v] of Object.entries(spec.params)) {
+      const t = def?.params[k]?.type;
+      value(v, t === undefined || t === 'code' || t === 'group' || t === 'string' || t === 'json', depth);
+    }
+  };
+  if (!Object.hasOwn(graph.nodes, node)) return [];
+  for (const n of upstreamOf(graph, node)) nodeParams(graph, n, 0);
+  return [...out].sort();
 }
 
 /**

@@ -35,6 +35,71 @@ const PKG_VERSION = (() => {
 
 export interface LibraryRef { name: string; path: string }
 
+let PROGRAM = 'topotopo';
+/**
+ * The command a person runs TopoTopo with, as hints name it: "topotopo" installed, "node src/cli.ts" from a clone. The
+ * CLI and the MCP server set it from how they were started.
+ */
+export const program = () => PROGRAM;
+export const setProgram = (p: string) => { PROGRAM = p; };
+
+/** Wait `ms` without giving up the thread (a short retry between file operations). */
+const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Rename a file or folder into place. On Windows a file watcher, an editor or a virus scanner holding a file in it
+ * makes the rename fail for a moment (EPERM, EBUSY, EACCES): it is tried again for about two seconds, and then fails
+ * with a plain message.
+ */
+export function renameInto(from: string, to: string) {
+  for (let i = 0; ; i++) {
+    try { fs.renameSync(from, to); return; }
+    catch (e: any) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(e?.code)) throw e;
+      if (i >= 8) throw new Error(`could not move ${from} to ${to}: another program (a file watcher, an editor, a virus scanner) holds a file there; close it or wait a moment, then try again`);
+      pause(Math.min(400, 25 * 2 ** i));
+    }
+  }
+}
+
+/** How long a project's lock may be held before another process takes it as left behind by one that ended. */
+const STALE_LOCK_MS = 120_000;
+
+/**
+ * Run `f` holding the project's lock, packages/.lock, a file only one process can create at a time: the CLI, the MCP
+ * server and the viewer read, change and write project.json and packages/lock.json under it, so that none loses
+ * another's change. Waits up to about ten seconds for another holder; a lock older than two minutes, or whose process
+ * has ended, is taken over. Held again by the same process (a nested call), it just runs `f`.
+ */
+const heldLocks = new Set<string>();
+export function withProjectLock<T>(dir: string, f: () => T): T {
+  const file = path.join(path.resolve(dir), 'packages', '.lock');
+  if (heldLocks.has(file)) return f();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  for (let waited = 0; ; ) {
+    try {
+      fs.writeFileSync(file, `${process.pid} ${new Date().toISOString()}\n`, { flag: 'wx' });
+      break;
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST') throw e;
+      let stale = false;
+      try {
+        const [pid] = fs.readFileSync(file, 'utf8').split(' ');
+        const age = Date.now() - fs.statSync(file).mtimeMs;
+        let alive = true;
+        try { process.kill(Number(pid), 0); } catch (k: any) { alive = k?.code === 'EPERM'; }
+        stale = age > STALE_LOCK_MS || !alive || Number(pid) === process.pid;
+      } catch { /* removed meanwhile: try again */ }
+      if (stale) { fs.rmSync(file, { force: true }); continue; }
+      if (waited > 10_000) throw new Error(`${file} is held by another TopoTopo process (the viewer, an MCP server or a command) changing this project's packages; try again when it is done, or delete the file if no such process runs`);
+      pause(50);
+      waited += 50;
+    }
+  }
+  heldLocks.add(file);
+  try { return f(); } finally { heldLocks.delete(file); fs.rmSync(file, { force: true }); }
+}
+
 /**
  * TopoTopo's built-in library: TopoTopo's own packages (owner "topotopo"), shipped in library/ beside src/ and dist/.
  * Every project looks in it without listing it, and no other library takes its name. Its folder <name> holds the
@@ -195,10 +260,10 @@ export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
     if (!isPackage(k)) throw new Error(`"uses": "${k}" is not a package name (owner/name)`);
     if (typeof v !== 'string' || !VERSION_RE.test(v)) throw new Error(`"uses": "${k}" needs a version such as "1.3", got ${JSON.stringify(v)}`);
   }
+  // each entry's form is checked where the libraries are looked in (libraryEntry): one that is wrong is said there, and
+  // the others still work
   const libraries = raw.libraries ?? [];
-  if (!Array.isArray(libraries) || libraries.some((l: unknown) => typeof l !== 'string' || !l.trim())) throw new Error('"libraries" must be a list of registered library names and paths relative to the project');
-  for (const l of libraries as string[])
-    if (path.isAbsolute(l) || /^[A-Za-z]:/.test(l)) throw new Error(`"libraries": "${l}" is an absolute path: give the path relative to the project (a library in the same repository) or a registered library's name`);
+  if (!Array.isArray(libraries) || libraries.some((l: unknown) => typeof l !== 'string' || !l.trim())) throw new Error('"libraries" must be a list of registered library names and paths relative to the project ("./lib", "../../art/topotopo")');
   return {
     id, graph, bake,
     title: str(raw.title, 'title', id),
@@ -236,7 +301,7 @@ export function writeManifest(dir: string, m: ProjectManifest) {
 /** Written as a dot-file next to the target and renamed, so readers never see half a file. */
 export function writeAtomic(file: string, data: string | Uint8Array) {
   const part = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}-${Date.now().toString(36)}.part`);
-  try { fs.writeFileSync(part, data); fs.renameSync(part, file); } catch (e) { fs.rmSync(part, { force: true }); throw e; }
+  try { fs.writeFileSync(part, data); renameInto(part, file); } catch (e) { fs.rmSync(part, { force: true }); throw e; }
 }
 
 // ------------------------------------------------------------------------------------------------------------ scan
@@ -283,6 +348,45 @@ export function scanAll(cfg: GalleryConfig = loadConfig()): LibraryScan[] {
   return cfg.libraries.map(scanLibrary);
 }
 
+// ------------------------------------------------------------------------------------- the libraries a project lists
+
+/**
+ * What an entry of project.json "libraries" names: a path relative to the project, written "./lib" or "../../art/lib"
+ * (a library in the same repository, so every checkout and worktree reads its own), or a registered library's name
+ * ("game"). Anything else says how to write it.
+ */
+export function libraryEntry(entry: string): { path: string } | { name: string } | { error: string } {
+  const e = entry.trim();
+  if (path.isAbsolute(e) || /^[A-Za-z]:/.test(e))
+    return { error: `"${entry}" is an absolute path: list a library in the same repository by its path relative to the project ("../lib"), any other by its registered name` };
+  if (e === '.' || e === '..' || /^\.\.?[\\/]/.test(e)) return { path: e };
+  if (ID_RE.test(e)) return { name: e };
+  return { error: `"${entry}" is neither a path written from the project ("./${e.replace(/\\/g, '/')}") nor a registered library's name (lower-case letters, digits, - and _)` };
+}
+
+/**
+ * The entry project.json lists for a library a person names (`topotopo libraries add`): a folder (absolute, or relative
+ * to `cwd`) as its path relative to the project, "./x" or "../x"; else a registered library's name. Throws for what is
+ * neither, and for a folder that is a package rather than a library.
+ */
+export function libraryEntryFor(projectDir: string, given: string, cwd = process.cwd()): string {
+  const abs = path.resolve(cwd, given);
+  if (fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory()) {
+    if (fs.existsSync(manifestFile(abs)))
+      throw new Error(`${abs} is a project (it holds project.json), not a library: list the folder that holds it, ${path.dirname(abs)}`);
+    const rel = path.relative(projectDir, abs).split(path.sep).join('/') || '.';
+    if (path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) throw new Error(`${abs} is on another drive than the project: register it (topotopo library add <name> ${abs}) and list it by its name`);
+    return rel.startsWith('.') ? rel : `./${rel}`;
+  }
+  if (ID_RE.test(given)) {
+    let cfg: GalleryConfig | null = null;
+    try { cfg = loadConfig(); } catch { /* an unreadable config registers nothing */ }
+    if (cfg?.libraries.some((l) => l.name === given) || given === BUILTIN_LIBRARY.name) return given;
+    throw new Error(`"${given}" is no folder here and no registered library (${cfg?.libraries.map((l) => l.name).join(', ') || 'none are registered'}): give the library's folder, or register it first (${program()} library add ${given} <folder>)`);
+  }
+  throw new Error(`no folder ${abs}: give the library's folder or a registered library's name`);
+}
+
 /** The project a folder belongs to (the folder itself, or the nearest parent with a project.json), or null. */
 export function projectDirOf(start: string): string | null {
   let d = path.resolve(start);
@@ -299,9 +403,36 @@ export function projectDirOf(start: string): string | null {
 export interface CreateOptions { title?: string; description?: string; tags?: string[]; links?: ProjectLink[]; graph?: object }
 
 /**
- * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the workspace folders, attachments/, and a
- * .gitignore for the derived files. `graph` (a graph spec) becomes graphs/main.json. Fails when the folder holds a
- * project already or the id is taken in the library.
+ * What a project's .gitignore holds: files derived from it (previews, caches, the hashes of its copies' files) and the
+ * lock its package commands hold while they write.
+ */
+const IGNORED = ['.gallery/', '.cache/', 'packages/.cache.json', 'packages/.lock'];
+/**
+ * What a project's .gitattributes holds: its published versions and its package copies are kept byte for byte, their
+ * line ends never changed by a checkout (their hashes read text with LF line ends anyway, src/gallery/packages.ts).
+ */
+const ATTRIBUTES = ['versions/** -text', 'packages/** -text'];
+
+/** Add to a text file the lines it does not hold yet, at its end (a new file holds just them). */
+function addLines(file: string, lines: string[]) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { /* new */ }
+  const have = new Set(text.split(/\r?\n/).map((l) => l.trim()));
+  const missing = lines.filter((l) => !have.has(l));
+  if (!missing.length) return;
+  fs.writeFileSync(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+}
+
+/** A project's .gitignore and .gitattributes, made or completed. */
+function projectRepoFiles(dir: string) {
+  addLines(path.join(dir, '.gitignore'), IGNORED);
+  addLines(path.join(dir, '.gitattributes'), ATTRIBUTES);
+}
+
+/**
+ * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the workspace folders, attachments/, a
+ * .gitignore for the derived files and a .gitattributes that keeps its versions and copies byte for byte. `graph` (a
+ * graph spec) becomes graphs/main.json. Fails when the folder holds a project already or the id is taken in the library.
  */
 export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {}): Project {
   const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean);
@@ -317,8 +448,7 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
   if (taken) throw new Error(`id "${id}" is used by ${taken.rel} in library "${lib.name}": pick another folder name`);
   if (scan.projects.some((p) => dir.startsWith(p.dir + path.sep))) throw new Error(`${rel} is inside another project`);
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) fs.mkdirSync(path.join(dir, d), { recursive: true });
-  const gi = path.join(dir, '.gitignore');
-  if (!fs.existsSync(gi)) fs.writeFileSync(gi, '.gallery/\n.cache/\n');
+  projectRepoFiles(dir);
   const manifest = parseManifest({
     id, title: o.title ?? parts[parts.length - 1], description: o.description ?? '', tags: o.tags ?? [], links: o.links ?? [],
     graph: 'main', created: new Date().toISOString().slice(0, 10),
@@ -329,24 +459,57 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
 }
 
 /**
- * Make a folder a project (`topotopo init`), in a library or anywhere: project.json with an id from the folder's name
- * and "graph": "main", graphs/ (where a project's graphs go: the workspace, the gallery and publishing read them there,
- * for a package and any other project alike) and a .gitignore for the derived files. `pkg` names the package the
- * project is ("owner/name"). Fails when the folder is a project already or lies inside one.
+ * A package name a person gives their project ("owner/name"): checked, and the owner "topotopo", which TopoTopo's own
+ * packages have, refused.
  */
-export function initProject(dir: string, o: { package?: string } = {}): { dir: string; manifest: ProjectManifest } {
+export function ownPackageName(pkg: string): string {
+  const n = parsePackageName(pkg);
+  if (typeof n === 'string' || n.output !== null) throw new Error(`"${pkg}" is not a package name: write "owner/name", each part lower-case letters, digits, - and _, starting with a letter or digit`);
+  if (pkg.split('/')[0] === BUILTIN_LIBRARY.name) throw new Error(`the owner "${BUILTIN_LIBRARY.name}" is reserved for TopoTopo's own packages: name the package after its owner, you or your studio ("studio/${pkg.split('/')[1]}")`);
+  return pkg;
+}
+
+/** The graph a new project starts with (graphs/main.json): a box, so that the graph project.json shows cooks. */
+const STARTER = { description: 'A starting point: replace it with the project\'s graph.', nodes: { box: { type: 'box' } }, output: 'box' };
+
+/**
+ * Make a folder a project (`topotopo init`), in a library or anywhere: project.json (an id and title from the folder's
+ * name, or from `name`; the graph it shows; "libraries": [], where the person lists the libraries it finds packages
+ * in; and the package it is, `package`, "owner/name"), graphs/ with a starter graph when it holds none (so that the
+ * graph project.json shows is there: graphs/main.json, a box), a .gitignore for the derived files and a .gitattributes
+ * that keeps its versions and package copies byte for byte (both completed when they exist). In a folder that is a
+ * project already, `package` sets the package it is (when it names none yet); without it, that is an error. Fails for a
+ * folder inside another project.
+ */
+export function initProject(dir: string, o: { package?: string; name?: string } = {}): { dir: string; manifest: ProjectManifest; said: string } {
   const abs = path.resolve(dir);
-  if (fs.existsSync(manifestFile(abs))) throw new Error(`${abs} is a project already (${manifestFile(abs)})`);
+  if (o.package !== undefined) ownPackageName(o.package);
+  if (fs.existsSync(manifestFile(abs))) {
+    if (o.package === undefined) throw new Error(`${abs} is a project already (${manifestFile(abs)}); --package owner/name sets the package it is`);
+    const m = readManifest(abs);
+    if (m.package === o.package) return { dir: abs, manifest: m, said: `project ${m.id} → ${abs} is the package ${m.package} already` };
+    if (m.package) throw new Error(`project ${m.id} is the package ${m.package} already: a package keeps its name (to make it another package, change "package" in ${manifestFile(abs)} yourself)`);
+    m.package = o.package;
+    writeManifest(abs, m);
+    projectRepoFiles(abs);
+    return { dir: abs, manifest: m, said: `project ${m.id} → ${abs} is the package ${m.package} now` };
+  }
   const outer = projectDirOf(path.dirname(abs));
   if (outer) throw new Error(`${abs} is inside the project ${outer}: a project cannot hold another`);
-  const id = slugify(path.basename(abs));
-  if (!ID_RE.test(id)) throw new Error(`"${path.basename(abs)}" gives no usable project id: name the folder with letters or digits`);
-  const manifest = parseManifest({ id, title: path.basename(abs), graph: 'main', created: new Date().toISOString().slice(0, 10), ...(o.package !== undefined ? { package: o.package } : {}) }, id);
-  fs.mkdirSync(path.join(abs, 'graphs'), { recursive: true });
-  writeManifest(abs, manifest);
-  const gi = path.join(abs, '.gitignore');
-  if (!fs.existsSync(gi)) fs.writeFileSync(gi, '.gallery/\n.cache/\n');
-  return { dir: abs, manifest };
+  const named = o.name ?? path.basename(abs);
+  const id = slugify(named);
+  if (!ID_RE.test(id)) throw new Error(`"${named}" gives no usable project id: name the folder with letters or digits`);
+  // the graph it shows: main, unless graphs/ holds others and no main
+  const graphs = path.join(abs, 'graphs');
+  fs.mkdirSync(graphs, { recursive: true });
+  const held = jsonFiles(graphs).map((f) => f.slice(0, -5)).filter((n) => NAME_RE.test(n));
+  const graph = held.length && !held.includes('main') ? held[0] : 'main';
+  if (!held.length) fs.writeFileSync(path.join(graphs, 'main.json'), JSON.stringify(STARTER, null, 2) + '\n');
+  const raw = { id, title: named, graph, created: new Date().toISOString().slice(0, 10), ...(o.package !== undefined ? { package: o.package } : {}), libraries: [] };
+  const manifest = parseManifest(raw, id);
+  writeAtomic(manifestFile(abs), JSON.stringify(raw, null, 2) + '\n');
+  projectRepoFiles(abs);
+  return { dir: abs, manifest, said: `project ${id} → ${abs}${manifest.package ? ` (package ${manifest.package})` : ''}` };
 }
 
 /** Files an operating system leaves in folders, which say nothing about what a folder holds. */
@@ -364,22 +527,46 @@ export function notWorkspaceFiles(dir: string): string[] {
     .map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
 }
 
+/** Where the MCP server works, and what it says about it (initWorkspace). */
+export interface WorkspaceStart {
+  /** the folder to work in: the one given, or the root of the project it lies in */
+  dir: string;
+  /** what happened, for the server's log */
+  log: string;
+  /** what its first tool reply tells the agent (null: nothing to tell) */
+  note: string | null;
+}
+
 /**
- * The MCP server's rule for its workspace when it starts, named or not (scripts/preview.ts applies it too): a folder in
- * no project that holds nothing but what a workspace makes itself (graphs/, assets/, exports/, inputs/), or nothing at
- * all, becomes a project, so that its graphs use packages, TopoTopo's own among them, as they come. A folder with
- * anything else in it (a repository, a folder of the person's) stays as it is, and so does one in a project:
- * library {action:"init"} (topotopo init) makes it a project when the person says so. Says what it did.
+ * The MCP server's rule for its workspace when it starts, named or not (scripts/preview.ts applies it too). A folder in
+ * a project works in that project's root, which holds its graphs, assets and packages. A folder in no project that holds
+ * nothing but what a workspace makes itself (graphs/, assets/, exports/, inputs/), or nothing at all, becomes a project
+ * (initProject; `name`: its id and title, else the folder's name), so that its graphs use packages, TopoTopo's own among
+ * them, as they come. A folder with anything else in it (a repository, a folder of the person's) stays as it is:
+ * library {action:"init"} makes it a project when the person says so.
  */
-export function initWorkspace(dir: string): string {
+export function initWorkspace(dir: string, o: { name?: string } = {}): WorkspaceStart {
   const abs = path.resolve(dir);
   const outer = projectDirOf(abs);
-  if (outer) return outer === abs ? `the workspace ${abs} is a project` : `the workspace ${abs} is in the project ${outer}`;
+  if (outer === abs) return { dir: abs, log: `the workspace ${abs} is a project`, note: null };
+  if (outer) return {
+    dir: outer, log: `the workspace ${abs} is in the project ${outer}: working in the project's folder`,
+    note: `The server works in the project ${outer}, the project that holds the folder it was given (${abs}): a project's graphs, assets, inputs and packages are those of its own folder.`,
+  };
   const other = notWorkspaceFiles(abs);
-  if (other.length)
-    return `the workspace ${abs} is in no project and holds ${other.slice(0, 3).join(', ')}${other.length > 3 ? ` and ${other.length - 3} more` : ''}, which a workspace does not make: left as it is (library {action:"init"} makes it a project)`;
-  try { initProject(abs); } catch (e: any) { return `the workspace ${abs} could not be made a project: ${e.message}`; }
-  return `made the workspace ${abs} a project (project.json): it held nothing but what a workspace makes itself`;
+  if (other.length) {
+    const held = `${other.slice(0, 3).join(', ')}${other.length > 3 ? ` and ${other.length - 3} more` : ''}`;
+    return {
+      dir: abs, log: `the workspace ${abs} is in no project and holds ${held}, which a workspace does not make: left as it is`,
+      note: `The workspace ${abs} is in no project, so its graphs cannot use packages, TopoTopo's own kits ("topotopo/nature/rock" …) among them: it holds ${held}, which a workspace does not make, so the server left it as it is. Ask the person before making it a project; library {action:"init"} then does it (project.json, graphs/, .gitignore, .gitattributes).`,
+    };
+  }
+  let made: ReturnType<typeof initProject>;
+  try { made = initProject(abs, { name: o.name }); } catch (e: any) { return { dir: abs, log: `the workspace ${abs} could not be made a project: ${e.message}`, note: `The workspace ${abs} could not be made a project, so its graphs cannot use packages: ${e.message}` }; }
+  return {
+    dir: abs, log: `made the workspace ${abs} a project (project.json): it held nothing but what a workspace makes itself`,
+    note: `The workspace ${abs} became a project, "${made.manifest.id}", when the server started (project.json, graphs/${made.manifest.graph}.json): it held nothing but a workspace's own folders. Its graphs use packages as they come, TopoTopo's own kits ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish the project as a package, library {action:"set", package:"<owner>/${made.manifest.id}"}; to use packages from another library, library {action:"set", libraries:[...]} when the person names it.`,
+  };
 }
 
 // ------------------------------------------------------------------------------------------------------ project files

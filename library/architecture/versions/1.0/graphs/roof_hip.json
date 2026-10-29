@@ -86,7 +86,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "roof_hip": { "node": "out", "label": "Hip roof" } },
+  "outputs": { "roof_hip": { "node": "out", "label": "Hip roof", "kind": "mesh", "tags": ["roof", "hip-roof", "building", "modular"] } },
   "meta": {
     "watertight": true,
     "pivot": "wall_top",

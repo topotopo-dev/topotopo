@@ -156,7 +156,7 @@
     }
   },
   "output": "out",
-  "outputs": { "railing": { "node": "out", "label": "Railing" } },
+  "outputs": { "railing": { "node": "out", "label": "Railing", "kind": "mesh", "tags": ["railing", "balustrade", "along-curve", "metal"] } },
   "meta": {
     "pivot": "curve",
     "inputs": ["curve"],

@@ -101,7 +101,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "copynum", "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "arch": { "node": "out", "label": "Arch" } },
+  "outputs": { "arch": { "node": "out", "label": "Arch", "kind": "mesh", "tags": ["arch", "opening", "masonry", "stone", "modular"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 25, "elevation": 15 }

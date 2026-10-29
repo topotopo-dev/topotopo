@@ -203,7 +203,7 @@
     }
   },
   "output": "out",
-  "outputs": { "road_strip": { "node": "out", "label": "Road" } },
+  "outputs": { "road_strip": { "node": "out", "label": "Road", "kind": "mesh", "tags": ["road", "street", "asphalt", "sidewalk", "along-curve"] } },
   "meta": {
     "pivot": "curve",
     "inputs": ["curve"],

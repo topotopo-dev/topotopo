@@ -84,6 +84,6 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint copynum" } }
   },
   "output": "out",
-  "outputs": { "pallet": { "node": "out", "label": "Pallet" } },
+  "outputs": { "pallet": { "node": "out", "label": "Pallet", "kind": "mesh", "tags": ["pallet", "warehouse", "wooden", "prop"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 30 } }
 }
