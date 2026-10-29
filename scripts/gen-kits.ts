@@ -26,9 +26,8 @@ import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { BUILTIN_LIBRARY, readManifest } from '../src/gallery/library.ts';
 import type { ProjectManifest } from '../src/gallery/library.ts';
-import { loadProject, openPackages, publishPackage, publishText, publishedVersions, versionHash, workingHash } from '../src/gallery/packages.ts';
+import { openPackages, publishPackage, publishText, publishedVersions, versionHash, workingHash } from '../src/gallery/packages.ts';
 import type { VersionInfo } from '../src/gallery/packages.ts';
-import { Workspace } from '../src/workspace.ts';
 import { thumbOptions, thumbnailPNG as renderThumb } from '../src/render/preview.ts';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -184,11 +183,9 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
   if (args.includes('--publish')) {
     const name = opt('--publish'), k = kits.find((x) => x.name === name);
     if (!k) { console.log(`--publish needs a kit: ${kits.map((x) => x.name).join(', ')}`); process.exit(1); }
+    // publishing cooks each output as a project that uses the kit does, in the kit's own scope
     const { engine, pk } = await kitEngine(k);
-    // the kit's graphs and assets in the root, read without writing anything into its folder (a workspace would make folders)
-    const ws = new Workspace(k.dir, engine);
-    for (const p of loadProject(engine, k.dir)) console.log(`warning: ${p}`);
-    const r = await publishPackage(ws, pk, { note: opt('--note'), big: args.includes('--big'), builtin: true });
+    const r = await publishPackage(pk, { note: opt('--note'), big: args.includes('--big'), builtin: true });
     console.log(publishText(r));
     if (r.ok) writeReadme(readKits());
     await engine.host.pool?.close();

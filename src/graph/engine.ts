@@ -21,8 +21,11 @@
 //
 // Scopes (src/graph/scope.ts): a cook runs in a scope, which gives it its node types, the graphs graph_ref reads and
 // the files nodes read; nested cooks inherit it. The cache is shared by all scopes: outside the root scope, a node
-// whose result depends on its scope (NodeDef.usesScope) has the scope's id in its signature. A node type with a slash
-// is a package output (src/graph/packages.ts), which only the scope's packages resolve.
+// whose result depends on its scope has the scope's id in its signature. It depends on it when it reads it: its
+// signatureExtra reads the scope it is given (a file's stamp), or its cook reads ctx.scope or cooks a nested graph in
+// it (ctx.subcook without a scope of its own). That is found as time dependence is, and remembered per signature
+// (scopeDeps); NodeDef.usesScope says it up front. A node type with a slash is a package output
+// (src/graph/packages.ts), which only the scope's packages resolve.
 //
 // Concurrency: when the host has a worker pool (Engine.concurrent), the inputs of a node (and the nodes its
 // expressions reference) are pulled at once, so independent branches overlap wherever a cook awaits (a chunked
@@ -230,6 +233,19 @@ export function resolveTime(o: { frame?: number; time?: number; fps?: number; ti
 
 const timeKey = (t: TimeState) => `T:${t.frame}:${t.time}:${t.fps}:${t.timeInc}`;
 
+/**
+ * A scope that calls `read` when what it holds is read: its assets, graphs, files or packages (what a node is given, in
+ * signatureExtra and as CookContext.scope: Engine.scopeDeps). Its id alone does not count: a node that reads it keys
+ * its result by it itself.
+ */
+const watchScope = (s: Scope, read: () => void): Scope => ({
+  get id() { return s.id; },
+  get assets() { read(); return s.assets; },
+  get graphs() { read(); return s.graphs; },
+  get files() { read(); return s.files; },
+  get packages() { read(); return s.packages; },
+});
+
 /** Normalise `in` wiring into an ordered list of node names (null = unconnected). */
 export function wiringOf(spec: NodeSpec, def: NodeDef): { list: (string | null)[]; errors: string[] } {
   const errors: string[] = [];
@@ -427,6 +443,8 @@ export class Engine {
   readonly root: Scope;
   /** base signatures of nodes found to depend on time while cooking */
   timeDeps = new Set<string>();
+  /** signatures (without the scope) of nodes found to read their scope: their results are keyed by the scope's id */
+  scopeDeps = new Set<string>();
   /** manifold-3d wasm module, loaded by init() */
   manifold: any = null;
   maxDepth = 24;
@@ -1025,9 +1043,12 @@ export class Engine {
       return result;
     }
 
+    // the scope a node reads, through signatureExtra (a file's stamp) or while it cooks (ctx.scope, a nested cook in
+    // it), keys its result outside the root scope (scopeSig); found once, remembered for its signature (scopeDeps)
+    let readScope = !!def.usesScope, readScopeCooking = false;
     let extra = '';
     try {
-      extra = def.signatureExtra?.(rp.values, scope) ?? '';
+      extra = def.signatureExtra?.(rp.values, watchScope(scope, () => { readScope = true; })) ?? '';
     } catch (e: any) {
       result.error = { node: name, message: e.message };
       return result;
@@ -1037,12 +1058,11 @@ export class Engine {
       : typeof def.usesVars === 'function' ? stableStringify(pickVars(vars, codeVarNames(def.usesVars(rp.values), vars))) : '';
     // a result named after its node (an image's default name) is not shared with an identical node of another name
     const nameSig = def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '';
-    const baseSig = String(
-      hashString(
-        def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' +
-        varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : '') + (def.usesScope ? scopeSig(scope) : '') + nameSig,
-      ),
-    );
+    const material = def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : '') + nameSig;
+    const plainSig = String(hashString(material));
+    if (this.scopeDeps.has(plainSig)) readScope = true;
+    const scopedSig = () => (scopeSig(scope) ? String(hashString(material + scopeSig(scope))) : plainSig);
+    let baseSig = readScope ? scopedSig() : plainSig;
     const timeSig = () => String(hashString(baseSig + '|' + timeKey(time)));
     let timeDep = !!def.usesTime || np.usesTime || this.timeDeps.has(baseSig);
     let sig = timeDep ? timeSig() : baseSig;
@@ -1112,7 +1132,7 @@ export class Engine {
       warn: (m) => result.warnings.push(m),
       vars,
       engine: this,
-      scope,
+      scope: watchScope(scope, () => { readScopeCooking = true; }),
       inputSigs,
       depth,
       get frame() { mark(); return time.frame; },
@@ -1123,6 +1143,8 @@ export class Engine {
       signal: opts.signal,
       async subcook(g, o = {}) {
         const inherit = o.frame === undefined && o.time === undefined ? { frame: time.frame, time: time.time, timeInc: time.timeInc } : {};
+        // a nested cook in this cook's scope resolves its node types there
+        if (!o.scope) readScopeCooking = true;
         // nested cooks report their nodes (inside this one), stop with this cook and run in its scope unless given one
         const r = await engine.cook(g, {
           fps: time.fps, ...inherit, ...o, depth: depth + 1, ancestors: chain(),
@@ -1154,6 +1176,14 @@ export class Engine {
       const out = await def.cook(ctx);
       if (!isGeometry(out)) throw new Error(`node returned ${out === null ? 'null' : typeof out} instead of geometry`);
       checkFinite(out, result);
+      if (readScopeCooking && !readScope) {
+        // found to read its scope: remember it, and key this result by the scope (the root's key stays the same)
+        if (this.scopeDeps.size > 100000) { this.scopeDeps.clear(); this.cache.clear(); }
+        this.scopeDeps.add(plainSig);
+        baseSig = scopedSig();
+        sig = timeDep ? timeSig() : baseSig;
+        result.sig = sig;
+      }
       if (readTime && !timeDep) {
         // discovered while cooking: remember it so later cooks look up the time-mixed key directly
         timeDep = true;

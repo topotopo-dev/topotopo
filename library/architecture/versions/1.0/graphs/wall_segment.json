@@ -103,7 +103,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "copynum", "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "wall_segment": { "node": "out", "label": "Wall" } },
+  "outputs": { "wall_segment": { "node": "out", "label": "Wall", "kind": "mesh", "tags": ["wall", "window", "building", "modular"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 25, "elevation": 15 }

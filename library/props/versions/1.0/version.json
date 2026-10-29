@@ -1,15 +1,23 @@
 {
   "package": "topotopo/props",
   "version": "1.0",
-  "note": "first version: barrels, crates, pallets, sandbag walls and pipe runs",
-  "published": "2026-10-28T04:57:54.141Z",
+  "note": "first version",
+  "published": "2026-10-29T16:36:50.812Z",
   "big": false,
-  "hash": "2948cd2c4c371c21652aa2411ddf28310cfcbb1dc5d9847539ded6b3dbda0930",
+  "hash": "3d535352af055a4531f206484e1748748e33b9b14911c3b71eef9036b377586f",
   "outputs": {
     "barrel": {
       "graph": "barrel",
       "node": "out",
       "label": "Barrel",
+      "kind": "mesh",
+      "tags": [
+        "barrel",
+        "container",
+        "wooden",
+        "prop"
+      ],
+      "description": "Wooden barrel: a bulged body of faceted staves with a recessed lid, and metal hoops. Pivot at the centre of the base, axis Y. Pieces: barrel_body (wood), barrel_hoops (metal_dark). Every piece is closed.",
       "sliders": {
         "height": {
           "type": "float",
@@ -60,6 +68,14 @@
       "graph": "crate",
       "node": "out",
       "label": "Crate",
+      "kind": "mesh",
+      "tags": [
+        "crate",
+        "container",
+        "wooden",
+        "prop"
+      ],
+      "description": "Wooden crate: plank walls with gaps on all six sides inside a frame of edge battens. Pivot at the centre of the base. Pieces: crate_planks (wood), crate_frame (wood_dark). Every piece is a closed box.",
       "sliders": {
         "width": {
           "type": "float",
@@ -113,10 +129,32 @@
       },
       "inputs": []
     },
+    "kit": {
+      "graph": "kit",
+      "node": "kit",
+      "label": "Props kit",
+      "kind": "mesh",
+      "tags": [
+        "kit",
+        "lineup",
+        "props"
+      ],
+      "description": "TopoTopo's props kit, its 5 outputs side by side at their defaults. The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.",
+      "sliders": {},
+      "inputs": []
+    },
     "pallet": {
       "graph": "pallet",
       "node": "out",
       "label": "Pallet",
+      "kind": "mesh",
+      "tags": [
+        "pallet",
+        "warehouse",
+        "wooden",
+        "prop"
+      ],
+      "description": "Block pallet (EUR style): bottom boards, a 3 × 3 grid of blocks, cross boards and a top deck. Pivot at the centre of the base; deck boards run along X. Pieces: pallet_boards (wood_light), pallet_blocks (wood). Every piece is a closed box.",
       "sliders": {
         "width": {
           "type": "float",
@@ -167,6 +205,14 @@
       "graph": "pipe_run",
       "node": "out",
       "label": "Pipe run",
+      "kind": "mesh",
+      "tags": [
+        "pipe",
+        "industrial",
+        "along-curve",
+        "metal"
+      ],
+      "description": "Pipe run along a polyline (input 0; without one, a default run that turns and rises): corners rounded into elbows of bend_radius, flanges at both ends and every flange_spacing metres, and floor stands under horizontal stretches. Pivot = the curve (the default run starts at the origin, 0.5 m up). Pieces: pipe (pipe_paint), pipe_flanges (steel), pipe_supports (metal_dark). Every piece is closed.",
       "sliders": {
         "radius": {
           "type": "float",
@@ -220,6 +266,14 @@
       "graph": "sandbag_wall",
       "node": "out",
       "label": "Sandbag wall",
+      "kind": "mesh",
+      "tags": [
+        "sandbags",
+        "barrier",
+        "cover",
+        "wall"
+      ],
+      "description": "Sandbag wall from x = 0 to x = wall_length: rows of pillow-shaped bags in running bond, squashed onto each other, with random yaw, offset and tint. Pivot at the start of the wall, on the ground, centred in depth. Piece: sandbags (burlap). Every bag is closed.",
       "sliders": {
         "wall_length": {
           "type": "float",
@@ -270,6 +324,13 @@
   "default": {
     "graph": "kit",
     "node": "kit",
+    "kind": "mesh",
+    "tags": [
+      "kit",
+      "lineup",
+      "props"
+    ],
+    "description": "TopoTopo's props kit, its 5 outputs side by side at their defaults. The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.",
     "sliders": {},
     "inputs": []
   },

@@ -110,5 +110,5 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "copynum", "groups": "ends" } }
   },
   "output": "out",
-  "outputs": { "log": { "node": "out", "label": "Log", "kind": "mesh", "tags": ["log", "deadwood", "wood", "lowpoly"] } }
+  "outputs": { "log": { "node": "out", "label": "Log", "kind": "mesh", "tags": ["log", "deadwood", "wood", "low-poly"] } }
 }

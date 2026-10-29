@@ -141,7 +141,7 @@
     }
   },
   "output": "out",
-  "outputs": { "pipe_run": { "node": "out", "label": "Pipe run" } },
+  "outputs": { "pipe_run": { "node": "out", "label": "Pipe run", "kind": "mesh", "tags": ["pipe", "industrial", "along-curve", "metal"] } },
   "meta": {
     "watertight": true,
     "pivot": "curve",

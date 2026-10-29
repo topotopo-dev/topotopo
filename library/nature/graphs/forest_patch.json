@@ -162,7 +162,7 @@
     }
   },
   "output": "out",
-  "outputs": { "forest_patch": { "node": "out", "label": "Forest", "kind": "instances", "tags": ["forest", "trees", "conifer", "vegetation", "scatter", "lowpoly"] } },
+  "outputs": { "forest_patch": { "node": "out", "label": "Forest", "kind": "instances", "tags": ["forest", "trees", "conifer", "vegetation", "scatter", "low-poly"] } },
   "meta": {
     "pivot": "surface",
     "inputs": ["surface"],

@@ -63,5 +63,5 @@
     }
   },
   "output": "out",
-  "outputs": { "bush": { "node": "out", "label": "Bush", "kind": "mesh", "tags": ["bush", "foliage", "vegetation", "lowpoly"] } }
+  "outputs": { "bush": { "node": "out", "label": "Bush", "kind": "mesh", "tags": ["bush", "foliage", "vegetation", "low-poly"] } }
 }

@@ -98,15 +98,24 @@ section('the workspace of the MCP server: a project when it holds nothing but wh
   const repo = ws('repo', { 'README.md': '# a game', 'graphs/main.json': JSON.stringify(BOX) }), git = ws('git', { '.git/HEAD': 'ref: refs/heads/main' });
   check([fresh, empty, own].every((d) => !notWorkspaceFiles(d).length), 'a workspace\'s own folders (and files an operating system leaves) are nothing else, as are no files and no folder');
   check(notWorkspaceFiles(repo).join() === 'README.md' && notWorkspaceFiles(git).join() === '.git/', `anything else is: ${notWorkspaceFiles(repo)}, ${notWorkspaceFiles(git)}`);
-  for (const d of [fresh, empty, own]) check(/^made the workspace .* a project \(project\.json\)/.test(initWorkspace(d)) && fs.existsSync(path.join(d, 'project.json')), `${path.basename(d)}: made a project`);
-  check(readManifest(own).id === 'own' && fs.existsSync(path.join(own, 'graphs', 'main.json')) && fs.existsSync(path.join(own, 'assets', 'rock.json')), 'its graphs and assets stay where they are');
-  for (const d of [repo, git]) {
-    const said = initWorkspace(d);
-    check(/is in no project and holds .*, which a workspace does not make: left as it is \(library \{action:"init"\} makes it a project\)$/.test(said) && !fs.existsSync(path.join(d, 'project.json')), `${path.basename(d)}: left as it is (${said.slice(said.indexOf(' holds'))})`);
+  for (const d of [fresh, empty, own]) {
+    const s = initWorkspace(d);
+    check(/^made the workspace .* a project \(project\.json\)/.test(s.log) && s.dir === d && /became a project, ".*", when the server started .* Next: build into graph "main"/.test(s.note ?? '') && fs.existsSync(path.join(d, 'project.json')),
+      `${path.basename(d)}: made a project, and the first reply will say so and what to do next`);
   }
-  check(/^the workspace .* is a project$/.test(initWorkspace(own)), 'a project stays as it is');
-  const sub = ws('own/levels');
-  check(/^the workspace .* is in the project .*own$/.test(initWorkspace(sub)) && !fs.existsSync(path.join(sub, 'project.json')), 'and a folder in a project becomes no project of its own');
+  check(readManifest(own).id === 'own' && fs.existsSync(path.join(own, 'graphs', 'main.json')) && fs.existsSync(path.join(own, 'assets', 'rock.json')), 'its graphs and assets stay where they are');
+  check(readManifest(fresh).graph === 'main' && JSON.parse(fs.readFileSync(path.join(fresh, 'graphs', 'main.json'), 'utf8')).output === 'box', 'a new one gets a starter graph, the one project.json shows');
+  const named = ws('parent/workspace');
+  check(readManifest(initWorkspace(named, { name: 'parent' }).dir).id === 'parent' && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
+  for (const d of [repo, git]) {
+    const s = initWorkspace(d);
+    check(/is in no project and holds .*, which a workspace does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own kits .* Ask the person before making it a project; library \{action:"init"\} then does it/.test(s.note ?? '') && !fs.existsSync(path.join(d, 'project.json')),
+      `${path.basename(d)}: left as it is (${s.log.slice(s.log.indexOf(' holds'))})`);
+  }
+  check(/^the workspace .* is a project$/.test(initWorkspace(own).log) && initWorkspace(own).note === null, 'a project stays as it is, with nothing to tell');
+  const sub = ws('own/levels'), inSub = initWorkspace(sub);
+  check(inSub.dir === own && /is in the project .*own: working in the project's folder$/.test(inSub.log) && /The server works in the project .*own, the project that holds the folder it was given/.test(inSub.note ?? '') && !fs.existsSync(path.join(sub, 'project.json')),
+    'a folder in a project becomes no project of its own: the server works in the project\'s folder, and says so');
 }
 
 section('bake');

@@ -113,6 +113,6 @@
     }
   },
   "output": "out",
-  "outputs": { "spiral_stairs": { "node": "out", "label": "Spiral stairs" } },
+  "outputs": { "spiral_stairs": { "node": "out", "label": "Spiral stairs", "kind": "mesh", "tags": ["stairs", "spiral", "staircase", "interior"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 20 } }
 }

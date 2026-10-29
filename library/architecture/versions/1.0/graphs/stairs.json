@@ -141,7 +141,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint copynum", "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "stairs": { "node": "out", "label": "Stairs" } },
+  "outputs": { "stairs": { "node": "out", "label": "Stairs", "kind": "mesh", "tags": ["stairs", "staircase", "concrete", "wooden"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": -120, "elevation": 25 }

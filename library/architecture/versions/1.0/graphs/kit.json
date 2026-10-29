@@ -37,5 +37,6 @@
     "window_frame_at": {"type":"transform","in":["window_frame"],"params":{"translate":[95.236,0,0]}},
     "kit": {"type":"merge","in":["arch_at","beam_truss_at","brick_wall_at","door_frame_at","hex_grid_floor_at","house_at","pillar_at","railing_at","roof_gable_at","roof_hip_at","roof_skeleton_at","scaffold_at","spiral_stairs_at","stairs_at","tile_floor_at","wall_segment_at","window_frame_at"]}
   },
-  "output": "kit"
+  "output": "kit",
+  "outputs": {"kit":{"node":"kit","label":"Architecture kit","kind":"mesh","tags":["kit","lineup","architecture"]}}
 }
