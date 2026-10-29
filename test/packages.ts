@@ -33,7 +33,7 @@ import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Workspace } from '../src/workspace.ts';
 import { addLibrary, loadConfig, parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
-import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, readLock, searchPackages, searchText, startsBigVersion, versionHash } from '../src/gallery/packages.ts';
+import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/gallery/packages.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import type { ProjectPackages, PublishResult } from '../src/gallery/packages.ts';
 import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/gallery/update.ts';
@@ -297,6 +297,24 @@ section('publishing: the first version, what it holds, its hash');
   check(!again.ok && again.blocks.join() === 'nothing changed since 1.0', `nothing changed: refused (${again.blocks})`);
   const noNote = await publish(ROCKS, '  ');
   check(!noNote.ok && noNote.blocks.some((b) => /a version needs a note/.test(b)), 'no note: refused');
+}
+
+section('hashes: text with LF line ends, binary files as they are');
+{
+  const v = path.join(ROCKS, 'versions', '1.0'), hash = readJSON(path.join(v, 'version.json')).hash;
+  // a checkout with core.autocrlf: every text file gets CRLF line ends
+  const crlf = path.join(tmp, 'crlf-checkout');
+  fs.cpSync(v, crlf, { recursive: true });
+  for (const f of ['project.json', 'graphs/main.json', 'inputs/rock.obj']) {
+    const p = path.join(crlf, ...f.split('/'));
+    fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(/\r?\n/g, '\r\n'));
+  }
+  check(fs.readFileSync(path.join(crlf, 'project.json'), 'utf8').includes('\r\n') && versionHash(crlf) === hash, 'a checkout that turns LF into CRLF keeps the hash (json, obj)');
+  const t = (name: string, s: string | number[]) => textContent(name, typeof s === 'string' ? Buffer.from(s) : new Uint8Array(s)).length;
+  check(t('a.json', 'a\r\nb\r\n') === 4 && t('a.csv', 'a\r\nb') === 3 && t('a.txt', 'a\rb') === 3, 'text: CRLF read as LF, a lone CR kept');
+  check(t('a.png', 'a\r\nb') === 4 && t('a.glb', 'a\r\nb') === 4 && t('a.dat', [0, 13, 10]) === 3, 'binary: by its name, or a NUL byte in its first 8000 bytes, as it is');
+  fs.writeFileSync(path.join(crlf, 'inputs', 'moss.png'), Buffer.concat([fs.readFileSync(path.join(crlf, 'inputs', 'moss.png')), Buffer.from('\r\n')]));
+  check(versionHash(crlf) !== hash, 'a changed binary file changes the hash');
 }
 
 section('publishing: the version rule');
@@ -1005,8 +1023,11 @@ section('the CLI: init, use, packages, publish, --follow, --catalog');
   const CLI = path.join(dirs.repo, 'cliproj');
   const init = cli(['init', CLI, '--package', 'studio/cli']);
   check(init.code === 0 && /^project cliproj → .*cliproj \(package studio\/cli\)/.test(init.out) && readManifest(CLI).package === 'studio/cli' && exists(CLI, '.gitignore'), `init makes a folder a project: ${init.out.split('\n')[0]}`);
+  check(fs.readFileSync(path.join(CLI, '.gitattributes'), 'utf8') === 'versions/** -text\npackages/** -text\n', 'init keeps versions/ and packages/ byte for byte (.gitattributes)');
   const PLAIN = path.join(dirs.repo, 'plainproj');
+  write(path.join(PLAIN, '.gitattributes'), '*.png binary');
   const plain = cli(['init', PLAIN]);
+  check(fs.readFileSync(path.join(PLAIN, '.gitattributes'), 'utf8') === '*.png binary\nversions/** -text\npackages/** -text\n', 'and adds those lines to a .gitattributes that is there');
   check(exists(CLI, 'graphs') && plain.code === 0 && /graphs go in graphs\//.test(plain.out) && exists(PLAIN, 'graphs') && readManifest(PLAIN).package === undefined,
     'init makes graphs/, where it says graphs go, for a package and a plain project alike');
   check(cli(['init', CLI]).code === 1 && cli(['init', path.join(CLI, 'inner')]).code === 1, 'init refuses a project, and a folder inside one');

@@ -15,7 +15,9 @@
 //
 // A copy holds the files of the version but the copies the version holds itself, which sit flat beside it; it keeps the
 // version's lock. A version's hash covers every file of the version but version.json: the sorted posix paths, each with
-// the SHA-256 of the file's bytes ("<sha256>  <path>" lines, hashed again). A copy is checked against it together with
+// the SHA-256 of the file's content ("<sha256>  <path>" lines, hashed again). A text file's content is read with LF line
+// ends, so a checkout that turns them into CRLF (core.autocrlf on Windows) keeps every hash; binary files are hashed as
+// they are (textContent). A copy is checked against it together with
 // the copies it uses as the project holds them, so a copy edited by hand shows. A project finds packages only in the
 // libraries its project.json lists: a path relative to the project (a library in the same repository, so every checkout
 // and worktree reads its own) or a registered library's name, and before those in TopoTopo's built-in library, which
@@ -149,19 +151,43 @@ function filesBelow(dir: string): { rel: string; abs: string }[] {
   return out.sort(byRel);
 }
 
+/** Files that are never text, whatever their bytes: images, meshes, fonts, archives. */
+const BINARY = /\.(png|jpe?g|webp|gif|avif|bmp|tga|tiff?|exr|hdr|dds|ktx2?|glb|bin|bgeo|sc|usdc|usdz|fbx|abc|vdb|r16|r32|raw|wasm|ttf|otf|woff2?|zip|gz|7z|pdf|mp4|webm|wav|ogg|mp3)$/i;
+
+/**
+ * A file's content as a version's hash reads it: a text file with its CRLF line ends read as LF, so that a checkout that
+ * turns LF into CRLF (core.autocrlf) keeps the hash; anything else as it is. Text is what version control takes for
+ * text: no NUL byte in the first 8000 bytes, and no binary format by its name.
+ */
+export function textContent(name: string, bytes: Uint8Array): Uint8Array {
+  if (BINARY.test(name)) return bytes;
+  const head = Math.min(bytes.length, 8000);
+  for (let i = 0; i < head; i++) if (bytes[i] === 0) return bytes;
+  let crlf = 0;
+  for (let i = 0; i + 1 < bytes.length; i++) if (bytes[i] === 13 && bytes[i + 1] === 10) crlf++;
+  if (!crlf) return bytes;
+  const out = new Uint8Array(bytes.length - crlf);
+  let j = 0;
+  for (let i = 0; i < bytes.length; i++) if (!(bytes[i] === 13 && bytes[i + 1] === 10)) out[j++] = bytes[i];
+  return out;
+}
+
+/** The SHA-256 a version's hash takes of a file: of its text with LF line ends, or of its bytes (textContent). */
+export const contentSha = (name: string, bytes: Uint8Array) => sha(textContent(name, bytes));
+
 /** SHA-256 of files kept while their size and time stay the same: copies and followed folders are read again often. */
 const shaCache = new Map<string, { stamp: string; sha: string }>();
 function fileSha(abs: string, cached: boolean): string {
-  if (!cached) return sha(fs.readFileSync(abs));
+  if (!cached) return contentSha(abs, fs.readFileSync(abs));
   const st = fs.statSync(abs), stamp = `${st.size}:${st.mtimeMs}`;
   const c = shaCache.get(abs);
   if (c?.stamp === stamp) return c.sha;
-  const h = sha(fs.readFileSync(abs));
+  const h = contentSha(abs, fs.readFileSync(abs));
   shaCache.set(abs, { stamp, sha: h });
   return h;
 }
 
-/** The hash of a set of files: their sorted posix paths, each with the SHA-256 of its bytes. */
+/** The hash of a set of files: their sorted posix paths, each with the SHA-256 of its content (contentSha). */
 export function filesHash(files: { rel: string; sha: string }[]): string {
   return sha([...files].sort(byRel).map((f) => `${f.sha}  ${f.rel}\n`).join(''));
 }
@@ -172,7 +198,7 @@ export function filesHash(files: { rel: string; sha: string }[]): string {
  */
 export function workingHash(dir: string): string {
   const m = readManifest(dir), lock = readLock(dir);
-  return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? sha(f.bytes) : fileSha(f.abs!, true) })));
+  return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? contentSha(f.rel, f.bytes) : fileSha(f.abs!, true) })));
 }
 
 /** The hash of a version folder as published: every file but its version.json. */
@@ -1635,14 +1661,15 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
   let hashed: { rel: string; bytes: Uint8Array }[] = [], hash = '';
   try {
     hashed = versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, bytes: f.bytes ?? fs.readFileSync(f.abs!) }));
-    hash = filesHash(hashed.map((f) => ({ rel: f.rel, sha: sha(f.bytes) })));
+    hash = filesHash(hashed.map((f) => ({ rel: f.rel, sha: contentSha(f.rel, f.bytes) })));
   } catch (e: any) { r.blocks.push(e.message); }
   const bytes = hashed.reduce((s, f) => s + f.bytes.byteLength, 0);
   const prev = m.package ? readVersions(dir, m.package, '', new Set()).at(-1)?.info : undefined;
   if (prev && hash && prev.hash === hash) { r.blocks.push(`nothing changed since ${prev.version}`); return r; }
-  if (stop() || !outs.default) return r;
-  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x))]));
-  const def = outputInfo(outs.default, kinds.get(outs.default));
+  // a version number only for what would publish: every output cooked to its kind
+  if (r.blocks.length || !outs.default) return r;
+  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x)!)]));
+  const def = outputInfo(outs.default, kinds.get(outs.default)!);
   let version = '1.0';
   if (prev) {
     const c = compareInterfaces(prev, { outputs, default: def });

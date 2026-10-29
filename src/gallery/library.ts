@@ -298,10 +298,34 @@ export function projectDirOf(start: string): string | null {
 
 export interface CreateOptions { title?: string; description?: string; tags?: string[]; links?: ProjectLink[]; graph?: object }
 
+/** What a project's .gitignore holds: files derived from it (previews, caches). */
+const IGNORED = ['.gallery/', '.cache/'];
 /**
- * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the workspace folders, attachments/, and a
- * .gitignore for the derived files. `graph` (a graph spec) becomes graphs/main.json. Fails when the folder holds a
- * project already or the id is taken in the library.
+ * What a project's .gitattributes holds: its published versions and its package copies are kept byte for byte, their
+ * line ends never changed by a checkout (their hashes read text with LF line ends anyway, src/gallery/packages.ts).
+ */
+const ATTRIBUTES = ['versions/** -text', 'packages/** -text'];
+
+/** Add to a text file the lines it does not hold yet, at its end (a new file holds just them). */
+function addLines(file: string, lines: string[]) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { /* new */ }
+  const have = new Set(text.split(/\r?\n/).map((l) => l.trim()));
+  const missing = lines.filter((l) => !have.has(l));
+  if (!missing.length) return;
+  fs.writeFileSync(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+}
+
+/** A project's .gitignore and .gitattributes, made or completed. */
+function projectRepoFiles(dir: string) {
+  addLines(path.join(dir, '.gitignore'), IGNORED);
+  addLines(path.join(dir, '.gitattributes'), ATTRIBUTES);
+}
+
+/**
+ * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the workspace folders, attachments/, a
+ * .gitignore for the derived files and a .gitattributes that keeps its versions and copies byte for byte. `graph` (a
+ * graph spec) becomes graphs/main.json. Fails when the folder holds a project already or the id is taken in the library.
  */
 export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {}): Project {
   const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean);
@@ -317,8 +341,7 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
   if (taken) throw new Error(`id "${id}" is used by ${taken.rel} in library "${lib.name}": pick another folder name`);
   if (scan.projects.some((p) => dir.startsWith(p.dir + path.sep))) throw new Error(`${rel} is inside another project`);
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) fs.mkdirSync(path.join(dir, d), { recursive: true });
-  const gi = path.join(dir, '.gitignore');
-  if (!fs.existsSync(gi)) fs.writeFileSync(gi, '.gallery/\n.cache/\n');
+  projectRepoFiles(dir);
   const manifest = parseManifest({
     id, title: o.title ?? parts[parts.length - 1], description: o.description ?? '', tags: o.tags ?? [], links: o.links ?? [],
     graph: 'main', created: new Date().toISOString().slice(0, 10),
@@ -331,8 +354,9 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
 /**
  * Make a folder a project (`topotopo init`), in a library or anywhere: project.json with an id from the folder's name
  * and "graph": "main", graphs/ (where a project's graphs go: the workspace, the gallery and publishing read them there,
- * for a package and any other project alike) and a .gitignore for the derived files. `pkg` names the package the
- * project is ("owner/name"). Fails when the folder is a project already or lies inside one.
+ * for a package and any other project alike), a .gitignore for the derived files and a .gitattributes that keeps its
+ * versions and package copies byte for byte (both completed when they exist). `pkg` names the package the project is
+ * ("owner/name"). Fails when the folder is a project already or lies inside one.
  */
 export function initProject(dir: string, o: { package?: string } = {}): { dir: string; manifest: ProjectManifest } {
   const abs = path.resolve(dir);
@@ -344,8 +368,7 @@ export function initProject(dir: string, o: { package?: string } = {}): { dir: s
   const manifest = parseManifest({ id, title: path.basename(abs), graph: 'main', created: new Date().toISOString().slice(0, 10), ...(o.package !== undefined ? { package: o.package } : {}) }, id);
   fs.mkdirSync(path.join(abs, 'graphs'), { recursive: true });
   writeManifest(abs, manifest);
-  const gi = path.join(abs, '.gitignore');
-  if (!fs.existsSync(gi)) fs.writeFileSync(gi, '.gallery/\n.cache/\n');
+  projectRepoFiles(abs);
   return { dir: abs, manifest };
 }
 
