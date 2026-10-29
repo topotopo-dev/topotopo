@@ -12,7 +12,7 @@ import '../nodes/index.ts';
 import { Engine } from '../graph/engine.ts';
 import { createNodeHost } from '../host/node.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
-import { Session } from '../session.ts';
+import type { Session } from '../session.ts';
 import { makeTools } from './tools.ts';
 import type { ToolDef } from './tools.ts';
 import { libraryTool } from './library.ts';
@@ -20,7 +20,7 @@ import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
 import { startProject, setProgram } from '../project.ts';
-import { openPackages } from '../packages/registry.ts';
+import { openProject } from '../open.ts';
 import type { ProjectPackages } from '../packages/registry.ts';
 
 const argv = process.argv.slice(2);
@@ -61,12 +61,7 @@ async function openSession(dir: string) {
   if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) e.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
   if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) e.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
   await e.init();
-  // the project the folder belongs to: its packages resolve before its assets register (they may use them)
-  const pk = openPackages(e, dir);
-  const w = new Session(dir, e);
-  w.packages = pk;
-  const loaded = w.load();
-  w.watch();
+  const { session: w, packages: pk, loaded } = openProject(e, dir, { watch: true });
   log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.manifest?.uses ?? {}).length} packages used` : '; in no project'}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
   for (const x of pk.check()) log('package problem:', x);

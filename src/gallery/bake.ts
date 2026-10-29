@@ -13,14 +13,13 @@ import { fileURLToPath } from 'node:url';
 import '../nodes/index.ts';
 import { Engine } from '../graph/engine.ts';
 import { createNodeHost } from '../host/node.ts';
-import { Session } from '../session.ts';
 import { previewGLB, thumbOptions } from '../render/preview.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { bakeKey, galleryDir, readBakeState } from './library.ts';
 import { readManifest, writeAtomic } from '../project.ts';
 import type { BakeState } from './library.ts';
-import { openPackages } from '../packages/registry.ts';
+import { openProject } from '../open.ts';
 
 export const THUMB_SIZE = 512;
 /** a preview.glb above this is not written (the page shows the thumbnail instead) */
@@ -47,10 +46,8 @@ export async function bakeProject(dir: string): Promise<BakeState> {
     if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) engine.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
     if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
     await engine.init();
-    // the packages the project uses, from its copies (a bake adds none)
-    openPackages(engine, dir);
-    const ws = new Session(dir, engine);
-    ws.load();
+    // the packages the project uses, from its copies (a bake adds none), its graphs and its assets
+    const ws = openProject(engine, dir).session;
     const name = m.bake.graph ?? m.graph;
     const g = ws.graphs.get(name);
     if (!g) return finish({ ok: false, error: `no default graph yet: the project has no graph "${name}" (project.json "graph")` });

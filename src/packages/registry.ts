@@ -54,10 +54,10 @@ import { imageRef, referenceableImages } from '../core/image.ts';
 import { NAME_RE } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { VERSION_RE, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
+import { VERSION_RE, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
 import { scanLibrary } from '../gallery/library.ts';
 import type { GalleryConfig } from '../config.ts';
-import type { ProjectManifest } from '../project.ts';
+import type { Libraries, LibraryAt, ProjectManifest } from '../project.ts';
 
 /** Publishing warns about a version above this size: every project that uses it keeps a copy. */
 export const MAX_VERSION_BYTES = 50 * 2 ** 20;
@@ -559,14 +559,11 @@ interface Found { package: string; libraries: string[]; working: { library: stri
 /** A package's folder in a library: its versions/, and `working` when it is the package's working folder (a project). */
 interface PackageFolder { package: string; library: string; dir: string; working: boolean }
 
-/** The libraries a project lists, and what is wrong with the entries that do not work (the others still do). */
-export interface Listed { libs: { entry: string; root: string }[]; problems: string[] }
-
 /**
  * The project's libraries and the packages in them, scanned once for several finds: TopoTopo's built-in library first,
  * then the libraries project.json lists; and what is wrong with an entry or a library (the others still count).
  */
-interface Scanned { libs: { entry: string; root: string }[]; packages: PackageFolder[]; problems: string[] }
+interface Scanned { libs: LibraryAt[]; packages: PackageFolder[]; problems: string[] }
 
 /**
  * The packages of TopoTopo's built-in library at `dir`: topotopo/<name> for each folder <name> with versions/, a working
@@ -1203,8 +1200,8 @@ export class ProjectPackages implements SessionPackages {
    * a registered library's name; and what is wrong with the entries that do not work (the others still do). TopoTopo's
    * built-in library, which every project looks in, is not one of them (listing it by its name changes nothing).
    */
-  libraries(): Listed {
-    return listedLibraries(this.project().dir);
+  libraries(): Libraries {
+    return librariesFor(this.project().dir);
   }
 
   /**
@@ -1245,9 +1242,9 @@ export class ProjectPackages implements SessionPackages {
     const builtin = this.builtinPackages(problems), seen = new Set(builtin.map((p) => path.resolve(p.dir).toLowerCase()));
     // a library listed that is the built-in library's folder holds nothing more
     const listed = libs.flatMap((lib) => {
-      const scan = scanLibrary({ name: lib.entry, path: lib.root });
-      problems.push(...scan.problems.map((p) => `${libraryText(lib.entry)}: ${p}`));
-      return scan.projects.flatMap((p) => (p.manifest.package && !seen.has(path.resolve(p.dir).toLowerCase()) ? [{ package: p.manifest.package, library: lib.entry, dir: p.dir, working: true }] : []));
+      const scan = scanLibrary({ name: lib.name, path: lib.root });
+      problems.push(...scan.problems.map((p) => `${libraryText(lib.name)}: ${p}`));
+      return scan.projects.flatMap((p) => (p.manifest.package && !seen.has(path.resolve(p.dir).toLowerCase()) ? [{ package: p.manifest.package, library: lib.name, dir: p.dir, working: true }] : []));
     });
     return { libs, packages: [...builtin, ...listed], problems };
   }
@@ -1656,46 +1653,6 @@ export class ProjectPackages implements SessionPackages {
     for (const [pkg, v] of Object.entries(this.root.uses)) visit(pkg, v, true);
     return out;
   }
-}
-
-/**
- * The libraries the project folder `dir` lists in its project.json (as it is now): a path relative to the project
- * ("./lib", "../lib"), or a registered library's name; and what is wrong with each entry that does not work: a name not
- * registered on this machine, a folder that is not there, a package's folder instead of its library's, an entry of
- * neither form. The others still work. TopoTopo's built-in library is none of them (listing it by its name changes
- * nothing).
- */
-function listedLibraries(dir: string): Listed {
-  const manifest = readManifest(dir);
-  const out: Listed = { libs: [], problems: [] };
-  let cfg: GalleryConfig | null | undefined;
-  const said = (entry: string, why: string) => out.problems.push(`project.json "libraries": "${entry}" ${why}; the other libraries still count`);
-  for (const entry of manifest.libraries) {
-    if (entry === BUILTIN_LIBRARY.name) continue;
-    const k = libraryEntry(entry);
-    if ('error' in k) { out.problems.push(`project.json "libraries": ${k.error}; the other libraries still count`); continue; }
-    if ('name' in k) {
-      if (cfg === undefined) { try { cfg = loadConfig(); } catch (e: any) { cfg = null; out.problems.push(e.message); } }
-      const lib = cfg?.libraries.find((l) => l.name === entry);
-      if (lib) { out.libs.push({ entry, root: lib.path }); continue; }
-      const here = path.resolve(dir, entry);
-      said(entry, fs.statSync(here, { throwIfNoEntry: false })?.isDirectory()
-        ? `names no registered library, and a folder of that name is beside project.json: a path is written from the project, "./${entry}"`
-        : `is not registered on this machine${cfg ? ` (${cfg.file} has ${cfg.libraries.map((l) => l.name).join(', ') || 'none'})` : ''}: ${program()} library add ${entry} <folder> registers it, or list the library by its path from the project ("../lib")`);
-      continue;
-    }
-    const root = path.resolve(dir, k.path);
-    if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) { said(entry, `is no folder (${root})`); continue; }
-    if (fs.existsSync(manifestFile(root))) {
-      let pkg = '';
-      try { pkg = readManifest(root).package ?? ''; } catch { /* named without its package */ }
-      const parent = path.posix.dirname(k.path.replace(/\\/g, '/'));
-      said(entry, `is a project${pkg ? ` (the package ${pkg})` : ''}, not a library: list the folder that holds it, "${parent === '.' ? '.' : parent}"`);
-      continue;
-    }
-    out.libs.push({ entry, root });
-  }
-  return out;
 }
 
 /** The records of a package's published versions (its versions/ folder), oldest first; unreadable ones are left out. */
@@ -2182,9 +2139,9 @@ export function packagesText(pk: ProjectPackages, mcp = false): string {
   }
   const followed = pk.following();
   if (followed.length) lines.push('following this session:', ...followed.map((f) => `  ${f.package}  ${f.dir} (library "${f.library}")`));
-  let libs: Listed = { libs: [], problems: [] };
+  let libs: Libraries = { libs: [], problems: [] };
   try { libs = pk.libraries(); } catch (e: any) { problems.push(e.message); }
-  lines.push(`libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root})`).join(', ') : `none listed (${mcp ? 'library {action:"set", libraries:[...]}' : `${program()} libraries add <folder or registered name>`} lists one)`}; TopoTopo's built-in library is looked in as well`);
+  lines.push(`libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root}${l.name !== l.entry ? `, named "${l.name}"` : ''}${l.from === 'workspace' ? ', listed by the workspace' : ''})`).join(', ') : `none listed (${mcp ? 'library {action:"set", libraries:[...]}' : `${program()} libraries add <folder or registered name>`} lists one)`}; TopoTopo's built-in library is looked in as well`);
   const said = [...new Set(problems)];
   if (said.length) lines.push(`could not check ${said.length}:`, ...said.map((p) => `  ${p}`));
   lines.push(mcp ? 'library {action:"packages", package:"owner/name"} shows one with its outputs; {action:"outdated"} the notes of the newer versions' : `${program()} packages owner/name shows one with its outputs; ${program()} outdated the notes of the newer versions`);
@@ -2295,7 +2252,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
   const key = (p: string) => path.resolve(p).toLowerCase(), seen = new Set([key(builtin)]);
   const libs: Omit<SearchLibrary, 'hits'>[] = [];
   if (dir && manifest) {
-    const listed = listedLibraries(dir);
+    const listed = librariesFor(dir);
     for (const p of listed.problems) problems.add(p);
     for (const l of listed.libs) if (!seen.has(key(l.root))) { seen.add(key(l.root)); libs.push({ name: l.entry, root: l.root, standing: 'listed' }); }
   }

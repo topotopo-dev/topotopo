@@ -197,15 +197,11 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
     const dir = projectOf(a.rest[0], prog);
     const { Engine } = await import('../graph/engine.ts');
     const { createNodeHost } = await import('../host/node.ts');
-    const { Session } = await import('../session.ts');
+    const { openProject } = await import('../open.ts');
     const { startViewer } = await import('../viewer/server.ts');
-    const { openPackages } = await import('./registry.ts');
     const engine = new Engine(createNodeHost({ baseDir: dir }));
     await engine.init();
-    const ws = new Session(dir, engine);
-    ws.packages = openPackages(engine, dir);
-    ws.load();
-    ws.watch();
+    const ws = openProject(engine, dir, { watch: true }).session;
     const v = await startViewer(ws, a.opt('--port') !== undefined ? Number(a.opt('--port')) : undefined);
     if (a.has('--json')) {
       // started by the gallery: report the URL, and stop once no page has been open for a while

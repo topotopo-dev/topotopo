@@ -9,8 +9,7 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { startProject } from '../src/project.ts';
-import { openPackages } from '../src/packages/registry.ts';
-import { Session } from '../src/session.ts';
+import { openProject } from '../src/open.ts';
 import { startViewer } from '../src/viewer/server.ts';
 
 const argv = process.argv.slice(2);
@@ -21,15 +20,13 @@ console.log(start.log);
 const wsDir = start.dir;
 const engine = new Engine(createNodeHost({ baseDir: wsDir }));
 await engine.init();
-const ws = new Session(wsDir, engine);
-ws.packages = openPackages(engine, wsDir);
-ws.load();
+const { session: ws, packages } = openProject(engine, wsDir);
 if (argv.includes('--examples')) {
   const dir = path.join(root, 'examples');
   for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && x !== 'project.json')) {
     const name = path.basename(f, '.json');
     const graph = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-    for (const n of ws.packages.addFor(graph)) console.log(n);
+    for (const n of packages.addFor(graph)) console.log(n);
     ws.setGraph(name, graph);
     const r = await ws.cook(name);
     console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${name} (${r.ms.toFixed(0)} ms)`);

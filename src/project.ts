@@ -368,3 +368,99 @@ export function startProject(dir: string, o: { name?: string } = {}): ProjectSta
   };
 }
 
+// -------------------------------------------------------------------------------- where a project looks for packages
+
+/** The file at a game's root that makes it a workspace: the libraries every project inside it looks in. */
+export const WORKSPACE_FILE = 'topotopo-workspace.json';
+/** A library's own file: its name, the same whatever path or registered name reaches the library. */
+export const LIBRARY_FILE = 'library.json';
+
+export interface Located {
+  /** the project the folder belongs to (itself or the nearest folder above with project.json) */
+  project: string | null;
+  /** the workspace around it: the nearest folder at or above the project (or the folder) with topotopo-workspace.json */
+  workspace: string | null;
+}
+
+/** Where a folder sits: the project it belongs to and the workspace (the game) around it. */
+export function locate(start: string): Located {
+  const project = projectDirOf(start);
+  for (let d = path.resolve(project ?? start); ; ) {
+    if (fs.existsSync(path.join(d, WORKSPACE_FILE))) return { project, workspace: d };
+    const up = path.dirname(d);
+    if (up === d) return { project, workspace: null };
+    d = up;
+  }
+}
+
+/** A library's own name (library.json "name"), or null when it has none. */
+export function libraryName(root: string): string | null {
+  try {
+    const n = JSON.parse(fs.readFileSync(path.join(root, LIBRARY_FILE), 'utf8'))?.name;
+    return typeof n === 'string' && ID_RE.test(n) ? n : null;
+  } catch { return null; }
+}
+
+/** A library a project looks in: the entry that lists it, its folder, its name, and who lists it. */
+export interface LibraryAt { entry: string; root: string; name: string; from: 'project' | 'workspace' }
+/** The libraries a project looks in, and what is wrong with the entries that do not work (the others still do). */
+export interface Libraries { libs: LibraryAt[]; problems: string[] }
+
+/**
+ * The libraries a project looks in, in order: those its project.json lists (as it is now), then those of the workspace
+ * around it (topotopo-workspace.json "libraries"), a library listed by both counted once. Each entry is a path relative
+ * to the file that lists it ("./lib", "../lib") or a registered library's name. A library is named by its library.json
+ * when it has one, else by the entry. What is wrong with an entry is a problem: a name not registered on this machine,
+ * a folder that is not there, a package's folder instead of its library's, an entry of neither form; the others still
+ * work. TopoTopo's built-in library is none of them (listing it by its name changes nothing).
+ */
+export function librariesFor(dir: string): Libraries {
+  const out: Libraries = { libs: [], problems: [] };
+  let cfg: GalleryConfig | null | undefined;
+  const lists: { file: string; base: string; entries: string[]; from: LibraryAt['from'] }[] = [
+    { file: 'project.json', base: dir, entries: readManifest(dir).libraries, from: 'project' },
+  ];
+  const ws = locate(dir).workspace;
+  if (ws) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(ws, WORKSPACE_FILE), 'utf8'));
+      const entries = raw?.libraries ?? [];
+      if (!Array.isArray(entries) || entries.some((e: unknown) => typeof e !== 'string')) throw new Error('"libraries" must be a list of paths and registered names');
+      lists.push({ file: path.join(ws, WORKSPACE_FILE), base: ws, entries, from: 'workspace' });
+    } catch (e: any) { out.problems.push(`${path.join(ws, WORKSPACE_FILE)}: ${e.message}`); }
+  }
+  for (const { file, base, entries, from } of lists) {
+    const said = (entry: string, why: string) => out.problems.push(`${file} "libraries": "${entry}" ${why}; the other libraries still count`);
+    const add = (entry: string, root: string) => {
+      if (out.libs.some((l) => path.resolve(l.root).toLowerCase() === path.resolve(root).toLowerCase())) return;
+      out.libs.push({ entry, root, name: libraryName(root) ?? entry, from });
+    };
+    for (const entry of entries) {
+      if (entry === BUILTIN_LIBRARY.name) continue;
+      const k = libraryEntry(entry);
+      if ('error' in k) { out.problems.push(`${file} "libraries": ${k.error}; the other libraries still count`); continue; }
+      if ('name' in k) {
+        if (cfg === undefined) { try { cfg = loadConfig(); } catch (e: any) { cfg = null; out.problems.push(e.message); } }
+        const lib = cfg?.libraries.find((l) => l.name === entry);
+        if (lib) { add(entry, lib.path); continue; }
+        const here = path.resolve(base, entry);
+        said(entry, fs.statSync(here, { throwIfNoEntry: false })?.isDirectory()
+          ? `names no registered library, and a folder of that name is beside ${from === 'project' ? 'project.json' : WORKSPACE_FILE}: a path is written from the ${from}, "./${entry}"`
+          : `is not registered on this machine${cfg ? ` (${cfg.file} has ${cfg.libraries.map((l) => l.name).join(', ') || 'none'})` : ''}: ${program()} library add ${entry} <folder> registers it, or list the library by its path from the ${from} ("../lib")`);
+        continue;
+      }
+      const root = path.resolve(base, k.path);
+      if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) { said(entry, `is no folder (${root})`); continue; }
+      if (fs.existsSync(manifestFile(root))) {
+        let pkg = '';
+        try { pkg = readManifest(root).package ?? ''; } catch { /* named without its package */ }
+        const parent = path.posix.dirname(k.path.replace(/\\/g, '/'));
+        said(entry, `is a project${pkg ? ` (the package ${pkg})` : ''}, not a library: list the folder that holds it, "${parent === '.' ? '.' : parent}"`);
+        continue;
+      }
+      add(entry, root);
+    }
+  }
+  return out;
+}
+

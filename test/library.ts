@@ -8,6 +8,7 @@ import path from 'node:path';
 import { addLibrary, loadConfig } from '../src/config.ts';
 import { startProject, notProjectFiles, parseManifest, projectDirOf, readManifest, slugify, writeManifest } from '../src/project.ts';
 import { bakeKey, createProject, isStale, readBakeState, scanLibrary } from '../src/gallery/library.ts';
+import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/project.ts';
 import { bakeProject, BakeQueue } from '../src/gallery/bake.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-library-'));
@@ -164,6 +165,28 @@ section('bake queue (child processes)');
   await slow.idle();
   const late = readBakeState(p.dir)!;
   check(!late.ok && /time limit/.test(late.error ?? ''), `a bake over the time limit is stopped and recorded (${late.error})`);
+}
+
+// where a project looks for packages: its own libraries, then the workspace's (the game around it), each library by
+// its library.json name when it has one
+{
+  const game = path.join(tmp, 'game');
+  const w = (f: string, d: unknown) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, typeof d === 'string' ? d : JSON.stringify(d)); };
+  w(path.join(game, WORKSPACE_FILE), { name: 'game', libraries: ['./art/materials', './art/shared'] });
+  w(path.join(game, 'art', 'materials', LIBRARY_FILE), { name: 'game-materials' });
+  fs.mkdirSync(path.join(game, 'art', 'shared'), { recursive: true });
+  fs.mkdirSync(path.join(game, 'art', 'props-lib'), { recursive: true });
+  w(path.join(game, 'art', 'props', 'crate', 'project.json'), { id: 'crate', libraries: ['../../props-lib', '../../shared'] });
+  const crate = path.join(game, 'art', 'props', 'crate');
+  const at = locate(path.join(crate, 'graphs'));
+  check(at.project === crate && at.workspace === game, `locate: the project and the workspace around it (${at.project}, ${at.workspace})`);
+  check(locate(tmp).workspace === null, 'locate: no workspace outside a game');
+  const libs = librariesFor(crate);
+  check(libs.libs.map((l) => `${l.name}:${l.from}`).join(' ') === '../../props-lib:project ../../shared:project game-materials:workspace' && !libs.problems.length,
+    `librariesFor: the project's libraries, then the workspace's, a library listed by both once, named by library.json (${libs.libs.map((l) => `${l.name}:${l.from}`).join(' ')})`);
+  w(path.join(game, WORKSPACE_FILE), { libraries: ['./art/nope'] });
+  check(librariesFor(crate).problems.some((p) => p.includes(WORKSPACE_FILE) && /"\.\/art\/nope" is no folder/.test(p)), 'a workspace entry that does not work says so, naming the workspace file');
+  check(libraryName(path.join(game, 'art', 'shared')) === null && libraryName(path.join(game, 'art', 'materials')) === 'game-materials', 'libraryName: library.json, or none');
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
