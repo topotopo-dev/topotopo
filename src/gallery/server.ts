@@ -1,7 +1,9 @@
 // The gallery web server: every library's projects as a grid, a page per project with its 3D
 // preview, and stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their
 // notes and the outputs it publishes with their kinds and tags (from its versions' records), which the grid's search
-// finds as well, and any project's page the packages it uses. It reads
+// finds as well, and the projects that use it; any project's page the packages it uses, linked, and the grid marks a
+// project with an update. TopoTopo's kits (its built-in library) have cards and pages of their own (/k/<id>), with
+// each output's thumbnail, and the search finds their outputs too. It reads
 // files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in editor"
 // starts a `topotopo edit` child.
 // Bound to 127.0.0.1 on a fixed port (stable links); requests must name this server as their Host, and writes must
@@ -21,8 +23,10 @@ import type { BakeState, GalleryConfig, LibraryScan, Project } from './library.t
 import { builtinVersions, compareVersions, copyRecord, publishedVersions, startsBigVersion } from './packages.ts';
 import type { VersionInfo } from './packages.ts';
 import { BakeQueue } from './bake.ts';
-import { embedPage, galleryPage, projectPage } from './pages.ts';
-import type { CardData, OutputRow, ProjectData, Urls } from './pages.ts';
+import { embedPage, galleryPage, kitPage, projectPage } from './pages.ts';
+import type { CardData, KitCardData, OutputRow, ProjectData, Urls, UserRow } from './pages.ts';
+import { listKits } from './kits.ts';
+import type { Kit } from './kits.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const assetDir = path.join(here, 'app');
@@ -178,7 +182,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
 
   // ---------------------------------------------------------------- page data
   const enc = encodeURIComponent;
-  const urls: Urls = {
+  const urls: Urls & Required<Pick<Urls, 'kit' | 'kitThumb'>> = {
     home: '/',
     project: (lib, id) => `/p/${enc(lib)}/${enc(id)}`,
     thumb: (lib, id, v) => `/p/${enc(lib)}/${enc(id)}/thumb.png${v ? `?v=${enc(String(v))}` : ''}`,
@@ -186,10 +190,27 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     embed: (lib, id) => `/embed/${enc(lib)}/${enc(id)}`,
     file: (lib, id, rel) => `/p/${enc(lib)}/${enc(id)}/files/${rel.split('/').map(enc).join('/')}`,
     edit: (lib, id) => `/p/${enc(lib)}/${enc(id)}/edit`,
+    kit: (id) => `/k/${enc(id)}`,
+    kitThumb: (id, output) => `/k/${enc(id)}/thumbs/${enc(output)}.png`,
     asset: (name) => `/static/${name}`,
     app: (name) => `/app/${name}`,
     three: '/vendor/three/',
   };
+  // TopoTopo's kits: read again on each page (a few small files), so a kit published while the gallery runs shows
+  const kits = () => listKits();
+  const kitOf = (name: string, all = kits()) => all.find((k) => k.name === name);
+  /** The newest version of a package the gallery knows of: its project's in a library, or TopoTopo's kits'. */
+  const newestOf = (name: string, homes = packageHomes(), all = kits()) =>
+    [...(homes.get(name) ? publishedVersions(homes.get(name)!.dir, name) : []), ...(kitOf(name, all)?.versions ?? [])].map((x) => x.version).sort(compareVersions).at(-1);
+  /** The projects of the libraries that use a package, with the version each uses. */
+  const usersOf = (name: string): UserRow[] => [...projects.values()].filter((p) => p.manifest.uses[name])
+    .map((p) => ({ lib: p.lib, id: p.id, title: p.manifest.title, version: p.manifest.uses[name], url: urls.project(p.lib, p.id) }))
+    .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
+  const kitCard = (k: Kit): KitCardData => ({
+    id: k.id, name: k.name, title: k.title, description: k.description, tags: k.tags, version: k.version,
+    thumb: k.outputs.find((o) => o.thumb)?.id ?? null,
+    outputs: k.outputs.map((o) => ({ type: o.type, label: o.label, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags })),
+  });
   const status = (p: Project, s: BakeState | null) => (!hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
   const cardOf = (p: Project): CardData => {
     const s = readBakeState(p.dir);
@@ -198,9 +219,12 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     const newest = m.package ? publishedVersions(p.dir, m.package).at(-1) : undefined;
     const pkg = m.package ? { name: m.package, version: newest?.version ?? null } : undefined;
     const outputs = m.package && newest ? outputsOf(m.package, newest).map((o) => ({ type: o.type, ...(o.alias ? { alias: o.alias } : {}), label: o.label, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags })) : undefined;
+    // the packages it uses, and those of them with a newer version: the card says so
+    const uses = Object.keys(m.uses);
+    const updates = uses.flatMap((name) => { const n = newestOf(name); return n && compareVersions(n, m.uses[name]) > 0 ? [{ name, version: m.uses[name], newest: n }] : []; });
     return {
       lib: p.lib, id: p.id, title: m.title, collection: p.collection, tags: m.tags, description: m.description, updated: p.updated, status: status(p, s), version: String(s?.at ?? 0),
-      ...(pkg ? { pkg } : {}), ...(outputs ? { outputs } : {}),
+      ...(pkg ? { pkg } : {}), ...(outputs ? { outputs } : {}), ...(uses.length ? { usesPackages: uses } : {}), ...(updates.length ? { updates } : {}),
     };
   };
   /** The projects that are packages, by full name: the first library's when two hold one. */
@@ -237,10 +261,12 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     const versions = m.package ? publishedVersions(p.dir, m.package) : [];
     // the packages it uses: the version in use (its copy's record), and the newest the gallery knows of (TopoTopo's own
     // also in TopoTopo's built-in library)
+    const all = kits();
     const uses = Object.entries(m.uses).map(([name, v]) => {
-      const rec = copyRecord(p.dir, name, v), home = homes.get(name);
-      const newest = [...(home ? publishedVersions(home.dir, name) : []), ...builtinVersions(name)].map((x) => x.version).sort(compareVersions).at(-1);
-      return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(home ? { url: urls.project(home.lib, home.id) } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
+      const rec = copyRecord(p.dir, name, v), home = homes.get(name), kit = kitOf(name, all);
+      const newest = newestOf(name, homes, all);
+      const url = home ? urls.project(home.lib, home.id) : kit ? urls.kit(kit.id) : undefined;
+      return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(url ? { url } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {
       ...cardOf(p), rel: p.rel, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
@@ -249,12 +275,20 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       share: { link: abs(urls.project(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
       package: m.package ? {
         name: m.package,
-        versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big })),
+        versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(m.package!, v) })),
         outputs: versions.length ? outputsOf(m.package, versions.at(-1)!) : [],
+        usedBy: usersOf(m.package),
       } : null,
       uses,
     };
   };
+  /** A kit's page: its versions, its outputs with their thumbnails, the projects that use it. */
+  const kitData = (k: Kit) => ({
+    ...kitCard(k),
+    versions: [...k.versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(k.name, v) })),
+    rows: k.versions.length ? outputsOf(k.name, k.versions.at(-1)!).map((o) => ({ ...o, thumb: k.outputs.find((x) => x.type === o.type)?.thumb ? urls.kitThumb(k.id, o.type.slice(k.name.length + 1)) : null })) : [],
+    usedBy: usersOf(k.name),
+  });
   const listJSON = () => [...projects.values()].map((p) => {
     const c = cardOf(p);
     return {
@@ -313,7 +347,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       const seg = u.pathname.split('/').slice(1);
 
       if (u.pathname === '/' || u.pathname === '/index.html') {
-        return html(galleryPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.projects.map(cardOf) })), problems: scans.flatMap((s) => s.problems) }, urls));
+        return html(galleryPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.projects.map(cardOf) })), kits: kits().map(kitCard), problems: scans.flatMap((s) => s.problems) }, urls));
       }
       if (seg[0] === 'static') { const p = readStatic(assetDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'app') { const p = readStatic(appDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
@@ -334,6 +368,18 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         const cors: Record<string, string> = origin && cfg.gallery.cors.includes(origin) ? { 'access-control-allow-origin': origin, vary: 'Origin' } : { vary: 'Origin' };
         if (req.method === 'OPTIONS') return send(204, '', 'text/plain', { ...cors, 'access-control-allow-methods': 'GET' });
         return json(200, { libraries: scans.map((s) => ({ name: s.name, projects: s.projects.length, problems: s.problems })), projects: listJSON() }, cors);
+      }
+      if (seg[0] === 'k' && seg.length >= 2) {
+        const k = kits().find((x) => x.id === decodeURIComponent(seg[1])) ?? (() => { throw new HttpError(404, `no kit "${decodeURIComponent(seg[1])}" in TopoTopo's built-in library`); })();
+        if (seg.length === 2 || (seg.length === 3 && !seg[2])) return html(kitPage(kitData(k), urls));
+        // a kit's thumbnail of one of its outputs (thumbs/<output>.png), nothing else of its folder
+        if (seg[2] === 'thumbs' && seg.length === 4) {
+          const name = decodeURIComponent(seg[3]);
+          const o = /^([a-z0-9][a-z0-9_-]*)\.png$/.exec(name) && k.outputs.find((x) => `${x.id}.png` === name && x.thumb);
+          if (!o) throw new HttpError(404, `no thumbnail ${name}`);
+          return send(200, fs.readFileSync(o.thumb!), 'image/png', { 'cache-control': 'max-age=3600' });
+        }
+        throw new HttpError(404, 'not found');
       }
       if (seg[0] === 'embed' && seg.length === 3) {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));

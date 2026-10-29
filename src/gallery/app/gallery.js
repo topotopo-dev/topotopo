@@ -1,12 +1,13 @@
 // The gallery pages' script (src/gallery/pages.ts): search and tag filters on the grid (the search finds a package's
-// outputs too, by name, kind and tag, and shows those it found on the card), copy buttons and actions on a project page,
-// and live updates from the server's event stream (a bake finished, projects added or removed).
+// outputs and TopoTopo's kits' too, by name, kind and tag, and shows those it found on the card; each library says how
+// many cards it shows, and Clear ends the filter, which a new visit starts without), copy buttons and actions on a
+// project page, and live updates from the server's event stream (a bake finished, projects added or removed).
 const page = document.body.dataset.page;
 const data = document.body.dataset.json ? JSON.parse(document.body.dataset.json) : {};
 const $$ = (s) => [...document.querySelectorAll(s)];
 
 if (page === 'gallery') {
-  const search = document.getElementById('search');
+  const search = document.getElementById('search'), clear = document.getElementById('clear');
   const chips = $$('.chip');
   const filter = () => {
     const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -23,14 +24,21 @@ if (page === 'gallery') {
       if (ok) shown++;
     }
     for (const sec of $$('.collection')) sec.hidden = !sec.querySelector('.card:not([hidden])');
+    // while a filter is on, each library says how many of its cards it shows, and one with none hides
+    const on = words.length > 0 || tags.length > 0;
+    for (const lib of $$('.library')) {
+      const count = lib.querySelector('h2 .count'), n = lib.querySelectorAll('.card:not([hidden])').length, total = Number(count?.dataset.total ?? 0);
+      if (count) count.textContent = on ? `${n} of ${total}` : String(total);
+      lib.hidden = on && !n;
+    }
+    clear.hidden = !on;
     document.getElementById('nomatch').hidden = shown > 0 || !$$('.card').length;
-    try { sessionStorage.setItem('gallery.filter', JSON.stringify({ q: search.value, tags })); } catch { /* storage blocked */ }
   };
-  try {
-    const saved = JSON.parse(sessionStorage.getItem('gallery.filter') ?? 'null');
-    if (saved) { search.value = saved.q ?? ''; for (const c of chips) c.setAttribute('aria-pressed', String(saved.tags?.includes(c.dataset.tag) ?? false)); }
-  } catch { /* storage blocked */ }
+  const reset = () => { search.value = ''; for (const c of chips) c.setAttribute('aria-pressed', 'false'); filter(); search.focus(); };
   search.addEventListener('input', filter);
+  search.addEventListener('keydown', (e) => { if (e.key === 'Escape') reset(); });
+  clear.addEventListener('click', reset);
+  for (const b of $$('[data-clear]')) b.addEventListener('click', reset);
   for (const c of chips) c.addEventListener('click', () => { c.setAttribute('aria-pressed', String(c.getAttribute('aria-pressed') !== 'true')); filter(); });
   document.addEventListener('keydown', (e) => { if (e.key === '/' && document.activeElement !== search) { e.preventDefault(); search.focus(); } });
   filter();

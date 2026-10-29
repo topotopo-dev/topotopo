@@ -145,8 +145,10 @@ try {
     g.rescan();
     const page = (await req('/p/game/trees')).body.toString();
     check(/class="pkgline">Package <span class="pkg"[^>]*>studio\/trees 1\.1<\/span>/.test(page), 'a package\'s page names it in full, with its newest version');
-    check(/<th>1\.1<\/th><td>2026-10-22<\/td><td>rounder &lt;crowns&gt;<\/td>/.test(page) && /<th>1\.0<\/th><td>2026-10-20<\/td><td>first trees<\/td>/.test(page) && page.indexOf('<th>1.1</th>') < page.indexOf('<th>1.0</th>'),
-      'its versions, newest first, with their dates and notes (escaped)');
+    check(/<span class="vn">1\.1<\/span><span class="vd">2026-10-22<\/span><span class="vt">rounder &lt;crowns&gt;<\/span>/.test(page) && /<span class="vn">1\.0<\/span><span class="vd">2026-10-20<\/span><span class="vt">first trees<\/span>/.test(page)
+      && page.indexOf('id="v-1.1"') < page.indexOf('id="v-1.0"') && /id="v-1\.0"[\s\S]*?<ul class="vouts"><li><code>studio\/trees\/pine<\/code>/.test(page),
+      'its versions, newest first, with their dates and notes (escaped); each opens to the outputs it published');
+    check(/<h2>Used by <span class="count">1<\/span><\/h2><table class="vars uses"><tbody><tr><th><a href="\/p\/game\/forest">Forest<\/a><\/th><td>1\.0<\/td>/.test(page), 'a package\'s page lists the projects that use it, linked');
     check(/<code>studio\/trees\/pine<\/code><br><code>studio\/trees<\/code> <span class="dim">\(the default\)<\/span><\/th><td>Pine<span class="tags"><span class="kind"[^>]*>mesh<\/span><span class="tag">conifer<\/span><span class="tag">low-poly<\/span><\/span><\/td><td class="dim">node &quot;tree&quot; of graph &quot;main&quot; · sliders height · input ground<\/td>/.test(page),
       'the outputs it publishes, by the node type a graph names them with: their kinds, tags, sliders and inputs, the default output');
     const user = (await req('/p/game/forest')).body.toString();
@@ -157,7 +159,24 @@ try {
     check(cardOf('game/trees').includes('<span class="pkg" title="package studio/trees, newest version 1.1">studio/trees 1.1</span>') && cardOf('game/forest') && !cardOf('game/forest').includes('class="pkg"'),
       'the grid marks a package with its full name and newest version');
     check(/<span class="out" hidden data-hay="studio\/trees\/pine studio\/trees pine mesh conifer low-poly"><code>studio\/trees\/pine<\/code><span class="kind"[^>]*>mesh<\/span><span class="tag">conifer<\/span>/.test(cardOf('game/trees')) && !cardOf('game/forest').includes('class="out"')
-      && /placeholder="Search \d+ projects and 1 output"/.test(grid), 'the grid\'s search finds a package\'s outputs by name, kind and tag: each card carries them, shown when the search finds them');
+      && /placeholder="Search \d+ projects and \d+ outputs"/.test(grid), 'the grid\'s search finds a package\'s outputs by name, kind and tag: each card carries them, shown when the search finds them');
+    check(/data-hay="[^"]*studio\/trees/.test(cardOf('game/forest')) && /<span class="upd" title="studio\/trees 1\.0 is in use; 1\.1 is out">update: studio\/trees 1\.1<\/span>/.test(cardOf('game/forest')),
+      'a project\'s card: the search finds it by the packages it uses, and it says that an update exists');
+    // TopoTopo's kits: on the grid, searchable, with a page and thumbnails, and the projects that use them
+    const kit = cardOf('kit/props');
+    check(/<section class="library kits" id="kits">/.test(grid) && /href="\/k\/props" data-key="kit\/props"/.test(grid) && /<span class="out" hidden data-hay="topotopo\/props\/barrel [^"]*"><code>topotopo\/props\/barrel<\/code>/.test(kit) && /src="\/k\/props\/thumbs\/[a-z_]+\.png"/.test(kit),
+      'TopoTopo\'s kits have cards on the grid, whose search finds their outputs');
+    const kp = (await req('/k/props')).body.toString();
+    check(/<h1>Props kit<\/h1>/.test(kp) && /<code>topotopo\/props\/barrel<\/code>/.test(kp) && /<img src="\/k\/props\/thumbs\/barrel\.png"/.test(kp) && /<h2>Used by <span class="count">0<\/span>/.test(kp),
+      'a kit\'s page: its outputs with their thumbnails, its versions, the projects that use it');
+    const th = await req('/k/props/thumbs/barrel.png');
+    check(th.status === 200 && th.headers['content-type'] === 'image/png' && (await req('/k/props/thumbs/..%2Fproject.json')).status === 404 && (await req('/k/nope')).status === 404,
+      'a kit\'s thumbnails are served, nothing else of its folder');
+    edit(forest.dir, (m) => { m.uses = { ...m.uses, 'topotopo/props': '1.0' }; });
+    g.rescan();
+    const user2 = (await req('/p/game/forest')).body.toString();
+    check(/<th><a href="\/k\/props">topotopo\/props<\/a><\/th><td>1\.0<\/td>[\s\S]*?<span class="newer">1\.1 is out<\/span>/.test(user2) && /<a href="\/p\/game\/forest">Forest<\/a>/.test((await req('/k/props')).body.toString()),
+      'a project\'s page links the kits it uses, and the kit\'s page lists the project');
     const api = JSON.parse((await req('/api/projects')).body.toString());
     check(JSON.stringify(api.projects.find((x: any) => x.id === 'trees')?.package) === '{"name":"studio/trees","version":"1.1"}' && api.projects.find((x: any) => x.id === 'forest')?.package === undefined,
       '/api/projects names the packages too');
