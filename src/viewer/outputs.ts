@@ -1,6 +1,6 @@
 // Output catalogue, previews, downloads and exports. Geometry stays server-side; cards and previews are lazy.
 // A graph's results are cards, one per result (io/targets.ts publishedOutputs: the default output once, marked so). A
-// card says what its result is (io/kinds.ts: its kind, mesh, instances, points, curves, terrain, textures, volume or
+// card says what its result is (io/kinds.ts: its kind, mesh, instances, points, curves, terrain, textures, material, volume or
 // scene, and its size; its tags; when it is not the kind its graph pins) and offers the formats that write it. Its Download gets the export as a browser download (the file itself, or a zip of its files: a sidecar, a
 // textures folder), with the record of how it was made; its Export writes its target in the graph (io/targets.ts) into
 // exports/, Export all every target, and a first export sets the target in the graph so the next click just writes
@@ -23,7 +23,7 @@ import type { Geometry } from '../core/geometry.ts';
 import { Image, referenceableImages, imageToBytes, resizeLayer } from '../core/image.ts';
 import { expandPacked } from '../core/packed.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
-import { withImagePreview } from '../render/texview.ts';
+import { withImagePreview, withMaterialPreview } from '../render/texview.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
@@ -503,7 +503,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
           // heightfields: the layer drawn in red (the page's layer picker; the mask by default)
           const tint = u.searchParams.get('heightfield_layer') || 'mask';
           const bytes = await cache(`${item.entry.id}:${item.entry.revision}:${thumb}:${thumb ? '' : tint}`, async () => {
-            if (!thumb) return exportGeometryAsync(withImagePreview(withHeightfieldPreview(g, 256, tint)), 'glb', { custom: false, splitByName: false, readFile: (p) => ws.engine.host.readFile(p) });
+            if (!thumb) return exportGeometryAsync(withImagePreview(withMaterialPreview(withHeightfieldPreview(g, 256, tint))), 'glb', { custom: false, splitByName: false, readFile: (p) => ws.engine.host.readFile(p) });
             const r = renderGeometry(g, { size: 160, views: ['persp'], viewLabels: false });
             return encodePNG(r.rgba.subarray(0, r.width * 160 * 4), r.width, 160, deflate);
           });

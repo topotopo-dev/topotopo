@@ -2,20 +2,20 @@
 
 # TopoTopo node reference
 
-231 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+236 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
-- [generate](#generate-nodes): [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
+- [generate](#generate-nodes): [beam](#beam) · [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
 - [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
-- [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
+- [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_string](#attrib_string) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [measure](#measure-nodes): [assert](#assert) · [curvature](#curvature) · [distance](#distance) · [occlusion](#occlusion)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
-- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [reverse](#reverse) · [solidify](#solidify) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
+- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [remove_interior](#remove_interior) · [reverse](#reverse) · [solidify](#solidify) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
@@ -27,9 +27,98 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/kit](#topotopoarchitecturekit) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/kit](#topotoponaturekit) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/kit](#topotopopropskit) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/kit](#topotopostreetkit) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_crop](#tex_crop) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
+
+### beam
+
+category: `generate` · aliases: `strut`, `post`, `rafter`, `joist`, `brace`, `member`, `lumber`, `girder`, `beams`
+
+Beams between two points, between point pairs or along every segment of curves: a rectangle (or any closed profile on input 1) swept straight, with an up vector, caps, uv in metres and a prim name. Posts, rafters, joists, struts, trusses.
+
+Without input 0 one beam runs from start to end. With input 0 every segment of its curves (polylines, and the edges of polygons) becomes a beam (from "segments"), or, for points only, each consecutive pair (0-1, 2-3 …: from "pairs"); "auto" picks segments when there are curves. The profile lies across the beam: its first axis runs to the side, its second along up projected square to the beam (a beam along up takes +Z, else +X, as up), then roll turns it about the beam. The default profile is a size[0] × size[1] rectangle (width to the side, height up), centred on the line; offset shifts it (offset [0, size[1] / 2] puts the line along the bottom face, e.g. joists resting on a line). A closed curve on input 1 replaces it, drawn flat in any plane (shape2d's XZ: x to the side, -z up; XY: x to the side, y up): an I-beam, a channel, a round bar; every closed loop is swept, each capped on its own (switch caps off for hollow sections). extend lengthens the start and end (negative shortens, e.g. by half a post's width). uv: along the beam (u) and around the profile (v) in metres × uv_scale; caps are mapped flat. Point attributes of the input (Cd, …) are blended along each beam and prim attributes copied from the curve a beam follows; name (with {index} for the beam number) names every beam's prims, "" keeps the curve's name.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `path` | yes | no | optional: curves (each segment a beam) or points (pairs); else start → end |
+| 1 | `profile` | yes | no | optional: a closed cross-section curve, drawn flat (else the size rectangle) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `start` | vec3 | `[0,0,0]` |  |  | `from`, `p0`, `a` | start point when input 0 is not connected |
+| `end` | vec3 | `[0,3,0]` |  |  | `to`, `p1`, `b` | end point when input 0 is not connected |
+| `from` | enum | `"auto"` |  | `auto`, `segments`, `pairs` | `mode` | input 0: every curve segment, or consecutive point pairs (auto: segments when there are curves) |
+| `size` | vec2 | `[0.1,0.2]` | 0.. |  | `section`, `dimensions` | rectangle profile [width to the side, height up] in metres |
+| `up` | vec3 | `[0,1,0]` |  |  | `up_vector` | which way the profile's second axis (the height) faces, projected square to the beam |
+| `roll` | float | `0` |  |  |  | turn the profile about the beam, degrees |
+| `offset` | vec2 | `[0,0]` |  |  |  | shift of the profile [to the side, up] in metres (the line is its origin) |
+| `extend` | vec2 | `[0,0]` |  |  | `overhang`, `extension` | lengthen [start, end] along the beam in metres (negative shortens) |
+| `divisions` | int | `1` | 1..1000 |  | `segments`, `rows` | segments along the length (for later bending) |
+| `caps` | bool | `true` |  |  | `cap`, `end_caps` | close both ends |
+| `uv_scale` | float | `1` | 0.. |  |  | uv units per metre (uv in metres at 1) |
+| `name` | string | `"beam"` |  |  | `prim_name` | prim name of every beam ({index} = the beam number; "" = keep the input curve's name) |
+
+**Writes:** polygons; prim groups sides, caps; prim string name, prim int beam (the beam number); vertex uv
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "frame": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            2.4,
+            0
+          ],
+          [
+            3,
+            2.4,
+            0
+          ],
+          [
+            3,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "posts": {
+      "type": "beam",
+      "in": [
+        "frame"
+      ],
+      "params": {
+        "size": [
+          0.12,
+          0.12
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "name": "timber_{index}"
+      }
+    }
+  },
+  "output": "posts"
+}
+```
 
 ### box
 
@@ -595,6 +684,8 @@ category: `curve` · aliases: `curve_boolean`, `shape_boolean`
 
 2D boolean of closed shapes in a plane (union / subtract / intersect / xor).
 
+Within each input, a shape lying wholly inside another is a hole in it (a merged plate and circle make a plate with a hole), a shape inside that hole an island, and shapes that only overlap are joined. Faces with holes come out as a few polygons that share edges.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -607,7 +698,7 @@ category: `curve` · aliases: `curve_boolean`, `shape_boolean`
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `operation` | enum | `"union"` |  | `union`, `subtract`, `intersect`, `xor` | `op`, `mode` | boolean op |
-| `output` | enum | `"faces"` |  | `outlines`, `faces` |  | faces = filled (holes cut, triangulated where needed); outlines = closed contour polygons |
+| `output` | enum | `"faces"` |  | `outlines`, `faces` |  | faces = filled, holes cut (a face with holes as a few polygons sharing edges); outlines = closed contour polygons |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
 
 **Example**
@@ -773,7 +864,9 @@ Houdini Convert SOP for curves. Spline → polyline evaluates the curve (adaptiv
 
 category: `curve` · aliases: `polyline`, `path`, `spline`
 
-Curve through explicit points; optional Catmull-Rom smoothing; open or closed.
+Curve through explicit points; optional Catmull-Rom smoothing or rounded corners; open or closed.
+
+corner_radius rounds the corners with arcs tangent to both edges: one number for every corner, or a list with one radius per point (0 keeps that corner sharp; the ends of an open curve are never rounded). Radii that do not fit between neighbouring corners shrink. A point that is not three numbers (NaN, null, a missing coordinate) is an error that names it.
 
 **Inputs**
 
@@ -785,8 +878,12 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `points` | json | `[[0,0,0],[1,0.5,0],[2,0,0]]` |  |  | `positions`, `pts` | list of [x,y,z] (2-number entries → [x, 0, z] on the ground) |
 | `closed` | bool | `false` |  |  |  | close the curve (makes a polygon) |
-| `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points |
+| `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points (not with corner_radius) |
 | `subdivisions` | int | `8` | 1..10000 |  |  | smooth: samples per segment |
+| `corner_radius` | json | `0` |  |  | `fillet`, `radius`, `radii`, `corner_radii` | round the corners: a radius for every corner, or a list with one per point (0 = sharp) |
+| `corner_segments` | int | `6` | 1..10000 |  |  | segments per rounded corner |
+
+**Writes:** point group fillet (the points of rounded corners)
 
 **Example**
 
@@ -1101,22 +1198,26 @@ None (generator).
 
 category: `curve` · aliases: `skin`
 
-Skin a surface through a sequence of curves (in prim order). Curves are resampled to equal counts.
+Skin a surface through a sequence of curves (in prim order), or through copies of one profile placed by "sections".
+
+Sections: with several input curves, each is a section in prim order. With one curve and the sections list, each entry places a copy of it: {"offset": [x, y, z], "scale": [sx, sy], "rotate": [rx, ry, rz]} (any key may be left out; a number for offset moves it along the curve's normal, a number for scale scales it evenly), applied as scale and rotate about the curve's centre, then the offset. Correspondence: when every section has the same number of points, point k of one section joins point k of the next (insets and rounded corners stay where they are); otherwise each section is resampled evenly by length (resample "length"). Closed sections are turned to run the same way round as the first one, and each starts at the point nearest the previous section's start, so the skin does not twist. Winding: the side faces follow the first section's direction; a closed result (closed sections with caps, or closed: true) is turned to face outward, caps included. uv: u along the section, v across the sections.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | two or more curves, in order |
+| 0 | `curves` | no | no | two or more curves, in order; or one profile with sections |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
+| `sections` | json | `[]` |  |  | `stations`, `placements` | one input curve: a list of placements, each {offset, scale, rotate} (see the description) |
+| `resample` | enum | `"auto"` |  | `auto`, `length`, `none` |  | auto = keep the points when every section has the same count, else even by length; length = always resample evenly; none = points by index (counts must match) |
 | `closed` | bool | `false` |  |  |  | connect the last curve back to the first |
 | `caps` | bool | `false` |  |  |  | cap the first and last curves (when they are closed) |
 
-**Writes:** vertex uv
+**Writes:** vertex uv; prim groups caps, sides
 
 **Example**
 
@@ -1239,23 +1340,26 @@ Houdini Curve SOP in NURBS mode (a NURBCurve prim). Open curves have n + order k
 
 ### offset_curve
 
-category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
+category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`, `strap`, `stroke`
 
-2D offset (grow/shrink) of closed shapes, like PolyExpand2D. Negative distance = inset.
+2D offset (grow/shrink) of closed shapes, like PolyExpand2D. Negative distance = inset. Open paths become straps.
+
+Closed shapes grow by distance (shrink when negative). An open path (a polyline whose ends do not meet) becomes a strap: a closed outline at |distance| on both sides, with its ends cut square at the end points (cap butt), rounded, or extended by the distance; extrude it for a 3D strap or band. Shapes and straps in one input are joined.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `shapes` | no | no | closed polygons in a plane |
+| 0 | `shapes` | no | no | closed polygons in a plane, or open paths for straps |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `distance` | float | `0.1` |  |  | `offset`, `dist` | offset distance (negative shrinks) |
+| `distance` | float | `0.1` |  |  | `offset`, `dist` | offset distance (negative shrinks); straps: half their width |
 | `join` | enum | `"round"` |  | `round`, `miter`, `square` |  | corner style |
-| `segments` | int | `16` | 3..10000 |  |  | segments per full circle for round joins |
+| `cap` | enum | `"butt"` |  | `butt`, `round`, `square` |  | strap ends: butt = cut square at the end point, round = half circle, square = extended by the distance |
+| `segments` | int | `16` | 3..10000 |  |  | segments per full circle for round joins and caps |
 | `output` | enum | `"outlines"` |  | `outlines`, `faces` |  | outlines = closed polygons per contour; faces = filled with holes cut |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
 
@@ -1540,18 +1644,22 @@ Bezier/NURBS prims are sampled on the true curve, evenly by arc length (treat_sp
 
 category: `curve` · aliases: `lathe`
 
-Lathe: revolve profile curves (drawn in XY, x = radius) around the Y axis. Profiles touching the axis close up.
+Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.
+
+Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. Closed results face outward.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `profile` | no | no | curves in the XY plane (x = distance from the axis) |
+| 0 | `profile` | no | no | curves in a plane holding the axis (default: the XY plane, x = distance from the Y axis) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
+| `axis` | vec3 | `[0,1,0]` |  |  | `direction`, `dir` | direction of the axis to turn around |
+| `origin` | vec3 | `[0,0,0]` |  |  | `center`, `pivot` | a point on the axis |
 | `segments` | int | `32` | 3..4096 |  | `divisions`, `cols` | segments around |
 | `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees |
 | `caps` | bool | `false` |  |  |  | cap partial revolves (closed profiles) |
@@ -1615,7 +1723,7 @@ Lathe: revolve profile curves (drawn in XY, x = radius) around the Y axis. Profi
 
 category: `curve` · aliases: `rect`, `rectangle`, `ngon`, `star`, `polygon2d`
 
-Flat 2D shapes as closed polygons: rect, rounded_rect, ngon, star, gear, cross, L, U.
+Flat 2D shapes as closed polygons: rect, rounded_rect, capsule (slot), ngon, star, gear, cross, L, U.
 
 **Inputs**
 
@@ -1625,13 +1733,13 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `shape` | enum | `"rect"` |  | `rect`, `rounded_rect`, `ngon`, `star`, `gear`, `cross`, `L`, `U` |  | shape type |
-| `size` | vec2 | `[1,1]` |  |  |  | rect/rounded_rect/cross/L/U: width and depth |
+| `shape` | enum | `"rect"` |  | `rect`, `rounded_rect`, `capsule`, `slot`, `ngon`, `star`, `gear`, `cross`, `L`, `U` |  | shape type; capsule and slot are the same stadium: a rect whose short ends are half circles |
+| `size` | vec2 | `[1,1]` |  |  |  | rect/rounded_rect/capsule/slot/cross/L/U: width and depth (overall, ends included) |
 | `radius` | float | `0.5` |  |  |  | ngon/star/gear: outer radius |
 | `inner_radius` | float | `0.25` |  |  |  | star/gear: inner radius |
 | `sides` | int | `6` | 3..100000 |  | `points`, `teeth` | ngon sides / star points / gear teeth |
 | `corner_radius` | float | `0.1` | 0.. |  |  | rounded_rect corner radius |
-| `corner_segments` | int | `6` | 1..10000 |  |  | rounded_rect segments per corner |
+| `corner_segments` | int | `6` | 1..10000 |  |  | rounded_rect/capsule/slot: segments per quarter circle |
 | `thickness` | float | `0.25` |  |  |  | cross/L/U arm thickness |
 | `rotate` | float | `0` |  |  |  | rotation in degrees within the plane |
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
@@ -1844,6 +1952,8 @@ category: `curve`
 
 Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).
 
+The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -1855,8 +1965,9 @@ Sweep a cross-section along curves using rotation-minimising frames (tubes, ribb
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `shape` | enum | `"circle"` |  | `circle`, `square`, `ribbon`, `half_circle` |  | built-in profile when no profile input |
+| `shape` | enum | `"circle"` |  | `circle`, `square`, `rect`, `ribbon`, `half_circle` |  | built-in profile when no profile input; rect is size wide (X) and high (Y), for straps and bars |
 | `radius` | float | `0.1` |  |  | `width`, `rad` | built-in profile radius / half width |
+| `size` | vec2 | `[0.2,0.05]` |  |  |  | rect profile: width along the profile X (sideways) and height along Y (up) |
 | `divisions` | int | `12` | 2..1024 |  | `sides`, `cols` | built-in profile segments |
 | `caps` | bool | `true` |  |  |  | cap open ends (closed profiles only) |
 | `twist` | float | `0` |  |  |  | total twist in degrees along each curve |
@@ -1942,7 +2053,7 @@ Traces pixel-cell boundaries (not a bounding rectangle). Foreground is 4-connect
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `image` | string | `""` |  |  |  | image name (empty selects the first image) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
 | `channel` | enum | `"alpha"` |  | `alpha`, `luminance`, `r`, `g`, `b` |  | channel to read; alpha requires RGBA, luminance/R/G/B accept grey |
 | `threshold` | float | `0.5` |  |  |  | values at least this threshold are foreground |
@@ -3316,6 +3427,73 @@ Rename an attribute.
 }
 ```
 
+### attrib_string
+
+category: `attribute` · aliases: `string_edit`, `attrib_string_edit`, `name_pieces`, `rename_pieces`, `attribstringedit`
+
+Write or edit a string attribute per element: a pattern with the element's number, its piece number and other attributes ("hull_{piece:03}"), then find/replace and case. Names for pieces, LODs and engine suffixes in one node.
+
+Houdini: Attribute String Edit + a name wrangle. For each element of class (in group) the value is built in three steps: format, when set, makes it from a pattern ("" keeps the current value); find/replace edits it (plain text, or a JavaScript regular expression with regex, $1 for groups); case lowers or raises it. Placeholders in format: {value} the current value, {index} the element number, {piece} the number of the element's piece, {pieces} how many there are, and {<attribute>} any attribute of the element (prim, then point and detail; a tuple joins with "_"). A width pads numbers with zeros: {piece:03} → 007. Pieces are connected pieces (prims sharing points), or with piece_attrib the distinct values of that attribute (class, copynum, a name), numbered in order of first appearance; start offsets {index} and {piece} (1 counts from one). Examples: name 146 convex hulls for Godot in one node {format:"hull_{piece:03}-convcolonly"}; LOD names to lower case {find:"_LOD", replace:"_lod"}; a prefix on every part {format:"gun_{value}"}; copies {format:"crate_{copynum}"}.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | geometry |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `name` | string | `"name"` |  |  | `attrib`, `attribute` | string attribute to write (created when missing) |
+| `class` | enum | `"prim"` |  | `point`, `prim`, `vertex`, `detail` |  | attribute class |
+| `format` | string | `""` |  |  | `pattern`, `template` | pattern of the new value, e.g. "hull_{piece:03}" ("" = keep the current value; placeholders {value} {index} {piece} {pieces} {<attribute>}, width {index:03}) |
+| `piece_attrib` | string | `""` |  |  | `piece_attribute`, `by` | what makes a piece for {piece}: "" = connected pieces, else an attribute whose distinct values are the pieces (class, copynum, name) |
+| `start` | int | `0` | -1000000..1000000 |  | `offset`, `first` | first number of {index} and {piece} (1 counts from one) |
+| `find` | string | `""` |  |  | `search`, `from` | text to replace in the value ("" = none) |
+| `replace` | string | `""` |  |  | `to`, `replace_with` | what find becomes (every occurrence) |
+| `regex` | bool | `false` |  |  | `regexp`, `use_regex` | find is a JavaScript regular expression (replace may use $1, $2 …) |
+| `case` | enum | `"keep"` |  | `keep`, `lower`, `upper` | `letter_case` | change the letter case last |
+| `group` | group | `""` |  |  |  | only elements in this group (point and prim classes) |
+
+**Writes:** string attribute <name> on <class>
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 2
+      }
+    },
+    "shards": {
+      "type": "voronoi_fracture",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "count": 8,
+        "gap": 0.02
+      }
+    },
+    "hulls": {
+      "type": "attrib_string",
+      "in": [
+        "shards"
+      ],
+      "params": {
+        "format": "hull_{piece:03}-convcolonly"
+      }
+    }
+  },
+  "output": "hulls"
+}
+```
+
 ### attrib_transfer
 
 category: `attribute` · aliases: `attribtransfer`, `transfer`
@@ -3495,21 +3673,23 @@ Label connected pieces with an integer attribute (default "class"), optionally a
 
 category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, `materialassign`
 
-Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims; exporters write it as a glTF material.
+Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims, or one from a material output; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). Vertex colours (Cd) still win in exports: a material then supplies the PBR scalars. Assign several materials by chaining material nodes with different groups. Texture maps are file paths (PNG or JPEG, relative to the graph/workspace): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the project folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used. With nothing in input 0 the result is the material alone: a material output.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | geometry |
+| 0 | `geo` | yes | no | geometry (none: the material alone, for a material output) |
+| 1 | `source` | yes | no | a material output, or any geometry carrying materials, to take the material from |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `name` | string | `"material"` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name (also the glTF material name) |
+| `name` | string | `""` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name, also the glTF material name ("" = "material", or the source material's own name with input 1) |
+| `from` | string | `""` |  |  | `source_material`, `use` | input 1: which of its materials ("" = its only one) |
 | `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
 | `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
 | `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 |
@@ -3524,7 +3704,7 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none) |
 | `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel |
 
-**Writes:** prim "material" (string), detail "materials" (JSON table)
+**Writes:** prim "material" (string), detail "materials" (JSON table); with a source, the images its maps use
 
 **Example**
 
@@ -4399,7 +4579,7 @@ For holes, non-manifold edges, inconsistent winding and self-intersections use m
 |---|---|---|---|---|---|---|
 | `fuse_distance` | float | `0` | 0.. |  |  | weld points within this distance first (0 = off) |
 | `remove_degenerate` | bool | `true` |  |  |  | remove prims with repeated/too few points |
-| `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep) |
+| `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side |
 | `remove_unused_points` | bool | `true` |  |  |  | remove points not used by prims (only when the geometry has prims) |
 | `fix_winding` | bool | `false` |  |  |  | make closed meshes face outward |
 
@@ -4799,9 +4979,9 @@ Unlike clip, both sides stay connected (keep both) and the mesh stays watertight
 
 category: `topology` · aliases: `lod_tree`, `polyreduce_lod`, `lod_create`, `lods`
 
-Levels of detail in one go: decimated copies tagged with prim lod and name suffix _LOD0, _LOD1 … (merged), or one level (switch).
+Levels of detail in one go: decimated copies tagged with prim lod and named {name}_lod0, {name}_lod1 … (merged), or one level (switch); optionally of one group only.
 
-Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. merge outputs all levels together with prim int "lod" and prim "name" = input name (or base_name) + "_LOD<k>", so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level". Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
+Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. Every level's prims get prim int "lod" and prim "name" = name_format with {name} = the prim's input name (or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open borders, with point counts (or the max_error limit). Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
 
 **Inputs**
 
@@ -4824,10 +5004,12 @@ Houdini: PolyReduce per level + a name per level (LOD Create). Each level is dec
 | `prune` | bool | `true` |  |  |  | let small disconnected pieces (leaves, bolts) vanish in coarse levels |
 | `mode` | enum | `"merge"` |  | `merge`, `switch` |  | merge = all levels in one geometry; switch = only "level" |
 | `level` | int | `0` | 0.. |  |  | switch mode: the level to output |
-| `base_name` | string | `"mesh"` |  |  | `name` | name for prims without a "name" attribute (becomes mesh_LOD0 …) |
+| `name_format` | string | `"{name}_lod{level}"` |  |  | `name_pattern`, `suffix_format` | prim name of each level: {name} = the input prim name (or base_name), {level} = the level number (merge needs {level}) |
+| `base_name` | string | `"mesh"` |  |  | `name` | the {name} of prims without a "name" attribute (mesh_lod0 …) |
+| `group` | group (prim) | `""` |  |  |  | prims to make levels of ("" = all); the others pass through once, unchanged |
 | `spacing` | vec3 | `[0,0,0]` |  |  | `offset` | offset of level k = k * spacing (side-by-side previews; keep 0 for export) |
 
-**Writes:** prim int lod, prim string name (…_LOD<k>); detail string lod (JSON per level), detail int[] lod_tris
+**Writes:** prim int lod, prim string name (name_format, default {name}_lod{level}); detail string lod (JSON per level), detail int[] lod_tris
 
 **Example**
 
@@ -4982,7 +5164,7 @@ Edge mode: every edge in "group" becomes a strip of divisions+1 quads; the faces
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `group` | group | `""` |  |  | `edges`, `edge_group`, `points` | edges to bevel (edge pattern or group: "angle>80", "border:top", "p0-1", "rim"; "" = every edge shared by two polygons); with mode "points", a point pattern ("" = all points) |
+| `group` | group | `""` |  |  | `edges`, `edge_group`, `points` | edges to bevel (edge pattern or group: "angle>80", "border:top", "p0-1", "rim"; "" = every edge shared by two polygons where the surface bends: flat edges inside a plane, such as the splits a boolean leaves in a cut face, are skipped); with mode "points", a point pattern ("" = all points) |
 | `mode` | enum | `"edges"` |  | `edges`, `points` | `bevel_type`, `class` | bevel edges, or truncate points |
 | `offset` | float | `0.1` | 0.. |  | `distance`, `width`, `radius`, `size`, `amount` | distance from the edge across each adjacent face (points mode: along each edge) |
 | `offset_mode` | enum | `"distance"` |  | `distance`, `fraction` | `distance_mode`, `offsetmode` | distance = offset in scene units; fraction = offset x the shortest edge at the edge's points (stays proportional on small faces) |
@@ -5341,6 +5523,89 @@ Smooths a four-way orientation field and a position field through a multiresolut
 }
 ```
 
+### remove_interior
+
+category: `topology` · aliases: `remove_hidden`, `remove_inside`, `hidden_faces`, `interior_faces`
+
+Delete faces buried inside other closed parts (kitbashed pieces that overlap): they can never be seen.
+
+Parts are told apart by connectivity (or by the prim attribute name). A face goes when its centre and every corner, pulled a hair toward the centre, lie inside one other part that is a closed solid; a face only partly inside stays (cut it with boolean union instead). Faces touching another part face to face stay too. The parts are left open where their buried faces were: that is the point, nothing inside is rendered or baked.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | overlapping parts (each closed part hides what is inside it) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (prim) | `""` |  |  |  | faces that may be removed ("" = all) |
+| `parts` | enum | `"connected"` |  | `connected`, `name` |  | what makes a part: connected polygons, or the prim attribute name |
+| `output` | enum | `"delete"` |  | `delete`, `group` |  | delete the hidden faces, or keep them in prim group "interior" |
+
+**Writes:** prim group interior (output group)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "body": {
+      "type": "box",
+      "params": {
+        "size": [
+          1,
+          0.4,
+          0.4
+        ]
+      }
+    },
+    "boss": {
+      "type": "tube",
+      "params": {
+        "radius": 0.1,
+        "height": 0.3,
+        "caps": true
+      }
+    },
+    "place": {
+      "type": "transform",
+      "in": [
+        "boss"
+      ],
+      "params": {
+        "rotate": [
+          0,
+          0,
+          90
+        ],
+        "translate": [
+          0.5,
+          0,
+          0
+        ]
+      }
+    },
+    "parts": {
+      "type": "merge",
+      "in": [
+        "body",
+        "place"
+      ]
+    },
+    "tidy": {
+      "type": "remove_interior",
+      "in": [
+        "parts"
+      ]
+    }
+  },
+  "output": "tidy"
+}
+```
+
 ### reverse
 
 category: `topology` · aliases: `flip`, `flip_normals`
@@ -5682,7 +5947,7 @@ Make N copies, each transformed cumulatively (Houdini Copy and Transform): stair
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `count` | int | `4` | 0..100000 |  | `ncy`, `copies`, `n` | total copies (including the original) |
-| `translate` | vec3 | `[1,0,0]` |  |  | `t`, `offset` | offset applied per copy |
+| `translate` | vec3 | `[0,0,0]` |  |  | `t`, `offset` | offset applied per copy, in metres (0 by default, as in Houdini: set it, or rotate, or the copies stack in place) |
 | `rotate` | vec3 | `[0,0,0]` |  |  | `r` | rotation per copy (degrees) |
 | `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale per copy (compounding) |
 | `pivot` | vec3 | `[0,0,0]` |  |  |  | pivot for rotate/scale |
@@ -5889,6 +6154,8 @@ category: `solid` · aliases: `csg`, `bool`, `difference`, `union`, `intersect`
 
 Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, unions A’s overlapping pieces.
 
+The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -5901,6 +6168,8 @@ Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `operation` | enum | `"subtract"` |  | `union`, `subtract`, `intersect` | `op`, `mode` | A ∪ B, A − B, or A ∩ B |
+| `output` | enum | `"polygons"` |  | `polygons`, `triangles` |  | polygons = each surviving input face as one polygon (or a few around a hole); triangles = the kernel triangles as they come |
+| `tolerance` | float | `0.00001` | 0.. |  | `simplify`, `sliver` | after the cut, collapse edges shorter than this and flatten slivers thinner than it, keeping the solid closed (0 = rounding only) |
 
 **Writes:** prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated
 
@@ -9108,6 +9377,8 @@ category: `flow` · aliases: `combine`, `join`
 
 Combine any number of inputs into one geometry (attributes, groups and material tables are unioned).
 
+Material tables are unioned and images (texture nodes) combined. What several inputs share (the same image, the same material) is kept once. A name two inputs use for different things is made distinct, so each piece keeps its own maps and material: package outputs or asset instances whose maps are all called "basecolor" get theirs renamed "<material>_basecolor" (else "basecolor_2" …), different materials of one name "<name>_2", and the input's material table and prim "material" follow. Two different images under one name inside one input are warned about, as texture nodes and materials then cannot tell them apart.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -9331,7 +9602,7 @@ category: `io` · aliases: `null_object`, `empty`, `socket`, `locator`, `scene_e
 
 Add a named scene empty (attachment socket): a meshless node in glTF export, parented to the root, another empty or a mesh.
 
-Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated point marked scene_empty = 1 with point attributes name, parent, orient and scale (help topic "export"). translation, rotation and scale are in geometry (model) space, so later transform nodes move the empty with the mesh; glTF export writes it as a node without a mesh under its parent with the local transform that keeps this geometry-space placement. parent names another empty or a mesh (the prim "name" of the pieces export splits by); missing, ambiguous and cyclic parents are export errors. Other point attributes set on the empty (e.g. a "forward" vector) export as node extras. Ordinary loose points still export as POINTS.
+Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated point marked scene_empty = 1 with point attributes name, parent, orient and scale (help topic "export"). translation, rotation and scale are in geometry (model) space, so later transform nodes move the empty with the mesh; glTF export writes it as a node without a mesh under its parent with the local transform that keeps this geometry-space placement. parent names another empty or a mesh (the prim "name" of the pieces export splits by); missing, ambiguous and cyclic parents are export errors. Other point attributes set on the empty (e.g. a "forward" vector) export as node extras. The empty's attributes (scene_empty, parent, orient, scale and such extras) only hold their defaults on the mesh points after a merge, and export never writes them as mesh channels, even with custom_attribs. Ordinary loose points still export as POINTS.
 
 **Inputs**
 
@@ -11662,7 +11933,7 @@ category: `texture` · aliases: `ao_bake`, `bake_ambient_occlusion`, `bake_occlu
 
 Bake ambient occlusion into uv space: white = open sky, dark in gaps, corners and contact areas.
 
-Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Each texel casts `samples` cosine-weighted rays over the hemisphere of its normal against the mesh (or the high-res input, sampled at the projected point); C = 1 - the fraction that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.
+Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` cosine-weighted rays over the hemisphere of its normal against the mesh (or the high-res input, sampled at the projected point); C = 1 - the fraction that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.
 
 **Inputs**
 
@@ -11681,17 +11952,19 @@ Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping 
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"ao"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `samples` | int | `16` | 1..1024 |  | `rays`, `secondary_rays` | rays per sample (stratified; more = smoother, linear cost) |
 | `bias` | float | `0` | 0.. |  |  | ray start offset along the normal against self-hits (0 = auto: 1e-4 of the bbox diagonal) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `invert` | bool | `false` |  |  |  | write 1 - value |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `max_distance` | float | `0` | 0.. |  | `max_occluder_distance`, `distance`, `radius` | hits farther than this do not occlude (metres; 0 = unlimited) |
 | `cone_angle` | float | `0` | 0..90 |  | `spread`, `angle` | half-angle of the ray cone in degrees (0 = auto: 90, the hemisphere) |
 
-**Writes:** image <name> (default "ao"): C grey 0..1 (1 = open), mask
+**Writes:** image <name> (default: the node name): C grey 0..1 (1 = open), mask
 
 **Example**
 
@@ -11728,7 +12001,7 @@ category: `texture` · aliases: `curvature_bake`, `bake_edges`, `edge_wear_bake`
 
 Bake edge curvature into uv space: 0.5 flat, brighter on convex edges and bevels, darker in concave creases (edge wear and dirt masks).
 
-Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. tex_histogram_scan or tex_levels on "convex" make an edge-wear mask.
+Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask.
 
 **Inputs**
 
@@ -11747,14 +12020,17 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"curvature"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `radius` | float | `0` | 0.. |  | `width`, `edge_width`, `distance` | how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal) |
 | `strength` | float | `1` | 0.. |  | `intensity`, `contrast` | contrast multiplier |
 | `min_angle` | float | `0.5` | 0..179 |  |  | edges bending less than this (degrees) are ignored |
+| `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | also find the concave creases where separate parts cut into each other (kitbashed meshes) |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 
-**Writes:** image <name> (default "curvature"): C grey (0.5 = flat), convex, concave, mask
+**Writes:** image <name> (default: the node name): C grey (0.5 = flat), convex, concave, mask
 
 **Example**
 
@@ -11801,7 +12077,7 @@ category: `texture` · aliases: `height_bake`, `bake_displacement`, `displacemen
 
 Bake the height of a high-res mesh (input 1) above the low mesh along its normals: a displacement / height map.
 
-Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Rays along the low normals within ±cage find the high surface; layer "distance" holds the signed distance in metres (0 on a miss) and C maps it to 0..1: mode cage = 0.5 + d / (2 cage) (0.5 = on the low surface), normalize = the min..max of the hits (stats height_min / height_max). Feed tex_normal_from_height or use it as displacement.
+Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Rays along the low normals within ±cage find the high surface; layer "distance" holds the signed distance in metres (0 on a miss) and C maps it to 0..1: mode cage = 0.5 + d / (2 cage) (0.5 = on the low surface), normalize = the min..max of the hits (stats height_min / height_max). Feed tex_normal_from_height or use it as displacement.
 
 **Inputs**
 
@@ -11820,12 +12096,14 @@ Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap)
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"height"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `mode` | enum | `"cage"` |  | `cage`, `normalize` | `range` | how distances map to 0..1 |
 
-**Writes:** image <name> (default "height"): C grey 0..1, distance (metres), mask
+**Writes:** image <name> (default: the node name): C grey 0..1, distance (metres), mask
 
 **Example**
 
@@ -11889,7 +12167,7 @@ category: `texture` · aliases: `island_id_bake`, `bake_id`, `id_bake`, `bake_uv
 
 Bake uv islands as random flat colours (an ID map for masking per island), with the island number in layer "id".
 
-Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).
+Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).
 
 **Inputs**
 
@@ -11907,10 +12185,10 @@ Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"island_id"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `seed` | float | `0` |  |  |  | random seed |
 
-**Writes:** image <name> (default "island_id"): C RGBA, id (island number), mask
+**Writes:** image <name> (default: the node name): C RGBA, id (island number), mask
 
 **Example**
 
@@ -11946,7 +12224,7 @@ category: `texture` · aliases: `mask_bake`, `bake_group`, `bake_attribute`, `at
 
 Bake a mask into uv space from a prim group (1 inside) or a numeric attribute (its value), e.g. to paint per-part materials.
 
-Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. mask_group (a prim group pattern) gives 1 on its prims and 0 elsewhere; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
+Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mask_group (a prim group pattern) gives 1 on its prims and 0 elsewhere; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
 
 **Inputs**
 
@@ -11964,12 +12242,12 @@ Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv 
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"mask"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `mask_group` | group (prim) | `""` |  |  | `from_group`, `mask_prims` | prims that read 1 (e.g. "planks", "@P.y>0.5") |
 | `attrib` | string | `""` |  |  | `attribute`, `from_attrib` | numeric attribute to bake when mask_group is empty |
 | `component` | int | `0` | -1..15 |  |  | vector component of attrib (-1 = luminance of the first three) |
 
-**Writes:** image <name> (default "mask"): C grey, mask
+**Writes:** image <name> (default: the node name): C grey, mask
 
 **Example**
 
@@ -12007,7 +12285,7 @@ category: `texture` · aliases: `normal_bake`, `bake_tangent_normal`, `bake_norm
 
 Bake a tangent-space normal map from a high-res mesh (input 1) onto the uv of the low mesh: OpenGL or DirectX.
 
-Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's MikkTSpace tangent frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
+Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's MikkTSpace tangent frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
 
 **Inputs**
 
@@ -12026,12 +12304,14 @@ Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"normal"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `format` | enum | `"opengl"` |  | `opengl`, `directx` | `convention` | green channel convention |
 
-**Writes:** image <name> (default "normal"): C RGBA, mask
+**Writes:** image <name> (default: the node name): C RGBA, mask
 
 **Example**
 
@@ -12085,7 +12365,7 @@ category: `texture` · aliases: `position_bake`, `bake_world_position`
 
 Bake world position into uv space as RGB (bbox-normalised by default): gradients, masks by height or direction.
 
-Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. mode bbox maps each axis of the bounding box to 0..1 (R = X, G = Y, B = Z), uniform maps the largest axis to 0..1 and keeps the proportions (centred), world writes metres as they are (data, beyond 0..1). Feed tex_channel extract (channel g) for a bottom-to-top gradient.
+Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mode bbox maps each axis of the bounding box to 0..1 (R = X, G = Y, B = Z), uniform maps the largest axis to 0..1 and keeps the proportions (centred), world writes metres as they are (data, beyond 0..1). Feed tex_channel extract (channel g) for a bottom-to-top gradient.
 
 **Inputs**
 
@@ -12103,10 +12383,10 @@ Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwra
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"position"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `mode` | enum | `"bbox"` |  | `bbox`, `uniform`, `world` | `normalize` | how positions map to colour |
 
-**Writes:** image <name> (default "position"): C RGBA, mask
+**Writes:** image <name> (default: the node name): C RGBA, mask
 
 **Example**
 
@@ -12142,7 +12422,7 @@ category: `texture` · aliases: `thickness_bake`, `bake_thick`
 
 Bake thickness into uv space: rays into the mesh measure how thick it is under each texel (white = thick).
 
-Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Each texel casts `samples` rays in a cone around its inward normal; C = the mean distance to the far side divided by max_distance (misses count as max_distance). invert gives white where thin (translucency, subsurface masks).
+Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` rays in a cone around its inward normal; C = the mean distance to the far side divided by max_distance (misses count as max_distance). invert gives white where thin (translucency, subsurface masks).
 
 **Inputs**
 
@@ -12161,17 +12441,19 @@ Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"thickness"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `samples` | int | `16` | 1..1024 |  | `rays`, `secondary_rays` | rays per sample (stratified; more = smoother, linear cost) |
 | `bias` | float | `0` | 0.. |  |  | ray start offset along the normal against self-hits (0 = auto: 1e-4 of the bbox diagonal) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `invert` | bool | `false` |  |  |  | write 1 - value |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `max_distance` | float | `0` | 0.. |  | `distance`, `radius` | thickness that maps to 1 (metres; 0 = auto: 25% of the bbox diagonal) |
 | `cone_angle` | float | `0` | 0..90 |  | `spread`, `angle` | half-angle of the ray cone in degrees (0 = auto: 30) |
 
-**Writes:** image <name> (default "thickness"): C grey 0..1, mask
+**Writes:** image <name> (default: the node name): C grey 0..1, mask
 
 **Example**
 
@@ -12208,7 +12490,7 @@ category: `texture` · aliases: `vertex_color_bake`, `bake_color`, `bake_cd`, `c
 
 Bake a colour attribute (Cd, with Alpha) into uv space as an RGBA image.
 
-Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. attrib (point, vertex, prim or detail; 1 or 3+ floats) is interpolated across the triangles; alpha_attrib fills A when present. Values are written as they are, the same numbers the renderer shows.
+Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. attrib (point, vertex, prim or detail; 1 or 3+ floats) is interpolated across the triangles; alpha_attrib fills A when present. Values are written as they are, the same numbers the renderer shows.
 
 **Inputs**
 
@@ -12226,11 +12508,11 @@ Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"vertex_color"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `attrib` | string | `"Cd"` |  |  | `attribute`, `color_attrib` | colour attribute |
 | `alpha_attrib` | string | `"Alpha"` |  |  |  | alpha attribute (missing = 1) |
 
-**Writes:** image <name> (default "vertex_color"): C RGBA, mask
+**Writes:** image <name> (default: the node name): C RGBA, mask
 
 **Example**
 
@@ -12280,7 +12562,7 @@ category: `texture` · aliases: `world_normal_bake`, `bake_worldspace_normal`
 
 Bake world-space normals into uv space as RGB (0.5 + 0.5 n): the mesh's own, or the high-res input's along the cage.
 
-Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Without input 1 the mesh's interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.
+Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Without input 1 the mesh's interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.
 
 **Inputs**
 
@@ -12299,11 +12581,13 @@ Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1
 | `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
-| `name` | string | `"world_normal"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 
-**Writes:** image <name> (default "world_normal"): C RGBA, mask
+**Writes:** image <name> (default: the node name): C RGBA, mask
 
 **Example**
 
@@ -12361,9 +12645,9 @@ Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits input_m
 | `input_max` | float | `1` |  |  |  | layer value that becomes 1 |
 | `auto_range` | bool | `false` |  |  |  | use the layer's own min..max as the input range instead (depends on the field's extent) |
 | `keep` | bool | `false` |  |  |  | keep the input (heightfield and all) and add the image; off outputs only the image |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = the layer name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name> (default: the layer name): C grey
+**Writes:** image <name> (default: the node name): C grey
 
 **Example**
 
@@ -12382,19 +12666,18 @@ Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits input_m
         "amplitude": 3
       }
     },
-    "out": {
+    "height": {
       "type": "heightfield_to_tex",
       "in": [
         "hills"
       ],
       "params": {
-        "name": "height",
         "input_min": -3,
         "input_max": 3
       }
     }
   },
-  "output": "out"
+  "output": "height"
 }
 ```
 
@@ -12404,7 +12687,7 @@ category: `texture` · aliases: `image_read`, `png_read`, `texture_file`
 
 Load a PNG (8 or 16 bit, grey or colour) as an image: your own textures and masks into the texture nodes and materials.
 
-Houdini COP: File; Substance: Bitmap. The image is named after the file ("inputs/brick.png" → "brick") unless name is set; layer C holds it, grey or RGBA (layers), and a grey image keeps the file's alpha, when it has one, in layer "A". Values are samples / 255 (16-bit files / 65535: their precision is kept). Colour layers hold display values, as every colour in the engine does ("#a5462e" is 0.65, 0.27, 0.18), so srgb (on by default) keeps the numbers the file stores: a PNG this engine wrote reads back unchanged, and masks, heights, normal and roughness maps load as they are. Turn srgb off only for a file holding linear-light colour (a linear render): grey and RGB are then encoded to display values, alpha never (unlike Unreal's sRGB checkbox, off does not mean "data"). With input 0 connected the image is added to that geometry, replacing an image of the same name, so image_file nodes chain. The file node reads .png files the same way (with these defaults).
+Houdini COP: File; Substance: Bitmap. The image is named after this node, like every image a node makes, unless name is set; layer C holds it, grey or RGBA (layers), and a grey image keeps the file's alpha, when it has one, in layer "A". Values are samples / 255 (16-bit files / 65535: their precision is kept). Colour layers hold display values, as every colour in the engine does ("#a5462e" is 0.65, 0.27, 0.18), so srgb (on by default) keeps the numbers the file stores: a PNG this engine wrote reads back unchanged, and masks, heights, normal and roughness maps load as they are. Turn srgb off only for a file holding linear-light colour (a linear render): grey and RGB are then encoded to display values, alpha never (unlike Unreal's sRGB checkbox, off does not mean "data"). With input 0 connected the image is added to that geometry, replacing an image of the same name, so image_file nodes chain. The file node reads .png files the same way (with these defaults), naming the image after the file.
 
 **Inputs**
 
@@ -12416,28 +12699,28 @@ Houdini COP: File; Substance: Bitmap. The image is named after the file ("inputs
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the workspace, e.g. "inputs/brick.png") or URL |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = the file name without .png); materials reference it as "image:<name>" |
+| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the project folder, e.g. "inputs/brick.png") or URL |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `layers` | enum | `"auto"` |  | `auto`, `grey`, `rgba` | `channels` | auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels |
 | `srgb` | bool | `true` |  |  |  | the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never) |
 
-**Writes:** image <name>: C grey or RGBA 0..1; A grey (the file's alpha, for a grey image of a file with alpha)
+**Writes:** image <name> (default: the node name): C grey or RGBA 0..1; A grey (the file's alpha, for a grey image of a file with alpha)
 
 **Example**
 
 ```json
 {
   "nodes": {
-    "color": {
+    "brick_color": {
       "type": "image_file",
       "params": {
         "path": "inputs/brick_color.png"
       }
     },
-    "maps": {
+    "brick_rough": {
       "type": "image_file",
       "in": [
-        "color"
+        "brick_color"
       ],
       "params": {
         "path": "inputs/brick_rough.png",
@@ -12460,7 +12743,7 @@ Houdini COP: File; Substance: Bitmap. The image is named after the file ("inputs
       "type": "texture_to_material",
       "in": [
         "uv",
-        "maps"
+        "brick_rough"
       ],
       "params": {
         "material": "brick",
@@ -12479,7 +12762,7 @@ category: `texture` · aliases: `blend`, `composite`, `cop_blend`, `layer_blend`
 
 Blend a foreground image over a background with a mode (normal, add, multiply, screen, overlay, min, max, difference …), opacity and an optional mask.
 
-Substance: Blend; Houdini COP: Blend / Composite. result = mix(background, mode(background, foreground), opacity × mask × foreground alpha). The foreground and mask are resized to the background. A grey and an RGBA input give RGBA; alpha is the background's. clamp keeps the result in 0..1.
+Substance: Blend; Houdini COP: Blend / Composite. result = mix(background, mode(background, foreground), opacity × mask × foreground alpha). The foreground and mask are resized to the background. A grey and an RGBA input give RGBA; alpha is the background's. clamp keeps the result in 0..1. For normal maps use tex_normal_blend (overlay flattens them).
 
 **Inputs**
 
@@ -12496,41 +12779,52 @@ Substance: Blend; Houdini COP: Blend / Composite. result = mix(background, mode(
 | `mode` | enum | `"normal"` |  | `normal`, `add`, `subtract`, `multiply`, `screen`, `overlay`, `min`, `max`, `difference`, `divide` | `blend_mode`, `operation` | blend mode |
 | `opacity` | float | `1` | 0..1 |  | `amount`, `alpha`, `weight` | strength of the foreground |
 | `clamp` | bool | `true` |  |  |  | clamp the result to 0..1 |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the background) to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `foreground_image` | string | `""` |  |  |  | image of input 1 ("" = first) |
+| `foreground_image` | string | `""` |  |  |  | which image of input 1 (the foreground) to use ("" = its only image; needed when it holds several) |
 | `foreground_layer` | string | `""` |  |  |  | layer of the foreground ("" = main) |
+| `mask_image` | string | `""` |  |  |  | which image of input 2 (the mask) to use ("" = its only image; needed when it holds several) |
 | `mask_layer` | string | `""` |  |  |  | layer of the mask image ("" = main) |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | resizing wraps at the borders |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
-**Writes:** the background image with the blended layer
+**Writes:** the background image with the blended layer, named <name> (default: the node name)
 
 **Example**
 
 ```json
 {
   "nodes": {
-    "a": {
+    "paint": {
       "type": "tex_noise",
       "params": {
-        "resolution": 256
+        "resolution": 256,
+        "scale": 3
       }
     },
-    "b": {
+    "metal": {
       "type": "tex_pattern",
       "params": {
         "resolution": 256
       }
     },
+    "wear": {
+      "type": "tex_cells",
+      "params": {
+        "resolution": 256,
+        "output": "edges"
+      }
+    },
     "out": {
       "type": "tex_blend",
       "in": [
-        "a",
-        "b"
+        "paint",
+        "metal",
+        "wear"
       ],
       "params": {
-        "mode": "multiply"
+        "mode": "normal",
+        "opacity": 0.8
       }
     }
   },
@@ -12550,7 +12844,7 @@ Substance: Blur HQ; Houdini COP: Blur. radius in pixels (gaussian: radius = 2 si
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
@@ -12559,9 +12853,9 @@ Substance: Blur HQ; Houdini COP: Blur. radius in pixels (gaussian: radius = 2 si
 | `radius` | float | `4` | 0.. |  | `intensity`, `size` | blur radius in pixels |
 | `mode` | enum | `"gaussian"` |  | `gaussian`, `box` | `type`, `filter` | filter shape |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -12612,9 +12906,9 @@ None (generator).
 | `metric` | enum | `"euclidean"` |  | `euclidean`, `manhattan`, `chebyshev` |  | distance metric (manhattan = diamond cells, chebyshev = square cells) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
 | `seed` | float | `0` |  |  |  | random seed |
-| `name` | string | `"cells"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey (the chosen output), id grey random per cell
+**Writes:** image <name> (default: the node name): C grey (the chosen output), id grey random per cell
 
 **Example**
 
@@ -12635,7 +12929,7 @@ category: `texture` · aliases: `channel_pack`, `pack_channels`, `rgba_merge`, `
 
 Pack grey images into the R, G, B, A channels of one RGBA image (e.g. ORM for glTF/Unreal: occlusion, roughness, metallic), or extract one channel as grey.
 
-Substance: RGBA Merge / RGBA Split / Channel Shuffle; Houdini COP: Channel Copy. pack: inputs 0..3 fill R, G, B, A (their luminance); unconnected channels take fill (default [1, 0.5, 0, 1]: occlusion 1, roughness 0.5, metallic 0, alpha 1, the ORM convention of glTF and Unreal). The size is the first connected input's; others are resized. extract: one channel of input 0 as a grey image (keeps the input, replacing the layer).
+Substance: RGBA Merge / RGBA Split / Channel Shuffle; Houdini COP: Channel Copy. pack: inputs 0..3 fill R, G, B, A (their luminance; each input holds one image); unconnected channels take fill (default [1, 0.5, 0, 1]: occlusion 1, roughness 0.5, metallic 0, alpha 1, the ORM convention of glTF and Unreal). The size is the first connected input's; others are resized. extract: one channel of an image of input 0 as a grey image (keeps the input, replacing the layer).
 
 **Inputs**
 
@@ -12653,9 +12947,10 @@ Substance: RGBA Merge / RGBA Split / Channel Shuffle; Houdini COP: Channel Copy.
 | `mode` | enum | `"pack"` |  | `pack`, `extract` |  | pack inputs into RGBA, or extract a channel of input 0 |
 | `channel` | enum | `"r"` |  | `r`, `g`, `b`, `a`, `luminance` |  | extract: which channel |
 | `fill` | vec4 | `[1,0.5,0,1]` |  |  |  | pack: values of unconnected channels |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | pack: the new image's name ("" = "packed"); extract: rename the result ("" = keep) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (extract) to use ("" = its only image; needed when it holds several) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | pack: the new image's name, extract: the result's ("" = this node's name) |
 
-**Writes:** pack: a new RGBA image <name> (default "packed"); extract: input 0 with the channel as its layer
+**Writes:** pack: a new RGBA image <name> (default: the node name); extract: input 0 with the channel as its layer, renamed <name>
 
 **Example**
 
@@ -12682,7 +12977,6 @@ Substance: RGBA Merge / RGBA Split / Channel Shuffle; Houdini COP: Channel Copy.
         "rough"
       ],
       "params": {
-        "name": "orm",
         "fill": [
           1,
           0.5,
@@ -12708,16 +13002,16 @@ Substance: Gradient Map; Houdini COP: Ramp lookup. ramp keys [[pos, colour], …
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `ramp` | ramp | `[[0,"#000000"],[1,"#ffffff"]]` |  |  | `gradient`, `colors`, `colours` | colour ramp [[pos, colour], …] |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -12758,13 +13052,81 @@ Substance: Gradient Map; Houdini COP: Ramp lookup. ramp keys [[pos, colour], …
 }
 ```
 
+### tex_constant
+
+category: `texture` · aliases: `constant_texture`, `uniform_color`, `solid_color`, `flat_color`, `fill_image`, `cop_constant`
+
+Constant image: one grey value or one RGBA colour everywhere, sized by resolution or by an input image.
+
+Substance: Uniform Color; Houdini COP: Constant. channels grey fills layer C with value (a flat roughness, metallic or height, a mask of 1); rgba with color (display values like every colour param: "#a5462e" comes out of the PNG as #a5462e) and alpha. With input 0 connected the image takes the size of an image there (image picks one when it holds several) and resolution is ignored; the output holds only the new image either way. Blend over it, pack it into an ORM channel, or give a material a flat map.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `size_from` | yes | no | optional: an image whose size the constant takes |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `channels` | enum | `"grey"` |  | `grey`, `rgba` | `mode`, `type` | grey = one value (value), rgba = a colour (color, alpha) |
+| `value` | float | `0.5` |  |  | `grey`, `level` | grey: the value of every pixel |
+| `color` | color | `[0.5,0.5,0.5]` |  |  | `rgb`, `colour` | rgba: the colour of every pixel |
+| `alpha` | float | `1` | 0..1 |  |  | rgba: the alpha of every pixel |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the size source) to use ("" = its only image; needed when it holds several) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+
+**Writes:** image <name> (default: the node name): C grey or RGBA, one value everywhere
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "noise": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 128
+      }
+    },
+    "roughness": {
+      "type": "tex_constant",
+      "in": [
+        "noise"
+      ],
+      "params": {
+        "value": 0.65
+      }
+    },
+    "paint": {
+      "type": "tex_constant",
+      "params": {
+        "resolution": 64,
+        "channels": "rgba",
+        "color": "#a5462e"
+      }
+    },
+    "out": {
+      "type": "merge",
+      "in": [
+        "roughness",
+        "paint"
+      ]
+    }
+  },
+  "output": "out"
+}
+```
+
 ### tex_crop
 
 category: `texture`
 
 Extract an exact pixel rectangle, optionally resize it; all image layers stay aligned.
 
-Origin is [x,y] from the top left. Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. Other geometry/images pass through.
+Origin is [x,y] from the top left. Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. The result takes this node's name unless name is set; other geometry/images pass through.
 
 **Inputs**
 
@@ -12776,8 +13138,8 @@ Origin is [x,y] from the top left. Size 0 on an axis means the remaining source 
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `image` | string | `""` |  |  |  | image name (empty selects the first image) |
-| `name` | string | `""` |  |  |  | output image name (empty keeps the source name) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 | `origin` | ivec2 | `[0,0]` | -1000000..1000000 |  |  | crop origin in pixels, from the top left; negative origins add zero padding |
 | `size` | ivec2 | `[0,0]` | 0..8192 |  |  | crop width/height in pixels; 0 = source extent minus origin |
 | `resolution` | ivec2 | `[0,0]` | 0..8192 |  |  | output width/height; 0 = cropped size on that axis |
@@ -12832,16 +13194,16 @@ Substance: Curve; Houdini COP: Lookup. ramp keys [[in, out], …] interpolated l
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `ramp` | ramp | `[[0,0],[0.5,0.5],[1,1]]` |  |  | `curve`, `lut` | tone curve [[in, out], …] |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -12891,7 +13253,7 @@ category: `texture`
 
 Extend nearest valid image values into an invalid band, preserving opacity by default.
 
-Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond radius are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding.
+Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond radius are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding. The result takes this node's name unless name is set.
 
 **Inputs**
 
@@ -12904,11 +13266,11 @@ Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `image` | string | `""` |  |  |  | image name (empty selects the first image) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
-| `name` | string | `""` |  |  |  | output image name (empty keeps the source name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 | `radius` | int | `8` | 0..8192 |  |  | maximum Euclidean distance in pixels from a valid source |
-| `mask_image` | string | `""` |  |  |  | image name (empty selects the first image) |
+| `mask_image` | string | `""` |  |  |  | which image of input 1 (the mask) to use ("" = its only image; needed when it holds several) |
 | `mask_layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
 | `mask_channel` | enum | `"luminance"` |  | `alpha`, `luminance`, `r`, `g`, `b` |  | channel to read; alpha requires RGBA, luminance/R/G/B accept grey |
 | `mask_threshold` | float | `0` |  |  |  | mask values strictly greater than this are valid |
@@ -12955,7 +13317,7 @@ Substance: Edge Detect; Houdini COP: Edge Detect. A 0 → 1 step gives about 1 a
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
@@ -12964,9 +13326,9 @@ Substance: Edge Detect; Houdini COP: Edge Detect. A 0 → 1 step gives about 1 a
 | `strength` | float | `1` | 0.. |  | `intensity`, `contrast` | multiplier of the gradient magnitude |
 | `width` | float | `0` | 0..64 |  |  | thicken the edges by this many pixels |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13014,9 +13376,9 @@ None (generator).
 | `angle` | float | `0` |  |  | `rotation`, `direction` | direction in degrees (linear, mirror) or start angle (angular) |
 | `center` | vec2 | `[0.5,0.5]` |  |  |  | centre in uv (radial, diamond, angular) |
 | `radius` | float | `0.5` | 0.001.. |  |  | radial / diamond: distance (uv) where the gradient reaches 1 |
-| `name` | string | `"gradient"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey 0..1
+**Writes:** image <name> (default: the node name): C grey 0..1
 
 **Example**
 
@@ -13043,7 +13405,7 @@ Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `st
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
@@ -13054,9 +13416,9 @@ Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `st
 | `directions` | int | `8` | 1..32 |  | `dirs` | directions per pixel |
 | `steps` | int | `6` | 1..64 |  |  | samples along each direction |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13088,25 +13450,28 @@ Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `st
 
 category: `texture` · aliases: `histogram_scan`, `histogramscan`, `scan`
 
-Histogram scan: slide a threshold through a grey image (position) with adjustable hardness (contrast); the classic mask maker.
+Histogram scan: turn a grey image into a mask with a set white coverage (or a threshold position) and hardness (contrast); the classic mask maker.
 
-Substance: Histogram Scan. position 0 = black, 1 = white, 0.5 with contrast 0 = unchanged; contrast 1 = a hard cut at 1 - position. Use on noise or a curvature bake to grow wear or dirt masks.
+Substance: Histogram Scan. coverage is the fraction of the image that turns white, measured on its own histogram: 0.3 makes the brightest 30 % of the pixels white whatever the input's range (a noise of 0..0.48, a curvature bake), so a value read off a wear reference works on any input. With coverage -1, position sets a value cut instead: the cut sits at 1 - position (0 = black, 1 = white; 0.5 with contrast 0 = unchanged), so how much turns white depends on the input. contrast is the hardness of the transition around the cut (1 = hard; softer edges blend around the same cut). The stat coverage reports the fraction of the result above 0.5. Use on noise or a curvature bake to grow wear or dirt masks.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `position` | float | `0.5` | 0..1 |  |  | how much is white (0 = none, 1 = all) |
+| `coverage` | float | `-1` | -1..1 |  | `white_fraction`, `amount` | fraction of the pixels that turn white (0.3 = the brightest 30 %), from the image's own histogram; -1 = use position |
+| `position` | float | `0.5` | 0..1 |  |  | coverage -1: value cut at 1 - position (higher = more white; how much depends on the input's range) |
 | `contrast` | float | `0.5` | 0..1 |  |  | hardness of the transition (1 = hard cut) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
+
+**Writes:** the mask (grey) named <name> (default: the node name); stat coverage = its fraction above 0.5
 
 **Example**
 
@@ -13126,7 +13491,7 @@ Substance: Histogram Scan. position 0 = black, 1 = white, 0.5 with contrast 0 = 
         "n"
       ],
       "params": {
-        "position": 0.4,
+        "coverage": 0.3,
         "contrast": 0.8
       }
     }
@@ -13145,15 +13510,15 @@ Invert: 1 - value (grey or RGB; alpha untouched).
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13189,7 +13554,7 @@ Substance: Levels; Houdini COP: Levels. value = out_low + (out_high - out_low) �
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
@@ -13201,9 +13566,9 @@ Substance: Levels; Houdini COP: Levels. value = out_low + (out_high - out_low) �
 | `out_low` | float | `0` |  |  |  | output black |
 | `out_high` | float | `1` |  |  |  | output white |
 | `clamp` | bool | `true` |  |  |  | clamp to 0..1 |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13259,9 +13624,9 @@ None (generator).
 | `offset` | vec2 | `[0,0]` |  |  |  | shift in cells (vary or animate without changing the seed) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
 | `seed` | float | `0` |  |  |  | random seed |
-| `name` | string | `"noise"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey 0..1
+**Writes:** image <name> (default: the node name): C grey 0..1
 
 **Example**
 
@@ -13277,30 +13642,121 @@ None (generator).
 }
 ```
 
-### tex_normal_from_height
+### tex_normal_blend
 
-category: `texture` · aliases: `normal_from_height`, `height_to_normal`, `normal_map`, `bump_to_normal`, `cop_bumptonormal`
+category: `texture` · aliases: `normal_blend`, `blend_normals`, `normal_combine`, `rnm`, `detail_normal`, `combine_normals`
 
-Normal map from a height image (Sobel): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).
+Combine two normal maps: a detail (micro grain, a tiling pattern) over a base (a baked normal map), reoriented (RNM) by default, with strength and an optional mask.
 
-Substance: Normal (from height); Houdini COP: Bump to Normal. strength 1 tilts the normal 45° where the height rises by 1 over 1/64 of the image width (the same look at any resolution). A flat image gives (0.5, 0.5, 1). glTF and Blender use OpenGL; Unreal uses DirectX (or flip green on import).
+Substance: Normal Combine / Normal Blend; Unreal: BlendAngleCorrectedNormals. The detail's tilt is scaled by strength (0 = no detail, 2 = twice as steep), then: rnm (reoriented normal mapping) rotates the detail onto the base normal, so the baked shapes and the detail both keep their depth; udn adds the detail's x and y to the base (cheaper, flattens strong detail on steep base slopes); linear normalises the sum (softens both, even the base). The mask (input 2, grey) fades from the base where it is 0 to the blend where it is 1. The detail and mask are resized to the base; the base's alpha is kept. Both maps must use the same green convention (OpenGL or DirectX). tex_blend overlay is no substitute: it flattens and skews normal maps.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `base` | no | no | base normal map (RGBA; its geometry passes through) |
+| 1 | `detail` | no | no | detail normal map (RGBA) laid over the base |
+| 2 | `mask` | yes | no | grey mask: where the detail applies (optional) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `strength` | float | `1` |  |  | `intensity`, `height_scale` | slope scale (negative inverts the relief) |
+| `mode` | enum | `"rnm"` |  | `rnm`, `udn`, `linear` | `method`, `blend_mode` | rnm = reoriented (keeps both reliefs), udn = add x and y (cheaper), linear = normalised sum (softens both) |
+| `strength` | float | `1` | 0.. |  | `intensity`, `detail_strength`, `amount` | detail tilt multiplier (0 = base only, 1 = as baked, 2 = twice as steep) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the base) to use ("" = its only image; needed when it holds several) |
+| `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
+| `detail_image` | string | `""` |  |  |  | which image of input 1 (the detail) to use ("" = its only image; needed when it holds several) |
+| `detail_layer` | string | `""` |  |  |  | layer of the detail ("" = main) |
+| `mask_image` | string | `""` |  |  |  | which image of input 2 (the mask) to use ("" = its only image; needed when it holds several) |
+| `mask_layer` | string | `""` |  |  |  | layer of the mask ("" = main) |
+| `tileable` | bool | `true` |  |  | `wrap`, `seamless` | resizing the detail and mask wraps at the borders |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
+
+**Writes:** the base image with the combined normal map (RGBA), named <name> (default: the node name)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "bricks": {
+      "type": "tex_pattern",
+      "params": {
+        "resolution": 256,
+        "count": [
+          4,
+          8
+        ]
+      }
+    },
+    "base": {
+      "type": "tex_normal_from_height",
+      "in": [
+        "bricks"
+      ],
+      "params": {
+        "depth": 0.015
+      }
+    },
+    "grain": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 256,
+        "scale": 40,
+        "octaves": 3
+      }
+    },
+    "detail": {
+      "type": "tex_normal_from_height",
+      "in": [
+        "grain"
+      ],
+      "params": {
+        "depth": 0.0004
+      }
+    },
+    "out": {
+      "type": "tex_normal_blend",
+      "in": [
+        "base",
+        "detail"
+      ],
+      "params": {
+        "mode": "rnm",
+        "strength": 1
+      }
+    }
+  },
+  "output": "out"
+}
+```
+
+### tex_normal_from_height
+
+category: `texture` · aliases: `normal_from_height`, `height_to_normal`, `normal_map`, `bump_to_normal`, `cop_bumptonormal`
+
+Normal map from a height image (Sobel) in physical units (relief depth and texture size in metres): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).
+
+Substance: Normal (from height); Houdini COP: Bump to Normal. The slope is real: a value of 1 stands `depth` metres high and the image spans `size` metres on the model, so one texel is size / width metres and the normal tilts by atan(height step × depth / texel size). The same graph gives the same normals at any resolution, and a value you can measure picks the strength: 0.0003 for paint and cast grain, 0.002 for hammered metal, 0.01 to 0.02 for brick and mortar. For bake_height's "distance" layer (metres already) use depth 1 and the size the uv square covers. Steps narrower than a texel (hard pattern edges, thresholds) stay steeper at higher resolutions, as a finer step is physically steeper; give them a bevel or blur them in uv units. A flat image gives (0.5, 0.5, 1). glTF and Blender use OpenGL; Unreal uses DirectX (or flip green on import). Combine with another normal map in tex_normal_blend.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `depth` | float | `0.01` |  |  | `height`, `height_scale`, `bump_depth`, `relief` | relief: metres a height value of 1 stands above 0 (negative inverts the relief) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (the texel size is size / width) |
 | `format` | enum | `"opengl"` |  | `opengl`, `directx` | `convention` | green channel convention |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13313,18 +13769,18 @@ Substance: Normal (from height); Houdini COP: Bump to Normal. strength 1 tilts t
         "resolution": 256
       }
     },
-    "out": {
+    "brick_normal": {
       "type": "tex_normal_from_height",
       "in": [
         "bricks"
       ],
       "params": {
-        "strength": 3,
-        "name": "brick_normal"
+        "depth": 0.015,
+        "size": 1
       }
     }
   },
-  "output": "out"
+  "output": "brick_normal"
 }
 ```
 
@@ -13334,22 +13790,24 @@ category: `texture` · aliases: `texture_output`, `rename_image`, `image_output`
 
 Name an image (rename), or copy one of its layers out as a new image (e.g. the "id" layer of a pattern).
 
-Substance: Output node; Houdini COP: Null / Output. With layer "" the image is renamed to `name`; with a layer, a new image `name` holds that layer as C and the original stays. An image already called `name` is replaced. keep_only drops every other image (and the mesh) from the output.
+Substance: Output node; Houdini COP: Null / Output. With layer "" the image is renamed to `name` (default: this node's name); with a layer, a new image `name` holds that layer as C and the original stays. An image already called `name` is replaced. keep_only drops every other image (and the mesh) from the output: the way to isolate one image of a stack.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `name` | string | `"image"` |  |  | `image_name`, `output_name` | the image name (materials reference it as "image:<name>") |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  |  | copy this layer out as a new image ("" = rename the whole image) |
 | `keep_only` | bool | `false` |  |  |  | output only this image |
+
+**Writes:** the image renamed <name> (default: the node name), or with layer set a new image <name> holding that layer
 
 **Example**
 
@@ -13362,18 +13820,17 @@ Substance: Output node; Houdini COP: Null / Output. With layer "" the image is r
         "resolution": 256
       }
     },
-    "out": {
+    "brick_id": {
       "type": "tex_output",
       "in": [
         "bricks"
       ],
       "params": {
-        "name": "brick_id",
         "layer": "id"
       }
     }
   },
-  "output": "out"
+  "output": "brick_id"
 }
 ```
 
@@ -13398,7 +13855,7 @@ items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty i
 | `items` | json | `[]` |  |  |  | array of {name, maps:{channel:imageName}}; empty = each image becomes one item in channel C |
 | `resolution` | ivec2 | `[2048,2048]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `padding` | int | `8` | 0..8192 |  |  | empty gutter on every side of each item, in pixels |
-| `name` | string | `"atlas"` |  |  |  | atlas image name prefix; images are named <name>_<channel> |
+| `name` | string | `""` |  |  |  | atlas image name prefix ("" = this node's name); images are named <name>_<channel> |
 
 **Writes:** atlas images; points with name, rect, uv_offset and uv_scale; detail atlas_size
 
@@ -13450,9 +13907,9 @@ items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty i
 
 category: `texture` · aliases: `tile_generator`, `bricks`, `brick`, `checker`, `tiles_pattern`, `cop_pattern`
 
-Tiling pattern image: bricks, tiles, checker, stripes, hex, dots or grid lines, with gap (mortar), bevel and per-cell random id.
+Tiling pattern image: bricks, tiles, checker, stripes, hex, dots, or a grid line mask, with gap (mortar), bevel and per-cell random id.
 
-Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.
+Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.
 
 **Inputs**
 
@@ -13468,11 +13925,11 @@ None (generator).
 | `offset` | float | `0.5` | 0..1 |  | `row_offset`, `stagger` | bricks / hex / dots: shift of every other row (fraction of a cell) |
 | `gap` | float | `0.06` | 0..1 |  | `mortar`, `spacing` | mortar / gap width as a fraction of the smaller cell side (dots: 1 - diameter) |
 | `bevel` | float | `0.08` | 0..1 |  | `smooth`, `roundness` | bevel width as a fraction of the smaller cell side (0 = hard antialiased edge) |
-| `variation` | float | `0` | 0..1 |  | `height_variation`, `luminance_random` | random darkening per cell (0 = all cells 1) |
+| `variation` | float | `0` | 0..1 |  | `height_variation`, `luminance_random` | random darkening per cell (0 = all cells 1; not grid or checker) |
 | `seed` | float | `0` |  |  |  | random seed |
-| `name` | string | `"pattern"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey profile, id grey random per cell
+**Writes:** image <name> (default: the node name): C grey profile (1 on the cells; grid: 1 on the lines), id grey random per cell
 
 **Example**
 
@@ -13517,9 +13974,9 @@ None (generator).
 | `intensity` | vec2 | `[0.4,1]` | 0.. |  |  | intensity range of a stroke |
 | `tileable` | bool | `true` |  |  | `tile`, `wrap` | strokes wrap at the borders |
 | `seed` | float | `0` |  |  |  | random seed |
-| `name` | string | `"scratches"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey 0..1
+**Writes:** image <name> (default: the node name): C grey 0..1
 
 **Example**
 
@@ -13559,9 +14016,9 @@ None (generator).
 | `rotation` | float | `0` |  |  | `angle`, `rotate` | rotation in degrees (counter-clockwise) |
 | `falloff` | float | `0` | 0..1 |  | `softness`, `blur` | soft edge as a fraction of the radius (0 = antialiased hard edge, 1 = a cone) |
 | `tile` | ivec2 | `[1,1]` | 1..512 |  | `tiling`, `repeat`, `count` | repeats along u and v |
-| `name` | string | `"shape"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey 0..1
+**Writes:** image <name> (default: the node name): C grey 0..1
 
 **Example**
 
@@ -13605,9 +14062,9 @@ None (generator).
 | `combine` | enum | `"max"` |  | `max`, `add` | `blend` | how overlapping blobs combine |
 | `tileable` | bool | `true` |  |  | `tile`, `wrap` | blobs wrap at the borders |
 | `seed` | float | `0` |  |  |  | random seed |
-| `name` | string | `"splatter"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey 0..1
+**Writes:** image <name> (default: the node name): C grey 0..1
 
 **Example**
 
@@ -13648,9 +14105,9 @@ None (generator).
 | `size` | float | `0.2` | 0.001.. |  | `height`, `font_size` | height of the text block as a fraction of the image height (shrunk to fit the width) |
 | `position` | vec2 | `[0.5,0.5]` |  |  | `center` | centre of the text in uv |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment of lines |
-| `name` | string | `"text"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** image <name>: C grey 0..1
+**Writes:** image <name> (default: the node name): C grey 0..1
 
 **Example**
 
@@ -13678,7 +14135,7 @@ Threshold: grey 1 where the value (luminance) is above threshold, else 0, with a
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
@@ -13686,9 +14143,9 @@ Threshold: grey 1 where the value (luminance) is above threshold, else 0, with a
 |---|---|---|---|---|---|---|
 | `threshold` | float | `0.5` |  |  | `level`, `value` | cut value |
 | `softness` | float | `0` | 0..1 |  | `smooth`, `falloff` | width of the smooth transition around threshold |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13744,11 +14201,12 @@ Substance: Tile Sampler / Splatter Circular. One instance per grid cell: positio
 | `intensity` | vec2 | `[0.6,1]` | 0.. |  | `luminance_random` | intensity range per instance |
 | `combine` | enum | `"max"` |  | `max`, `add` | `blend` | how overlapping instances combine |
 | `seed` | float | `0` |  |  |  | random seed |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the pattern) to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `"tiles"` |  |  | `image_name`, `output_name` | image name (materials reference it as "image:<name>") |
+| `mask_image` | string | `""` |  |  |  | which image of input 1 (the mask) to use ("" = its only image; needed when it holds several) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
-**Writes:** a new image <name>: C grey
+**Writes:** a new image <name> (default: the node name): C grey
 
 **Example**
 
@@ -13796,7 +14254,7 @@ Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 =
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
@@ -13807,7 +14265,7 @@ Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 =
 | `height_offset` | float | `0` |  |  |  | added height (metres) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 | `layer_name` | string | `"height"` |  |  | `hf_layer` | heightfield layer to write ("height" or a mask layer) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 
 **Writes:** heightfield volume (layers height, mask)
@@ -13852,7 +14310,7 @@ Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `t
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `image` | no | no | geometry holding the image to process (everything else passes through) |
+| 0 | `image` | no | no | geometry holding the image to process (everything else passes through; with several images, image names the one) |
 
 **Parameters**
 
@@ -13863,9 +14321,9 @@ Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `t
 | `scale` | vec2 | `[1,1]` |  |  | `s`, `zoom` | zoom (> 1 enlarges the content) |
 | `tile` | vec2 | `[1,1]` | 0.001.. |  | `tiling`, `repeat` | repeats of the content along u and v |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | repeat the source outside 0..1 (else black) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13920,10 +14378,11 @@ Substance: Warp / Directional Warp / Vector Warp; Houdini COP: Displace. intensi
 | `intensity` | float | `0.02` |  |  | `amount`, `strength` | largest offset as a fraction of the image width |
 | `angle` | float | `0` |  |  |  | directional: direction in degrees (0 = +u) |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
-| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to process ("" = the first) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
+| `warp_image` | string | `""` |  |  |  | which image of input 1 (the warp image) to use ("" = its only image; needed when it holds several) |
 | `warp_layer` | string | `""` |  |  |  | layer of the warp image ("" = main) |
-| `name` | string | `""` |  |  | `image_name`, `output_name` | rename the result ("" = keep the input image name) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
 
 **Example**
 
@@ -13965,13 +14424,13 @@ category: `texture` · aliases: `texture_material`, `material_textures`, `attach
 
 Attach images as texture maps (base colour, normal, roughness, ORM) to a named material and assign it; the images travel with the geometry and exporters embed them.
 
-Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0); it is copied into the output and the material table entry gets "image:<name>" in that slot. orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images.
+Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other projects assign through input 1 of the material node.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | mesh to texture (needs uv) |
+| 0 | `geo` | yes | no | mesh to texture (needs uv); none: the material alone, for a material output |
 | 1 | `images` | yes | no | geometry holding the images (merge texture branches) |
 
 **Parameters**
@@ -14012,11 +14471,10 @@ Input 0 is the mesh (with uv), input 1 the images (merge several texture branche
     "bricks": {
       "type": "tex_pattern",
       "params": {
-        "resolution": 256,
-        "name": "brick_height"
+        "resolution": 256
       }
     },
-    "color": {
+    "brick_color": {
       "type": "tex_colorize",
       "in": [
         "bricks"
@@ -14035,25 +14493,23 @@ Input 0 is the mesh (with uv), input 1 the images (merge several texture branche
             1,
             "#a5462e"
           ]
-        ],
-        "name": "brick_color"
+        ]
       }
     },
-    "nrm": {
+    "brick_normal": {
       "type": "tex_normal_from_height",
       "in": [
         "bricks"
       ],
       "params": {
-        "strength": 2,
-        "name": "brick_normal"
+        "depth": 0.02
       }
     },
     "maps": {
       "type": "merge",
       "in": [
-        "color",
-        "nrm"
+        "brick_color",
+        "brick_normal"
       ]
     },
     "out": {

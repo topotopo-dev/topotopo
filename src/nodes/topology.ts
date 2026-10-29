@@ -4,13 +4,15 @@ import type { Src } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import {
-  boundaryLoops, buildEdges, connectivity, orientOutward, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, topologyReport, triangulate,
+  boundaryLoops, buildEdges, connectivity, orientOutward, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, signedVolume, topologyReport, triangulate,
 } from '../core/topology.ts';
+import { TriBVH } from '../core/spatial.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
 import { EdgeSet, edgeFromKey, edgeKey, forEachPrimEdge } from '../core/edges.ts';
 import { P, edgeMask, mask } from './util.ts';
 import { fusePoints, removeDegenerate } from './transform.ts';
 import { makeBox } from './generate.ts';
+import { repairMesh } from '../core/repair.ts';
 import type { Vec3 } from '../core/math.ts';
 
 defineNode({
@@ -42,7 +44,7 @@ defineNode({
   params: {
     fuse_distance: { type: 'float', default: 0, min: 0, desc: 'weld points within this distance first (0 = off)' },
     remove_degenerate: { type: 'bool', default: true, desc: 'remove prims with repeated/too few points' },
-    min_area: { type: 'float', default: 1e-12, min: 0, desc: 'remove polygons with smaller area (0 = keep)' },
+    min_area: { type: 'float', default: 1e-12, min: 0, desc: 'remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side' },
     remove_unused_points: { type: 'bool', default: true, desc: 'remove points not used by prims (only when the geometry has prims)' },
     fix_winding: { type: 'bool', default: false, desc: 'make closed meshes face outward' },
   },
@@ -51,13 +53,110 @@ defineNode({
     let g = input(0);
     if (p.fuse_distance > 0) g = fusePoints(g, p.fuse_distance);
     if (p.remove_degenerate) g = removeDegenerate(g);
-    if (p.min_area > 0) {
-      const keep = Uint8Array.from({ length: g.numPrims }, (_, pr) => (!g.primClosed[pr] || primArea(g, pr) >= p.min_area ? 1 : 0));
-      g = g.subsetPrims(keep, false);
-    }
+    if (p.min_area > 0) g = removeSmallFaces(g, p.min_area);
     if (p.remove_unused_points && g.numPrims > 0) g = g.removeUnusedPoints();
     if (p.fix_winding) g = orientOutward(g);
     return g === input(0) ? g.clone() : g;
+  },
+});
+
+/**
+ * Faces below minArea go without opening the surface: a tiny face (all its points within 2·√minArea) is collapsed
+ * into one point, so its neighbours meet (an edge collapse); a long thin sliver triangle hands its middle point to the
+ * face across its long side (mesh_repair's degenerate step). Only a sliver polygon of 4+ points with no such
+ * neighbour is simply removed.
+ */
+export function removeSmallFaces(g: Geometry, minArea: number): Geometry {
+  const reach = 2 * Math.sqrt(minArea), P = g.P;
+  const cand = new Uint8Array(g.numPoints);
+  let compact = 0, small = 0;
+  for (let pr = 0; pr < g.numPrims; pr++) {
+    if (!g.primClosed[pr] || primArea(g, pr) >= minArea) continue;
+    small++;
+    const ids = g.primPoints(pr);
+    let far = false;
+    for (let a = 0; a < ids.length && !far; a++)
+      for (let b = a + 1; b < ids.length; b++) {
+        const i = ids[a] * 3, j = ids[b] * 3;
+        if (Math.hypot(P[i] - P[j], P[i + 1] - P[j + 1], P[i + 2] - P[j + 2]) > reach) { far = true; break; }
+      }
+    if (far) continue;
+    compact++;
+    for (const i of ids) cand[i] = 1;
+  }
+  if (!small) return g;
+  if (compact) g = fusePoints(g, reach, (i) => !!cand[i]);
+  if (compact === small) return g;
+  const out = repairMesh(g, {
+    fuse: 'off', tolerance: 0, degenerate: true, duplicates: false, nonManifold: 'keep', winding: false, outward: false,
+    fillHoles: false, maxHoleEdges: 0, isolated: false, selfIntersections: 'off', minArea,
+  }).geo;
+  out.primGroups.delete('filled');
+  return out;
+}
+
+defineNode({
+  type: 'remove_interior',
+  category: 'topology',
+  summary: 'Delete faces buried inside other closed parts (kitbashed pieces that overlap): they can never be seen.',
+  description: 'Parts are told apart by connectivity (or by the prim attribute name). A face goes when its centre and every corner, pulled a hair toward the centre, lie inside one other part that is a closed solid; a face only partly inside stays (cut it with boolean union instead). Faces touching another part face to face stay too. The parts are left open where their buried faces were: that is the point, nothing inside is rendered or baked.',
+  aliases: ['remove_hidden', 'remove_inside', 'hidden_faces', 'interior_faces'],
+  inputs: [{ name: 'geo', desc: 'overlapping parts (each closed part hides what is inside it)' }],
+  params: {
+    group: P.group('prim', 'faces that may be removed ("" = all)'),
+    parts: { type: 'enum', options: ['connected', 'name'], default: 'connected', desc: 'what makes a part: connected polygons, or the prim attribute name' },
+    output: { type: 'enum', options: ['delete', 'group'], default: 'delete', desc: 'delete the hidden faces, or keep them in prim group "interior"' },
+  },
+  outputs: 'prim group interior (output group)',
+  example: {
+    nodes: {
+      body: { type: 'box', params: { size: [1, 0.4, 0.4] } },
+      boss: { type: 'tube', params: { radius: 0.1, height: 0.3, caps: true } },
+      place: { type: 'transform', in: ['boss'], params: { rotate: [0, 0, 90], translate: [0.5, 0, 0] } },
+      parts: { type: 'merge', in: ['body', 'place'] },
+      tidy: { type: 'remove_interior', in: ['parts'] },
+    },
+    output: 'tidy',
+  },
+  cook: ({ input, p, warn }) => {
+    const g = input(0);
+    const sel = mask(g, 'prim', p.group);
+    let part: Int32Array, nParts: number;
+    if (p.parts === 'name') {
+      const na = g.prims.get('name');
+      if (!na || na.type !== 'string') throw new NodeError('parts "name" needs a prim string attribute name', 'name the parts first (name node), or use parts "connected"');
+      const ids = new Map<string, number>();
+      part = Int32Array.from({ length: g.numPrims }, (_, pr) => { const k = String(na.get(pr) ?? ''); let i = ids.get(k); if (i === undefined) ids.set(k, i = ids.size); return i; });
+      nParts = ids.size;
+    } else ({ primClass: part, count: nParts } = connectivity(g));
+    // closed parts hide what is inside them
+    const solids: { k: number; bvh: TriBVH; lo: number[]; hi: number[] }[] = [];
+    for (let k = 0; k < nParts; k++) {
+      const sub = g.subsetPrims(Uint8Array.from(part, (c) => (c === k ? 1 : 0)), true);
+      if (!sub.numPrims || !topologyReport(sub).closed || !(signedVolume(sub) > 0)) continue;
+      const bb = sub.bbox();
+      solids.push({ k, bvh: new TriBVH(sub), lo: bb.min, hi: bb.max });
+    }
+    const hidden = new Uint8Array(g.numPrims);
+    let n = 0;
+    if (solids.length) {
+      const P = g.P;
+      for (let pr = 0; pr < g.numPrims; pr++) {
+        if (!g.primClosed[pr] || (sel && !sel[pr])) continue;
+        const ids = g.primPoints(pr);
+        if (ids.length < 3) continue;
+        const c = primCentroid(g, pr);
+        const pts: Vec3[] = [c, ...ids.map((i): Vec3 => [P[i * 3] + (c[0] - P[i * 3]) * 0.01, P[i * 3 + 1] + (c[1] - P[i * 3 + 1]) * 0.01, P[i * 3 + 2] + (c[2] - P[i * 3 + 2]) * 0.01])];
+        for (const s of solids) {
+          if (s.k === part[pr]) continue;
+          if (!pts.every((q) => q[0] >= s.lo[0] && q[0] <= s.hi[0] && q[1] >= s.lo[1] && q[1] <= s.hi[1] && q[2] >= s.lo[2] && q[2] <= s.hi[2])) continue;
+          if (pts.every((q) => s.bvh.inside(q[0], q[1], q[2]))) { hidden[pr] = 1; n++; break; }
+        }
+      }
+    } else if (g.numPrims) warn('no closed part to hide anything: every part has open edges (or no volume), so nothing is inside one');
+    if (p.output === 'group') { const out = g.clone(); out.addGroup('prim', 'interior', hidden); return out; }
+    if (!n) return g.clone();
+    return g.subsetPrims(hidden.map((x) => 1 - x), true);
   },
 });
 

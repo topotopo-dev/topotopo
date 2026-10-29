@@ -466,92 +466,113 @@ defineNode({
   example: { type: 'fillet_curve', params: { radius: 0.5, segments: 8 } },
   cook: ({ input, p }) => {
     const g = input(0);
-    const ptSel = mask(g, 'point', p.group);
     const ra = p.radius_attrib ? g.points.get(p.radius_attrib) : null;
     if (p.radius_attrib && (!ra || ra.type === 'string' || ra.isArray)) throw new NodeError(`no numeric point attribute "${p.radius_attrib}" for radius_attrib`);
-    const minTurn = p.angle_min * DEG;
-    const rb = new Rebuild(g);
-    const fg = rb.b.group('point', 'fillet');
-    for (let pr = 0; pr < g.numPrims; pr++) {
-      if (!isCurvePrim(g, pr) || g.primSize(pr) < 3) { rb.keep(pr); continue; }
-      let pts = g.primPoints(pr);
-      let closed = !!g.primClosed[pr];
-      // an open polyline whose ends meet is a loop: fillet its seam too, keep it open (seam point repeated)
-      const loop = !closed && pts.length > 3 && pts[0] === pts[pts.length - 1];
-      if (loop) pts = pts.slice(0, -1);
-      const cyc = closed || loop;
-      const m = pts.length, X = positionsOf(g, pts);
-      const t = new Float64Array(m), ang = new Float64Array(m);
-      const d1s: Vec3[] = new Array(m), d2s: Vec3[] = new Array(m), lenA = new Float64Array(m), lenB = new Float64Array(m);
-      for (let k = 0; k < m; k++) {
-        if (!cyc && (k === 0 || k === m - 1)) continue;
-        if (ptSel && !ptSel[pts[k]]) continue;
-        const a = (k - 1 + m) % m, c = (k + 1) % m;
-        const P0 = v3(X, k), A = v3(X, a), B = v3(X, c);
-        const da: Vec3 = [A[0] - P0[0], A[1] - P0[1], A[2] - P0[2]], db: Vec3 = [B[0] - P0[0], B[1] - P0[1], B[2] - P0[2]];
-        const la = Math.hypot(...da), lb = Math.hypot(...db);
-        if (!(la > 1e-12 && lb > 1e-12)) continue;
-        const d1 = normalize(da), d2 = normalize(db);
-        const th = Math.acos(Math.max(-1, Math.min(1, dot(d1, d2)))); // interior angle
-        if (Math.PI - th < minTurn || th < 1e-6) continue;
-        const r = p.radius * (ra ? Number(ra.get(pts[k])) : 1);
-        if (!(r > 0)) continue;
-        t[k] = r / Math.tan(th / 2);
-        ang[k] = th; d1s[k] = d1; d2s[k] = d2; lenA[k] = la; lenB[k] = lb;
-      }
-      if (p.clamp) {
-        // tangent lengths of the two corners of an edge may not add up to more than the edge
-        const f = new Float64Array(m).fill(1);
-        for (let k = 0; k < m; k++) {
-          const c = (k + 1) % m;
-          if (!cyc && k === m - 1) continue;
-          const L = Math.hypot(X[c * 3] - X[k * 3], X[c * 3 + 1] - X[k * 3 + 1], X[c * 3 + 2] - X[k * 3 + 2]);
-          const need = t[k] + t[c];
-          if (need > L && need > 0) { const s = L / need; f[k] = Math.min(f[k], s); f[c] = Math.min(f[c], s); }
-        }
-        for (let k = 0; k < m; k++) t[k] *= f[k];
-      }
-      const verts: CurveVtx[] = [];
-      for (let k = 0; k < m; k++) {
-        if (!(t[k] > 1e-12)) { verts.push({ k }); continue; }
-        const a = (k - 1 + m) % m, c = (k + 1) % m, th = ang[k], d1 = d1s[k], d2 = d2s[k], tk = t[k];
-        const P0 = v3(X, k);
-        const T1 = addS(P0, d1, tk), T2 = addS(P0, d2, tk);
-        const fa = tk / lenA[k], fb = tk / lenB[k];
-        const prov = (s: number) => ({ idx: [k, a, k, c], w: [(1 - s) * (1 - fa), (1 - s) * fa, s * (1 - fb), s * fb] });
-        const push = (P: Vec3, s: number) => { verts.push({ P, ...prov(s) }); };
-        if (p.type === 'chamfer') { push(T1, 0); push(T2, 1); continue; }
-        const n = Math.max(1, p.segments);
-        if (p.type === 'bezier') {
-          for (let j = 0; j <= n; j++) {
-            const s = j / n, w0 = (1 - s) * (1 - s), w1 = 2 * s * (1 - s), w2 = s * s;
-            push([w0 * T1[0] + w1 * P0[0] + w2 * T2[0], w0 * T1[1] + w1 * P0[1] + w2 * T2[1], w0 * T1[2] + w1 * P0[2] + w2 * T2[2]], s);
-          }
-          continue;
-        }
-        // round: arc around the centre on the bisector, from T1 to T2
-        const bis = normalize([d1[0] + d2[0], d1[1] + d2[1], d1[2] + d2[2]]);
-        const C = addS(P0, bis, tk / Math.cos(th / 2));
-        const va: Vec3 = [T1[0] - C[0], T1[1] - C[1], T1[2] - C[2]], vb: Vec3 = [T2[0] - C[0], T2[1] - C[1], T2[2] - C[2]];
-        const phi = Math.PI - th, sp = Math.sin(phi);
-        for (let j = 0; j <= n; j++) {
-          const s = j / n;
-          const wa = sp > 1e-12 ? Math.sin((1 - s) * phi) / sp : 1 - s, wb = sp > 1e-12 ? Math.sin(s * phi) / sp : s;
-          push([C[0] + va[0] * wa + vb[0] * wb, C[1] + va[1] * wa + vb[1] * wb, C[2] + va[2] * wa + vb[2] * wb], s);
-        }
-      }
-      // tangent points of neighbouring corners that meet exactly (clamped radii): keep one
-      const posOf = (c: CurveVtx): Vec3 => ('k' in c ? v3(X, c.k) : (c.P as Vec3));
-      const same = (a: CurveVtx, b: CurveVtx) => { const x = posOf(a), y = posOf(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) < 1e-12; };
-      const vv: CurveVtx[] = [];
-      for (const c of verts) if (!(vv.length && !('k' in c) && same(vv[vv.length - 1], c))) vv.push(c);
-      if (cyc && vv.length > 1 && !('k' in vv[vv.length - 1]) && same(vv[0], vv[vv.length - 1])) vv.pop();
-      const { created } = rb.addCurve(pr, vv, closed, undefined, loop);
-      for (const id of created) fg.add(id);
-    }
-    return rb.finish();
+    return filletCurves(g, {
+      radius: p.radius, type: p.type, segments: p.segments, angleMin: p.angle_min, sel: mask(g, 'point', p.group), clamp: p.clamp,
+      radiusOf: ra ? (pt) => Number(ra.get(pt)) : null,
+    });
   },
 });
+
+export interface FilletOptions {
+  radius: number;
+  type: 'round' | 'chamfer' | 'bezier';
+  segments: number;
+  /** degrees: corners turning less stay */
+  angleMin: number;
+  /** corner points to fillet (null = all) */
+  sel: ArrayLike<number> | null;
+  clamp: boolean;
+  /** per corner point, multiplies the radius */
+  radiusOf: ((pt: number) => number) | null;
+}
+
+/** Fillet the corners of polylines and polygons (the fillet_curve node; also curve's corner_radius). */
+export function filletCurves(g: Geometry, p: FilletOptions): Geometry {
+  const ptSel = p.sel;
+  const minTurn = p.angleMin * DEG;
+  const rb = new Rebuild(g);
+  const fg = rb.b.group('point', 'fillet');
+  for (let pr = 0; pr < g.numPrims; pr++) {
+    if (!isCurvePrim(g, pr) || g.primSize(pr) < 3) { rb.keep(pr); continue; }
+    let pts = g.primPoints(pr);
+    let closed = !!g.primClosed[pr];
+    // an open polyline whose ends meet is a loop: fillet its seam too, keep it open (seam point repeated)
+    const loop = !closed && pts.length > 3 && pts[0] === pts[pts.length - 1];
+    if (loop) pts = pts.slice(0, -1);
+    const cyc = closed || loop;
+    const m = pts.length, X = positionsOf(g, pts);
+    const t = new Float64Array(m), ang = new Float64Array(m);
+    const d1s: Vec3[] = new Array(m), d2s: Vec3[] = new Array(m), lenA = new Float64Array(m), lenB = new Float64Array(m);
+    for (let k = 0; k < m; k++) {
+      if (!cyc && (k === 0 || k === m - 1)) continue;
+      if (ptSel && !ptSel[pts[k]]) continue;
+      const a = (k - 1 + m) % m, c = (k + 1) % m;
+      const P0 = v3(X, k), A = v3(X, a), B = v3(X, c);
+      const da: Vec3 = [A[0] - P0[0], A[1] - P0[1], A[2] - P0[2]], db: Vec3 = [B[0] - P0[0], B[1] - P0[1], B[2] - P0[2]];
+      const la = Math.hypot(...da), lb = Math.hypot(...db);
+      if (!(la > 1e-12 && lb > 1e-12)) continue;
+      const d1 = normalize(da), d2 = normalize(db);
+      const th = Math.acos(Math.max(-1, Math.min(1, dot(d1, d2)))); // interior angle
+      if (Math.PI - th < minTurn || th < 1e-6) continue;
+      const r = p.radius * (p.radiusOf ? p.radiusOf(pts[k]) : 1);
+      if (!(r > 0)) continue;
+      t[k] = r / Math.tan(th / 2);
+      ang[k] = th; d1s[k] = d1; d2s[k] = d2; lenA[k] = la; lenB[k] = lb;
+    }
+    if (p.clamp) {
+      // tangent lengths of the two corners of an edge may not add up to more than the edge
+      const f = new Float64Array(m).fill(1);
+      for (let k = 0; k < m; k++) {
+        const c = (k + 1) % m;
+        if (!cyc && k === m - 1) continue;
+        const L = Math.hypot(X[c * 3] - X[k * 3], X[c * 3 + 1] - X[k * 3 + 1], X[c * 3 + 2] - X[k * 3 + 2]);
+        const need = t[k] + t[c];
+        if (need > L && need > 0) { const s = L / need; f[k] = Math.min(f[k], s); f[c] = Math.min(f[c], s); }
+      }
+      for (let k = 0; k < m; k++) t[k] *= f[k];
+    }
+    const verts: CurveVtx[] = [];
+    for (let k = 0; k < m; k++) {
+      if (!(t[k] > 1e-12)) { verts.push({ k }); continue; }
+      const a = (k - 1 + m) % m, c = (k + 1) % m, th = ang[k], d1 = d1s[k], d2 = d2s[k], tk = t[k];
+      const P0 = v3(X, k);
+      const T1 = addS(P0, d1, tk), T2 = addS(P0, d2, tk);
+      const fa = tk / lenA[k], fb = tk / lenB[k];
+      const prov = (s: number) => ({ idx: [k, a, k, c], w: [(1 - s) * (1 - fa), (1 - s) * fa, s * (1 - fb), s * fb] });
+      const push = (P: Vec3, s: number) => { verts.push({ P, ...prov(s) }); };
+      if (p.type === 'chamfer') { push(T1, 0); push(T2, 1); continue; }
+      const n = Math.max(1, p.segments);
+      if (p.type === 'bezier') {
+        for (let j = 0; j <= n; j++) {
+          const s = j / n, w0 = (1 - s) * (1 - s), w1 = 2 * s * (1 - s), w2 = s * s;
+          push([w0 * T1[0] + w1 * P0[0] + w2 * T2[0], w0 * T1[1] + w1 * P0[1] + w2 * T2[1], w0 * T1[2] + w1 * P0[2] + w2 * T2[2]], s);
+        }
+        continue;
+      }
+      // round: arc around the centre on the bisector, from T1 to T2
+      const bis = normalize([d1[0] + d2[0], d1[1] + d2[1], d1[2] + d2[2]]);
+      const C = addS(P0, bis, tk / Math.cos(th / 2));
+      const va: Vec3 = [T1[0] - C[0], T1[1] - C[1], T1[2] - C[2]], vb: Vec3 = [T2[0] - C[0], T2[1] - C[1], T2[2] - C[2]];
+      const phi = Math.PI - th, sp = Math.sin(phi);
+      for (let j = 0; j <= n; j++) {
+        const s = j / n;
+        const wa = sp > 1e-12 ? Math.sin((1 - s) * phi) / sp : 1 - s, wb = sp > 1e-12 ? Math.sin(s * phi) / sp : s;
+        push([C[0] + va[0] * wa + vb[0] * wb, C[1] + va[1] * wa + vb[1] * wb, C[2] + va[2] * wa + vb[2] * wb], s);
+      }
+    }
+    // tangent points of neighbouring corners that meet exactly (clamped radii): keep one
+    const posOf = (c: CurveVtx): Vec3 => ('k' in c ? v3(X, c.k) : (c.P as Vec3));
+    const same = (a: CurveVtx, b: CurveVtx) => { const x = posOf(a), y = posOf(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) < 1e-12; };
+    const vv: CurveVtx[] = [];
+    for (const c of verts) if (!(vv.length && !('k' in c) && same(vv[vv.length - 1], c))) vv.push(c);
+    if (cyc && vv.length > 1 && !('k' in vv[vv.length - 1]) && same(vv[0], vv[vv.length - 1])) vv.pop();
+    const { created } = rb.addCurve(pr, vv, closed, undefined, loop);
+    for (const id of created) fg.add(id);
+  }
+  return rb.finish();
+}
 
 // ---------------------------------------------------------------- offset_curve_3d
 

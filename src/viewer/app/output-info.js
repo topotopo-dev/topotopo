@@ -5,7 +5,7 @@ import { fmtSize } from './units.js';
 
 /**
  * A result's kind as its badge shows it, in the words everything uses (src/io/kinds.ts): mesh, instances, points,
- * curves, terrain, textures, volume, scene, or empty; '' for a texture of an output, a sidecar or a file.
+ * curves, terrain, textures, material, volume, scene, or empty; '' for a texture of an output, a sidecar or a file.
  */
 export const kindBadge = (item) => (item.kind && item.kind !== 'metadata' ? item.kind : '');
 

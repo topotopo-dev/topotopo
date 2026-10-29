@@ -342,6 +342,8 @@ check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' &&
       c: { type: 'copy_to_points', in: ['b', 's'], params: { pack: true } }, m: { type: 'merge', in: ['hf', 'c'] } }, output: 'm' },
       kind: 'mixed', formats: 'unreal_landscape,png16,r16,mask_png,glb,usda,csv,pointsjson,gltf,geo,obj,ply,stl,json', text: /^terrain 9 × 9, 1 m \+ 5 instances of 1 source$/ },
     image: { spec: { nodes: { t: { type: 'tex_noise', params: { resolution: 8 } } } }, kind: 'image', formats: 'textures,json', text: /^8 × 8 px$/ },
+    material: { spec: { nodes: { t: { type: 'tex_noise', params: { resolution: 8 } }, m: { type: 'texture_to_material', in: [null as unknown as string, 't'], params: { material: 'm', base_color: 't' } } }, output: 'm' },
+      kind: 'material', formats: 'textures,json', text: /^1 material, 1 map \(8 × 8 px\)$/ },
     textured: { spec: { nodes: { b: { type: 'box' }, t: { type: 'tex_noise', params: { resolution: 8 } }, m: { type: 'merge', in: ['b', 't'] } }, output: 'm' }, kind: 'mesh', formats: 'glb,gltf,usda,obj,ply,stl,geo,textures,json' },
     grid: { spec: { nodes: { s: { type: 'sdf_shape' }, g: { type: 'sdf_grid', in: ['s'] } }, output: 'g' }, kind: 'volume', formats: 'json' },
     sdf: { spec: { nodes: { s: { type: 'sdf_shape' } } }, kind: 'volume', formats: '' },

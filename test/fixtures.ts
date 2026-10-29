@@ -25,6 +25,8 @@ export const SRC: Record<string, NodeSpec> = {
   SMALLSPHERE: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.1 } },
   // boolean cutter: bites the +x+y+z corner off BOX (the unit MESH sphere would enclose the box and leave nothing)
   CUTTER: { type: 'sphere', params: { type: 'ico', level: 2, radius: 0.6, center: [0.5, 0.5, 0.5] } },
+  // remove_interior: the small sphere sits inside the box, so all of it is hidden
+  OVERLAP: { type: 'merge', in: ['BOX', 'SMALLSPHERE'] },
   GRID: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
   CURVE: { type: 'curve', params: { points: [[0, 0, 0], [1, 0.5, 0.2], [2, 0, 0.5], [3, 0.4, 0]], smooth: true } },
   CIRCLE: { type: 'circle', params: { radius: 0.6, segments: 24 } },
@@ -76,12 +78,15 @@ export const SRC: Record<string, NodeSpec> = {
   KIT_GROUND: { type: 'terrain', params: { size: [16, 16], divisions: [24, 24], height: 1.5, frequency: 0.12, octaves: 3, seed: 3 } },
   // an L-shaped footprint on the ground (closed polygon), concave on purpose
   KIT_FOOTPRINT: { type: 'curve', params: { points: [[0, 0, 0], [10, 0, 0], [10, 0, 6], [5, 0, 6], [5, 0, 9], [0, 0, 9]], closed: true } },
-  // textures: small images (noise "noise", bricks "pattern" + id, a soft disc stamp "shape"), a box unwrapped
-  // for bakes (xatlas), the same box coloured, and its subdivided high-res version
+  // textures: small images, each named after its node (noise "TEX", bricks "TEX2" + id, a soft disc stamp
+  // "TEXSHAPE", normal maps of the bricks and the noise), a box unwrapped for bakes (xatlas), the same box coloured,
+  // and its subdivided high-res version
   TEX: { type: 'tex_noise', params: { resolution: 64, seed: 1 } },
   TEX2: { type: 'tex_pattern', params: { resolution: [64, 32], count: [4, 4] } },
   TEXSHAPE: { type: 'tex_shape', params: { resolution: 32, falloff: 0.5 } },
   TEXATLAS: { type: 'merge', in: ['TEX', 'TEX2'] },
+  TEXNORMAL: { type: 'tex_normal_from_height', in: ['TEX2'], params: { depth: 0.02 } },
+  TEXDETAIL: { type: 'tex_normal_from_height', in: ['TEX'], params: { depth: 0.002 } },
   UVBOX: { type: 'uv_unwrap', in: ['BOX'] },
   UVCOLOR: { type: 'color', in: ['UVBOX'], params: { mode: 'random' } },
   HIGHBOX: { type: 'subdivide', in: ['BOX'], params: { levels: 2 } },
@@ -122,7 +127,7 @@ export const INPUTS: Record<string, string[]> = {
   resample: ['CURVE'], carve: ['CURVE'], ends: ['CIRCLE'], sweep: ['CURVE', 'PROFILEXY'], polywire: ['CURVE'], revolve: ['PROFILE'],
   extrude: ['SHAPE'], offset_curve: ['SHAPE'], boolean2d: ['SHAPE', 'CIRCLE'], fill: ['SHAPE'], loft: ['LOFT'],
   copy_to_points: ['MESH', 'PTS'], ray: ['PTS_ABOVE', 'MESH'], attrib_copy: ['MESH', 'COLORED'], attrib_transfer: ['MESH', 'COLORED'],
-  boolean: ['BOX', 'CUTTER'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
+  boolean: ['BOX', 'CUTTER'], remove_interior: ['OVERLAP'], material: ['MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],
   sdf_grid: ['SDF'], grid_combine: ['SDFGRID', 'SDFGRID2'], grid_offset: ['SDFGRID'], grid_blur: ['SDFGRID'],
   grid_dilate: ['SDFGRID'], grid_erode: ['SDFGRID'], grid_resample: ['SDFGRID'], grid_to_mesh: ['SDFGRID'],
@@ -147,11 +152,11 @@ export const INPUTS: Record<string, string[]> = {
   // PCG: masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
-  curve_attribs: ['NURBS'], straight_skeleton: ['KIT_FOOTPRINT'],
+  curve_attribs: ['NURBS'], straight_skeleton: ['KIT_FOOTPRINT'], beam: ['ZIGZAG', 'SHAPE'],
   // textures: filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
   tex_blend: ['TEX', 'TEX2', 'TEXSHAPE'], tex_levels: ['TEX'], tex_curves: ['TEX'], tex_blur: ['TEX'], tex_warp: ['TEX2', 'TEX'],
   tex_transform: ['TEX2'], tex_edge_detect: ['TEX2'], tex_invert: ['TEX'], tex_threshold: ['TEX'], tex_histogram_scan: ['TEX'],
-  tex_normal_from_height: ['TEX2'], tex_height_to_ao: ['TEX2'], tex_channel: ['TEX', 'TEX2'], tex_colorize: ['TEX'],
+  tex_constant: ['TEX2'], tex_normal_from_height: ['TEX2'], tex_normal_blend: ['TEXNORMAL', 'TEXDETAIL', 'TEXSHAPE'], tex_height_to_ao: ['TEX2'], tex_channel: ['TEX', 'TEX2'], tex_colorize: ['TEX'],
   tex_tile_sampler: ['TEXSHAPE'], tex_output: ['TEX2'], texture_to_material: ['UVBOX', 'TEX'], tex_to_heightfield: ['TEX'],
   tex_crop: ['TEX2'], trace_image: ['TEXSHAPE'], tex_dilate: ['TEXSHAPE', 'TEXSHAPE'], tex_pack: ['TEXATLAS'],
   heightfield_to_tex: ['HFN'],
@@ -215,6 +220,8 @@ export const PARAMS: Record<string, any> = {
   remesh_quad: { target_length: 0.2, smooth_iterations: 4 },
   mesh_repair: { self_intersections: 'report' },
   lod: { levels: 3 },
+  attrib_string: { format: 'part_{piece:02}_{index}', case: 'upper' },
+  beam: { up: [0, 0, 1], roll: 15, extend: [0.05, 0.1], divisions: 2, name: 'member_{index}' },
   mask: { by: 'slope', min: 0, max: 45, falloff: 15 },
   // attribute_from_map and image_file: { path } is filled in by createFixtureEngine() (an RGBA PNG written to the temp dir)
   orient: { random_yaw: [0, 360], tilt: [0, 10], scale_min: 0.8, scale_max: 1.2 },
@@ -245,8 +252,10 @@ export const PARAMS: Record<string, any> = {
   tex_transform: { offset: [0.25, 0], rotate: 30, scale: [1.5, 1.5] },
   tex_edge_detect: { width: 1 },
   tex_threshold: { threshold: 0.5, softness: 0.1 },
-  tex_histogram_scan: { position: 0.3, contrast: 0.8 },
-  tex_normal_from_height: { strength: 2, format: 'directx' },
+  tex_histogram_scan: { coverage: 0.3, contrast: 0.8 },
+  tex_normal_from_height: { depth: 0.03, size: 1, format: 'directx' },
+  tex_normal_blend: { mode: 'rnm', strength: 1.5 },
+  tex_constant: { channels: 'rgba', color: '#336699', alpha: 0.5 },
   tex_height_to_ao: { radius: 0.1, depth: 0.1, directions: 4, steps: 4 },
   tex_channel: { name: 'orm' },
   tex_colorize: { ramp: [[0, '#3b2316'], [0.5, '#8a4b2a'], [1, '#c9845a']] },
@@ -256,7 +265,7 @@ export const PARAMS: Record<string, any> = {
   trace_image: { channel: 'luminance', tolerance: 1 },
   tex_dilate: { radius: 3, mask_threshold: 0.5 },
   tex_pack: { resolution: 128, padding: 4 },
-  texture_to_material: { material: 'noisy', base_color: 'noise', roughness: 'noise' },
+  texture_to_material: { material: 'noisy', base_color: 'TEX', roughness: 'TEX' },
   tex_to_heightfield: { size: 4, height_scale: 0.5 },
   bake_ao: { resolution: 64, samples: 8 },
   bake_thickness: { resolution: 64, samples: 8 },

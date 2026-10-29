@@ -70,9 +70,9 @@ try {
   check(!expanded.hasPacked() && expanded.numPoints === 11 && expanded.numPrims === 3
     && eq(values(expanded, 'prim', 'name'), ['copy0', 'copy1', 'copy2']) && near(expanded.bbox().max, unpacked.bbox().max), 'expand mode retains three world-space mesh copies');
   check(checkGeo(g).length === 0 && checkGeo(expanded).length === 0, 'merged scenes satisfy geometry invariants');
-  const reexported = await importGeometryAsync(await exportGeometryAsync(g, 'glb'), 'glb');
+  const reexported = await importGeometryAsync(await exportGeometryAsync(g, 'glb', { custom: true }), 'glb');
   check(reexported.numPacked === 3 && eq(values(reexported, 'prim', 'name'), ['copy0', 'copy1', 'copy2'])
-    && eq(values(reexported, 'prim', 'category'), ['node0', 'node1', 'node2']), 'packed names and extras survive normal GLB export/reimport');
+    && eq(values(reexported, 'prim', 'category'), ['node0', 'node1', 'node2']), 'packed names and extras survive GLB export (custom attributes) and reimport');
   check(eq(values(g, 'prim', 'name'), values(await importGeometryAsync(bytes, 'glb'), 'prim', 'name')), 'repeated import has stable instance order');
   fs.writeFileSync(path.join(tmp, 'scene.glb'), bytes);
   const host = createNodeHost({ baseDir: tmp, workers: 0 });
@@ -130,7 +130,7 @@ try {
   fs.writeFileSync(path.join(mixed, 'models.glb'), await io.writeBinary(pure));
   fs.writeFileSync(path.join(mixed, 'markers.v1.points.json'), JSON.stringify({ format: 'topotopo-points', version: 1, count: 1, attributes: { P: { type: 'float', size: 3, data: [0, 0, 0] } } }));
   const mixedFolder = await engine.cook(fileGraph('mixed'));
-  const mixedBack = await importGeometryAsync(await exportGeometryAsync(mixedFolder.geo!, 'glb'), 'glb');
+  const mixedBack = await importGeometryAsync(await exportGeometryAsync(mixedFolder.geo!, 'glb', { custom: true }), 'glb');
   check(mixedFolder.ok && values(mixedFolder.geo!, 'point', 'name').includes('markers.v1') && eq(values(mixedBack, 'prim', 'name'), ['models/left', 'models/right']), 'separate point-stream and packed files keep folder names through export; dotted stems survive');
   const noConversion = new Engine({ ...host, convertFile: undefined });
   const missing = await noConversion.cook(fileGraph('anything.blend'));

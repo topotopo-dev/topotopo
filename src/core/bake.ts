@@ -17,6 +17,7 @@ import { distanceTransform } from './heightfield.ts';
 import type { RayScene } from './analysis.ts';
 import { hash32 } from './random.ts';
 import { primNormals } from './topology.ts';
+import { TriBVH } from './spatial.ts';
 
 export interface TexelMap {
   w: number;
@@ -381,13 +382,15 @@ export interface ProjectArgs {
 /**
  * For samples [start, end): cast a ray from P + N·cage along -N over 2·cage against the high-res scene and write the
  * signed height of the nearest hit above the low surface (D = cage - t; NaN on a miss) and, when HN (the high mesh's
- * point normals) is given, the hit's interpolated normal into NO (in the low normal's hemisphere).
+ * point normals) is given, the hit's interpolated normal into NO (in the low normal's hemisphere). A per-sample cage
+ * C (one value per sample), when given, replaces a.cage.
  */
 export function projectRange(a: ProjectArgs, A: Record<string, any>, scene: RayScene, start: number, end: number): void {
   const P: Float64Array = A.P, N: Float64Array = A.N, D: Float64Array = A.D, NO: Float64Array | undefined = A.NO;
   const HN: Float64Array | undefined = A.HN, Tri: Float64Array = A.T, triPt: Int32Array = A.triPt;
-  const cage = a.cage;
+  const C: Float64Array | undefined = A.C && A.C.length ? A.C : undefined;
   for (let i = start; i < end; i++) {
+    const cage = C ? C[i] : a.cage;
     const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2];
     if (!(nx || ny || nz)) { D[i] = NaN; continue; }
     const ox = P[i * 3] + nx * cage, oy = P[i * 3 + 1] + ny * cage, oz = P[i * 3 + 2] + nz * cage;
@@ -438,8 +441,14 @@ export interface CurvatureEdges {
   count: number;
 }
 
-/** Edges between two polygons (points matched by position, tolerance `tol`) with a bend of at least minAngle degrees. */
-export function curvatureEdges(g: Geometry, tol: number, minAngle = 0.5): CurvatureEdges {
+/**
+ * Edges between two polygons (points matched by position, tolerance `tol`) with a bend of at least minAngle degrees.
+ * With `intersections`, also the creases where separate parts cut into each other (a bolt through a plate, a box sunk
+ * into another: triangles that cross without sharing a point), as concave edges: there the surface of the whole folds
+ * inward by the angle between the two faces. `counts` receives how many of each were found and whether the pair
+ * search stopped at its cap.
+ */
+export function curvatureEdges(g: Geometry, tol: number, minAngle = 0.5, intersections = false, counts?: { shared: number; crossing: number; capped: boolean }): CurvatureEdges {
   const P = g.P, np = g.numPoints;
   const canon = new Int32Array(np);
   const ids = new Map<string, number>();
@@ -488,6 +497,10 @@ export function curvatureEdges(g: Geometry, tol: number, minAngle = 0.5): Curvat
     K.push((s <= 0 ? 1 : -1) * (Math.acos(c) / (Math.PI / 2)));
     FN.push(n1x, n1y, n1z, n2x, n2y, n2z);
   }
+  const shared = K.length;
+  let capped = false;
+  if (intersections) capped = crossingCreases(g, canon, tol, cosMin, E, K, FN);
+  if (counts) { counts.shared = shared; counts.crossing = K.length - shared; counts.capped = capped; }
   const D = new Float64Array(K.length * 4);
   for (let e = 0; e < K.length; e++) {
     const ux = E[e * 6 + 3] - E[e * 6], uy = E[e * 6 + 4] - E[e * 6 + 1], uz = E[e * 6 + 5] - E[e * 6 + 2];
@@ -495,6 +508,105 @@ export function curvatureEdges(g: Geometry, tol: number, minAngle = 0.5): Curvat
     D[e * 4] = ux / L; D[e * 4 + 1] = uy / L; D[e * 4 + 2] = uz / L; D[e * 4 + 3] = L;
   }
   return { E: Float64Array.from(E), D, K: Float64Array.from(K), FN: Float64Array.from(FN), count: K.length };
+}
+
+/**
+ * Creases where triangles that share no point (by position: `canon`) cross: the segment the two have in common becomes a
+ * concave edge (bend = −(angle between their normals) / 90°) with the two normals as its faces. Nearly parallel pairs
+ * (closer than the bend threshold `cosMin`) and coplanar overlaps are skipped. Appends to E, K, FN; returns true when the
+ * pair search stopped at `maxTests` candidate pairs.
+ */
+function crossingCreases(g: Geometry, canon: Int32Array, tol: number, cosMin: number, E: number[], K: number[], FN: number[], maxTests = 4_000_000): boolean {
+  const bvh = new TriBVH(g);
+  const T = bvh.T, tp = bvh.triPt, nodes = bvh.nodes, child = bvh.child, order = bvh.order, nt = T.length / 9;
+  if (nt < 2) return false;
+  const N = new Float64Array(nt * 3);
+  for (let t = 0; t < nt; t++) {
+    const o = t * 9;
+    const ux = T[o + 3] - T[o], uy = T[o + 4] - T[o + 1], uz = T[o + 5] - T[o + 2], vx = T[o + 6] - T[o], vy = T[o + 7] - T[o + 1], vz = T[o + 8] - T[o + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, l = Math.hypot(nx, ny, nz);
+    if (l > 1e-300) { N[t * 3] = nx / l; N[t * 3 + 1] = ny / l; N[t * 3 + 2] = nz / l; }
+  }
+  const stack = new Int32Array(512), seg = new Float64Array(6);
+  let tested = 0;
+  for (let i = 0; i < nt; i++) {
+    if (!N[i * 3] && !N[i * 3 + 1] && !N[i * 3 + 2]) continue;
+    const o = i * 9;
+    const mnx = Math.min(T[o], T[o + 3], T[o + 6]) - tol, mxx = Math.max(T[o], T[o + 3], T[o + 6]) + tol;
+    const mny = Math.min(T[o + 1], T[o + 4], T[o + 7]) - tol, mxy = Math.max(T[o + 1], T[o + 4], T[o + 7]) + tol;
+    const mnz = Math.min(T[o + 2], T[o + 5], T[o + 8]) - tol, mxz = Math.max(T[o + 2], T[o + 5], T[o + 8]) + tol;
+    const a0 = canon[tp[i * 3]], a1 = canon[tp[i * 3 + 1]], a2 = canon[tp[i * 3 + 2]];
+    let sp = 0;
+    stack[sp++] = 0;
+    while (sp > 0) {
+      const n = stack[--sp], b = n * 6;
+      if (nodes[b] > mxx || nodes[b + 3] < mnx || nodes[b + 1] > mxy || nodes[b + 4] < mny || nodes[b + 2] > mxz || nodes[b + 5] < mnz) continue;
+      const c0 = child[n * 2], c1 = child[n * 2 + 1];
+      if (c0 >= 0) { stack[sp++] = c0; stack[sp++] = c1; continue; }
+      const s = -1 - c0;
+      for (let k = s; k < s + c1; k++) {
+        const j = order[k];
+        if (j <= i || (!N[j * 3] && !N[j * 3 + 1] && !N[j * 3 + 2])) continue;
+        const b0 = canon[tp[j * 3]], b1 = canon[tp[j * 3 + 1]], b2 = canon[tp[j * 3 + 2]];
+        if (b0 === a0 || b0 === a1 || b0 === a2 || b1 === a0 || b1 === a1 || b1 === a2 || b2 === a0 || b2 === a1 || b2 === a2) continue;
+        const q = j * 9;
+        if (Math.min(T[q], T[q + 3], T[q + 6]) > mxx || Math.max(T[q], T[q + 3], T[q + 6]) < mnx ||
+            Math.min(T[q + 1], T[q + 4], T[q + 7]) > mxy || Math.max(T[q + 1], T[q + 4], T[q + 7]) < mny ||
+            Math.min(T[q + 2], T[q + 5], T[q + 8]) > mxz || Math.max(T[q + 2], T[q + 5], T[q + 8]) < mnz) continue;
+        const c = N[i * 3] * N[j * 3] + N[i * 3 + 1] * N[j * 3 + 1] + N[i * 3 + 2] * N[j * 3 + 2];
+        if (c > cosMin || c < -cosMin) continue; // (anti)parallel: no crease worth a bend
+        if (++tested > maxTests) return true;
+        if (!crossSegment(T, o, q, N, i, j, tol, seg)) continue;
+        E.push(seg[0], seg[1], seg[2], seg[3], seg[4], seg[5]);
+        K.push(-Math.acos(Math.max(-1, Math.min(1, c))) / (Math.PI / 2));
+        FN.push(N[i * 3], N[i * 3 + 1], N[i * 3 + 2], N[j * 3], N[j * 3 + 1], N[j * 3 + 2]);
+      }
+    }
+  }
+  return false;
+}
+
+/** Scratch of crossSegment: the points where a triangle meets the other's plane. */
+const CS = new Float64Array(12);
+
+/**
+ * The segment two non-coplanar triangles (offsets a, b in T; unit normals of triangles i, j in N) have in common, into
+ * out (two endpoints); false when they do not cross along a segment longer than eps.
+ */
+function crossSegment(T: Float64Array, a: number, b: number, N: Float64Array, i: number, j: number, eps: number, out: Float64Array): boolean {
+  // where triangle `t` meets the plane through point `p` with normal n (two points into CS at `at`), or false
+  const onPlane = (t: number, p: number, n: number, at: number): boolean => {
+    const d = [0, 0, 0];
+    for (let k = 0; k < 3; k++) {
+      const x = (T[t + k * 3] - T[p]) * N[n] + (T[t + k * 3 + 1] - T[p + 1]) * N[n + 1] + (T[t + k * 3 + 2] - T[p + 2]) * N[n + 2];
+      d[k] = Math.abs(x) <= eps ? 0 : x;
+    }
+    if ((d[0] > 0 && d[1] > 0 && d[2] > 0) || (d[0] < 0 && d[1] < 0 && d[2] < 0) || (!d[0] && !d[1] && !d[2])) return false;
+    let m = 0;
+    const put = (x: number, y: number, z: number) => { if (m < 2) { CS[at + m * 3] = x; CS[at + m * 3 + 1] = y; CS[at + m * 3 + 2] = z; } m++; };
+    for (let k = 0; k < 3; k++) {
+      const k2 = (k + 1) % 3, o1 = t + k * 3, o2 = t + k2 * 3;
+      if (!d[k]) put(T[o1], T[o1 + 1], T[o1 + 2]);
+      if (d[k] * d[k2] < 0) { const s = d[k] / (d[k] - d[k2]); put(T[o1] + (T[o2] - T[o1]) * s, T[o1 + 1] + (T[o2 + 1] - T[o1 + 1]) * s, T[o1 + 2] + (T[o2 + 2] - T[o1 + 2]) * s); }
+    }
+    return m === 2;
+  };
+  if (!onPlane(a, b, j * 3, 0) || !onPlane(b, a, i * 3, 6)) return false;
+  // both segments lie on the line where the planes meet: overlap their intervals along it
+  const dx = N[i * 3 + 1] * N[j * 3 + 2] - N[i * 3 + 2] * N[j * 3 + 1], dy = N[i * 3 + 2] * N[j * 3] - N[i * 3] * N[j * 3 + 2], dz = N[i * 3] * N[j * 3 + 1] - N[i * 3 + 1] * N[j * 3];
+  const dl = Math.hypot(dx, dy, dz);
+  if (!(dl > 1e-12)) return false;
+  const at = (k: number) => (CS[k] * dx + CS[k + 1] * dy + CS[k + 2] * dz) / dl;
+  let a0 = at(0), a1 = at(3), sA = 0;
+  if (a1 < a0) { const t = a0; a0 = a1; a1 = t; sA = 1; }
+  const b0 = Math.min(at(6), at(9)), b1 = Math.max(at(6), at(9));
+  const lo = Math.max(a0, b0), hi = Math.min(a1, b1);
+  if (!(hi - lo > eps) || !(a1 - a0 > 0)) return false;
+  // points of segment A at lo and hi
+  const p0 = sA ? 3 : 0, p1 = sA ? 0 : 3;
+  for (const [w, o] of [[(lo - a0) / (a1 - a0), 0], [(hi - a0) / (a1 - a0), 3]] as const)
+    for (let c = 0; c < 3; c++) out[o + c] = CS[p0 + c] + (CS[p1 + c] - CS[p0 + c]) * w;
+  return true;
 }
 
 export interface EdgeGrid {

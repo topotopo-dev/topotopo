@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": ["beam:int:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [2.8387, 1.3863, 2.5214],
+      "min": [-0.05, -0.9986, -0.9336]
+    },
+    "counts": {
+      "points": 120,
+      "prims": 88,
+      "vertices": 400,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["caps", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "590be20bc1bf373d",
+      "attributes": {
+        "group.prim.caps": "483f9f3d5a70ef07",
+        "group.prim.sides": "ddc7e77d3b374407",
+        "prim.beam": "30e5e1852895cfbf",
+        "prim.name": "ef27b9054fae7f0f",
+        "vertex.uv": "371c51fd007df277"
+      },
+      "topology": "a1ed521c5e11d7c6"
+    }
+  },
+  "name": "node.beam",
+  "ok": true,
+  "source": "fixture for node type \"beam\" (test/fixtures.ts)",
+  "warnings": []
+}

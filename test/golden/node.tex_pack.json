@@ -27,7 +27,7 @@
       "P": "1c95a0418d91d33f",
       "attributes": {
         "detail.atlas_size": "8af868057010a71f",
-        "point.name": "cae2ca50401d9c3e",
+        "point.name": "a1ce3690a4ad4626",
         "point.rect": "4922182dace52c37",
         "point.uv_offset": "a30dd59e91429944",
         "point.uv_scale": "cafe4acb6b82c1a9"
@@ -48,7 +48,7 @@
         "layers": {
           "C": "8acb030878020892"
         },
-        "name": "atlas_C"
+        "name": "target_C"
       }
     ]
   },

@@ -4,7 +4,9 @@ import { GeoBuilder, Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { M, fromManifold, manifoldId, planeMatrix, polygonsToGeo, propLayout, toManifold } from '../core/manifold.ts';
-import { boundaryLoops, triangulate, topologyReport } from '../core/topology.ts';
+import { boundaryLoops, outwardPieces, triangulate, topologyReport } from '../core/topology.ts';
+import { mergeTriangles } from '../core/polymerge.ts';
+import { primWhere } from '../core/report.ts';
 import { KDTree, TriBVH } from '../core/spatial.ts';
 import { rng } from '../core/random.ts';
 import { normalize, m4invert } from '../core/math.ts';
@@ -25,10 +27,13 @@ defineNode({
   type: 'boolean',
   category: 'solid',
   summary: 'Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, unions A’s overlapping pieces.',
+  description: 'The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.',
   aliases: ['csg', 'bool', 'difference', 'union', 'intersect'],
   inputs: [{ name: 'a', desc: 'solid A' }, { name: 'b', desc: 'solid B (optional)', optional: true }],
   params: {
     operation: { type: 'enum', options: ['union', 'subtract', 'intersect'], default: 'subtract', desc: 'A ∪ B, A − B, or A ∩ B', aliases: ['op', 'mode'] },
+    output: { type: 'enum', options: ['polygons', 'triangles'], default: 'polygons', desc: 'polygons = each surviving input face as one polygon (or a few around a hole); triangles = the kernel triangles as they come' },
+    tolerance: { type: 'float', default: 0.00001, min: 0, desc: 'after the cut, collapse edges shorter than this and flatten slivers thinner than it, keeping the solid closed (0 = rounding only)', aliases: ['simplify', 'sliver'] },
   },
   outputs: 'prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated',
   example: {
@@ -39,8 +44,13 @@ defineNode({
     },
     output: 'cut',
   },
-  cook: ({ input, hasInput, p }) => withManifolds((track) => {
-    const A = input(0), B = hasInput(1) ? input(1) : null;
+  cook: ({ input, hasInput, p, warn }) => withManifolds((track) => {
+    const outward = (g: Geometry, label: string) => {
+      const r = outwardPieces(g);
+      if (r.flipped.length) warn(`${label}: ${r.flipped.length} piece(s) were inside out (faces pointing inward, e.g. mirrored without a winding flip) and were turned outward first; first ${primWhere(g, r.flipped[0])}`);
+      return r.geo;
+    };
+    const A = outward(input(0), 'A'), B = hasInput(1) ? outward(input(1), 'B') : null;
     const L = propLayout(B ? [A, B] : [A]);
     const mA = track(toManifold(A, L));
     let r;
@@ -51,10 +61,12 @@ defineNode({
       sources.push({ geo: B, id: manifoldId(mB) });
       r = track(p.operation === 'union' ? mA.add(mB) : p.operation === 'intersect' ? mA.intersect(mB) : mA.subtract(mB));
     }
-    const { geo, primSource } = fromManifold(r, L, sources);
+    if (p.tolerance > 0) r = track(r.simplify(p.tolerance));
+    const { geo, primSource, primFace } = fromManifold(r, L, sources);
     geo.addGroup('prim', 'from_a', Uint8Array.from(primSource, (s) => (s === 0 ? 1 : 0)));
     geo.addGroup('prim', 'from_b', Uint8Array.from(primSource, (s) => (s === 1 ? 1 : 0)));
-    return geo;
+    if (p.output === 'triangles') return geo;
+    return mergeTriangles(geo, Float64Array.from(primSource, (s, t) => (s >= 0 && primFace[t] >= 0 ? s * 2 ** 32 + primFace[t] : -1)));
   }),
 });
 

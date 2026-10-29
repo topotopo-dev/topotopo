@@ -835,7 +835,7 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const s = man?.source;
   check(man?.format === 'topotopo-export-source' && JSON.stringify(man.files) === '["land.glb"]' && s.graph === 'land' && s.output === 'mesh' && s.node === 'ground'
     && s.frame === 1 && s.fps === 24 && JSON.stringify(s.vars) === '{"count":10,"relief":5,"seed":3}' && JSON.stringify(s.seeds) === '{"hills":"=seed","pts":2}'
-    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y"}}'
+    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y","vertex_colors":false}}'
     && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
     `the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format and every option with its default, graph hash, version (${JSON.stringify(s?.export)})`);
   const glb = fs.readFileSync(path.join(dir, 'a', 'land.glb'));

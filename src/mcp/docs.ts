@@ -14,7 +14,7 @@ WORKFLOW
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
-OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, volume, scene; a mesh with scene_null sockets is a mesh) pins what it must cook to: build warns and publishing blocks when it does not.
+OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, material, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, material, volume, scene; a mesh with scene_null sockets is a mesh; materials alone are a material) pins what it must cook to: build warns and publishing blocks when it does not.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
@@ -208,8 +208,9 @@ IMAGES: PNG masks and heightmaps. heightfield_from_image {path:"inputs/height.pn
   makes a terrain (16-bit greys keep the detail); with a heightfield connected it writes into layer (e.g. "mask",
   height_min 0, height_max 1), the image lying at size/center in the world (fit "field" stretches it over the
   connected heightfield instead). attribute_from_map {path, projection:"xz", size, center, name:"mask"} samples it onto
-  points (scatter density_mask, prune {mode:"density"}). Textures: image_file {path:"inputs/albedo.png"} (or a file
-  node) loads it as an image named "albedo" for the texture nodes and texture_to_material {base_color:"albedo"}.
+  points (scatter density_mask, prune {mode:"density"}). Textures: a node albedo = image_file {path:"inputs/albedo.png"}
+  loads it as an image named "albedo" (after the node; a file node names it after the file) for the texture nodes and
+  texture_to_material {base_color:"albedo"}.
 EXAMPLE: inputs/guides.glb holds path.* curves and zone.* areas: roads cut into hills, trees in the zones off the road,
 the vars a person would tune exposed as params:
 ${graphLines(INPUTS_EXAMPLE)}
@@ -330,6 +331,20 @@ SDF helpers are also available (see topic sdf).`,
   @P.y>0.5           attribute test, ops = == != > < >= <= ; components .x .y .z .w .r .g .b
   @class==3   @name=piece*   @Cd.r<0.2   @ptnum<100
 Tokens are space-separated and applied left to right (union unless prefixed ! or ^).
+STRING ATTRIBUTES (name, path, a material or part label):
+  @name=barrel        exactly "barrel" (= and == are the same)
+  @name=bar*  @name=*rel  @name=b?rrel   wildcards: * any run, ? one character; case-sensitive
+  @name!=frame        every element whose name is not "frame"
+  "@name=barrel @name=stock"         either (a space is a union)
+  "* ^@name=barrel ^@name=stock"     all but those two
+  Quotes around the value are optional (@name='bolt*'); a value cannot hold a space (it splits the tokens), so name
+  parts with _ or -. < > <= >= never match a string. Digits in a string compare as text: @lod=1 matches "1", not "01".
+  A prim test reads the prim attribute, then the detail one, then the point one (a string from the prim's first point,
+  numbers averaged over its points); a point test reads the point attribute, then the detail one.
+RECIPES: material per part {"type":"material","params":{"name":"glass","group":"@name=Glass*"}} · prims 0 to 11
+  "0-11" · all glass but the first three prims "@name=Glass* ^0-2" · pieces without names: name them first with
+  attrib_string {"format":"part_{piece:03}"} (connected pieces; piece_attrib for class / copynum), then select
+  "@name=part_00*". Help topic "materials" has the material recipes.
 FOUR CLASSES: point, prim, vertex (polygon corners), edge (unordered point pairs, Houdini edge groups).
   group node: "class": "point" | "prim" | "vertex" | "edge". delete: class vertex removes corners (a polygon losing
   one is deleted, polylines shrink); class edge deletes every prim using one of the edges.
@@ -361,7 +376,9 @@ SELECTING EDGES TO BEVEL (poly_bevel group; also subdivide creases, normal hard_
   "p3-7" "p0-1-2-3-0"   explicit edges / closed chains of point numbers
   "rim"                 an edge group made with {"type":"group","params":{"class":"edge","name":"rim","pattern":"..."}}
   "bevel_edges"         poly_bevel's output group (where the bevel meets the faces): bevel again to soften the first
-  ""                    every edge shared by two polygons. Boundary and non-manifold edges are skipped with a warning.
+  ""                    every edge shared by two polygons where the surface bends (flat edges inside a plane, such as
+                        the splits of a boolean's cut face, are skipped). Boundary and non-manifold edges are skipped
+                        with a warning.
   mode "points" takes a point pattern instead ("0", "@P.y>0", a point group) and truncates those corners.
 EDGE GROUPS IN NODES: poly_bevel, subdivide creases (+ creaseweight attribute), normal hard_edges. Edge groups follow points:
   they survive transforms, fuse (remapped), merge (offset), copies, deletes (edges that no longer bound a prim
@@ -370,10 +387,46 @@ EDGE GROUPS IN NODES: poly_bevel, subdivide creases (+ creaseweight attribute), 
 WRANGLE: @group_x works in vertices mode too; invertexgroup(i,"g",v) inedgegroup(i,"g",pt0,pt1) setvertexgroup(0,"g",v,1)
   setedgegroup(0,"g",pt0,pt1,1). Scripts: lib.halfEdges(geo) (edge loops/rings, one-rings, boundaries), lib.EdgeSet,
   lib.evalEdgeGroup(geo, pattern), lib.convertSelection(geo, from, to, sel, include).
-Groups produced by nodes: poly_extrude front/side, poly_bevel bevel/bevel_corner (+ edge group bevel_edges), extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides,
+Groups produced by nodes: poly_extrude front/side, poly_bevel bevel/bevel_corner (+ edge group bevel_edges), extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides, loft caps/sides, curve fillet, remove_interior interior,
 clip above/below/cap, fill_holes filled, lsystem leaves/J/K/M, voronoi_fracture inside, knife cut (edge + point) and
 above/below, polysplit split (edge + point), edge_divide divided, polybridge bridge, polyfill fill, dissolve dissolved,
 edge_collapse collapsed. Create custom ones with "group".`,
+
+  materials: `MATERIALS (assign by name, range or group; name the pieces first)
+A material is a prim string "material" naming an entry of the detail table "materials" (PBR base colour, metallic,
+roughness, emissive, alpha, maps). The material node writes both for the prims of its group ("" = all); chain one
+node per material, the later one winning where groups overlap. Maps: base_color_map / normal_map / roughness_map file
+paths, or images from the texture nodes through texture_to_material (help topic "textures").
+PICK THE PRIMS (any group pattern, help topic "groups"; string tests take wildcards and are case-sensitive):
+  by name          {"type":"material","params":{"name":"glass","group":"@name=Glass*","alpha":0.3}}
+                   "@name=*lass*" contains · "@name=glass_* @name=Glass_*" either · "@name!=frame" all but
+  by prim range    "0-11" (prims 0 to 11) · "0-100:2" every second · "6-11 ^7" without 7 · "@name=Glass* ^0-2"
+  by node groups   extrude "top" / "side", poly_extrude "front", poly_bevel "bevel", boolean "from_b" (the cut
+                   faces), clip "cap" … ; by attribute "@P.y>1.5", "@N.y>0.9" (facing up)
+NAME THE PIECES FIRST when they have no names (one node each):
+  connected pieces  attrib_string {"format":"part_{piece:03}"} → part_000 … (or connectivity {name_prefix:"part_"})
+  copies            attrib_string {"format":"crate_{copynum}"} after copy_xform / copy_to_points
+  engine suffixes   attrib_string {"format":"hull_{piece:03}-convcolonly"} names 146 collision hulls at once
+  clean up          attrib_string {"find":"_LOD","replace":"_lod"} · {"find":"\\\\.\\\\d+$","regex":true} · {"case":"lower"}
+  prefix            attrib_string {"format":"gun_{value}"} keeps each name behind a prefix
+  Then material {group:"@name=hull_*"} and export split_by_name write one mesh per name.
+EXPORT: glTF writes one material per table entry; a named material decides the colour of its prims (their Cd is
+  dropped unless vertex_colors:true). Merging pieces whose materials or images share a name but differ (two package
+  outputs that both call their map "basecolor") renames the later one ("paint_2", "<material>_basecolor"), so every
+  piece keeps its own look. Inspect the table: inspect lists materials; render {shading:"pbr", textures:true}.
+MATERIAL OUTPUTS (a material as a package output, kind "material": materials and their maps, no geometry):
+  make    texture nodes → texture_to_material with NOTHING in input 0, the images in input 1 ("in": {"images": "maps"}
+          or [null, "maps"]), {material:"steel", base_color, normal, orm} → the output; or material {name, base_color,
+          roughness} with no input for a plain one.
+          Each map keeps its texture node's resolution (a 4k normal beside a 512 mask); expose one as a param (a var
+          such as "normal_resolution" read by that node) to let a use change it.
+  use     {"type":"owner/materials/steel", "params":{...}} → input 1 of material {group:"@name=body*"} on the mesh: the
+          material and its maps are copied in and assigned (from names one when the source holds several; name
+          renames it). The material node's own colour and map params are not used then.
+  see     renders, the viewer and the Gallery show it on spheres (one per material) with its base colour maps;
+          publishing records each map's size (packages lists "maps baseColor 2048, normal 4096").
+  export  format "textures": one PNG per map + materials.json (each material's values and the files of its maps), for
+          engines to rebuild it; glb and usda need a mesh: export the mesh that uses it.`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
 Classes: point (P and per-point data), vertex (per polygon corner: uv seams, hard normals), prim (per face/curve), detail (global).
@@ -525,33 +578,54 @@ An image is a volume carried in the geometry (like a heightfield): a 2D grid of 
 Values are written to PNG as value × 255 with no transfer curve: colours hold the numbers colour params give
 ("#a5462e" → 0.65, 0.27, 0.18), so files match the colours you typed; data maps (heights, masks, roughness, normals)
 are linear. Images merge, clone and cache like geometry; materials reference them as "image:<name>".
+NAMES: every image is named after the node that made or last filtered it ("rust_mask" for the node rust_mask), unless
+  that node's name param says otherwise, so default names in a graph never collide and texture_to_material slots name
+  nodes: {base_color:"paint", normal:"detail_normal"}. A node whose input holds several images never picks one: it
+  stops and lists them; set image (foreground_image, mask_image, detail_image … for the other inputs) to the one to
+  use, or isolate it with tex_output {image, keep_only:true}. To edit one image of a stack in place (an atlas, a
+  material's maps), give the filter name = that image's name. merge (and every node that merges) keeps an image or
+  material several inputs carry (same name and content, e.g. textured LOD branches) once; when two inputs use a name
+  for different images or materials (two package outputs whose maps are all "basecolor"), the later one is renamed
+  ("<material>_basecolor", "paint_2") with its material table and prim "material", so each piece keeps its own maps
+  in renders, the viewer and every export.
 GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/worley × fbm/ridged/turbulence,
   tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
-  hex, dots, grid; gap = mortar, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance / edges /
-  id / crackle) · tex_gradient · tex_shape (disc, square, polygon, star, ring; falloff; tile) · tex_splatter (blobs) ·
-  tex_scratches (strokes) · tex_text.
-FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour; the file node reads .png the same way)
-  as an image named after the file ("brick"; name sets another); layers auto/grey/rgba; srgb (default on) keeps the stored
-  values, which suits colour and data maps alike (off only for linear-light colour). Input 0 = a geometry to add it to,
-  so image_file nodes chain. People drop their own textures and masks into inputs/.
-FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer; name renames; every
-  other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min, max,
-  difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable
+  hex, dots: 1 on the cells, 0 in the gaps; grid is a line mask, 1 on the lines, 0 in the cells: for grooved cells use
+  tiles; gap = mortar or line width, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance /
+  edges / id / crackle) · tex_gradient · tex_constant (one grey value, or an RGBA colour with channels:"rgba";
+  input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star, ring; falloff; tile) ·
+  tex_splatter (blobs) · tex_scratches (strokes) · tex_text.
+FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
+  (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
+  (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).
+  Input 0 = a geometry to add it to, so image_file nodes chain. People drop their own textures and masks into inputs/.
+FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer and takes the filter's
+  name; every other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min,
+  max, difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable
   keeps the mean) · tex_warp (directional/slope/vector by input 1) · tex_transform (offset, rotate, scale, tile) ·
-  tex_edge_detect · tex_invert · tex_threshold · tex_histogram_scan (position + contrast: THE mask maker) ·
-  tex_normal_from_height (Sobel; strength 1 = 45° for a rise of 1 over 1/64 width; opengl/directx) ·
-  tex_height_to_ao · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or extract) ·
-  tex_tile_sampler (stamp input 0 on a grid with jitter/rotation/scale; mask input 1) · tex_output (rename, or copy a
-  layer out as a new image: {name:"brick_ids", layer:"id"}; keep_only drops the rest).
+  tex_edge_detect · tex_invert · tex_threshold · tex_histogram_scan (THE mask maker: coverage 0.3 = the brightest 30 %
+  turn white, whatever the input's range; or position = a value cut; contrast = hardness; stat coverage) ·
+  tex_normal_from_height (physical: depth = metres a value of 1 stands, size = metres the image spans, so the slope is
+  real and the same at any resolution; paint grain 0.0003, hammered metal 0.002, bricks 0.015; opengl/directx) ·
+  tex_normal_blend (detail normal map over a base, e.g. micro grain over a bake: mode rnm (default, reoriented: both
+  reliefs keep their depth) | udn | linear; strength scales the detail; input 2 = mask; never tex_blend overlay on
+  normals) · tex_height_to_ao · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or
+  extract) · tex_tile_sampler (stamp input 0 on a grid with jitter/rotation/scale; mask input 1) · tex_output (rename,
+  or copy a layer out as a new image: brick_ids = tex_output {layer:"id"}; keep_only drops the rest).
   To process a layer as its own image, copy it out first (tex_output layer:"id") and filter that.
   Inputs of different sizes are resized to the first input (bilinear up, area average down).
 BAKES (input 0 = mesh with non-overlapping uv in 0..1: uv_unwrap; input 1 = optional high-res mesh): bake_ao
   (samples, max_distance; white = open), bake_curvature (edges' dihedral angles within radius: 0.5 flat, bright convex,
-  dark concave; layers convex/concave), bake_thickness, bake_position (bbox/uniform/world), bake_world_normal,
+  dark concave; layers convex/concave; creases where separate parts cut into each other count as concave too),
+  bake_thickness, bake_position (bbox/uniform/world), bake_world_normal,
   bake_normal (tangent space from the high mesh along averaged-normal cage rays; cage distance), bake_height (high above
   low; layer distance in metres), bake_island_id (colour per uv island, layer id, stat islands), bake_mask
   (mask_group or a numeric attribute), bake_vertex_color (Cd + Alpha). Shared: resolution (default 1024), supersample
   (1..4), padding (texels of edge dilation, default 4), group (prims to bake), keep_mesh (output the mesh too).
+  With a high-res mesh: cage (search distance), cage_attrib (default "cage": a float prim/point attribute of the mesh
+  that sets the cage per part, e.g. attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03}),
+  match_name (each named piece projects only onto the high prims of its name: parts sharing one atlas), and layer
+  "missed" (1 where no high surface was found within the cage; stat missed) to see where to raise the cage.
   Rays and curvature run on the worker pool. The output is only the image unless keep_mesh.
 MATERIALS: texture_to_material {material, base_color, normal, roughness, metallic, occlusion, orm} on input 0 (mesh
   with uv) + input 1 (merged images): writes "image:<name>" slots into the material table, assigns the material (all
@@ -575,11 +649,13 @@ EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metal
   <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
   <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
 RECIPE (brick wall + worn crate: examples/textures.json):
-  bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {name:"ids", layer:"id"}
+  bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {layer:"id"}
   color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)
-  normal = tex_normal_from_height(bricks) · crate: uv_unwrap → bake_ao + bake_curvature → tex_output layer "convex"
-  → tex_blend subtract noise → tex_histogram_scan = edge wear → tex_blend(wood, paint, wear) → tex_channel(ao, rough)
-  = ORM → texture_to_material {base_color, orm}.`,
+  normal = tex_normal_from_height(bricks) {depth:0.035, size:1.6} · crate: uv_unwrap → bake_ao + bake_curvature →
+  tex_output layer "convex" → tex_blend subtract noise → tex_histogram_scan {coverage} = edge wear →
+  tex_blend(wood, paint, wear) → tex_channel(ao, rough) = ORM → texture_to_material {base_color, orm}.
+  Detail on a bake: grain = tex_noise {scale:60} → grain_n = tex_normal_from_height {depth:0.0003, size:<uv span in m>}
+  → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.`,
 
   loops: `FOREACH LOOPS
 {"type": "foreach", "in": ["lots"], "params": {"mode": "prims", "body": {
@@ -626,9 +702,9 @@ Read them: primintrinsic(0, "bounds", pr) in a wrangle (or primintrinsic('n', pr
 See them: render draws instances (an evenly spread subset above 600k triangles, with a note "rendering 9.5k of 30k
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
 Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",
-  TRANSLATION/ROTATION/SCALE per instance, anchor attributes as _NAME instance accessors (Cd → _COLOR); shear is
-  approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices, positions, orientations,
-  scales, ids, velocities, primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
+  TRANSLATION/ROTATION/SCALE per instance, with custom_attribs:true the anchor attributes as _NAME instance accessors
+  (Cd → _COLOR); shear is approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
+  positions, orientations, scales, ids, velocities, with custom_attribs:true primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
   csv / points.json → one row per instance (instance stream: Position/Rotation/Scale or P/orient/scale, Mesh column)
   + <name>.meshes.json + one GLB per source; json keeps them losslessly; obj/ply/stl expand them (warned).
   instancing:"expand" (export option) always writes real geometry (instances:"expand" for csv/points.json only).
@@ -740,11 +816,20 @@ Nodes:
       nurbs is exact; polyline → spline uses the points as CVs, or passes through them with fit:true.
   spline_fit {tolerance | cv_count, smoothing, order, output nurbs|polyline}   least-squares NURBS through ordered points:
       denoise GPS-like / jittered polylines, compress dense curves (prim fit_error = largest deviation).
+  curve {points, corner_radius, corner_segments}   corner_radius rounds corners as you draw: one radius, or one per point
+      (0 = sharp), e.g. [0, 0.004, 0.004, 0]; a point that is not [x, y, z] (NaN, null) is an error naming it.
   fillet_curve {radius, type round|chamfer|bezier, segments, group (corner points), angle_min, clamp}   rounds polyline
       corners in 3D (new points in point group "fillet").
   offset_curve_3d {distance, lift, frame rmf|plane, up, corner mitre|round|bevel, both}   parallel curves in 3D:
       rails, kerbs, lanes (both:true = two rails, prim side ±1; frame "plane" keeps them level). offset_curve is the
-      2D (Clipper) grow/shrink of CLOSED flat shapes; use offset_curve_3d for open paths or anything not flat.
+      2D (Clipper) grow/shrink of CLOSED flat shapes; on a flat OPEN path it makes a strap outline (width 2 × distance,
+      cap butt|round|square): offset_curve → extrude for a flat band; sweep {shape:"rect", size:[w, h]} for one that
+      follows a 3D path.
+  loft {sections, resample auto|length|none, caps}   skins through the curves in prim order, or through copies of ONE
+      profile placed by sections [{offset, scale, rotate}, ...]; sections with the same point count join point to point
+      (insets keep their corners), closed sections are turned to the first one's winding; closed results face outward.
+  revolve {axis, origin, angle}   lathe about any axis line; draw the profile in a plane that holds the axis.
+  shape2d capsule | slot   a stadium (rect with half-circle ends) in size; extrude for a slot cutter.
   project_curve (curves, surface | heightfield) {mode direction|closest, direction, spacing, lift, misses}   drapes a
       curve onto terrain; spacing resamples first so it follows the bumps; writes point hit and N (smooth normals).
   curve_attribs {curveu, arclength, tangent (tangentu), frame (N = tangent, up), curvature, segment, ramp_attrib + ramp}
@@ -817,8 +902,9 @@ its graph's vars (they are not its params; give it a graph of its own for params
 
 WHAT AN OUTPUT IS: its kind, its tags and its description, which search, the catalog and help show.
   "outputs": {"pine": {"node": "out", "label": "Pine", "kind": "mesh", "tags": ["conifer", "low-poly"], "description": "…"}}
-- kind: mesh, instances (packed), points, curves, terrain (heightfields), textures (images alone), volume, or scene
-  (several of these: a street with its lamp posts as instances). A mesh that carries scene_null sockets is a mesh: the
+- kind: mesh, instances (packed), points, curves, terrain (heightfields), textures (images alone), material (materials
+  and their maps, no geometry: help topic "materials"), volume, or scene (several of these: a street with its lamp
+  posts as instances). A mesh that carries scene_null sockets is a mesh: the
   sockets are part of a mesh asset, and scene means several kinds of geometry together. Publishing cooks every output
   and records the kind it cooks to. "kind" pins it: publishing blocks when the output cooks to another, and build, edit
   and the viewer warn before that. A kind not on the list is an error wherever the graph is read.
@@ -1087,7 +1173,8 @@ export {path:"exports/thing.glb"} — format from the extension:
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs (extra numeric attributes: default off for glb / gltf / usda and the GLBs of instance rows and bundles,
-  on for ply), materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
+  on for ply; below), materials (default true), vertex_colors (glTF, default false: prims with a named material are
+  written in that material, their Cd dropped; true keeps Cd as COLOR_0 there too, below), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
@@ -1115,16 +1202,22 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or
   a uniquely named mesh, with the local TRS that keeps their geometry-space placement; set point attributes → node extras;
   missing, ambiguous or cyclic parents and GPU-instanced parents are errors; import brings them back. N → NORMAL (else computed, 60° cusp),
-  uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0. TANGENT (tangents "auto", the default): MikkTSpace
+  uv/uv2 → TEXCOORD_0/1 (V flipped), Cd (+Alpha) → COLOR_0 (not on prims with a named material unless vertex_colors,
+  MATERIALS below). TANGENT (tangents "auto", the default): MikkTSpace
   tangents (xyz + handedness w) for every primitive whose material has a normal map, computed per corner before
   vertices are welded (uv seams, hard normals and mirrored islands keep their own frames), the same frame bake_normal
   bakes in; a valid point/vertex "tangent" float[4] (from an import) is written on other primitives. "preserve" writes
   the supplied attribute wherever it exists (malformed = error), "none" never writes TANGENT. Collapsed uvs are
-  reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors). Custom attributes: every other numeric point/vertex attribute
-  of size 1-4 → _NAME (upper-cased, float or the smallest int type); mesh extras keep the original names and types.
-MATERIALS: the material node writes prim "material" + the detail table. Vertex colours win: prims whose Cd is not all
-  white export baseColor white × COLOR_0 with the material's metallic/roughness/emissive; otherwise baseColor = the
-  material colour. alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
+  reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors).
+  Custom attributes (custom_attribs true): every other numeric point/vertex attribute of size 1-4 → _NAME (upper-cased,
+  float or the smallest int type), mesh extras keep the original names and types, and packed instances carry their
+  anchor attributes as per-instance accessors. The attributes only scene empties use (scene_empty, parent, orient, scale,
+  their extras) never become mesh channels.
+MATERIALS: the material node writes prim "material" + the detail table. A named material wins: its prims export in that
+  material as it is and their Cd / Alpha are dropped (Cd left from colouring parts does not become COLOR_0 or a second,
+  white or tinted copy of the material). Prims without a material, and every prim with vertex_colors:true, keep their
+  Cd: not all white → baseColor white × COLOR_0 with the material's metallic/roughness/emissive (one constant Cd is
+  folded into the factor). alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
 TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the project folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
   map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
@@ -1188,9 +1281,10 @@ HOUDINI: File SOP reads .geo (and glb/obj/usd); packed prims are written as Pack
   stored once in sharedprimitivedata (layout not yet confirmed against a Houdini-written file: instancing "expand" is
   the safe path). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
   A material name becomes a Houdini material path with a wrangle: s@shop_materialpath = "/mat/" + s@material;
-BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME).
-PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing with per-instance attributes, usda a
-  PointInstancer with per-instance primvars, geo PackedGeometry prims, csv/points.json the instance stream, json keeps
+BLENDER: File > Import > glTF 2.0 (custom attributes, exported with custom_attribs:true, arrive as mesh attributes
+  named _NAME).
+PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing (per-instance attributes with
+  custom_attribs:true), usda a PointInstancer (per-instance primvars with custom_attribs:true), geo PackedGeometry prims, csv/points.json the instance stream, json keeps
   them; obj/ply/stl expand them. Option instancing "expand" writes real geometry everywhere.
 SPLINES (Bezier/NURBS prims, help topic "curves"): every format but json writes the evaluated polylines (closed curves as
   polygons), with a note; json keeps the spline prims. convert_curve first to choose the resolution.
@@ -1304,8 +1398,10 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
  chamfer; shape 1 = squarer, -0.5 = flat, -1 = cove). Only the rim of a slab: extrude → poly_bevel {group:"border:top"}.
 13) Clean asset pipeline: imported/broken mesh → mesh_repair (fuse, winding, small holes; report in detail repair_report)
  → remesh_isotropic {target_length, feature_angle:40} (even triangles before uv_unwrap or simulation; target_attrib for
- adaptive size) → uv_unwrap → lod {levels:4, ratios:[1,0.5,0.25,0.1]} (prim lod + name _LOD0…, export split_by_name) or
- decimate {ratio, attributes:"uv N"} for one level. remesh_quad {target_faces:2000, feature_angle:45} produces field-aligned
+ adaptive size) → uv_unwrap → lod {levels:4, ratios:[1,0.5,0.25,0.1]} (prim lod + name {name}_lod0… from name_format,
+ export split_by_name; group "@name=magazine" for one part; mode switch + level for one level, named the same way) or
+ decimate {ratio, attributes:"uv N"} for one level. A level that stops short warns with what holds it (uv seams, hard
+ normals, group / prim attribute borders): reduce before unwrapping and compute vertex normals after lod. remesh_quad {target_faces:2000, feature_angle:45} produces field-aligned
  quad-dominant polygons with point/vertex/prim attributes; mode:"quads_only" conformingly subdivides all faces and can
  exceed target_faces, especially along hard curves. crease_group aligns explicit edges; group keeps its border fixed.
  Inspect detail quad_fraction and singularities, and the wireframe (examples/quad_remesh.json). remesh (voxel) only

@@ -404,6 +404,7 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
       tri2 += (flat[b] - flat[a]) * (flat[c + 1] - flat[a + 1]) - (flat[c] - flat[a]) * (flat[b + 1] - flat[a + 1]);
     }
     const flip = poly2 * tri2 < 0;
+    if (n > 4 && planarPoly(P, vp, s, n, nrm)) delaunayFlips(flat, idx);
     for (let k = 0; k < idx.length; k += 3) {
       const a = s + idx[k], b = s + idx[k + 1], c = s + idx[k + 2];
       if (flip) tris.push(a, c, b); else tris.push(a, b, c);
@@ -411,6 +412,76 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
     }
   }
   return { tris: Uint32Array.from(tris), triPrim: Uint32Array.from(tp) };
+}
+
+/** Is polygon s..s+n flat (every corner within a millionth of its size of the plane through its centroid)? */
+function planarPoly(P: ArrayLike<number>, vp: ArrayLike<number>, s: number, n: number, nrm: number[]): boolean {
+  const l = Math.hypot(nrm[0], nrm[1], nrm[2]);
+  if (!(l > 0)) return false;
+  const nx = nrm[0] / l, ny = nrm[1] / l, nz = nrm[2] / l;
+  let cx = 0, cy = 0, cz = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let k = 0; k < n; k++) {
+    const i = vp[s + k] * 3, x = P[i], y = P[i + 1], z = P[i + 2];
+    cx += x; cy += y; cz += z;
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
+  }
+  cx /= n; cy /= n; cz /= n;
+  const tol = 1e-6 * Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+  for (let k = 0; k < n; k++) {
+    const i = vp[s + k] * 3;
+    if (Math.abs((P[i] - cx) * nx + (P[i + 1] - cy) * ny + (P[i + 2] - cz) * nz) > tol) return false;
+  }
+  return true;
+}
+
+/**
+ * Improve an ear-clipped triangulation of a flat polygon in place by edge flips toward Delaunay: a diagonal whose
+ * opposite corner lies inside the other triangle's circumcircle is swapped (when the two triangles form a convex quad),
+ * so nearly collinear corners do not leave slivers. The outline is never touched and every corner stays in use.
+ */
+function delaunayFlips(flat: Float64Array, idx: number[]): void {
+  const nt = idx.length / 3;
+  if (nt < 2) return;
+  const X = (i: number) => flat[i * 2], Y = (i: number) => flat[i * 2 + 1];
+  const orient = (a: number, b: number, c: number) => (X(b) - X(a)) * (Y(c) - Y(a)) - (Y(b) - Y(a)) * (X(c) - X(a));
+  // all triangles counter-clockwise for the in-circle test
+  const ccw = orient(idx[0], idx[1], idx[2]) > 0;
+  const tri = (t: number): [number, number, number] => (ccw ? [idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]] : [idx[t * 3], idx[t * 3 + 2], idx[t * 3 + 1]]);
+  const set = (t: number, a: number, b: number, c: number) => { idx[t * 3] = a; if (ccw) { idx[t * 3 + 1] = b; idx[t * 3 + 2] = c; } else { idx[t * 3 + 1] = c; idx[t * 3 + 2] = b; } };
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < flat.length; i += 2) { x0 = Math.min(x0, flat[i]); x1 = Math.max(x1, flat[i]); y0 = Math.min(y0, flat[i + 1]); y1 = Math.max(y1, flat[i + 1]); }
+  const size = Math.max(x1 - x0, y1 - y0);
+  const eps = 1e-12 * size ** 4;
+  const incircle = (a: number, b: number, c: number, d: number) => {
+    const adx = X(a) - X(d), ady = Y(a) - Y(d), bdx = X(b) - X(d), bdy = Y(b) - Y(d), cdx = X(c) - X(d), cdy = Y(c) - Y(d);
+    return (adx * adx + ady * ady) * (bdx * cdy - cdx * bdy) - (bdx * bdx + bdy * bdy) * (adx * cdy - cdx * ady) + (cdx * cdx + cdy * cdy) * (adx * bdy - bdx * ady);
+  };
+  const edgeKey = (a: number, b: number) => (a < b ? a * 1048576 + b : b * 1048576 + a);
+  const edges = new Map<number, number[]>();
+  const link = (t: number) => { const [a, b, c] = tri(t); for (const [u, w] of [[a, b], [b, c], [c, a]]) { const k = edgeKey(u, w); const l = edges.get(k); if (l) l.push(t); else edges.set(k, [t]); } };
+  const unlink = (t: number) => { const [a, b, c] = tri(t); for (const [u, w] of [[a, b], [b, c], [c, a]]) { const l = edges.get(edgeKey(u, w)); if (l) l.splice(l.indexOf(t), 1); } };
+  for (let t = 0; t < nt; t++) link(t);
+  const todo = [...edges.keys()];
+  // each flip strictly improves the triangulation (Delaunay), the budget only guards against rounding loops
+  for (let budget = 8 * nt + 64; todo.length && budget > 0;) {
+    const l = edges.get(todo.pop()!);
+    if (!l || l.length !== 2) continue;
+    const [t1, t2] = l, A = tri(t1), B = tri(t2);
+    let k = 0;
+    for (; k < 3; k++) if (B.includes(A[k]) && B.includes(A[(k + 1) % 3])) break;
+    if (k === 3) continue;
+    // shared edge a → b in A, opposite corners c (in A) and d (in B)
+    const a = A[k], b = A[(k + 1) % 3], c = A[(k + 2) % 3], d = B.find((x) => x !== a && x !== b)!;
+    if (!(incircle(a, b, c, d) > eps)) continue;
+    // the new diagonal c–d must lie inside the quad a, d, b, c
+    if (!(orient(c, d, b) > 0 && orient(d, c, a) > 0)) continue;
+    unlink(t1); unlink(t2);
+    edges.delete(edgeKey(a, b));
+    set(t1, a, d, c); set(t2, d, b, c);
+    link(t1); link(t2);
+    todo.push(edgeKey(a, d), edgeKey(d, b), edgeKey(b, c), edgeKey(c, a));
+    budget--;
+  }
 }
 
 /** Connected components over shared points. Returns component id per prim and per point. */
@@ -483,6 +554,44 @@ export function signedVolume(g: Geometry): number {
 /** Make a closed mesh face outward (flip everything if the signed volume is negative). */
 export function orientOutward(g: Geometry): Geometry {
   return signedVolume(g) < 0 ? reversePrims(g) : g;
+}
+
+/**
+ * Turn inside-out pieces outward: a connected piece with negative signed volume flips, unless it lies inside another
+ * piece's bounds (the inner wall of a hollow solid faces inward on purpose). A mirror without a winding flip, or a
+ * hand-built cutter, gives such pieces; booleans would make inverted walls from them. Returns the first prim of each
+ * flipped piece.
+ */
+export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[] } {
+  const { primClass, count } = connectivity(g);
+  if (!count) return { geo: g, flipped: [] };
+  const { tris, triPrim } = triangulate(g);
+  const vol = new Float64Array(count), first = new Int32Array(count).fill(-1);
+  const lo = new Float64Array(count * 3).fill(Infinity), hi = new Float64Array(count * 3).fill(-Infinity);
+  const P = g.P;
+  for (let t = 0; t < tris.length; t += 3) {
+    const c = primClass[triPrim[t / 3]];
+    const a = g.vertexPoint[tris[t]] * 3, b = g.vertexPoint[tris[t + 1]] * 3, d = g.vertexPoint[tris[t + 2]] * 3;
+    vol[c] += P[a] * (P[b + 1] * P[d + 2] - P[b + 2] * P[d + 1]) - P[a + 1] * (P[b] * P[d + 2] - P[b + 2] * P[d]) + P[a + 2] * (P[b] * P[d + 1] - P[b + 1] * P[d]);
+    for (const i of [a, b, d]) for (let k = 0; k < 3; k++) { lo[c * 3 + k] = Math.min(lo[c * 3 + k], P[i + k]); hi[c * 3 + k] = Math.max(hi[c * 3 + k], P[i + k]); }
+  }
+  for (let p = 0; p < g.numPrims; p++) { const c = primClass[p]; if (c >= 0 && first[c] < 0) first[c] = p; }
+  const inside = (c: number, o: number) => {
+    for (let k = 0; k < 3; k++) if (lo[c * 3 + k] < lo[o * 3 + k] || hi[c * 3 + k] > hi[o * 3 + k]) return false;
+    return true;
+  };
+  const flip = new Uint8Array(count);
+  const flipped: number[] = [];
+  for (let c = 0; c < count; c++) {
+    if (!(vol[c] < 0)) continue;
+    let nested = false;
+    for (let o = 0; o < count && !nested; o++) if (o !== c && vol[o] > 0 && inside(c, o)) nested = true;
+    if (nested) continue;
+    flip[c] = 1;
+    flipped.push(first[c]);
+  }
+  if (!flipped.length) return { geo: g, flipped };
+  return { geo: reversePrims(g, Uint8Array.from(primClass, (c) => (c >= 0 ? flip[c] : 0))), flipped };
 }
 
 /** Quick topology health report used by inspect and by solid ops. */

@@ -26,7 +26,7 @@
     "hashes": {
       "P": "8837f3fcfed73bb2",
       "attributes": {
-        "detail.materials": "3543fa8837bbfdea",
+        "detail.materials": "a7ec2a0dcfa83577",
         "point.height": "4d239aca5875227c",
         "point.uv": "10ff26d8711f1f72",
         "prim.copynum": "adb19f61815e8bfb"
@@ -34,9 +34,9 @@
       "topology": "83c889068829d23c"
     },
     "packed": {
-      "hash": "fbba3928061fe0d2",
+      "hash": "1acac3307e6150aa",
       "instances": 21,
-      "sources": ["8fac219f637ff8f1", "b783edd4daf2a33e", "598494b97a25066b", "4feb679b5139431d"]
+      "sources": ["8fac219f637ff8f1", "b783edd4daf2a33e", "598494b97a25066b", "45caff5b8fb08071"]
     }
   },
   "name": "package.topotopo.nature.forest_patch",

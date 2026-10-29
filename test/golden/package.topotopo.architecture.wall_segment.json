@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 152,
-      "prims": 148,
-      "vertices": 540,
+      "prims": 114,
+      "vertices": 472,
       "volumes": 0
     },
     "groups": {
@@ -27,12 +27,12 @@
       "P": "7762e8bd09d5f7af",
       "attributes": {
         "detail.materials": "170cb3d1fd617147",
-        "prim.Cd": "0091ee9d2e45a417",
-        "prim.material": "9139d68de5daae17",
-        "prim.name": "180ecadd3d56ce57",
-        "vertex.uv": "b9de7dbd641ad79f"
+        "prim.Cd": "26123a7dad92478f",
+        "prim.material": "0830db3905830dc3",
+        "prim.name": "a4468649edca5573",
+        "vertex.uv": "05572ef113d4044b"
       },
-      "topology": "15067e9b3c4ce9f1"
+      "topology": "8d789c49c154ceab"
     }
   },
   "name": "package.topotopo.architecture.wall_segment",

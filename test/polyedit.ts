@@ -338,5 +338,37 @@ const BOX: NodeSpec = { type: 'box' };
   check(ok, 'knife on a sphere: every edge shared by exactly two polygons');
 }
 
+// ---------------------------------------------------------------- beam
+{
+  const { signedVolume } = await import('../src/core/topology.ts');
+  const closedOut = (g: Geometry) => topologyReport(g).closed && signedVolume(g) > 0;
+  const one = await cook({ b: { type: 'beam', params: { start: [0, 0, 0], end: [3, 0, 0], size: [0.1, 0.2] } } }, 'b');
+  const bb = one.bbox();
+  check(one.numPrims === 6 && closedOut(one) && Math.abs(signedVolume(one) - 0.06) < 1e-9 && Math.abs(bb.max[1] - 0.1) < 1e-9 && Math.abs(bb.max[2] - 0.05) < 1e-9,
+    'beam: a closed 0.1 × 0.2 × 3 box along +X, height up (+Y), faces outward');
+  const ups = await cook({ b: { type: 'beam', params: { start: [0, 0, 0], end: [3, 0, 0], size: [0.1, 0.2], up: [0, 0, 1], roll: 0 } } }, 'b');
+  check(Math.abs(ups.bbox().max[2] - 0.1) < 1e-9 && Math.abs(ups.bbox().max[1] - 0.05) < 1e-9, 'up [0, 0, 1] stands the height along +Z');
+  const bottom = await cook({ b: { type: 'beam', params: { start: [0, 0, 0], end: [2, 0, 0], size: [0.1, 0.2], offset: [0, 0.1], extend: [0.1, 0.25] } } }, 'b');
+  check(Math.abs(bottom.bbox().min[1]) < 1e-9 && Math.abs(bottom.bbox().min[0] + 0.1) < 1e-9 && Math.abs(bottom.bbox().max[0] - 2.25) < 1e-9, 'offset puts the line along the bottom face; extend lengthens both ends');
+  const frame = await cook({ c: { type: 'curve', params: { points: [[0, 0, 0], [0, 2.4, 0], [3, 2.4, 0], [3, 0, 0]] } }, b: { type: 'beam', in: ['c'], params: { size: [0.12, 0.12], name: 'timber_{index}' } } }, 'b');
+  const names = [...new Set(frame.prims.get('name')!.data as string[])];
+  check(names.join() === 'timber_0,timber_1,timber_2' && closedOut(frame) && (frame.prims.get('beam')!.data as Int32Array)[17] === 2, `curve segments: one beam each, named with {index} (${names.join(', ')})`);
+  const pairs = await cook({ p: { type: 'point_grid', params: { counts: [4, 1, 1], size: [3, 0, 0] } }, b: { type: 'beam', in: ['p'], params: { caps: false } } }, 'b');
+  check(pairs.numPrims === 8 && pairs.primGroups.get('caps')?.every((x) => !x) !== false && !topologyReport(pairs).closed, 'points: consecutive pairs make beams (4 points → 2 open beams without caps)');
+  const ibeam = await cook({
+    prof: { type: 'curve', params: { closed: true, points: [[-0.05, -0.1, 0], [-0.05, -0.09, 0], [-0.006, -0.09, 0], [-0.006, 0.09, 0], [-0.05, 0.09, 0], [-0.05, 0.1, 0], [0.05, 0.1, 0], [0.05, 0.09, 0], [0.006, 0.09, 0], [0.006, -0.09, 0], [0.05, -0.09, 0], [0.05, -0.1, 0]] } },
+    b: { type: 'beam', in: [null, 'prof'], params: { start: [0, 0, 0], end: [4, 0, 0], divisions: 3 } },
+  }, 'b');
+  const area = 0.1 * 0.02 + 0.012 * 0.18;
+  check(closedOut(ibeam) && Math.abs(signedVolume(ibeam) - area * 4) < 1e-9 && ibeam.numPrims === 12 * 3 + 2, `any closed profile (an I-beam drawn clockwise is turned round): volume ${signedVolume(ibeam).toFixed(5)}`);
+  const uv = one.vertices.get('uv')!;
+  let maxU = 0;
+  for (let v = 0; v < one.numVertices; v++) maxU = Math.max(maxU, (uv.get(v) as number[])[0]);
+  check(Math.abs(maxU - 3) < 1e-9, 'uv in metres along the beam');
+  const named = await cook({ c: { type: 'curve', params: { points: [[0, 0, 0], [1, 0, 0]] } }, n: { type: 'attrib_create', in: ['c'], params: { name: 'name', class: 'prim', value: 'rail' } }, b: { type: 'beam', in: ['n'], params: { name: '' } } }, 'b');
+  check((named.prims.get('name')!.data as string[]).every((x) => x === 'rail'), 'name "" keeps the curve\'s name');
+  check((await cookErr({ p: { type: 'point_grid', params: { counts: [1, 1, 1] } }, b: { type: 'beam', in: ['p'] } }, 'b')).includes('no segment'), 'an input without segments is an error');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

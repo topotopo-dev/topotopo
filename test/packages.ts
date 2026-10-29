@@ -500,14 +500,14 @@ section('a pinned kind: publishing blocks on another kind, build warns, a kind n
   const ok = await publish(PINNED, 'pinned right');
   check(ok.ok && readJSON(path.join(PINNED, 'versions', '1.0', 'version.json')).outputs.trees.kind === 'instances', 'with the kind it cooks to it publishes');
   // a kind not on the list: an error wherever the graph is read, with the list in the hint
-  const v = o.engine.validate({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'material' as any } } });
-  check(v.errors.length === 1 && v.errors[0].message === 'named output "brick": "kind" "material" is not a kind' && /mesh, instances, points, curves, terrain, textures, volume, scene/.test(v.errors[0].hint ?? ''),
+  const v = o.engine.validate({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'level' as any } } });
+  check(v.errors.length === 1 && v.errors[0].message === 'named output "brick": "kind" "level" is not a kind' && /mesh, instances, points, curves, terrain, textures, material, volume, scene/.test(v.errors[0].hint ?? ''),
     `validate: ${v.errors.map((x) => `${x.message} (${x.hint})`).join('; ')}`);
   const cooked = await o.engine.cook({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'Mesh' as any } } });
   check(!cooked.ok && /"kind" "Mesh" is not a kind/.test(errorOf(cooked)), 'a cook of it fails the same way');
-  setGraph(PINNED, 'main', { ...scatter('instances'), outputs: { ...scatter('instances').outputs, block: { node: 'b', kind: 'material' as any } } });
+  setGraph(PINNED, 'main', { ...scatter('instances'), outputs: { ...scatter('instances').outputs, block: { node: 'b', kind: 'level' as any } } });
   const bad = await publish(PINNED, 'material');
-  check(!bad.ok && bad.blocks.some((b) => /^output "block" \(graph "main"\): "kind" "material" is not a kind \(the kinds: mesh, instances/.test(b)), `publishing blocks it: ${bad.blocks.join(' | ')}`);
+  check(!bad.ok && bad.blocks.some((b) => /^output "block" \(graph "main"\): "kind" "level" is not a kind \(the kinds: mesh, instances/.test(b)), `publishing blocks it: ${bad.blocks.join(' | ')}`);
 }
 
 section('tags and descriptions: the rule, recorded, searched; the version rule for kinds');
@@ -1082,7 +1082,7 @@ section('search: every library, by words, kind and tag; what the project can use
   check(where(find(FINDER, { query: 'conif' })) === where(s) && !find(FINDER, { query: 'onifer' }).libraries.some((l) => l.hits.length) && !find(FINDER, { query: 'ree' }).libraries.some((l) => l.hits.length),
     'a word matches the start of a word ("conif" finds conifers; "onifer" and "ree" find nothing)');
   check(where(find(FINDER, { query: 'nordic boulder' })) === '../lib:listed:nordic/rocks/boulder topotopo:builtin: game:unlisted: other:unlisted:', 'every word must match');
-  check(throws(() => find(FINDER, { kind: 'material' }), /^"material" is not a kind: mesh, instances, points, curves, terrain, textures, volume, scene$/), 'a kind not on the list says the list');
+  check(throws(() => find(FINDER, { kind: 'level' }), /^"level" is not a kind: mesh, instances, points, curves, terrain, textures, material, volume, scene$/), 'a kind not on the list says the list');
   // a project that lists the library, uses the package; the package itself; a folder in no project
   const used = find(dirs.forest, { tag: 'conifer' });
   check(used.libraries.find((l) => l.name === 'game')?.standing === 'listed' && used.libraries.find((l) => l.name === 'game')!.hits[0].used === '1.1' && /\(also studio\/trees, its default output; this project uses 1\.1\)/.test(searchText(used)),
@@ -1196,8 +1196,8 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   const there = await run('search', ['--tag', 'conifer', CLI]);
   check(there.code === 0 && /for project cliproj/.test(there.out) && /\n {2}studio\/trees\/pine /.test(there.out), 'search for the project of a folder named (a path), --tag');
   check(/^no folder .*nowhere$/.test((await run('search', ['conifer', './nowhere'], CLI)).err), 'a folder that does not exist is an error');
-  const wrong = await run('search', ['--kind', 'material'], CLI);
-  check(wrong.code === 1 && /"material" is not a kind: mesh, instances/.test(wrong.err), `search --kind with no such kind: ${wrong.err}`);
+  const wrong = await run('search', ['--kind', 'level'], CLI);
+  check(wrong.code === 1 && /"level" is not a kind: mesh, instances/.test(wrong.err), `search --kind with no such kind: ${wrong.err}`);
   // the texture of a package output names the copy relative to the root's folder (the project folder: relative paths
   // read from the nearest project.json at or above the graph file), so exports that carry texture paths name no folder
   // of this machine
@@ -1545,6 +1545,53 @@ section('the library tool: the libraries a project lists, set when the person sa
     check(!pk.err && /uses 1 package/.test(pk.text) && !od.err && list.err && /broken-config\.json/.test(list.text),
       `with a config that cannot be read, the project's packages still work and the list of registered libraries says why it cannot (${list.text.slice(0, 80)})`);
   } finally { process.env.TOPOTOPO_CONFIG = cfg; }
+}
+
+section('textures of two packages under the same image names stay apart when their outputs are merged');
+{
+  // two kits each call their base colour map "basecolor": a red locker, a blue compressor
+  const kit = (pkg: string, material: string, color: string): GraphSpec => ({
+    nodes: {
+      b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
+      basecolor: { type: 'tex_constant', params: { resolution: 8, channels: 'rgba', color } },
+      m: { type: 'texture_to_material', in: ['uv', 'basecolor'], params: { material, base_color: 'basecolor' } },
+    },
+    output: 'm', outputs: { piece: { node: 'm', label: pkg, kind: 'mesh', tags: ['prop'], description: `a ${material}` } },
+  });
+  const LOCKERS = path.join(dirs.game, 'lockers'), COMPRESSOR = path.join(dirs.game, 'compressor');
+  project(LOCKERS, { package: 'studio/lockers' }, { main: kit('lockers', 'locker', '#ff0000') });
+  project(COMPRESSOR, { package: 'studio/compressor' }, { main: kit('compressor', 'compressor', '#0000ff') });
+  check((await publish(LOCKERS, 'lockers')).ok && (await publish(COMPRESSOR, 'compressor')).ok, 'two kits published, both with an image "basecolor"');
+  const HALL = path.join(dirs.repo, 'hall');
+  project(HALL, { libraries: ['game'] }, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  const o = await open(HALL);
+  o.pk.use('studio/lockers');
+  o.pk.use('studio/compressor');
+  const { exportGeometryAsync } = await import('../src/io/export.ts');
+  const { decodePNG } = await import('../src/io/png-decode.ts');
+  const { referenceableImages } = await import('../src/core/image.ts');
+  const { mergeMaterialTables } = await import('../src/core/materials.ts');
+  const red = (img: any) => img.layer('C')[0] > 0.9 && img.layer('C')[2] < 0.1, blue = (img: any) => img.layer('C')[2] > 0.9 && img.layer('C')[0] < 0.1;
+  for (const packed of [false, true]) {
+    const at = (n: string, x: number): Record<string, any> => packed
+      ? { [`${n}_p`]: { type: 'pack', in: [n], params: { by: 'all' } }, [`${n}_at`]: { type: 'transform', in: [`${n}_p`], params: { translate: [x, 0, 0] } } }
+      : { [`${n}_at`]: { type: 'transform', in: [n], params: { translate: [x, 0, 0] } } };
+    const r = await o.engine.cook({ nodes: { a: { type: 'studio/lockers/piece' }, a2: { type: 'studio/lockers/piece' }, c: { type: 'studio/compressor/piece' }, ...at('a', 0), ...at('a2', 4), ...at('c', 2), out: { type: 'merge', in: ['a_at', 'c_at', 'a2_at'] } }, output: 'out' });
+    const label = packed ? 'packed' : 'merged';
+    if (!r.ok || !r.geo) { check(false, `${label}: ${errorOf(r)}`); continue; }
+    const g = r.geo, table = mergeMaterialTables([g, ...g.packedSources]), imgs = referenceableImages(g);
+    const ref = (m: string) => String(table[m]?.textures?.baseColor ?? '').replace(/^image:/, '');
+    check(ref('locker') && ref('compressor') && ref('locker') !== ref('compressor') && red(imgs.get(ref('locker'))) && blue(imgs.get(ref('compressor'))) && imgs.size === 2,
+      `${label}: each material keeps its own map (locker → "${ref('locker')}", compressor → "${ref('compressor')}"; ${imgs.size} images, the two lockers share one)`);
+    const glb = await exportGeometryAsync(g, 'glb');
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength), jlen = dv.getUint32(12, true);
+    const j = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jlen))), bin = 20 + jlen + 8;
+    const texOf = (m: string) => j.textures[j.materials.find((x: any) => x.name === m).pbrMetallicRoughness.baseColorTexture.index].source;
+    const pixel = (i: number) => { const bv = j.bufferViews[j.images[i].bufferView]; const png = decodePNG(glb.subarray(bin + (bv.byteOffset ?? 0), bin + (bv.byteOffset ?? 0) + bv.byteLength)); return [png.data[0], png.data[2]]; };
+    const [lr, lb] = pixel(texOf('locker')), [cr, cb] = pixel(texOf('compressor'));
+    check(j.images.length === 2 && texOf('locker') !== texOf('compressor') && lr === 255 && lb === 0 && cr === 0 && cb === 255 && new Set(j.images.map((i: any) => i.uri ?? i.name)).size === 2,
+      `${label} GLB: two images with their own names (${j.images.map((i: any) => i.name).join(', ')}), the locker red and the compressor blue`);
+  }
 }
 
 await engines[0]?.host.pool?.close();

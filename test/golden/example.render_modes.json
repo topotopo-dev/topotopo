@@ -12,9 +12,9 @@
       "min": [-1.3, -0.2, -0.7]
     },
     "counts": {
-      "points": 252,
-      "prims": 442,
-      "vertices": 1380,
+      "points": 248,
+      "prims": 136,
+      "vertices": 760,
       "volumes": 0
     },
     "groups": {
@@ -24,16 +24,16 @@
       "vertex": []
     },
     "hashes": {
-      "P": "e05303e32ba1eb45",
+      "P": "da92f2e9b58c1be3",
       "attributes": {
-        "group.point.pipe_top": "451eede47b2d38de",
-        "group.prim.lid": "1e44528b207c8bad",
-        "group.prim.pipes": "6eff05a1265b7787",
-        "group.prim.walls": "ac443d24b50eae42",
-        "vertex.N": "8cc30ea8db05e78a",
-        "vertex.uv": "28aa4e42933fa168"
+        "group.point.pipe_top": "7d5d25384d81f942",
+        "group.prim.lid": "50da70a699741b3c",
+        "group.prim.pipes": "9fa8978c624eeb56",
+        "group.prim.walls": "5749560cb0bbd2f6",
+        "vertex.N": "536de53d91944347",
+        "vertex.uv": "a37910b869f75736"
       },
-      "topology": "3b12c72bd355c019"
+      "topology": "bd880d7777a3eb51"
     }
   },
   "name": "example.render_modes",

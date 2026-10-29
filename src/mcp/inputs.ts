@@ -161,7 +161,7 @@ export class InputDescriber {
       `  on points    {"type":"attribute_from_map","in":["pts"],"params":{"path":"${rel}","projection":"xz","size":[100,100],"name":"mask"}}`,
       '               (top view: column along +X, row 0 at min Z; then scatter density_mask, prune, copy_to_points scale_attrib)',
       `  a texture    {"type":"image_file","params":{"path":"${rel}"}}`,
-      `               (an image "${imageNameOf(rel)}" for the texture nodes and texture_to_material; a file node reads it the same way)`,
+      `               (an image named after the node, e.g. a node "${imageNameOf(rel)}", for the texture nodes and texture_to_material; a file node reads it as "${imageNameOf(rel)}")`,
     ].join('\n');
     return { short, long, failed: false };
   }

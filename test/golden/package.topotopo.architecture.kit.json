@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 9134,
-      "prims": 7055,
-      "vertices": 28850,
+      "prims": 6681,
+      "vertices": 28102,
       "volumes": 0
     },
     "groups": {
@@ -26,19 +26,19 @@
     "hashes": {
       "P": "5a0eaca5a6767547",
       "attributes": {
-        "detail.materials": "e49d5ca65e611650",
-        "group.prim.front": "ea12a3e7eb2f3bb1",
-        "group.prim.side": "789cc3a35484ea0d",
-        "prim.N": "f18c7b4594a38e2f",
-        "prim.copynum": "c0fe2825ebe1309f",
-        "prim.edge": "fcae34edd88db937",
-        "prim.material": "5098f1d2bf718140",
-        "prim.name": "1fb6f8ffe437c0f5",
-        "vertex.Cd": "1ea796e941efb31b",
-        "vertex.N": "35d98b5d7430bbd7",
-        "vertex.uv": "274dff959d241523"
+        "detail.materials": "b0ce1be399044d85",
+        "group.prim.front": "59aa86aa1e2f3330",
+        "group.prim.side": "3d034f4a4a2246d0",
+        "prim.N": "3ec962057b5e552f",
+        "prim.copynum": "bfadf865f89e4d9f",
+        "prim.edge": "999bf9dd4ce2a807",
+        "prim.material": "e9e0fad6c3afbd44",
+        "prim.name": "a2abb13347df6479",
+        "vertex.Cd": "b53ed4896df7490b",
+        "vertex.N": "d771c8ddaf0571d7",
+        "vertex.uv": "db214ff2f91bd058"
       },
-      "topology": "3235a1dbb79938f1"
+      "topology": "36ae382ef71e30cc"
     }
   },
   "name": "package.topotopo.architecture.kit",

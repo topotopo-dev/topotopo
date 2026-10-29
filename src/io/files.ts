@@ -135,7 +135,7 @@ async function formatFiles(g: Geometry, format: ExportFormat | 'unreal_landscape
     if (o.meshes !== false) {
       const names = packedSourceNames(g);
       for (let s = 0; s < g.packedSources.length; s++) {
-        files.push({ path: joinPath(dirOf(base), meshDir, names[s] + '.glb'), bytes: await exportGLB(flattenSource(g.packedSources[s]), { materials: o.materials, readFile: o.readFile, warn: o.warn, custom: o.custom }) });
+        files.push({ path: joinPath(dirOf(base), meshDir, names[s] + '.glb'), bytes: await exportGLB(flattenSource(g.packedSources[s]), { materials: o.materials, readFile: o.readFile, warn: o.warn, custom: o.custom, vertexColors: o.vertexColors }) });
       }
     }
     return {

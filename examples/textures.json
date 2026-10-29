@@ -13,7 +13,7 @@
     "brick_mask": { "type": "tex_output", "in": ["bricks"], "params": { "name": "brick_mask", "keep_only": true } },
     "masonry": { "type": "tex_blend", "in": ["mortar", "brick_tint", "brick_mask"], "params": { "mode": "normal" } },
     "brick_color": { "type": "tex_blend", "in": ["masonry", "grain"], "params": { "mode": "overlay", "opacity": 0.35, "name": "brick_color" } },
-    "brick_normal": { "type": "tex_normal_from_height", "in": ["height"], "params": { "strength": 1.5, "name": "brick_normal" } },
+    "brick_normal": { "type": "tex_normal_from_height", "in": ["height"], "params": { "depth": 0.035, "size": 1.6, "name": "brick_normal" } },
     "brick_rough": { "type": "tex_levels", "in": ["height"], "params": { "out_low": 0.95, "out_high": 0.7, "name": "brick_rough" } },
     "brick_maps": { "type": "merge", "in": ["brick_color", "brick_normal", "brick_rough"] },
     "brick_wall": { "type": "texture_to_material", "in": ["wall_uv", "brick_maps"], "params": { "material": "brick", "base_color": "brick_color", "normal": "brick_normal", "roughness": "brick_rough" } },

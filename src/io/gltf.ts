@@ -15,23 +15,27 @@
 //   keep their own frames, for every primitive whose material has a normal map; a supplied point/vertex "tangent"
 //   float[4] attribute is written on the others ('preserve': everywhere it exists). Collapsed or missing uvs are
 //   reported, never written as invalid tangents.
-//   Custom attributes: every other numeric point/vertex attribute of size 1–4 becomes `_NAME` (upper-cased; float,
-//   or the smallest integer type that holds an int attribute). The original names and types are kept in mesh
-//   extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale as `_PSCALE`.
+//   Custom attributes (option custom, default off): every other numeric point/vertex attribute of size 1–4 becomes
+//   `_NAME` (upper-cased; float, or the smallest integer type that holds an int attribute). The original names and
+//   types are kept in mesh extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale
+//   as `_PSCALE`. Attributes only scene empties use (scene_empty, parent, orient, scale and their extras, at their
+//   defaults on every mesh point) are never written as mesh channels.
 //   Materials: the prim "material" attribute names a material of the detail table "materials" (core/materials.ts).
 //   Colour space: TopoTopo colours (Cd, material base/emissive colours) are display values; glTF defines
 //   baseColorFactor, emissiveFactor and COLOR_0 as linear, so they are converted on export and back on import.
-//   Vertex colours win: a primitive with Cd gets baseColorFactor white × COLOR_0, the material supplies the PBR
-//   scalars; the original material is kept in material extras (topotopo.material) for lossless re-import.
-//   A primitive whose Cd is one constant colour writes it as the baseColorFactor instead of COLOR_0 (the same
-//   colour under glTF's factor × COLOR_0, and visible in engines whose default materials ignore vertex colours,
-//   such as Unreal's Interchange); primitive extras (topotopo.Cd) restore it as point Cd on import.
+//   A named material wins over Cd: a primitive whose prim "material" names a material of the table is written with
+//   that material as it is, and its Cd / Alpha are not exported (option vertexColors writes them there too).
+//   Elsewhere, and with vertexColors, vertex colours win: a primitive with Cd gets baseColorFactor white × COLOR_0,
+//   the material supplies the PBR scalars; the original material is kept in material extras (topotopo.material) for
+//   lossless re-import. A primitive whose Cd is one constant colour writes it as the baseColorFactor instead of
+//   COLOR_0 (the same colour under glTF's factor × COLOR_0, and visible in engines whose default materials ignore
+//   vertex colours, such as Unreal's Interchange); primitive extras (topotopo.Cd) restore it as point Cd on import.
 //   Options: quantize (KHR_mesh_quantization), compress 'meshopt' (EXT_meshopt_compression, implies quantize),
 //   compress 'draco' (KHR_draco_mesh_compression, only when the optional draco3dgltf package is installed).
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
 //   (TRANSLATION / ROTATION / SCALE per instance; a 3×3 with shear is written as its nearest rotation and the
 //   scale of its columns, with a warning); the rest of the geometry as above. instancing 'expand' writes real copies.
-//   Per-instance attributes (custom, default on): the anchor point / packed prim attributes become extra instance
+//   Per-instance attributes (custom, default off): the anchor point / packed prim attributes become extra instance
 //   accessors with the extension's "_" prefix: Cd (+ Alpha) → _COLOR (VEC3/VEC4 float), every other numeric attribute
 //   of size 1–4 → _NAME, single strings → _NAME indices into a table in the node's extras; all as 32-bit floats (exact
 //   for integers below 2^24; 1- and 2-byte components break EXT_meshopt_compression's 4-byte instance strides); the
@@ -277,9 +281,18 @@ interface MatState {
   /** texture bytes by path (exportGLB preloads them); undefined = no texture support in this call */
   data?: Map<string, Uint8Array | null>;
   textures: Map<string, Texture | null>;
+  /** textures by byte length, for the byte-for-byte check that writes each distinct image once */
+  byLength: Map<number, { bytes: Uint8Array; tex: Texture }[]>;
   uris: Set<string>;
   warn?: (msg: string) => void;
 }
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
 
 /** Image MIME type from the first bytes (PNG or JPEG), or null. */
 export function imageMime(b: Uint8Array): string | null {
@@ -288,7 +301,10 @@ export function imageMime(b: Uint8Array): string | null {
   return null;
 }
 
-/** The glTF texture for an image path (created once per path), or null when its bytes are missing or not PNG/JPEG. */
+/**
+ * The glTF texture for an image path (created once per path, and once per distinct image: a path whose bytes equal an
+ * earlier one's, e.g. each LOD's copy of a map, shares its texture), or null when its bytes are missing or not PNG/JPEG.
+ */
 function textureFor(st: MatState, path: string): Texture | null {
   if (!st.data) return null;
   let t = st.textures.get(path);
@@ -298,12 +314,18 @@ function textureFor(st: MatState, path: string): Texture | null {
   const mime = bytes ? imageMime(bytes) : null;
   if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image; material exported without it`);
   if (bytes && mime) {
-    const base = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
-    const ext = mime === 'image/png' ? '.png' : '.jpg';
-    let uri = base + ext, k = 1;
-    while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
-    st.uris.add(uri);
-    t = st.doc.createTexture(base).setImage(bytes).setMimeType(mime).setURI(uri);
+    const same = st.byLength.get(bytes.length)?.find((c) => sameBytes(c.bytes, bytes));
+    if (same) t = same.tex;
+    else {
+      const base = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
+      const ext = mime === 'image/png' ? '.png' : '.jpg';
+      let uri = base + ext, k = 1;
+      while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
+      st.uris.add(uri);
+      t = st.doc.createTexture(base).setImage(bytes).setMimeType(mime).setURI(uri);
+      const list = st.byLength.get(bytes.length);
+      if (list) list.push({ bytes, tex: t }); else st.byLength.set(bytes.length, [{ bytes, tex: t }]);
+    }
   }
   st.textures.set(path, t);
   return t;
@@ -367,6 +389,34 @@ const rgbAllOnes = (d: number[], size: number) => {
 
 // ------------------------------------------------------------------ export: document
 
+/**
+ * The empties' own point attributes are no mesh data: once the empties are split out (`g` holds only the other points,
+ * a copy the caller owns), their marker, parent, orient, scale and extras hold nothing but the default fill a merge
+ * gave the mesh points. Those are deleted so no mesh carries a channel for them; one a mesh point really sets stays.
+ */
+function dropEmptyAttributes(g: Geometry, empties: SceneEmpty[]): void {
+  const names = new Set([EMPTY_ATTRIB, PARENT_ATTRIB, 'orient', 'scale']);
+  for (const e of empties) for (const k of Object.keys(e.extras)) names.add(k);
+  for (const n of names) {
+    const a = g.points.get(n);
+    if (!a) continue;
+    if (n === EMPTY_ATTRIB || onlyDefaults(a)) g.points.delete(n);
+  }
+}
+
+/** Every element of a fixed-size attribute holds its default (or, for numbers, all zeros: an unset fill). */
+function onlyDefaults(a: Attribute): boolean {
+  if (a.isArray) return false;
+  if (a.type === 'string') { const d = a.def; return (a.data as string[]).every((s) => s === '' || s === d); }
+  const d = a.def as number[], sz = a.size, data = a.data as Float64Array | Int32Array;
+  for (let i = 0; i < data.length; i += sz) {
+    let def = true, zero = true;
+    for (let c = 0; c < sz; c++) { const x = data[i + c]; if (x !== (d[c] ?? 0)) def = false; if (x !== 0) zero = false; }
+    if (!def && !zero) return false;
+  }
+  return true;
+}
+
 /** Build a gltf-transform Document for the geometry (no IO yet). */
 export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   if (hasSplinesDeep(g)) g = splinesToPolylinesDeep(g).geo; // Bezier/NURBS prims (also in packed sources) as polylines
@@ -376,16 +426,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     const keep = new Uint8Array(g.numPoints).fill(1);
     for (const e of empties) keep[e.point] = 0;
     g = g.subsetPoints(keep);
-    // the empties' own attributes are no mesh data: merged meshes only hold their default fill
-    g.points.delete(EMPTY_ATTRIB);
-    for (const n of ['orient', 'scale']) {
-      const a = g.points.get(n);
-      if (!a || a.type !== 'float' || typeof a.def === 'string') continue;
-      const d = a.def, sz = a.size, data = a.data as Float64Array;
-      let fill = true;
-      for (let i = 0; i < data.length && fill; i++) fill = data[i] === d[i % sz] || data[i] === 0;
-      if (fill) g.points.delete(n);
-    }
+    dropEmptyAttributes(g, empties);
   }
   const doc = new Document();
   doc.getRoot().getAsset().generator = 'topotopo';
@@ -398,10 +439,10 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const useMaterials = o.materials !== false;
   const st: MatState = {
     doc, table: useMaterials ? mergeMaterialTables([g, ...g.packedSources]) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material,
-    data: o.textureData, textures: new Map(), uris: new Set(), warn: o.warn,
+    data: o.textureData, textures: new Map(), byLength: new Map(), uris: new Set(), warn: o.warn,
   };
   let noUV = 0;
-  const custom = o.custom !== false;
+  const custom = o.custom === true;
   const tangentMode = o.tangents ?? 'auto';
   const lineMode = o.lineMode ?? 'strip';
   // what to write: the geometry, or (packed) its non-instanced part plus one instanced mesh per packed source
@@ -435,6 +476,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     }
     const hasN = !!(geo.vertices.get('N') ?? geo.points.get('N'));
     let normals: Float64Array | null = null;
+    // a named material decides the colour of its primitives: their Cd / Alpha are written only with vertexColors
+    const colorFor = (mat: string): Channel | null => (color && (o.vertexColors === true || !(mat && st.table[mat])) ? color : null);
     const finishColor = (out: PrimOut, mat: string) => {
       // vertex colours win where they are set; all-white Cd lets the material colour through
       const ci = color ? out.channels.indexOf(color) : -1;
@@ -514,7 +557,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
         if (tan) chans.push(tan);
         if (uv0) chans.push(uv0);
         if (uv1) chans.push(uv1);
-        if (color) chans.push(color);
+        const col = colorFor(gr.mat);
+        if (col) chans.push(col);
         chans.push(...customs);
         const e = emit(chans, tris, vprim, geo, true);
         const out: PrimOut = { mode: Primitive.Mode.TRIANGLES, channels: chans, data: e.data, count: e.count, indices: e.idx, material: null };
@@ -532,7 +576,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
         const chans: Channel[] = [posCh];
         const uv0 = uvCh('uv', 'TEXCOORD_0');
         if (uv0) chans.push(uv0);
-        if (color) chans.push(color);
+        const col = colorFor(gr.mat);
+        if (col) chans.push(col);
         chans.push(...customs);
         const strips = lineMode === 'strip' && curves.length <= MAX_LINE_STRIPS;
         const batches = strips ? curves.map((c) => [c]) : [curves];
@@ -661,21 +706,31 @@ interface MeshJob { src: Geometry; split: boolean; onMesh?: (w: WrittenMesh) => 
  */
 function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']>, g: Geometry, o: ExportOptions, quantize: boolean): MeshJob[] {
   const kind = g.primKind!, S = g.packedSource!, X = g.packedXform!, P = g.P;
-  const bySrc = new Map<number, number[]>();
+  // a packed prim's "material" (pack carries it onto the instance) applies where its source has none of its own, as
+  // unpacking does: one instanced mesh per source and material
+  const flat = new Map<number, Geometry>();
+  const flatOf = (s: number) => { let f = flat.get(s); if (!f) { f = flattenSource(g.packedSources[s]); flat.set(s, f); } return f; };
+  const ownMat = (s: number) => { const a = flatOf(s).prims.get('material'); return !!a && a.type === 'string' && (a.data as string[]).some((x) => !!x); };
+  const pm = g.prims.get('material'), pmat = pm && pm.type === 'string' ? (pm.data as string[]) : null;
+  const bySrc = new Map<string, { s: number; mat: string; prims: number[] }>();
   for (let p = 0; p < kind.length; p++) {
     if (kind[p] !== 1 || g.primStart[p + 1] - g.primStart[p] !== 1) continue;
-    let l = bySrc.get(S[p]);
-    if (!l) { l = []; bySrc.set(S[p], l); }
-    l.push(p);
+    const s = S[p], mat = pmat?.[p] && o.materials !== false && !ownMat(s) ? pmat[p] : '';
+    const key = `${s}\u0000${mat}`;
+    let l = bySrc.get(key);
+    if (!l) { l = { s, mat, prims: [] }; bySrc.set(key, l); }
+    l.prims.push(p);
   }
+  const perSource = new Map<number, number>();
+  for (const { s } of bySrc.values()) perSource.set(s, (perSource.get(s) ?? 0) + 1);
   const ext = doc.createExtension(EXTMeshGPUInstancing).setRequired(true);
   const names = packedSourceNames(g);
-  const iattrs = o.custom === false ? [] : instanceAttribSpecs(g);
+  const iattrs = o.custom === true ? instanceAttribSpecs(g) : [];
   const info: Record<string, InstanceAttribInfo> = {};
   for (const ia of iattrs) info[ia.sem] = { name: ia.a.name, cls: ia.a.cls, type: ia.type, size: ia.size, ...(ia.strings ? { strings: ia.strings } : {}) };
   let sheared = 0;
   const jobs: MeshJob[] = [];
-  for (const [s, prims] of bySrc) {
+  for (const { s, mat, prims } of bySrc.values()) {
     const n = prims.length;
     const T = new Float64Array(n * 3), L = new Float64Array(n * 9), Q = new Float32Array(n * 4), SC = new Float64Array(n * 3);
     prims.forEach((p, i) => {
@@ -687,8 +742,12 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
       Q.set(d.q, i * 4);
       SC.set(d.s, i * 3);
     });
-    const src = flattenSource(g.packedSources[s]);
-    const label = names[s] ?? `source_${s}`;
+    let src = flatOf(s);
+    if (mat) {
+      src = src.clone();
+      src.prims.set('material', new Attribute('string', 1, new Array<string>(src.numPrims).fill(mat), ''));
+    }
+    const label = (names[s] ?? `source_${s}`) + (mat && (perSource.get(s) ?? 0) > 1 ? `_${mat}` : '');
     jobs.push({
       src, split: false,
       onMesh: ({ node, center, extent }) => {

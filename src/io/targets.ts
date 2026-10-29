@@ -26,7 +26,7 @@ export function targetFormat(f: unknown): ExportFormat | null {
 }
 
 // the export tool's options (src/mcp/tools.ts), by value type
-const BOOLEAN = ['split_by_name', 'materials', 'custom_attribs', 'quantize', 'pcg', 'pcg_struct', 'meshes'];
+const BOOLEAN = ['split_by_name', 'materials', 'custom_attribs', 'vertex_colors', 'quantize', 'pcg', 'pcg_struct', 'meshes'];
 const CHOICES: Record<string, unknown[]> = { up_axis: ['y', 'z'], compress: ['none', 'meshopt', 'draco'], tangents: ['auto', 'preserve', 'none'], instancing: ['packed', 'expand'], instances: ['rows', 'expand'], precision: [32, 64] };
 const NUMBER = ['scale', 'height_min', 'height_max', 'tile_size', 'heightfield'];
 const NAMES = ['attributes', 'layers'];
@@ -38,7 +38,7 @@ export function exportToolOptions(a: Record<string, unknown>): Record<string, un
 }
 
 const MESH = { up_axis: 'y', scale: 1, instancing: 'packed' };
-const GLTF = { ...MESH, split_by_name: true, custom_attribs: false, materials: true, compress: 'none', quantize: false, tangents: 'auto' };
+const GLTF = { ...MESH, split_by_name: true, custom_attribs: false, vertex_colors: false, materials: true, compress: 'none', quantize: false, tangents: 'auto' };
 /** instance rows (csv / points.json of packed prims) write one GLB per source with these */
 const ROWS = { instances: 'rows', meshes: true, materials: true, custom_attribs: false };
 
