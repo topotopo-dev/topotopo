@@ -7,7 +7,7 @@
 //                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
-//                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--no-materials]
+//                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--vertex-colors] [--no-materials]
 //                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
 //                   (every option of the export tool has a flag; booleans take --name / --no-name)
 //                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--json]]
@@ -128,6 +128,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         export options (every option of the export tool; booleans as --name / --no-name):',
     '                         [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '                         [--custom-attribs | --no-custom-attribs] (extra numeric attributes; glTF and USD default off, PLY on) [--materials | --no-materials]',
+    '                         [--vertex-colors | --no-vertex-colors] (glTF: also write Cd as COLOR_0 on prims with a named material; default off)',
     '                         [--split-by-name | --no-split-by-name] [--precision 32|64] (geo) [--layer height] [--height-min 0] [--height-max 100] [--heightfield 0]',
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
     '                         [--instances rows|expand] [--no-meshes] (csv/points.json of packed instances: one row per instance + meshes sidecar + GLBs)',

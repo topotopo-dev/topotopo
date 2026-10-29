@@ -423,7 +423,7 @@ defineNode({
   inputs: [{ name: 'geo', desc: 'geometry to copy' }],
   params: {
     count: { type: 'int', default: 4, min: 0, max: 100000, desc: 'total copies (including the original)', aliases: ['ncy', 'copies', 'n'] },
-    translate: { type: 'vec3', default: [1, 0, 0], desc: 'offset applied per copy', aliases: ['t', 'offset'] },
+    translate: { type: 'vec3', default: [0, 0, 0], desc: 'offset applied per copy, in metres (0 by default, as in Houdini: set it, or rotate, or the copies stack in place)', aliases: ['t', 'offset'] },
     rotate: { type: 'vec3', default: [0, 0, 0], desc: 'rotation per copy (degrees)', aliases: ['r'] },
     scale: { type: 'vec3', default: [1, 1, 1], desc: 'scale per copy (compounding)', aliases: ['s'] },
     pivot: { type: 'vec3', default: [0, 0, 0], desc: 'pivot for rotate/scale' },

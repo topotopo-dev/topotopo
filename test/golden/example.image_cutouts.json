@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 928,
-      "prims": 440,
-      "vertices": 1760,
+      "prims": 28,
+      "vertices": 936,
       "volumes": 3
     },
     "groups": {
@@ -27,12 +27,12 @@
       "P": "45fae7662ee3eaf0",
       "attributes": {
         "detail.materials": "caaf5f7b5e603365",
-        "point.N": "d6240f99df609823",
-        "prim.copynum": "6cb17905749a079f",
-        "prim.material": "ca088ae5b765f97f",
-        "vertex.uv": "343ab9d9d98a802b"
+        "point.N": "8507884d09213de7",
+        "prim.copynum": "328dbd656a1cbcdf",
+        "prim.material": "4fd323d5393e75cf",
+        "vertex.uv": "417e83b5e0b8a53f"
       },
-      "topology": "a20bfad6aa04795c"
+      "topology": "e37bf80bddf62fdd"
     },
     "volumes": [
       {

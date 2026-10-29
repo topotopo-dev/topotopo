@@ -1,0 +1,39 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": [],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "5e7fa92eda54cd74",
+      "attributes": {
+        "point.N": "7feff485b1e9ec1f",
+        "vertex.uv": "28d520c5fe340eef"
+      },
+      "topology": "211195f53fcdbf2f"
+    }
+  },
+  "name": "node.remove_interior",
+  "ok": true,
+  "source": "fixture for node type \"remove_interior\" (test/fixtures.ts)",
+  "warnings": []
+}

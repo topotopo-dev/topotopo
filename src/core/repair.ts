@@ -43,6 +43,8 @@ export interface RepairOptions {
   maxHoleEdges: number;
   isolated: boolean;
   selfIntersections: SelfIntersectMode;
+  /** faces below this area count as degenerate (default: rounding at the mesh's size) */
+  minArea?: number;
 }
 
 export interface RepairReport {
@@ -701,6 +703,7 @@ function segTri(T: Float64Array, a: number, b: number, o: number): [number, numb
 /** Run the repair steps on g (see the header). */
 export function repairMesh(g: Geometry, o: RepairOptions): { geo: Geometry; report: RepairReport } {
   const r = new Repair(g);
+  if (o.minArea && o.minArea > r.areaEps) r.areaEps = o.minArea;
   if (o.fuse !== 'off') r.fuse(Math.max(0, o.tolerance), o.fuse);
   if (o.degenerate) r.degenerate();
   if (o.duplicates) r.duplicates();

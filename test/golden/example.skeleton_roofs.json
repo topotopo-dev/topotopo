@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 1284,
-      "prims": 1222,
-      "vertices": 4528,
+      "prims": 958,
+      "vertices": 4000,
       "volumes": 0
     },
     "groups": {
@@ -24,22 +24,22 @@
       "vertex": []
     },
     "hashes": {
-      "P": "e37e1cc7e3cc134d",
+      "P": "4dc31e039a2c7349",
       "attributes": {
         "detail.materials": "93ca07e8bef22c6a",
-        "group.prim.bottom": "12f02a07f0186aad",
-        "group.prim.front": "58ab6c0decd2a2a7",
-        "group.prim.side": "ac49ae1e062dd42c",
-        "group.prim.top": "c57865cf86cf640d",
-        "prim.N": "f7ad83ed9713fbf7",
-        "prim.edge": "f1caa5a4bdbc3b7e",
-        "prim.material": "50662ed572e763b7",
-        "prim.name": "8af26d315e164d8b",
-        "vertex.Cd": "7c793dd52862790f",
-        "vertex.N": "19e2b3c923ddfdb3",
-        "vertex.uv": "396bdbdb4f4c3cb1"
+        "group.prim.bottom": "ba5c300b32899555",
+        "group.prim.front": "d89b55184e36f3ae",
+        "group.prim.side": "d90bab9b1a69571d",
+        "group.prim.top": "0c8c405fba618539",
+        "prim.N": "6d8b8aedcc7867f7",
+        "prim.edge": "71069f646473dd3e",
+        "prim.material": "62ceefa5b1ba02f7",
+        "prim.name": "a7d875112c8ebf3b",
+        "vertex.Cd": "6fd86985c5d5849f",
+        "vertex.N": "3fa029c94b9801b3",
+        "vertex.uv": "934525ff464892d5"
       },
-      "topology": "9d69da3bd35437cd"
+      "topology": "111b33f735a37405"
     }
   },
   "name": "example.skeleton_roofs",

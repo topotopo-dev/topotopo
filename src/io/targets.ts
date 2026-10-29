@@ -38,7 +38,7 @@ export function exportToolOptions(a: Record<string, unknown>): Record<string, un
 }
 
 const MESH = { up_axis: 'y', scale: 1, instancing: 'packed' };
-const GLTF = { ...MESH, split_by_name: true, custom_attribs: false, materials: true, compress: 'none', quantize: false, tangents: 'auto' };
+const GLTF = { ...MESH, split_by_name: true, custom_attribs: false, vertex_colors: false, materials: true, compress: 'none', quantize: false, tangents: 'auto' };
 /** instance rows (csv / points.json of packed prims) write one GLB per source with these */
 const ROWS = { instances: 'rows', meshes: true, materials: true, custom_attribs: false };
 

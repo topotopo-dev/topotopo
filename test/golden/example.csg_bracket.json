@@ -12,9 +12,9 @@
       "min": [-2, 0, -1]
     },
     "counts": {
-      "points": 360,
-      "prims": 740,
-      "vertices": 2220,
+      "points": 350,
+      "prims": 184,
+      "vertices": 1088,
       "volumes": 0
     },
     "groups": {
@@ -24,18 +24,18 @@
       "vertex": []
     },
     "hashes": {
-      "P": "a4825de1dd1add63",
+      "P": "58073a94e5b3eafe",
       "attributes": {
-        "group.prim.bottom": "c71379fefbfcc794",
-        "group.prim.from_a": "36db4952292cdd68",
-        "group.prim.from_b": "df90aa3242a6a368",
-        "group.prim.side": "136c468014bfdf2a",
-        "group.prim.top": "93b1d42ba0e0ade1",
-        "point.Cd": "10067b05ed20829f",
-        "prim.copynum": "9c9b35654336f11f",
-        "vertex.uv": "28fa6270e49daa56"
+        "group.prim.bottom": "f4e9b87b80bcbfa1",
+        "group.prim.from_a": "ab755d6a8bbcb430",
+        "group.prim.from_b": "d448d0ca96c2f690",
+        "group.prim.side": "7c35258cdac498f6",
+        "group.prim.top": "36f7e3ce97a56954",
+        "point.Cd": "77e10215ebad57ff",
+        "prim.copynum": "0df4ddc58eb9097f",
+        "vertex.uv": "95bee8e68f62b054"
       },
-      "topology": "cb2a7aa79ef38995"
+      "topology": "9024b402ab796960"
     }
   },
   "name": "example.csg_bracket",
