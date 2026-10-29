@@ -305,7 +305,9 @@ const decorated: Record<string, NodeSpec> = {
   ...base,
   color: { type: 'color', in: ['grid'], params: { color: [0.2, 0.3, 0.4] } },
   material: { type: 'material', in: ['color'], params: { name: 'must_not_transfer' } },
-  tag: { type: 'attrib_create', in: ['material'], params: { name: 'source_tag', class: 'detail', value: 'source-only' } },
+  // a grid has no prims, so material writes only its table: give the prim attribute a table of its own
+  matname: { type: 'attrib_create', in: ['material'], params: { name: 'material', class: 'prim', type: 'string', value: 'must_not_transfer' } },
+  tag: { type: 'attrib_create', in: ['matname'], params: { name: 'source_tag', class: 'detail', value: 'source-only' } },
 };
 const tagged = await cook(decorated, 'tag');
 check(tagged.points.has('Cd') && tagged.prims.has('material') && tagged.detail.has('source_tag'), 'decorated grid carries source attribute tables');
