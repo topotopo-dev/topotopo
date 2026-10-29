@@ -328,7 +328,12 @@ SDF helpers are also available (see topic sdf).`,
   0-10  5  0-100:2   element index ranges (:2 = every 2nd)
   @P.y>0.5           attribute test, ops = == != > < >= <= ; components .x .y .z .w .r .g .b
   @class==3   @name=piece*   @Cd.r<0.2   @ptnum<100
+  strings: @name=Glass* (wildcards, case-sensitive), @name=*lass*, @name!=frame
 Tokens are space-separated and applied left to right (union unless prefixed ! or ^).
+RECIPES: material per part {"type":"material","params":{"name":"glass","group":"@name=Glass*"}} · prims 0 to 11
+  "0-11" · all glass but the first three prims "@name=Glass* ^0-2" · pieces without names: name them first with
+  attrib_string {"format":"part_{piece:03}"} (connected pieces; piece_attrib for class / copynum), then select
+  "@name=part_00*". Help topic "materials" has the material recipes.
 FOUR CLASSES: point, prim, vertex (polygon corners), edge (unordered point pairs, Houdini edge groups).
   group node: "class": "point" | "prim" | "vertex" | "edge". delete: class vertex removes corners (a polygon losing
   one is deleted, polylines shrink); class edge deletes every prim using one of the edges.
@@ -373,6 +378,29 @@ Groups produced by nodes: poly_extrude front/side, poly_bevel bevel/bevel_corner
 clip above/below/cap, fill_holes filled, lsystem leaves/J/K/M, voronoi_fracture inside, knife cut (edge + point) and
 above/below, polysplit split (edge + point), edge_divide divided, polybridge bridge, polyfill fill, dissolve dissolved,
 edge_collapse collapsed. Create custom ones with "group".`,
+
+  materials: `MATERIALS (assign by name, range or group; name the pieces first)
+A material is a prim string "material" naming an entry of the detail table "materials" (PBR base colour, metallic,
+roughness, emissive, alpha, maps). The material node writes both for the prims of its group ("" = all); chain one
+node per material, the later one winning where groups overlap. Maps: base_color_map / normal_map / roughness_map file
+paths, or images from the texture nodes through texture_to_material (help topic "textures").
+PICK THE PRIMS (any group pattern, help topic "groups"; string tests take wildcards and are case-sensitive):
+  by name          {"type":"material","params":{"name":"glass","group":"@name=Glass*","alpha":0.3}}
+                   "@name=*lass*" contains · "@name=glass_* @name=Glass_*" either · "@name!=frame" all but
+  by prim range    "0-11" (prims 0 to 11) · "0-100:2" every second · "6-11 ^7" without 7 · "@name=Glass* ^0-2"
+  by node groups   extrude "top" / "side", poly_extrude "front", poly_bevel "bevel", boolean "from_b" (the cut
+                   faces), clip "cap" … ; by attribute "@P.y>1.5", "@N.y>0.9" (facing up)
+NAME THE PIECES FIRST when they have no names (one node each):
+  connected pieces  attrib_string {"format":"part_{piece:03}"} → part_000 … (or connectivity {name_prefix:"part_"})
+  copies            attrib_string {"format":"crate_{copynum}"} after copy_xform / copy_to_points
+  engine suffixes   attrib_string {"format":"hull_{piece:03}-convcolonly"} names 146 collision hulls at once
+  clean up          attrib_string {"find":"_LOD","replace":"_lod"} · {"find":"\\\\.\\\\d+$","regex":true} · {"case":"lower"}
+  prefix            attrib_string {"format":"gun_{value}"} keeps each name behind a prefix
+  Then material {group:"@name=hull_*"} and export split_by_name write one mesh per name.
+EXPORT: glTF writes one material per table entry; a named material decides the colour of its prims (their Cd is
+  dropped unless vertex_colors:true). Merging pieces whose materials or images share a name but differ (two package
+  outputs that both call their map "basecolor") renames the later one ("paint_2", "<material>_basecolor"), so every
+  piece keeps its own look. Inspect the table: inspect lists materials; render {shading:"pbr", textures:true}.`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
 Classes: point (P and per-point data), vertex (per polygon corner: uv seams, hard normals), prim (per face/curve), detail (global).
