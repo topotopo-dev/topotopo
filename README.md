@@ -1,7 +1,5 @@
 # <img src="docs/brand/mark.svg" alt="" width="44" height="44" align="top"> TopoTopo
 
-*Formerly Polyforge; renamed before the first tagged release. Files written as `polyforge-*` still load.*
-
 TopoTopo is an open-source procedural geometry engine. You describe geometry as a node graph in JSON; the engine
 cooks it headless and deterministic, and exports it to Unreal, Blender and Houdini. Built for LLM agents through MCP,
 and for people through the CLI. It runs on Node and WebAssembly with no GPU, every cook is reproducible from the
