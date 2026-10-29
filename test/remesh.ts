@@ -351,9 +351,9 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   const lod = g.prims.get('lod')!.data as Int32Array, name = g.prims.get('name')!.data as string[];
   const counts = [0, 0, 0, 0];
   let namesOk = true;
-  for (let p = 0; p < g.numPrims; p++) { counts[lod[p]]++; if (name[p] !== `mesh_LOD${lod[p]}`) namesOk = false; }
+  for (let p = 0; p < g.numPrims; p++) { counts[lod[p]]++; if (name[p] !== `mesh_lod${lod[p]}`) namesOk = false; }
   check(counts.every((c, k) => !k || c < counts[k - 1]) && counts[0] === 5120, `lod: 4 levels with decreasing triangle counts ${counts.join(' > ')}`);
-  check(namesOk, 'lod: names suffixed mesh_LOD0 … mesh_LOD3');
+  check(namesOk, 'lod: names mesh_lod0 … mesh_lod3 (name_format "{name}_lod{level}")');
   const info = JSON.parse((g.detail.get('lod')!.data as string[])[0]);
   const lt = g.detail.get('lod_tris')!.getArray(0);
   check(info.length === 4 && info.every((x: any, k: number) => x.triangles === counts[k]) && lt.join() === counts.join(), `lod: detail lod lists the levels (${info.map((x: any) => `${x.level}:${x.triangles}`).join(' ')})`);
@@ -362,7 +362,38 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   check(sw.numPrims === counts[2] && swl.every((x) => x === 2), `lod switch: level 2 only (${sw.numPrims} triangles)`);
   const named = await cook({ ...src, n: { type: 'attrib_create', in: ['c'], params: { name: 'name', class: 'prim', type: 'string', value: 'rock' } }, l: { type: 'lod', in: ['n'], params: { levels: 2 } } }, 'l');
   const nn = new Set(named.prims.get('name')!.data as string[]);
-  check(nn.has('rock_LOD0') && nn.has('rock_LOD1') && nn.size === 2, `lod: existing names get the suffix (${[...nn].join(', ')})`);
+  check(nn.has('rock_lod0') && nn.has('rock_lod1') && nn.size === 2, `lod: existing names get the suffix (${[...nn].join(', ')})`);
+  // name_format, switch naming and its errors
+  const fmtd = await cook({ ...src, n: { type: 'attrib_create', in: ['c'], params: { name: 'name', class: 'prim', type: 'string', value: 'rock' } }, l: { type: 'lod', in: ['n'], params: { levels: 2, name_format: 'LOD{level}_{name}' } } }, 'l');
+  check(new Set(fmtd.prims.get('name')!.data as string[]).has('LOD1_rock'), 'lod name_format places {name} and {level}');
+  const swn = await cook({ ...src, l: { type: 'lod', in: ['c'], params: { levels: 3, mode: 'switch', level: 1 } } }, 'l');
+  const swk = await cook({ ...src, l: { type: 'lod', in: ['c'], params: { levels: 3, mode: 'switch', level: 1, name_format: '{name}', base_name: 'rock' } } }, 'l');
+  check((swn.prims.get('name')!.data as string[]).every((x) => x === 'mesh_lod1') && (swk.prims.get('name')!.data as string[]).every((x) => x === 'rock'), 'switch mode names its level the same way (mesh_lod1); "{name}" keeps the name');
+  const noLevel = await engine.cook({ nodes: { ...src, l: { type: 'lod', in: ['c'], params: { levels: 2, name_format: '{name}' } } }, output: 'l' });
+  check(!noLevel.ok && /has no \{level\}/.test(noLevel.errors[0]?.message ?? ''), 'merge mode needs {level} in name_format');
+  // group: only those prims get levels, the rest passes through once
+  const parts: Record<string, NodeSpec> = {
+    a: { type: 'box', params: { divisions: [4, 4, 4] } }, an: { type: 'attrib_create', in: ['a'], params: { name: 'name', class: 'prim', value: 'body' } },
+    b: { type: 'sphere', params: { type: 'ico', level: 3, center: [2, 0, 0] } }, bn: { type: 'attrib_create', in: ['b'], params: { name: 'name', class: 'prim', value: 'magazine' } },
+    m: { type: 'merge', in: ['an', 'bn'] },
+  };
+  const grp = await cook({ ...parts, l: { type: 'lod', in: ['m'], params: { levels: 3, group: '@name=magazine' } } }, 'l');
+  const gn = grp.prims.get('name')!.data as string[];
+  check(gn.filter((x) => x === 'body').length === 96 && ['magazine_lod0', 'magazine_lod1', 'magazine_lod2'].every((x) => gn.includes(x)) && !gn.some((x) => x.startsWith('body_')),
+    `lod group: the magazine gets levels, the body passes through once (${[...new Set(gn)].join(', ')})`);
+  // a level held back by seams says why; hard normals no longer make a level vanish
+  const hard: Record<string, NodeSpec> = { s: { type: 'sphere', params: { type: 'ico', level: 4 } }, uv: { type: 'uv_unwrap', in: ['s'] }, n: { type: 'normal', in: ['uv'], params: { class: 'vertex', cusp_angle: 5 } } };
+  const held = await cookR({ ...hard, l: { type: 'lod', in: ['n'], params: { levels: 2, ratios: [1, 0.1] } } }, 'l');
+  const hw = held.warnings.map((w) => w.message).find((w) => w.includes('short of its 10 % target')) ?? '';
+  const hinfo = JSON.parse((held.geo!.detail.get('lod')!.data as string[])[0]);
+  check(hinfo[1].triangles > 512 && /hard normals \(vertex N\) \([\d,]+ points\)/.test(hw) && /uv seams \([\d,]+ points\)/.test(hw), `lod: a level held by seams warns with the causes and counts (${hw.slice(0, 160)}…)`);
+  check(hinfo[1].triangles > 0, `lod: hard normals do not prune a level to nothing (${hinfo[1].triangles} triangles)`);
+  // … while a tiny separate piece still goes in a coarse level (pruned by points where seams split the islands)
+  const bolt = await cook({ ...hard, b: { type: 'box', params: { size: [0.004, 0.004, 0.004], center: [1.5, 0, 0] } }, bn: { type: 'normal', in: ['b'], params: { class: 'vertex' } }, m: { type: 'merge', in: ['n', 'bn'] }, l: { type: 'lod', in: ['m'], params: { levels: 2, ratios: [1, 0.02], max_error: 1 } } }, 'l');
+  const lv = bolt.prims.get('lod')!.data as Int32Array;
+  let farPts = 0;
+  for (let pr = 0; pr < bolt.numPrims; pr++) if (lv[pr] === 1) for (const pt of bolt.primPoints(pr)) if (bolt.P[pt * 3] > 1.2) farPts++;
+  check(farPts === 0, 'lod prune: a 4 mm bolt is gone from the coarse level of a hard-normal mesh');
   const ss = await cook({ s: src.s, l: { type: 'lod', in: ['s'], params: { screen_sizes: [1, 0.3, 0.05] } } }, 'l');
   const sl = ss.prims.get('lod')!.data as Int32Array, sc = [0, 0, 0];
   for (const x of sl) sc[x]++;

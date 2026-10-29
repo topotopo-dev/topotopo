@@ -87,6 +87,28 @@ function steerColumns(g: Geometry, attrs: SteerAttrib[], maxFloats: number) {
   return { cols, total, used, skipped };
 }
 
+/**
+ * Connected components of a triangle index list over `n` render vertices, or, with `toPoint`, over the points they map
+ * to (`np` points).
+ */
+function islandCount(idx: Uint32Array, n: number, toPoint?: number[], np = 0): number {
+  const m = toPoint ? np : n, parent = new Int32Array(m);
+  for (let i = 0; i < m; i++) parent[i] = i;
+  const find = (x: number) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const id = (r: number) => (toPoint ? toPoint[r] : r);
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = find(id(idx[t])), b = find(id(idx[t + 1])), c = find(id(idx[t + 2]));
+    if (a !== b) parent[a] = b;
+    const b2 = find(b);
+    if (find(c) !== b2) parent[find(c)] = b2;
+  }
+  const used = new Uint8Array(m);
+  for (let t = 0; t < idx.length; t++) used[id(idx[t])] = 1;
+  let count = 0;
+  for (let i = 0; i < m; i++) if (used[i] && find(i) === i) count++;
+  return count;
+}
+
 /** Decimate the (selected) polygons of g to triangles with meshoptimizer; other prims pass through. */
 export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
   const sel = o.group;
@@ -139,10 +161,14 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
   }
   if (anyLock) { lock = new Uint8Array(R); for (let r = 0; r < R; r++) lock[r] = lockPt[rvPt[r]]; }
   const target = Math.min(nt, o.targetCount > 0 ? Math.floor(o.targetCount) : Math.floor(nt * Math.max(0, Math.min(1, o.ratio)))) * 3;
+  // meshoptimizer prunes components of the render-vertex mesh: where seams or hard normals split a connected piece
+  // into islands, it would remove parts of surfaces (a sphere with hard normals vanished whole), so prune only when the
+  // render vertices keep every piece in one island
+  const prune = o.prune && islandCount(idx, R) === islandCount(idx, R, rvPt, np);
   const scale = MeshoptSimplifier.getScale(pos, 3) || 1;
   const steer = steerColumns(g, o.attributes, 32);
   let out: Uint32Array = idx, err = 0;
-  if (target < nt * 3 || o.prune) {
+  if (target < nt * 3 || prune) {
     if (o.sloppy) {
       const relMax = o.errorAbsolute ? o.maxError / scale : o.maxError;
       [out, err] = MeshoptSimplifier.simplifySloppy(idx, pos, 3, lock, target, relMax);
@@ -150,7 +176,7 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     } else {
       const flags: SimplifierFlags[] = [];
       if (o.lockBorder) flags.push('LockBorder');
-      if (o.prune) flags.push('Prune');
+      if (prune) flags.push('Prune');
       if (o.sparse) flags.push('Sparse');
       if (o.errorAbsolute) flags.push('ErrorAbsolute');
       if (o.regularize) flags.push('Regularize');
@@ -185,6 +211,31 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     keepTri[i] = 0;
     if (!sameWinding) { keepTri[j] = 0; seenTri.delete(key); }
   }
+  // prune by points where seams kept meshoptimizer from it: a piece (connected through its points) no larger than the
+  // error the reduction reached goes, as meshoptimizer's prune does
+  if (o.prune && !prune && !o.sloppy && target < nt * 3 && errorAbs > 0) {
+    const parent = new Int32Array(np);
+    for (let p = 0; p < np; p++) parent[p] = p;
+    const find = (x: number) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    for (let i = 0; i < nOut; i++) {
+      if (!keepTri[i]) continue;
+      const a = find(rvPt[out[i * 3]]), b = find(rvPt[out[i * 3 + 1]]), c = find(rvPt[out[i * 3 + 2]]);
+      if (a !== b) parent[a] = b;
+      const r = find(b);
+      if (find(c) !== r) parent[find(c)] = r;
+    }
+    const box = new Map<number, number[]>();
+    for (let i = 0; i < nOut * 3; i++) {
+      if (!keepTri[(i / 3) | 0]) continue;
+      const p = rvPt[out[i]], r = find(p), q = p * 3;
+      const bb = box.get(r);
+      if (!bb) box.set(r, [P[q], P[q + 1], P[q + 2], P[q], P[q + 1], P[q + 2]]);
+      else for (let c = 0; c < 3; c++) { if (P[q + c] < bb[c]) bb[c] = P[q + c]; if (P[q + c] > bb[c + 3]) bb[c + 3] = P[q + c]; }
+    }
+    const small = new Set<number>();
+    for (const [r, bb] of box) if (Math.hypot(bb[3] - bb[0], bb[4] - bb[1], bb[5] - bb[2]) <= errorAbs) small.add(r);
+    if (small.size && small.size < box.size) for (let i = 0; i < nOut; i++) if (keepTri[i] && small.has(find(rvPt[out[i * 3]]))) keepTri[i] = 0;
+  }
   // rebuild: points in input order, passthrough prims, then the decimated triangles
   const used = new Uint8Array(np);
   for (let i = 0; i < out.length; i++) if (keepTri[(i / 3) | 0]) used[rvPt[out[i]]] = 1;
@@ -210,6 +261,58 @@ export function decimateMesh(g: Geometry, o: DecimateOptions): DecimateResult {
     b.addPrim([map[rvPt[r0]], map[rvPt[r1]], map[rvPt[r2]]], true, prim, [v0, v1, v2]);
   }
   return { geo: b.build(), error, errorAbs, trisIn: nt, trisOut, used: steer.used, skipped: steer.skipped };
+}
+
+/**
+ * What keeps the polygons of g from reducing freely (decimateMesh keeps every discontinuity of a render vertex): per
+ * cause, how many points hold one. Causes: a vertex attribute whose corners differ at a point ('uv seams', 'hard
+ * normals (vertex N)', 'vertex <name>'), a string prim attribute or prim group that changes across it ('prim "<name>"
+ * borders', 'group "<name>" borders') and 'open borders' (edges used by one polygon). Largest first.
+ */
+export function reductionLocks(g: Geometry): { cause: string; points: number }[] {
+  const vp = g.vertexPoint, np = g.numPoints;
+  const vAttrs = [...g.vertices.map].filter(([, a]) => !a.isArray);
+  const strs = [...g.prims.map].filter(([, a]) => a.type === 'string' && !a.isArray);
+  const grps = [...g.primGroups];
+  const vprim = g.vertexPrims();
+  // corners of every point (closed polygons only)
+  const start = new Int32Array(np + 1);
+  for (let pr = 0; pr < g.numPrims; pr++) if (g.primClosed[pr] && g.primSize(pr) >= 3) for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) start[vp[v] + 1]++;
+  for (let p = 0; p < np; p++) start[p + 1] += start[p];
+  const corners = new Int32Array(start[np]), fill = start.slice(0, np);
+  for (let pr = 0; pr < g.numPrims; pr++) if (g.primClosed[pr] && g.primSize(pr) >= 3) for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) corners[fill[vp[v]]++] = v;
+  const counts = new Map<string, number>();
+  const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1);
+  for (let p = 0; p < np; p++) {
+    const s = start[p], e = start[p + 1];
+    if (e - s < 2) continue;
+    const v0 = corners[s], p0 = vprim[v0];
+    for (const [n, a] of vAttrs) {
+      for (let k = s + 1; k < e; k++) if (vertexAttribsDiffer([a], v0, corners[k])) { bump(n === 'uv' ? 'uv seams' : n === 'N' ? 'hard normals (vertex N)' : `vertex ${n}`); break; }
+    }
+    for (const [n, a] of strs) {
+      const d = a.data as string[];
+      for (let k = s + 1; k < e; k++) if (d[vprim[corners[k]]] !== d[p0]) { bump(`prim "${n}" borders`); break; }
+    }
+    for (const [n, m] of grps) {
+      for (let k = s + 1; k < e; k++) if (m[vprim[corners[k]]] !== m[p0]) { bump(`group "${n}" borders`); break; }
+    }
+  }
+  // open borders: edges used by one polygon
+  const edges = new Map<string, number>();
+  for (let pr = 0; pr < g.numPrims; pr++) {
+    if (!g.primClosed[pr] || g.primSize(pr) < 3) continue;
+    const s = g.primStart[pr], e = g.primStart[pr + 1];
+    for (let v = s; v < e; v++) {
+      const a = vp[v], b = vp[v + 1 < e ? v + 1 : s];
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      edges.set(key, (edges.get(key) ?? 0) + 1);
+    }
+  }
+  const borderPts = new Set<number>();
+  for (const [k, n] of edges) if (n === 1) { const [a, b] = k.split(',').map(Number); borderPts.add(a); borderPts.add(b); }
+  if (borderPts.size) counts.set('open borders', borderPts.size);
+  return [...counts].map(([cause, points]) => ({ cause, points })).sort((a, b) => b.points - a.points || (a.cause < b.cause ? -1 : 1));
 }
 
 export interface PointDecimateOptions {

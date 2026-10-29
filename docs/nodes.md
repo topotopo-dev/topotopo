@@ -4799,9 +4799,9 @@ Unlike clip, both sides stay connected (keep both) and the mesh stays watertight
 
 category: `topology` · aliases: `lod_tree`, `polyreduce_lod`, `lod_create`, `lods`
 
-Levels of detail in one go: decimated copies tagged with prim lod and name suffix _LOD0, _LOD1 … (merged), or one level (switch).
+Levels of detail in one go: decimated copies tagged with prim lod and named {name}_lod0, {name}_lod1 … (merged), or one level (switch); optionally of one group only.
 
-Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. merge outputs all levels together with prim int "lod" and prim "name" = input name (or base_name) + "_LOD<k>", so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level". Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
+Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. Every level's prims get prim int "lod" and prim "name" = name_format with {name} = the prim's input name (or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open borders, with point counts (or the max_error limit). Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
 
 **Inputs**
 
@@ -4824,10 +4824,12 @@ Houdini: PolyReduce per level + a name per level (LOD Create). Each level is dec
 | `prune` | bool | `true` |  |  |  | let small disconnected pieces (leaves, bolts) vanish in coarse levels |
 | `mode` | enum | `"merge"` |  | `merge`, `switch` |  | merge = all levels in one geometry; switch = only "level" |
 | `level` | int | `0` | 0.. |  |  | switch mode: the level to output |
-| `base_name` | string | `"mesh"` |  |  | `name` | name for prims without a "name" attribute (becomes mesh_LOD0 …) |
+| `name_format` | string | `"{name}_lod{level}"` |  |  | `name_pattern`, `suffix_format` | prim name of each level: {name} = the input prim name (or base_name), {level} = the level number (merge needs {level}) |
+| `base_name` | string | `"mesh"` |  |  | `name` | the {name} of prims without a "name" attribute (mesh_lod0 …) |
+| `group` | group (prim) | `""` |  |  |  | prims to make levels of ("" = all); the others pass through once, unchanged |
 | `spacing` | vec3 | `[0,0,0]` |  |  | `offset` | offset of level k = k * spacing (side-by-side previews; keep 0 for export) |
 
-**Writes:** prim int lod, prim string name (…_LOD<k>); detail string lod (JSON per level), detail int[] lod_tris
+**Writes:** prim int lod, prim string name (name_format, default {name}_lod{level}); detail string lod (JSON per level), detail int[] lod_tris
 
 **Example**
 
