@@ -500,7 +500,7 @@ defineNode({
   aliases: ['image_read', 'png_read', 'texture_file'],
   inputs: [{ name: 'geo', desc: 'optional: add the image to this geometry (chain image_file nodes, or carry a mesh); else the output holds only the image', optional: true }],
   params: {
-    path: { type: 'path', default: '', desc: 'PNG file (relative to the workspace, e.g. "inputs/brick.png") or URL', aliases: ['file', 'filename'] },
+    path: { type: 'path', default: '', desc: 'PNG file (relative to the project folder, e.g. "inputs/brick.png") or URL', aliases: ['file', 'filename'] },
     name: nameParam(),
     layers: { type: 'enum', options: [...PNG_LAYERS], default: 'auto', desc: 'auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels', aliases: ['channels'] },
     srgb: { type: 'bool', default: true, desc: 'the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never)' },
@@ -522,7 +522,7 @@ defineNode({
   },
   async cook(ctx) {
     const { p, type, scope } = ctx;
-    if (!String(p.path ?? '').trim()) throw new NodeError(`${type}: path is empty`, 'a PNG relative to the workspace (people drop theirs into inputs/) or a URL');
+    if (!String(p.path ?? '').trim()) throw new NodeError(`${type}: path is empty`, 'a PNG relative to the project folder (people drop theirs into inputs/) or a URL');
     let img: Image;
     try {
       img = await readImageFile((f) => scope.files.readFile(f), p.path, { name: outName(ctx), layers: p.layers, srgb: !!p.srgb });

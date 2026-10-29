@@ -19,6 +19,7 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { andThen } from '../graph/parallel.ts';
+import { partsOf, primWhere } from '../core/report.ts';
 import { P, mask } from './util.ts';
 import { NAMED_BY_NODE, imageGeo, nameParam, outName, resolutionParam, size2 } from './texture.ts';
 
@@ -239,6 +240,18 @@ const chain = <T>(x: T | Promise<T>, f: (v: T) => Geometry | Promise<Geometry>):
 
 const cageOf = (b: Bake) => (b.ctx.p.cage > 0 ? b.ctx.p.cage : 0.02 * b.diag);
 
+/** Where the projection missed, for its warning: the parts with missed samples (counts) and the first one's place. */
+function missWhere(b: Bake): string {
+  const m = b.missed;
+  if (!m) return '';
+  const prims: number[] = [];
+  let first = -1;
+  for (let i = 0; i < b.s.n; i++) if (m[i]) { if (first < 0) first = i; prims.push(b.triPrim[b.s.tri[i]]); }
+  if (first < 0) return '';
+  const parts = partsOf(b.g, prims);
+  return `; ${parts ? `samples by part: ${parts}; ` : ''}the first at ${primWhere(b.g, b.triPrim[b.s.tri[first]], b.P.subarray(first * 3, first * 3 + 3))}`;
+}
+
 /** Samples moved onto the high mesh (P, N) where the projection hit; the low surface elsewhere. */
 function onHigh(b: Bake, high: Geometry) {
   return andThen(project(b, high, cageOf(b), true), ({ D, NO, scene, R }) => {
@@ -249,7 +262,7 @@ function onHigh(b: Bake, high: Geometry) {
       if (!(d === d)) { miss++; continue; }
       for (let c = 0; c < 3; c++) { P[i * 3 + c] += R[i * 3 + c] * d; N[i * 3 + c] = NO[i * 3 + c]; }
     }
-    if (miss) b.ctx.warn(`${b.ctx.type}: ${miss} of ${b.s.n} samples found no high-res surface within the cage (${cageOf(b).toPrecision(3)} m${b.ctx.p.cage_attrib && b.g.findAttrib(b.ctx.p.cage_attrib, ['vertex', 'point', 'prim', 'detail']) ? `, or attribute "${b.ctx.p.cage_attrib}"` : ''}); they use the low surface. Layer "missed" shows where: raise cage there (cage_attrib per part)`);
+    if (miss) b.ctx.warn(`${b.ctx.type}: ${miss} of ${b.s.n} samples found no high-res surface within the cage (${cageOf(b).toPrecision(3)} m${b.ctx.p.cage_attrib && b.g.findAttrib(b.ctx.p.cage_attrib, ['vertex', 'point', 'prim', 'detail']) ? `, or attribute "${b.ctx.p.cage_attrib}"` : ''}); they use the low surface${missWhere(b)}. Layer "missed" shows where: raise cage there (cage_attrib per part)`);
     return { P, N, scene, D, miss };
   });
 }
@@ -579,7 +592,7 @@ defineBake({
       const n = b.s.n, dist = new Float32Array(n), C = new Float32Array(n);
       let lo = Infinity, hi = -Infinity, miss = 0;
       for (let i = 0; i < n; i++) { const d = D[i]; if (d === d) { if (d < lo) lo = d; if (d > hi) hi = d; } else miss++; }
-      if (miss) ctx.warn(`${ctx.type}: ${miss} of ${n} samples found no high-res surface within the cage (${cage.toPrecision(3)} m)`);
+      if (miss) ctx.warn(`${ctx.type}: ${miss} of ${n} samples found no high-res surface within the cage (${cage.toPrecision(3)} m)${missWhere(b)}; layer "missed" shows where`);
       const span = hi > lo ? hi - lo : 1;
       for (let i = 0; i < n; i++) {
         const d = D[i];

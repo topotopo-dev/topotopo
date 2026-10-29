@@ -15,7 +15,7 @@ defineNode({
     'material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not ' +
     'written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different ' +
     'groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or ' +
-    'JPEG, relative to the graph/workspace): glb/gltf embed them, usda references them through UsdUVTexture shaders, ' +
+    'JPEG, relative to the project folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, ' +
     'geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.',
   aliases: ['material_assign', 'shop', 'assign_material', 'materialassign'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
