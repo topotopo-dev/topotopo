@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 17684,
-      "prims": 16977,
-      "vertices": 62308,
+      "prims": 13273,
+      "vertices": 54900,
       "volumes": 0
     },
     "groups": {
@@ -27,18 +27,18 @@
       "P": "1d0bf3762bafe6f8",
       "attributes": {
         "detail.materials": "93ca07e8bef22c6a",
-        "group.prim.front": "fd06876a54b94a88",
-        "group.prim.side": "311bee161180b58c",
-        "prim.N": "26428ea50df9c5d7",
-        "prim.copynum": "74102d65cb4a2d9f",
-        "prim.edge": "9fbfd15dfa540087",
-        "prim.material": "550b39c6fb001bb0",
-        "prim.name": "d17c5896751fef20",
-        "vertex.Cd": "1ef19b15eef399df",
-        "vertex.N": "d07c7ac54c7d252f",
-        "vertex.uv": "89e75a9c1d9ce5ca"
+        "group.prim.front": "c1745021b992dc17",
+        "group.prim.side": "4a6f2d819c6d0cb7",
+        "prim.N": "57138fa519205dd7",
+        "prim.copynum": "2f3ed6651171099f",
+        "prim.edge": "a23b481dd44b66c7",
+        "prim.material": "2651379600fb5b40",
+        "prim.name": "440c6c668c21f710",
+        "vertex.Cd": "53fdff151990f31f",
+        "vertex.N": "62c020c54e59cd2f",
+        "vertex.uv": "864afb54294541ea"
       },
-      "topology": "4c95563a72d9b3dc"
+      "topology": "38b9436d69984093"
     }
   },
   "name": "example.house_city",

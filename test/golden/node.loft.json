@@ -20,12 +20,14 @@
     "groups": {
       "edge": [],
       "point": [],
-      "prim": [],
+      "prim": ["caps", "sides"],
       "vertex": []
     },
     "hashes": {
       "P": "343f13a5117fb6d7",
       "attributes": {
+        "group.prim.caps": "5d025c7da6ea3787",
+        "group.prim.sides": "7d6d3c7d9f69a687",
         "vertex.uv": "1cf8daeda40c2fd7"
       },
       "topology": "a2ac1dc43d70a51e"

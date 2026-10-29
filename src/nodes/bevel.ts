@@ -1,6 +1,10 @@
 // Poly bevel: chamfer / round edges and points (Houdini PolyBevel). Kernels in core/bevel.ts.
 import { defineNode } from '../graph/registry.ts';
 import { bevelEdges, bevelPoints } from '../core/bevel.ts';
+import type { Geometry } from '../core/geometry.ts';
+import { primArea, primPerimeter } from '../core/topology.ts';
+import { primWhere } from '../core/report.ts';
+import { fusePoints } from './transform.ts';
 import { edgeMask, mask } from './util.ts';
 
 defineNode({
@@ -26,7 +30,7 @@ defineNode({
   params: {
     group: {
       type: 'group', default: '',
-      desc: 'edges to bevel (edge pattern or group: "angle>80", "border:top", "p0-1", "rim"; "" = every edge shared by two polygons); with mode "points", a point pattern ("" = all points)',
+      desc: 'edges to bevel (edge pattern or group: "angle>80", "border:top", "p0-1", "rim"; "" = every edge shared by two polygons where the surface bends: flat edges inside a plane, such as the splits a boolean leaves in a cut face, are skipped); with mode "points", a point pattern ("" = all points)',
       aliases: ['edges', 'edge_group', 'points'],
     },
     mode: { type: 'enum', options: ['edges', 'points'], default: 'edges', desc: 'bevel edges, or truncate points', aliases: ['bevel_type', 'class'] },
@@ -46,6 +50,42 @@ defineNode({
       ? bevelPoints(g, mask(g, 'point', pattern), opts)
       : bevelEdges(g, pattern === '' ? null : edgeMask(g, pattern), opts);
     for (const w of r.warnings) warn(w);
-    return r.geo;
+    return p.mode === 'points' || r.geo === g ? r.geo : closeCollapsed(r.geo, p.offset_mode === 'distance' ? p.offset * 0.01 : 0, warn);
   },
 });
+
+/**
+ * Faces the bevel shrank to a line (an offset at half the thickness of a plate: the bevels of its two edges meet on
+ * the side face; with clamp on they stop a hair short) are closed up: a face next to a bevel narrower than minWidth
+ * (a hundredth of the offset) or of no area has its points welded, so the strips meet directly and no sliver is
+ * exported. Says where.
+ */
+function closeCollapsed(g: Geometry, minWidth: number, warn: (m: string) => void): Geometry {
+  const bev = g.primGroups.get('bevel');
+  if (!bev) return g;
+  const onBevel = new Uint8Array(g.numPoints);
+  for (let p = 0; p < g.numPrims; p++) if (bev[p]) for (const i of g.primPoints(p)) onBevel[i] = 1;
+  const P = g.P;
+  const collapsed: number[] = [];
+  let weld = 0;
+  for (let p = 0; p < g.numPrims; p++) {
+    if (bev[p] || !g.primClosed[p] || g.primSize(p) < 3) continue;
+    const ids = g.primPoints(p);
+    if (!ids.some((i) => onBevel[i])) continue;
+    let longest = 0;
+    for (let k = 0; k < ids.length; k++) {
+      const a = ids[k] * 3, c = ids[(k + 1) % ids.length] * 3;
+      longest = Math.max(longest, Math.hypot(P[a] - P[c], P[a + 1] - P[c + 1], P[a + 2] - P[c + 2]));
+    }
+    const width = longest > 0 ? (2 * primArea(g, p)) / longest : 0;
+    if (!(width <= Math.max(minWidth, 1e-9 * primPerimeter(g, p)))) continue;
+    collapsed.push(p);
+    weld = Math.max(weld, width);
+  }
+  if (!collapsed.length) return g;
+  const b = g.bbox(), size = Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
+  const cand = new Uint8Array(g.numPoints);
+  for (const p of collapsed) for (const i of g.primPoints(p)) cand[i] = 1;
+  warn(`the offset reaches half the width of ${collapsed.length} face(s) (the thickness of a plate, a narrow facet), so the bevels on both sides meet and those faces closed up (first ${primWhere(g, collapsed[0])}); a smaller offset keeps a flat band between them`);
+  return fusePoints(g, Math.max(size * 1e-7, weld * 1.5), (i) => !!cand[i]);
+}

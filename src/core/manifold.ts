@@ -3,6 +3,7 @@
 // manifold "properties" so they are interpolated across new intersection edges.
 import { Geometry } from './geometry.ts';
 import { triangulate } from './topology.ts';
+import { mergeTriangles } from './polymerge.ts';
 import { solidCauses, solidReport } from './report.ts';
 import type { Vec3 } from './math.ts';
 
@@ -248,6 +249,45 @@ export function toPolygons(g: Geometry, plane: Plane): { polys: [number, number]
 }
 
 /**
+ * Contours by nesting: a contour lying wholly inside another is a hole of it (depth 1), one inside a hole an island
+ * (depth 2) and so on. Returns the contours wound counter-clockwise at even depth and clockwise at odd depth (so the
+ * NonZero rule fills shapes, cuts holes and still unions shapes that only overlap), each one's depth and the index
+ * of the contour it lies directly in (-1 at the top).
+ */
+export function orientNested(polys: [number, number][][]): { polys: [number, number][][]; depth: number[]; parent: number[] } {
+  const n = polys.length;
+  const area = polys.map((q) => { let a = 0; for (let i = 0; i < q.length; i++) { const p = q[i], r = q[(i + 1) % q.length]; a += p[0] * r[1] - r[0] * p[1]; } return a / 2; });
+  const box = polys.map((q) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of q) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    return [x0, y0, x1, y1];
+  });
+  const pointIn = (pt: [number, number], q: [number, number][]) => {
+    let inside = false;
+    for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+      const [xi, yi] = q[i], [xj, yj] = q[j];
+      if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  // a inside b: a's box within b's, and every corner of a inside b (a shape that only overlaps b is not nested)
+  const within = (a: number, b: number) => {
+    const A = box[a], B = box[b];
+    if (A[0] < B[0] || A[1] < B[1] || A[2] > B[2] || A[3] > B[3] || Math.abs(area[a]) >= Math.abs(area[b])) return false;
+    return polys[a].every((pt) => pointIn(pt, polys[b]));
+  };
+  const parent = new Array(n).fill(-1), depth = new Array(n).fill(0);
+  for (let a = 0; a < n; a++) {
+    let best = -1;
+    for (let b = 0; b < n; b++) if (b !== a && within(a, b) && (best < 0 || Math.abs(area[b]) < Math.abs(area[best]))) best = b;
+    parent[a] = best;
+  }
+  for (let a = 0; a < n; a++) { let d = 0; for (let r = parent[a]; r >= 0 && d <= n; r = parent[r]) d++; depth[a] = d; }
+  const out = polys.map((q, i) => ((area[i] > 0) === (depth[i] % 2 === 0) ? q : q.slice().reverse()));
+  return { polys: out, depth, parent };
+}
+
+/**
  * A manifold CrossSection from 2D contours. No contours (empty input, points only, open curves) gives an empty
  * section: manifold's constructor throws a raw TypeError on an empty list.
  */
@@ -277,7 +317,7 @@ export function polygonsToGeo(polys: [number, number][][], plane: Plane, offset 
   return new Geometry({ positions: pos, prims, closed: asPolygons });
 }
 
-/** Triangulated faces (holes respected) for a CrossSection, in the world plane. */
+/** Faces for a CrossSection in the world plane: one polygon per shape, a few for a shape with holes. */
 export function crossSectionFaces(cs: any, plane: Plane, offset = 0): Geometry {
   const W = M();
   const parts = cs.decompose();
@@ -296,7 +336,8 @@ export function crossSectionFaces(cs: any, plane: Plane, offset = 0): Geometry {
     const { U, V, N } = PLANE_FRAMES[plane];
     const pos: number[] = [];
     for (const [u, v] of flat) pos.push(U[0] * u + V[0] * v + N[0] * offset, U[1] * u + V[1] * v + N[1] * offset, U[2] * u + V[2] * v + N[2] * offset);
-    out.push(new Geometry({ positions: pos, prims: tris }));
+    // a face with holes as the few polygons it needs, not a fan of triangles
+    out.push(mergeTriangles(new Geometry({ positions: pos, prims: tris }), new Float64Array(tris.length)));
   }
   return Geometry.merge(out);
 }

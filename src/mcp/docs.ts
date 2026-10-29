@@ -330,8 +330,17 @@ SDF helpers are also available (see topic sdf).`,
   0-10  5  0-100:2   element index ranges (:2 = every 2nd)
   @P.y>0.5           attribute test, ops = == != > < >= <= ; components .x .y .z .w .r .g .b
   @class==3   @name=piece*   @Cd.r<0.2   @ptnum<100
-  strings: @name=Glass* (wildcards, case-sensitive), @name=*lass*, @name!=frame
 Tokens are space-separated and applied left to right (union unless prefixed ! or ^).
+STRING ATTRIBUTES (name, path, a material or part label):
+  @name=barrel        exactly "barrel" (= and == are the same)
+  @name=bar*  @name=*rel  @name=b?rrel   wildcards: * any run, ? one character; case-sensitive
+  @name!=frame        every element whose name is not "frame"
+  "@name=barrel @name=stock"         either (a space is a union)
+  "* ^@name=barrel ^@name=stock"     all but those two
+  Quotes around the value are optional (@name='bolt*'); a value cannot hold a space (it splits the tokens), so name
+  parts with _ or -. < > <= >= never match a string. Digits in a string compare as text: @lod=1 matches "1", not "01".
+  A prim test reads the prim attribute, then the detail one, then the point one (a string from the prim's first point,
+  numbers averaged over its points); a point test reads the point attribute, then the detail one.
 RECIPES: material per part {"type":"material","params":{"name":"glass","group":"@name=Glass*"}} · prims 0 to 11
   "0-11" · all glass but the first three prims "@name=Glass* ^0-2" · pieces without names: name them first with
   attrib_string {"format":"part_{piece:03}"} (connected pieces; piece_attrib for class / copynum), then select
@@ -367,7 +376,9 @@ SELECTING EDGES TO BEVEL (poly_bevel group; also subdivide creases, normal hard_
   "p3-7" "p0-1-2-3-0"   explicit edges / closed chains of point numbers
   "rim"                 an edge group made with {"type":"group","params":{"class":"edge","name":"rim","pattern":"..."}}
   "bevel_edges"         poly_bevel's output group (where the bevel meets the faces): bevel again to soften the first
-  ""                    every edge shared by two polygons. Boundary and non-manifold edges are skipped with a warning.
+  ""                    every edge shared by two polygons where the surface bends (flat edges inside a plane, such as
+                        the splits of a boolean's cut face, are skipped). Boundary and non-manifold edges are skipped
+                        with a warning.
   mode "points" takes a point pattern instead ("0", "@P.y>0", a point group) and truncates those corners.
 EDGE GROUPS IN NODES: poly_bevel, subdivide creases (+ creaseweight attribute), normal hard_edges. Edge groups follow points:
   they survive transforms, fuse (remapped), merge (offset), copies, deletes (edges that no longer bound a prim
@@ -376,7 +387,7 @@ EDGE GROUPS IN NODES: poly_bevel, subdivide creases (+ creaseweight attribute), 
 WRANGLE: @group_x works in vertices mode too; invertexgroup(i,"g",v) inedgegroup(i,"g",pt0,pt1) setvertexgroup(0,"g",v,1)
   setedgegroup(0,"g",pt0,pt1,1). Scripts: lib.halfEdges(geo) (edge loops/rings, one-rings, boundaries), lib.EdgeSet,
   lib.evalEdgeGroup(geo, pattern), lib.convertSelection(geo, from, to, sel, include).
-Groups produced by nodes: poly_extrude front/side, poly_bevel bevel/bevel_corner (+ edge group bevel_edges), extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides,
+Groups produced by nodes: poly_extrude front/side, poly_bevel bevel/bevel_corner (+ edge group bevel_edges), extrude top/bottom/side, boolean from_a/from_b, sweep caps/sides, loft caps/sides, curve fillet, remove_interior interior,
 clip above/below/cap, fill_holes filled, lsystem leaves/J/K/M, voronoi_fracture inside, knife cut (edge + point) and
 above/below, polysplit split (edge + point), edge_divide divided, polybridge bridge, polyfill fill, dissolve dissolved,
 edge_collapse collapsed. Create custom ones with "group".`,
@@ -792,11 +803,20 @@ Nodes:
       nurbs is exact; polyline → spline uses the points as CVs, or passes through them with fit:true.
   spline_fit {tolerance | cv_count, smoothing, order, output nurbs|polyline}   least-squares NURBS through ordered points:
       denoise GPS-like / jittered polylines, compress dense curves (prim fit_error = largest deviation).
+  curve {points, corner_radius, corner_segments}   corner_radius rounds corners as you draw: one radius, or one per point
+      (0 = sharp), e.g. [0, 0.004, 0.004, 0]; a point that is not [x, y, z] (NaN, null) is an error naming it.
   fillet_curve {radius, type round|chamfer|bezier, segments, group (corner points), angle_min, clamp}   rounds polyline
       corners in 3D (new points in point group "fillet").
   offset_curve_3d {distance, lift, frame rmf|plane, up, corner mitre|round|bevel, both}   parallel curves in 3D:
       rails, kerbs, lanes (both:true = two rails, prim side ±1; frame "plane" keeps them level). offset_curve is the
-      2D (Clipper) grow/shrink of CLOSED flat shapes; use offset_curve_3d for open paths or anything not flat.
+      2D (Clipper) grow/shrink of CLOSED flat shapes; on a flat OPEN path it makes a strap outline (width 2 × distance,
+      cap butt|round|square): offset_curve → extrude for a flat band; sweep {shape:"rect", size:[w, h]} for one that
+      follows a 3D path.
+  loft {sections, resample auto|length|none, caps}   skins through the curves in prim order, or through copies of ONE
+      profile placed by sections [{offset, scale, rotate}, ...]; sections with the same point count join point to point
+      (insets keep their corners), closed sections are turned to the first one's winding; closed results face outward.
+  revolve {axis, origin, angle}   lathe about any axis line; draw the profile in a plane that holds the axis.
+  shape2d capsule | slot   a stadium (rect with half-circle ends) in size; extrude for a slot cutter.
   project_curve (curves, surface | heightfield) {mode direction|closest, direction, spacing, lift, misses}   drapes a
       curve onto terrain; spacing resamples first so it follows the bumps; writes point hit and N (smooth normals).
   curve_attribs {curveu, arclength, tangent (tangentu), frame (N = tangent, up), curvature, segment, ramp_attrib + ramp}

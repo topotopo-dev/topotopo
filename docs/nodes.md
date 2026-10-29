@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-235 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+236 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -15,7 +15,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_string](#attrib_string) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
 - [measure](#measure-nodes): [assert](#assert) · [curvature](#curvature) · [distance](#distance) · [occlusion](#occlusion)
 - [group](#group-nodes): [delete](#delete) · [group](#group) · [group_combine](#group_combine) · [group_delete](#group_delete) · [group_expand](#group_expand) · [group_promote](#group_promote) · [group_rename](#group_rename)
-- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [reverse](#reverse) · [solidify](#solidify) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
+- [topology](#topology-nodes): [bound](#bound) · [clean](#clean) · [decimate](#decimate) · [dissolve](#dissolve) · [edge_collapse](#edge_collapse) · [edge_divide](#edge_divide) · [facet](#facet) · [fill_holes](#fill_holes) · [fuse](#fuse) · [grid_split](#grid_split) · [knife](#knife) · [lod](#lod) · [mesh_repair](#mesh_repair) · [normal](#normal) · [poly_bevel](#poly_bevel) · [poly_extrude](#poly_extrude) · [polybridge](#polybridge) · [polyfill](#polyfill) · [polysplit](#polysplit) · [remesh](#remesh) · [remesh_isotropic](#remesh_isotropic) · [remesh_quad](#remesh_quad) · [remove_interior](#remove_interior) · [reverse](#reverse) · [solidify](#solidify) · [sort](#sort) · [subdivide](#subdivide) · [triangulate](#triangulate)
 - [copy](#copy-nodes): [copy_to_points](#copy_to_points) · [copy_xform](#copy_xform) · [pack](#pack) · [scatter](#scatter) · [unpack](#unpack)
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
@@ -684,6 +684,8 @@ category: `curve` · aliases: `curve_boolean`, `shape_boolean`
 
 2D boolean of closed shapes in a plane (union / subtract / intersect / xor).
 
+Within each input, a shape lying wholly inside another is a hole in it (a merged plate and circle make a plate with a hole), a shape inside that hole an island, and shapes that only overlap are joined. Faces with holes come out as a few polygons that share edges.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -696,7 +698,7 @@ category: `curve` · aliases: `curve_boolean`, `shape_boolean`
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `operation` | enum | `"union"` |  | `union`, `subtract`, `intersect`, `xor` | `op`, `mode` | boolean op |
-| `output` | enum | `"faces"` |  | `outlines`, `faces` |  | faces = filled (holes cut, triangulated where needed); outlines = closed contour polygons |
+| `output` | enum | `"faces"` |  | `outlines`, `faces` |  | faces = filled, holes cut (a face with holes as a few polygons sharing edges); outlines = closed contour polygons |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
 
 **Example**
@@ -862,7 +864,9 @@ Houdini Convert SOP for curves. Spline → polyline evaluates the curve (adaptiv
 
 category: `curve` · aliases: `polyline`, `path`, `spline`
 
-Curve through explicit points; optional Catmull-Rom smoothing; open or closed.
+Curve through explicit points; optional Catmull-Rom smoothing or rounded corners; open or closed.
+
+corner_radius rounds the corners with arcs tangent to both edges: one number for every corner, or a list with one radius per point (0 keeps that corner sharp; the ends of an open curve are never rounded). Radii that do not fit between neighbouring corners shrink. A point that is not three numbers (NaN, null, a missing coordinate) is an error that names it.
 
 **Inputs**
 
@@ -874,8 +878,12 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `points` | json | `[[0,0,0],[1,0.5,0],[2,0,0]]` |  |  | `positions`, `pts` | list of [x,y,z] (2-number entries → [x, 0, z] on the ground) |
 | `closed` | bool | `false` |  |  |  | close the curve (makes a polygon) |
-| `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points |
+| `smooth` | bool | `false` |  |  |  | Catmull-Rom interpolate through the points (not with corner_radius) |
 | `subdivisions` | int | `8` | 1..10000 |  |  | smooth: samples per segment |
+| `corner_radius` | json | `0` |  |  | `fillet`, `radius`, `radii`, `corner_radii` | round the corners: a radius for every corner, or a list with one per point (0 = sharp) |
+| `corner_segments` | int | `6` | 1..10000 |  |  | segments per rounded corner |
+
+**Writes:** point group fillet (the points of rounded corners)
 
 **Example**
 
@@ -1190,22 +1198,26 @@ None (generator).
 
 category: `curve` · aliases: `skin`
 
-Skin a surface through a sequence of curves (in prim order). Curves are resampled to equal counts.
+Skin a surface through a sequence of curves (in prim order), or through copies of one profile placed by "sections".
+
+Sections: with several input curves, each is a section in prim order. With one curve and the sections list, each entry places a copy of it: {"offset": [x, y, z], "scale": [sx, sy], "rotate": [rx, ry, rz]} (any key may be left out; a number for offset moves it along the curve's normal, a number for scale scales it evenly), applied as scale and rotate about the curve's centre, then the offset. Correspondence: when every section has the same number of points, point k of one section joins point k of the next (insets and rounded corners stay where they are); otherwise each section is resampled evenly by length (resample "length"). Closed sections are turned to run the same way round as the first one, and each starts at the point nearest the previous section's start, so the skin does not twist. Winding: the side faces follow the first section's direction; a closed result (closed sections with caps, or closed: true) is turned to face outward, caps included. uv: u along the section, v across the sections.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | two or more curves, in order |
+| 0 | `curves` | no | no | two or more curves, in order; or one profile with sections |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
+| `sections` | json | `[]` |  |  | `stations`, `placements` | one input curve: a list of placements, each {offset, scale, rotate} (see the description) |
+| `resample` | enum | `"auto"` |  | `auto`, `length`, `none` |  | auto = keep the points when every section has the same count, else even by length; length = always resample evenly; none = points by index (counts must match) |
 | `closed` | bool | `false` |  |  |  | connect the last curve back to the first |
 | `caps` | bool | `false` |  |  |  | cap the first and last curves (when they are closed) |
 
-**Writes:** vertex uv
+**Writes:** vertex uv; prim groups caps, sides
 
 **Example**
 
@@ -1328,23 +1340,26 @@ Houdini Curve SOP in NURBS mode (a NURBCurve prim). Open curves have n + order k
 
 ### offset_curve
 
-category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`
+category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`, `strap`, `stroke`
 
-2D offset (grow/shrink) of closed shapes, like PolyExpand2D. Negative distance = inset.
+2D offset (grow/shrink) of closed shapes, like PolyExpand2D. Negative distance = inset. Open paths become straps.
+
+Closed shapes grow by distance (shrink when negative). An open path (a polyline whose ends do not meet) becomes a strap: a closed outline at |distance| on both sides, with its ends cut square at the end points (cap butt), rounded, or extended by the distance; extrude it for a 3D strap or band. Shapes and straps in one input are joined.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `shapes` | no | no | closed polygons in a plane |
+| 0 | `shapes` | no | no | closed polygons in a plane, or open paths for straps |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `distance` | float | `0.1` |  |  | `offset`, `dist` | offset distance (negative shrinks) |
+| `distance` | float | `0.1` |  |  | `offset`, `dist` | offset distance (negative shrinks); straps: half their width |
 | `join` | enum | `"round"` |  | `round`, `miter`, `square` |  | corner style |
-| `segments` | int | `16` | 3..10000 |  |  | segments per full circle for round joins |
+| `cap` | enum | `"butt"` |  | `butt`, `round`, `square` |  | strap ends: butt = cut square at the end point, round = half circle, square = extended by the distance |
+| `segments` | int | `16` | 3..10000 |  |  | segments per full circle for round joins and caps |
 | `output` | enum | `"outlines"` |  | `outlines`, `faces` |  | outlines = closed polygons per contour; faces = filled with holes cut |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane |
 
@@ -1629,18 +1644,22 @@ Bezier/NURBS prims are sampled on the true curve, evenly by arc length (treat_sp
 
 category: `curve` · aliases: `lathe`
 
-Lathe: revolve profile curves (drawn in XY, x = radius) around the Y axis. Profiles touching the axis close up.
+Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.
+
+Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. Closed results face outward.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `profile` | no | no | curves in the XY plane (x = distance from the axis) |
+| 0 | `profile` | no | no | curves in a plane holding the axis (default: the XY plane, x = distance from the Y axis) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
+| `axis` | vec3 | `[0,1,0]` |  |  | `direction`, `dir` | direction of the axis to turn around |
+| `origin` | vec3 | `[0,0,0]` |  |  | `center`, `pivot` | a point on the axis |
 | `segments` | int | `32` | 3..4096 |  | `divisions`, `cols` | segments around |
 | `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees |
 | `caps` | bool | `false` |  |  |  | cap partial revolves (closed profiles) |
@@ -1704,7 +1723,7 @@ Lathe: revolve profile curves (drawn in XY, x = radius) around the Y axis. Profi
 
 category: `curve` · aliases: `rect`, `rectangle`, `ngon`, `star`, `polygon2d`
 
-Flat 2D shapes as closed polygons: rect, rounded_rect, ngon, star, gear, cross, L, U.
+Flat 2D shapes as closed polygons: rect, rounded_rect, capsule (slot), ngon, star, gear, cross, L, U.
 
 **Inputs**
 
@@ -1714,13 +1733,13 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `shape` | enum | `"rect"` |  | `rect`, `rounded_rect`, `ngon`, `star`, `gear`, `cross`, `L`, `U` |  | shape type |
-| `size` | vec2 | `[1,1]` |  |  |  | rect/rounded_rect/cross/L/U: width and depth |
+| `shape` | enum | `"rect"` |  | `rect`, `rounded_rect`, `capsule`, `slot`, `ngon`, `star`, `gear`, `cross`, `L`, `U` |  | shape type; capsule and slot are the same stadium: a rect whose short ends are half circles |
+| `size` | vec2 | `[1,1]` |  |  |  | rect/rounded_rect/capsule/slot/cross/L/U: width and depth (overall, ends included) |
 | `radius` | float | `0.5` |  |  |  | ngon/star/gear: outer radius |
 | `inner_radius` | float | `0.25` |  |  |  | star/gear: inner radius |
 | `sides` | int | `6` | 3..100000 |  | `points`, `teeth` | ngon sides / star points / gear teeth |
 | `corner_radius` | float | `0.1` | 0.. |  |  | rounded_rect corner radius |
-| `corner_segments` | int | `6` | 1..10000 |  |  | rounded_rect segments per corner |
+| `corner_segments` | int | `6` | 1..10000 |  |  | rounded_rect/capsule/slot: segments per quarter circle |
 | `thickness` | float | `0.25` |  |  |  | cross/L/U arm thickness |
 | `rotate` | float | `0` |  |  |  | rotation in degrees within the plane |
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
@@ -1933,6 +1952,8 @@ category: `curve`
 
 Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).
 
+The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -1944,8 +1965,9 @@ Sweep a cross-section along curves using rotation-minimising frames (tubes, ribb
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `shape` | enum | `"circle"` |  | `circle`, `square`, `ribbon`, `half_circle` |  | built-in profile when no profile input |
+| `shape` | enum | `"circle"` |  | `circle`, `square`, `rect`, `ribbon`, `half_circle` |  | built-in profile when no profile input; rect is size wide (X) and high (Y), for straps and bars |
 | `radius` | float | `0.1` |  |  | `width`, `rad` | built-in profile radius / half width |
+| `size` | vec2 | `[0.2,0.05]` |  |  |  | rect profile: width along the profile X (sideways) and height along Y (up) |
 | `divisions` | int | `12` | 2..1024 |  | `sides`, `cols` | built-in profile segments |
 | `caps` | bool | `true` |  |  |  | cap open ends (closed profiles only) |
 | `twist` | float | `0` |  |  |  | total twist in degrees along each curve |
@@ -4555,7 +4577,7 @@ For holes, non-manifold edges, inconsistent winding and self-intersections use m
 |---|---|---|---|---|---|---|
 | `fuse_distance` | float | `0` | 0.. |  |  | weld points within this distance first (0 = off) |
 | `remove_degenerate` | bool | `true` |  |  |  | remove prims with repeated/too few points |
-| `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep) |
+| `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side |
 | `remove_unused_points` | bool | `true` |  |  |  | remove points not used by prims (only when the geometry has prims) |
 | `fix_winding` | bool | `false` |  |  |  | make closed meshes face outward |
 
@@ -5140,7 +5162,7 @@ Edge mode: every edge in "group" becomes a strip of divisions+1 quads; the faces
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `group` | group | `""` |  |  | `edges`, `edge_group`, `points` | edges to bevel (edge pattern or group: "angle>80", "border:top", "p0-1", "rim"; "" = every edge shared by two polygons); with mode "points", a point pattern ("" = all points) |
+| `group` | group | `""` |  |  | `edges`, `edge_group`, `points` | edges to bevel (edge pattern or group: "angle>80", "border:top", "p0-1", "rim"; "" = every edge shared by two polygons where the surface bends: flat edges inside a plane, such as the splits a boolean leaves in a cut face, are skipped); with mode "points", a point pattern ("" = all points) |
 | `mode` | enum | `"edges"` |  | `edges`, `points` | `bevel_type`, `class` | bevel edges, or truncate points |
 | `offset` | float | `0.1` | 0.. |  | `distance`, `width`, `radius`, `size`, `amount` | distance from the edge across each adjacent face (points mode: along each edge) |
 | `offset_mode` | enum | `"distance"` |  | `distance`, `fraction` | `distance_mode`, `offsetmode` | distance = offset in scene units; fraction = offset x the shortest edge at the edge's points (stays proportional on small faces) |
@@ -5499,6 +5521,89 @@ Smooths a four-way orientation field and a position field through a multiresolut
 }
 ```
 
+### remove_interior
+
+category: `topology` · aliases: `remove_hidden`, `remove_inside`, `hidden_faces`, `interior_faces`
+
+Delete faces buried inside other closed parts (kitbashed pieces that overlap): they can never be seen.
+
+Parts are told apart by connectivity (or by the prim attribute name). A face goes when its centre and every corner, pulled a hair toward the centre, lie inside one other part that is a closed solid; a face only partly inside stays (cut it with boolean union instead). Faces touching another part face to face stay too. The parts are left open where their buried faces were: that is the point, nothing inside is rendered or baked.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | overlapping parts (each closed part hides what is inside it) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (prim) | `""` |  |  |  | faces that may be removed ("" = all) |
+| `parts` | enum | `"connected"` |  | `connected`, `name` |  | what makes a part: connected polygons, or the prim attribute name |
+| `output` | enum | `"delete"` |  | `delete`, `group` |  | delete the hidden faces, or keep them in prim group "interior" |
+
+**Writes:** prim group interior (output group)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "body": {
+      "type": "box",
+      "params": {
+        "size": [
+          1,
+          0.4,
+          0.4
+        ]
+      }
+    },
+    "boss": {
+      "type": "tube",
+      "params": {
+        "radius": 0.1,
+        "height": 0.3,
+        "caps": true
+      }
+    },
+    "place": {
+      "type": "transform",
+      "in": [
+        "boss"
+      ],
+      "params": {
+        "rotate": [
+          0,
+          0,
+          90
+        ],
+        "translate": [
+          0.5,
+          0,
+          0
+        ]
+      }
+    },
+    "parts": {
+      "type": "merge",
+      "in": [
+        "body",
+        "place"
+      ]
+    },
+    "tidy": {
+      "type": "remove_interior",
+      "in": [
+        "parts"
+      ]
+    }
+  },
+  "output": "tidy"
+}
+```
+
 ### reverse
 
 category: `topology` · aliases: `flip`, `flip_normals`
@@ -5840,7 +5945,7 @@ Make N copies, each transformed cumulatively (Houdini Copy and Transform): stair
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `count` | int | `4` | 0..100000 |  | `ncy`, `copies`, `n` | total copies (including the original) |
-| `translate` | vec3 | `[1,0,0]` |  |  | `t`, `offset` | offset applied per copy |
+| `translate` | vec3 | `[0,0,0]` |  |  | `t`, `offset` | offset applied per copy, in metres (0 by default, as in Houdini: set it, or rotate, or the copies stack in place) |
 | `rotate` | vec3 | `[0,0,0]` |  |  | `r` | rotation per copy (degrees) |
 | `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale per copy (compounding) |
 | `pivot` | vec3 | `[0,0,0]` |  |  |  | pivot for rotate/scale |
@@ -6047,6 +6152,8 @@ category: `solid` · aliases: `csg`, `bool`, `difference`, `union`, `intersect`
 
 Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, unions A’s overlapping pieces.
 
+The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -6059,6 +6166,8 @@ Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `operation` | enum | `"subtract"` |  | `union`, `subtract`, `intersect` | `op`, `mode` | A ∪ B, A − B, or A ∩ B |
+| `output` | enum | `"polygons"` |  | `polygons`, `triangles` |  | polygons = each surviving input face as one polygon (or a few around a hole); triangles = the kernel triangles as they come |
+| `tolerance` | float | `0.00001` | 0.. |  | `simplify`, `sliver` | after the cut, collapse edges shorter than this and flatten slivers thinner than it, keeping the solid closed (0 = rounding only) |
 
 **Writes:** prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated
 

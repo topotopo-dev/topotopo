@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 27502,
-      "prims": 25595,
-      "vertices": 95554,
+      "prims": 24987,
+      "vertices": 94338,
       "volumes": 0
     },
     "groups": {
@@ -31,20 +31,20 @@
         "point.curveu": "da51c635a554d66f",
         "point.side": "80ff89e5abe8595f",
         "point.tangent": "502db685f233591f",
-        "prim.Cd": "422c4286263e4c70",
-        "prim.copynum": "7a6d61664c8a825c",
-        "prim.material": "3291ee5accbd224c",
-        "prim.name": "daaef84588073e13",
-        "vertex.N": "5bb4a9b68f8d82d0",
-        "vertex.uv": "15be1f27bcc6d791"
+        "prim.Cd": "792c78061814d7f0",
+        "prim.copynum": "3b040566b0d8d25c",
+        "prim.material": "5ae48db2cc13ad74",
+        "prim.name": "74e61dad5a4dd98b",
+        "vertex.N": "0357e1b61f1282d0",
+        "vertex.uv": "18584c58711bdb0a"
       },
-      "topology": "72cd953424078672"
+      "topology": "6a58d29ab93747b4"
     },
     "packed": {
-      "hash": "ef8c87b485efd1da",
+      "hash": "326b324460bd05fa",
       "instances": 56,
       "sources": [
-        "1555a95fdcce6035",
+        "ad5d1df65e472efc",
         "14c091b670fade94",
         "f84ffc8892dc3d16",
         "2ab39a8d27df8bbb",

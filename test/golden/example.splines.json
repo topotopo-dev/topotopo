@@ -13,30 +13,33 @@
     },
     "counts": {
       "points": 4357,
-      "prims": 4136,
-      "vertices": 16240,
+      "prims": 3900,
+      "vertices": 15726,
       "volumes": 0
     },
     "groups": {
       "edge": [],
       "point": ["fillet"],
-      "prim": ["caps", "sides"],
+      "prim": ["bottom", "caps", "side", "sides", "top"],
       "vertex": []
     },
     "hashes": {
-      "P": "66f7e640feeb9f9a",
+      "P": "ce5e63b412231e16",
       "attributes": {
         "group.point.fillet": "ac3b19d0b36b847a",
-        "group.prim.caps": "f43960056844c367",
-        "group.prim.sides": "2e6b7d6d9db6fbcf",
+        "group.prim.bottom": "1d0dbc8d62bf96cb",
+        "group.prim.caps": "2c93362c1cf1b452",
+        "group.prim.side": "becb4cb4aba0da02",
+        "group.prim.sides": "642384b4841d96da",
+        "group.prim.top": "1b0b7061f929c27f",
         "point.Cd": "3c895ba69ceeeee8",
         "point.curveu": "9432c625e11eb39f",
         "point.hit": "b0bbaa25d63d561f",
-        "prim.copynum": "8e8b1c4587283e1f",
-        "prim.side": "ac986415a7a2bc2f",
-        "vertex.uv": "ecc1708da7a61b47"
+        "prim.copynum": "37a39cc5b429781f",
+        "prim.side": "dc2fac957f06962f",
+        "vertex.uv": "76127f0d0b4d9647"
       },
-      "topology": "1be7d7cb6d1429ed"
+      "topology": "12044fb04207160e"
     }
   },
   "name": "example.splines",

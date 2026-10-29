@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 61,
-      "prims": 118,
-      "vertices": 354,
+      "prims": 70,
+      "vertices": 258,
       "volumes": 0
     },
     "groups": {
@@ -26,11 +26,11 @@
     "hashes": {
       "P": "4baa4c7c7445e676",
       "attributes": {
-        "group.prim.from_a": "b1baef32f15a11c8",
-        "group.prim.from_b": "a5beecd3308370e9",
-        "vertex.uv": "afb524f8c3331b5a"
+        "group.prim.from_a": "4a9cefe315d49399",
+        "group.prim.from_b": "6d68ad02bf2f9798",
+        "vertex.uv": "10ea02458ea10627"
       },
-      "topology": "b21458e878d65f42"
+      "topology": "1d457e78f3895ee2"
     }
   },
   "name": "node.boolean",

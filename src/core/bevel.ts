@@ -417,8 +417,11 @@ class Ctx {
 
 // ---------------------------------------------------------------- edge bevel
 
+/** Edges whose two faces bend less than this (degrees) are flat: the default selection leaves them alone. */
+export const FLAT_EDGE_DEG = 0.01;
+
 /**
- * Bevel the given edges (point pairs; null = every edge used by two polygons). Boundary, non-manifold and
+ * Bevel the given edges (point pairs; null = every edge used by two polygons where the surface bends). Boundary, non-manifold and
  * inconsistently wound edges, and edges at non-manifold points, are skipped with a warning. Returns the input object
  * itself when nothing is bevelled.
  */
@@ -442,7 +445,8 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
       const val = he.edgeValence(e);
       if (val < 2) continue;
       if (he.nonManifoldEdges.has(e)) nNonManifold++;
-      else bevE[e] = 1;
+      // an edge inside a flat area (a face split in two, a boolean's cut face) has nothing to bevel
+      else if (!(he.dihedralAngle(e) < FLAT_EDGE_DEG)) bevE[e] = 1;
     }
   if (nBoundary) warnings.push(`${nBoundary} boundary edge(s) skipped: bevelling open-mesh edges is not supported`);
   if (nNonManifold) warnings.push(`${nNonManifold} non-manifold or inconsistently wound edge(s) skipped`);
@@ -459,7 +463,7 @@ export function bevelEdges(g: Geometry, sel: EdgeSet | null, opts: BevelOptions)
   let count = 0;
   for (let e = 0; e < ne; e++) count += bevE[e];
   if (!count) {
-    warnings.push('no edges to bevel: geometry unchanged');
+    warnings.push(sel ? 'no edges to bevel: geometry unchanged' : 'no edges to bevel: every edge is flat (both faces in one plane) or open; geometry unchanged');
     return { geo: g, warnings, count: 0, scale: 1 };
   }
   const offsetMode = opts.offsetMode ?? 'distance';

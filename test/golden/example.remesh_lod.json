@@ -8,13 +8,13 @@
       "vertex": ["Cd:float:3", "uv:float:3"]
     },
     "bbox": {
-      "max": [4.2071, 4.6124, 1.1205],
+      "max": [4.2103, 4.6124, 1.1205],
       "min": [-4.3555, 0, -1.0546]
     },
     "counts": {
-      "points": 8942,
-      "prims": 9908,
-      "vertices": 29724,
+      "points": 9000,
+      "prims": 9974,
+      "vertices": 29922,
       "volumes": 0
     },
     "groups": {
@@ -24,31 +24,31 @@
       "vertex": []
     },
     "hashes": {
-      "P": "e3eae65a6b6608a4",
+      "P": "bf0c9ab6217cfe30",
       "attributes": {
-        "detail.lod": "da381450ca6fe1d6",
-        "detail.lod_tris": "15dfb105539c440f",
+        "detail.lod": "e903f6c19c402d6b",
+        "detail.lod_tris": "61d6097b19f576a1",
         "detail.repair_report": "d60900eb550d32c1",
-        "group.point.J": "4d4d52213acf3f8b",
-        "group.point.K": "4d4d52213acf3f8b",
-        "group.point.M": "4d4d52213acf3f8b",
-        "group.point.leaves": "4d4d52213acf3f8b",
-        "group.prim.caps": "2d6938d1f3f1b203",
-        "group.prim.filled": "6ee1a300f9fadce2",
-        "group.prim.sides": "22c47a3bf70522dd",
-        "point.N": "7ddff8ba6d86d908",
-        "point.depth": "858c5124aafea47e",
-        "point.pscale": "97001e258cfd6adf",
-        "point.tl": "63a94314a5e31afe",
-        "point.width": "e310800a89148610",
-        "prim.copynum": "ed20f8d512f8addb",
-        "prim.depth": "eb31fd8559f37e1f",
-        "prim.lod": "c30db124785c785e",
-        "prim.name": "2a078a69bad206cf",
-        "vertex.Cd": "de877800efe8bf0a",
-        "vertex.uv": "ff53bd6bc7ac5091"
+        "group.point.J": "20c3d6fce9334c3a",
+        "group.point.K": "20c3d6fce9334c3a",
+        "group.point.M": "20c3d6fce9334c3a",
+        "group.point.leaves": "20c3d6fce9334c3a",
+        "group.prim.caps": "f63bcf90f9b1be0a",
+        "group.prim.filled": "29f5c74ad59c4598",
+        "group.prim.sides": "2496cf63f8c65901",
+        "point.N": "4890523a1f3ec648",
+        "point.depth": "c70ad806270ec11c",
+        "point.pscale": "c926e2457b6ada1f",
+        "point.tl": "ff639c140d5a8f7e",
+        "point.width": "f29b9dbabf332964",
+        "prim.copynum": "1b937215f1bc3a6b",
+        "prim.depth": "1dabf145a16da0bf",
+        "prim.lod": "ecf8226425c4645e",
+        "prim.name": "06a794f11014c61f",
+        "vertex.Cd": "115024e0327c04da",
+        "vertex.uv": "9b590bfe64a67730"
       },
-      "topology": "26553d6434a769de"
+      "topology": "267e0fa5659fd33f"
     }
   },
   "name": "example.remesh_lod",

@@ -13,8 +13,8 @@
     },
     "counts": {
       "points": 1648,
-      "prims": 3210,
-      "vertices": 9708,
+      "prims": 1606,
+      "vertices": 6500,
       "volumes": 0
     },
     "groups": {
@@ -24,16 +24,16 @@
       "vertex": []
     },
     "hashes": {
-      "P": "5d324c7c5005395e",
+      "P": "39bc8dac811b8256",
       "attributes": {
-        "group.prim.bottom": "661659c4820d7d92",
-        "group.prim.from_a": "fb2d134b23fb7dc1",
-        "group.prim.from_b": "fd0080a38180f689",
-        "group.prim.side": "b65c6c54b6d4ed6a",
-        "group.prim.top": "ac975326bc43290c",
-        "vertex.Cd": "7086d4e5664b55df"
+        "group.prim.bottom": "fbf5c9373401cead",
+        "group.prim.from_a": "e0b60a0512f58fdf",
+        "group.prim.from_b": "9992ededf5e13637",
+        "group.prim.side": "e47996997f263b73",
+        "group.prim.top": "e33b094efb458d1c",
+        "vertex.Cd": "5a1fb3157d10aa6f"
       },
-      "topology": "34d5f8f8ba71cc1a"
+      "topology": "6c190f277118a225"
     }
   },
   "name": "example.engraved_sign",
