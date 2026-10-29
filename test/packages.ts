@@ -33,7 +33,9 @@ import { createNodeHost } from '../src/host/node.ts';
 import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Session } from '../src/session.ts';
-import { addLibrary, libraryEntry, loadConfig, parseManifest, readManifest, scanLibrary } from '../src/gallery/library.ts';
+import { addLibrary, loadConfig } from '../src/config.ts';
+import { libraryEntry, parseManifest, readManifest } from '../src/project.ts';
+import { scanLibrary } from '../src/gallery/library.ts';
 import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/gallery/packages.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { libraryTool } from '../src/mcp/library.ts';
@@ -1008,7 +1010,7 @@ section('TopoTopo\'s built-in library: looked in without listing it; copies and 
   fs.mkdirSync(loose);
   const lo = await open(loose, [], BUILTIN);
   const notHere = await lo.engine.cook(scene);
-  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no project, and only projects use packages \(hint: topotopo init <folder> \(MCP: library \{action:"init"\} for the open project, when the person says so\) makes the folder a project/.test(errorOf(notHere)),
+  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no project, and only projects use packages \(hint: topotopo init <folder> \(MCP: library \{action:"init"\} for the server's folder, when the person says so\) makes the folder a project/.test(errorOf(notHere)),
     `outside a project it is offered too, and naming it says how to make the folder a project: ${errorOf(notHere)}`);
   // a TopoTopo release with a new version: an update, never a silent change
   setGraph(KIT, 'main', cube(2));
@@ -1485,7 +1487,7 @@ section('two writers: the project\'s lock around project.json and packages/lock.
   check(/^added nordic\/rocks/.test(a.pk.use('nordic/rocks').text) && !fs.existsSync(lockAt), 'a lock left by a process that ended is taken over, and released after');
   // another process holds it: a write waits for it, and loses nothing
   const held = path.join(tmp, 'two-held');
-  const script = `import { withProjectLock } from ${JSON.stringify(new URL('../src/gallery/library.ts', import.meta.url).href)};
+  const script = `import { withProjectLock } from ${JSON.stringify(new URL('../src/project.ts', import.meta.url).href)};
 import fs from 'node:fs';
 withProjectLock(${JSON.stringify(TWO)}, () => { const m = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(TWO, 'project.json'))}, 'utf8')); m.title = 'held'; fs.writeFileSync(${JSON.stringify(path.join(TWO, 'project.json'))}, JSON.stringify(m)); fs.writeFileSync(${JSON.stringify(held)}, 'x'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); });`;
   const child = (await import('node:child_process')).spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: 'ignore' });

@@ -18,7 +18,7 @@ import { defineNode } from '../src/graph/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Session } from '../src/session.ts';
-import { readManifest } from '../src/gallery/library.ts';
+import { readManifest } from '../src/project.ts';
 import { openPackages, publishPackage } from '../src/gallery/packages.ts';
 import type { ProjectPackages } from '../src/gallery/packages.ts';
 import { startViewer } from '../src/viewer/server.ts';

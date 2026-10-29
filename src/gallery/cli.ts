@@ -23,10 +23,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
-import {
-  addLibrary, createProject, initProject, isStale, libraryEntryFor, loadConfig, projectDirOf, readBakeState, readManifest, scanAll, slugify,
-} from './library.ts';
-import type { GalleryConfig } from './library.ts';
+import { addLibrary, loadConfig } from '../config.ts';
+import { createProject, isStale, readBakeState, scanAll } from './library.ts';
+import { initProject, libraryEntryFor, projectDirOf, readManifest, slugify } from '../project.ts';
+import type { GalleryConfig } from '../config.ts';
 
 /**
  * The package commands as every list of them says them: src/cli.ts (its header and --help), this file's header, the

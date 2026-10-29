@@ -10,11 +10,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Session } from '../session.ts';
 import type { ToolDef, ToolResult, Content } from './tools.ts';
-import {
-  createProject, graphNames, initProject, isStale, listFiles, loadConfig, ownPackageName, parseManifest, program, projectDirOf, readBakeState, readGraph,
-  readManifest, scanAll, withProjectLock, writeManifest,
-} from '../gallery/library.ts';
-import type { GalleryConfig, LibraryScan, Project } from '../gallery/library.ts';
+import { loadConfig } from '../config.ts';
+import { initProject, ownPackageName, parseManifest, program, projectDirOf, readManifest, withProjectLock, writeManifest } from '../project.ts';
+import { createProject, graphNames, isStale, listFiles, readBakeState, readGraph, scanAll } from '../gallery/library.ts';
+import type { GalleryConfig } from '../config.ts';
+import type { LibraryScan, Project } from '../gallery/library.ts';
 import { KINDS } from '../graph/outputs.ts';
 import { NothingToUpdate, packageText, packagesText, publishPackage, publishText, searchPackages, searchText } from '../gallery/packages.ts';
 import type { ProjectPackages } from '../gallery/packages.ts';

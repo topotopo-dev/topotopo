@@ -53,11 +53,11 @@ import type { Geometry } from '../core/geometry.ts';
 import { imageRef, referenceableImages } from '../core/image.ts';
 import { NAME_RE } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
-import {
-  BUILTIN_LIBRARY, VERSION_RE, libraryEntry, loadConfig, manifestFile, program, projectDirOf, readManifest, renameInto, scanLibrary, withProjectLock, writeAtomic,
-  writeManifest,
-} from './library.ts';
-import type { GalleryConfig, ProjectManifest } from './library.ts';
+import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
+import { VERSION_RE, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
+import { scanLibrary } from './library.ts';
+import type { GalleryConfig } from '../config.ts';
+import type { ProjectManifest } from '../project.ts';
 
 /** Publishing warns about a version above this size: every project that uses it keeps a copy. */
 export const MAX_VERSION_BYTES = 50 * 2 ** 20;

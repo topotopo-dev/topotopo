@@ -19,7 +19,7 @@ import { libraryTool } from './library.ts';
 import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
-import { startProject, setProgram } from '../gallery/library.ts';
+import { startProject, setProgram } from '../project.ts';
 import { openPackages } from '../gallery/packages.ts';
 import type { ProjectPackages } from '../gallery/packages.ts';
 

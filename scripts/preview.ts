@@ -8,7 +8,7 @@ import path from 'node:path';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { startProject } from '../src/gallery/library.ts';
+import { startProject } from '../src/project.ts';
 import { openPackages } from '../src/gallery/packages.ts';
 import { Session } from '../src/session.ts';
 import { startViewer } from '../src/viewer/server.ts';

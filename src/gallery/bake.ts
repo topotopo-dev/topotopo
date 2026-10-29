@@ -17,7 +17,8 @@ import { Session } from '../session.ts';
 import { previewGLB, thumbOptions } from '../render/preview.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
-import { bakeKey, galleryDir, readBakeState, readManifest, writeAtomic } from './library.ts';
+import { bakeKey, galleryDir, readBakeState } from './library.ts';
+import { readManifest, writeAtomic } from '../project.ts';
 import type { BakeState } from './library.ts';
 import { openPackages } from './packages.ts';
 

@@ -5,10 +5,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  addLibrary, bakeKey, createProject, startProject, isStale, loadConfig, notProjectFiles, parseManifest, projectDirOf, readBakeState, readManifest, scanLibrary, slugify,
-  writeManifest,
-} from '../src/gallery/library.ts';
+import { addLibrary, loadConfig } from '../src/config.ts';
+import { startProject, notProjectFiles, parseManifest, projectDirOf, readManifest, slugify, writeManifest } from '../src/project.ts';
+import { bakeKey, createProject, isStale, readBakeState, scanLibrary } from '../src/gallery/library.ts';
 import { bakeProject, BakeQueue } from '../src/gallery/bake.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-library-'));

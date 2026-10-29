@@ -38,7 +38,7 @@ import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
 import { ProjectPackages } from '../gallery/packages.ts';
 import { listKits, kitOutputsText } from '../gallery/kits.ts';
-import { projectDirOf, readManifest } from '../gallery/library.ts';
+import { projectDirOf, readManifest } from '../project.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';

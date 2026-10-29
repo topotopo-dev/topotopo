@@ -30,7 +30,7 @@ import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../session.ts';
-import { program } from './library.ts';
+import { program } from '../project.ts';
 import { compareInterfaces, compareVersions, kindChanges, libraryText } from './packages.ts';
 import type { ProjectPackages, UpdateTarget } from './packages.ts';
 

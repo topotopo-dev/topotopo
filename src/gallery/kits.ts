@@ -4,7 +4,8 @@
 // kinds, tags and the thumbnail the kit keeps of each (thumbs/<output>.png).
 import fs from 'node:fs';
 import path from 'node:path';
-import { BUILTIN_LIBRARY, readManifest } from './library.ts';
+import { BUILTIN_LIBRARY } from '../config.ts';
+import { readManifest } from '../project.ts';
 import { builtinVersions } from './packages.ts';
 import type { VersionInfo } from './packages.ts';
 
