@@ -238,6 +238,50 @@ defineNode({
 });
 
 defineNode({
+  type: 'tex_constant',
+  category: 'texture',
+  summary: 'Constant image: one grey value or one RGBA colour everywhere, sized by resolution or by an input image.',
+  description:
+    'Substance: Uniform Color; Houdini COP: Constant. channels grey fills layer C with value (a flat roughness, ' +
+    'metallic or height, a mask of 1); rgba with color (display values like every colour param: "#a5462e" comes out ' +
+    'of the PNG as #a5462e) and alpha. With input 0 connected the image takes the size of an image there (image picks ' +
+    'one when it holds several) and resolution is ignored; the output holds only the new image either way. Blend over ' +
+    'it, pack it into an ORM channel, or give a material a flat map.',
+  aliases: ['constant_texture', 'uniform_color', 'solid_color', 'flat_color', 'fill_image', 'cop_constant'],
+  inputs: [{ name: 'size_from', desc: 'optional: an image whose size the constant takes', optional: true }],
+  params: {
+    resolution: resolutionParam(),
+    channels: { type: 'enum', options: ['grey', 'rgba'], default: 'grey', desc: 'grey = one value (value), rgba = a colour (color, alpha)', aliases: ['mode', 'type'] },
+    value: { type: 'float', default: 0.5, desc: 'grey: the value of every pixel', aliases: ['grey', 'level'] },
+    color: { type: 'color', default: [0.5, 0.5, 0.5], desc: 'rgba: the colour of every pixel', aliases: ['rgb', 'colour'] },
+    alpha: { type: 'float', default: 1, min: 0, max: 1, desc: 'rgba: the alpha of every pixel' },
+    image: imageParam('input 0 (the size source)'),
+    name: nameParam(),
+  },
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey or RGBA, one value everywhere',
+  example: {
+    nodes: {
+      noise: { type: 'tex_noise', params: { resolution: 128 } },
+      roughness: { type: 'tex_constant', in: ['noise'], params: { value: 0.65 } },
+      paint: { type: 'tex_constant', params: { resolution: 64, channels: 'rgba', color: '#a5462e' } },
+      out: { type: 'merge', in: ['roughness', 'paint'] },
+    },
+    output: 'out',
+  },
+  cook: (ctx) => {
+    const { p, type } = ctx;
+    let w: number, h: number;
+    if (ctx.hasInput(0)) { const s = source(ctx, 0, p.image); w = s.img.width; h = s.img.height; } else [w, h] = size2(p, type);
+    const rgba = p.channels === 'rgba';
+    const C = new Float32Array(w * h * (rgba ? 4 : 1));
+    if (!rgba) C.fill(p.value);
+    else for (let i = 0; i < C.length; i += 4) { C[i] = p.color[0]; C[i + 1] = p.color[1]; C[i + 2] = p.color[2]; C[i + 3] = p.alpha; }
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C));
+  },
+});
+
+defineNode({
   type: 'tex_shape',
   category: 'texture',
   summary: 'Shape image: disc, square, polygon, star or ring with a soft falloff, optionally repeated in a grid.',

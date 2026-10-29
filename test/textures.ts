@@ -179,6 +179,12 @@ section('generators: deterministic, seeded, tileable');
   check(mean(txt.layer('C')!) > 0.03 && mean(txt.layer('C')!) < 0.6, `tex_text fills glyphs (coverage ${f3(mean(txt.layer('C')!))})`);
   const grad = await image({ n: { type: 'tex_gradient', params: { resolution: [64, 8] } } });
   check(grad.layer('C')![0] < 0.05 && grad.layer('C')![63] > 0.95, 'tex_gradient linear runs 0 → 1 left to right');
+  const k = await image({ k: { type: 'tex_constant', params: { resolution: [8, 4], value: 0.65 } } });
+  check(k.name === 'k' && k.width === 8 && k.height === 4 && k.layer('C')!.length === 32 && k.layer('C')!.every((x) => Math.abs(x - 0.65) < 1e-6), 'tex_constant grey: one value everywhere');
+  const kc = await image({ src: { type: 'tex_noise', params: { resolution: [24, 12] } }, k: { type: 'tex_constant', in: ['src'], params: { channels: 'rgba', color: '#a5462e', alpha: 0.5 } } }, 'k');
+  const kd = kc.layer('C')!;
+  check(kc.width === 24 && kc.height === 12 && kd.length === 24 * 12 * 4 && Math.abs(kd[0] - 0xa5 / 255) < 1e-6 && Math.abs(kd[2] - 0x2e / 255) < 1e-6 && kd[3] === 0.5 && imagesOf(await geo({ src: { type: 'tex_noise', params: { resolution: 8 } }, k: { type: 'tex_constant', in: ['src'] } }, 'k')).length === 1,
+    'tex_constant rgba: the colour as typed, the size of the input image, only the new image out');
   check((await cookErr({ n: { type: 'tex_noise', params: { resolution: [8192, 8192] } } })).includes('too large'), 'oversized images fail with a readable error');
 }
 

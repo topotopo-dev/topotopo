@@ -154,7 +154,7 @@ export const INPUTS: Record<string, string[]> = {
   // textures: filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
   tex_blend: ['TEX', 'TEX2', 'TEXSHAPE'], tex_levels: ['TEX'], tex_curves: ['TEX'], tex_blur: ['TEX'], tex_warp: ['TEX2', 'TEX'],
   tex_transform: ['TEX2'], tex_edge_detect: ['TEX2'], tex_invert: ['TEX'], tex_threshold: ['TEX'], tex_histogram_scan: ['TEX'],
-  tex_normal_from_height: ['TEX2'], tex_normal_blend: ['TEXNORMAL', 'TEXDETAIL', 'TEXSHAPE'], tex_height_to_ao: ['TEX2'], tex_channel: ['TEX', 'TEX2'], tex_colorize: ['TEX'],
+  tex_constant: ['TEX2'], tex_normal_from_height: ['TEX2'], tex_normal_blend: ['TEXNORMAL', 'TEXDETAIL', 'TEXSHAPE'], tex_height_to_ao: ['TEX2'], tex_channel: ['TEX', 'TEX2'], tex_colorize: ['TEX'],
   tex_tile_sampler: ['TEXSHAPE'], tex_output: ['TEX2'], texture_to_material: ['UVBOX', 'TEX'], tex_to_heightfield: ['TEX'],
   tex_crop: ['TEX2'], trace_image: ['TEXSHAPE'], tex_dilate: ['TEXSHAPE', 'TEXSHAPE'], tex_pack: ['TEXATLAS'],
   heightfield_to_tex: ['HFN'],
@@ -251,6 +251,7 @@ export const PARAMS: Record<string, any> = {
   tex_histogram_scan: { coverage: 0.3, contrast: 0.8 },
   tex_normal_from_height: { depth: 0.03, size: 1, format: 'directx' },
   tex_normal_blend: { mode: 'rnm', strength: 1.5 },
+  tex_constant: { channels: 'rgba', color: '#336699', alpha: 0.5 },
   tex_height_to_ao: { radius: 0.1, depth: 0.1, directions: 4, steps: 4 },
   tex_channel: { name: 'orm' },
   tex_colorize: { ramp: [[0, '#3b2316'], [0.5, '#8a4b2a'], [1, '#c9845a']] },

@@ -535,8 +535,9 @@ GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/
   tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
   hex, dots: 1 on the cells, 0 in the gaps; grid is a line mask, 1 on the lines, 0 in the cells: for grooved cells use
   tiles; gap = mortar or line width, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance /
-  edges / id / crackle) · tex_gradient · tex_shape (disc, square, polygon, star, ring; falloff; tile) · tex_splatter
-  (blobs) · tex_scratches (strokes) · tex_text.
+  edges / id / crackle) · tex_gradient · tex_constant (one grey value, or an RGBA colour with channels:"rgba";
+  input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star, ring; falloff; tile) ·
+  tex_splatter (blobs) · tex_scratches (strokes) · tex_text.
 FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
   (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
   (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).
