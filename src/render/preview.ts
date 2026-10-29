@@ -5,7 +5,7 @@ import type { GraphSpec } from '../graph/types.ts';
 import type { ExportOptions } from '../io/common.ts';
 import { exportGeometryAsync } from '../io/export.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
-import { withImagePreview } from './texview.ts';
+import { withImagePreview, withMaterialPreview } from './texview.ts';
 import { renderGeometry } from './raster.ts';
 import { renderArgs } from './options.ts';
 import { encodePNG } from './png.ts';
@@ -25,10 +25,10 @@ export function thumbnailPNG(geo: Geometry, g: GraphSpec, deflate: (d: Uint8Arra
 
 /**
  * The GLB a viewer page shows: heightfields as meshes (with `heightfieldLayer` in red, default the mask), images as
- * textured quads, lines as lines, no custom attributes. `compress: 'meshopt'` for files kept on disk (the page's
+ * textured quads, a material output as spheres wearing its materials, lines as lines, no custom attributes. `compress: 'meshopt'` for files kept on disk (the page's
  * loader decodes it).
  */
 export function previewGLB(g: Geometry, o: Pick<ExportOptions, 'compress'> & { heightfieldLayer?: string } = {}): Promise<Uint8Array> {
   const { heightfieldLayer, ...rest } = o;
-  return exportGeometryAsync(withImagePreview(withHeightfieldPreview(g, 256, heightfieldLayer)), 'glb', { splitByName: false, lineMode: 'lines', custom: false, ...rest });
+  return exportGeometryAsync(withImagePreview(withMaterialPreview(withHeightfieldPreview(g, 256, heightfieldLayer))), 'glb', { splitByName: false, lineMode: 'lines', custom: false, ...rest });
 }

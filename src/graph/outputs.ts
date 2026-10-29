@@ -5,9 +5,10 @@
 
 /**
  * The kinds of a published output: a mesh, packed instances, points, curves, a terrain (heightfields), textures (images
- * alone), a volume, or a scene that holds several of these (a street with its lamp posts as instances).
+ * alone), a material (materials and the maps they use, no geometry), a volume, or a scene that holds several of these
+ * (a street with its lamp posts as instances).
  */
-export const KINDS = ['mesh', 'instances', 'points', 'curves', 'terrain', 'textures', 'volume', 'scene'] as const;
+export const KINDS = ['mesh', 'instances', 'points', 'curves', 'terrain', 'textures', 'material', 'volume', 'scene'] as const;
 export type Kind = (typeof KINDS)[number];
 export const isKind = (k: unknown): k is Kind => typeof k === 'string' && (KINDS as readonly string[]).includes(k);
 

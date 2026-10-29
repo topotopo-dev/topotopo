@@ -27,7 +27,7 @@ import { LabelPlacer, ambientOcclusion, dotOv, drawLabel, drawLegend, lineOv } f
 import type { DepthTol, LegendItem, RGB } from './overlay.ts';
 import { heightfieldPreviewStep, isHeightfield, layerStats, withHeightfieldPreview } from '../core/heightfield.ts';
 import { withSdfGridPreview } from '../core/sdfgrid.ts';
-import { drawTextureView, textureSampler } from './texview.ts';
+import { drawTextureView, textureSampler, withMaterialPreview } from './texview.ts';
 import { EMPTY_ATTRIB } from '../core/scene.ts';
 import { pbrScene, preparePBR } from './pbr.ts';
 import { decodePNG } from '../io/png-decode.ts';
@@ -381,10 +381,13 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   }
   g = withHeightfieldPreview(g, hfRes, hfLayer);
   g = withSdfGridPreview(g); // sampled SDFs draw through the existing level-set mesher at preview resolution
+  // a material output: spheres wearing its materials, with their base colour maps unless textures is set
+  const matPreview = withMaterialPreview(g), materialOnly = matPreview !== g;
+  if (materialOnly) { g = matPreview; if (o.textures === undefined) o = { ...o, textures: true }; }
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   // images and nothing else to draw in 3D: the texture view (render/texview.ts)
   const onlyImages = !g.numPoints && g.volumes.length > 0 && g.volumes.every((v) => v.kind === 'image');
-  const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : ['persp', 'front', 'right', 'top'];
+  const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : materialOnly ? ['persp'] : ['persp', 'front', 'right', 'top'];
   const ui = Math.max(1, Math.min(4, Math.round(o.scale ?? 1)));
   // tile size: n (square) or [width, height] pixels per view, before scale
   const sz0 = o.size ?? (views.length === 1 ? 800 : 512);

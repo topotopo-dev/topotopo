@@ -543,7 +543,7 @@ let tg: Geometry;
   // the textures format: every image as PNG, extra layers on request
   const tx = await exportFilesAsync(Geometry.merge([tg, await geo({ p: { type: 'tex_pattern', params: { resolution: 16, name: 'bricks' } } })]), 'textures', path.join(tmp, 'maps'), { layers: ['id'] });
   const names = tx.files.map((f) => path.basename(f.path)).sort();
-  check(names.join(',') === 'brick_color.png,brick_color_id.png,brick_normal.png,brick_normal_id.png,brick_orm.png,bricks.png,bricks_id.png', `textures export: ${names.join(', ')}`);
+  check(names.join(',') === 'brick_color.png,brick_color_id.png,brick_normal.png,brick_normal_id.png,brick_orm.png,bricks.png,bricks_id.png,materials.json', `textures export: ${names.join(', ')}`);
   const grey = decodePNG(tx.files.find((f) => f.path.endsWith('bricks.png'))!.bytes);
   check(grey.channels === 1 && grey.width === 16, 'grey images are written as 8-bit grey PNGs');
   const geoWarn: string[] = [];
