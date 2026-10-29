@@ -4,7 +4,8 @@
 import { Geometry } from './geometry.ts';
 import { triangulate } from './topology.ts';
 import { mergeTriangles } from './polymerge.ts';
-import { solidCauses, solidReport } from './report.ts';
+import { primWhere, solidCauses, solidReport } from './report.ts';
+import { selfIntersections } from './analysis.ts';
 import type { Vec3 } from './math.ts';
 
 let wasm: any = null;
@@ -117,14 +118,22 @@ export function toManifold(g: Geometry, L: PropLayout = propLayout([g])): any {
     // why: each cause with its count, where the first one is and its fix (core/report.ts)
     const r = solidReport(g), causes = solidCauses(r);
     const seamsOnly = !causes.length && r.seamEdges > 0;
+    const crossing = !seamsOnly && !causes.length ? crossingWhere(g) : '';
     const err = new NotManifoldError(`input is not a closed solid (manifold): ${seamsOnly
       ? `its ${r.seamEdges} open edges are uv/normal seam splits (coincident points not welded), first ${r.firstOpen ?? 'at a seam'}`
-      : causes.length ? causes.join('; ') : 'the mesh kernel rejected it (self-intersecting or touching faces)'}.`);
+      : causes.length ? causes.join('; ') : crossing ? `its faces cross each other: ${crossing}` : 'the mesh kernel rejected it (touching faces)'}.`);
     err.hint = seamsOnly
       ? 'fuse the points (or file {weld:true} on import) to join the seams; Solid ops need watertight meshes.'
+      : crossing ? 'a bevel, offset or extrude too big for a thin part crosses the surface through itself: a smaller offset, or remesh through sdf_from_mesh → sdf_to_mesh.'
       : 'Solid ops need watertight meshes: fix the causes above, or remesh through sdf_from_mesh → sdf_to_mesh. Open surfaces can use clip instead of boolean.';
     throw err;
   }
+}
+
+/** "3 pairs, first prim 12 of "guard" at (x, y, z)": where a closed mesh crosses itself ('' when it does not). */
+function crossingWhere(g: Geometry): string {
+  const x = selfIntersections(g);
+  return x.pairs ? `${x.pairs}${x.capped ? '+' : ''} pair(s), first ${primWhere(g, x.prims.indexOf(1))}` : '';
 }
 
 export interface FromManifoldResult { geo: Geometry; primSource: Int32Array; primFace: Int32Array }
