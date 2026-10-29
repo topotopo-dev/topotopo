@@ -349,7 +349,7 @@ section('a viewer whose graphs are in no project: nothing to show');
   try {
     const s = await (await fetch(`${lv.url}api/packages`)).json() as any;
     const c = await fetch(`${lv.url}api/packages/compare`, { method: 'POST', body: '{"package":"studio/trees"}' });
-    check(s.project === null && !s.packages.length && c.status === 400 && /in no project: topotopo init <folder> \(MCP: library \{action:"init"\} for the open project, when the person says so\) makes the folder a project/.test((await c.json() as any).error),
+    check(s.project === null && !s.packages.length && c.status === 400 && /in no project: topotopo init <folder> \(MCP: library \{action:"init"\} for the server's folder, when the person says so\) makes the folder a project/.test((await c.json() as any).error),
       'no project: no packages, and a before/after says how to make one');
   } finally { lv.close(); }
 }
