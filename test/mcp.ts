@@ -98,6 +98,12 @@ console.log(e.txt.split('\n')[0]);
 
 const ins = await call('inspect', { node: 'rocks', detail: 'all', class: 'point', count: 3 });
 check(ins.txt.includes('topology:') && ins.txt.includes('point elements'), 'inspect detail');
+const insSum = await call('inspect', { node: 'rocks' });
+check(/\d triangles\n/.test(insSum.txt) && /^bbox: min \(-?\d+\.\d{3}, /m.test(insSum.txt) && /^topology: /m.test(insSum.txt), 'inspect summary (default): one screen with triangles, the bbox to the mm and the topology');
+const insBud = await call('inspect', { node: 'rocks', detail: 'budget', json: true });
+check(!insBud.isError && /^budget: [\d,]+ triangles/m.test(insBud.txt) && /^by node \(the triangles each node adds/m.test(insBud.txt) && /budget \(JSON\):\n\{"triangles":/.test(insBud.txt), 'inspect detail "budget": totals, parts, nodes, and JSON');
+const insScene = await call('inspect', { node: 'rocks', detail: 'scene', export_options: { split_by_name: false } });
+check(!insScene.isError && /^scene \(the glb export, read back\): 1 nodes, 1 meshes/m.test(insScene.txt), `inspect detail "scene": the glb export read back (${insScene.txt.split('\n')[1]?.slice(0, 100)})`);
 
 const rnd = await call('render', { node: 'terrain', color_by: 'height', views: ['top', 'persp'] });
 check(!!rnd.img, 'render tool image');
@@ -398,11 +404,11 @@ if (url) {
   const fol = await call('library', { action: 'follow', package: 'studio/crates', on: true });
   check(!fol.isError && /following studio\/crates for this session: its working folder/.test(fol.txt), `library follow: ${fol.txt.slice(0, 100)}`);
   const ins = await call('inspect', { node: 'a' });
-  check(/size 2\.00 × 2\.00 × 2\.00/.test(before.txt) && /size 6\.00 × 6\.00 × 6\.00/.test(ins.txt), 'the followed package cooks from its working folder (an edit there shows here)');
+  check(/size 2\.000 × 2\.000 × 2\.000 m/.test(before.txt) && /size 6\.000 × 6\.000 × 6\.000 m/.test(ins.txt), 'the followed package cooks from its working folder (an edit there shows here)');
   kitGraph.nodes.c.params.size = '=s * 4';
   fs.writeFileSync(path.join(kit, 'graphs', 'main.json'), JSON.stringify(kitGraph, null, 2));
   const ins2 = await call('inspect', { node: 'a' });
-  check(/size 8\.00 × 8\.00 × 8\.00/.test(ins2.txt), 'a later edit there re-cooks it');
+  check(/size 8\.000 × 8\.000 × 8\.000 m/.test(ins2.txt), 'a later edit there re-cooks it');
   const xf = await call('export', { path: 'exports/yard_followed.glb' });
   const frec = JSON.parse(fs.readFileSync(path.join(yard, 'exports', 'yard_followed.glb.source.json'), 'utf8')).source;
   check(!xf.isError && typeof frec.packages?.['studio/crates@working'] === 'string' && !frec.packages['studio/crates@1.0'], `an export while following records the working folder: ${JSON.stringify(frec.packages)}`);
@@ -438,7 +444,7 @@ if (url) {
   check(!ap.isError && /^updated studio\/crates 1\.0 → 1\.1 in project yard/.test(ap.txt) && JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8')).uses['studio/crates'] === '1.1'
     && fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1', 'version.json')) && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.0')), `library update with apply:true applies it: ${ap.txt.split('\n')[0]}`);
   const grown = await call('inspect', { node: 'a' });
-  check(/size 8\.00 × 8\.00 × 8\.00/.test(grown.txt), 'the graphs cook with the new version at once');
+  check(/size 8\.000 × 8\.000 × 8\.000 m/.test(grown.txt), 'the graphs cook with the new version at once');
 }
 
 await client.close();

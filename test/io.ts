@@ -21,6 +21,7 @@ import { sha256Hex } from '../src/core/sha256.ts';
 import { exportFilesAsync } from '../src/io/files.ts';
 import { unrealLandscapeBundle } from '../src/io/unreal.ts';
 import { heightmapExport } from '../src/io/heightmap.ts';
+import { glbSceneReport, sceneReportText } from '../src/io/inspect-scene.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { importCSV } from '../src/io/points.ts';
 import { canonicalJSON, exportSource, graphSha256 } from '../src/io/source.ts';
@@ -305,5 +306,26 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     // mkdtemp returns the exact owned directory
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------- inspect detail "scene": the glb export read back
+{
+  const sc = await engine.cook({
+    nodes: {
+      body: { type: 'box', params: { size: [1, 0.5, 0.4] } },
+      body_n: { type: 'attrib_create', in: ['body'], params: { name: 'name', class: 'prim', value: 'body' } },
+      m: { type: 'material', in: ['body_n'], params: { name: 'paint', base_color: [0.8, 0.1, 0.1], roughness: 0.4 } },
+      hook: { type: 'scene_null', in: ['m'], params: { name: 'hook', parent: 'body', translate: [0.5, 0.25, 0] } },
+    },
+    output: 'hook',
+  });
+  const glb = await exportGeometryAsync(sc.geo!, 'glb', {}) as Uint8Array;
+  const rep = glbSceneReport(glb);
+  const body = rep.nodes.find((x) => x.name === 'body'), hook = rep.nodes.find((x) => x.name === 'hook');
+  check(rep.triangles === 12 && body?.kind === 'mesh' && rep.meshes[0].primitives[0].material === 'paint' && rep.materials[0].name === 'paint' && Math.abs(rep.materials[0].roughness - 0.4) < 1e-6,
+    `scene report: the mesh, its triangles and material as the glb holds them (${rep.triangles} tris, ${rep.materials.map((x) => x.name)})`);
+  check(hook?.kind === 'empty' && hook.parent === 'body' && hook.world.map((x) => +x.toFixed(3)).join() === '0.5,0.25,0', `scene report: the socket under its parent at its world position (${JSON.stringify(hook)})`);
+  const txt = sceneReportText(rep).join('\n');
+  check(/^scene \(the glb export, read back\): 2 nodes, 1 meshes, 12 triangles, 1 materials/.test(txt) && /\n {4}hook: empty \(socket\); at \(0\.500, 0\.250, 0\.000\)/.test(txt) && /paint: base colour factor \(linear\) \(0\.60, 0\.01, 0\.01\), metallic 0\.00, roughness 0\.40; no maps/.test(txt), 'scene report text: nodes as a tree, materials');
 }
 process.exit(fail ? 1 : 0);

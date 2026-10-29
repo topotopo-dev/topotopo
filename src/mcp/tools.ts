@@ -10,7 +10,8 @@ import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
 import { migrateGraph } from '../graph/migrate.ts';
 import { catalogText, nodeDoc, topicList, topicText, INSTRUCTIONS } from './docs.ts';
-import { summarize, inspect } from '../inspect.ts';
+import { nodeBudgetInput, summarize, inspect } from '../inspect.ts';
+import { glbSceneReport, sceneReportText } from '../io/inspect-scene.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import type { RenderOptions } from '../render/raster.ts';
 import { renderArgs } from '../render/options.ts';
@@ -364,16 +365,17 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'inspect',
-      description: 'Inspect any node\'s output as text: summary; detail "attributes" (min/max/mean, unique strings), "topology" (a closed solid or why not: open edges counted after welding the vertex splits of uv/normal seams, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part (prim name/group) and world position of the first one and the fix; pieces, volume, area, genus, render/export triangle health), "elements" (list values for a range), "all", or "uv" (exact uv overlaps split into in-tile (atlas) overlap, tiling overlap (charts across tile borders: a repeating texture, flagged tiling) and overlap across LODs (_lodN names), each listed with parts and positions; collapsed / non-finite / out-of-tile triangles, charts, utilization, per-piece texel density with resolution; json:true appends the machine-readable report).',
+      description: 'Inspect any node\'s output as text: detail "summary" (default: one screen: counts, triangles, bbox in mm, parts, materials and maps, images, uv state, closed or open edges after welding seam splits); "budget" (triangles per part (prim "name", each an exported mesh) split per LOD (_lodN names), and per node (what each adds), sorted, with totals); "scene" (the glb export read back: nodes and parents, sockets, meshes and triangles, materials and maps, images; export_options as for export); "attributes" (min/max/mean, unique strings), "topology" (a closed solid or why not: open edges counted after welding the vertex splits of uv/normal seams, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part (prim name/group) and world position of the first one and the fix; pieces, volume, area, genus, render/export triangle health), "elements" (list values for a range), "all", or "uv" (exact uv overlaps split into in-tile (atlas) overlap, tiling overlap (charts across tile borders: a repeating texture, flagged tiling) and overlap across LODs (_lodN names), each listed with parts and positions; collapsed / non-finite / out-of-tile triangles, charts, utilization, per-piece texel density with resolution; json:true appends the machine-readable report).',
       inputSchema: {
         type: 'object',
         properties: {
           graph: { type: 'string', description: 'graph name (default "main")' },
           node: { type: 'string', description: 'node to inspect (default: graph output)' },
-          detail: { type: 'string', enum: ['summary', 'attributes', 'topology', 'elements', 'all', 'uv'] },
+          detail: { type: 'string', enum: ['summary', 'attributes', 'topology', 'elements', 'all', 'uv', 'budget', 'scene'] },
+          export_options: { type: 'object', description: 'detail "scene": export options as the export tool takes them (up_axis, scale, split_by_name, materials, custom_attribs, tangents, instancing, compress …)' },
           uv_attrib: { type: 'string', description: 'detail "uv": the uv attribute (default "uv")' },
           resolution: { description: 'detail "uv": texture size in texels for texel density, n or [width, height]', anyOf: [{ type: 'number' }, { type: 'array', items: { type: 'number' } }] },
-          json: { type: 'boolean', description: 'detail "uv": append the report as JSON' },
+          json: { type: 'boolean', description: 'detail "uv", "budget" or "scene": append the report as JSON' },
           class: { type: 'string', enum: ['point', 'prim', 'vertex', 'detail', 'edge'], description: 'element class; "edge" lists unique edges (point pair, length, polygon count, dihedral angle, edge groups)' },
           attribs: { type: 'array', items: { type: 'string' } },
           start: { type: 'number' }, count: { type: 'number' },
@@ -386,7 +388,16 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const node = r.target;
         const res = r.results.get(node);
         const head = `${name}/${node}${atFrame(r)}${res ? ` (${res.cached ? 'cached' : res.ms.toFixed(0) + ' ms'})` : ''}`;
-        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, json: a.json }));
+        if (a.detail === 'scene') {
+          // the glb export with these options, read back from its bytes (io/inspect-scene.ts)
+          const ex = await serializeExport(geo, 'glb', path.join(ws.exportDir, 'scene.glb'), exportToolOptions(a.export_options ?? {}), engine.host);
+          const glb = ex.files.find((f) => /\.glb$/i.test(f.path));
+          if (!glb) return text(`${head}\nscene: the glb export wrote no file`, true);
+          const rep = glbSceneReport(glb.bytes);
+          return text([head, ...sceneReportText(rep), ...ex.warnings.map((w) => `warning: ${w}`), ...(a.json ? ['scene (JSON):', JSON.stringify(rep)] : [])].join('\n'));
+        }
+        const nodes = a.detail === 'budget' ? nodeBudgetInput(ws.getGraph(name), r.results) : undefined;
+        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, json: a.json, nodes }));
       },
     },
     {

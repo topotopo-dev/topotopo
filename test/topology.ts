@@ -13,7 +13,7 @@ import { convertSelection } from '../src/core/groupconvert.ts';
 import { boundaryLoops, primArea, primNormals, topologyReport, triangleReport, triangulate } from '../src/core/topology.ts';
 import { readFileSync } from 'node:fs';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
-import { summarize, inspect } from '../src/inspect.ts';
+import { budgetReport, nodeBudgetInput, summarize, inspect } from '../src/inspect.ts';
 import { pointWhere, posText, primCentroid, primWhere, solidReport } from '../src/core/report.ts';
 import { exportGeometryAsync } from '../src/io/export.ts';
 import { importGeometryAsync } from '../src/io/import.ts';
@@ -571,6 +571,38 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   const as = await engine.cook({ nodes: { ...named, h: { type: 'delete', in: ['n'], params: { group: '0' } }, out: { type: 'assert', in: ['h'], params: { watertight: true, on_fail: 'warn' } } }, output: 'out' });
   const aw = as.warnings.map((x) => x.message).join(' ');
   check(/watertight: .*first edge .* of "crate" .* at \(/.test(aw), `assert watertight names the first open edge (${aw.slice(0, 140)})`);
+}
+
+// ---------------------------------------------------------------- inspect summary, budget per part / LOD / node, scene
+{
+  const named = (src: NodeSpec, name: string): Record<string, NodeSpec> => ({ [`${name}_src`]: src, [name]: { type: 'attrib_create', in: [`${name}_src`], params: { name: 'name', class: 'prim', value: name } } });
+  const spec = {
+    nodes: {
+      ...named({ type: 'tube', params: { radius: 0.03, height: 0.9, rows: 4, cols: 32, caps: true } }, 'barrel_lod0'),
+      ...named({ type: 'box', params: { size: [0.35, 0.12, 0.06], center: [-0.35, 0.1, 0], divisions: [4, 2, 2] } }, 'stock_lod0'),
+      ...named({ type: 'tube', params: { radius: 0.03, height: 0.9, rows: 2, cols: 8, caps: true } }, 'barrel_lod1'),
+      ...named({ type: 'box', params: { size: [0.35, 0.12, 0.06], center: [-0.35, 0.1, 0] } }, 'stock_lod1'),
+      out: { type: 'merge', in: ['barrel_lod0', 'stock_lod0', 'barrel_lod1', 'stock_lod1'] },
+    } as Record<string, NodeSpec>,
+    output: 'out',
+  };
+  const r = await engine.cook(spec);
+  const g = r.geo!;
+  const b = budgetReport(g, nodeBudgetInput(spec, r.results));
+  const l0 = b.lods.find((l) => l.lod === 0)!, l1 = b.lods.find((l) => l.lod === 1)!;
+  check(b.triangles === 452 && l0.triangles === 396 && l1.triangles === 56 && l0.parts[0].name === 'barrel_lod0' && l0.parts[0].triangles === 316 && l1.parts.map((x) => x.name).join() === 'barrel_lod1,stock_lod1',
+    `budget: 452 triangles, LOD 0 396 (barrel_lod0 316 first), LOD 1 56 (${b.lods.map((l) => `${l.lod}:${l.triangles}`).join(' ')})`);
+  check(b.nodes[0].node === 'barrel_lod0_src' && b.nodes[0].added === 316 && b.nodes.find((x) => x.node === 'out')?.added === 0, `budget per node: what each node adds (${b.nodes.slice(0, 2).map((x) => `${x.node} +${x.added}`).join(', ')})`);
+  const bt = inspect(g, { detail: 'budget', nodes: nodeBudgetInput(spec, r.results) });
+  check(/budget: 452 triangles/.test(bt) && /LOD 1: 56 triangles \(14\.1% of LOD 0\)/.test(bt) && /barrel_lod0_src \(tube\)\s+\+316/.test(bt), 'inspect detail "budget" prints totals, LODs and nodes');
+  // packed instances count in the budget, expanded
+  const packed = await cook({ pts: { type: 'point_grid', params: { counts: [3, 1, 1], size: [4, 0, 0] } }, rock: { type: 'box' }, out: { type: 'copy_to_points', in: ['rock', 'pts'], params: { pack: true } } }, 'out');
+  const pb = budgetReport(packed);
+  check(pb.triangles === 36 && pb.instances === 3 && pb.instanceTriangles === 36, `budget: packed instances expanded (${pb.triangles} triangles in ${pb.instances} instances)`);
+  const sm = inspect(g, { detail: 'summary' });
+  check(/; 452 triangles/.test(sm) && /bbox: min \(-0\.525, -0\.450, -0\.030\) max/.test(sm) && /parts \(prim "name", 4\)/.test(sm) && /^uv: \d+ charts/m.test(sm) && /^topology: closed solid/m.test(sm),
+    `inspect summary: one screen with triangles, bbox to the mm, parts, uv and topology (${sm.split('\n').find((x) => x.startsWith('bbox'))})`);
+  check(!/^image "/m.test(summarize(g)) && /bbox: .* m, center/.test(summarize(g)), 'the short summary: bbox in metres to the mm');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

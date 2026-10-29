@@ -1186,6 +1186,17 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    sample), Hausdorff + mean distance, per-point displacement (same point count), verdict. a/b: "graph", "graph/node" or {graph, node, frame} (two nodes or two frames work too).
    render:true overlays them: grey = unchanged, blue = only in b, orange = only in a.
 4. RENDER for what text cannot tell (proportions, style); inspect for one attribute's numbers.
+5. INSPECT {detail} (CLI --inspect <detail>):
+   summary (default)  one screen: counts and triangles, bbox in metres to the millimetre, parts (prim "name"),
+                      materials and their maps, images, uv state (charts, in-tile overlap, tiling, utilization), closed
+                      or open edges (after welding seam splits)
+   budget             triangles per part (prim "name": each exports as its own mesh), split per LOD when the names
+                      end in _lod0, _lod1 …, and per node (the triangles each node adds over its inputs), sorted, with
+                      totals; packed instances count expanded. json:true (CLI --json) appends it as JSON
+   scene              the glb export read back from its bytes: the node tree (meshes, sockets and their parents, world
+                      and local positions), triangles per mesh, materials with factors and maps, images with size;
+                      export_options (CLI: the export flags) as the export takes them
+   topology / uv / attributes / elements / all   (see above and help topic "uv")
 MEASURE NODES (category measure) turn shape into attributes for masks and colour:
   curvature   type mean|gaussian|principal_min|principal_max|convexity (1/m; normalize → 0..1) — wear on convex edges
   occlusion   mode occlusion → ao 0..1 | cavity → cavity 0..1 | thickness → metres (rays inward; closed meshes);

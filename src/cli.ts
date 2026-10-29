@@ -8,7 +8,7 @@
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
-//                   [--inspect summary|attributes|topology|all|uv [--uv-resolution 1024] [--json]]
+//                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--json]]
 //   --output picks a named output (the graph's "outputs"); --var overrides a graph var for this run (src/graph/vars.ts).
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   Packed instances to .csv/.points.json: one row per instance + <name>.meshes.json + <name>_meshes/<Mesh>.glb.
@@ -55,7 +55,8 @@ import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
 import { publishedOutputs } from './io/targets.ts';
-import { inspect } from './inspect.ts';
+import { budgetReport, inspect, nodeBudgetInput, summarize } from './inspect.ts';
+import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
 import { uvReport } from './core/uvreport.ts';
 import { didYouMean } from './graph/params.ts';
 import { parseVarArg, withVars } from './graph/vars.ts';
@@ -76,7 +77,13 @@ if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
-    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all|topology|uv] [--uv-resolution 1024] [--json] (uv: overlaps, utilization, texel density; --json: the report as JSON)',
+    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb]',
+    '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--json]',
+    '           summary: one screen (counts, triangles, bbox in mm, parts, materials, images, uv state, closed or open edges)',
+    '           topology: a closed solid or why not (open edges after welding seam splits, non-manifold, flipped, inward), with where',
+    '           uv: overlaps (in-tile, tiling, across LODs), utilization, texel density; budget: triangles per part, per LOD and per node',
+    '           scene: the glb export read back (nodes and parents, meshes, materials, maps, images; takes the export options)',
+    '           --json: the uv, budget or scene report as JSON',
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
@@ -256,6 +263,32 @@ async function cook() {
   const single = frameArg !== undefined ? Number(frameArg) : undefined;
   if (single !== undefined && !Number.isFinite(single)) fail(`--frame expects a number, got "${frameArg}"`);
 
+  // --inspect <detail>: checked before cooking
+  const INSPECT_DETAILS = ['summary', 'attributes', 'topology', 'all', 'uv', 'budget', 'scene'];
+  const inspectDetail = opt('--inspect');
+  if (argv.includes('--inspect') && (inspectDetail === undefined || !INSPECT_DETAILS.includes(inspectDetail))) {
+    const s = inspectDetail ? didYouMean(inspectDetail, INSPECT_DETAILS) : [];
+    fail(`--inspect needs one of ${INSPECT_DETAILS.join(', ')}${inspectDetail ? `, got "${inspectDetail}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}` : ''}`);
+  }
+  const uvRes = opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined;
+
+  /** The --inspect report of a cook: text, or the uv / budget / scene report as JSON with --json. */
+  async function inspectText(r: CookReport): Promise<string> {
+    const geo = r.geo!, json = argv.includes('--json');
+    if (inspectDetail === 'scene') {
+      // the glb export with the export options given, read back
+      const res = await serializeExport(geo, 'glb', 'scene.glb', exportArgs(), engine.host);
+      const glb = res.files.find((f) => /\.glb$/i.test(f.path));
+      if (!glb) return 'scene: the glb export wrote no file';
+      const rep = glbSceneReport(glb.bytes);
+      const warn = res.warnings.map((w) => `warning: ${w}`);
+      return json ? JSON.stringify(rep, null, 2) : [...sceneReportText(rep), ...warn].join('\n');
+    }
+    if (inspectDetail === 'uv' && json) return JSON.stringify(uvReport(geo, { resolution: uvRes }), null, 2);
+    if (inspectDetail === 'budget' && json) return JSON.stringify(budgetReport(geo, nodeBudgetInput(graph, r.results)), null, 2);
+    return inspect(geo, { detail: inspectDetail as any, uvResolution: uvRes, nodes: inspectDetail === 'budget' ? nodeBudgetInput(graph, r.results) : undefined });
+  }
+
   function report(r: CookReport) {
     for (const e of r.errors) console.error(`error [${e.node}] ${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`);
     for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
@@ -357,7 +390,7 @@ async function cook() {
       if (!r.ok || !r.geo) return;
       const cooked = [...r.results.values()].filter((n) => !n.cached && !n.error).length;
       console.log(`frame ${f}: ${r.target} in ${r.ms.toFixed(0)} ms (${cooked} node(s) cooked) — ${r.geo.numPoints} points, ${r.geo.numPrims} prims`);
-      if (opt('--inspect')) console.log(inspect(r.geo, { detail: opt('--inspect') as any }));
+      if (inspectDetail) console.log(await inspectText(r));
       await writeOutputs(r, f);
     }, { target, fps });
     console.log(`cooked ${file} frames ${range.start}-${range.end}${range.step !== 1 ? `:${range.step}` : ''}: ${res.frames - res.failed.length}/${res.frames} ok`);
@@ -368,8 +401,8 @@ async function cook() {
     if (!r.ok || !r.geo) process.exit(1);
     const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
     console.log(`cooked ${file} → ${outputName !== undefined ? `output "${outputName}" (${r.target})` : r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''}${vars} in ${r.ms.toFixed(0)} ms`);
-    if (opt('--inspect') === 'uv' && argv.includes('--json')) console.log(JSON.stringify(uvReport(r.geo, { resolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }), null, 2));
-    else console.log(inspect(r.geo, { detail: (opt('--inspect') as any) ?? 'summary', uvResolution: opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined }));
+    // without --inspect the short summary; --inspect <detail> the report (src/inspect.ts, io/inspect-scene.ts)
+    console.log(inspectDetail ? await inspectText(r) : summarize(r.geo));
     await writeOutputs(r);
     if (argv.includes('--export-all')) await exportAll();
   }
