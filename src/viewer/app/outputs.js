@@ -7,7 +7,7 @@
 import { createImageView } from './image-view.js';
 import { fmtBytes } from './units.js';
 import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
-import { kindLine, detailLine, kindBadge, liveText, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, detailLine, kindBadge, kindTagsLine, liveText, layerChoices, shownLayer } from './output-info.js';
 import { inputImageURL } from './layers.js';
 
 const url = (route, item, more = {}) => `/api/output/${route}?` + new URLSearchParams({ id: item.id, rev: item.revision, ...more });
@@ -230,6 +230,7 @@ export function createOutputPanel(ctx) {
         if (item.live?.length) { const b = text('span', 'unpublished edits', 'badge live'); b.title = liveText(item); marks.push(b); }
         badges.replaceChildren(...marks);
         tags.replaceChildren(...(item.tags ?? []).map((t) => text('span', t, 'tag')));
+        tags.title = item.tags?.length ? kindTagsLine(item) : '';
         tags.hidden = !item.tags?.length;
         // an output that is not the kind its graph pins says so (publishing the project's package would block on it); one
         // whose cook was stopped shows the last finished result

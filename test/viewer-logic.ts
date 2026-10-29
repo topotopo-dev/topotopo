@@ -384,6 +384,8 @@ section('output cards: what an output is, its formats and downloads');
   const hf = { name: 'heightfield', width: 21, height: 21, cell: 1, layers: [{ name: 'height', min: -1, max: 2 }, { name: 'flow', min: 0, max: 3.25 }, { name: 'mask', min: 0, max: 1 }] };
   check(info.kindLine({ kind: 'terrain', about: '21 × 21 samples, 1 m apart', size: [20, 3, 20] }) === 'terrain · 21 × 21 samples, 1 m apart · 20.0 × 3.00 × 20.0 m' && info.kindLine({ view: 'file' }) === 'file'
     && info.kindLine({ kind: 'metadata' }) === 'metadata', 'a card says what it is and its size');
+  check(info.kindTagsLine({ kind: 'mesh', tags: ['crate', 'wood'] }) === 'mesh [crate, wood]' && info.kindTagsLine({ kind: 'terrain', tags: [] }) === 'terrain' && info.kindTagsLine({ tags: ['x'] }) === 'kind not pinned [x]',
+    'kind and tags in words, as the CLI says them');
   check(info.kindBadge({ kind: 'scene' }) === 'scene' && info.kindBadge({ kind: 'metadata' }) === '' && info.kindBadge({}) === ''
     && info.detailLine({ kind: 'terrain', about: '21 × 21 samples, 1 m apart', size: [20, 3, 20] }) === '21 × 21 samples, 1 m apart · 20.0 × 3.00 × 20.0 m', 'the kind is a badge, the size the line beside it');
   check(JSON.stringify(info.layerChoices(hf)) === JSON.stringify([{ value: 'mask', label: 'mask' }, { value: 'flow', label: 'flow (0 .. 3.25)' }, { value: 'none', label: 'none' }]),

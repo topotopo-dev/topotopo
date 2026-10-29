@@ -15,6 +15,9 @@ export function detailLine(item) {
   return [what, item.size ? fmtSize(item.size) : ''].filter(Boolean).join(' · ');
 }
 
+/** An output's kind and tags in words, as the CLI says them: "mesh [crate, wood]" (the badges read in the same order). */
+export const kindTagsLine = (o) => `${o.kind || 'kind not pinned'}${o.tags?.length ? ` [${o.tags.join(', ')}]` : ''}`;
+
 /** What a result that uses packages shown live says: its exports and downloads hold their unpublished edits. */
 export const liveText = (item) => (item.live?.length ? `uses the unpublished edits of ${item.live.join(', ')} (shown live this session): Export and Download write them too, and say so in how the file was made` : '');
 

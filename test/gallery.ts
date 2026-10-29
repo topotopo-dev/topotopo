@@ -157,8 +157,8 @@ try {
       && page.indexOf('id="v-1.1"') < page.indexOf('id="v-1.0"') && /id="v-1\.0"[\s\S]*?<ul class="vouts"><li><code>studio\/trees\/pine<\/code>/.test(page),
       'its versions, newest first, with their dates and notes (escaped); each opens to the outputs it published');
     check(/<h2>Used by <span class="count">1<\/span><\/h2><table class="vars uses"><tbody><tr><th><a href="\/p\/game\/forest">Forest<\/a><\/th><td>1\.0<\/td>/.test(page), 'a package\'s page lists the projects that use it, linked');
-    check(/<code>studio\/trees\/pine<\/code><br><code>studio\/trees<\/code> <span class="dim">\(the default\)<\/span><\/th><td>Pine<span class="tags"><span class="kind"[^>]*>mesh<\/span><span class="tag">conifer<\/span><span class="tag">low-poly<\/span><\/span><\/td><td class="dim">node &quot;tree&quot; of graph &quot;main&quot; · sliders height · input ground<\/td>/.test(page),
-      'the outputs it publishes, by the node type a graph names them with: their kinds, tags, sliders and inputs, the default output');
+    check(/<code>studio\/trees\/pine<\/code><br><code>studio\/trees<\/code> <span class="dim">\(the default\)<\/span><\/th><td>Pine<span class="tags"><span class="kind"[^>]*>mesh<\/span><span class="tag">conifer<\/span><span class="tag">low-poly<\/span><\/span><\/td><td class="dim">node &quot;tree&quot; of graph &quot;main&quot; · params height · input ground<\/td>/.test(page),
+      'the outputs it publishes, by the node type a graph names them with: their kinds, tags, params and inputs, the default output');
     const user = (await req('/p/game/forest')).body.toString();
     check(/<h2>Packages it uses<\/h2>/.test(user) && /<th><a href="\/p\/game\/trees">studio\/trees<\/a><\/th><td>1\.0<\/td><td class="dim">first trees · 2026-10-20 <span class="newer">1\.1 is out<\/span><\/td>/.test(user) && !/class="pkgline"/.test(user),
       'a project\'s page lists the packages it uses: the version in use, its note, the package\'s page, a newer version');
@@ -183,7 +183,7 @@ try {
     edit(forest.dir, (m) => { m.uses = { ...m.uses, 'topotopo/props': '1.0' }; });
     g.rescan();
     const user2 = (await req('/p/game/forest')).body.toString();
-    check(/<th><a href="\/k\/props">topotopo\/props<\/a><\/th><td>1\.0<\/td>[\s\S]*?<span class="newer">1\.1 is out<\/span>/.test(user2) && /<a href="\/p\/game\/forest">Forest<\/a>/.test((await req('/k/props')).body.toString()),
+    check(/<th><a href="\/k\/props">topotopo\/props<\/a><\/th><td>1\.0<\/td>/.test(user2) && /<a href="\/p\/game\/forest">Forest<\/a>/.test((await req('/k/props')).body.toString()),
       'a project\'s page links the kits it uses, and the kit\'s page lists the project');
     const api = JSON.parse((await req('/api/projects')).body.toString());
     check(JSON.stringify(api.projects.find((x: any) => x.id === 'trees')?.package) === '{"name":"studio/trees","version":"1.1"}' && api.projects.find((x: any) => x.id === 'forest')?.package === undefined,

@@ -52,7 +52,7 @@ export interface FileRow { path: string; size: number; image: boolean }
  * A published output: the node type a graph names it with ("owner/name/output"; `alias` "owner/name" for the default),
  * its kind and tags (none in a version published before TopoTopo recorded kinds).
  */
-export interface OutputRow { type: string; alias?: string; label: string; kind?: string; tags: string[]; graph: string; node: string; sliders: string[]; inputs: string[] }
+export interface OutputRow { type: string; alias?: string; label: string; kind?: string; tags: string[]; graph: string; node: string; params: string[]; inputs: string[] }
 /** A published version: `big` when it starts a big version, `marked` when its author marked it big; its outputs. */
 export interface VersionRow { version: string; note: string; published: string; big: boolean; marked: boolean; outputs?: OutputRow[] }
 export interface ProjectData extends CardData {
@@ -203,7 +203,7 @@ function packageSection(pk: NonNullable<ProjectData['package']>): string {
   if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the project's folder publishes the first, which other projects can then use as <code>${esc(pk.name)}</code>.</p>`;
   const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a project relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
   const outputs = pk.outputs.map((o) => {
-    const what = [`node "${o.node}" of graph "${o.graph}"`, o.sliders.length ? `sliders ${o.sliders.join(', ')}` : '', o.inputs.length ? `input${o.inputs.length > 1 ? 's' : ''} ${o.inputs.join(', ')}` : ''].filter(Boolean).join(' · ');
+    const what = [`node "${o.node}" of graph "${o.graph}"`, o.params.length ? `params ${o.params.join(', ')}` : '', o.inputs.length ? `input${o.inputs.length > 1 ? 's' : ''} ${o.inputs.join(', ')}` : ''].filter(Boolean).join(' · ');
     const marks = kindTagMarks(o);
     return `<tr><th><code>${esc(o.type)}</code>${o.alias ? `<br><code>${esc(o.alias)}</code> <span class="dim">(the default)</span>` : ''}</th><td>${esc(o.label)}${marks ? `<span class="tags">${marks}</span>` : ''}</td><td class="dim">${esc(what)}</td></tr>`;
   }).join('');
@@ -211,7 +211,7 @@ function packageSection(pk: NonNullable<ProjectData['package']>): string {
     ${versionList(pk.versions, big)}
     <h2>Published outputs</h2>
     <table class="vars outputs"><tbody>${outputs}</tbody></table>
-    <p class="dim small">The outputs of ${esc(pk.versions[0].version)}: a project's graph uses one as a node type, <code>{"type": "${esc(pk.outputs[0]?.type ?? pk.name)}"}</code>, its sliders as params.</p>
+    <p class="dim small">The outputs of ${esc(pk.versions[0].version)}: a project's graph uses one as a node type, <code>{"type": "${esc(pk.outputs[0]?.type ?? pk.name)}"}</code>, with its params.</p>
     ${usedBySection(pk.usedBy ?? [])}`;
 }
 
@@ -234,7 +234,7 @@ export function kitPage(k: KitData, u: Urls): string {
   const big = (v: VersionRow) => (v.big || v.marked ? ' <span class="tag">big</span>' : '');
   const rows = k.rows.filter((o) => !/\/kit$/.test(o.type)).map((o) => `<div class="kit-out">
       <span class="kthumb">${o.thumb ? `<img src="${esc(o.thumb)}" alt="" loading="lazy" width="256" height="256">` : ''}</span>
-      <span class="kmeta"><code>${esc(o.type)}</code><span>${esc(o.label)}</span>${kindTagMarks(o) ? `<span class="tags">${kindTagMarks(o)}</span>` : ''}${o.sliders.length ? `<span class="dim small">sliders ${esc(o.sliders.join(', '))}</span>` : ''}</span>
+      <span class="kmeta"><code>${esc(o.type)}</code><span>${esc(o.label)}</span>${kindTagMarks(o) ? `<span class="tags">${kindTagMarks(o)}</span>` : ''}${o.params.length ? `<span class="dim small">params ${esc(o.params.join(', '))}</span>` : ''}</span>
     </div>`).join('');
   return shell(`${k.title} · TopoTopo Gallery`, u, `<header class="bar">
   <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>

@@ -238,7 +238,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     const isDefault = (o: { graph: string; node: string }) => o.graph === v.default.graph && o.node === v.default.node;
     const row = (type: string, o: VersionInfo['default'], dflt: boolean): OutputRow => ({
       type, ...(dflt ? { alias: name } : {}), label: o.label ?? '', ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [],
-      graph: o.graph, node: o.node, sliders: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`),
+      graph: o.graph, node: o.node, params: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`),
     });
     const rows = Object.entries(v.outputs).map(([k, o]) => row(`${name}/${k}`, o, isDefault(o)));
     // a default output that is no named output is listed by the package's name alone

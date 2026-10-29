@@ -15,6 +15,7 @@
 // The plain functions are tested in Node (test/viewer-logic.ts).
 import { api } from './api.js';
 import { compareLine, fmtDuration } from './cooking.js';
+import { kindTagsLine } from './output-info.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
@@ -224,7 +225,7 @@ export function createPackagesPanel(ctx, host) {
         for (const t of h.tags) tags.append(el('span', 'tag', t));
         const state = h.used ? `in use (${h.used})` : h.self ? 'this project' : l.standing === 'unlisted' ? `its project.json would list library "${l.name}"` : 'ready to use';
         row.append(name, ...(kind ? [kind] : []), el('span', 'pkg-hitstate dim', state), tags);
-        row.title = `${h.type}${h.label ? ` (${h.label})` : ''}${h.description ? `: ${h.description}` : ''}${h.tags.length ? `\ntags: ${h.tags.join(', ')}` : ''}\nTo use it, ask your agent: use ${h.type}`;
+        row.title = `${h.type}${h.label ? ` (${h.label})` : ''} · ${kindTagsLine(h)}${h.description ? `\n${h.description}` : ''}\nTo use it, ask your agent: use ${h.type}`;
         row.append(button('Copy name', 'pkg-hitcopy', `copy ${h.type}: your agent uses it as a node type`, async () => {
           try { await navigator.clipboard.writeText(h.type); ctx.message(`copied ${h.type}: ask your agent to use it`, 'ok'); } catch { ctx.message(h.type); }
         }));
@@ -304,9 +305,9 @@ export function createPackagesPanel(ctx, host) {
       for (const o of p.outputs) {
         const l = outputLine(p.package, o), tags = el('span', 'pkg-tags line');
         for (const t of l.tags) tags.append(el('span', 'tag', t));
-        tags.title = l.tags.join(', ');
+        tags.title = kindTagsLine(l);
         const name = el('span', `pkg-on${l.used ? ' used' : ''}`, l.name);
-        name.title = `${o.type}${o.label ? ` (${o.label})` : ''}${l.used ? ' · used by the project' : ''}`;
+        name.title = `${o.type}${o.label ? ` (${o.label})` : ''} · ${kindTagsLine(l)}${l.used ? ' · used by the project' : ''}`;
         grid.append(el('span', `pkg-in${l.used ? ' on' : ''}`, l.used ? '●' : ''), name, l.kind ? el('span', 'badge kind', l.kind) : el('span'), tags);
       }
       box.append(fold(`${p.outputs.length} output${p.outputs.length === 1 ? '' : 's'}${used ? ` · ${used} in use` : ''}`, grid, open.has(p.package), (on) => { if (on) open.add(p.package); else open.delete(p.package); }));
