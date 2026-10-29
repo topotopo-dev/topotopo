@@ -152,5 +152,28 @@ const RED = [0.8, 0.25, 0.2];
   check(threw.includes('pbr'), `unknown shading lists pbr among the modes (${threw})`);
 }
 
+// ---------------------------------------------------------------- automatic polygon edges, color_by as a tint
+{
+  // a sphere of 1,536 quads: the automatic wireframe would draw its edges, but not over the material
+  const g = withMaterial({ baseColor: [0.8, 0.8, 0.8] });
+  const auto = await shot(g, { wireframe: undefined, annotate: undefined }), off = await shot(g, { wireframe: false, annotate: undefined });
+  check(maxDiff(auto, off) === 0 && !auto.notes.some((n) => /wireframe auto/.test(n)), 'shading "pbr": the automatic wireframe draws no polygon edges');
+  const tex = renderGeometry(g, { views: ['front'], size: 160, textures: true }), texOff = renderGeometry(g, { views: ['front'], size: 160, textures: true, wireframe: false });
+  check(maxDiff(tex, texOff) === 0, 'textures: the automatic wireframe draws no polygon edges');
+  const plain = renderGeometry(g, { views: ['front'], size: 160 }), plainOff = renderGeometry(g, { views: ['front'], size: 160, wireframe: false });
+  check(maxDiff(plain, plainOff) > 0 && plain.notes.some((n) => /wireframe auto: polygon edges drawn/.test(n)), 'default shading: the automatic wireframe draws edges and says so');
+  const forced = await shot(g, { wireframe: true });
+  check(maxDiff(forced, off) > 0, 'wireframe true still draws edges under pbr');
+  // color_by under pbr: the attribute colours tint the shaded material
+  const hot = g.clone();
+  const t = hot.points.add('t', 'float', 1);
+  for (let i = 0; i < hot.numPoints; i++) t.set(i, hot.P[i * 3] > 0 ? 1 : 0);
+  const tinted = await shot(hot, { colorBy: 't' }), untinted = await shot(hot);
+  const side = (r: RenderResult, right: boolean) => { const y = 80, x = right ? 110 : 50, i = (y * r.width + x) * 4; return [r.rgba[i], r.rgba[i + 1], r.rgba[i + 2]]; };
+  const [lr, lg, lb] = side(tinted, false), [rr, rg, rb] = side(tinted, true);
+  check(maxDiff(tinted, untinted) > 40 && rr + rg > 2 * rb && lb > lr, `color_by under pbr tints the material: left (${lr},${lg},${lb}) low = viridis purple, right (${rr},${rg},${rb}) high = yellow`);
+  check(!tinted.notes.some((n) => /not shown/.test(n) && /color_by/.test(n)), 'no note that color_by is dropped');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

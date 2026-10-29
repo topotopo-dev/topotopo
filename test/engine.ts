@@ -10,7 +10,9 @@ import '../src/nodes/index.ts';
 import { Engine, resolveTime, STOPPED } from '../src/graph/engine.ts';
 import type { CookOptions, CookReport } from '../src/graph/engine.ts';
 import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
-import { createNodeHost } from '../src/host/node.ts';
+import { createNodeHost, projectBaseDir } from '../src/host/node.ts';
+import { replayArgs } from '../src/io/source.ts';
+import { exportOptionFlags } from '../src/io/targets.ts';
 import { GRAPH_VERSION } from '../src/graph/types.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { migrateGraph, migrateGraphDetailed } from '../src/graph/migrate.ts';
@@ -833,15 +835,15 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const s = man?.source;
   check(man?.format === 'topotopo-export-source' && JSON.stringify(man.files) === '["land.glb"]' && s.graph === 'land' && s.output === 'mesh' && s.node === 'ground'
     && s.frame === 1 && s.fps === 24 && JSON.stringify(s.vars) === '{"count":10,"relief":5,"seed":3}' && JSON.stringify(s.seeds) === '{"hills":"=seed","pts":2}'
-    && JSON.stringify(s.export) === '{"format":"glb","options":{}}' && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
-    'the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format, graph hash, version');
+    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y"}}'
+    && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
+    `the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format and every option with its default, graph hash, version (${JSON.stringify(s?.export)})`);
   const glb = fs.readFileSync(path.join(dir, 'a', 'land.glb'));
   const asset = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')).asset;
   check(JSON.stringify(asset.extras?.source) === JSON.stringify(s), 'the GLB carries the same block in asset.extras.source');
-  // replay: the manifest's output, frame, fps and vars on the command line give the same bytes
-  const replay = [...(s.output ? ['--output', s.output] : ['--node', s.node]), '--frame', String(s.frame), '--fps', String(s.fps),
-    ...Object.entries(s.vars).flatMap(([k, v]) => ['--var', `${k}=${JSON.stringify(v)}`])];
-  const again = cli(g, ...replay, '--export', path.join(dir, 'b', 'land.glb'));
+  // replay: the manifest's output, frame, fps, vars, format and every option on the command line give the same bytes
+  const replay = replayArgs(s, path.join(dir, 'b', 'land.glb'), exportOptionFlags);
+  const again = cli(g, ...replay);
   check(again.status === 0 && sha(path.join(dir, 'b', 'land.glb')) === sha(path.join(dir, 'a', 'land.glb'))
     && fs.readFileSync(path.join(dir, 'b', 'land.glb.source.json'), 'utf8') === fs.readFileSync(manifestFile, 'utf8'),
     `replaying the manifest (${replay.join(' ')}) writes the same GLB and a byte-identical manifest`);
@@ -855,6 +857,26 @@ section('CLI --output, --var and export sources (replay from the manifest)');
     && JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'exports', 'mesh.glb.source.json'), 'utf8')).source) === JSON.stringify(s),
     '--export-all with the same vars writes the same GLB and source through the output\'s export target');
   // a heightmap keeps the source in its sidecar
+  // an export target with options of its own (custom attributes on, Z up, centimetres): its record replays on the CLI
+  const tg = path.join(dir, 'target.json');
+  fs.writeFileSync(tg, JSON.stringify({
+    nodes: { b: { type: 'box', params: { divisions: [2, 2, 2] } }, h: { type: 'attrib_randomize', in: ['b'], params: { name: 'heat' } } },
+    output: 'h', export: { format: 'glb', path: 'crate.glb', custom_attribs: true, up_axis: 'z', scale: 100 },
+  }));
+  const tAll = cli(tg, '--export-all');
+  const tSrc = JSON.parse(fs.readFileSync(path.join(dir, 'exports', 'crate.glb.source.json'), 'utf8')).source;
+  const tReplay = cli(tg, ...replayArgs(tSrc, path.join(dir, 'r', 'crate.glb'), exportOptionFlags));
+  check(tAll.status === 0 && tSrc.export.options.custom_attribs === true && tSrc.export.options.materials === true && tReplay.status === 0
+    && sha(path.join(dir, 'r', 'crate.glb')) === sha(path.join(dir, 'exports', 'crate.glb'))
+    && JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'r', 'crate.glb.source.json'), 'utf8')).source) === JSON.stringify(tSrc),
+    `an export target's record (custom attributes on, Z up, cm) replays on the CLI to the same bytes and record (${replayArgs(tSrc, 'crate.glb', exportOptionFlags).join(' ')})`);
+  const on = cli(tg, '--custom-attribs', '--export', path.join(dir, 'r', 'on.glb')), off = cli(tg, '--no-custom-attribs', '--export', path.join(dir, 'r', 'off.glb'));
+  const dflt = cli(tg, '--export', path.join(dir, 'r', 'default.glb'));
+  check(on.status === 0 && off.status === 0 && dflt.status === 0 && sha(path.join(dir, 'r', 'on.glb')) !== sha(path.join(dir, 'r', 'off.glb')) && sha(path.join(dir, 'r', 'default.glb')) === sha(path.join(dir, 'r', 'off.glb'))
+    && /"custom_attribs": false/.test(fs.readFileSync(path.join(dir, 'r', 'off.glb.source.json'), 'utf8')) && /_HEAT/.test(fs.readFileSync(path.join(dir, 'r', 'on.glb')).toString('latin1')),
+    '--custom-attribs / --no-custom-attribs on the CLI export: off by default for glTF, and the record says which');
+  const badFlag = cli(tg, '--up-axis', 'x', '--export', path.join(dir, 'r', 'bad.glb'));
+  check(badFlag.status === 1 && /--up_axis must be one of y, z|--up-axis must be one of y, z/.test(badFlag.stderr), `an export flag with a value it does not take is refused (${badFlag.stderr.trim()})`);
   const field = cli(g, '--output', 'field', '--var', 'relief=5', '--export', path.join(dir, 'h', 'field.png'));
   const side = JSON.parse(fs.readFileSync(path.join(dir, 'h', 'field.json'), 'utf8'));
   check(field.status === 0 && side.source.output === 'field' && side.source.node === 'hills' && side.source.export.format === 'png16' && side.height_max > 0
@@ -863,6 +885,9 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const look = cli(g, '--output', 'field', '--views', 'top', '--size', '128', '--render', path.join(dir, 'field_top.png'));
   check(look.status === 0 && /heightfield "heightfield": 41×41 samples/.test(look.stdout) && fs.existsSync(path.join(dir, 'field_top.png')), '--output renders and inspects the named output');
   // mistakes are named
+  const nodeAsOut = cli(g, '--output', 'ground'), outAsNode = cli(g, '--node', 'mesh');
+  check(nodeAsOut.status === 1 && /has no output "ground", but a node of that name: --node ground/.test(nodeAsOut.stderr)
+    && outAsNode.status === 1 && /has no node "mesh", but an output of that name: --output mesh/.test(outAsNode.stderr), `--output naming a node suggests --node, and the reverse (${nodeAsOut.stderr.trim()})`);
   const badOut = cli(g, '--output', 'mesj');
   check(badOut.status === 1 && /no output "mesj" \(did you mean mesh\?\); its outputs: mesh, field/.test(badOut.stderr), `--output: an unknown name lists the outputs (${badOut.stderr.trim()})`);
   const noOuts = path.join(dir, 'plain.json');
@@ -909,10 +934,32 @@ section('CLI several renders per cook, triangle budget');
     `two --render flags: one cook, two files (${(two.stdout.match(/^cooked /gm) ?? []).length} cook line)`);
   check(/rendered .*r_a\.png.*color by height/.test(two.stdout) && !/rendered .*r_b\.png.*color by/.test(two.stdout) && sizeOf(a)[0] === 200 && sizeOf(b)[0] === 160,
     `per-render options: colour only on the first, size 200 / 160 (${sizeOf(a)[0]} / ${sizeOf(b)[0]}); shared --views top on both`);
+  check(/warning: --size after the last --render apply to .*r_b\.png only; options before the first --render apply to every render/.test(two.stderr), `options after the last of several --render: a warning (${two.stderr.trim().slice(0, 120)})`);
+  const one = cli(g, '--views', 'top', '--render', a, '--size', '120');
+  check(one.status === 0 && !/warning/.test(one.stderr), 'one --render: options after it are its own, no warning');
   const capped = cli(g, '--views', 'top', '--size', '120', '--render', a);
   const lifted = cli(g, '--views', 'top', '--size', '120', '--render', a, '--max-triangles', '2000000');
   check(/rendering .* of 3\.6k instances/.test(capped.stdout) && lifted.status === 0 && !/rendering .* of/.test(lifted.stdout),
     '--max-triangles: 1.15M instance triangles draw as a subset by default and in full with a 2M budget');
+}
+
+section('relative paths read from the project folder');
+{
+  // a graph in a project's graphs/ reads "inputs/…" from the project, cooked from anywhere; export targets go to its exports/
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const proj = path.join(tmp, 'proj');
+  fs.mkdirSync(path.join(proj, 'graphs'), { recursive: true });
+  fs.mkdirSync(path.join(proj, 'inputs'), { recursive: true });
+  const init = cli('init', proj);
+  fs.writeFileSync(path.join(proj, 'inputs', 'tri.obj'), 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
+  const g = path.join(proj, 'graphs', 'piece.json');
+  fs.writeFileSync(g, JSON.stringify({ nodes: { f: { type: 'file', params: { path: 'inputs/tri.obj' } } }, output: 'f', export: 'obj' }));
+  const r = cli(g, '--export-all');
+  check(init.status === 0 && r.status === 0 && /3 points, 1 prims/.test(r.stdout) && fs.existsSync(path.join(proj, 'exports', 'piece.obj')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
+    `a graph in graphs/ reads inputs/ of its project, and --export-all writes the project's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
+  check(projectBaseDir(path.join(proj, 'graphs')) === proj && projectBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'projectBaseDir: the nearest project.json, else the folder itself');
+  const e = new Engine(createNodeHost({ baseDir: path.join(proj, 'graphs') }));
+  check(e.host.resolvePath('inputs/tri.obj') === path.join(proj, 'inputs', 'tri.obj'), 'the node host resolves relative paths against the project folder');
 }
 
 section('progress and stop: CookOptions.onNode, signal, ctx.checkpoint');

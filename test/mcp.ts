@@ -98,12 +98,23 @@ console.log(e.txt.split('\n')[0]);
 
 const ins = await call('inspect', { node: 'rocks', detail: 'all', class: 'point', count: 3 });
 check(ins.txt.includes('topology:') && ins.txt.includes('point elements'), 'inspect detail');
+const insSum = await call('inspect', { node: 'rocks' });
+check(/\d triangles\n/.test(insSum.txt) && /^bbox: min \(-?\d+\.\d{3}, /m.test(insSum.txt) && /^topology: /m.test(insSum.txt), 'inspect summary (default): one screen with triangles, the bbox to the mm and the topology');
+const insBud = await call('inspect', { node: 'rocks', detail: 'budget', json: true });
+check(!insBud.isError && /^budget: [\d,]+ triangles/m.test(insBud.txt) && /^by node \(the triangles each node adds/m.test(insBud.txt) && /budget \(JSON\):\n\{"triangles":/.test(insBud.txt), 'inspect detail "budget": totals, parts, nodes, and JSON');
+const insScene = await call('inspect', { node: 'rocks', detail: 'scene', export_options: { split_by_name: false } });
+check(!insScene.isError && /^scene \(the glb export, read back\): 1 nodes, 1 meshes/m.test(insScene.txt), `inspect detail "scene": the glb export read back (${insScene.txt.split('\n')[1]?.slice(0, 100)})`);
 
 const rnd = await call('render', { node: 'terrain', color_by: 'height', views: ['top', 'persp'] });
 check(!!rnd.img, 'render tool image');
 if (rnd.img) fs.writeFileSync(path.join(wsDir, 'render.png'), Buffer.from(rnd.img.data, 'base64'));
 const ov = await call('render', { node: 'rocks', views: ['persp', 'section'], section_axis: 'x', wireframe: 'hard', glyphs: 'N', max_glyphs: 50, label_pieces: true, max_labels: 5, shading: 'matcap', size: 256 });
 check(!!ov.img && !ov.isError && /overlays: shading matcap .*section x=.*wire hard>30/.test(ov.txt) && /label_pieces: first 5 of/.test(ov.txt), `render tool overlays: ${ov.txt.split('\n').find((l) => l.includes('overlays'))?.slice(0, 120)}`);
+const pngSize = (img: any) => { const b = Buffer.from(img.data, 'base64'); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+const ul = await call('render', { node: 'rocks', views: 'front_left', size: '300x150', underlay: 'render.png', underlay_opacity: 0.4, sockets: true });
+check(!!ul.img && !ul.isError && pngSize(ul.img).join('x') === '300x188' && /no scene empties/.test(ul.txt), `render tool: size "WxH", a named view, an underlay read from the workspace, sockets (${ul.img ? pngSize(ul.img).join('x') : ul.txt.slice(0, 120)})`);
+const ulBad = await call('render', { node: 'rocks', underlay: 'missing.png' });
+check(ulBad.isError && /underlay "[^"]*missing\.png" cannot be read/.test(ulBad.txt), 'render tool: a missing underlay is an error naming it');
 const ovBad = await call('render', { node: 'rocks', shading: 'toon' });
 check(ovBad.isError && /unknown shading "toon"/.test(ovBad.txt), 'render tool rejects an unknown shading mode');
 const helpR = await call('help', { topic: 'render' });
@@ -137,7 +148,7 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
 {
   const x = await call('export', { path: 'exports/scene_z.obj', up_axis: 'z', scale: 100, frame: 3 });
   const s = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'scene_z.obj.source.json'), 'utf8')).source;
-  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"scale":100,"up_axis":"z"}}', 'the source records the frame and the export options given');
+  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"instancing":"packed","scale":100,"split_by_name":true,"up_axis":"z"}}', `the source records the frame, the export options given and the defaults of the rest (${JSON.stringify(s.export)})`);
 }
 {
   const x = await call('export', { path: 'exports/scene_meshopt.glb', compress: 'meshopt' });
@@ -155,6 +166,10 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
     inst: { type: 'copy_to_points', in: ['sn', 'pts'], params: { pack: true } },
     out: { type: 'merge', in: ['n', 'inst'] },
   } } });
+  // an unknown output lists every named one, the named default output included
+  await call('build', { name: 'named_default', graph: { nodes: { b: { type: 'box' }, c: { type: 'sphere' } }, output: 'b', outputs: { crate: { node: 'b', export: 'glb' }, ball: { node: 'c' } } } });
+  const noOut = await call('export', { graph: 'named_default', output: 'nope' });
+  check(noOut.isError && /publishes no output "nope" \(outputs: crate \(default\), ball\)/.test(noOut.txt), `export: an unknown output lists them all, the default one first (${noOut.txt.slice(0, 120)})`);
   const b1 = await call('export', { graph: 'ue', format: 'unreal_landscape', path: 'exports/level' });
   const man = path.join(wsDir, 'exports', 'level', 'landscape.json');
   check(!ue.isError && !b1.isError && fs.existsSync(man) && fs.existsSync(path.join(wsDir, 'exports', 'level', 'meshes', 'shrub.glb')) && /Unreal Landscape bundle/.test(b1.txt) && /not an exact fit/.test(b1.txt),
@@ -165,7 +180,7 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
   // formats with a sidecar or manifest keep the source there
   const bundleSource = JSON.parse(fs.readFileSync(man, 'utf8')).source;
   const rowsSource = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'shrubs.meshes.json'), 'utf8')).source;
-  check(bundleSource?.graph === 'ue' && bundleSource.export.format === 'unreal_landscape' && rowsSource?.node === 'inst' && JSON.stringify(rowsSource.export.options) === '{"pcg":true}'
+  check(bundleSource?.graph === 'ue' && bundleSource.export.format === 'unreal_landscape' && rowsSource?.node === 'inst' && JSON.stringify(rowsSource.export.options) === '{"custom_attribs":false,"instances":"rows","instancing":"packed","materials":true,"meshes":true,"pcg":true,"pcg_struct":false,"scale":100,"up_axis":"y"}'
     && !fs.existsSync(path.join(wsDir, 'exports', 'shrubs.csv.source.json')) && /source recorded in shrubs\.meshes\.json/.test(b2.txt),
     'unreal_landscape records the source in landscape.json, instance rows in <name>.meshes.json');
 }
@@ -393,11 +408,11 @@ if (url) {
   const fol = await call('library', { action: 'follow', package: 'studio/crates', on: true });
   check(!fol.isError && /following studio\/crates for this session: its working folder/.test(fol.txt), `library follow: ${fol.txt.slice(0, 100)}`);
   const ins = await call('inspect', { node: 'a' });
-  check(/size 2\.00 × 2\.00 × 2\.00/.test(before.txt) && /size 6\.00 × 6\.00 × 6\.00/.test(ins.txt), 'the followed package cooks from its working folder (an edit there shows here)');
+  check(/size 2\.000 × 2\.000 × 2\.000 m/.test(before.txt) && /size 6\.000 × 6\.000 × 6\.000 m/.test(ins.txt), 'the followed package cooks from its working folder (an edit there shows here)');
   kitGraph.nodes.c.params.size = '=s * 4';
   fs.writeFileSync(path.join(kit, 'graphs', 'main.json'), JSON.stringify(kitGraph, null, 2));
   const ins2 = await call('inspect', { node: 'a' });
-  check(/size 8\.00 × 8\.00 × 8\.00/.test(ins2.txt), 'a later edit there re-cooks it');
+  check(/size 8\.000 × 8\.000 × 8\.000 m/.test(ins2.txt), 'a later edit there re-cooks it');
   const xf = await call('export', { path: 'exports/yard_followed.glb' });
   const frec = JSON.parse(fs.readFileSync(path.join(yard, 'exports', 'yard_followed.glb.source.json'), 'utf8')).source;
   check(!xf.isError && typeof frec.packages?.['studio/crates@working'] === 'string' && !frec.packages['studio/crates@1.0'], `an export while following records the working folder: ${JSON.stringify(frec.packages)}`);
@@ -433,7 +448,7 @@ if (url) {
   check(!ap.isError && /^updated studio\/crates 1\.0 → 1\.1 in project yard/.test(ap.txt) && JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8')).uses['studio/crates'] === '1.1'
     && fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1', 'version.json')) && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.0')), `library update with apply:true applies it: ${ap.txt.split('\n')[0]}`);
   const grown = await call('inspect', { node: 'a' });
-  check(/size 8\.00 × 8\.00 × 8\.00/.test(grown.txt), 'the graphs cook with the new version at once');
+  check(/size 8\.000 × 8\.000 × 8\.000 m/.test(grown.txt), 'the graphs cook with the new version at once');
 }
 
 await client.close();

@@ -217,8 +217,8 @@ works in that project's folder. The first reply the agent gets says which of the
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inputs` | `list` the files in the workspace `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
-| `inspect` | summary, attribute stats, topology health (watertight, pieces, volume, genus, render/export triangle slivers), element listings, images (size and per-layer ranges), `detail: "uv"` (exact uv overlaps, collapsed and out-of-tile triangles, charts, utilization, per-piece texel density; `json: true`) |
-| `render` | PNG with persp/front/right/top views, `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `shading: "pbr"` (the exported metallic-roughness material with its base colour, normal, orm and roughness maps under a fixed studio rig; deterministic, `exposure` in stops), `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the kits' thumbnails), `heightfield_res` (heightfield quads drawn per side, default 256, or `"full"`), `heightfield_layer` (the heightfield layer drawn in red, default the mask, or `"none"`); a footer line names what is shown (help topic `render`) |
+| `inspect` | one-screen summary (counts, triangles, bbox to the millimetre, parts, materials, images, uv state, open edges), `detail: "budget"` (triangles per part, per LOD and per node), `detail: "scene"` (the glb export read back: nodes, sockets, parents, meshes, materials, images), attribute stats, topology health (a closed solid or why not: open edges counted after welding uv/normal seam splits, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part and world position of the first one and the fix; pieces, volume, genus, render/export triangle slivers), element listings, images (size and per-layer ranges), `detail: "uv"` (exact uv overlaps split into in-tile, tiling and across-LOD overlap with parts and positions, collapsed and out-of-tile triangles, charts, utilization, per-piece texel density; `json: true`) |
+| `render` | PNG with persp/front/right/top views (every 3D view fits the bounds; `zoom` is relative to that fit), three-quarter views (`front_left`, `back_right`, …), `size: "1600x600"` for wide views, `transparent` background, `grid: false`, a reference image behind the views (`underlay`, `underlay_opacity`, `underlay_fit`), scene empties as labelled dots (`sockets`), `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `shading: "pbr"` (the exported metallic-roughness material with its base colour, normal, orm and roughness maps under a fixed studio rig; deterministic, `exposure` in stops), `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the kits' thumbnails), `heightfield_res` (heightfield quads drawn per side, default 256, or `"full"`), `heightfield_layer` (the heightfield layer drawn in red, default the mask, or `"none"`); a footer line names what is shown (help topic `render`) |
 | `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json (packed instances: instance rows + meshes sidecar + one GLB per source); heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png / unreal_landscape (a directory bundle); images: textures (one PNG per image; glb/gltf embed and usda writes the textures materials use); every export records its source (graph, vars, seeds, frame, version) to be made again |
 | `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a package output's graph (TopoTopo's own included) into the workspace's assets to edit |
@@ -350,6 +350,9 @@ To cook a graph from the command line:
 ```bash
 node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
 node src/cli.ts examples/csg_bracket.json --render out/bracket.png --section x:0.3 --wireframe hard --labels groups --shading matcap
+node src/cli.ts examples/csg_bracket.json --views front --size 1600x700 --underlay ref.png --render out/compare.png   # a reference image behind the view
+node src/cli.ts examples/street_block.json --inspect budget   # triangles per part, per LOD and per node
+node src/cli.ts examples/street_block.json --inspect scene   # what the glb export holds: nodes, sockets, materials, images
 node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
 node src/cli.ts examples/unreal_demo.json --node landscape --format unreal_landscape --export out/level   # Landscape bundle
 node src/cli.ts examples/forest.json --node forest --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
@@ -360,17 +363,24 @@ node src/cli.ts --help-topic export   # a help topic; --catalog ends with the li
 
 `--var name=value` sets a graph var for one run without editing the file (repeat it; numbers, `true`/`false` and JSON
 values are parsed, other text is a string; an unknown name lists the graph's vars). `--output <name>` renders, exports
-and inspects a named output (the graph's `"outputs"`) instead of the default one. Renders draw heightfields at up to
+and inspects a named output (the graph's `"outputs"`) instead of the default one; `--output` naming a node (or `--node`
+naming an output) says which flag to use. Relative paths inside a graph (file nodes, texture maps) read from its project
+folder: the nearest folder with a `project.json` at or above the graph file, else the graph file's folder (the MCP server
+and the viewer use the same rule), and `--export-all` writes into that folder's `exports/`. Several `--render` flags
+share one cook: the options after a `--render` apply to that render, those before the first to every render (a warning
+names options left after the last of several). Renders draw heightfields at up to
 256 quads per side, so a 513 × 513 field shows at 257 × 257 and the footer says so; `--heightfield-res full` draws
 every sample. They show the mask layer in red; `--heightfield-layer flow` shows another layer (`none`: none).
 
 Every export records how it was made in a `source` block: the graph's name and the SHA-256 of its JSON as cooked, the
 output and node, frame and fps, every var after overrides, the seeds the graph sets, the format and options, and the
-TopoTopo version. Heightmaps (`png16`, `r16`) keep it in their `.json` sidecar, instance rows in `<name>.meshes.json`
+TopoTopo version; the options are every one the format reads, the defaults included, so a later default change does not
+change what a record replays. Heightmaps (`png16`, `r16`) keep it in their `.json` sidecar, instance rows in `<name>.meshes.json`
 and the Unreal Landscape bundle in `landscape.json`; every other export writes `<file>.source.json` next to the file (a
 `textures` folder gets `source.json` inside it), and glTF also carries it in `asset.extras.source`. The same graph,
 values and options give the same bytes, so the manifest is enough to make the export again: pass its output
-(`--output`) or node (`--node`), `--frame`, `--fps` and one `--var name=<value as JSON>` per var (help topic `export`).
+(`--output`) or node (`--node`), `--frame`, `--fps`, one `--var name=<value as JSON>` per var, `--format` and every
+option as its flag (`--up-axis z`, `--custom-attribs` / `--no-custom-attribs`, `--layers a,b`; help topic `export`).
 
 Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`, output paths may contain `{frame}` or
 `{frame:04}`; without a pattern, `.0001`-style frame numbers are inserted before the extension:

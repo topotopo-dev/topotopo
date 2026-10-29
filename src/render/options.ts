@@ -1,8 +1,8 @@
 // Render options from tool arguments: the snake_case keys of the MCP render tool, an example's
 // meta.render and the CLI flags all map to RenderOptions here, so the three stay in sync.
 // Only keys that are present are set (renderGeometry's defaults apply to the rest).
-import { parseViews } from './raster.ts';
-import type { Axis, ClipOptions, RenderOptions } from './raster.ts';
+import { UNDERLAY_FITS, parseViews } from './raster.ts';
+import type { Axis, ClipOptions, RenderOptions, UnderlayFit } from './raster.ts';
 
 const num = (v: unknown, key: string): number => {
   const n = typeof v === 'string' ? Number(v) : v;
@@ -22,15 +22,33 @@ export function parsePlane(s: string, key: string): { axis: Axis; offset: number
   return { axis: axis(a, key), offset: off === undefined || off === '' ? 0.5 : num(off, key), absolute: abs === 'abs' || abs === 'absolute' };
 }
 
+/** Pixels per view: 800, "800", "1600x900" (also 1600×900 or 1600,900) or [1600, 900]. */
+export function parseSize(v: unknown): number | [number, number] {
+  const bad = () => new Error(`render: size expects pixels per view, n or "WxH" (e.g. 800 or "1600x900"), got ${JSON.stringify(v)}`);
+  if (Array.isArray(v)) {
+    if (v.length !== 2 || !v.every((x) => Number.isFinite(+x) && +x > 0)) throw bad();
+    return [+v[0], +v[1]];
+  }
+  if (typeof v === 'string' && /[x×,]/i.test(v)) {
+    const m = /^\s*(\d+(?:\.\d+)?)\s*[x×,]\s*(\d+(?:\.\d+)?)\s*$/i.exec(v);
+    if (!m) throw bad();
+    return [Number(m[1]), Number(m[2])];
+  }
+  const n = typeof v === 'string' ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) throw bad();
+  return n;
+}
+
 /** Map tool-style arguments (snake_case; camelCase also accepted) to RenderOptions. */
 export function renderArgs(a: Record<string, any>): RenderOptions {
   const o: RenderOptions = {};
   const has = (k: string) => a[k] !== undefined && a[k] !== null;
   const pick = (snake: string, camel = snake) => (has(snake) ? a[snake] : has(camel) ? a[camel] : undefined);
   if (has('views')) o.views = parseViews(a.views);
-  for (const [s, c] of [['size', 'size'], ['azimuth', 'azimuth'], ['elevation', 'elevation'], ['zoom', 'zoom'], ['hard_angle', 'hardAngle'], ['max_labels', 'maxLabels'],
+  if (has('size')) o.size = parseSize(a.size);
+  for (const [s, c] of [['azimuth', 'azimuth'], ['elevation', 'elevation'], ['zoom', 'zoom'], ['hard_angle', 'hardAngle'], ['max_labels', 'maxLabels'],
     ['glyph_scale', 'glyphScale'], ['max_glyphs', 'maxGlyphs'], ['ao_radius', 'aoRadius'], ['ortho_scale', 'orthoScale'], ['scale', 'scale'], ['ssaa', 'ssaa'],
-    ['max_triangles', 'maxTriangles'], ['exposure', 'exposure']] as const) {
+    ['max_triangles', 'maxTriangles'], ['exposure', 'exposure'], ['underlay_opacity', 'underlayOpacity']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = num(v, s);
   }
@@ -39,12 +57,13 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   const pts = pick('points');
   if (pts !== undefined) o.points = pts === 'auto' ? 'auto' : bool(pts);
   for (const [s, c] of [['point_numbers', 'pointNumbers'], ['prim_numbers', 'primNumbers'], ['label_groups', 'labelGroups'], ['label_pieces', 'labelPieces'],
-    ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute'], ['textures', 'textures'], ['view_labels', 'viewLabels']] as const) {
+    ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute'], ['textures', 'textures'], ['view_labels', 'viewLabels'],
+    ['transparent', 'transparent'], ['sockets', 'sockets']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = bool(v);
   }
   for (const [s, c] of [['color_by', 'colorBy'], ['label_attrib', 'labelAttrib'], ['glyph_attrib', 'glyphAttrib'], ['glyphs', 'glyphs'], ['shading', 'shading'], ['title', 'title'], ['texture', 'texture'],
-    ['heightfield_layer', 'heightfieldLayer']] as const) {
+    ['heightfield_layer', 'heightfieldLayer'], ['underlay', 'underlay']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = String(v);
   }
@@ -55,6 +74,12 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
     if (!(v >= 1)) throw new Error(`render: heightfield_res expects quads per side (1 or more) or "full", got ${JSON.stringify(hr)}`);
     o.heightfieldRes = v;
   }
+  const uf = pick('underlay_fit', 'underlayFit');
+  if (uf !== undefined) {
+    if (!UNDERLAY_FITS.includes(uf)) throw new Error(`render: underlay_fit expects ${UNDERLAY_FITS.join(', ')}, got ${JSON.stringify(uf)}`);
+    o.underlayFit = uf as UnderlayFit;
+  }
+  if (o.underlayOpacity !== undefined && !(o.underlayOpacity >= 0 && o.underlayOpacity <= 1)) throw new Error(`render: underlay_opacity expects 0..1, got ${o.underlayOpacity}`);
   const sa = pick('section_axis', 'sectionAxis');
   if (sa !== undefined) o.sectionAxis = axis(sa, 'section_axis');
   const so = pick('section_offset', 'sectionOffset');

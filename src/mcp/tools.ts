@@ -10,7 +10,8 @@ import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
 import { migrateGraph } from '../graph/migrate.ts';
 import { catalogText, nodeDoc, topicList, topicText, INSTRUCTIONS } from './docs.ts';
-import { summarize, inspect } from '../inspect.ts';
+import { nodeBudgetInput, summarize, inspect } from '../inspect.ts';
+import { glbSceneReport, sceneReportText } from '../io/inspect-scene.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import type { RenderOptions } from '../render/raster.ts';
 import { renderArgs } from '../render/options.ts';
@@ -112,8 +113,10 @@ function exportReport(all: { path: string; bytes: Uint8Array }[], outDir: string
   const list = files.length === 1 ? files[0].path : `${files.length} files in ${outDir}: ${files.slice(0, 12).map((f) => rel(f.path)).join(', ')}${files.length > 12 ? ', …' : ''}`;
   return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${summary}${sourceFile ? `\nsource recorded in ${rel(sourceFile)} (graph, vars, seeds, frame; help topic "export")` : ''}${warnings.length ? '\nwarnings:\n  ' + warnings.join('\n  ') : ''}`;
 }
-function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
+function renderOpts(a: any, g: Geometry, label: string | undefined, dir: string): RenderOptions {
   const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
+  // a reference image is a path relative to the workspace, as save_to is
+  if (ro.underlay) ro.underlay = path.resolve(dir, ro.underlay);
   let highlight: RenderOptions['highlight'] = null;
   if (a.highlight) {
     const cls = a.highlight_class === 'point' ? 'point' : 'prim';
@@ -122,23 +125,29 @@ function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   }
   return {
     ...ro, wireframe: ro.wireframe ?? 'auto', colorBy: ro.colorBy ?? null, highlight,
-    points: ro.points ?? 'auto', grid: ro.grid ?? true, target: ro.target ?? null, title: label, checker: !!ro.checker,
+    points: ro.points ?? 'auto', target: ro.target ?? null, title: label, checker: !!ro.checker,
   };
 }
 
 const RENDER_PROPS = {
-  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), "turntable" (persp at azimuth 0/90/180/270), a single view, or a list of persp/front/back/left/right/top/bottom/uv/section/texture/persp@<azimuth>. "texture" draws images flat (see texture). "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red. "section" slices along section_axis and looks along it: the cut filled red (blue = inside-out solid), open sheets as yellow lines, the far half ghosted', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), "turntable" (persp at azimuth 0/90/180/270), a single view, or a list of persp/front/back/left/right/top/bottom/front_left/front_right/back_left/back_right/uv/section/texture/persp@<azimuth> (front_left … are persp views at azimuth -45/45/-135/135). Every 3D view fits the bounds. "texture" draws images flat (see texture). "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red. "section" slices along section_axis and looks along it: the cut filled red (blue = inside-out solid), open sheets as yellow lines, the far half ghosted', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
   checker: { type: 'boolean', description: 'shade 3D views with an 8×8 uv checker (light cells tinted red along u, green along v) to see stretch, seams and flips' },
-  size: { type: 'number', description: 'pixels per view tile (default 512 for multi-view, 800 single); scale 2 doubles it' },
-  color_by: { type: 'string', description: 'colour by attribute (e.g. "height", "class", "N", "P.y"); ints/strings get categorical colours' },
+  size: { description: 'pixels per view: n (square; default 512 for several views, 800 for one) or "WxH" / [w, h] (e.g. "1600x600" for a long prop: the views fit the bounds to that aspect); scale 2 doubles it', anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'array', items: { type: 'number' } }] },
+  transparent: { type: 'boolean', description: 'transparent background: pixels without surface, line or point get alpha 0 (PNG with alpha); no ground grid or axis gizmo; the footer stays opaque' },
+  grid: { type: 'boolean', description: 'the persp ground grid on y = 0 (default true, false with transparent)' },
+  underlay: { type: 'string', description: 'a reference image (PNG, path relative to the workspace) drawn behind the 3D views, e.g. a side photo behind views:"front"' },
+  underlay_opacity: { type: 'number', description: 'underlay opacity 0..1 (default 0.5)' },
+  underlay_fit: { type: 'string', enum: ['bounds', 'width', 'height', 'view'], description: 'where the underlay goes: "bounds" (default: fitted into the rectangle the bounds cover in each view, keeping its aspect, so a reference cropped to the object lines up with it), "width" (its width spans the width of the bounds), "height" (its height spans their height), "view" (the whole view)' },
+  sockets: { type: 'boolean', description: 'draw scene empties (scene_null sockets) as dots with their name and orient axes (X red, Y green, Z blue), through surfaces; without it pbr renders hide them' },
+  color_by: { type: 'string', description: 'colour by attribute (e.g. "height", "class", "N", "P.y"); ints/strings get categorical colours; under shading "pbr" the colours tint the shaded material' },
   highlight: { type: 'string', description: 'group pattern to highlight in orange (e.g. "front", "@P.y>1")' },
   highlight_class: { type: 'string', enum: ['prim', 'point'] },
-  wireframe: { description: 'true/false/"auto" (polygon edges, auto = on below 6000 polys), or a crisp 1 px edge overlay: "all" (every edge: topology density), "hard" (dihedral > hard_angle in cyan + crease/hard/sharp edge groups), "boundary" (open edges pink, non-manifold yellow, winding flips violet), "groups" (each edge group in its colour, with legend), "none"', anyOf: [{ type: 'boolean' }, { type: 'string', enum: ['auto', 'none', 'all', 'hard', 'boundary', 'groups'] }] },
+  wireframe: { description: 'true/false/"auto" (polygon edges; auto, the default, draws them below 6,000 polygons but never under shading "pbr" or textures:true, and the footer says EDGES AUTO when it does), or a crisp 1 px edge overlay: "all" (every edge: topology density), "hard" (dihedral > hard_angle in cyan + crease/hard/sharp edge groups), "boundary" (open edges pink, non-manifold yellow, winding flips violet), "groups" (each edge group in its colour, with legend), "none"', anyOf: [{ type: 'boolean' }, { type: 'string', enum: ['auto', 'none', 'all', 'hard', 'boundary', 'groups'] }] },
   points: { type: 'boolean', description: 'draw all points, sized by pscale when present (default: only loose points)' },
-  azimuth: { type: 'number', description: 'persp camera azimuth degrees (default 35)' },
-  elevation: { type: 'number', description: 'persp camera elevation degrees (default 25)' },
-  zoom: { type: 'number', description: 'zoom factor (1 = fit bbox)' },
-  target: { type: 'array', items: { type: 'number' }, description: 'look-at point override [x,y,z]' },
+  azimuth: { type: 'number', description: 'persp camera azimuth in degrees around +Y (default 35): 0 = camera on +Z looking at the front, 90 = on +X (right side), 180 = back, -90 = left' },
+  elevation: { type: 'number', description: 'persp camera elevation in degrees above the horizon (default 25; 90 looks straight down)' },
+  zoom: { type: 'number', description: 'relative to the fit: 1 (default) = the bounds fill the view with a small margin, 0.5 = half that size. Above 1 it magnifies around look_at and crops: only with look_at or ortho_scale, else it is held at 1 (a note says so)' },
+  target: { type: 'array', items: { type: 'number' }, description: 'look-at point [x,y,z] (same as look_at)' },
   hard_angle: { type: 'number', description: 'wireframe "hard": dihedral angle threshold in degrees (default 30)' },
   point_numbers: { type: 'boolean', description: 'label visible point numbers (the first max_labels points)' },
   prim_numbers: { type: 'boolean', description: 'label visible prim numbers at prim centroids (the first max_labels prims)' },
@@ -164,8 +173,8 @@ const RENDER_PROPS = {
   shading: { type: 'string', enum: ['default', 'flat', 'matcap', 'ao', 'pbr'], description: 'flat: facets (ignores N); matcap: clay that reads form; ao: screen-space ambient occlusion darkens creases and cavities; pbr: the exported metallic-roughness material (base colour, normal, orm/roughness maps, emissive, unlit) under a fixed studio light rig, deterministic' },
   exposure: { type: 'number', description: 'shading "pbr": exposure in stops (default 0)' },
   ao_radius: { type: 'number', description: 'shading "ao": sample radius in pixels (default 10)' },
-  look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x,y,z] (same as target)' },
-  ortho_scale: { type: 'number', description: 'ortho/section views: world width across a view (default: fit the bbox)' },
+  look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x, y, z] in world metres (x right, y up, z towards the front; default the bbox centre): the view centres on it and still fits the bounds; with zoom > 1 it zooms into that point' },
+  ortho_scale: { type: 'number', description: 'ortho and section views: the world width in metres across a view (default: fit the bounds), e.g. 0.5 shows 50 cm across' },
   scale: { type: 'number', description: '2 (up to 4) for a 2× image: tiles, text, lines and markers scaled' },
   annotate: { type: 'boolean', description: 'second footer line naming the active overlays plus geometry notes (pieces, open edges, back-facing %); default on whenever an overlay option is used' },
   view_labels: { type: 'boolean', description: 'false hides the name label of every view and the persp axis gizmo (clean thumbnails); default true' },
@@ -202,7 +211,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
     const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes, await kindWarnings(name, r, a.frame)) }];
     if (r.geo && a.render) {
-      const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
+      const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`, ws.dir);
       const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
       const renderPath = renderDestination(name, r.target);
       fs.mkdirSync(path.dirname(renderPath), { recursive: true }); fs.writeFileSync(renderPath, png);
@@ -236,7 +245,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     let chosen = published;
     if (!a.all) {
       const p = a.output === undefined ? published[0] : published.find((x) => x.output === a.output);
-      if (!p) return text(`graph "${name}" publishes no output "${a.output}" (outputs: ${published.slice(1).map((x) => x.output).join(', ') || 'none'})`, true);
+      if (!p) return text(`graph "${name}" publishes no output "${a.output}" (outputs: ${published.filter((x) => x.output !== null).map((x) => `${x.output}${x.default ? ' (default)' : ''}`).join(', ') || 'none'})`, true);
       if (!p.target) return text(`${a.output === undefined ? 'the default output' : `output "${a.output}"`} of "${name}" has no export target: set one with ${hint(a.output)}, or pass path`, true);
       chosen = [p];
     }
@@ -360,16 +369,17 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
     },
     {
       name: 'inspect',
-      description: 'Inspect any node\'s output as text: summary; detail "attributes" (min/max/mean, unique strings), "topology" (watertight/manifold, pieces, volume, area, genus, render/export triangle health), "elements" (list values for a range), "all", or "uv" (exact uv overlaps with triangle pairs and areas, collapsed / non-finite / out-of-tile triangles, charts, utilization, per-piece texel density with resolution; json:true appends the machine-readable report).',
+      description: 'Inspect any node\'s output as text: detail "summary" (default: one screen: counts, triangles, bbox in mm, parts, materials and maps, images, uv state, closed or open edges after welding seam splits); "budget" (triangles per part (prim "name", each an exported mesh) split per LOD (_lodN names), and per node (what each adds), sorted, with totals); "scene" (the glb export read back: nodes and parents, sockets, meshes and triangles, materials and maps, images; export_options as for export); "attributes" (min/max/mean, unique strings), "topology" (a closed solid or why not: open edges counted after welding the vertex splits of uv/normal seams, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part (prim name/group) and world position of the first one and the fix; pieces, volume, area, genus, render/export triangle health), "elements" (list values for a range), "all", or "uv" (exact uv overlaps split into in-tile (atlas) overlap, tiling overlap (charts across tile borders: a repeating texture, flagged tiling) and overlap across LODs (_lodN names), each listed with parts and positions; collapsed / non-finite / out-of-tile triangles, charts, utilization, per-piece texel density with resolution; json:true appends the machine-readable report).',
       inputSchema: {
         type: 'object',
         properties: {
           graph: { type: 'string', description: 'graph name (default "main")' },
           node: { type: 'string', description: 'node to inspect (default: graph output)' },
-          detail: { type: 'string', enum: ['summary', 'attributes', 'topology', 'elements', 'all', 'uv'] },
+          detail: { type: 'string', enum: ['summary', 'attributes', 'topology', 'elements', 'all', 'uv', 'budget', 'scene'] },
+          export_options: { type: 'object', description: 'detail "scene": export options as the export tool takes them (up_axis, scale, split_by_name, materials, custom_attribs, tangents, instancing, compress …)' },
           uv_attrib: { type: 'string', description: 'detail "uv": the uv attribute (default "uv")' },
           resolution: { description: 'detail "uv": texture size in texels for texel density, n or [width, height]', anyOf: [{ type: 'number' }, { type: 'array', items: { type: 'number' } }] },
-          json: { type: 'boolean', description: 'detail "uv": append the report as JSON' },
+          json: { type: 'boolean', description: 'detail "uv", "budget" or "scene": append the report as JSON' },
           class: { type: 'string', enum: ['point', 'prim', 'vertex', 'detail', 'edge'], description: 'element class; "edge" lists unique edges (point pair, length, polygon count, dihedral angle, edge groups)' },
           attribs: { type: 'array', items: { type: 'string' } },
           start: { type: 'number' }, count: { type: 'number' },
@@ -382,7 +392,16 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
         const node = r.target;
         const res = r.results.get(node);
         const head = `${name}/${node}${atFrame(r)}${res ? ` (${res.cached ? 'cached' : res.ms.toFixed(0) + ' ms'})` : ''}`;
-        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, json: a.json }));
+        if (a.detail === 'scene') {
+          // the glb export with these options, read back from its bytes (io/inspect-scene.ts)
+          const ex = await serializeExport(geo, 'glb', path.join(ws.exportDir, 'scene.glb'), exportToolOptions(a.export_options ?? {}), engine.host);
+          const glb = ex.files.find((f) => /\.glb$/i.test(f.path));
+          if (!glb) return text(`${head}\nscene: the glb export wrote no file`, true);
+          const rep = glbSceneReport(glb.bytes);
+          return text([head, ...sceneReportText(rep), ...ex.warnings.map((w) => `warning: ${w}`), ...(a.json ? ['scene (JSON):', JSON.stringify(rep)] : [])].join('\n'));
+        }
+        const nodes = a.detail === 'budget' ? nodeBudgetInput(ws.getGraph(name), r.results) : undefined;
+        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, json: a.json, nodes }));
       },
     },
     {
@@ -399,7 +418,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
-        const { img, notes, png } = await pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`), engine.host);
+        const { img, notes, png } = await pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`, ws.dir), engine.host);
         const content: Content[] = [img];
         const info: string[] = [];
         {
@@ -434,7 +453,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           up_axis: { type: 'string', enum: ['y', 'z'] },
           scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres; pcg csv defaults to 100)' },
           split_by_name: { type: 'boolean', description: 'separate meshes per prim "name" (default true)' },
-          custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: include extra numeric attributes (glTF _NAME accessors; default true for glTF and PLY, false for USD)' },
+          custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: include extra numeric attributes (glTF _NAME accessors; default false for glb/gltf/usda, true for ply). The CLI flag is --custom-attribs / --no-custom-attribs' },
           materials: { type: 'boolean', description: 'glTF: write materials from the prim "material" attribute + table (default true)' },
           compress: { type: 'string', enum: ['none', 'meshopt', 'draco'], description: 'glTF: meshopt = EXT_meshopt_compression + quantization; draco needs the optional draco3dgltf package' },
           quantize: { type: 'boolean', description: 'glTF: KHR_mesh_quantization (smaller, lossy) without compression' },

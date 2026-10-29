@@ -13,7 +13,10 @@ import { convertSelection } from '../src/core/groupconvert.ts';
 import { boundaryLoops, primArea, primNormals, topologyReport, triangleReport, triangulate } from '../src/core/topology.ts';
 import { readFileSync } from 'node:fs';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
-import { summarize, inspect } from '../src/inspect.ts';
+import { budgetReport, nodeBudgetInput, summarize, inspect } from '../src/inspect.ts';
+import { pointWhere, posText, primCentroid, primWhere, solidReport } from '../src/core/report.ts';
+import { exportGeometryAsync } from '../src/io/export.ts';
+import { importGeometryAsync } from '../src/io/import.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
 const engine = new Engine(createNodeHost());
@@ -536,6 +539,70 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   for (const [k, cnt] of directed) { const [x, y] = k.split('>'); if (cnt !== 1 || directed.get(`${y}>${x}`) !== 1) windingOk = false; }
   check(cover < 1e-9 && windingOk, `bracket bevel: every polygon's triangles cover its projected area (worst relative error ${cover.toExponential(2)}); triangle mesh closed with consistent winding`);
   check(/346 render\/export triangles; .* 0 degenerate, 0 near-degenerate/.test(inspect(g, { detail: 'topology' })), 'inspect topology reports render/export triangle health');
+}
+
+// ---------------------------------------------------------------- findings name the part and a position; seam welding
+{
+  const named = { b: { type: 'box' }, n: { type: 'attrib_create', in: ['b'], params: { name: 'name', class: 'prim', value: 'crate' } } } as Record<string, NodeSpec>;
+  const holed = await cook({ ...named, out: { type: 'delete', in: ['n'], params: { group: '0' } } }, 'out');
+  const s = solidReport(holed);
+  check(!s.closed && s.openEdges === 4 && s.seamEdges === 0 && /^edge \d+–\d+ of "crate" \(prim \d+\) at \(-?\d+\.\d{3}, -?\d+\.\d{3}, -?\d+\.\d{3}\)$/.test(s.firstOpen ?? ''), `solidReport: 4 open edges, the first named with its part and position (${s.firstOpen})`);
+  const t = inspect(holed, { detail: 'topology' });
+  check(/NOT a closed solid:\n {4}4 open edges \(after welding seam splits\), first edge .* of "crate" .* at \(.*\): fill_holes/.test(t), 'inspect topology: why it is not closed, where and the fix');
+  // a box split at every uv seam (as a re-imported GLB is): its open edges are seam splits, not holes
+  const box = await cook({ ...named, out: { type: 'uv_project', in: ['n'], params: { method: 'box' } } }, 'out');
+  const back = await importGeometryAsync(await exportGeometryAsync(box, 'glb', {}) as Uint8Array, 'glb', {});
+  const w = solidReport(back);
+  check(!w.closed && w.closedAfterWeld && w.openEdges === 0 && w.seamEdges === 24 && w.pieces === 1, `a re-imported GLB box: 24 seam-split edges welded, 0 open, 1 piece (open ${w.openEdges}, seams ${w.seamEdges}, pieces ${w.pieces})`);
+  const tb = inspect(back, { detail: 'topology' });
+  check(/CLOSED solid after welding seam splits: 0 open edges \(after welding seam splits; 24 boundary edges are uv\/normal seam splits\)/.test(tb) && /volume 1\.00/.test(tb), 'inspect topology welds seam splits before counting open edges');
+  // flipped faces and an inward piece are named with where they are
+  const flip = await cook({ ...named, r: { type: 'reverse', in: ['n'], params: { group: '0' } }, out: { type: 'null', in: ['r'] } }, 'out');
+  check(/inconsistent winding .* first edge .* of "crate" .* at \(.*\): clean with fix_winding/.test(inspect(flip, { detail: 'topology' })), 'flipped faces: count, part, position and fix');
+  const inward = await cook({ ...named, out: { type: 'reverse', in: ['n'] } }, 'out');
+  check(/1 closed piece facing inward, first prim \d+ of "crate" at .*: reverse it/.test(inspect(inward, { detail: 'topology' })), 'an inward-facing closed piece is named');
+  // where helpers
+  check(primWhere(holed, 0) === `prim 0 of "crate" at ${posText(primCentroid(holed, 0))}` && /^point 3 of "crate" at \(/.test(pointWhere(holed, 3, 0)), `primWhere / pointWhere (${primWhere(holed, 0)})`);
+  // the solid ops error states the cause, where and the fix
+  const r = await engine.cook({ nodes: { ...named, h: { type: 'delete', in: ['n'], params: { group: '0' } }, c: { type: 'box', params: { size: [0.4, 2, 0.4] } }, out: { type: 'boolean', in: ['h', 'c'], params: { operation: 'subtract' } } }, output: 'out' });
+  const msg = r.errors.map((e) => `${e.message} (${e.hint ?? ''})`).join(' ');
+  check(!r.ok && /not a closed solid \(manifold\): 4 open edges \(after welding seam splits\), first edge .* of "crate" .* at \(.*\): fill_holes/.test(msg), `boolean of an open mesh: the cause with its position and fix (${msg.slice(0, 160)})`);
+  // the assert node names the first offender
+  const as = await engine.cook({ nodes: { ...named, h: { type: 'delete', in: ['n'], params: { group: '0' } }, out: { type: 'assert', in: ['h'], params: { watertight: true, on_fail: 'warn' } } }, output: 'out' });
+  const aw = as.warnings.map((x) => x.message).join(' ');
+  check(/watertight: .*first edge .* of "crate" .* at \(/.test(aw), `assert watertight names the first open edge (${aw.slice(0, 140)})`);
+}
+
+// ---------------------------------------------------------------- inspect summary, budget per part / LOD / node, scene
+{
+  const named = (src: NodeSpec, name: string): Record<string, NodeSpec> => ({ [`${name}_src`]: src, [name]: { type: 'attrib_create', in: [`${name}_src`], params: { name: 'name', class: 'prim', value: name } } });
+  const spec = {
+    nodes: {
+      ...named({ type: 'tube', params: { radius: 0.03, height: 0.9, rows: 4, cols: 32, caps: true } }, 'barrel_lod0'),
+      ...named({ type: 'box', params: { size: [0.35, 0.12, 0.06], center: [-0.35, 0.1, 0], divisions: [4, 2, 2] } }, 'stock_lod0'),
+      ...named({ type: 'tube', params: { radius: 0.03, height: 0.9, rows: 2, cols: 8, caps: true } }, 'barrel_lod1'),
+      ...named({ type: 'box', params: { size: [0.35, 0.12, 0.06], center: [-0.35, 0.1, 0] } }, 'stock_lod1'),
+      out: { type: 'merge', in: ['barrel_lod0', 'stock_lod0', 'barrel_lod1', 'stock_lod1'] },
+    } as Record<string, NodeSpec>,
+    output: 'out',
+  };
+  const r = await engine.cook(spec);
+  const g = r.geo!;
+  const b = budgetReport(g, nodeBudgetInput(spec, r.results));
+  const l0 = b.lods.find((l) => l.lod === 0)!, l1 = b.lods.find((l) => l.lod === 1)!;
+  check(b.triangles === 452 && l0.triangles === 396 && l1.triangles === 56 && l0.parts[0].name === 'barrel_lod0' && l0.parts[0].triangles === 316 && l1.parts.map((x) => x.name).join() === 'barrel_lod1,stock_lod1',
+    `budget: 452 triangles, LOD 0 396 (barrel_lod0 316 first), LOD 1 56 (${b.lods.map((l) => `${l.lod}:${l.triangles}`).join(' ')})`);
+  check(b.nodes[0].node === 'barrel_lod0_src' && b.nodes[0].added === 316 && b.nodes.find((x) => x.node === 'out')?.added === 0, `budget per node: what each node adds (${b.nodes.slice(0, 2).map((x) => `${x.node} +${x.added}`).join(', ')})`);
+  const bt = inspect(g, { detail: 'budget', nodes: nodeBudgetInput(spec, r.results) });
+  check(/budget: 452 triangles/.test(bt) && /LOD 1: 56 triangles \(14\.1% of LOD 0\)/.test(bt) && /barrel_lod0_src \(tube\)\s+\+316/.test(bt), 'inspect detail "budget" prints totals, LODs and nodes');
+  // packed instances count in the budget, expanded
+  const packed = await cook({ pts: { type: 'point_grid', params: { counts: [3, 1, 1], size: [4, 0, 0] } }, rock: { type: 'box' }, out: { type: 'copy_to_points', in: ['rock', 'pts'], params: { pack: true } } }, 'out');
+  const pb = budgetReport(packed);
+  check(pb.triangles === 36 && pb.instances === 3 && pb.instanceTriangles === 36, `budget: packed instances expanded (${pb.triangles} triangles in ${pb.instances} instances)`);
+  const sm = inspect(g, { detail: 'summary' });
+  check(/; 452 triangles/.test(sm) && /bbox: min \(-0\.525, -0\.450, -0\.030\) max/.test(sm) && /parts \(prim "name", 4\)/.test(sm) && /^uv: \d+ charts/m.test(sm) && /^topology: closed solid/m.test(sm),
+    `inspect summary: one screen with triangles, bbox to the mm, parts, uv and topology (${sm.split('\n').find((x) => x.startsWith('bbox'))})`);
+  check(!/^image "/m.test(summarize(g)) && /bbox: .* m, center/.test(summarize(g)), 'the short summary: bbox in metres to the mm');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

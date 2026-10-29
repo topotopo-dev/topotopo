@@ -52,6 +52,16 @@ interface Described {
   failed: boolean;
 }
 
+/**
+ * The path a file node reads an input with: relative to the folder the host resolves paths against (the project folder,
+ * host/node.ts projectBaseDir), "inputs/<path>" when the workspace is the project, as most are.
+ */
+export function inputRef(ws: Workspace, rel: string): string {
+  const base = ws.engine.host.resolvePath('.'), dir = path.relative(base, ws.inputDir);
+  const d = !dir ? '' : dir.startsWith('..') || path.isAbsolute(dir) ? ws.inputDir : dir;
+  return [d.split(path.sep).join('/'), rel].filter(Boolean).join('/');
+}
+
 /** inputs/ file → its description, keyed by path and invalidated by the host's file stamp (mtime + size). */
 export class InputDescriber {
   ws: Workspace;
@@ -61,7 +71,7 @@ export class InputDescriber {
 
   /** Describe one file (cached while its stamp holds). */
   describe(f: InputFile): Promise<Described> {
-    const rel = `inputs/${f.path}`;
+    const rel = inputRef(this.ws, f.path);
     const stamp = this.ws.engine.host.fileStamp(rel);
     const hit = this.cache.get(f.path);
     if (hit && hit.stamp === stamp) return hit.d;
@@ -75,7 +85,7 @@ export class InputDescriber {
   /** Whether describe() would answer from the cache. */
   cached(f: InputFile): boolean {
     const hit = this.cache.get(f.path);
-    return !!hit && hit.stamp === this.ws.engine.host.fileStamp(`inputs/${f.path}`);
+    return !!hit && hit.stamp === this.ws.engine.host.fileStamp(inputRef(this.ws, f.path));
   }
 
   /** Forget files that are gone. */
@@ -367,7 +377,7 @@ export function inputsTool(ws: Workspace): ToolDef {
         `inputs/ (${ws.inputDir}): ${plural(files.length, 'file')} (${kinds.map(([k, c]) => `${c} ${k}`).join(', ')})`,
         ...rows,
         ...(skipped ? [`${plural(skipped, 'file')} not summarised within ${LIST_BUDGET_MS / 1000} s; list again (summaries are cached) or describe them one by one.`] : []),
-        'A file node reads one: {"type":"file","params":{"path":"inputs/<path>"}} (paths are relative to the workspace). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.',
+        `A file node reads one: {"type":"file","params":{"path":"${inputRef(ws, '<path>')}"}} (relative paths read from the project folder: the nearest project.json at or above the workspace, else the workspace). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.`,
         'OBJ/STL from Blender (Up = Z) and Unreal are Z-up: add "up_axis":"z". A .blend needs Blender installed (converted headlessly).',
       ].join('\n'));
     },
