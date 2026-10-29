@@ -387,3 +387,11 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
     },
   };
 }
+
+// Projects and their packages for scripts that cook outside the CLI and the MCP server (a world generator): open a
+// project (its packages, graphs and assets in the engine's root scope), add what a graph names on first use, cook.
+//   const engine = new Engine(createNodeHost({ baseDir: dir })); await engine.init();
+//   const { packages } = openProject(engine, dir); packages.addFor(graph); await engine.cook(graph);
+export { openProject } from '../open.ts';
+export type { OpenOptions, Opened } from '../open.ts';
+export { openPackages, ProjectPackages } from '../packages/registry.ts';
