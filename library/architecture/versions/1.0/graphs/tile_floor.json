@@ -101,6 +101,6 @@
     }
   },
   "output": "out",
-  "outputs": { "tile_floor": { "node": "out", "label": "Tiled floor" } },
+  "outputs": { "tile_floor": { "node": "out", "label": "Tiled floor", "kind": "mesh", "tags": ["floor", "tiles", "interior"] } },
   "meta": { "watertight": true, "thumbnail_render": { "elevation": 40 } }
 }

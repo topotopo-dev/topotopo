@@ -1,15 +1,24 @@
 {
   "package": "topotopo/architecture",
   "version": "1.0",
-  "note": "first version: walls, windows and doors, houses, roofs, stairs, railings, pillars, arches, floors, trusses and scaffolds",
-  "published": "2026-10-28T04:57:42.855Z",
+  "note": "first version",
+  "published": "2026-10-29T16:36:47.383Z",
   "big": false,
-  "hash": "095c309489d55e53898e4bcab72ae2319fd1f3c6a454741fd539a1e6db37e1da",
+  "hash": "ab39f6679415448adf2a15d681297d47c707182f3e9bfe8d0a38de64bfe0145e",
   "outputs": {
     "arch": {
       "graph": "arch",
       "node": "out",
       "label": "Arch",
+      "kind": "mesh",
+      "tags": [
+        "arch",
+        "opening",
+        "masonry",
+        "stone",
+        "modular"
+      ],
+      "description": "Stone arch: a wall block with a round, pointed (equilateral gothic) or flat-topped opening cut by a 2D boolean and extruded, with impost blocks at the spring line and a keystone. Pivot at the centre of the base (the opening is centred on x = 0, depth along Z). Pieces: arch (stone), arch_trim (stone_dark). Every piece is closed.",
       "sliders": {
         "width": {
           "type": "float",
@@ -68,6 +77,16 @@
       "graph": "beam_truss",
       "node": "out",
       "label": "Truss",
+      "kind": "mesh",
+      "tags": [
+        "truss",
+        "beam",
+        "structural",
+        "steel",
+        "timber",
+        "industrial"
+      ],
+      "description": "Planar truss in the XY plane: top and bottom chords, verticals and diagonals in Warren, Pratt or Howe layout, swept with a steel I-section or a square timber section. Spans x = -span/2 … span/2. Pivot at the centre of the bottom chord's underside. Pieces: truss_chords, truss_web (steel or wood_dark). Every member is closed.",
       "sliders": {
         "span": {
           "type": "float",
@@ -119,6 +138,14 @@
       "graph": "brick_wall",
       "node": "out",
       "label": "Brick wall",
+      "kind": "mesh",
+      "tags": [
+        "wall",
+        "brick",
+        "masonry",
+        "modular"
+      ],
+      "description": "Brick wall from x = 0 to x = wall_length: individual bricks in running, stack, English or Flemish bond, cut to the wall ends and top, with random offset, yaw and tint, standing slightly proud of a recessed mortar core. One wythe deep (headers are drawn as half bricks). Pivot at the start of the wall, on the ground, centred in thickness. Pieces: brick_wall_bricks (brick), brick_wall_mortar (mortar). Every piece is a closed box.",
       "sliders": {
         "wall_length": {
           "type": "float",
@@ -187,6 +214,14 @@
       "graph": "door_frame",
       "node": "out",
       "label": "Door",
+      "kind": "mesh",
+      "tags": [
+        "door",
+        "wall-opening",
+        "modular",
+        "building"
+      ],
+      "description": "Door for a wall opening: jambs and head that fill the opening (width × height), a panelled leaf hinged on the left (-X) that swings towards -Z by open_angle, and lever handles on both sides. Pivot at the bottom centre of the opening, centred in depth. Pieces: door_frame (paint_white), door_leaf (door_paint), door_handle (brass). Every piece is a closed box.",
       "sliders": {
         "width": {
           "type": "float",
@@ -237,6 +272,14 @@
       "graph": "hex_grid_floor",
       "node": "out",
       "label": "Hexagonal paving",
+      "kind": "mesh",
+      "tags": [
+        "floor",
+        "paving",
+        "hexagonal",
+        "tiles"
+      ],
+      "description": "Hexagonal paving: flat-topped hexagonal prisms on a hex lattice filling a rectangle (tiles whose centre lies inside), with gaps and random height and tint. Pivot at the centre of the base. Piece: hex_tiles (paving). Every tile is a closed prism.",
       "sliders": {
         "size_x": {
           "type": "float",
@@ -294,6 +337,15 @@
       "graph": "house",
       "node": "out",
       "label": "House",
+      "kind": "mesh",
+      "tags": [
+        "house",
+        "building",
+        "residential",
+        "footprint",
+        "modular"
+      ],
+      "description": "House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_skeleton hip roof that follows the footprint exactly (straight skeleton: L-shapes, courtyards and any simple polygon get correct valleys and ridges). Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are this kit's own wall_segment and roof_skeleton outputs, so a change to those changes every house. Pivot: the footprint's origin on the ground. Pieces come from those outputs (wall, window_frame, door_frame, roof).",
       "sliders": {
         "width": {
           "type": "float",
@@ -357,10 +409,32 @@
         }
       ]
     },
+    "kit": {
+      "graph": "kit",
+      "node": "kit",
+      "label": "Architecture kit",
+      "kind": "mesh",
+      "tags": [
+        "kit",
+        "lineup",
+        "architecture"
+      ],
+      "description": "TopoTopo's architecture kit, its 17 outputs side by side at their defaults. The package's default output and its preview, from arch to window_frame along +X, 1 m apart.",
+      "sliders": {},
+      "inputs": []
+    },
     "pillar": {
       "graph": "pillar",
       "node": "out",
       "label": "Pillar",
+      "kind": "mesh",
+      "tags": [
+        "pillar",
+        "column",
+        "classical",
+        "stone"
+      ],
+      "description": "Classical pillar: a round, fluted or square shaft with an optional plinth base and capital. Pivot at the centre of the base. Pieces: pillar_shaft, pillar_base, pillar_capital (all stone_light). Every piece is closed.",
       "sliders": {
         "height": {
           "type": "float",
@@ -410,6 +484,14 @@
       "graph": "railing",
       "node": "out",
       "label": "Railing",
+      "kind": "mesh",
+      "tags": [
+        "railing",
+        "balustrade",
+        "along-curve",
+        "metal"
+      ],
+      "description": "Railing along a curve (input 0; without one, a straight run of `run_length` along +X from the origin): posts at even spacing including both ends, a handrail on top, lower rails and balusters. Sits on the curve (pivot = the curve). Pieces: railing_posts, railing_rails, railing_balusters (all metal_dark).",
       "sliders": {
         "run_length": {
           "type": "float",
@@ -467,6 +549,14 @@
       "graph": "roof_gable",
       "node": "out",
       "label": "Gable roof",
+      "kind": "mesh",
+      "tags": [
+        "roof",
+        "gable-roof",
+        "building",
+        "modular"
+      ],
+      "description": "Gable roof for a width × depth footprint: two pitched slabs meeting at a ridge along X with a ridge cap, overhanging eaves and verges, and optional triangular gable walls under it. Pivot at the centre of the wall-top plane (put it on top of the walls); the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on top, wood_dark on edges and underside), roof_ridge (roof_tiles), roof_gables (plaster). Every piece is closed.",
       "sliders": {
         "width": {
           "type": "float",
@@ -515,6 +605,14 @@
       "graph": "roof_hip",
       "node": "out",
       "label": "Hip roof",
+      "kind": "mesh",
+      "tags": [
+        "roof",
+        "hip-roof",
+        "building",
+        "modular"
+      ],
+      "description": "Hip roof for a width × depth footprint: four slopes at the same pitch meeting at a ridge along the longer side (a pyramid on a square), a fascia band and a flat soffit under overhanging eaves, and a ridge cap. Built as one closed solid (the attic is filled); there is no straight skeleton node yet, so footprints are rectangles. Pivot at the centre of the wall-top plane; the eaves hang below y = 0 by overhang × tan(pitch). Pieces: roof (roof_tiles on the slopes, wood_dark fascia and soffit), roof_ridge (roof_tiles). Every piece is closed.",
       "sliders": {
         "width": {
           "type": "float",
@@ -558,6 +656,14 @@
       "graph": "roof_skeleton",
       "node": "paint",
       "label": "Roof on a footprint",
+      "kind": "mesh",
+      "tags": [
+        "roof",
+        "hip-roof",
+        "footprint",
+        "building"
+      ],
+      "description": "Straight-skeleton hip roof from an optional XZ footprint, including concave outlines and courtyard holes. Without input it uses a width by depth rectangle. Negative offset distance adds the overhang before the roof is built; a connected extrusion gives the roof shell thickness along averaged vertex normals. Pivot is the wall-top plane. Every face carries the source contour edge as edge; the roof is one closed shell per connected footprint.",
       "sliders": {
         "width": {
           "type": "float",
@@ -606,6 +712,14 @@
       "graph": "scaffold",
       "node": "out",
       "label": "Scaffold",
+      "kind": "mesh",
+      "tags": [
+        "scaffold",
+        "construction",
+        "industrial",
+        "modular"
+      ],
+      "description": "Tube-and-fitting scaffold: standards (verticals) on base plates, ledgers along X and transoms along Z at every lift, zig-zag face braces on the front (+Z), board decks on the lifts and guard rails at the top. Runs along +X from x = 0. Pivot at the start, on the ground, centred in depth. Pieces: scaffold_tubes (galvanized), scaffold_boards (wood_light), scaffold_plates (metal_dark). Every piece is closed.",
       "sliders": {
         "bays": {
           "type": "int",
@@ -659,6 +773,14 @@
       "graph": "spiral_stairs",
       "node": "out",
       "label": "Spiral stairs",
+      "kind": "mesh",
+      "tags": [
+        "stairs",
+        "spiral",
+        "staircase",
+        "interior"
+      ],
+      "description": "Spiral staircase: wedge treads turning counter-clockwise (seen from above) around a central column, with an optional helical handrail on posts. Pivot at the foot of the column. Pieces: spiral_treads (wood), spiral_column (metal_dark), spiral_railing (metal_dark). Every piece is closed.",
       "sliders": {
         "steps": {
           "type": "int",
@@ -707,6 +829,14 @@
       "graph": "stairs",
       "node": "out",
       "label": "Stairs",
+      "kind": "mesh",
+      "tags": [
+        "stairs",
+        "staircase",
+        "concrete",
+        "wooden"
+      ],
+      "description": "Straight stairs climbing along +Z: a solid concrete flight (one watertight sawtooth solid) or open wooden treads between two stringers, with optional handrails on both sides. Pivot at the bottom of the first step, centred in width. Pieces: stairs_flight (concrete) or stairs_treads (wood) + stairs_stringers (wood_dark), stairs_railing (metal_dark).",
       "sliders": {
         "steps": {
           "type": "int",
@@ -757,6 +887,13 @@
       "graph": "tile_floor",
       "node": "out",
       "label": "Tiled floor",
+      "kind": "mesh",
+      "tags": [
+        "floor",
+        "tiles",
+        "interior"
+      ],
+      "description": "Tiled floor: square tiles in a grid, offset (half-tile) or checker pattern with grout gaps, random height and tint, cut to the floor edges, on a grout bed. Pivot at the centre of the base; the tile tops are at the bed thickness + tile thickness. Pieces: tile_floor_tiles (tile_light; tile_dark for the checker's dark squares), tile_floor_grout (grout). Every piece is a closed box.",
       "sliders": {
         "size_x": {
           "type": "float",
@@ -824,6 +961,14 @@
       "graph": "wall_segment",
       "node": "out",
       "label": "Wall",
+      "kind": "mesh",
+      "tags": [
+        "wall",
+        "window",
+        "building",
+        "modular"
+      ],
+      "description": "Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this kit's window_frame and door_frame outputs. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
       "sliders": {
         "wall_length": {
           "type": "float",
@@ -891,6 +1036,15 @@
       "graph": "window_frame",
       "node": "out",
       "label": "Window",
+      "kind": "mesh",
+      "tags": [
+        "window",
+        "glass",
+        "wall-opening",
+        "modular",
+        "building"
+      ],
+      "description": "Window for a wall opening: a frame that fills the opening (width × height), mullions, a glass pane and a stone sill that sticks out at the front (+Z). Pivot at the bottom centre of the opening, centred in depth. Pieces: window_frame (paint_white), window_glass (glass), window_sill (stone). Every piece is a closed box.",
       "sliders": {
         "width": {
           "type": "float",
@@ -953,6 +1107,13 @@
   "default": {
     "graph": "kit",
     "node": "kit",
+    "kind": "mesh",
+    "tags": [
+      "kit",
+      "lineup",
+      "architecture"
+    ],
+    "description": "TopoTopo's architecture kit, its 17 outputs side by side at their defaults. The package's default output and its preview, from arch to window_frame along +X, 1 m apart.",
     "sliders": {},
     "inputs": []
   },

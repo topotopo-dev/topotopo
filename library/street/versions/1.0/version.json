@@ -1,15 +1,23 @@
 {
   "package": "topotopo/street",
   "version": "1.0",
-  "note": "first version: roads, lamp posts, bollards, benches, street signs, fences and cables",
-  "published": "2026-10-28T04:57:55.645Z",
+  "note": "first version",
+  "published": "2026-10-29T16:36:52.576Z",
   "big": false,
-  "hash": "93b1834d22694359f6a769526cbdc04a05c7f05cdef7cf64a61c81d355d5f3f8",
+  "hash": "7acd8c90db7e910ac64ffd3c3d754c27eaac3622f49c714dc5985057c2232ece",
   "outputs": {
     "bench": {
       "graph": "bench",
       "node": "out",
       "label": "Bench",
+      "kind": "mesh",
+      "tags": [
+        "bench",
+        "seating",
+        "park",
+        "street-furniture"
+      ],
+      "description": "Park bench along X: wooden seat slats and an optional reclined backrest on cast-iron side frames (two, or three on long benches). The seat faces +Z. Pivot at the centre of the base. Pieces: bench_slats (wood), bench_frames (metal_dark). Every piece is closed.",
       "sliders": {
         "bench_length": {
           "type": "float",
@@ -58,6 +66,13 @@
       "graph": "bollard",
       "node": "out",
       "label": "Bollard",
+      "kind": "mesh",
+      "tags": [
+        "bollard",
+        "barrier",
+        "street-furniture"
+      ],
+      "description": "Street bollard: a round post with a domed top or a square post with a pyramid cap, an optional reflective band and a base ring. Pivot at the centre of the base. Pieces: bollard_body (metal_dark), bollard_band (reflective). Every piece is closed.",
       "sliders": {
         "height": {
           "type": "float",
@@ -94,6 +109,14 @@
       "graph": "cable",
       "node": "out",
       "label": "Cable",
+      "kind": "mesh",
+      "tags": [
+        "cable",
+        "power-line",
+        "utility-pole",
+        "street-furniture"
+      ],
+      "description": "Hanging cable between two points: a catenary that sags by `sag` below the straight line at mid-span, swept as a tube, with optional wooden poles (with a cross arm and insulators) standing on y = 0 under the ends. With the default end points the pivot is the foot of the first pole. Pieces: cable (rubber), cable_poles (wood_dark), cable_insulators (ceramic). Every piece is closed.",
       "sliders": {
         "start": {
           "type": "vec3",
@@ -146,6 +169,14 @@
       "graph": "fence",
       "node": "out",
       "label": "Fence",
+      "kind": "mesh",
+      "tags": [
+        "fence",
+        "barrier",
+        "garden",
+        "along-curve"
+      ],
+      "description": "Fence along a curve (input 0; without one, a straight run of `run_length` along +X from the origin) in three styles: picket (white pointed pickets on two rails), plank (horizontal boards) and rail (three ranch rails). Posts at even spacing including both ends. Sits on the curve (pivot = the curve). Pieces: fence_posts, fence_infill (paint_white, wood or wood_dark by style).",
       "sliders": {
         "run_length": {
           "type": "float",
@@ -200,10 +231,32 @@
         }
       ]
     },
+    "kit": {
+      "graph": "kit",
+      "node": "kit",
+      "label": "Street kit",
+      "kind": "mesh",
+      "tags": [
+        "kit",
+        "lineup",
+        "street"
+      ],
+      "description": "TopoTopo's street kit, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
+      "sliders": {},
+      "inputs": []
+    },
     "lamp_post": {
       "graph": "lamp_post",
       "node": "out",
       "label": "Lamp post",
+      "kind": "mesh",
+      "tags": [
+        "lamp",
+        "street-light",
+        "lighting",
+        "street-furniture"
+      ],
+      "description": "Street lamp: a tapered pole on a flared base with 1–4 curved arms carrying shades and glowing glass (arms 0 = a lantern on top of the pole). The first arm points along +X. Pivot at the centre of the base. Pieces: lamp_pole, lamp_arms, lamp_heads (metal_dark), lamp_glass (lamp_glass, emissive). Every piece is closed.",
       "sliders": {
         "height": {
           "type": "float",
@@ -247,6 +300,15 @@
       "graph": "road_strip",
       "node": "out",
       "label": "Road",
+      "kind": "mesh",
+      "tags": [
+        "road",
+        "street",
+        "asphalt",
+        "sidewalk",
+        "along-curve"
+      ],
+      "description": "Road along a curve (input 0; without one, a gentle 24 m S-curve along X): an asphalt ribbon of `width` centred on the curve with solid white edge lines, dashed lane lines between `lanes` lanes, and kerbs with sidewalks on both sides. Follows the curve's height (drape the curve on a terrain first). Pivot = the curve. Pieces: road_surface (asphalt), road_markings (road_paint), road_kerbs (concrete), road_sidewalks (paving).",
       "sliders": {
         "width": {
           "type": "float",
@@ -300,6 +362,14 @@
       "graph": "sign_post",
       "node": "out",
       "label": "Street sign",
+      "kind": "mesh",
+      "tags": [
+        "sign",
+        "street-sign",
+        "text",
+        "street-furniture"
+      ],
+      "description": "Street name sign: a post with a ball cap and a green blade (two crossed blades for a corner) carrying raised white lettering on both faces, scaled to fit. The first blade faces ±Z. Pivot at the centre of the base. Pieces: sign_post (galvanized), sign_panel (sign_green), sign_text (sign_white). Every piece is closed.",
       "sliders": {
         "height": {
           "type": "float",
@@ -339,6 +409,13 @@
   "default": {
     "graph": "kit",
     "node": "kit",
+    "kind": "mesh",
+    "tags": [
+      "kit",
+      "lineup",
+      "street"
+    ],
+    "description": "TopoTopo's street kit, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
     "sliders": {},
     "inputs": []
   },

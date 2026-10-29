@@ -95,7 +95,7 @@
     }
   },
   "output": "out",
-  "outputs": { "scatter_rocks": { "node": "out", "label": "Scattered rocks" } },
+  "outputs": { "scatter_rocks": { "node": "out", "label": "Scattered rocks", "kind": "instances", "tags": ["rocks", "stone", "ground-cover", "scatter"] } },
   "meta": {
     "pivot": "surface",
     "inputs": ["surface"],

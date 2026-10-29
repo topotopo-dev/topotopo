@@ -278,12 +278,14 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       run: async (a) => {
         const cat = catalogText([...allNodeDefs(), ...engine.assetsIn().map((x) => x.def), ...engine.packageDefs()], { category: a.category, search: a.search, deprecated: a.include_deprecated });
         const nIn = ws.listInputs().length;
-        return text(`${cat}\nHUMAN INPUT: ${nIn ? `${nIn} file${nIn === 1 ? '' : 's'} in` : 'nothing yet in'} the workspace inputs/ folder (meshes, guide curves and points, blockouts, PNG masks people drop in). Building a landscape or scene: inputs {action:"list"} first, then read them with file nodes (help topic "inputs").`);
+        // the package outputs listed cannot be used where the workspace is in no project: say why, and how that changes
+        const notice = (!a.category || a.category === 'package') ? ws.packages?.notice() : null;
+        return text(`${cat}${notice ? `\nPACKAGES: ${notice}` : ''}\nHUMAN INPUT: ${nIn ? `${nIn} file${nIn === 1 ? '' : 's'} in` : 'nothing yet in'} the workspace inputs/ folder (meshes, guide curves and points, blockouts, PNG masks people drop in). Building a landscape or scene: inputs {action:"list"} first, then read them with file nodes (help topic "inputs").`);
       },
     },
     {
       name: 'help',
-      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its sliders, inputs, version and note) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
+      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its params, inputs, version and note, also one search found that the project does not use yet) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
       inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` } } },
       run: async (a) => {
         const out: string[] = [];
@@ -292,8 +294,9 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           const d = engine.resolveDef(n);
           if (!d && String(n).includes('/')) {
             const p = engine.packageIssue(String(n));
-            // one of TopoTopo's own packages the project does not use yet: its docs, and what naming it does here
-            const offered = engine.packageDefs().find((x) => x.type === n);
+            // a package the project does not use yet (TopoTopo's own, or one search found in a library it lists): its
+            // docs, read where its library holds it, and what naming it does here
+            const offered = engine.packageDefs().find((x) => x.type === n) ?? ws.packages?.describe(String(n)) ?? undefined;
             out.push(offered ? `${nodeDoc(offered)}\nin this workspace: ${p.error}${p.hint ? ` (hint: ${p.hint})` : ''}` : `${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`);
             continue;
           }
@@ -334,10 +337,11 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
             ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + first
             : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : '') + first, d.errors.length > 0);
         }
-        // packages the graph names for the first time join the project (a dry run changes nothing)
+        // validated as a dry run sees it: a graph that is not saved adds no package and writes nothing
+        const v = engine.validate(spec, '', ws.dryScope(spec).scope);
+        if (v.errors.length) return text(`✗ graph not saved — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n'), true);
+        // packages the graph names for the first time join the project
         const added = ws.packages?.addFor(spec) ?? [];
-        const v = engine.validate(spec);
-        if (v.errors.length) return text(`✗ graph not saved — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + added.map((n) => `\nnote: ${n}`).join(''), true);
         ws.setGraph(name, spec);
         return cookAndReport(name, a, added);
       },
@@ -529,6 +533,15 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           if (!x) { const s = didYouMean(String(n), engine.assetsIn().map((x) => x.name)); throw new Error(`no asset "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); }
           return x;
         };
+        /**
+         * An asset's name and graph checked as a dry run sees the graph, before it adds a package or writes a file:
+         * throws as registering it would.
+         */
+        const validAsset = (n: string, g: GraphSpec) => {
+          if (!/^[A-Za-z_][\w]*$/.test(n)) throw new Error(`asset name must be an identifier, got "${n}"`);
+          const v = engine.validate(g, '', ws.dryScope(g).scope);
+          if (v.errors.length) throw new Error(`asset graph invalid: ${v.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
+        };
         switch (a.action) {
           case 'list': {
             const all = engine.assetsIn();
@@ -561,7 +574,8 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
             const g: GraphSpec = { ...structuredClone(o.spec), output: o.node };
             delete g.outputs;
             delete g.export;
-            // the package's other outputs its graph names join the project (first use)
+            // the package's other outputs its graph names join the project (first use), once it validates
+            validAsset(to, g);
             const added = ws.packages?.addFor(g) ?? [];
             const def = engine.registerAsset(to, g);
             fs.writeFileSync(path.join(ws.assetDir, to + '.json'), JSON.stringify(g, null, 2));
@@ -574,6 +588,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
             const g: GraphSpec = migrateGraph(structuredClone(a.graph ?? ws.getGraph(a.from_graph ?? 'main')));
             if (a.description) g.description = a.description;
             if (a.params) g.params = { ...(g.params ?? {}), ...a.params };
+            validAsset(String(a.name), g);
             const added = ws.packages?.addFor(g) ?? [];
             const def = engine.registerAsset(a.name, g);
             fs.writeFileSync(path.join(ws.assetDir, a.name + '.json'), JSON.stringify(g, null, 2));

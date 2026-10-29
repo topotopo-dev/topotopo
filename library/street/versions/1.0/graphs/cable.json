@@ -122,7 +122,7 @@
     }
   },
   "output": "out",
-  "outputs": { "cable": { "node": "out", "label": "Cable" } },
+  "outputs": { "cable": { "node": "out", "label": "Cable", "kind": "mesh", "tags": ["cable", "power-line", "utility-pole", "street-furniture"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 15, "elevation": 12, "zoom": 1.2 }

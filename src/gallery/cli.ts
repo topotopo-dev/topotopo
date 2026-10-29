@@ -1,256 +1,405 @@
 // The gallery's commands (src/cli.ts dispatches here):
 //   topotopo gallery [--port 7340] [--library <folder>] [--no-bake]   the gallery website on 127.0.0.1
-//   topotopo library add <name> <folder>                             list a folder as a library (~/.topotopo/config.json)
-//   topotopo library list                                            libraries, projects and problems
+//   topotopo library add <name> <folder>                             register a folder as a library (~/.topotopo/config.json)
+//   topotopo library list                                            the registered libraries, their projects and problems
 //   topotopo library new <library> <folder/name> [--title t] [--tags a,b] [--description d]
 //   topotopo library bake <project folder> | --stale | --all          bake previews in this process
-//   topotopo edit <project folder> [--port 7341] [--json]             the live viewer on a project (the gallery's editor)
-// and a project's packages (src/gallery/packages.ts, src/gallery/update.ts):
-//   topotopo init [folder] [--package owner/name]                     make a folder a project (project.json)
-//   topotopo use owner/name [folder]                                  add a package from the libraries the project lists
-//   topotopo packages [folder]                                        what it uses, and the packages in its libraries
-//   topotopo publish [folder] --note "..." [--big] [--check]          publish the next version of the project's package
-//                                                                     (--check: a dry run, nothing written)
-//   topotopo search [words] [--kind k] [--tag t]                      the outputs of every library, for the current project
+//   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a project (the gallery's editor)
+// and a project's packages (src/gallery/packages.ts, src/gallery/update.ts), as PACKAGE_COMMANDS says them:
+//   topotopo init [folder] [--package owner/name]                     make a folder a project, or set the package it is
+//   topotopo libraries add|remove <folder or name> [folder]           the libraries the project finds packages in
+//   topotopo use owner/name [folder] [--version 1.1]                  add a package from the libraries the project lists
+//   topotopo remove owner/name [folder]                               remove a package no graph of the project names
+//   topotopo packages [owner/name] [folder]                           what the project uses and can use; one package
+//   topotopo publish [folder] --note "..." [--big] [--dry-run]        publish the next version of the project's package
+//   topotopo search [words] [folder] [--kind k] [--tag t]             the outputs of every library, for the project
 //   topotopo outdated [folder]                                        the newer versions of what it uses, with their notes
-//   topotopo update owner/name [folder] [--to <version>] [--render <folder>] [--apply]
-//                                                                     the before/after of an update; --apply applies it
+//   topotopo update owner/name [folder] [--to 1.4] [--render <folder>]           the before/after of an update
+//   topotopo update owner/name [folder] --from 1.3 --to 1.4 --apply              apply the update you looked at
+// A folder named must exist (a project's folder, or one inside it); without one, the current folder's project. Each
+// package command returns its exit code and says what it did through an Io (the console by default), so that tests
+// run them in this process.
 import fs from 'node:fs';
 import path from 'node:path';
 import { KINDS } from '../graph/outputs.ts';
-import { addLibrary, createProject, initProject, isStale, loadConfig, projectDirOf, readBakeState, scanAll, slugify } from './library.ts';
+import { parsePackageName } from '../graph/scope.ts';
+import {
+  addLibrary, createProject, initProject, isStale, libraryEntryFor, loadConfig, projectDirOf, readBakeState, readManifest, scanAll, slugify,
+} from './library.ts';
 import type { GalleryConfig } from './library.ts';
 
-const fail = (msg: string): never => { console.error(msg); process.exit(1); };
+/**
+ * The package commands as every list of them says them: src/cli.ts (its header and --help), this file's header, the
+ * help topic "packages" and README.md, each of which holds every usage as it is here (test/docs.ts checks).
+ */
+export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
+  { usage: 'init [folder] [--package owner/name]', what: 'make a folder a project (project.json, graphs/main.json), or set the package an existing project is' },
+  { usage: 'libraries add|remove <folder or name> [folder]', what: 'list or unlist a library the project finds packages in: a folder by its path from the project, else a registered library\'s name' },
+  { usage: 'use owner/name [folder] [--version 1.1]', what: 'add a package: its newest version (or --version) in the libraries the project lists, copied into packages/' },
+  { usage: 'remove owner/name [folder]', what: 'remove a package no graph of the project names: its copy goes, with the copies nothing else uses' },
+  { usage: 'packages [owner/name] [folder]', what: 'what the project uses and can use, one line each; with a package, its versions and its outputs' },
+  { usage: 'publish [folder] --note "..." [--big] [--dry-run]', what: 'publish the next version of the project\'s package into versions/; --dry-run checks everything and writes nothing' },
+  { usage: 'search [words] [folder] [--kind k] [--tag t]', what: 'the outputs of every library, and whether the project can use them' },
+  { usage: 'outdated [folder]', what: 'the packages the project uses that have newer versions, with their notes' },
+  { usage: 'update owner/name [folder] [--to 1.4] [--render <folder>]', what: 'the before/after of an update: every place the project uses it, cooked with both versions; nothing is written' },
+  { usage: 'update owner/name [folder] --from 1.3 --to 1.4 --apply', what: 'apply the update you looked at: copy it in, set "uses" and the lock, delete the copies nothing uses' },
+];
 
-export async function galleryCommand(argv: string[], prog: string) {
-  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  let cfg: GalleryConfig;
-  try { cfg = loadConfig(); } catch (e: any) { return fail(e.message); }
-  const extra = opt('--library');
-  if (extra) {
-    const name = slugify(path.basename(path.resolve(extra))) || 'library';
-    cfg = { ...cfg, libraries: [...cfg.libraries.filter((l) => l.name !== name), { name, path: path.resolve(extra) }] };
-  }
-  if (!cfg.libraries.length) console.log(`no libraries yet: add a folder with \`${prog} library add <name> <folder>\` (or pass --library <folder>)`);
-  const port = opt('--port') !== undefined ? Number(opt('--port')) : cfg.gallery.port;
-  const { startGallery, runningGallery } = await import('./server.ts');
-  try {
-    const g = await startGallery({ config: cfg, port, bake: !argv.includes('--no-bake'), log: (m) => console.log(m) });
-    const n = cfg.libraries.length;
-    console.log(`gallery: ${g.url}  (${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
-    if (g.queue.size) console.log(`baking ${g.queue.size} project(s) in the background`);
-  } catch (e: any) {
-    if (e?.code !== 'EADDRINUSE') throw e;
-    const url = await runningGallery(port);
-    if (url) { console.log(`gallery: ${url}  (already running)`); process.exit(0); }
-    fail(`port ${port} is taken by another program: pass --port, or set "gallery": {"port": N} in ${cfg.file}`);
-  }
+/** Where a command says what it did (out) and what went wrong (err). */
+export interface Io { out(s: string): void; err(s: string): void }
+export const consoleIo: Io = { out: (s) => console.log(s), err: (s) => console.error(s) };
+
+/** A command's failure, said on stderr: exit code 1. */
+class Fail extends Error {}
+const fail = (msg: string): never => { throw new Fail(msg); };
+
+/** A command: its exit code, or nothing for one that keeps running (a server). */
+export type Command = (argv: string[], prog: string, io?: Io) => Promise<number | void>;
+
+/** Run a command's body: a failure, or any error it throws, is said on stderr and exits 1. */
+async function run(io: Io, f: () => Promise<number | void>): Promise<number | void> {
+  try { return await f(); } catch (e: any) { io.err(String(e?.message ?? e)); return 1; }
 }
 
-export async function libraryCommand(argv: string[], prog: string) {
-  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  const [sub, a, b] = argv;
-  const usage = `usage: ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] [--description d] | bake <project folder> | bake --stale | bake --all`;
-  let cfg: GalleryConfig;
-  try { cfg = loadConfig(); } catch (e: any) { return fail(e.message); }
-
-  if (sub === 'add') {
-    if (!a || !b) fail(usage);
-    try { cfg = addLibrary(a, b); } catch (e: any) { fail(e.message); }
-    console.log(`library ${a} → ${path.resolve(b)} (in ${cfg.file})`);
-    return;
+/**
+ * A command's arguments: its options (`valued` take the next argument as their value, `flags` none) and the rest in
+ * order. An unknown option, or a valued one without its value, fails with the usage.
+ */
+function args(argv: string[], valued: string[], flags: string[], usage: string) {
+  const opts = new Map<string, string>(), rest: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) { rest.push(a); continue; }
+    if (flags.includes(a)) { opts.set(a, ''); continue; }
+    if (!valued.includes(a)) fail(`unknown option ${a}\n${usage}`);
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith('--')) fail(`${a} needs a value\n${usage}`);
+    opts.set(a, v);
+    i++;
   }
-  if (sub === 'list') {
-    if (!cfg.libraries.length) console.log(`no libraries (config ${cfg.file}): ${prog} library add <name> <folder>`);
-    for (const s of scanAll(cfg)) {
-      console.log(`${s.name}  ${s.root}  (${s.projects.length} projects)`);
-      for (const p of s.projects) {
-        const st = readBakeState(p.dir);
-        const status = !st ? 'not baked' : !st.ok ? 'bake failed' : isStale(p) ? 'stale' : 'baked';
-        console.log(`  ${p.id.padEnd(24)} ${p.rel.padEnd(32)} ${status}${p.manifest.tags.length ? '  [' + p.manifest.tags.join(', ') + ']' : ''}`);
-      }
-      for (const pr of s.problems) console.log(`  ! ${pr}`);
-    }
-    return;
-  }
-  if (sub === 'new') {
-    if (!a || !b) fail(usage);
-    const lib = cfg.libraries.find((l) => l.name === a) ?? fail(`no library "${a}" (${cfg.libraries.map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>`})`);
-    try {
-      const p = createProject(lib, b, { title: opt('--title'), description: opt('--description'), tags: opt('--tags')?.split(',').map((t) => t.trim()).filter(Boolean) });
-      console.log(`project ${p.lib}/${p.id} → ${p.dir}`);
-      console.log(`  gallery: http://127.0.0.1:${cfg.gallery.port}/p/${p.lib}/${p.id}`);
-    } catch (e: any) { fail(e.message); }
-    return;
-  }
-  if (sub === 'bake') {
-    if (!a) fail(usage);
-    const { bakeProject } = await import('./bake.ts');
-    let dirs: string[];
-    if (a === '--all' || a === '--stale') dirs = scanAll(cfg).flatMap((s) => s.projects).filter((p) => a === '--all' || isStale(p)).map((p) => p.dir);
-    else {
-      const d = projectDirOf(a);
-      if (!d) fail(`${a}: no project.json here or in a parent folder`);
-      dirs = [d!];
-    }
-    let failed = 0;
-    for (const d of dirs) {
-      const s = await bakeProject(d);
-      if (!s.ok) failed++;
-      console.log(`${s.ok ? 'ok  ' : 'FAIL'} ${d}  ${s.ok ? `${s.ms} ms, ${s.points} points, ${s.prims} prims${s.glb ? '' : ', no preview.glb'}` : s.error}`);
-    }
-    if (!dirs.length) console.log('nothing to bake');
-    process.exit(failed ? 1 : 0);
-  }
-  fail(usage);
+  return { opt: (f: string) => opts.get(f), has: (f: string) => opts.has(f), rest };
 }
 
-/** `edit <project>`: the live viewer on a project's workspace, following changes other processes make to it. */
-export async function editCommand(argv: string[], prog: string) {
-  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  const dir = argv[0] && !argv[0].startsWith('-') ? projectDirOf(argv[0]) ?? path.resolve(argv[0]) : fail(`usage: ${prog} edit <project folder> [--port 7341] [--json]`);
-  if (!fs.existsSync(dir)) fail(`no folder ${dir}`);
-  const { Engine } = await import('../graph/engine.ts');
-  const { createNodeHost } = await import('../host/node.ts');
-  const { Workspace } = await import('../workspace.ts');
-  const { startViewer } = await import('../viewer/server.ts');
-  const { openPackages } = await import('./packages.ts');
-  const engine = new Engine(createNodeHost({ baseDir: dir }));
-  await engine.init();
-  const ws = new Workspace(dir, engine);
-  ws.packages = openPackages(engine, dir);
-  ws.load();
-  ws.watch();
-  const v = await startViewer(ws, opt('--port') !== undefined ? Number(opt('--port')) : undefined);
-  if (argv.includes('--json')) {
-    // started by the gallery: report the URL, and stop once no page has been open for a while
-    console.log(JSON.stringify({ url: v.url }));
-    let idleSince = Date.now();
-    setInterval(() => {
-      if (v.clients() > 0) idleSince = Date.now();
-      else if (Date.now() - idleSince > 10 * 60_000) { v.close(); process.exit(0); }
-    }, 30_000);
-  } else console.log(`edit: ${v.url}  (${dir}; Ctrl+C to stop)`);
+/**
+ * The project a command acts on: the folder named (which must exist; a folder inside a project acts on that project),
+ * else the current folder's. Fails for a folder in no project, saying how to make one.
+ */
+function projectOf(folder: string | undefined, prog: string): string {
+  const abs = path.resolve(folder ?? '.');
+  if (folder !== undefined && !isDir(abs)) fail(`no folder ${abs}`);
+  return projectDirOf(abs) ?? fail(`${abs} is in no project: ${prog} init${folder === undefined ? '' : ` ${quoted(folder)}`} makes the folder a project (project.json)`);
 }
 
-/** The folder a package command acts on: the argument that is not an option (or its value), else the current one. */
-function folderArg(argv: string[], valued: string[], skip = 0): string {
-  const rest = argv.filter((x, i) => !x.startsWith('--') && !valued.includes(argv[i - 1]));
-  return path.resolve(rest[skip] ?? '.');
-}
+const isDir = (abs: string) => !!fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory();
+/** "owner/name", a package (no output) */
+const isPackage = (s: string) => { const n = parsePackageName(s); return typeof n !== 'string' && n.output === null; };
+/** A folder argument that is a version ("1.1", "2") and no folder: what was meant, said. */
+const versionGiven = (folder: string | undefined, meant: string) => {
+  if (folder !== undefined && /^\d+(\.\d+)?$/.test(folder) && !isDir(path.resolve(folder))) fail(`"${folder}" is no folder here: ${meant}`);
+};
 
-/** `init [folder] [--package owner/name]`: make a folder a project. */
-export async function initCommand(argv: string[], prog: string) {
-  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  if (argv.includes('--package') && (opt('--package') === undefined || opt('--package')!.startsWith('--'))) fail(`usage: ${prog} init [folder] [--package owner/name]`);
-  try {
-    const { dir, manifest } = initProject(folderArg(argv, ['--package']), { package: opt('--package') });
-    console.log(`project ${manifest.id} → ${dir}${manifest.package ? ` (package ${manifest.package})` : ''}`);
-    console.log(`  graphs go in graphs/ ("graph": "${manifest.graph}" is the one it shows); list the libraries it finds packages in under "libraries" in project.json`);
-  } catch (e: any) { fail(e.message); }
-}
-
-/** The packages of the project a folder belongs to, in an engine of their own. */
-async function projectPackages(dir: string, prog: string) {
+/** The packages of a project, in an engine of their own (its worker pool closed by `close`). */
+async function projectPackages(project: string) {
   const { Engine } = await import('../graph/engine.ts');
   const { createNodeHost } = await import('../host/node.ts');
   const { openPackages } = await import('./packages.ts');
-  const project = projectDirOf(dir) ?? fail(`${dir} is in no project: ${prog} init <folder> makes a folder a project (project.json)`);
   const engine = new Engine(createNodeHost({ baseDir: project }));
   await engine.init();
-  return { engine, project, pk: openPackages(engine, project) };
+  return { engine, pk: openPackages(engine, project), close: async () => { await engine.host.pool?.close(); } };
 }
 
-/** `use owner/name [folder]`: add a package to the project from the libraries it lists. */
-export async function useCommand(argv: string[], prog: string) {
-  const [pkg] = argv.filter((x) => !x.startsWith('--'));
-  if (!pkg) fail(`usage: ${prog} use owner/name [folder]`);
-  const { pk } = await projectPackages(folderArg(argv, [], 1), prog);
-  try { console.log(pk.use(pkg).text); } catch (e: any) { fail(e.message); }
-  for (const p of pk.check()) console.error(`warning: ${p}`);
+const quoted = (s: string) => (/[\s"]/.test(s) ? JSON.stringify(s) : s);
+
+// ---------------------------------------------------------------------------------------------------- the gallery
+
+export async function galleryCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
+  return run(io, async () => {
+    const a = args(argv, ['--port', '--library'], ['--no-bake'], `usage: ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]`);
+    let cfg: GalleryConfig = loadConfig();
+    const extra = a.opt('--library');
+    if (extra) {
+      const name = slugify(path.basename(path.resolve(extra))) || 'library';
+      cfg = { ...cfg, libraries: [...cfg.libraries.filter((l) => l.name !== name), { name, path: path.resolve(extra) }] };
+    }
+    if (!cfg.libraries.length) io.out(`no libraries yet: register a folder with \`${prog} library add <name> <folder>\` (or pass --library <folder>)`);
+    const port = a.opt('--port') !== undefined ? Number(a.opt('--port')) : cfg.gallery.port;
+    const { startGallery, runningGallery } = await import('./server.ts');
+    try {
+      const g = await startGallery({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
+      const n = cfg.libraries.length;
+      io.out(`gallery: ${g.url}  (${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
+      if (g.queue.size) io.out(`baking ${g.queue.size} project(s) in the background`);
+    } catch (e: any) {
+      if (e?.code !== 'EADDRINUSE') throw e;
+      const url = await runningGallery(port);
+      if (url) { io.out(`gallery: ${url}  (already running)`); return 0; }
+      fail(`port ${port} is taken by another program: pass --port, or set "gallery": {"port": N} in ${cfg.file}`);
+    }
+  });
 }
 
-/** `packages [folder]`: what the project uses, and the packages in the libraries it lists. */
-export async function packagesCommand(argv: string[], prog: string) {
-  const { packagesText } = await import('./packages.ts');
-  const { pk } = await projectPackages(folderArg(argv, []), prog);
-  console.log(packagesText(pk));
+export async function libraryCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
+  return run(io, async () => {
+    const usage = `usage: ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] [--description d] | bake <project folder> | bake --stale | bake --all`;
+    const a = args(argv, ['--title', '--tags', '--description'], ['--stale', '--all'], usage);
+    const [sub, x, y] = a.rest;
+    let cfg = loadConfig();
+    if (sub === 'add') {
+      if (!x || !y) fail(usage);
+      cfg = addLibrary(x, y);
+      io.out(`library ${x} → ${path.resolve(y)} (in ${cfg.file})`);
+      return 0;
+    }
+    if (sub === 'list') {
+      if (!cfg.libraries.length) io.out(`no libraries (config ${cfg.file}): ${prog} library add <name> <folder>`);
+      for (const s of scanAll(cfg)) {
+        io.out(`${s.name}  ${s.root}  (${s.projects.length} projects)`);
+        for (const p of s.projects) {
+          const st = readBakeState(p.dir);
+          const status = !st ? 'not baked' : !st.ok ? 'bake failed' : isStale(p) ? 'stale' : 'baked';
+          io.out(`  ${p.id.padEnd(24)} ${p.rel.padEnd(32)} ${status}${p.manifest.tags.length ? '  [' + p.manifest.tags.join(', ') + ']' : ''}`);
+        }
+        for (const pr of s.problems) io.out(`  ! ${pr}`);
+      }
+      return 0;
+    }
+    if (sub === 'new') {
+      if (!x || !y) fail(usage);
+      const lib = cfg.libraries.find((l) => l.name === x) ?? fail(`no library "${x}" (${cfg.libraries.map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>`})`);
+      const p = createProject(lib, y, { title: a.opt('--title'), description: a.opt('--description'), tags: a.opt('--tags')?.split(',').map((t) => t.trim()).filter(Boolean) });
+      io.out(`project ${p.lib}/${p.id} → ${p.dir}`);
+      io.out(`  gallery: http://127.0.0.1:${cfg.gallery.port}/p/${p.lib}/${p.id}`);
+      return 0;
+    }
+    if (sub === 'bake') {
+      const { bakeProject } = await import('./bake.ts');
+      let dirs: string[];
+      if (a.has('--all') || a.has('--stale')) dirs = scanAll(cfg).flatMap((s) => s.projects).filter((p) => a.has('--all') || isStale(p)).map((p) => p.dir);
+      else if (x) dirs = [projectOf(x, prog)];
+      else return fail(usage);
+      let failed = 0;
+      for (const d of dirs) {
+        const s = await bakeProject(d);
+        if (!s.ok) failed++;
+        io.out(`${s.ok ? 'ok  ' : 'FAIL'} ${d}  ${s.ok ? `${s.ms} ms, ${s.points} points, ${s.prims} prims${s.glb ? '' : ', no preview.glb'}` : s.error}`);
+      }
+      if (!dirs.length) io.out('nothing to bake');
+      return failed ? 1 : 0;
+    }
+    fail(usage);
+  });
+}
+
+/** `edit [folder]`: the live viewer on a project's workspace, following changes other processes make to it. */
+export async function editCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
+  return run(io, async () => {
+    const a = args(argv, ['--port'], ['--json'], `usage: ${prog} edit [folder] [--port 7341] [--json]`);
+    const dir = projectOf(a.rest[0], prog);
+    const { Engine } = await import('../graph/engine.ts');
+    const { createNodeHost } = await import('../host/node.ts');
+    const { Workspace } = await import('../workspace.ts');
+    const { startViewer } = await import('../viewer/server.ts');
+    const { openPackages } = await import('./packages.ts');
+    const engine = new Engine(createNodeHost({ baseDir: dir }));
+    await engine.init();
+    const ws = new Workspace(dir, engine);
+    ws.packages = openPackages(engine, dir);
+    ws.load();
+    ws.watch();
+    const v = await startViewer(ws, a.opt('--port') !== undefined ? Number(a.opt('--port')) : undefined);
+    if (a.has('--json')) {
+      // started by the gallery: report the URL, and stop once no page has been open for a while
+      io.out(JSON.stringify({ url: v.url }));
+      let idleSince = Date.now();
+      setInterval(() => {
+        if (v.clients() > 0) idleSince = Date.now();
+        else if (Date.now() - idleSince > 10 * 60_000) { v.close(); process.exit(0); }
+      }, 30_000);
+    } else io.out(`edit: ${v.url}  (${dir}; Ctrl+C to stop)`);
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------- packages
+
+/** `init [folder] [--package owner/name]`: make a folder a project, or set the package an existing project is. */
+export async function initCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const a = args(argv, ['--package'], [], `usage: ${prog} init [folder] [--package owner/name]`);
+    const r = initProject(a.rest[0] ?? '.', { package: a.opt('--package') });
+    io.out(r.said);
+    if (r.said.startsWith('project') && !/package .* (already|now)$/.test(r.said))
+      io.out(`  graphs go in graphs/ (it shows "${r.manifest.graph}"); ${prog} libraries add <folder> lists a library it finds packages in; TopoTopo's own packages need none`);
+    return 0;
+  })) ?? 0;
+}
+
+/** `libraries add|remove <folder or registered name> [folder]`: the libraries the project lists, as the person says. */
+export async function librariesCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const usage = `usage: ${prog} libraries add <library folder or registered name> [folder] | remove <library> [folder]`;
+    const a = args(argv, [], [], usage);
+    const [sub, given, folder] = a.rest;
+    if ((sub !== 'add' && sub !== 'remove') || !given) fail(usage);
+    const project = projectOf(folder, prog);
+    const listed = readManifest(project).libraries;
+    const { pk, close } = await projectPackages(project);
+    try {
+      if (sub === 'add') {
+        const entry = libraryEntryFor(project, given);
+        if (listed.includes(entry)) { io.out(`project.json lists "${entry}" already`); return 0; }
+        io.out(pk.setLibraries([...listed, entry]));
+      } else {
+        // the entry as listed, or the folder or registered name it stands for
+        const abs = path.resolve(given);
+        const entry = listed.find((e) => e === given || e === given.replace(/\\/g, '/') || path.resolve(project, e) === abs);
+        if (!entry) fail(`project.json does not list "${given}": it lists ${listed.map((e) => `"${e}"`).join(', ') || 'no libraries'}`);
+        io.out(pk.setLibraries(listed.filter((e) => e !== entry)));
+      }
+      return 0;
+    } finally { await close(); }
+  })) ?? 0;
+}
+
+/** `use owner/name [folder] [--version 1.1]`: add a package to the project from the libraries it lists. */
+export async function useCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const usage = `usage: ${prog} use owner/name [folder] [--version 1.1]`;
+    const a = args(argv, ['--version'], [], usage);
+    const [pkg, folder] = a.rest;
+    if (!pkg) fail(usage);
+    versionGiven(folder, `a version is named with --version, ${prog} use ${pkg} --version ${/^\d+$/.test(folder ?? '') ? `${folder}.0` : folder}`);
+    const { pk, close } = await projectPackages(projectOf(folder, prog));
+    try {
+      io.out(pk.use(pkg, { version: a.opt('--version') }).text);
+      for (const p of pk.check()) io.err(`warning: ${p}`);
+      return 0;
+    } finally { await close(); }
+  })) ?? 0;
+}
+
+/** `remove owner/name [folder]`: remove a package no graph of the project names any more. */
+export async function removeCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const usage = `usage: ${prog} remove owner/name [folder]`;
+    const [pkg, folder] = args(argv, [], [], usage).rest;
+    if (!pkg) fail(usage);
+    const { removePackage } = await import('./update.ts');
+    const { pk, close } = await projectPackages(projectOf(folder, prog));
+    try { io.out(removePackage(pk, pkg).text); return 0; } finally { await close(); }
+  })) ?? 0;
+}
+
+/** `packages [owner/name] [folder]`: what the project uses and can use, one line each; or one package with its outputs. */
+export async function packagesCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const a = args(argv, [], [], `usage: ${prog} packages [owner/name] [folder]`);
+    // a package name first (one that is no folder here), then the folder
+    const first = a.rest[0], named = first !== undefined && isPackage(first) && !isDir(path.resolve(first));
+    const pkg = named ? first : undefined, folder = named ? a.rest[1] : a.rest[0];
+    const { packagesText, packageText } = await import('./packages.ts');
+    const { pk, close } = await projectPackages(projectOf(folder, prog));
+    try { io.out(pkg ? packageText(pk, pkg) : packagesText(pk)); return 0; } finally { await close(); }
+  })) ?? 0;
 }
 
 /**
- * `publish [folder] --note "..." [--big]`: publish the next version of the project's package; `--check` is a dry run
- * that says what publishing would do and writes nothing.
+ * `publish [folder] --note "..." [--big] [--dry-run]`: publish the next version of the project's package; --dry-run
+ * says what publishing would do and writes nothing.
  */
-export async function publishCommand(argv: string[], prog: string) {
-  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  if (argv.includes('--note') && (opt('--note') === undefined || opt('--note')!.startsWith('--'))) fail(`usage: ${prog} publish [folder] --note "what changed" [--big] [--check]`);
-  const { loadProject, publishPackage, publishText } = await import('./packages.ts');
-  const { Workspace } = await import('../workspace.ts');
-  const { engine, project, pk } = await projectPackages(folderArg(argv, ['--note']), prog);
-  // the project's graphs and assets in the root, read without writing anything into its folder (a workspace's load
-  // would make its folders)
-  const ws = new Workspace(project, engine);
-  ws.packages = pk;
-  for (const p of loadProject(engine, project)) console.error(`warning: ${p}`);
-  const r = await publishPackage(ws, pk, { note: opt('--note'), big: argv.includes('--big'), check: argv.includes('--check') });
-  console.log(publishText(r));
-  await engine.host.pool?.close();
-  process.exit(r.ok ? 0 : 1);
-}
-
-/** `search [words] [--kind k] [--tag t]`: the outputs of every library, and whether the current folder's project can use them. */
-export async function searchCommand(argv: string[], prog: string) {
-  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  const valued = ['--kind', '--tag'];
-  if (valued.some((f) => argv.includes(f) && (opt(f) === undefined || opt(f)!.startsWith('--')))) fail(`usage: ${prog} search [words] [--kind ${KINDS.join('|')}] [--tag t]`);
-  const words = argv.filter((x, i) => !x.startsWith('--') && !valued.includes(argv[i - 1]));
-  const { searchPackages, searchText } = await import('./packages.ts');
-  try { console.log(searchText(searchPackages(projectDirOf(process.cwd()), { query: words.join(' '), kind: opt('--kind'), tag: opt('--tag') }))); }
-  catch (e: any) { fail(e.message); }
-}
-
-/** `outdated [folder]`: for each package the project uses, the newer versions in its libraries and their notes. */
-export async function outdatedCommand(argv: string[], prog: string) {
-  const { outdatedText } = await import('./update.ts');
-  const { pk } = await projectPackages(folderArg(argv, []), prog);
-  try { console.log(outdatedText(pk)); } catch (e: any) { fail(e.message); }
+export async function publishCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const a = args(argv, ['--note'], ['--big', '--dry-run'], `usage: ${prog} publish [folder] --note "what changed" [--big] [--dry-run]`);
+    const { publishPackage, publishText } = await import('./packages.ts');
+    const { pk, close } = await projectPackages(projectOf(a.rest[0], prog));
+    try {
+      const r = await publishPackage(pk, { note: a.opt('--note'), big: a.has('--big'), dryRun: a.has('--dry-run') });
+      io.out(publishText(r));
+      return r.ok ? 0 : 1;
+    } finally { await close(); }
+  })) ?? 0;
 }
 
 /**
- * `update owner/name [folder] [--to <version>] [--render <folder>] [--apply]`: the before/after of updating a package
- * the project uses, which writes nothing (--render writes its overlay renders into a folder); the same command with
- * --apply applies the update. Ctrl+C stops a long before/after at the next node.
+ * `search [words] [folder] [--kind k] [--tag t]`: the outputs of every library, and whether the project can use them.
+ * The folder is written as a path (".", "./forest", "../forest", an absolute path), so that a word is never one.
  */
-export async function updateCommand(argv: string[], prog: string) {
-  const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  const usage = `usage: ${prog} update owner/name [folder] [--to <version>] [--render <folder>] [--apply]`;
-  const valued = ['--to', '--render'];
-  if (valued.some((f) => argv.includes(f) && (opt(f) === undefined || opt(f)!.startsWith('--')))) fail(usage);
-  const [pkg, folder] = argv.filter((x, i) => !x.startsWith('--') && !valued.includes(argv[i - 1]));
-  if (!pkg) fail(usage);
-  const { applyUpdate, beforeAfter, beforeAfterText, overlayRenders } = await import('./update.ts');
-  const { loadProject } = await import('./packages.ts');
-  const { engine, project, pk } = await projectPackages(path.resolve(folder ?? '.'), prog);
-  try {
-    if (argv.includes('--apply')) { console.log(applyUpdate(pk, pkg, opt('--to')).text); return; }
-    for (const p of loadProject(engine, project)) console.error(`warning: ${p}`);
-    const stop = { aborted: false };
-    process.once('SIGINT', () => { stop.aborted = true; console.error('stopping at the next node (Ctrl+C again ends it at once); nothing is written'); });
-    const r = await beforeAfter(pk, pkg, { to: opt('--to'), signal: stop, progress: (done, total, what) => console.error(`[${done + 1}/${total}] ${what}`) });
-    const again = `${prog} ${['update', pkg, ...(folder ? [folder] : []), '--to', r.target.to, '--apply'].map((x) => (/\s/.test(x) ? JSON.stringify(x) : x)).join(' ')}`;
-    console.log(beforeAfterText(r, `nothing was written. To apply it: ${again}`));
-    const renders = overlayRenders(r, Infinity), dir = opt('--render');
-    if (dir && renders.length) {
-      fs.mkdirSync(path.resolve(dir), { recursive: true });
-      const files = renders.map((x, i) => {
-        const file = path.join(path.resolve(dir), `${String(i + 1).padStart(2, '0')}-${x.title.replace(/[^A-Za-z0-9_.-]+/g, '_')}.png`);
-        fs.writeFileSync(file, x.png);
-        return file;
-      });
-      console.log(`overlay renders (grey: the same with both, blue: only with ${r.target.to}, orange: only with ${r.target.from}):`, ...files.map((f) => `\n  ${f}`));
-    } else if (renders.length) console.log(`--render <folder> writes an overlay render of each place that changed`);
-    await engine.host.pool?.close();
-    process.exit(r.stopped ? 1 : 0);
-  } catch (e: any) { fail(e.message); }
+export async function searchCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const a = args(argv, ['--kind', '--tag'], [], `usage: ${prog} search [words] [folder] [--kind ${KINDS.join('|')}] [--tag t]`);
+    const asPath = (s: string) => s === '.' || s === '..' || /^\.\.?[\\/]/.test(s) || path.isAbsolute(s) || /^[A-Za-z]:/.test(s);
+    const last = a.rest.at(-1), folder = last !== undefined && asPath(last) ? last : undefined;
+    const words = folder === undefined ? a.rest : a.rest.slice(0, -1);
+    if (folder !== undefined && !isDir(path.resolve(folder))) fail(`no folder ${path.resolve(folder)}`);
+    const { searchPackages, searchText } = await import('./packages.ts');
+    io.out(searchText(searchPackages(projectDirOf(path.resolve(folder ?? '.')), { query: words.join(' '), kind: a.opt('--kind'), tag: a.opt('--tag') })));
+    return 0;
+  })) ?? 0;
 }
+
+/** `outdated [folder]`: the packages the project uses that have newer versions, with their notes. */
+export async function outdatedCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const folder = args(argv, [], [], `usage: ${prog} outdated [folder]`).rest[0];
+    const { outdatedText } = await import('./update.ts');
+    const { pk, close } = await projectPackages(projectOf(folder, prog));
+    try { io.out(outdatedText(pk, false, folder)); return 0; } finally { await close(); }
+  })) ?? 0;
+}
+
+/**
+ * `update owner/name [folder] [--to <version>] [--render <folder>]`: the before/after of updating a package the project
+ * uses, which writes nothing (--render writes its overlay renders into a folder); `--from <version> --to <version>
+ * --apply` applies the update whose before/after the person saw. Ctrl+C stops a long before/after at the next node.
+ * Nothing to update is no failure.
+ */
+export async function updateCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const usage = `usage: ${prog} update owner/name [folder] [--to <version>] [--render <folder>]   (the before/after)\n       ${prog} update owner/name [folder] --from <version> --to <version> --apply   (apply the update you looked at)`;
+    const a = args(argv, ['--to', '--from', '--render'], ['--apply'], usage);
+    const [pkg, folder] = a.rest;
+    if (!pkg) fail(usage);
+    versionGiven(folder, `a version is named with --to, ${prog} update ${pkg} --to ${/^\d+$/.test(folder ?? '') ? `${folder}.0` : folder}`);
+    const { applyUpdate, beforeAfter, beforeAfterText, overlayRenders } = await import('./update.ts');
+    const { NothingToUpdate, loadProject } = await import('./packages.ts');
+    const project = projectOf(folder, prog);
+    const { engine, pk, close } = await projectPackages(project);
+    try {
+      if (a.has('--apply')) {
+        const from = a.opt('--from'), to = a.opt('--to');
+        if (!from || !to) fail(`--apply needs --from and --to: the version in use and the version of the before/after you looked at (the before/after ends with the command)\n${usage}`);
+        io.out(applyUpdate(pk, pkg, { from: from!, to: to! }).text);
+        return 0;
+      }
+      if (a.has('--from')) fail(`--from goes with --apply\n${usage}`);
+      for (const p of loadProject(engine, project)) io.err(`warning: ${p}`);
+      const stop = { aborted: false };
+      const onStop = () => { stop.aborted = true; io.err('stopping at the next node (Ctrl+C again ends it at once); nothing is written'); };
+      process.once('SIGINT', onStop);
+      let r;
+      try { r = await beforeAfter(pk, pkg, { to: a.opt('--to'), signal: stop, progress: (done, total, what) => io.err(`[${done + 1}/${total}] ${what}`) }); }
+      finally { process.off('SIGINT', onStop); }
+      const again = `${prog} ${['update', pkg, ...(folder ? [folder] : []), '--from', r.target.from, '--to', r.target.to, '--apply'].map(quoted).join(' ')}`;
+      io.out(beforeAfterText(r, `nothing was written. To apply it: ${again}`));
+      const renders = overlayRenders(r, Infinity), dir = a.opt('--render');
+      if (dir && renders.length) {
+        fs.mkdirSync(path.resolve(dir), { recursive: true });
+        const files = renders.map((x, i) => {
+          const file = path.join(path.resolve(dir), `${String(i + 1).padStart(2, '0')}-${x.title.replace(/[^A-Za-z0-9_.-]+/g, '_')}.png`);
+          fs.writeFileSync(file, x.png);
+          return file;
+        });
+        io.out([`overlay renders (grey: the same with both, blue: only with ${r.target.to}, orange: only with ${r.target.from}):`, ...files.map((f) => `  ${f}`)].join('\n'));
+      } else if (renders.length) io.out(`--render <folder> writes an overlay render of each place that changed`);
+      return r.stopped ? 1 : 0;
+    } catch (e) {
+      if (e instanceof NothingToUpdate) { io.out(e.message); return 0; }
+      throw e;
+    } finally { await close(); }
+  })) ?? 0;
+}
+
+/** The commands src/cli.ts dispatches here, by name. */
+export const commands: Record<string, Command> = {
+  gallery: galleryCommand, library: libraryCommand, edit: editCommand, init: initCommand, libraries: librariesCommand, use: useCommand,
+  remove: removeCommand, packages: packagesCommand, publish: publishCommand, search: searchCommand, outdated: outdatedCommand, update: updateCommand,
+};

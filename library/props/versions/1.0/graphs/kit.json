@@ -13,5 +13,6 @@
     "sandbag_wall_at": {"type":"transform","in":["sandbag_wall"],"params":{"translate":[13.349,0,0]}},
     "kit": {"type":"merge","in":["barrel_at","crate_at","pallet_at","pipe_run_at","sandbag_wall_at"]}
   },
-  "output": "kit"
+  "output": "kit",
+  "outputs": {"kit":{"node":"kit","label":"Props kit","kind":"mesh","tags":["kit","lineup","props"]}}
 }

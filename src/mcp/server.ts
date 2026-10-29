@@ -19,23 +19,29 @@ import { libraryTool } from './library.ts';
 import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
-import { initWorkspace } from '../gallery/library.ts';
+import { initWorkspace, setProgram } from '../gallery/library.ts';
 import { openPackages } from '../gallery/packages.ts';
 import type { ProjectPackages } from '../gallery/packages.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
 const named = argOf('--workspace') ?? process.env.TOPOTOPO_WORKSPACE;
-const wsDir = path.resolve(named ?? path.join(process.cwd(), 'workspace'));
 
 const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + '\n');
 
-// The workspace, named (--workspace, TOPOTOPO_WORKSPACE) or not, becomes a project when the server starts if it is in
-// no project and holds nothing but what a workspace makes itself (graphs/, assets/, exports/, inputs/), or nothing at
-// all, as a new one does: then its graphs use packages, TopoTopo's own among them, as they come. A folder with anything
-// else in it (a repository, a folder of the person's) stays as it is: library {action:"init"} makes it a project when
-// the person says so (initWorkspace, src/gallery/library.ts).
-log(initWorkspace(wsDir));
+// hints name the command a person runs: the sources from a clone, or the installed package's
+setProgram(import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo');
+
+// The workspace, named (--workspace, TOPOTOPO_WORKSPACE) or not (<cwd>/workspace, which takes the name of the folder it
+// is in), becomes a project when the server starts if it is in no project and holds nothing but what a workspace makes
+// itself (graphs/, assets/, exports/, inputs/), or nothing at all, as a new one does: then its graphs use packages,
+// TopoTopo's own among them, as they come. A folder in a project works in that project's folder. A folder with
+// anything else in it (a repository, a folder of the person's) stays as it is: library {action:"init"} makes it a
+// project when the person says so (initWorkspace, src/gallery/library.ts). The first tool reply says what happened.
+const start = initWorkspace(path.resolve(named ?? path.join(process.cwd(), 'workspace')), named ? {} : { name: path.basename(process.cwd()) });
+log(start.log);
+const wsDir = start.dir;
+let firstNote = start.note;
 
 // The workspace can change while the server runs (library {action:"open"} opens a gallery project): every tool and
 // the live viewer then work on the new folder. Each workspace has its own engine (asset registry, base directory,
@@ -93,11 +99,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const progress = token === undefined ? undefined : (done: number, total: number, message: string) => {
     extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: done, total, message } }).catch(() => {});
   };
-  try {
-    return (await t.run(req.params.arguments ?? {}, { signal: extra.signal, progress })) as any;
-  } catch (e: any) {
-    return { content: [{ type: 'text', text: `error: ${e?.message ?? e}` }], isError: true };
-  }
+  // the first reply says where the server works when that is news: a folder that became a project, one left as it is,
+  // the project a folder lies in
+  const note = firstNote;
+  firstNote = null;
+  let r: any;
+  try { r = await t.run(req.params.arguments ?? {}, { signal: extra.signal, progress }); }
+  catch (e: any) { r = { content: [{ type: 'text', text: `error: ${e?.message ?? e}` }], isError: true }; }
+  if (note) r.content = [...(r.content ?? []), { type: 'text', text: note }];
+  return r;
 });
 
 // the client closing the pipe (or a signal) ends the session: stop the worker threads and the viewer, then exit

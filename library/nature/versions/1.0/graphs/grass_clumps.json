@@ -108,7 +108,7 @@
     }
   },
   "output": "out",
-  "outputs": { "grass_clumps": { "node": "out", "label": "Grass" } },
+  "outputs": { "grass_clumps": { "node": "out", "label": "Grass", "kind": "instances", "tags": ["grass", "foliage", "vegetation", "ground-cover", "scatter"] } },
   "meta": {
     "pivot": "surface",
     "inputs": ["surface"],

@@ -26,12 +26,21 @@
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
 //   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/gallery/cli.ts)
-//   node src/cli.ts library add|list|new|bake …           libraries and projects; edit <project> opens the live viewer
-//   node src/cli.ts init|use|packages|publish|search …    a project and its packages (src/gallery/packages.ts);
-//                                                         --follow owner/name on a cook or view uses a package's
-//                                                         working folder instead of its copy, for that run
-//   node src/cli.ts outdated|update …                     the newer versions of what a project uses, and the
-//                                                         before/after of an update (src/gallery/update.ts)
+//   node src/cli.ts library add|list|new|bake …           registered libraries and projects; edit [folder] opens the
+//                                                         live viewer on a project
+// A project and its packages (src/gallery/cli.ts, src/gallery/packages.ts, src/gallery/update.ts):
+//   node src/cli.ts init [folder] [--package owner/name]
+//   node src/cli.ts libraries add|remove <folder or name> [folder]
+//   node src/cli.ts use owner/name [folder] [--version 1.1]
+//   node src/cli.ts remove owner/name [folder]
+//   node src/cli.ts packages [owner/name] [folder]
+//   node src/cli.ts publish [folder] --note "..." [--big] [--dry-run]
+//   node src/cli.ts search [words] [folder] [--kind k] [--tag t]
+//   node src/cli.ts outdated [folder]
+//   node src/cli.ts update owner/name [folder] [--to 1.4] [--render <folder>]
+//   node src/cli.ts update owner/name [folder] --from 1.3 --to 1.4 --apply
+//   A graph-file cook adds a package its graph names for the first time (and says so); --locked fails instead, for a
+//   build machine. --follow owner/name on a cook or view uses a package's working folder instead of its copy.
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -51,6 +60,8 @@ import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { exportSource } from './io/source.ts';
 import { packagesUsed } from './graph/packages.ts';
+import { PACKAGE_COMMANDS } from './gallery/cli.ts';
+import { setProgram } from './gallery/library.ts';
 import { openPackages } from './gallery/packages.ts';
 import { ArtifactStore } from './host/artifacts.ts';
 import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
@@ -71,6 +82,8 @@ const fail = (msg: string): never => { console.error(msg); process.exit(1); };
 const graphName = (file: string) => path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
 // the command as the user typed it: the sources from a clone, or the package's bin (dist/cli.js)
 const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo';
+// the hints of every command name it so
+setProgram(prog);
 
 if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
   console.log(`topotopo ${TOPOTOPO_VERSION}`);
@@ -92,6 +105,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         relative paths in the graph (file nodes, maps) read from its project folder: the nearest folder with a project.json at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
     '         [--follow owner/name] (use that package\'s working folder in the project\'s libraries instead of its copy, for this run; repeat it)',
+    '         [--locked] (a build machine: a package the graph names that the project does not use, or a copy missing or edited by hand, fails the run instead of being added)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
@@ -128,19 +142,10 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} mcp [--workspace dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
     `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's projects, stable links for a board)`,
-    `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <project>|--stale|--all`,
-    `       ${prog} edit <project folder> [--port 7341]   (the live viewer on a gallery project)`,
-    `       ${prog} init [folder] [--package owner/name]   (make a folder a project: project.json)`,
-    `       ${prog} use owner/name [folder]   (add a package to the project: its newest version in the libraries project.json lists, copied into packages/)`,
-    `       ${prog} packages [folder]   (what the project uses, and the packages in its libraries with their newest version, note and outputs)`,
-    `       ${prog} publish [folder] --note "what changed" [--big]   (publish the next version of the project's package into versions/; --help-topic packages)`,
-    `       ${prog} publish [folder] --check [--note "..."] [--big]   (a dry run: every check and cook, the version number it would get, blocks and warnings; writes nothing)`,
-    `       ${prog} search [words] [--kind ${KINDS.join('|')}] [--tag t]   (the outputs of every library, and whether this folder's project can use them)`,
-    `       ${prog} outdated [folder]   (the newer versions of the packages the project uses, small and big, with the notes of each)`,
-    `       ${prog} update owner/name [folder] [--to <version>] [--render <folder>]   (the before/after of an update: every place the project uses it, cooked`,
-    '         with the version in use and the new one, what changed and the notes between; nothing is written. Without --to: the newest version',
-    '         with the same big number; a big version needs --to. --render writes an overlay render of each place that changed into a folder)',
-    `       ${prog} update owner/name [folder] [--to <version>] --apply   (apply it: copy the new version in, update "uses" and the lock, delete copies nothing uses)`,
+    `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <project>|--stale|--all   (registered libraries)`,
+    `       ${prog} edit [folder] [--port 7341]   (the live viewer on a project, default the current folder's)`,
+    '       a project and its packages (a folder named must exist; default: the current folder\'s project; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
+    ...PACKAGE_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
   ].join('\n'));
   process.exit(0);
 }
@@ -162,12 +167,13 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   // packages (house, stairs, …) it does not use yet
   const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
   await engine.init();
-  openPackages(engine, process.cwd());
+  const pk = openPackages(engine, process.cwd());
   const defs = [...allNodeDefs(), ...engine.assetsIn().map((x) => x.def), ...engine.packageDefs()];
   if (argv.includes('--catalog')) console.log(catalogText(defs, { cli: true }));
   else {
     const name = opt('--help-node')!;
-    const d = defs.find((x) => x.type === name) ?? (name.includes('/') ? engine.resolveDef(name) : undefined);
+    // an output of a package the project does not use yet is read where its library holds it (nothing is copied)
+    const d = defs.find((x) => x.type === name) ?? (name.includes('/') ? engine.resolveDef(name) ?? pk.describe(name) ?? undefined : undefined);
     // a package output this folder cannot cook as it is (one of TopoTopo's own it does not use, a folder in no project)
     const why = name.includes('/') && !engine.resolveDef(name) ? engine.packageIssue(name) : null;
     const said = why ? `${why.error}${why.hint ? ` (${why.hint})` : ''}` : '';
@@ -189,14 +195,12 @@ if (argv[0] === 'view') {
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
-} else if (['gallery', 'library', 'edit', 'init', 'use', 'packages', 'publish', 'search', 'outdated', 'update'].includes(argv[0])) {
-  // the gallery website, its libraries and its editor; a project's packages (src/gallery/cli.ts)
-  const g = await import('./gallery/cli.ts');
-  const commands: Record<string, (argv: string[], prog: string) => Promise<void>> = {
-    gallery: g.galleryCommand, library: g.libraryCommand, edit: g.editCommand, init: g.initCommand, use: g.useCommand, packages: g.packagesCommand,
-    publish: g.publishCommand, search: g.searchCommand, outdated: g.outdatedCommand, update: g.updateCommand,
-  };
-  await commands[argv[0]](argv.slice(1), prog);
+} else if (['gallery', 'library', 'edit', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'update'].includes(argv[0])) {
+  // the gallery website, its libraries and its editor; a project's packages (src/gallery/cli.ts). A command that ends
+  // gives its exit code; the gallery and the editor keep running
+  const { commands } = await import('./gallery/cli.ts');
+  const code = await commands[argv[0]](argv.slice(1), prog);
+  if (typeof code === 'number') process.exit(code);
 } else if (argv[0] === 'mcp') {
   // `topotopo mcp [--workspace dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin
@@ -262,11 +266,19 @@ async function cook() {
   }
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
   await engine.init();
-  // the packages of the project the file belongs to: one the graph names for the first time is added, and --follow
-  // uses a package's working folder for this run
+  // the packages of the project the file belongs to: one the graph names for the first time is added (said), and
+  // --follow uses a package's working folder for this run. A graph that does not validate as a dry run sees it adds
+  // nothing: its errors are said and the run ends. --locked (a build machine) adds nothing and changes no file: a
+  // package the project does not use, or a copy missing or edited by hand, fails the run instead.
   let pk: ReturnType<typeof openPackages>;
   try { pk = openPackages(engine, path.dirname(path.resolve(file)), { follow: followArgs }); } catch (e) { fail(`--follow: ${(e as Error).message}`); }
-  for (const n of pk!.addFor(graph)) console.log(n);
+  const dry = pk!.dryRun(graph);
+  const invalid = engine.validate(graph, '', { ...engine.root, id: dry.id, packages: dry.resolver }).errors;
+  if (invalid.length) fail(invalid.map((e) => `error [${e.node}] ${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`).join('\n'));
+  if (argv.includes('--locked')) {
+    const unlocked = pk!.locked(graph);
+    if (unlocked.length) fail(unlocked.map((x) => `--locked: ${x}`).join('\n'));
+  } else for (const n of pk!.addFor(graph)) console.log(n);
   for (const p of pk!.check()) console.error(`warning: ${p}`);
   for (const f of pk!.following()) console.log(`following ${f.package}: its working folder ${f.dir} instead of its copy`);
   const fps = opt('--fps') !== undefined ? Number(opt('--fps')) : undefined;
