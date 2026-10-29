@@ -206,8 +206,9 @@ IMAGES: PNG masks and heightmaps. heightfield_from_image {path:"inputs/height.pn
   makes a terrain (16-bit greys keep the detail); with a heightfield connected it writes into layer (e.g. "mask",
   height_min 0, height_max 1), the image lying at size/center in the world (fit "field" stretches it over the
   connected heightfield instead). attribute_from_map {path, projection:"xz", size, center, name:"mask"} samples it onto
-  points (scatter density_mask, prune {mode:"density"}). Textures: image_file {path:"inputs/albedo.png"} (or a file
-  node) loads it as an image named "albedo" for the texture nodes and texture_to_material {base_color:"albedo"}.
+  points (scatter density_mask, prune {mode:"density"}). Textures: a node albedo = image_file {path:"inputs/albedo.png"}
+  loads it as an image named "albedo" (after the node; a file node names it after the file) for the texture nodes and
+  texture_to_material {base_color:"albedo"}.
 EXAMPLE: inputs/guides.glb holds path.* curves and zone.* areas: roads cut into hills, trees in the zones off the road,
 the vars a person would tune exposed as params:
 ${graphLines(INPUTS_EXAMPLE)}
@@ -523,24 +524,36 @@ An image is a volume carried in the geometry (like a heightfield): a 2D grid of 
 Values are written to PNG as value × 255 with no transfer curve: colours hold the numbers colour params give
 ("#a5462e" → 0.65, 0.27, 0.18), so files match the colours you typed; data maps (heights, masks, roughness, normals)
 are linear. Images merge, clone and cache like geometry; materials reference them as "image:<name>".
+NAMES: every image is named after the node that made or last filtered it ("rust_mask" for the node rust_mask), unless
+  that node's name param says otherwise, so default names in a graph never collide and texture_to_material slots name
+  nodes: {base_color:"paint", normal:"detail_normal"}. A node whose input holds several images never picks one: it
+  stops and lists them; set image (foreground_image, mask_image, detail_image … for the other inputs) to the one to
+  use, or isolate it with tex_output {image, keep_only:true}. To edit one image of a stack in place (an atlas, a
+  material's maps), give the filter name = that image's name. merge keeps an image that several inputs carry (same
+  name and pixels, e.g. textured LOD branches) once, and warns when different images share a name.
 GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/worley × fbm/ridged/turbulence,
   tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
-  hex, dots, grid; gap = mortar, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance / edges /
-  id / crackle) · tex_gradient · tex_shape (disc, square, polygon, star, ring; falloff; tile) · tex_splatter (blobs) ·
-  tex_scratches (strokes) · tex_text.
-FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour; the file node reads .png the same way)
-  as an image named after the file ("brick"; name sets another); layers auto/grey/rgba; srgb (default on) keeps the stored
-  values, which suits colour and data maps alike (off only for linear-light colour). Input 0 = a geometry to add it to,
-  so image_file nodes chain. People drop their own textures and masks into inputs/.
-FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer; name renames; every
-  other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min, max,
-  difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable
+  hex, dots: 1 on the cells, 0 in the gaps; grid is a line mask, 1 on the lines, 0 in the cells: for grooved cells use
+  tiles; gap = mortar or line width, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance /
+  edges / id / crackle) · tex_gradient · tex_shape (disc, square, polygon, star, ring; falloff; tile) · tex_splatter
+  (blobs) · tex_scratches (strokes) · tex_text.
+FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
+  (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
+  (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).
+  Input 0 = a geometry to add it to, so image_file nodes chain. People drop their own textures and masks into inputs/.
+FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer and takes the filter's
+  name; every other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min,
+  max, difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable
   keeps the mean) · tex_warp (directional/slope/vector by input 1) · tex_transform (offset, rotate, scale, tile) ·
-  tex_edge_detect · tex_invert · tex_threshold · tex_histogram_scan (position + contrast: THE mask maker) ·
-  tex_normal_from_height (Sobel; strength 1 = 45° for a rise of 1 over 1/64 width; opengl/directx) ·
-  tex_height_to_ao · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or extract) ·
-  tex_tile_sampler (stamp input 0 on a grid with jitter/rotation/scale; mask input 1) · tex_output (rename, or copy a
-  layer out as a new image: {name:"brick_ids", layer:"id"}; keep_only drops the rest).
+  tex_edge_detect · tex_invert · tex_threshold · tex_histogram_scan (THE mask maker: coverage 0.3 = the brightest 30 %
+  turn white, whatever the input's range; or position = a value cut; contrast = hardness; stat coverage) ·
+  tex_normal_from_height (physical: depth = metres a value of 1 stands, size = metres the image spans, so the slope is
+  real and the same at any resolution; paint grain 0.0003, hammered metal 0.002, bricks 0.015; opengl/directx) ·
+  tex_normal_blend (detail normal map over a base, e.g. micro grain over a bake: mode rnm (default, reoriented: both
+  reliefs keep their depth) | udn | linear; strength scales the detail; input 2 = mask; never tex_blend overlay on
+  normals) · tex_height_to_ao · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or
+  extract) · tex_tile_sampler (stamp input 0 on a grid with jitter/rotation/scale; mask input 1) · tex_output (rename,
+  or copy a layer out as a new image: brick_ids = tex_output {layer:"id"}; keep_only drops the rest).
   To process a layer as its own image, copy it out first (tex_output layer:"id") and filter that.
   Inputs of different sizes are resized to the first input (bilinear up, area average down).
 BAKES (input 0 = mesh with non-overlapping uv in 0..1: uv_unwrap; input 1 = optional high-res mesh): bake_ao
@@ -573,11 +586,13 @@ EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metal
   <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
   <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
 RECIPE (brick wall + worn crate: examples/textures.json):
-  bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {name:"ids", layer:"id"}
+  bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {layer:"id"}
   color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)
-  normal = tex_normal_from_height(bricks) · crate: uv_unwrap → bake_ao + bake_curvature → tex_output layer "convex"
-  → tex_blend subtract noise → tex_histogram_scan = edge wear → tex_blend(wood, paint, wear) → tex_channel(ao, rough)
-  = ORM → texture_to_material {base_color, orm}.`,
+  normal = tex_normal_from_height(bricks) {depth:0.035, size:1.6} · crate: uv_unwrap → bake_ao + bake_curvature →
+  tex_output layer "convex" → tex_blend subtract noise → tex_histogram_scan {coverage} = edge wear →
+  tex_blend(wood, paint, wear) → tex_channel(ao, rough) = ORM → texture_to_material {base_color, orm}.
+  Detail on a bake: grain = tex_noise {scale:60} → grain_n = tex_normal_from_height {depth:0.0003, size:<uv span in m>}
+  → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.`,
 
   loops: `FOREACH LOOPS
 {"type": "foreach", "in": ["lots"], "params": {"mode": "prims", "body": {

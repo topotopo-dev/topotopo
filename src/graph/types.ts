@@ -67,6 +67,12 @@ export interface NodeDef {
    * then part of its signature.
    */
   usesScope?: boolean;
+  /**
+   * The result depends on the node's own name (CookContext.node), e.g. an image named after the node that made it:
+   * true, or a function deciding from the resolved params. The name is then part of its signature, so two otherwise
+   * identical nodes do not share one cached result.
+   */
+  usesNodeName?: boolean | ((p: Record<string, any>) => boolean);
   /** deprecation notice naming the replacement; hidden from the catalog, warned about on cook */
   deprecated?: string;
   /**

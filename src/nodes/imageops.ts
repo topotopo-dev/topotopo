@@ -7,11 +7,9 @@ import { skylinePack } from '../core/uv.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { ParamDef } from '../graph/types.ts';
-import { source, withLayer, checkSize, resolutionParam } from './texture.ts';
+import { NAMED_BY_NODE, imageParam, outName, renameParam, source, withLayer, checkSize, resolutionParam } from './texture.ts';
 
-const imageParam = (): ParamDef => ({ type: 'string', default: '', desc: 'image name (empty selects the first image)' });
 const layerParam = (): ParamDef => ({ type: 'string', default: '', desc: 'layer name (empty selects the main layer)' });
-const nameParam = (): ParamDef => ({ type: 'string', default: '', desc: 'output image name (empty keeps the source name)' });
 const channelParam = (def = 'alpha'): ParamDef => ({ type: 'enum', options: ['alpha', 'luminance', 'r', 'g', 'b'], default: def, desc: 'channel to read; alpha requires RGBA, luminance/R/G/B accept grey' });
 
 function channel(data: Float32Array, ch: number, which: string): Float32Array {
@@ -25,12 +23,12 @@ function channel(data: Float32Array, ch: number, which: string): Float32Array {
 }
 
 defineNode({
-  type: 'tex_crop', category: 'texture', packed: 'keep',
+  type: 'tex_crop', category: 'texture', packed: 'keep', usesNodeName: NAMED_BY_NODE,
   summary: 'Extract an exact pixel rectangle, optionally resize it; all image layers stay aligned.',
-  description: 'Origin is [x,y] from the top left. Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. Other geometry/images pass through.',
+  description: 'Origin is [x,y] from the top left. Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. The result takes this node\'s name unless name is set; other geometry/images pass through.',
   inputs: [{ name: 'image', desc: 'geometry carrying an image' }],
   params: {
-    image: imageParam(), name: nameParam(),
+    image: imageParam(), name: renameParam(),
     origin: { type: 'ivec2', default: [0, 0], min: -1000000, max: 1000000, desc: 'crop origin in pixels, from the top left; negative origins add zero padding' },
     size: { type: 'ivec2', default: [0, 0], min: 0, max: 8192, desc: 'crop width/height in pixels; 0 = source extent minus origin' },
     resolution: { type: 'ivec2', default: [0, 0], min: 0, max: 8192, desc: 'output width/height; 0 = cropped size on that axis' },
@@ -43,7 +41,7 @@ defineNode({
     const [x, y] = p.origin, w = p.size[0] || s.img.width - x, h = p.size[1] || s.img.height - y;
     const ow = p.resolution[0] || w, oh = p.resolution[1] || h;
     checkSize(w, h, ctx.type); checkSize(ow, oh, ctx.type);
-    const name = p.name.trim() || s.img.name, g = s.g.clone();
+    const name = outName(ctx), g = s.g.clone();
     const img = cropImage(s.img, x, y, w, h, ow, oh, p.filter === 'nearest', name);
     g.volumes[s.index] = img;
     g.volumes = g.volumes.filter((v) => v === img || v.kind !== 'image' || v.name !== name);
@@ -52,14 +50,14 @@ defineNode({
 });
 
 defineNode({
-  type: 'tex_dilate', category: 'texture', packed: 'keep',
+  type: 'tex_dilate', category: 'texture', packed: 'keep', usesNodeName: NAMED_BY_NODE,
   summary: 'Extend nearest valid image values into an invalid band, preserving opacity by default.',
-  description: 'Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond radius are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding.',
+  description: 'Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond radius are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding. The result takes this node\'s name unless name is set.',
   inputs: [{ name: 'image', desc: 'image to pad' }, { name: 'mask', desc: 'optional explicit validity mask (same dimensions)', optional: true }],
   params: {
-    image: imageParam(), layer: layerParam(), name: nameParam(),
+    image: imageParam(), layer: layerParam(), name: renameParam(),
     radius: { type: 'int', default: 8, min: 0, max: 8192, desc: 'maximum Euclidean distance in pixels from a valid source' },
-    mask_image: imageParam(), mask_layer: layerParam(), mask_channel: channelParam('luminance'),
+    mask_image: imageParam('input 1 (the mask)', []), mask_layer: layerParam(), mask_channel: channelParam('luminance'),
     mask_threshold: { type: 'float', default: 0, desc: 'mask values strictly greater than this are valid' },
     preserve_alpha: { type: 'bool', default: true, desc: 'keep original alpha at every RGBA pixel while padding RGB' },
   },
@@ -69,14 +67,14 @@ defineNode({
     const { p } = ctx, s = source(ctx, 0, p.image, p.layer);
     let mask: Float32Array;
     if (ctx.hasInput(1)) {
-      const m = source(ctx, 1, p.mask_image, p.mask_layer);
+      const m = source(ctx, 1, p.mask_image, p.mask_layer, 'mask_image');
       if (m.img.width !== s.img.width || m.img.height !== s.img.height) throw new NodeError('tex_dilate: mask dimensions must match the source image');
       mask = channel(m.data, m.ch, p.mask_channel);
     } else {
       if (s.ch !== 4) throw new NodeError('tex_dilate: a grey image requires an explicit mask input');
       mask = channel(s.data, s.ch, 'alpha');
     }
-    return withLayer(s, dilateImage(s.data, s.ch, s.img.width, s.img.height, mask, p.mask_threshold, p.radius, p.preserve_alpha), p.name);
+    return withLayer(s, dilateImage(s.data, s.ch, s.img.width, s.img.height, mask, p.mask_threshold, p.radius, p.preserve_alpha), outName(ctx));
   },
 });
 
@@ -116,7 +114,7 @@ defineNode({
 interface AtlasItem { name: string; maps: Record<string, string> }
 
 defineNode({
-  type: 'tex_pack', category: 'texture',
+  type: 'tex_pack', category: 'texture', usesNodeName: NAMED_BY_NODE,
   summary: 'Pack named images into aligned atlases and output per-item UV placement attributes.',
   description: 'items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.',
   inputs: [{ name: 'images', desc: 'geometry carrying named source images (combine with merge)' }],
@@ -124,11 +122,12 @@ defineNode({
     items: { type: 'json', default: [], desc: 'array of {name, maps:{channel:imageName}}; empty = each image becomes one item in channel C' },
     resolution: resolutionParam(2048),
     padding: { type: 'int', default: 8, min: 0, max: 8192, desc: 'empty gutter on every side of each item, in pixels' },
-    name: { type: 'string', default: 'atlas', desc: 'atlas image name prefix; images are named <name>_<channel>' },
+    name: { type: 'string', default: '', desc: 'atlas image name prefix ("" = this node\'s name); images are named <name>_<channel>' },
   },
   outputs: 'atlas images; points with name, rect, uv_offset and uv_scale; detail atlas_size',
   example: { nodes: { a: { type: 'tex_shape', params: { resolution: 32, name: 'disc' } }, b: { type: 'tex_pattern', params: { resolution: [32, 16], name: 'pattern' } }, images: { type: 'merge', in: ['a', 'b'] }, out: { type: 'tex_pack', in: ['images'], params: { resolution: 128, padding: 4 } } }, output: 'out' },
-  cook: ({ input, p }) => {
+  cook: (ctx) => {
+    const { input, p } = ctx;
     const images = imagesOf(input(0)), pool = new Map<string, Image>();
     for (const im of images) {
       if (pool.has(im.name)) throw new NodeError('tex_pack: duplicate input image name "' + im.name + '"');
@@ -137,8 +136,7 @@ defineNode({
     if (!Array.isArray(p.items)) throw new NodeError('tex_pack: items must be an array of {name,maps}');
     const items: AtlasItem[] = p.items.length ? p.items : images.map((im) => ({ name: im.name, maps: { C: im.name } }));
     if (!items.length || items.length > 4096) throw new NodeError('tex_pack: needs 1..4096 items');
-    const prefix = p.name.trim();
-    if (!prefix) throw new NodeError('tex_pack: name must not be empty');
+    const prefix = outName(ctx);
     const names = new Set<string>();
     let labels: string[] = [];
     const sources = items.map((item, i) => {

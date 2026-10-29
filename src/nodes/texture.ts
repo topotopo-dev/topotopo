@@ -3,11 +3,15 @@
 // a PNG, filters process one layer of one image of their first input and pass everything else through,
 // texture_to_material attaches images to a material ("image:<name>" texture slots), and exporters embed them (glTF) or
 // write them next to the file (USD, the "textures" format). Bakes from meshes live in nodes/bake.ts.
-import { Geometry } from '../core/geometry.ts';
-import { Image, MAIN_LAYER, MAX_PIXELS, channelsOf, findImage, imagesOf, isImage, resizeLayer, toGrey } from '../core/image.ts';
+// Names: every image a node makes or filters is named after that node unless its name param says otherwise, so the
+// default names in a graph never collide. A node reading an input that holds several images needs to be told which
+// one (its image param): it never picks the first silently.
+import { Geometry, sameImage } from '../core/geometry.ts';
+import type { Volume } from '../core/geometry.ts';
+import { Image, MAIN_LAYER, MAX_PIXELS, asImage, channelsOf, imagesOf, isImage, resizeLayer, toGrey } from '../core/image.ts';
 import {
-  BLEND_MODES, GRADIENTS, PATTERNS, SHAPES, WARP_MODES, blendLayers, blurLayer, colorize, curvesLayer, edgeDetect, genGradient,
-  genPattern, genScratches, genShape, genSplatter, heightToAO, histogramScanFn, levelsFn, mapValues, normalFromHeight, rampLUT,
+  BLEND_MODES, GRADIENTS, NORMAL_BLEND_MODES, PATTERNS, SHAPES, WARP_MODES, blendLayers, blendNormals, blurLayer, colorize, curvesLayer, edgeDetect, genGradient,
+  coverageCut, genPattern, genScratches, genShape, genSplatter, heightToAO, histogramScanFn, levelsFn, mapValues, normalFromHeight, rampLUT,
   tileSampler, transformLayer, warpLayer,
 } from '../core/texture.ts';
 import type { CellsJob, NoiseJob } from '../core/texture.ts';
@@ -31,10 +35,17 @@ export const resolutionParam = (def = 512): ParamDef => ({
   desc: `image size in pixels [width, height] (one number = square; at most ${MAX_PIXELS.toLocaleString('en-US')} pixels); powers of two suit GPUs`,
   aliases: ['res', 'output_size', 'dimensions', 'image_size'],
 });
-export const nameParam = (def: string, desc = 'image name (materials reference it as "image:<name>")'): ParamDef => ({ type: 'string', default: def, desc, aliases: ['image_name', 'output_name'] });
-const imageParam = (): ParamDef => ({ type: 'string', default: '', desc: 'which image of the input to process ("" = the first)', aliases: ['input_image', 'source_image'] });
+/** The name of the image a node makes: "" = the node's own name (unique in its graph). */
+export const nameParam = (desc = 'image name ("" = this node\'s name); materials reference it as "image:<name>"'): ParamDef => ({ type: 'string', default: '', desc, aliases: ['image_name', 'output_name'] });
+/** Which image of an input to read: "" = its only image (an input holding several is an error that lists them). */
+export const imageParam = (of = 'the input', aliases: string[] = ['input_image', 'source_image']): ParamDef => ({ type: 'string', default: '', desc: `which image of ${of} to use ("" = its only image; needed when it holds several)`, aliases });
 const layerParam = (): ParamDef => ({ type: 'string', default: '', desc: 'layer to process ("" = the main layer "C"; others: "id", "mask", …)', aliases: ['plane', 'channel_layer'] });
-const renameParam = (): ParamDef => ({ type: 'string', default: '', desc: 'rename the result ("" = keep the input image name)', aliases: ['image_name', 'output_name'] });
+/** A filter's result name: "" = the filter node's name (the processed image is renamed; one already so called is replaced). */
+export const renameParam = (): ParamDef => nameParam('name of the result ("" = this node\'s name; an image already so called is replaced); materials reference it as "image:<name>"');
+/** usesNodeName for nodes whose image takes the node's name when the name param is empty. */
+export const NAMED_BY_NODE = (p: Record<string, any>) => !String(p.name ?? '').trim();
+/** The name of the image a node outputs: its name param, else the node's own name. */
+export const outName = (ctx: CookContext): string => String(ctx.p.name ?? '').trim() || ctx.node;
 const tileParam = (desc = 'the image tiles: filters read across the opposite border (keep a tileable texture tileable)'): ParamDef => ({ type: 'bool', default: true, desc, aliases: ['wrap', 'seamless'] });
 
 export function checkSize(w: number, h: number, node: string): void {
@@ -59,20 +70,32 @@ export interface Source {
   ch: 1 | 4;
 }
 
-/** The image (by name, "" = first) and layer ("" = main) a node reads from input i. */
-export function source(ctx: CookContext, i: number, imageName = '', layerName = ''): Source {
+/**
+ * The image (by name; "" = the input's only image) and layer ("" = main) a node reads from input i. `param` names the
+ * param that picks the image of this input, for the error when the input holds several and none is named ("" = the
+ * node has none: keep one image in that input).
+ */
+export function source(ctx: CookContext, i: number, imageName = '', layerName = '', param = 'image'): Source {
   const g = ctx.input(i);
-  let index = -1;
-  for (let k = 0; k < g.volumes.length; k++) {
-    const v = g.volumes[k];
-    if (isImage(v) && (!imageName || v.name === imageName)) { index = k; break; }
-  }
-  if (index < 0) {
-    const names = imagesOf(g).map((x) => x.name);
-    if (imageName && names.length) throw new NodeError(`${ctx.type}: input ${i} has no image "${imageName}"`, `images: ${names.join(', ')}`);
-    throw new NodeError(`${ctx.type}: input ${i} has no image`, NO_IMAGE);
-  }
-  const img = findImage(g, (g.volumes[index] as Image).name)!;
+  const found: number[] = [];
+  for (let k = 0; k < g.volumes.length; k++) if (isImage(g.volumes[k])) found.push(k);
+  const nameOf = (k: number) => (g.volumes[k] as Volume & { name: string }).name;
+  const names = found.map(nameOf);
+  if (!found.length) throw new NodeError(`${ctx.type}: input ${i} has no image`, NO_IMAGE);
+  let index: number;
+  if (imageName) {
+    const hits = found.filter((k) => nameOf(k) === imageName);
+    if (!hits.length) throw new NodeError(`${ctx.type}: input ${i} has no image "${imageName}"`, `images: ${names.join(', ')}`);
+    if (hits.length > 1) throw new NodeError(`${ctx.type}: input ${i} holds ${hits.length} different images named "${imageName}"`, 'give them different names (an image takes the name of the node that made it unless its name param is set; tex_output renames one)');
+    index = hits[0];
+  } else if (found.length > 1) {
+    const list = names.map((n) => `"${n}"`).join(', ');
+    throw new NodeError(
+      `${ctx.type}: input ${i} holds ${found.length} images (${list}); it does not guess which one to use`,
+      param ? `set ${param} to one of them, e.g. ${param}: "${names[0]}"` : `keep one image in input ${i}: tex_output {image: "${names[0]}", keep_only: true}`,
+    );
+  } else index = found[0];
+  const img = asImage(g.volumes[index] as Image);
   const layer = layerName || img.mainLayer;
   const data = img.layer(layer);
   if (!data) throw new NodeError(`${ctx.type}: image "${img.name}" has no layer "${layer}"`, `layers: ${[...img.layers.keys()].join(', ') || 'none'}`);
@@ -81,22 +104,25 @@ export function source(ctx: CookContext, i: number, imageName = '', layerName = 
   return { g, img, index, layer, data, ch };
 }
 
-/** Input i's image layer resized to w × h (or null when the input is not connected). */
-function sourceAt(ctx: CookContext, i: number, w: number, h: number, imageName = '', layerName = '', wrap = true): { data: Float32Array; ch: 1 | 4 } | null {
+/** Input i's image layer resized to w × h (or null when the input is not connected); `param` as in source(). */
+function sourceAt(ctx: CookContext, i: number, w: number, h: number, imageName = '', layerName = '', wrap = true, param = ''): { data: Float32Array; ch: 1 | 4 } | null {
   if (!ctx.hasInput(i)) return null;
-  const s = source(ctx, i, imageName, layerName);
+  const s = source(ctx, i, imageName, layerName, param);
   return { data: resizeLayer(s.data, s.ch, s.img.width, s.img.height, w, h, wrap), ch: s.ch };
 }
 
-/** The input geometry with the source image's layer replaced (and the image renamed when `rename` is set). */
-export function withLayer(s: Source, data: Float32Array, rename = '', extra?: Record<string, Float32Array>): Geometry {
+/**
+ * The input geometry with the source image's layer replaced and the image named `name` (outName: the filter node's
+ * name by default); another image already called `name` is replaced by it.
+ */
+export function withLayer(s: Source, data: Float32Array, name: string, extra?: Record<string, Float32Array>): Geometry {
   const g = s.g.clone();
   const img = s.img.clone();
   img.set(s.layer, data);
   if (extra) for (const [k, v] of Object.entries(extra)) img.set(k, v);
-  const name = String(rename ?? '').trim();
-  if (name) img.name = name;
+  img.name = name;
   g.volumes[s.index] = img;
+  g.volumes = g.volumes.filter((v) => v === img || !(isImage(v) && v.name === name));
   return g;
 }
 
@@ -106,7 +132,6 @@ export const size2 = (p: any, node: string): [number, number] => {
   return [w, h];
 };
 
-export const imgName = (p: any, def: string) => String(p.name ?? '').trim() || def;
 
 // ---------------------------------------------------------------- generators
 
@@ -133,31 +158,36 @@ defineNode({
     offset: { type: 'vec2', default: [0, 0], desc: 'shift in cells (vary or animate without changing the seed)' },
     tileable: { type: 'bool', default: true, desc: 'repeat seamlessly at the image borders', aliases: ['tile', 'tiling', 'seamless'] },
     seed: P.seed(),
-    name: nameParam('noise'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey 0..1',
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey 0..1',
   example: { type: 'tex_noise', params: { resolution: 512, scale: 6, fractal: 'ridged', seed: 2 } },
-  cook: ({ p, type, parallelMap }) => {
+  cook: (ctx) => {
+    const { p, type, parallelMap } = ctx;
     const [w, h] = size2(p, type);
     const job: NoiseJob = {
       noise: p.noise, fractal: p.fractal, scale: p.scale, octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity,
       seed: p.seed, tileable: !!p.tileable, offset: [p.offset[0], p.offset[1]], aspect: h / w, jitter: p.jitter, width: w, height: h,
     };
     const C = new Float32Array(w * h);
-    return andThen(parallelMap('tex_noise', { count: w * h, args: job, results: { C } }), () => imageGeo(new Image(w, h, imgName(p, 'noise')).set(MAIN_LAYER, C)));
+    return andThen(parallelMap('tex_noise', { count: w * h, args: job, results: { C } }), () => imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C)));
   },
 });
 
 defineNode({
   type: 'tex_pattern',
   category: 'texture',
-  summary: 'Tiling pattern image: bricks, tiles, checker, stripes, hex, dots or grid lines, with gap (mortar), bevel and per-cell random id.',
+  summary: 'Tiling pattern image: bricks, tiles, checker, stripes, hex, dots, or a grid line mask, with gap (mortar), bevel and per-cell random id.',
   description:
-    'Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. C is a height-like profile: 1 on the cells, 0 in ' +
-    'the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). Layer "id" holds a random 0..1 ' +
-    'per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); ' +
-    'bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for ' +
-    'its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.',
+    'Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is ' +
+    'a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for ' +
+    'bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so ' +
+    'multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles ' +
+    'without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer ' +
+    '"id" for per-brick colour). count = cells along u (columns) and v (rows); bricks and dots shift every other row by ' +
+    'offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are ' +
+    'fractions of the smaller cell side; variation darkens cells randomly.',
   aliases: ['tile_generator', 'bricks', 'brick', 'checker', 'tiles_pattern', 'cop_pattern'],
   inputs: [],
   params: {
@@ -167,16 +197,18 @@ defineNode({
     offset: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'bricks / hex / dots: shift of every other row (fraction of a cell)', aliases: ['row_offset', 'stagger'] },
     gap: { type: 'float', default: 0.06, min: 0, max: 1, desc: 'mortar / gap width as a fraction of the smaller cell side (dots: 1 - diameter)', aliases: ['mortar', 'spacing'] },
     bevel: { type: 'float', default: 0.08, min: 0, max: 1, desc: 'bevel width as a fraction of the smaller cell side (0 = hard antialiased edge)', aliases: ['smooth', 'roundness'] },
-    variation: { type: 'float', default: 0, min: 0, max: 1, desc: 'random darkening per cell (0 = all cells 1)', aliases: ['height_variation', 'luminance_random'] },
+    variation: { type: 'float', default: 0, min: 0, max: 1, desc: 'random darkening per cell (0 = all cells 1; not grid or checker)', aliases: ['height_variation', 'luminance_random'] },
     seed: P.seed(),
-    name: nameParam('pattern'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey profile, id grey random per cell',
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey profile (1 on the cells; grid: 1 on the lines), id grey random per cell',
   example: { type: 'tex_pattern', params: { pattern: 'bricks', count: [4, 8], gap: 0.05, bevel: 0.1 } },
-  cook: ({ p, type }) => {
+  cook: (ctx) => {
+    const { p, type } = ctx;
     const [w, h] = size2(p, type);
     const r = genPattern({ pattern: p.pattern, count: [p.count[0], p.count[1]], offset: p.offset, gap: p.gap, bevel: p.bevel, variation: p.variation, seed: p.seed }, w, h);
-    return imageGeo(new Image(w, h, imgName(p, 'pattern')).set(MAIN_LAYER, r.C).set('id', r.id));
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, r.C).set('id', r.id));
   },
 });
 
@@ -193,13 +225,15 @@ defineNode({
     angle: { type: 'float', default: 0, desc: 'direction in degrees (linear, mirror) or start angle (angular)', aliases: ['rotation', 'direction'] },
     center: { type: 'vec2', default: [0.5, 0.5], desc: 'centre in uv (radial, diamond, angular)' },
     radius: { type: 'float', default: 0.5, min: 0.001, desc: 'radial / diamond: distance (uv) where the gradient reaches 1' },
-    name: nameParam('gradient'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey 0..1',
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey 0..1',
   example: { type: 'tex_gradient', params: { resolution: 256, mode: 'radial', radius: 0.5 } },
-  cook: ({ p, type }) => {
+  cook: (ctx) => {
+    const { p, type } = ctx;
     const [w, h] = size2(p, type);
-    return imageGeo(new Image(w, h, imgName(p, 'gradient')).set(MAIN_LAYER, genGradient(p.mode, p.angle, [p.center[0], p.center[1]], p.radius, w, h)));
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, genGradient(p.mode, p.angle, [p.center[0], p.center[1]], p.radius, w, h)));
   },
 });
 
@@ -219,14 +253,16 @@ defineNode({
     rotation: { type: 'float', default: 0, desc: 'rotation in degrees (counter-clockwise)', aliases: ['angle', 'rotate'] },
     falloff: { type: 'float', default: 0, min: 0, max: 1, desc: 'soft edge as a fraction of the radius (0 = antialiased hard edge, 1 = a cone)', aliases: ['softness', 'blur'] },
     tile: { type: 'ivec2', default: [1, 1], min: 1, max: 512, desc: 'repeats along u and v', aliases: ['tiling', 'repeat', 'count'] },
-    name: nameParam('shape'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey 0..1',
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey 0..1',
   example: { type: 'tex_shape', params: { shape: 'star', sides: 5, falloff: 0.3, tile: [4, 4] } },
-  cook: ({ p, type }) => {
+  cook: (ctx) => {
+    const { p, type } = ctx;
     const [w, h] = size2(p, type);
     const C = genShape({ shape: p.shape, size: p.size, sides: p.sides, inner: p.inner_radius, rotation: p.rotation, falloff: p.falloff, tile: [p.tile[0], p.tile[1]] }, w, h);
-    return imageGeo(new Image(w, h, imgName(p, 'shape')).set(MAIN_LAYER, C));
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C));
   },
 });
 
@@ -246,18 +282,20 @@ defineNode({
     metric: { type: 'enum', options: ['euclidean', 'manhattan', 'chebyshev'], default: 'euclidean', desc: 'distance metric (manhattan = diamond cells, chebyshev = square cells)' },
     tileable: { type: 'bool', default: true, desc: 'repeat seamlessly at the image borders', aliases: ['tile', 'tiling', 'seamless'] },
     seed: P.seed(),
-    name: nameParam('cells'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey (the chosen output), id grey random per cell',
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey (the chosen output), id grey random per cell',
   example: { type: 'tex_cells', params: { output: 'edges', scale: 10, edge_width: 0.08 } },
-  cook: ({ p, type, parallelMap }) => {
+  cook: (ctx) => {
+    const { p, type, parallelMap } = ctx;
     const [w, h] = size2(p, type);
     const job: CellsJob = {
       width: w, height: h, scale: p.scale, jitter: p.jitter, seed: p.seed, tileable: !!p.tileable, output: p.output, edgeWidth: p.edge_width,
       metric: ['euclidean', 'manhattan', 'chebyshev'].indexOf(p.metric),
     };
     const C = new Float32Array(w * h), id = new Float32Array(w * h);
-    return andThen(parallelMap('tex_cells', { count: w * h, args: job, results: { C, id } }), () => imageGeo(new Image(w, h, imgName(p, 'cells')).set(MAIN_LAYER, C).set('id', id)));
+    return andThen(parallelMap('tex_cells', { count: w * h, args: job, results: { C, id } }), () => imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C).set('id', id)));
   },
 });
 
@@ -279,14 +317,16 @@ defineNode({
     intensity: { type: 'vec2', default: [0.4, 1], min: 0, desc: 'intensity range of a stroke' },
     tileable: { type: 'bool', default: true, desc: 'strokes wrap at the borders', aliases: ['tile', 'wrap'] },
     seed: P.seed(),
-    name: nameParam('scratches'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey 0..1',
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey 0..1',
   example: { type: 'tex_scratches', params: { resolution: 512, count: 150, angle: 45, seed: 3 } },
-  cook: ({ p, type }) => {
+  cook: (ctx) => {
+    const { p, type } = ctx;
     const [w, h] = size2(p, type);
     const C = genScratches({ count: p.count, length: [p.length[0], p.length[1]], width: p.width, angle: p.angle, spread: p.spread, curvature: p.curvature, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable }, w, h);
-    return imageGeo(new Image(w, h, imgName(p, 'scratches')).set(MAIN_LAYER, C));
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C));
   },
 });
 
@@ -307,14 +347,16 @@ defineNode({
     combine: { type: 'enum', options: ['max', 'add'], default: 'max', desc: 'how overlapping blobs combine', aliases: ['blend'] },
     tileable: { type: 'bool', default: true, desc: 'blobs wrap at the borders', aliases: ['tile', 'wrap'] },
     seed: P.seed(),
-    name: nameParam('splatter'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey 0..1',
+  usesNodeName: NAMED_BY_NODE,
+  outputs: 'image <name> (default: the node name): C grey 0..1',
   example: { type: 'tex_splatter', params: { resolution: 512, count: 40, size: [0.03, 0.1], seed: 2 } },
-  cook: ({ p, type }) => {
+  cook: (ctx) => {
+    const { p, type } = ctx;
     const [w, h] = size2(p, type);
     const C = genSplatter({ count: p.count, size: [p.size[0], p.size[1]], irregularity: p.irregularity, softness: p.softness, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable, add: p.combine === 'add' }, w, h);
-    return imageGeo(new Image(w, h, imgName(p, 'splatter')).set(MAIN_LAYER, C));
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C));
   },
 });
 
@@ -363,11 +405,12 @@ defineNode({
     size: { type: 'float', default: 0.2, min: 0.001, desc: 'height of the text block as a fraction of the image height (shrunk to fit the width)', aliases: ['height', 'font_size'] },
     position: { type: 'vec2', default: [0.5, 0.5], desc: 'centre of the text in uv', aliases: ['center'] },
     align: { type: 'enum', options: ['left', 'center', 'right'], default: 'center', desc: 'horizontal alignment of lines' },
-    name: nameParam('text'),
+    name: nameParam(),
   },
-  outputs: 'image <name>: C grey 0..1',
+  outputs: 'image <name> (default: the node name): C grey 0..1',
   // it cooks a text node, which reads its font through the scope
   usesScope: true,
+  usesNodeName: NAMED_BY_NODE,
   example: { type: 'tex_text', params: { resolution: [512, 128], text: 'EXIT', size: 0.7 } },
   async cook(ctx) {
     const { p, type } = ctx;
@@ -375,7 +418,7 @@ defineNode({
     const r = await ctx.subcook({ nodes: { t: { type: 'text', params: { text: p.text, font: p.font, size: 1, align: p.align, valign: 'center', output: 'outlines' } } }, output: 't' });
     if (!r.ok || !r.geo) throw new NodeError(`${type}: ${r.errors.map((e) => e.message).join('; ') || 'text failed'}`);
     const g = r.geo;
-    const img = new Image(w, h, imgName(p, 'text'));
+    const img = new Image(w, h, outName(ctx));
     if (!g.numPrims) return imageGeo(img.set(MAIN_LAYER, new Float32Array(w * h)));
     const b = g.bbox();
     const tw = b.max[0] - b.min[0], th = b.max[1] - b.min[1];
@@ -401,34 +444,35 @@ defineNode({
   packed: 'keep',
   summary: 'Load a PNG (8 or 16 bit, grey or colour) as an image: your own textures and masks into the texture nodes and materials.',
   description:
-    'Houdini COP: File; Substance: Bitmap. The image is named after the file ("inputs/brick.png" → "brick") unless name ' +
-    'is set; layer C holds it, grey or RGBA (layers), and a grey image keeps the file\'s alpha, when it has one, in layer ' +
+    'Houdini COP: File; Substance: Bitmap. The image is named after this node, like every image a node makes, unless ' +
+    'name is set; layer C holds it, grey or RGBA (layers), and a grey image keeps the file\'s alpha, when it has one, in layer ' +
     '"A". Values are samples / 255 (16-bit files / 65535: their precision is kept). Colour layers hold display values, as ' +
     'every colour in the engine does ("#a5462e" is 0.65, 0.27, 0.18), so srgb (on by default) keeps the numbers the file ' +
     'stores: a PNG this engine wrote reads back unchanged, and masks, heights, normal and roughness maps load as they are. ' +
     'Turn srgb off only for a file holding linear-light colour (a linear render): grey and RGB are then encoded to display ' +
     'values, alpha never (unlike Unreal\'s sRGB checkbox, off does not mean "data"). With input 0 connected the image is ' +
     'added to that geometry, replacing an image of the same name, so image_file nodes chain. The file node reads .png ' +
-    'files the same way (with these defaults).',
+    'files the same way (with these defaults), naming the image after the file.',
   aliases: ['image_read', 'png_read', 'texture_file'],
   inputs: [{ name: 'geo', desc: 'optional: add the image to this geometry (chain image_file nodes, or carry a mesh); else the output holds only the image', optional: true }],
   params: {
     path: { type: 'path', default: '', desc: 'PNG file (relative to the workspace, e.g. "inputs/brick.png") or URL', aliases: ['file', 'filename'] },
-    name: nameParam('', 'image name ("" = the file name without .png); materials reference it as "image:<name>"'),
+    name: nameParam(),
     layers: { type: 'enum', options: [...PNG_LAYERS], default: 'auto', desc: 'auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels', aliases: ['channels'] },
     srgb: { type: 'bool', default: true, desc: 'the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never)' },
   },
   // relative paths read the scope's folder
   usesScope: true,
+  usesNodeName: NAMED_BY_NODE,
   signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
-  outputs: 'image <name>: C grey or RGBA 0..1; A grey (the file\'s alpha, for a grey image of a file with alpha)',
+  outputs: 'image <name> (default: the node name): C grey or RGBA 0..1; A grey (the file\'s alpha, for a grey image of a file with alpha)',
   example: {
     nodes: {
-      color: { type: 'image_file', params: { path: 'inputs/brick_color.png' } },
-      maps: { type: 'image_file', in: ['color'], params: { path: 'inputs/brick_rough.png', layers: 'grey' } },
+      brick_color: { type: 'image_file', params: { path: 'inputs/brick_color.png' } },
+      brick_rough: { type: 'image_file', in: ['brick_color'], params: { path: 'inputs/brick_rough.png', layers: 'grey' } },
       box: { type: 'box' },
       uv: { type: 'uv_project', in: ['box'], params: { method: 'box' } },
-      out: { type: 'texture_to_material', in: ['uv', 'maps'], params: { material: 'brick', base_color: 'brick_color', roughness: 'brick_rough' } },
+      out: { type: 'texture_to_material', in: ['uv', 'brick_rough'], params: { material: 'brick', base_color: 'brick_color', roughness: 'brick_rough' } },
     },
     output: 'out',
   },
@@ -437,7 +481,7 @@ defineNode({
     if (!String(p.path ?? '').trim()) throw new NodeError(`${type}: path is empty`, 'a PNG relative to the workspace (people drop theirs into inputs/) or a URL');
     let img: Image;
     try {
-      img = await readImageFile((f) => scope.files.readFile(f), p.path, { name: String(p.name ?? '').trim(), layers: p.layers, srgb: !!p.srgb });
+      img = await readImageFile((f) => scope.files.readFile(f), p.path, { name: outName(ctx), layers: p.layers, srgb: !!p.srgb });
     } catch (e: any) { throw new NodeError(`${type}: ${e?.message ?? e}`); }
     const g = ctx.hasInput(0) ? ctx.input(0).clone() : new Geometry();
     const before = g.volumes.length;
@@ -450,13 +494,14 @@ defineNode({
 
 // ---------------------------------------------------------------- filters
 
-const FILTER_INPUT = [{ name: 'image', desc: 'geometry holding the image to process (everything else passes through)' }];
+const FILTER_INPUT = [{ name: 'image', desc: 'geometry holding the image to process (everything else passes through; with several images, image names the one)' }];
 
 defineNode({
   type: 'tex_blend',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Blend a foreground image over a background with a mode (normal, add, multiply, screen, overlay, min, max, difference …), opacity and an optional mask.',
-  description: 'Substance: Blend; Houdini COP: Blend / Composite. result = mix(background, mode(background, foreground), opacity × mask × foreground alpha). The foreground and mask are resized to the background. A grey and an RGBA input give RGBA; alpha is the background\'s. clamp keeps the result in 0..1.',
+  description: 'Substance: Blend; Houdini COP: Blend / Composite. result = mix(background, mode(background, foreground), opacity × mask × foreground alpha). The foreground and mask are resized to the background. A grey and an RGBA input give RGBA; alpha is the background\'s. clamp keeps the result in 0..1. For normal maps use tex_normal_blend (overlay flattens them).',
   aliases: ['blend', 'composite', 'cop_blend', 'layer_blend', 'mix_images'],
   inputs: [
     { name: 'background', desc: 'image A (its geometry passes through)' },
@@ -467,19 +512,21 @@ defineNode({
     mode: { type: 'enum', options: BLEND_MODES, default: 'normal', desc: 'blend mode', aliases: ['blend_mode', 'operation'] },
     opacity: { type: 'float', default: 1, min: 0, max: 1, desc: 'strength of the foreground', aliases: ['amount', 'alpha', 'weight'] },
     clamp: { type: 'bool', default: true, desc: 'clamp the result to 0..1' },
-    image: imageParam(), layer: layerParam(),
-    foreground_image: { type: 'string', default: '', desc: 'image of input 1 ("" = first)' },
+    image: imageParam('input 0 (the background)'), layer: layerParam(),
+    foreground_image: imageParam('input 1 (the foreground)', []),
     foreground_layer: { type: 'string', default: '', desc: 'layer of the foreground ("" = main)' },
+    mask_image: imageParam('input 2 (the mask)', []),
     mask_layer: { type: 'string', default: '', desc: 'layer of the mask image ("" = main)' },
     tileable: tileParam('resizing wraps at the borders'),
     name: renameParam(),
   },
-  outputs: 'the background image with the blended layer',
+  outputs: 'the background image with the blended layer, named <name> (default: the node name)',
   example: {
     nodes: {
-      a: { type: 'tex_noise', params: { resolution: 256 } },
-      b: { type: 'tex_pattern', params: { resolution: 256 } },
-      out: { type: 'tex_blend', in: ['a', 'b'], params: { mode: 'multiply' } },
+      paint: { type: 'tex_noise', params: { resolution: 256, scale: 3 } },
+      metal: { type: 'tex_pattern', params: { resolution: 256 } },
+      wear: { type: 'tex_cells', params: { resolution: 256, output: 'edges' } },
+      out: { type: 'tex_blend', in: ['paint', 'metal', 'wear'], params: { mode: 'normal', opacity: 0.8 } },
     },
     output: 'out',
   },
@@ -487,16 +534,17 @@ defineNode({
     const { p } = ctx;
     const A = source(ctx, 0, p.image, p.layer);
     const w = A.img.width, h = A.img.height, wrap = !!p.tileable;
-    const B = sourceAt(ctx, 1, w, h, p.foreground_image, p.foreground_layer, wrap);
+    const B = sourceAt(ctx, 1, w, h, p.foreground_image, p.foreground_layer, wrap, 'foreground_image');
     if (!B) throw new NodeError(`${ctx.type}: connect a foreground image to input 1`);
-    const M = sourceAt(ctx, 2, w, h, '', p.mask_layer, wrap);
+    const M = sourceAt(ctx, 2, w, h, p.mask_image, p.mask_layer, wrap, 'mask_image');
     const r = blendLayers(A.data, A.ch, B.data, B.ch, M ? toGrey(M.data, M.ch) : null, p.mode, p.opacity, !!p.clamp);
-    return withLayer(A, r.data, p.name);
+    return withLayer(A, r.data, outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_levels',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Levels: remap the input range, apply gamma, remap to the output range (contrast, brightness, inversion).',
   description: 'Substance: Levels; Houdini COP: Levels. value = out_low + (out_high - out_low) × ((value - in_low) / (in_high - in_low))^(1/gamma). Applies to grey or RGB (alpha untouched).',
@@ -521,12 +569,13 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    return withLayer(s, mapValues(s.data, s.ch, levelsFn(p.in_low, p.in_high, p.gamma, p.out_low, p.out_high, !!p.clamp)), p.name);
+    return withLayer(s, mapValues(s.data, s.ch, levelsFn(p.in_low, p.in_high, p.gamma, p.out_low, p.out_high, !!p.clamp)), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_curves',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Curves: map every value through a ramp (a tone curve).',
   description: 'Substance: Curve; Houdini COP: Lookup. ramp keys [[in, out], …] interpolated linearly (input clamped to 0..1). Applies to grey or RGB (alpha untouched); a colour ramp maps through its luminance.',
@@ -542,12 +591,13 @@ defineNode({
     const s = source(ctx, 0, p.image, p.layer);
     const { lut, ch } = rampLUT((t) => evalRamp(p.ramp, t));
     const grey = ch === 1 ? lut : Float32Array.from({ length: lut.length / 3 }, (_, k) => lut[k * 3] * 0.2126 + lut[k * 3 + 1] * 0.7152 + lut[k * 3 + 2] * 0.0722);
-    return withLayer(s, curvesLayer(s.data, s.ch, grey), p.name);
+    return withLayer(s, curvesLayer(s.data, s.ch, grey), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_blur',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Blur an image: gaussian or box, separable; tileable images blur across their borders (the mean is preserved).',
   description: 'Substance: Blur HQ; Houdini COP: Blur. radius in pixels (gaussian: radius = 2 sigma, three box passes of running sums, so the cost does not depend on the radius).',
@@ -569,12 +619,13 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    return withLayer(s, blurLayer(s.data, s.ch, s.img.width, s.img.height, p.radius, p.mode, !!p.tileable), p.name);
+    return withLayer(s, blurLayer(s.data, s.ch, s.img.width, s.img.height, p.radius, p.mode, !!p.tileable), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_warp',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Warp an image by a second image: directional, along its slope, or by an RG vector map.',
   description: 'Substance: Warp / Directional Warp / Vector Warp; Houdini COP: Displace. intensity is the largest offset as a fraction of the image width: directional moves each pixel by intensity × warp value along angle; slope along the warp image\'s gradient (normalised so the steepest slope moves intensity); vector by (R, G) × 2 − 1 of an RGBA warp image.',
@@ -589,6 +640,7 @@ defineNode({
     angle: { type: 'float', default: 0, desc: 'directional: direction in degrees (0 = +u)' },
     tileable: tileParam(),
     image: imageParam(), layer: layerParam(),
+    warp_image: imageParam('input 1 (the warp image)', []),
     warp_layer: { type: 'string', default: '', desc: 'layer of the warp image ("" = main)' },
     name: renameParam(),
   },
@@ -604,14 +656,15 @@ defineNode({
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
     const w = s.img.width, h = s.img.height;
-    const W = sourceAt(ctx, 1, w, h, '', p.warp_layer, !!p.tileable);
+    const W = sourceAt(ctx, 1, w, h, p.warp_image, p.warp_layer, !!p.tileable, 'warp_image');
     if (!W) throw new NodeError(`${ctx.type}: connect a warp image to input 1`);
-    return withLayer(s, warpLayer(s.data, s.ch, w, h, W.data, W.ch, p.mode, p.intensity, p.angle, !!p.tileable), p.name);
+    return withLayer(s, warpLayer(s.data, s.ch, w, h, W.data, W.ch, p.mode, p.intensity, p.angle, !!p.tileable), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_transform',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Offset, rotate, scale and tile an image (2D transform with wrap).',
   description: 'Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv). With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.',
@@ -635,12 +688,13 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    return withLayer(s, transformLayer(s.data, s.ch, s.img.width, s.img.height, [p.offset[0], p.offset[1]], p.rotate, [p.scale[0], p.scale[1]], [p.tile[0], p.tile[1]], !!p.tileable), p.name);
+    return withLayer(s, transformLayer(s.data, s.ch, s.img.width, s.img.height, [p.offset[0], p.offset[1]], p.rotate, [p.scale[0], p.scale[1]], [p.tile[0], p.tile[1]], !!p.tileable), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_edge_detect',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Edge detection: Sobel gradient magnitude of the (grey) image, scaled and optionally thickened.',
   description: 'Substance: Edge Detect; Houdini COP: Edge Detect. A 0 → 1 step gives about 1 at strength 1; width grows the lines by that many pixels (max filter).',
@@ -662,12 +716,13 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    return withLayer(s, edgeDetect(toGrey(s.data, s.ch), s.img.width, s.img.height, p.strength, p.width, !!p.tileable), p.name);
+    return withLayer(s, edgeDetect(toGrey(s.data, s.ch), s.img.width, s.img.height, p.strength, p.width, !!p.tileable), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_invert',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Invert: 1 - value (grey or RGB; alpha untouched).',
   aliases: ['invert', 'cop_invert', 'negate'],
@@ -676,12 +731,13 @@ defineNode({
   example: { nodes: { n: { type: 'tex_noise', params: { resolution: 256 } }, out: { type: 'tex_invert', in: ['n'] } }, output: 'out' },
   cook: (ctx) => {
     const s = source(ctx, 0, ctx.p.image, ctx.p.layer);
-    return withLayer(s, mapValues(s.data, s.ch, (x) => 1 - x), ctx.p.name);
+    return withLayer(s, mapValues(s.data, s.ch, (x) => 1 - x), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_threshold',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Threshold: grey 1 where the value (luminance) is above threshold, else 0, with an optional soft band.',
   aliases: ['threshold', 'cop_threshold', 'binarize'],
@@ -708,48 +764,71 @@ defineNode({
       if (hi <= lo) out[i] = x >= p.threshold ? 1 : 0;
       else { const t = Math.max(0, Math.min(1, (x - lo) / (hi - lo))); out[i] = t * t * (3 - 2 * t); }
     }
-    return withLayer(s, out, p.name);
+    return withLayer(s, out, outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_histogram_scan',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
-  summary: 'Histogram scan: slide a threshold through a grey image (position) with adjustable hardness (contrast); the classic mask maker.',
-  description: 'Substance: Histogram Scan. position 0 = black, 1 = white, 0.5 with contrast 0 = unchanged; contrast 1 = a hard cut at 1 - position. Use on noise or a curvature bake to grow wear or dirt masks.',
+  summary: 'Histogram scan: turn a grey image into a mask with a set white coverage (or a threshold position) and hardness (contrast); the classic mask maker.',
+  description:
+    'Substance: Histogram Scan. coverage is the fraction of the image that turns white, measured on its own histogram: ' +
+    '0.3 makes the brightest 30 % of the pixels white whatever the input\'s range (a noise of 0..0.48, a curvature bake), ' +
+    'so a value read off a wear reference works on any input. With coverage -1, position sets a value cut instead: the ' +
+    'cut sits at 1 - position (0 = black, 1 = white; 0.5 with contrast 0 = unchanged), so how much turns white depends ' +
+    'on the input. contrast is the hardness of the transition around the cut (1 = hard; softer edges blend around the ' +
+    'same cut). The stat coverage reports the fraction of the result above 0.5. Use on noise or a curvature bake to ' +
+    'grow wear or dirt masks.',
   aliases: ['histogram_scan', 'histogramscan', 'scan'],
   inputs: FILTER_INPUT,
   params: {
-    position: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how much is white (0 = none, 1 = all)' },
+    coverage: { type: 'float', default: -1, min: -1, max: 1, desc: 'fraction of the pixels that turn white (0.3 = the brightest 30 %), from the image\'s own histogram; -1 = use position', aliases: ['white_fraction', 'amount'] },
+    position: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'coverage -1: value cut at 1 - position (higher = more white; how much depends on the input\'s range)' },
     contrast: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'hardness of the transition (1 = hard cut)' },
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
+  outputs: 'the mask (grey) named <name> (default: the node name); stat coverage = its fraction above 0.5',
   example: {
     nodes: {
       n: { type: 'tex_noise', params: { resolution: 256, scale: 4 } },
-      out: { type: 'tex_histogram_scan', in: ['n'], params: { position: 0.4, contrast: 0.8 } },
+      out: { type: 'tex_histogram_scan', in: ['n'], params: { coverage: 0.3, contrast: 0.8 } },
     },
     output: 'out',
   },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const f = histogramScanFn(p.position, p.contrast), g = toGrey(s.data, s.ch);
+    const g = toGrey(s.data, s.ch);
+    const f = p.coverage >= 0 ? histogramScanFn(1 - coverageCut(g, p.coverage, p.contrast), p.contrast) : histogramScanFn(p.position, p.contrast);
     const out = new Float32Array(g.length);
-    for (let i = 0; i < g.length; i++) out[i] = f(g[i]);
-    return withLayer(s, out, p.name);
+    let white = 0;
+    for (let i = 0; i < g.length; i++) { out[i] = f(g[i]); if (out[i] > 0.5) white++; }
+    ctx.stat('coverage', white / Math.max(1, g.length));
+    return withLayer(s, out, outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_normal_from_height',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
-  summary: 'Normal map from a height image (Sobel): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).',
-  description: 'Substance: Normal (from height); Houdini COP: Bump to Normal. strength 1 tilts the normal 45° where the height rises by 1 over 1/64 of the image width (the same look at any resolution). A flat image gives (0.5, 0.5, 1). glTF and Blender use OpenGL; Unreal uses DirectX (or flip green on import).',
+  summary: 'Normal map from a height image (Sobel) in physical units (relief depth and texture size in metres): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).',
+  description:
+    'Substance: Normal (from height); Houdini COP: Bump to Normal. The slope is real: a value of 1 stands `depth` metres ' +
+    'high and the image spans `size` metres on the model, so one texel is size / width metres and the normal tilts by ' +
+    'atan(height step × depth / texel size). The same graph gives the same normals at any resolution, and a value you ' +
+    'can measure picks the strength: 0.0003 for paint and cast grain, 0.002 for hammered metal, 0.01 to 0.02 for brick ' +
+    'and mortar. For bake_height\'s "distance" layer (metres already) use depth 1 and the size the uv square covers. ' +
+    'Steps narrower than a texel (hard pattern edges, thresholds) stay steeper at higher resolutions, as a finer step is ' +
+    'physically steeper; give them a bevel or blur them in uv units. A flat image gives (0.5, 0.5, 1). glTF and Blender ' +
+    'use OpenGL; Unreal uses DirectX (or flip green on import). Combine with another normal map in tex_normal_blend.',
   aliases: ['normal_from_height', 'height_to_normal', 'normal_map', 'bump_to_normal', 'cop_bumptonormal'],
   inputs: FILTER_INPUT,
   params: {
-    strength: { type: 'float', default: 1, desc: 'slope scale (negative inverts the relief)', aliases: ['intensity', 'height_scale'] },
+    depth: { type: 'float', default: 0.01, desc: 'relief: metres a height value of 1 stands above 0 (negative inverts the relief)', aliases: ['height', 'height_scale', 'bump_depth', 'relief'] },
+    size: { type: 'float', default: 1, min: 1e-6, desc: 'metres the image width covers on the model (the texel size is size / width)', aliases: ['texture_size', 'world_size', 'tile_size'] },
     format: { type: 'enum', options: ['opengl', 'directx'], default: 'opengl', desc: 'green channel convention', aliases: ['convention'] },
     tileable: tileParam(),
     image: imageParam(), layer: layerParam(), name: renameParam(),
@@ -757,19 +836,75 @@ defineNode({
   example: {
     nodes: {
       bricks: { type: 'tex_pattern', params: { resolution: 256 } },
-      out: { type: 'tex_normal_from_height', in: ['bricks'], params: { strength: 3, name: 'brick_normal' } },
+      brick_normal: { type: 'tex_normal_from_height', in: ['bricks'], params: { depth: 0.015, size: 1 } },
     },
-    output: 'out',
+    output: 'brick_normal',
   },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    return withLayer(s, normalFromHeight(toGrey(s.data, s.ch), s.img.width, s.img.height, p.strength, p.format === 'directx', !!p.tileable), p.name);
+    return withLayer(s, normalFromHeight(toGrey(s.data, s.ch), s.img.width, s.img.height, p.depth, p.size, p.format === 'directx', !!p.tileable), outName(ctx));
+  },
+});
+
+defineNode({
+  type: 'tex_normal_blend',
+  usesNodeName: NAMED_BY_NODE,
+  category: 'texture',
+  summary: 'Combine two normal maps: a detail (micro grain, a tiling pattern) over a base (a baked normal map), reoriented (RNM) by default, with strength and an optional mask.',
+  description:
+    'Substance: Normal Combine / Normal Blend; Unreal: BlendAngleCorrectedNormals. The detail\'s tilt is scaled by ' +
+    'strength (0 = no detail, 2 = twice as steep), then: rnm (reoriented normal mapping) rotates the detail onto the ' +
+    'base normal, so the baked shapes and the detail both keep their depth; udn adds the detail\'s x and y to the base ' +
+    '(cheaper, flattens strong detail on steep base slopes); linear normalises the sum (softens both, even the base). ' +
+    'The mask (input 2, grey) fades from the base where it is 0 to the blend where it is 1. The detail and mask are ' +
+    'resized to the base; the base\'s alpha is kept. Both maps must use the same green convention (OpenGL or DirectX). ' +
+    'tex_blend overlay is no substitute: it flattens and skews normal maps.',
+  aliases: ['normal_blend', 'blend_normals', 'normal_combine', 'rnm', 'detail_normal', 'combine_normals'],
+  inputs: [
+    { name: 'base', desc: 'base normal map (RGBA; its geometry passes through)' },
+    { name: 'detail', desc: 'detail normal map (RGBA) laid over the base' },
+    { name: 'mask', desc: 'grey mask: where the detail applies (optional)', optional: true },
+  ],
+  params: {
+    mode: { type: 'enum', options: NORMAL_BLEND_MODES, default: 'rnm', desc: 'rnm = reoriented (keeps both reliefs), udn = add x and y (cheaper), linear = normalised sum (softens both)', aliases: ['method', 'blend_mode'] },
+    strength: { type: 'float', default: 1, min: 0, desc: 'detail tilt multiplier (0 = base only, 1 = as baked, 2 = twice as steep)', aliases: ['intensity', 'detail_strength', 'amount'] },
+    image: imageParam('input 0 (the base)'), layer: layerParam(),
+    detail_image: imageParam('input 1 (the detail)', []),
+    detail_layer: { type: 'string', default: '', desc: 'layer of the detail ("" = main)' },
+    mask_image: imageParam('input 2 (the mask)', []),
+    mask_layer: { type: 'string', default: '', desc: 'layer of the mask ("" = main)' },
+    tileable: tileParam('resizing the detail and mask wraps at the borders'),
+    name: renameParam(),
+  },
+  outputs: 'the base image with the combined normal map (RGBA), named <name> (default: the node name)',
+  example: {
+    nodes: {
+      bricks: { type: 'tex_pattern', params: { resolution: 256, count: [4, 8] } },
+      base: { type: 'tex_normal_from_height', in: ['bricks'], params: { depth: 0.015 } },
+      grain: { type: 'tex_noise', params: { resolution: 256, scale: 40, octaves: 3 } },
+      detail: { type: 'tex_normal_from_height', in: ['grain'], params: { depth: 0.0004 } },
+      out: { type: 'tex_normal_blend', in: ['base', 'detail'], params: { mode: 'rnm', strength: 1 } },
+    },
+    output: 'out',
+  },
+  cook: (ctx) => {
+    const { p, type } = ctx;
+    const A = source(ctx, 0, p.image, p.layer);
+    const w = A.img.width, h = A.img.height, wrap = !!p.tileable;
+    const B = sourceAt(ctx, 1, w, h, p.detail_image, p.detail_layer, wrap, 'detail_image');
+    if (!B) throw new NodeError(`${type}: connect a detail normal map to input 1`);
+    const rgba = 'normal maps are RGBA images (tex_normal_from_height, bake_normal, image_file of a normal map)';
+    if (A.ch !== 4) throw new NodeError(`${type}: the base "${A.img.name}" is a grey image, not a normal map`, rgba);
+    if (B.ch !== 4) throw new NodeError(`${type}: the detail on input 1 is a grey image, not a normal map`, `${rgba}; turn a height into one with tex_normal_from_height`);
+    const M = sourceAt(ctx, 2, w, h, p.mask_image, p.mask_layer, wrap, 'mask_image');
+    return withLayer(A, blendNormals(A.data, B.data, M ? toGrey(M.data, M.ch) : null, p.mode, Math.max(0, p.strength)), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_height_to_ao',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Ambient occlusion of a height image (horizon based): white = open, dark in pits, gaps and mortar.',
   description: 'Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `steps` samples up to radius (a fraction of the image width) and keep the highest horizon; depth sets how tall a height of 1 is (in image widths).',
@@ -793,15 +928,16 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    return withLayer(s, heightToAO(toGrey(s.data, s.ch), s.img.width, s.img.height, p.radius, p.depth, p.directions, p.steps, !!p.tileable), p.name);
+    return withLayer(s, heightToAO(toGrey(s.data, s.ch), s.img.width, s.img.height, p.radius, p.depth, p.directions, p.steps, !!p.tileable), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_channel',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Pack grey images into the R, G, B, A channels of one RGBA image (e.g. ORM for glTF/Unreal: occlusion, roughness, metallic), or extract one channel as grey.',
-  description: 'Substance: RGBA Merge / RGBA Split / Channel Shuffle; Houdini COP: Channel Copy. pack: inputs 0..3 fill R, G, B, A (their luminance); unconnected channels take fill (default [1, 0.5, 0, 1]: occlusion 1, roughness 0.5, metallic 0, alpha 1, the ORM convention of glTF and Unreal). The size is the first connected input\'s; others are resized. extract: one channel of input 0 as a grey image (keeps the input, replacing the layer).',
+  description: 'Substance: RGBA Merge / RGBA Split / Channel Shuffle; Houdini COP: Channel Copy. pack: inputs 0..3 fill R, G, B, A (their luminance; each input holds one image); unconnected channels take fill (default [1, 0.5, 0, 1]: occlusion 1, roughness 0.5, metallic 0, alpha 1, the ORM convention of glTF and Unreal). The size is the first connected input\'s; others are resized. extract: one channel of an image of input 0 as a grey image (keeps the input, replacing the layer).',
   aliases: ['channel_pack', 'pack_channels', 'rgba_merge', 'rgba_split', 'channel_shuffle', 'orm_pack', 'cop_channelcopy'],
   inputs: [
     { name: 'r', desc: 'red source (pack) or the image to split (extract)', optional: true },
@@ -813,31 +949,32 @@ defineNode({
     mode: { type: 'enum', options: ['pack', 'extract'], default: 'pack', desc: 'pack inputs into RGBA, or extract a channel of input 0' },
     channel: { type: 'enum', options: ['r', 'g', 'b', 'a', 'luminance'], default: 'r', desc: 'extract: which channel' },
     fill: { type: 'vec4', default: [1, 0.5, 0, 1], desc: 'pack: values of unconnected channels' },
-    name: nameParam('', 'pack: the new image\'s name ("" = "packed"); extract: rename the result ("" = keep)'),
+    image: imageParam('input 0 (extract)'),
+    name: nameParam('pack: the new image\'s name, extract: the result\'s ("" = this node\'s name)'),
   },
-  outputs: 'pack: a new RGBA image <name> (default "packed"); extract: input 0 with the channel as its layer',
+  outputs: 'pack: a new RGBA image <name> (default: the node name); extract: input 0 with the channel as its layer, renamed <name>',
   example: {
     nodes: {
       ao: { type: 'tex_noise', params: { resolution: 256, scale: 3 } },
       rough: { type: 'tex_cells', params: { resolution: 256 } },
-      orm: { type: 'tex_channel', in: ['ao', 'rough'], params: { name: 'orm', fill: [1, 0.5, 0, 1] } },
+      orm: { type: 'tex_channel', in: ['ao', 'rough'], params: { fill: [1, 0.5, 0, 1] } },
     },
     output: 'orm',
   },
   cook: (ctx) => {
     const { p, type } = ctx;
     if (p.mode === 'extract') {
-      const s = source(ctx, 0);
+      const s = source(ctx, 0, p.image);
       const k = ['r', 'g', 'b', 'a'].indexOf(p.channel);
       const n = s.img.count, out = new Float32Array(n);
       if (s.ch === 1) out.set(p.channel === 'a' ? new Float32Array(n).fill(1) : s.data);
       else if (k < 0) out.set(toGrey(s.data, 4));
       else for (let i = 0; i < n; i++) out[i] = s.data[i * 4 + k];
-      return withLayer(s, out, p.name);
+      return withLayer(s, out, outName(ctx));
     }
     const first = [0, 1, 2, 3].find((i) => ctx.hasInput(i));
     if (first === undefined) throw new NodeError(`${type}: connect at least one input (R, G, B or A)`);
-    const ref = source(ctx, first);
+    const ref = source(ctx, first, '', '', '');
     const w = ref.img.width, h = ref.img.height, n = w * h;
     const out = new Float32Array(n * 4);
     for (let c = 0; c < 4; c++) {
@@ -845,12 +982,13 @@ defineNode({
       const g = s ? toGrey(s.data, s.ch) : null;
       for (let i = 0; i < n; i++) out[i * 4 + c] = g ? g[i] : p.fill[c];
     }
-    return imageGeo(new Image(w, h, imgName(p, 'packed')).set(MAIN_LAYER, out));
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, out));
   },
 });
 
 defineNode({
   type: 'tex_colorize',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Colorize: map a grey image through a colour ramp (gradient map) into RGBA.',
   description: 'Substance: Gradient Map; Houdini COP: Ramp lookup. ramp keys [[pos, colour], …] with colours as [r, g, b] or "#hex"; the image holds those numbers as they are, so a "#a5462e" key comes out of the PNG as #a5462e. RGBA input uses its luminance.',
@@ -865,12 +1003,13 @@ defineNode({
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
     const { lut, ch } = rampLUT((t) => evalRamp(p.ramp, t));
-    return withLayer(s, colorize(toGrey(s.data, s.ch), lut, ch), p.name);
+    return withLayer(s, colorize(toGrey(s.data, s.ch), lut, ch), outName(ctx));
   },
 });
 
 defineNode({
   type: 'tex_tile_sampler',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Tile sampler: scatter an image (a shape, a brick, a pebble) N × M times with random offset, rotation, scale and intensity; optional mask.',
   description: 'Substance: Tile Sampler / Splatter Circular. One instance per grid cell: position jitter (fraction of a cell), rotation ± degrees, scale range relative to a cell, intensity range; with a mask (input 1), a cell keeps its instance with probability mask(cell centre). Instances wrap at the borders (tileable) and combine with max or add. Output grey (the source\'s luminance).',
@@ -889,10 +1028,11 @@ defineNode({
     intensity: { type: 'vec2', default: [0.6, 1], min: 0, desc: 'intensity range per instance', aliases: ['luminance_random'] },
     combine: { type: 'enum', options: ['max', 'add'], default: 'max', desc: 'how overlapping instances combine', aliases: ['blend'] },
     seed: P.seed(),
-    image: imageParam(), layer: layerParam(),
-    name: nameParam('tiles'),
+    image: imageParam('input 0 (the pattern)'), layer: layerParam(),
+    mask_image: imageParam('input 1 (the mask)', []),
+    name: nameParam(),
   },
-  outputs: 'a new image <name>: C grey',
+  outputs: 'a new image <name> (default: the node name): C grey',
   example: {
     nodes: {
       stamp: { type: 'tex_shape', params: { resolution: 128, shape: 'disc', falloff: 0.6 } },
@@ -904,12 +1044,12 @@ defineNode({
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
     const s = source(ctx, 0, p.image, p.layer);
-    const m = sourceAt(ctx, 1, w, h);
+    const m = sourceAt(ctx, 1, w, h, p.mask_image, '', true, 'mask_image');
     const C = tileSampler(toGrey(s.data, s.ch), s.img.width, s.img.height, w, h, {
       count: [p.count[0], p.count[1]], scale: [p.scale[0], p.scale[1]], rotation: p.rotation, jitter: p.jitter, offset: p.offset,
       intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, add: p.combine === 'add',
     }, m ? toGrey(m.data, m.ch) : null);
-    return imageGeo(new Image(w, h, imgName(p, 'tiles')).set(MAIN_LAYER, C));
+    return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C));
   },
 });
 
@@ -917,28 +1057,29 @@ defineNode({
 
 defineNode({
   type: 'tex_output',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Name an image (rename), or copy one of its layers out as a new image (e.g. the "id" layer of a pattern).',
-  description: 'Substance: Output node; Houdini COP: Null / Output. With layer "" the image is renamed to `name`; with a layer, a new image `name` holds that layer as C and the original stays. An image already called `name` is replaced. keep_only drops every other image (and the mesh) from the output.',
+  description: 'Substance: Output node; Houdini COP: Null / Output. With layer "" the image is renamed to `name` (default: this node\'s name); with a layer, a new image `name` holds that layer as C and the original stays. An image already called `name` is replaced. keep_only drops every other image (and the mesh) from the output: the way to isolate one image of a stack.',
   aliases: ['texture_output', 'rename_image', 'image_output', 'cop_null'],
   inputs: FILTER_INPUT,
   params: {
-    name: { type: 'string', default: 'image', desc: 'the image name (materials reference it as "image:<name>")', aliases: ['image_name', 'output_name'] },
+    name: nameParam(),
     image: imageParam(),
     layer: { type: 'string', default: '', desc: 'copy this layer out as a new image ("" = rename the whole image)' },
     keep_only: { type: 'bool', default: false, desc: 'output only this image' },
   },
+  outputs: 'the image renamed <name> (default: the node name), or with layer set a new image <name> holding that layer',
   example: {
     nodes: {
       bricks: { type: 'tex_pattern', params: { resolution: 256 } },
-      out: { type: 'tex_output', in: ['bricks'], params: { name: 'brick_id', layer: 'id' } },
+      brick_id: { type: 'tex_output', in: ['bricks'], params: { layer: 'id' } },
     },
-    output: 'out',
+    output: 'brick_id',
   },
   cook: (ctx) => {
-    const { p, type } = ctx;
-    const name = String(p.name ?? '').trim();
-    if (!name) throw new NodeError(`${type}: name is empty`);
+    const { p } = ctx;
+    const name = outName(ctx);
     const s = source(ctx, 0, p.image, p.layer);
     let img: Image;
     const g = s.g.clone();
@@ -965,7 +1106,8 @@ defineNode({
   summary: 'Attach images as texture maps (base colour, normal, roughness, ORM) to a named material and assign it; the images travel with the geometry and exporters embed them.',
   description:
     'Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image ' +
-    'of input 1 (or input 0); it is copied into the output and the material table entry gets "image:<name>" in that slot. ' +
+    'of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the ' +
+    'material table entry gets "image:<name>" in that slot (two different images under the named one are an error). ' +
     'orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the ' +
     'metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given ' +
     'separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and ' +
@@ -995,10 +1137,10 @@ defineNode({
     nodes: {
       box: { type: 'box' },
       uv: { type: 'uv_project', in: ['box'], params: { method: 'box' } },
-      bricks: { type: 'tex_pattern', params: { resolution: 256, name: 'brick_height' } },
-      color: { type: 'tex_colorize', in: ['bricks'], params: { ramp: [[0, '#6b6b66'], [0.5, '#7a3424'], [1, '#a5462e']], name: 'brick_color' } },
-      nrm: { type: 'tex_normal_from_height', in: ['bricks'], params: { strength: 2, name: 'brick_normal' } },
-      maps: { type: 'merge', in: ['color', 'nrm'] },
+      bricks: { type: 'tex_pattern', params: { resolution: 256 } },
+      brick_color: { type: 'tex_colorize', in: ['bricks'], params: { ramp: [[0, '#6b6b66'], [0.5, '#7a3424'], [1, '#a5462e']] } },
+      brick_normal: { type: 'tex_normal_from_height', in: ['bricks'], params: { depth: 0.02 } },
+      maps: { type: 'merge', in: ['brick_color', 'brick_normal'] },
       out: { type: 'texture_to_material', in: ['uv', 'maps'], params: { material: 'brick', base_color: 'brick_color', normal: 'brick_normal' } },
     },
     output: 'out',
@@ -1008,14 +1150,21 @@ defineNode({
     const mat = String(p.material ?? '').trim();
     if (!mat) throw new NodeError(`${type}: material name is empty`);
     const g = ctx.input(0).clone();
-    const pool = new Map<string, Image>();
-    for (const im of imagesOf(ctx.input(0))) if (!pool.has(im.name)) pool.set(im.name, im);
-    if (ctx.hasInput(1)) for (const im of imagesOf(ctx.input(1))) if (!pool.has(im.name)) pool.set(im.name, im);
+    // images by name; two different images under one name are ambiguous (reported when a slot names them)
+    const pool = new Map<string, Image>(), clash = new Set<string>();
+    const add = (im: Image) => {
+      const had = pool.get(im.name);
+      if (!had) pool.set(im.name, im);
+      else if (!sameImage(had, im)) clash.add(im.name);
+    };
+    for (const im of imagesOf(ctx.input(0))) add(im);
+    if (ctx.hasInput(1)) for (const im of imagesOf(ctx.input(1))) add(im);
     const need = (param: string): Image | null => {
       const n = String(p[param] ?? '').trim().replace(/^image:/, '');
       if (!n) return null;
       const im = pool.get(n);
       if (!im) throw new NodeError(`${type}: no image "${n}" for ${param}`, pool.size ? `images: ${[...pool.keys()].join(', ')}` : NO_IMAGE);
+      if (clash.has(n)) throw new NodeError(`${type}: ${param}: the inputs hold different images named "${n}"`, 'give them different names (an image takes the name of the node that made it unless its name param is set; tex_output renames one)');
       return im;
     };
     const table = readMaterials(g);
@@ -1111,6 +1260,7 @@ defineNode({
 
 defineNode({
   type: 'heightfield_to_tex',
+  usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Bridge: a heightfield layer becomes a grey image of the same sample count (input_min..input_max fitted to 0..1 by default).',
   description: 'Sample (i, j) → pixel (i, j) (the −Z row at the top). normalize fits input_min..input_max to 0..1 (absolute, so every tile of a map gets the same grey for the same height; values outside the range fall outside 0..1); auto_range fits the layer\'s own min..max instead, which depend on the field\'s extent; off writes raw values. The range used is recorded as the stats range_min / range_max. Feed tex_normal_from_height or tex_height_to_ao for terrain maps, or bake terrain masks into textures.',
@@ -1123,16 +1273,16 @@ defineNode({
     input_max: { type: 'float', default: 1, desc: 'layer value that becomes 1' },
     auto_range: { type: 'bool', default: false, desc: 'use the layer\'s own min..max as the input range instead (depends on the field\'s extent)' },
     keep: { type: 'bool', default: false, desc: 'keep the input (heightfield and all) and add the image; off outputs only the image' },
-    name: nameParam('', 'image name ("" = the layer name)'),
+    name: nameParam(),
   },
-  outputs: 'image <name> (default: the layer name): C grey',
+  outputs: 'image <name> (default: the node name): C grey',
   example: {
     nodes: {
       hf: { type: 'heightfield' },
       hills: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 3 } },
-      out: { type: 'heightfield_to_tex', in: ['hills'], params: { name: 'height', input_min: -3, input_max: 3 } },
+      height: { type: 'heightfield_to_tex', in: ['hills'], params: { input_min: -3, input_max: 3 } },
     },
-    output: 'out',
+    output: 'height',
   },
   cook: (ctx) => {
     const { p, type } = ctx;
@@ -1149,7 +1299,7 @@ defineNode({
     const out = new Float32Array(a.length);
     const span = hi - lo;
     for (let k = 0; k < a.length; k++) out[k] = p.normalize ? (span !== 0 ? (a[k] - lo) / span : 0) : a[k];
-    const img = new Image(hf.width, hf.height, imgName(p, p.layer)).set(MAIN_LAYER, out);
+    const img = new Image(hf.width, hf.height, outName(ctx)).set(MAIN_LAYER, out);
     if (p.normalize) { ctx.stat('range_min', lo); ctx.stat('range_max', hi); }
     if (!p.keep) return imageGeo(img);
     const g = ctx.input(0).clone();

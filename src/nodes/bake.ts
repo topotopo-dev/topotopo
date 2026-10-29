@@ -20,21 +20,21 @@ import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { andThen } from '../graph/parallel.ts';
 import { P, mask } from './util.ts';
-import { imageGeo, nameParam, resolutionParam, size2 } from './texture.ts';
+import { NAMED_BY_NODE, imageGeo, nameParam, outName, resolutionParam, size2 } from './texture.ts';
 
 /** Most samples a bake may rasterise (output texels × supersample²): 4096², about 1 GB of per-sample arrays at full coverage. */
 const MAX_SAMPLES = 4096 * 4096;
 
 // ---------------------------------------------------------------- shared params
 
-const BAKE_PARAMS = (name: string): Record<string, ParamDef> => ({
+const BAKE_PARAMS = (): Record<string, ParamDef> => ({
   resolution: resolutionParam(1024),
   supersample: { type: 'int', default: 1, min: 1, max: 4, desc: 'samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work)', aliases: ['ssaa', 'antialiasing', 'subsampling'] },
   padding: { type: 'int', default: 4, min: 0, max: 256, desc: 'dilate islands by this many texels (no background bleeding in mipmaps)', aliases: ['dilation', 'margin', 'edge_padding'] },
   uv_attrib: { type: 'string', default: 'uv', desc: 'vertex or point uv attribute to bake into', aliases: ['uv_name', 'uvattrib'] },
   group: P.group('prim', 'prims to bake ("" = all); the others leave their texels empty'),
   keep_mesh: { type: 'bool', default: false, desc: 'output the input mesh with the image added (off: only the image)', aliases: ['keep_input', 'keep'] },
-  name: nameParam(name),
+  name: nameParam(),
 });
 
 const INPUTS = [
@@ -104,8 +104,7 @@ function setup(ctx: CookContext): Bake {
 function finish(b: Bake, vals: ArrayLike<number>, ch: number, background: number[], extra: Record<string, { vals: ArrayLike<number>; ch: number; background: number[] }> = {}): Geometry {
   const { ctx, s } = b, p = ctx.p;
   const { data, coverage } = resolve(s, vals, ch);
-  const name = String(p.name ?? '').trim() || ctx.type.replace(/^bake_/, '');
-  const img = new Image(s.W, s.H, name);
+  const img = new Image(s.W, s.H, outName(ctx));
   const pad = Math.max(0, Math.round(p.padding));
   dilate(data, ch, s.W, s.H, coverage, pad, background);
   img.set(MAIN_LAYER, data);
@@ -197,7 +196,7 @@ function onHigh(b: Bake, high: Geometry) {
 }
 
 function defineBake(def: Omit<NodeDef, 'category' | 'inputs'> & { inputs?: NodeDef['inputs'] }) {
-  defineNode({ category: 'texture', inputs: INPUTS, ...def } as NodeDef);
+  defineNode({ category: 'texture', inputs: INPUTS, usesNodeName: NAMED_BY_NODE, ...def } as NodeDef);
 }
 
 const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. ';
@@ -245,12 +244,12 @@ defineBake({
     'that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.',
   aliases: ['ao_bake', 'bake_ambient_occlusion', 'bake_occlusion'],
   params: {
-    ...BAKE_PARAMS('ao'),
+    ...BAKE_PARAMS(),
     ...RAY_PARAMS,
     max_distance: { type: 'float', default: 0, min: 0, desc: 'hits farther than this do not occlude (metres; 0 = unlimited)', aliases: ['max_occluder_distance', 'distance', 'radius'] },
     cone_angle: { type: 'float', default: 0, min: 0, max: 90, desc: 'half-angle of the ray cone in degrees (0 = auto: 90, the hemisphere)', aliases: ['spread', 'angle'] },
   },
-  outputs: 'image <name> (default "ao"): C grey 0..1 (1 = open), mask',
+  outputs: 'image <name> (default: the node name): C grey 0..1 (1 = open), mask',
   example: {
     nodes: {
       crate: { type: 'topotopo/props/crate' },
@@ -271,12 +270,12 @@ defineBake({
     '(translucency, subsurface masks).',
   aliases: ['thickness_bake', 'bake_thick'],
   params: {
-    ...BAKE_PARAMS('thickness'),
+    ...BAKE_PARAMS(),
     ...RAY_PARAMS,
     max_distance: { type: 'float', default: 0, min: 0, desc: 'thickness that maps to 1 (metres; 0 = auto: 25% of the bbox diagonal)', aliases: ['distance', 'radius'] },
     cone_angle: { type: 'float', default: 0, min: 0, max: 90, desc: 'half-angle of the ray cone in degrees (0 = auto: 30)', aliases: ['spread', 'angle'] },
   },
-  outputs: 'image <name> (default "thickness"): C grey 0..1, mask',
+  outputs: 'image <name> (default: the node name): C grey 0..1, mask',
   example: {
     nodes: {
       ring: { type: 'torus' },
@@ -302,13 +301,13 @@ defineBake({
     'tex_levels on "convex" make an edge-wear mask.',
   aliases: ['curvature_bake', 'bake_edges', 'edge_wear_bake'],
   params: {
-    ...BAKE_PARAMS('curvature'),
+    ...BAKE_PARAMS(),
     radius: { type: 'float', default: 0, min: 0, desc: 'how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal)', aliases: ['width', 'edge_width', 'distance'] },
     strength: { type: 'float', default: 1, min: 0, desc: 'contrast multiplier', aliases: ['intensity', 'contrast'] },
     min_angle: { type: 'float', default: 0.5, min: 0, max: 179, desc: 'edges bending less than this (degrees) are ignored' },
     cage: cageParam(), cage_normals: cageNormalsParam(),
   },
-  outputs: 'image <name> (default "curvature"): C grey (0.5 = flat), convex, concave, mask',
+  outputs: 'image <name> (default: the node name): C grey (0.5 = flat), convex, concave, mask',
   example: {
     nodes: {
       box: { type: 'box' },
@@ -360,10 +359,10 @@ defineBake({
   aliases: ['position_bake', 'bake_world_position'],
   inputs: [INPUTS[0]],
   params: {
-    ...BAKE_PARAMS('position'),
+    ...BAKE_PARAMS(),
     mode: { type: 'enum', options: ['bbox', 'uniform', 'world'], default: 'bbox', desc: 'how positions map to colour', aliases: ['normalize'] },
   },
-  outputs: 'image <name> (default "position"): C RGBA, mask',
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       crate: { type: 'topotopo/props/crate' },
@@ -394,8 +393,8 @@ defineBake({
   summary: 'Bake world-space normals into uv space as RGB (0.5 + 0.5 n): the mesh\'s own, or the high-res input\'s along the cage.',
   description: 'Substance Painter "World Space Normal". ' + BAKE_DOC + 'Without input 1 the mesh\'s interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.',
   aliases: ['world_normal_bake', 'bake_worldspace_normal'],
-  params: { ...BAKE_PARAMS('world_normal'), cage: cageParam(), cage_normals: cageNormalsParam() },
-  outputs: 'image <name> (default "world_normal"): C RGBA, mask',
+  params: { ...BAKE_PARAMS(), cage: cageParam(), cage_normals: cageNormalsParam() },
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       ball: { type: 'sphere', params: { rows: 8, cols: 16 } },
@@ -429,11 +428,11 @@ defineBake({
     'read OpenGL; Unreal DirectX (or flip green on import).',
   aliases: ['normal_bake', 'bake_tangent_normal', 'bake_normal_map'],
   params: {
-    ...BAKE_PARAMS('normal'),
+    ...BAKE_PARAMS(),
     cage: cageParam(), cage_normals: cageNormalsParam(),
     format: { type: 'enum', options: ['opengl', 'directx'], default: 'opengl', desc: 'green channel convention', aliases: ['convention'] },
   },
-  outputs: 'image <name> (default "normal"): C RGBA, mask',
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       low: { type: 'box', params: { divisions: [2, 2, 2] } },
@@ -490,11 +489,11 @@ defineBake({
     'or use it as displacement.',
   aliases: ['height_bake', 'bake_displacement', 'displacement_bake'],
   params: {
-    ...BAKE_PARAMS('height'),
+    ...BAKE_PARAMS(),
     cage: cageParam(), cage_normals: cageNormalsParam(),
     mode: { type: 'enum', options: ['cage', 'normalize'], default: 'cage', desc: 'how distances map to 0..1', aliases: ['range'] },
   },
-  outputs: 'image <name> (default "height"): C grey 0..1, distance (metres), mask',
+  outputs: 'image <name> (default: the node name): C grey 0..1, distance (metres), mask',
   example: {
     nodes: {
       low: { type: 'box', params: { divisions: [2, 2, 2] } },
@@ -535,8 +534,8 @@ defineBake({
   description: 'Substance Painter "ID" (by uv island). ' + BAKE_DOC + 'Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).',
   aliases: ['island_id_bake', 'bake_id', 'id_bake', 'bake_uv_islands'],
   inputs: [INPUTS[0]],
-  params: { ...BAKE_PARAMS('island_id'), seed: P.seed() },
-  outputs: 'image <name> (default "island_id"): C RGBA, id (island number), mask',
+  params: { ...BAKE_PARAMS(), seed: P.seed() },
+  outputs: 'image <name> (default: the node name): C RGBA, id (island number), mask',
   example: {
     nodes: {
       crate: { type: 'topotopo/props/crate' },
@@ -573,12 +572,12 @@ defineBake({
   aliases: ['mask_bake', 'bake_group', 'bake_attribute', 'attribute_bake'],
   inputs: [INPUTS[0]],
   params: {
-    ...BAKE_PARAMS('mask'),
+    ...BAKE_PARAMS(),
     mask_group: { type: 'group', default: '', groupClass: 'prim', desc: 'prims that read 1 (e.g. "planks", "@P.y>0.5")', aliases: ['from_group', 'mask_prims'] },
     attrib: { type: 'string', default: '', desc: 'numeric attribute to bake when mask_group is empty', aliases: ['attribute', 'from_attrib'] },
     component: { type: 'int', default: 0, min: -1, max: 15, desc: 'vector component of attrib (-1 = luminance of the first three)' },
   },
-  outputs: 'image <name> (default "mask"): C grey, mask',
+  outputs: 'image <name> (default: the node name): C grey, mask',
   example: {
     nodes: {
       box: { type: 'box' },
@@ -614,11 +613,11 @@ defineBake({
   aliases: ['vertex_color_bake', 'bake_color', 'bake_cd', 'color_bake'],
   inputs: [INPUTS[0]],
   params: {
-    ...BAKE_PARAMS('vertex_color'),
+    ...BAKE_PARAMS(),
     attrib: { type: 'string', default: 'Cd', desc: 'colour attribute', aliases: ['attribute', 'color_attrib'] },
     alpha_attrib: { type: 'string', default: 'Alpha', desc: 'alpha attribute (missing = 1)' },
   },
-  outputs: 'image <name> (default "vertex_color"): C RGBA, mask',
+  outputs: 'image <name> (default: the node name): C RGBA, mask',
   example: {
     nodes: {
       ball: { type: 'sphere', params: { rows: 12, cols: 24 } },

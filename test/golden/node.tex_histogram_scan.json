@@ -37,9 +37,9 @@
         },
         "kind": "image",
         "layers": {
-          "C": "604e17182f2570a2"
+          "C": "3d6bf1cc6ec22856"
         },
-        "name": "noise"
+        "name": "target"
       }
     ]
   },

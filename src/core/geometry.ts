@@ -477,6 +477,38 @@ export function cloneVolumes(vs: Volume[]): Volume[] {
   return vs.map((v) => (v.kind === 'heightfield' || v.kind === 'image' || v.kind === 'grid' ? v.clone() : v));
 }
 
+/** Two images with the same name, size and layers, every layer equal value for value (shared arrays compare at once). */
+export function sameImage(a: ImageVolume, b: ImageVolume): boolean {
+  if (a === b) return true;
+  if (a.name !== b.name || a.width !== b.width || a.height !== b.height || a.layers.size !== b.layers.size) return false;
+  for (const [k, x] of a.layers) {
+    const y = b.layers.get(k);
+    if (!y || y.length !== x.length) return false;
+    if (y === x) continue;
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i] && !(x[i] !== x[i] && y[i] !== y[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * Volumes of merged inputs with repeated images dropped: an image equal to an earlier one (sameImage: the same name and
+ * pixels, as when textured LOD branches each carry the material's maps) is kept once. Same-named images that differ
+ * all stay (texture nodes then ask which one to use).
+ */
+function mergeVolumes(vs: Volume[]): Volume[] {
+  const out: Volume[] = [];
+  const images = new Map<string, ImageVolume[]>();
+  for (const v of vs) {
+    if (v.kind === 'image') {
+      const seen = images.get(v.name);
+      if (seen?.some((s) => sameImage(s, v))) continue;
+      if (seen) seen.push(v); else images.set(v.name, [v]);
+    }
+    out.push(v);
+  }
+  return cloneVolumes(out);
+}
+
 export interface GeoInit {
   positions?: ArrayLike<number>;
   prims?: ArrayLike<number>[];
@@ -948,7 +980,7 @@ export class Geometry {
    * Concatenate geometries. Attributes are unioned; missing values take attribute defaults.
    * Display attributes (Cd, Alpha, N, uv) that live on different classes in different inputs
    * are promoted to vertex attributes first, so every input keeps its look (a point Cd from one
-   * input never masks a prim Cd from another).
+   * input never masks a prim Cd from another). An image that several inputs carry (same name and pixels) is kept once.
    */
   static merge(geos: Geometry[]): Geometry {
     geos = geos.filter(Boolean);
@@ -980,7 +1012,7 @@ export class Geometry {
     out.primGroups = mergeGroups(geos.map((g) => [g.primGroups, g.numPrims] as const), nprim);
     out.vertexGroups = mergeGroups(geos.map((g) => [g.vertexGroups, g.numVertices] as const), nv);
     out.edgeGroups = mergeEdgeGroups(geos.map((g) => [g.edgeGroups, g.numPoints] as const));
-    out.volumes = cloneVolumes(geos.flatMap((g) => g.volumes));
+    out.volumes = mergeVolumes(geos.flatMap((g) => g.volumes));
     if (geos.some((g) => g.primKind)) mergePacked(out, geos);
     return out;
   }

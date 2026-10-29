@@ -201,7 +201,7 @@ section('filters: blend modes, levels, blur, normals');
   check(rgba.ch === 4 && Math.abs(rgba.data[0] - 0.75) < 1e-6 && rgba.data[3] === 1, 'grey + RGBA → RGBA, the foreground alpha weights the mix, alpha stays the background\'s');
   // node level: blend with a mask input, the result resized to the background
   const nb = await image({ a: { type: 'tex_gradient', params: { resolution: 32 } }, b: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, out: { type: 'tex_blend', in: ['a', 'b'], params: { mode: 'multiply' } } }, 'out');
-  check(nb.width === 32 && nb.name === 'gradient', 'tex_blend: the result keeps the background size and name');
+  check(nb.width === 32 && nb.name === 'out', 'tex_blend: the result keeps the background size and is named after the node');
 
   const noise = { n: { type: 'tex_noise', params: { resolution: 128, seed: 9 } } };
   const src = (await image(noise)).layer('C')!;
@@ -230,11 +230,30 @@ section('filters: blend modes, levels, blur, normals');
   const px = (img: Image, c: number) => img.layer('C')![(32 * 64 + 32) * 4 + c];
   check(px(rampU, 0) < 0.499 && Math.abs(px(rampU, 1) - 0.5) < 1e-6, 'height rising along +u tilts the normal to −u (red < 0.5)');
   check(px(rampV, 1) < 0.499 && px(rampVdx, 1) > 0.501 && Math.abs(px(rampV, 0) - 0.5) < 1e-6, 'height rising along +v: green < 0.5 in OpenGL, > 0.5 in DirectX');
-  // strength 1 is 45° for a rise of 1 over 1/64 of the width, at any resolution
+  // physical units: a ramp of 0..1 across an image 0.1 m wide, at depth 0.1 m, rises 0.1 m over 0.1 m: 45° at any
+  // resolution; depth 0.05 m gives atan(0.5)
   for (const res of [64, 256]) {
-    const steep = await image({ g: { type: 'tex_gradient', params: { resolution: res } }, s: { type: 'tex_levels', in: ['g'], params: { out_high: 64, clamp: false } }, nm: { type: 'tex_normal_from_height', in: ['s'], params: { tileable: false } } }, 'nm');
-    const r = steep.layer('C')![((res / 2) * res + res / 2) * 4];
-    check(Math.abs(r - (0.5 - 0.5 * Math.SQRT1_2)) < 0.01, `strength 1: slope 1 per 1/64 width → 45° at ${res}² (red ${f3(r)})`);
+    const nm = (depth: number) => image({ g: { type: 'tex_gradient', params: { resolution: res } }, nm: { type: 'tex_normal_from_height', in: ['g'], params: { tileable: false, depth, size: 0.1 } } }, 'nm');
+    const r = (await nm(0.1)).layer('C')![((res / 2) * res + res / 2) * 4], h = (await nm(0.05)).layer('C')![((res / 2) * res + res / 2) * 4];
+    const tilt = (x: number) => 0.5 - 0.5 * Math.sin(Math.atan(x));
+    check(Math.abs(r - tilt(1)) < 0.01 && Math.abs(h - tilt(0.5)) < 0.01, `depth / texel size: 0.1 m over 0.1 m → 45°, 0.05 m → 26.6° at ${res}² (red ${f3(r)}, ${f3(h)})`);
+  }
+  // tex_normal_blend: rnm keeps both reliefs; a flat detail (or strength 0, or a black mask) returns the base
+  {
+    const base = { g: { type: 'tex_gradient', params: { resolution: 32 } }, bn: { type: 'tex_normal_from_height', in: ['g'], params: { tileable: false, depth: 0.5, size: 1 } } };
+    const detailV = { d: { type: 'tex_gradient', params: { resolution: 32, angle: 90 } }, dn: { type: 'tex_normal_from_height', in: ['d'], params: { tileable: false, depth: 0.5, size: 1 } } };
+    const flatD = { f: { type: 'tex_levels', in: ['d'], params: { out_low: 0.5, out_high: 0.5 } }, fn: { type: 'tex_normal_from_height', in: ['f'] } };
+    const B = (await image({ ...base }, 'bn')).layer('C')!;
+    const blend = async (params: Record<string, any>, detail = 'dn', extra: Record<string, NodeSpec> = {}) => (await image({ ...base, ...detailV, ...flatD, ...extra, out: { type: 'tex_normal_blend', in: ['bn', detail, ...(extra.m ? ['m'] : [])], params } }, 'out'));
+    const rnm = await blend({}), at = (img: Image, c: number) => img.layer('C')![(16 * 32 + 16) * 4 + c];
+    check(rnm.name === 'out' && at(rnm, 0) < 0.45 && at(rnm, 1) < 0.45, `rnm: the base's tilt along u and the detail's along v both stay (${f3(at(rnm, 0))}, ${f3(at(rnm, 1))})`);
+    check(maxDiff((await blend({}, 'fn')).layer('C')!, B) < 1e-5 && maxDiff((await blend({ strength: 0 })).layer('C')!, B) < 1e-5, 'rnm: a flat detail and strength 0 return the base');
+    check(maxDiff((await blend({}, 'dn', { m: { type: 'tex_levels', in: ['g'], params: { out_low: 0, out_high: 0 } } })).layer('C')!, B) < 1e-5, 'a black mask keeps the base');
+    const udn = await blend({ mode: 'udn' }), lin = await blend({ mode: 'linear' });
+    check(at(udn, 2) > at(rnm, 2) - 0.2 && Math.abs(at(lin, 0) - at(rnm, 0)) > 0.01, 'udn and linear modes differ from rnm');
+    const strong = await blend({ strength: 2 });
+    check(at(strong, 1) < at(rnm, 1) - 0.01, 'strength 2 tilts the detail further');
+    check((await cookErr({ ...base, out: { type: 'tex_normal_blend', in: ['g', 'bn'] } }, 'out')).includes('not a normal map'), 'a grey base is an error naming normal maps');
   }
   const ed = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, e: { type: 'tex_edge_detect', in: ['p'] } }, 'e');
   check(Math.abs(ed.layer('C')![10 * 64 + 31] - 1) < 0.05 && ed.layer('C')![10 * 64 + 10] === 0, 'tex_edge_detect: about 1 on a 0 → 1 step, 0 on flat areas');
@@ -252,11 +271,50 @@ section('filters: blend modes, levels, blur, normals');
   const ts = await image({ s: { type: 'tex_shape', params: { resolution: 32, falloff: 0.5 } }, t: { type: 'tex_tile_sampler', in: ['s'], params: { resolution: 64, count: [4, 4] } } }, 't');
   check(mean(ts.layer('C')!) > 0.05, 'tex_tile_sampler stamps the source');
   const out = await geo({ p: { type: 'tex_pattern', params: { resolution: 16 } }, o: { type: 'tex_output', in: ['p'], params: { name: 'brick_ids', layer: 'id' } } }, 'o');
-  check(imagesOf(out).map((i) => i.name).join(',') === 'pattern,brick_ids', 'tex_output with a layer adds it as a new image');
+  check(imagesOf(out).map((i) => i.name).join(',') === 'p,brick_ids', 'tex_output with a layer adds it as a new image');
   check((await cookErr({ b: { type: 'box' }, l: { type: 'tex_levels', in: ['b'] } }, 'l')).includes('has no image'), 'a filter on a mesh fails with a hint');
   const hf = await geo({ n: { type: 'tex_noise', params: { resolution: 33 } }, h: { type: 'tex_to_heightfield', in: ['n'], params: { size: 4, height_scale: 2 } }, t: { type: 'heightfield_to_tex', in: ['h'], params: { normalize: false } } }, 't');
   const back = findImage(hf)!, srcN = (await image({ n: { type: 'tex_noise', params: { resolution: 33 } } })).layer('C')!;
   check(back.width === 33 && maxDiff(back.layer('C')!, srcN.map((x) => x * 2)) < 1e-5, 'tex_to_heightfield → heightfield_to_tex round trip (height = value × scale)');
+}
+
+// ---------------------------------------------------------------- names and coverage
+
+section('names: images take their node\'s name; several images need a choice; histogram coverage');
+{
+  // two identical generators under different names: their own names, no shared cache entry, no collision
+  const two = await geo({ rust: { type: 'tex_noise', params: { resolution: 16 } }, dirt: { type: 'tex_noise', params: { resolution: 16 } }, m: { type: 'merge', in: ['rust', 'dirt'] } }, 'm');
+  check(imagesOf(two).map((i) => i.name).join() === 'rust,dirt', 'default image names are the node names (identical nodes keep their own)');
+  const named = await geo({ a: { type: 'tex_noise', params: { resolution: 16, name: 'grain' } }, l: { type: 'tex_levels', in: ['a'], params: { name: 'grain_soft' } } }, 'l');
+  check(imagesOf(named).map((i) => i.name).join() === 'grain_soft', 'the name param overrides it');
+  const branches = { n: { type: 'tex_noise', params: { resolution: 16 } }, lv: { type: 'tex_levels', in: ['n'], params: { in_high: 0.5 } }, bl: { type: 'tex_blur', in: ['n'] }, m: { type: 'merge', in: ['lv', 'bl'] } };
+  check(imagesOf(await geo(branches, 'm')).map((i) => i.name).join() === 'lv,bl', 'two filters of one image do not collide when merged (lv, bl)');
+  const err = await cookErr({ ...branches, x: { type: 'tex_invert', in: ['m'] } }, 'x');
+  check(err.includes('holds 2 images ("lv", "bl")') && err.includes('set image to one of them'), `a filter given several images asks which one (${err})`);
+  check(!(await cookErr({ ...branches, x: { type: 'tex_invert', in: ['m'], params: { image: 'bl' } } }, 'x')), '… and takes the one named');
+  const fg = await cookErr({ ...branches, x: { type: 'tex_blend', in: ['n', 'm'] } }, 'x');
+  check(fg.includes('input 1 holds 2 images') && fg.includes('foreground_image'), 'a second input with several images names its own param (foreground_image)');
+  // merge: an image several inputs carry is kept once; different images under one name stay, with a warning
+  const lod = await cookOn(engine, { n: { type: 'tex_noise', params: { resolution: 16 } }, b: { type: 'box' }, s: { type: 'sphere' }, uvb: { type: 'uv_project', in: ['b'] }, uvs: { type: 'uv_project', in: ['s'] },
+    t0: { type: 'texture_to_material', in: ['uvb', 'n'], params: { material: 'm', base_color: 'n' } }, t1: { type: 'texture_to_material', in: ['uvs', 'n'], params: { material: 'm', base_color: 'n' } }, both: { type: 'merge', in: ['t0', 't1'] } }, 'both');
+  check(imagesOf(lod.geo).length === 1 && !lod.warnings.length, 'merging textured branches keeps one copy of their shared image');
+  const clash = await cookOn(engine, { a: { type: 'tex_noise', params: { resolution: 16, name: 'x' } }, b: { type: 'tex_noise', params: { resolution: 16, name: 'x', seed: 2 } }, m: { type: 'merge', in: ['a', 'b'] } }, 'm');
+  check(imagesOf(clash.geo).length === 2 && clash.warnings.some((w) => w.includes('different images share the name "x"')), 'different images under one name: both kept, merge warns');
+  const tmClash = await cookErr({ a: { type: 'tex_noise', params: { resolution: 16, name: 'x' } }, b: { type: 'tex_noise', params: { resolution: 16, name: 'x', seed: 2 } }, m: { type: 'merge', in: ['a', 'b'] }, g: { type: 'box' }, t: { type: 'texture_to_material', in: ['g', 'm'], params: { base_color: 'x' } } }, 't');
+  check(tmClash.includes('different images named "x"'), 'texture_to_material refuses an ambiguous image name');
+  // coverage: the white fraction from the image's own histogram, whatever its range
+  const narrow = { n: { type: 'tex_noise', params: { resolution: 64, seed: 3 } }, s: { type: 'tex_levels', in: ['n'], params: { out_high: 0.48 } } };
+  for (const cov of [0.1, 0.3, 0.7]) {
+    const r = await cookOn(engine, { ...narrow, h: { type: 'tex_histogram_scan', in: ['s'], params: { coverage: cov, contrast: 1 } } }, 'h');
+    const c = findImage(r.geo)!.layer('C')!;
+    const white = Array.from(c).filter((x) => x > 0.5).length / c.length;
+    check(Math.abs(white - cov) < 0.01 && Math.abs(r.stats.coverage - white) < 1e-9, `coverage ${cov} on a 0..0.48 noise: ${f3(white)} white (stat ${f3(r.stats.coverage)})`);
+  }
+  const soft = findImage(await geo({ ...narrow, h: { type: 'tex_histogram_scan', in: ['s'], params: { coverage: 0.3, contrast: 0.6 } } }, 'h'))!.layer('C')!;
+  check(Math.abs(Array.from(soft).filter((x) => x > 0.5).length / soft.length - 0.3) < 0.02, 'a soft contrast keeps the coverage around the same cut');
+  const none = findImage(await geo({ ...narrow, h: { type: 'tex_histogram_scan', in: ['s'], params: { coverage: 0, contrast: 1 } } }, 'h'))!.layer('C')!;
+  const all = findImage(await geo({ ...narrow, h: { type: 'tex_histogram_scan', in: ['s'], params: { coverage: 1, contrast: 1 } } }, 'h'))!.layer('C')!;
+  check(none.every((x) => x === 0) && all.every((x) => x === 1), 'coverage 0 is all black, 1 all white');
 }
 
 // ---------------------------------------------------------------- volumes
@@ -489,7 +547,7 @@ section('image_file and the file node: PNG files as images');
   const layersOf = (img: Image) => [...img.layers.keys()].map((k) => `${k}:${img.channels(k)}`).join(' ');
 
   let { img } = await load({ path: 'inputs/grey8.png' });
-  check(img.name === 'grey8' && layersOf(img) === 'C:1' && dev(img.layer('C'), 1, (i) => g8[i] / 255) < EPS, '8-bit grey: one grey layer C = samples / 255, named after the file');
+  check(img.name === 'f' && layersOf(img) === 'C:1' && dev(img.layer('C'), 1, (i) => g8[i] / 255) < EPS, '8-bit grey: one grey layer C = samples / 255, named after its node');
   ({ img } = await load({ path: 'inputs/grey16.png' }));
   const q8 = Math.max(...Array.from(img.layer('C')!, (v) => Math.abs(v * 255 - Math.round(v * 255))));
   check(layersOf(img) === 'C:1' && dev(img.layer('C'), 1, (i) => g16[i] / 65535) < EPS && q8 > 0.2, `16-bit grey keeps its precision: samples / 65535 (up to ${q8.toFixed(2)} of an 8-bit step off the 8-bit levels)`);
@@ -510,10 +568,10 @@ section('image_file and the file node: PNG files as images');
   check(layersOf(img) === 'C:1 A:1' && maxDiff(img.layer('C')!, toGrey(rgbaImg.layer('C')!, 4)) === 0 && dev(img.layer('A'), 1, (i) => rgba8[i * 4 + 3] / 255) < EPS,
     'RGBA, layers grey: C = the Rec. 709 luminance (the same bits as toGrey), A = the alpha');
 
-  // naming: the file name without folders and extension, or the name param
+  // naming: the node's name, or the name param
   put('inputs/Brick Color.v2.png', pngOf(W, H, 4, 8, rgba8));
-  check((await load({ path: 'inputs/Brick Color.v2.png' })).img.name === 'Brick Color.v2' && (await load({ path: 'inputs/rgba8.png', name: 'albedo' })).img.name === 'albedo',
-    'the image is named after the file ("Brick Color.v2") unless name is set');
+  check((await load({ path: 'inputs/Brick Color.v2.png' })).img.name === 'f' && (await load({ path: 'inputs/rgba8.png', name: 'albedo' })).img.name === 'albedo',
+    'the image is named after its node ("f"), not the file, unless name is set');
 
   // colour space: srgb (default) keeps the stored numbers; off encodes linear light to display values, never alpha
   const enc = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
@@ -525,29 +583,29 @@ section('image_file and the file node: PNG files as images');
   const made = findImage(await geo({ p: { type: 'tex_pattern', params: { resolution: 32 } }, n: { type: 'tex_colorize', in: ['p'], params: { ramp: [[0, '#202020'], [1, '#a5462e']], name: 'made' } } }, 'n'))!;
   put('inputs/made.png', imagePNG(made, '', (d) => zlib.deflateSync(d)));
   ({ img } = await load({ path: 'inputs/made.png' }));
-  check(img.name === 'made' && Buffer.from(imagePNG(img)).equals(Buffer.from(imagePNG(made))) && maxDiff(img.layer('C')!, made.layer('C')!) <= 0.5 / 255 + 1e-6,
+  check(img.name === 'f' && Buffer.from(imagePNG(img)).equals(Buffer.from(imagePNG(made))) && maxDiff(img.layer('C')!, made.layer('C')!) <= 0.5 / 255 + 1e-6,
     'a PNG this engine wrote reads back unchanged (written again, the same bytes)');
 
   // chaining: input 0 carries a mesh or other images; a second image of the same name replaces the first
   const box = { b: { type: 'box' } };
   const onBox = await load({ path: 'inputs/rgba8.png' }, box, 'b');
-  check(onBox.g.numPoints === 8 && onBox.g.numPrims === 6 && imagesOf(onBox.g).map((x) => x.name).join() === 'rgba8', 'with input 0 the image is added to that geometry (the box stays)');
+  check(onBox.g.numPoints === 8 && onBox.g.numPrims === 6 && imagesOf(onBox.g).map((x) => x.name).join() === 'f', 'with input 0 the image is added to that geometry (the box stays)');
   let r = await load({ path: 'inputs/grey16.png' }, { a: { type: 'image_file', params: { path: 'inputs/rgba8.png' } } }, 'a');
-  check(imagesOf(r.g).map((x) => `${x.name}:${x.channels('C')}`).join() === 'rgba8:4,grey16:1' && !r.warnings.length, 'image_file nodes chain (rgba8, grey16)');
-  r = await load({ path: 'inputs/grey8.png', name: 'rgba8' }, { a: { type: 'image_file', params: { path: 'inputs/rgba8.png' } } }, 'a');
-  check(imagesOf(r.g).length === 1 && r.img.channels('C') === 1 && r.warnings.some((w) => w.includes('replaced the input\'s image "rgba8"')), 'an image of the same name is replaced, with a warning');
+  check(imagesOf(r.g).map((x) => `${x.name}:${x.channels('C')}`).join() === 'a:4,f:1' && !r.warnings.length, 'image_file nodes chain (a = rgba8, f = grey16)');
+  r = await load({ path: 'inputs/grey8.png', name: 'a' }, { a: { type: 'image_file', params: { path: 'inputs/rgba8.png' } } }, 'a');
+  check(imagesOf(r.g).length === 1 && r.img.channels('C') === 1 && r.warnings.some((w) => w.includes('replaced the input\'s image "a"')), 'an image of the same name is replaced, with a warning');
 
   // into the texture family and materials
   const lv = findImage(await geo({ f: { type: 'image_file', params: { path: 'inputs/rgba8.png' } }, l: { type: 'tex_levels', in: ['f'], params: { in_high: 0.5 } } }, 'l'))!;
-  check(lv.name === 'rgba8' && mean(lv.layer('C')!, 4, 0) > mean(rgbaImg.layer('C')!, 4, 0) + 0.1, 'filters process a loaded image (tex_levels)');
-  const tm = await geo({ ...box, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } }, f: { type: 'image_file', params: { path: 'inputs/rgba8.png' } }, m: { type: 'texture_to_material', in: ['uv', 'f'], params: { material: 'mine', base_color: 'rgba8' } } }, 'm');
-  check(readMaterials(tm).mine?.textures?.baseColor === 'image:rgba8' && findImage(tm, 'rgba8') !== null, 'texture_to_material takes it as a base colour map ("image:rgba8")');
+  check(lv.name === 'l' && mean(lv.layer('C')!, 4, 0) > mean(rgbaImg.layer('C')!, 4, 0) + 0.1, 'filters process a loaded image (tex_levels), the result named after the filter');
+  const tm = await geo({ ...box, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } }, albedo: { type: 'image_file', params: { path: 'inputs/rgba8.png' } }, m: { type: 'texture_to_material', in: ['uv', 'albedo'], params: { material: 'mine', base_color: 'albedo' } } }, 'm');
+  check(readMaterials(tm).mine?.textures?.baseColor === 'image:albedo' && findImage(tm, 'albedo') !== null, 'texture_to_material takes it as a base colour map ("image:albedo")');
   const tv = renderGeometry((await load({ path: 'inputs/rgba8.png' })).g, { size: 128 });
   check(tv.width === 128 && !tv.notes.some((n) => n.includes('no image')), 'render draws it in the texture view');
 
   // the file node reads .png the same way (folders too), and importGeometry knows png
   const viaFile = findImage(await geo({ f: { type: 'file', params: { path: 'inputs/rgba8.png' } } }, 'f'))!;
-  check(viaFile.name === 'rgba8' && maxDiff(viaFile.layer('C')!, rgbaImg.layer('C')!) === 0, 'file on a .png gives the image that image_file gives with its defaults');
+  check(viaFile.name === 'rgba8' && maxDiff(viaFile.layer('C')!, rgbaImg.layer('C')!) === 0, 'file on a .png gives the pixels image_file gives with its defaults, named after the file');
   put('inputs/scan.dat', pngOf(W, H, 1, 8, g8));
   check(findImage(await geo({ f: { type: 'file', params: { path: 'inputs/scan.dat', format: 'png' } } }, 'f'))?.name === 'scan', 'format "png" reads a PNG with another extension');
   put('kit/a.obj', 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n'); put('kit/b.png', pngOf(W, H, 1, 8, g8)); put('kit/c.png', 'not a png');
@@ -588,7 +646,7 @@ section('image_file and the file node: PNG files as images');
   const [qw, qh, qz] = quadSize(0);
   check(quads.numPrims === 2 && quads.numPoints === 8 && Math.abs(qw - 1) < 1e-9 && Math.abs(qh - H / W) < 1e-9 && qz === 0 && quads.points.has('uv') && imagesOf(quads).length === 2,
     `two images → two quads 1 m wide and height / width tall in the XY plane (${qw.toFixed(3)} × ${qh.toFixed(3)})`);
-  check(!!mats['image:rgba8']?.unlit && mats['image:rgba8'].textures?.baseColor === 'image:rgba8' && quads.prims.get('material')?.get(1) === 'image:grey16', 'each quad has an unlit material "image:<name>" with the image as its base colour map');
+  check(!!mats['image:a']?.unlit && mats['image:a'].textures?.baseColor === 'image:a' && quads.prims.get('material')?.get(1) === 'image:b', 'each quad has an unlit material "image:<name>" with the image as its base colour map');
   check(withImagePreview(onBox.g) === onBox.g && withImagePreview(tm) === tm, 'a geometry with points is left as it is');
   const qglb = await exportGeometryAsync(quads, 'glb', { splitByName: false });
   const qj = JSON.parse(new TextDecoder().decode(qglb.subarray(20, 20 + new DataView(qglb.buffer, qglb.byteOffset).getUint32(12, true))));

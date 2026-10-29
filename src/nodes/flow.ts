@@ -19,6 +19,7 @@ defineNode({
   category: 'flow',
   packed: 'keep',
   summary: 'Combine any number of inputs into one geometry (attributes, groups and material tables are unioned).',
+  description: 'Images (texture nodes) are combined too: one that several inputs carry, the same name and pixels (textured LOD branches each holding the material\'s maps), is kept once; different images under one name stay and are warned about, as texture nodes and materials then cannot tell them apart.',
   aliases: ['combine', 'join'],
   inputs: [{ name: 'inputs', desc: 'any number of geometries', multi: true }],
   params: {},
@@ -30,11 +31,14 @@ defineNode({
     },
     output: 'both',
   },
-  cook: ({ inputs }) => {
+  cook: ({ inputs, warn }) => {
     const geos = inputs.filter((g): g is Geometry => !!g);
     const out = Geometry.merge(geos);
     const table = mergeMaterialTables(geos);
     if (Object.keys(table).length) writeMaterials(out, table);
+    const seen = new Set<string>(), twice = new Set<string>();
+    for (const v of out.volumes) if (v.kind === 'image') { if (seen.has(v.name)) twice.add(v.name); else seen.add(v.name); }
+    if (twice.size) warn(`merge: different images share the name ${[...twice].map((n) => `"${n}"`).join(', ')}; give them their own names (an image takes its node's name unless its name param is set)`);
     return out;
   },
 });

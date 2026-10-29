@@ -229,7 +229,7 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
     && /prim: name string/.test(ds.txt) && /"up_axis":"z"/.test(ds.txt), `inputs describe obj: ${ds.txt.split('\n').slice(1, 3).join(' | ')}`);
   const dp = await call('inputs', { action: 'describe', path: 'inputs/maps/heights.png' });
   check(!dp.isError && /16-bit grey/.test(dp.txt) && /grey 0\.00\.\.1\.00/.test(dp.txt) && /heightfield_from_image/.test(dp.txt)
-    && /\{"type":"image_file","params":\{"path":"inputs\/maps\/heights\.png"\}\}/.test(dp.txt) && /an image "heights"/.test(dp.txt), 'inputs describe png (heightmap, mask, points and texture readings)');
+    && /\{"type":"image_file","params":\{"path":"inputs\/maps\/heights\.png"\}\}/.test(dp.txt) && /a node "heights"/.test(dp.txt), 'inputs describe png (heightmap, mask, points and texture readings)');
   const dm = await call('inputs', { action: 'describe', path: 'guide.obj' });
   check(dm.isError && /did you mean guides\.obj/.test(dm.txt), 'inputs describe: unknown file with did-you-mean');
 
