@@ -14,3 +14,5 @@ bench/last.json
 /integrations/unreal/TopoTopoPCG/Binaries/
 /integrations/unreal/TopoTopoPCG/Intermediate/
 .cache/
+**/packages/.cache.json
+**/packages/.lock
