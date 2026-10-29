@@ -940,7 +940,7 @@ defineNode({
     class: { ...CLS, default: 'prim' },
     format: { type: 'string', default: '', desc: 'pattern of the new value, e.g. "hull_{piece:03}" ("" = keep the current value; placeholders {value} {index} {piece} {pieces} {<attribute>}, width {index:03})', aliases: ['pattern', 'template'] },
     piece_attrib: { type: 'string', default: '', desc: 'what makes a piece for {piece}: "" = connected pieces, else an attribute whose distinct values are the pieces (class, copynum, name)', aliases: ['piece_attribute', 'by'] },
-    start: { type: 'int', default: 0, desc: 'first number of {index} and {piece} (1 counts from one)', aliases: ['offset', 'first'] },
+    start: { type: 'int', default: 0, min: -1000000, max: 1000000, desc: 'first number of {index} and {piece} (1 counts from one)', aliases: ['offset', 'first'] },
     find: { type: 'string', default: '', desc: 'text to replace in the value ("" = none)', aliases: ['search', 'from'] },
     replace: { type: 'string', default: '', desc: 'what find becomes (every occurrence)', aliases: ['to', 'replace_with'] },
     regex: { type: 'bool', default: false, desc: 'find is a JavaScript regular expression (replace may use $1, $2 …)', aliases: ['regexp', 'use_regex'] },

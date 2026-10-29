@@ -3427,7 +3427,7 @@ Houdini: Attribute String Edit + a name wrangle. For each element of class (in g
 | `class` | enum | `"prim"` |  | `point`, `prim`, `vertex`, `detail` |  | attribute class |
 | `format` | string | `""` |  |  | `pattern`, `template` | pattern of the new value, e.g. "hull_{piece:03}" ("" = keep the current value; placeholders {value} {index} {piece} {pieces} {<attribute>}, width {index:03}) |
 | `piece_attrib` | string | `""` |  |  | `piece_attribute`, `by` | what makes a piece for {piece}: "" = connected pieces, else an attribute whose distinct values are the pieces (class, copynum, name) |
-| `start` | int | `0` |  |  | `offset`, `first` | first number of {index} and {piece} (1 counts from one) |
+| `start` | int | `0` | -1000000..1000000 |  | `offset`, `first` | first number of {index} and {piece} (1 counts from one) |
 | `find` | string | `""` |  |  | `search`, `from` | text to replace in the value ("" = none) |
 | `replace` | string | `""` |  |  | `to`, `replace_with` | what find becomes (every occurrence) |
 | `regex` | bool | `false` |  |  | `regexp`, `use_regex` | find is a JavaScript regular expression (replace may use $1, $2 …) |
