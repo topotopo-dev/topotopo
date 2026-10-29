@@ -106,6 +106,14 @@ try {
     check((await req('/p/game/barrel')).status === 200, 'and has its page');
   }
 
+  section('a bake whose thumbnail renders with shading "pbr" (MikkTSpace loads itself)');
+  {
+    const shiny = createProject(lib, 'props/shiny', { title: 'Shiny', graph: { nodes: { b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'] } }, output: 'uv', meta: { thumbnail_render: { shading: 'pbr' } } } as any });
+    const ok = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(shiny.dir, '.gallery', 'bake.json'), 'utf8')).at > 0; } catch { return false; } }, 60000);
+    const state = ok ? JSON.parse(fs.readFileSync(path.join(shiny.dir, '.gallery', 'bake.json'), 'utf8')) : null;
+    check(state?.ok === true && fs.existsSync(path.join(shiny.dir, '.gallery', 'thumb.png')), `the bake needs no preload script (${state?.error ?? 'ok'})`);
+  }
+
   section('a project without its default graph, and graph files beside project.json');
   {
     const empty = createProject(lib, 'props/empty', { title: 'Empty' });

@@ -1,4 +1,6 @@
-// Baking a project's previews: .gallery/thumb.png (512 px matcap) and .gallery/preview.glb (meshopt), plus
+// Baking a project's previews: .gallery/thumb.png (512 px matcap, or the graph's meta.thumbnail_render: a "pbr" one
+// renders through the asynchronous entry, which loads MikkTSpace and the textures itself) and .gallery/preview.glb
+// (meshopt), plus
 // .gallery/bake.json recording the bake key they were made from. The gallery never cooks in its own process (cooks
 // block the event loop and cannot be cancelled): BakeQueue runs `topotopo library bake <dir>` children one at a time,
 // with a shorter simulation limit, a hard time limit and a low priority. A failed bake keeps the previous files.
@@ -12,7 +14,9 @@ import '../nodes/index.ts';
 import { Engine } from '../graph/engine.ts';
 import { createNodeHost } from '../host/node.ts';
 import { Workspace } from '../workspace.ts';
-import { thumbnailPNG, previewGLB } from '../render/preview.ts';
+import { previewGLB, thumbOptions } from '../render/preview.ts';
+import { renderGeometryAsync } from '../render/raster.ts';
+import { encodePNG } from '../render/png.ts';
 import { bakeKey, galleryDir, readBakeState, readManifest, writeAtomic } from './library.ts';
 import type { BakeState } from './library.ts';
 import { openPackages } from './packages.ts';
@@ -51,7 +55,11 @@ export async function bakeProject(dir: string): Promise<BakeState> {
     if (!g) return finish({ ok: false, error: `no default graph yet: the project has no graph "${name}" (project.json "graph")` });
     const r = await engine.cook(g, { target: m.bake.node, frame: m.bake.frame });
     if (!r.ok || !r.geo) return finish({ ok: false, error: r.errors.map((e) => `[${e.node}] ${e.message}`).join('\n') || 'the cook gave no geometry' });
-    writeAtomic(path.join(out, 'thumb.png'), thumbnailPNG(r.geo, g, (d) => zlib.deflateSync(d, { level: 9 }), THUMB_SIZE));
+    // the asynchronous render: shading "pbr" needs MikkTSpace and the material's textures, which it loads (a project
+    // needs no preload script of its own)
+    const img = await renderGeometryAsync(r.geo, thumbOptions(g, THUMB_SIZE), (p) => engine.host.readFile(p));
+    const side = img.width; // a single square view tile sits above the footer
+    writeAtomic(path.join(out, 'thumb.png'), encodePNG(img.rgba.subarray(0, side * side * 4), side, side, (d) => zlib.deflateSync(d, { level: 9 })));
     const glb = await previewGLB(r.geo, { compress: 'meshopt' });
     const small = glb.length <= MAX_PREVIEW_GLB;
     if (small) writeAtomic(path.join(out, 'preview.glb'), glb);
