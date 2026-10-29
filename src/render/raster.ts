@@ -557,7 +557,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const autoWire = o.wireframe === undefined || o.wireframe === 'auto';
   const wire = !wireMode && o.wireframe !== 'none' && (o.wireframe === true
     || (autoWire && closedPrims > 0 && closedPrims <= AUTO_WIRE_MAX && o.shading !== 'pbr' && !o.textures));
-  if (wire && autoWire) notes.push('wireframe auto: polygon edges drawn (wireframe false hides them)');
+  const autoEdgesShown = wire && autoWire && views.some((v) => v !== 'uv' && v !== 'texture');
+  if (autoEdgesShown) notes.push('wireframe auto: polygon edges drawn (wireframe false hides them)');
   const edges = wire ? buildEdges(g) : null;
   // triangle-dominant meshes (boolean/remesh output): hide edges between coplanar faces so the
   // wireframe shows shape, not triangulation slivers
@@ -1465,7 +1466,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // footer
   const fy = outH - footerH + 4 * ui;
   const ext = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
-  const stats = `${np} PTS  ${g.numPrims} PRIMS  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bmin[0] + bmax[0]) / 2)},${fmtNum((bmin[1] + bmax[1]) / 2)},${fmtNum((bmin[2] + bmax[2]) / 2)}${wire && autoWire ? '  EDGES AUTO' : ''}`;
+  const stats = `${np} PTS  ${g.numPrims} PRIMS  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bmin[0] + bmax[0]) / 2)},${fmtNum((bmin[1] + bmax[1]) / 2)},${fmtNum((bmin[2] + bmax[2]) / 2)}${autoEdgesShown ? '  EDGES AUTO' : ''}`;
   drawText(out, outW, outH, 6 * ui, fy, (o.title ? o.title.toUpperCase() + '  ' : '') + stats, [0.85, 0.85, 0.85], 2 * ui, false);
   if (legend) {
     const lx = outW - textWidth(legend, 2 * ui) - 8 * ui;
