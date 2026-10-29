@@ -104,7 +104,7 @@ export async function kitDefs(): Promise<NodeDef[]> {
   const pk = new ProjectPackages(engine, null);
   engine.root.packages = pk.resolver;
   const defs = engine.packageDefs();
-  if (pk.problems.size) throw new Error(`TopoTopo's own packages: ${[...pk.problems].join('; ')}`);
+  if (pk.libraryProblems.length) throw new Error(`TopoTopo's own packages: ${pk.libraryProblems.join('; ')}`);
   return defs;
 }
 

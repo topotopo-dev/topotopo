@@ -239,7 +239,7 @@ if (!filter || 'stairs house'.includes(filter)) {
   const help = await txt('help', { nodes: ['topotopo/architecture/stairs', 'topotopo/nature/rock'] });
   check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this workspace: package topotopo\/nature is not in this project's uses/.test(help.text),
     'help documents an output, and says when the project does not use its kit yet');
-  check(/\ntopotopo\/nature\/rock ◦ — Low-poly rock[^\n]* \[kind mesh · tags rock, stone, boulder, low-poly\]\n/.test(`\n${cat.text.split('\n').map((l) => l.trim()).join('\n')}\n`) && /\nkind instances · tags forest, trees, conifer/.test((await txt('help', { nodes: ['topotopo/nature/forest_patch'] })).text)
+  check(/\ntopotopo\/nature\/rock ◦ — Low-poly rock[^\n]* {2}\(mesh \[rock, stone, boulder, low-poly\]\)\n/.test(`\n${cat.text.split('\n').map((l) => l.trim()).join('\n')}\n`) && /\nwhat it is: instances \[forest, trees, conifer/.test((await txt('help', { nodes: ['topotopo/nature/forest_patch'] })).text)
     && /topotopo\/nature\/forest_patch/.test((await txt('catalog', { search: 'conifer' })).text), 'the catalog and help give an output\'s kind and tags, and the catalog\'s search finds a tag');
   // a bare name is no node type, and nothing makes it one: the error names the output of that name, used or not
   const bareType = (await e2.cook({ nodes: { r: { type: 'rock' } }, output: 'r' })).errors.map((e) => e.message).join('; ');

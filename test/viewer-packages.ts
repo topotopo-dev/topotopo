@@ -72,7 +72,7 @@ async function open(dir: string): Promise<{ engine: Engine; pk: ProjectPackages;
   ws.load();
   return { engine, pk, ws };
 }
-const publish = async (dir: string, note: string) => { const o = await open(dir); const r = await publishPackage(o.ws, o.pk, { note }); if (!r.ok) throw new Error(`publish ${dir}: ${r.blocks.join('; ')}`); return r.version!; };
+const publish = async (dir: string, note: string) => { const o = await open(dir); const r = await publishPackage(o.pk, { note }); if (!r.ok) throw new Error(`publish ${dir}: ${r.blocks.join('; ')}`); return r.version!; };
 
 const trees = (crown: number): GraphSpec => ({
   nodes: {
@@ -203,7 +203,7 @@ try {
   {
     const r = (await post('/api/packages/compare', { package: 'studio/rocks', to: '2.0' })).j;
     const boulder = r.places[0];
-    check(r.ok && r.target.big && r.interfaceBig.some((x: string) => /output "boulder": slider "size" removed/.test(x)) && /^graphs\/main\.json boulder: sets slider "size", which studio\/rocks 2\.0 does not have/.test(r.mustChange[0]),
+    check(r.ok && r.target.big && r.interfaceBig.some((x: string) => /output "boulder": param "size" removed/.test(x)) && /^graphs\/main\.json boulder: sets param "size", which studio\/rocks 2\.0 does not have/.test(r.mustChange[0]),
       `a big version: what goes away, what the graphs must change (${r.mustChange.join('; ')})`);
     check(boulder.before.ok && !boulder.after.ok && /unknown param "size"/.test(boulder.after.errors.join()) && boulder.views.a && !boulder.views.b && !boulder.views.overlay,
       'a place that does not cook with it: a to look at, not b, no overlay');
@@ -268,9 +268,9 @@ try {
     const t = await row('studio/trees');
     check(t.version === '1.1' && !t.small && !t.newer.length && t.note === 'rounder crowns' && (await packages()).compare === null, 'the package is up to date (the mark goes); the before/after is done with');
     const big = await post('/api/packages/update', { package: 'studio/rocks', from: '1.0', to: '2.0' });
-    check(big.j.ok && /sets slider "size"/.test(big.j.mustChange.join()) && /the project's graphs must change for studio\/rocks 2\.0/.test(big.j.text), 'a big update is applied, and says what the graphs must change');
+    check(big.j.ok && /sets param "size"/.test(big.j.mustChange.join()) && /the project's graphs must change for studio\/rocks 2\.0/.test(big.j.text), 'a big update is applied, and says what the graphs must change');
     const kept = (await row('studio/rocks')).mustChange;
-    check(kept?.from === '1.0' && kept.to === '2.0' && /^graphs\/main\.json boulder: sets slider "size"/.test(kept.items[0]), 'that list stays in view (GET /api/packages)');
+    check(kept?.from === '1.0' && kept.to === '2.0' && /^graphs\/main\.json boulder: sets param "size"/.test(kept.items[0]), 'that list stays in view (GET /api/packages)');
     await until(() => !!(o.ws.lastReport.get('main') && !o.ws.lastReport.get('main')!.ok), 5000);
     const node = (await get('/api/graphs')).j.find((x: any) => x.name === 'main').nodes.find((n: any) => n.name === 'boulder');
     check(/unknown param "size" for studio\/rocks\/boulder/.test(node.error ?? ''), `the node that must change reports it (${node.error})`);
@@ -338,7 +338,7 @@ section('a viewer whose graphs are in no project: nothing to show');
   try {
     const s = await (await fetch(`${lv.url}api/packages`)).json() as any;
     const c = await fetch(`${lv.url}api/packages/compare`, { method: 'POST', body: '{"package":"studio/trees"}' });
-    check(s.project === null && !s.packages.length && c.status === 400 && /in no project: topotopo init <folder> \(MCP: library \{action:"init"\} for the open workspace\) makes the folder a project/.test((await c.json() as any).error),
+    check(s.project === null && !s.packages.length && c.status === 400 && /in no project: topotopo init <folder> \(MCP: library \{action:"init"\} for the open workspace, when the person says so\) makes the folder a project/.test((await c.json() as any).error),
       'no project: no packages, and a before/after says how to make one');
   } finally { lv.close(); }
 }

@@ -1,6 +1,7 @@
 // LLM-facing documentation: operating guide, topic pages, and generated node references.
 import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
+import { PACKAGE_COMMANDS } from '../gallery/cli.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
@@ -13,7 +14,7 @@ WORKFLOW
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
-OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, heightfield, instances, points, curves, image, mixed; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, volume, scene) pins what it must cook to: build warns and publishing blocks when it does not.
+OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, heightfield, instances, points, curves, image, mixed; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, volume, scene; a mesh with scene_null sockets is a mesh) pins what it must cook to: build warns and publishing blocks when it does not.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
@@ -28,7 +29,7 @@ ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geome
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
 LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".
-PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their sliders and version); a build that names one adds it to the project. TopoTopo's own packages are four kits built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a project's graphs use packages: the server makes its workspace one when it starts if the folder holds nothing but a workspace's own folders, and library {action:"init"} makes any other open workspace one when the person says so. library {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the project can use each, {action:"publish", note} publishes a version of the open project's package (check:true: a dry run that writes nothing), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply only when the person says so. See help topic "packages".`;
+PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the project once the graph validates. TopoTopo's own packages are four kits built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a project's graphs use packages: the server makes its workspace one when it starts if the folder holds nothing but a workspace's own folders (its first reply says so), and library {action:"init"} makes any other open workspace one when the person says so. library {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the project can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -797,28 +798,35 @@ assets {action:"get", name:"my_stairs"} shows it, assets {action:"save", name:"m
   packages: `PACKAGES (a project uses another project's published outputs by name)
 A package is a project with a full name and published versions. Its author names it once in project.json, "package":
 "owner/name" (lower-case letters, digits, - and _; the owner "topotopo" is reserved for TopoTopo's own), and publishes:
+  library {action:"publish", dry_run:true}               CLI: topotopo publish [folder] --dry-run
   library {action:"publish", note:"taller pines"}        CLI: topotopo publish [folder] --note "taller pines" [--big]
+Publishing is permanent: run the dry run, show it to the person, and publish when they say so.
 A graph uses an output of a package as a node type; "owner/name" alone is the package's default output:
   {"type": "studio/trees/pine", "in": ["ground"], "params": {"height": 6}}      {"type": "studio/trees"}
-Its params are the vars of the output's graph with their "params" declarations (ranges clamp, options are checked) and
-its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the version and its note;
-catalog {category:"package"} lists the outputs of the packages the project uses.
+Its params are the vars of the output's graph that its node reads, with their "params" declarations (ranges clamp,
+options are checked), and its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the
+version and its note, also for an output search found in a library the project lists but does not use yet (read there,
+nothing copied); catalog {category:"package"} lists the outputs of the packages the project uses and TopoTopo's own.
 
 WHAT A PACKAGE PUBLISHES: every named output ("outputs") of every graph in graphs/ but those marked "publish": false
 (viewer-only previews), and the default output: the output node ("output") of the graph project.json shows ("graph"),
-which must be set. Output names follow the same rule as the package name and are unique in the package.
+which must be set. Output names follow the same rule as the package name and are unique in the package. A graph that
+holds several outputs gives each the vars its node reads: publishing warns about an output that does not read some of
+its graph's vars (they are not its params; give it a graph of its own for params of its own).
 
 WHAT AN OUTPUT IS: its kind, its tags and its description, which search, the catalog and help show.
   "outputs": {"pine": {"node": "out", "label": "Pine", "kind": "mesh", "tags": ["conifer", "low-poly"], "description": "…"}}
 - kind: mesh, instances (packed), points, curves, terrain (heightfields), textures (images alone), volume, or scene
-  (several of these: a street with its lamp posts as instances). Publishing cooks every output and records the kind it
-  cooks to. "kind" pins it: publishing blocks when the output cooks to another, and build, edit and the viewer warn
-  before that. A kind not on the list is an error wherever the graph is read.
+  (several of these: a street with its lamp posts as instances). A mesh that carries scene_null sockets is a mesh: the
+  sockets are part of a mesh asset, and scene means several kinds of geometry together. Publishing cooks every output
+  and records the kind it cooks to. "kind" pins it: publishing blocks when the output cooks to another, and build, edit
+  and the viewer warn before that. A kind not on the list is an error wherever the graph is read.
 - tags: free words search finds the output by: lower-case letters, digits and -, starting with a letter or digit, at
-  most 64 characters, at most 16 per output, each once; a malformed one is an error. A project's own "tags" in
-  project.json stay the Gallery's; search matches both.
+  most 64 characters, at most 16 per output, each once ("low-poly", "street-furniture"); a malformed one is an error. A
+  project's own "tags" in project.json stay the Gallery's; search matches both.
 - description: the output's "description", else its graph's "description" (a kit's outputs, one graph each, need no
   more). The default output carries the tags and description of the named output it is, if any.
+Every listing says an output's kind and tags the same way: mesh [conifer, low-poly].
 
 OUTPUTS OF THE SAME PACKAGE: a package's graphs and assets name its own outputs by full name, as any project does: a kit
 whose pieces build on each other, a house of the kit's walls ({"type": "studio/kit/wall"} in the house's graph). They
@@ -828,56 +836,72 @@ b and b names a, or a names itself) do not resolve, and publishing refuses them.
 
 VERSIONS: big.small from 1.0, each a folder versions/<version>/ in the package that is never written over: project.json,
 graphs/, assets/, inputs/, the copies the package uses (packages/) and version.json (the note, the time, a hash of every
-other file, each output's graph, node, kind, tags, description, sliders and inputs). exports/, attachments/ and other
-files are not part of it. The number comes from the version before: big (2.0) when something a user relies on goes away
-or means something else (an output removed, renamed or marked "publish": false; an output of another kind; a slider
-removed, renamed or of another type; a narrower range; a removed option; an input removed or moved), small (1.4) for
-everything else (new outputs, sliders, options and inputs, wider ranges, other defaults, labels, tags, descriptions, a
-kind pinned or unpinned that stays the same, any change to the geometry). big:true (--big) marks a version big when its
-meaning changed in a way the tools cannot see (a model that now faces another way). Publishing cooks every published
-output first and is refused for an output that does not cook, one that cooks to nothing, one that is not the kind its
-author pinned, a malformed kind or tag, an output name clash, no default output, a copy edited by hand, nothing changed
-since the last version, no note, and a package this session follows. It warns about an output without tags or a
-description, an output of another kind than in the version before, URLs and files outside the package that its nodes
-read (a version holds no copy of them) and a version above 50 MB.
-A DRY RUN, library {action:"publish", check:true, note?, big?} (CLI: topotopo publish --check), runs every check and
-cooks every output, and says the number the version would get, why it is big, the changes, the blocks and the warnings,
-and each output's kind and tags; it writes nothing (the note may wait until the real publish).
+other file, each output's graph, node, kind, tags, description, params and inputs). The hash reads text files with LF
+line ends, so a checkout that turns them into CRLF changes nothing; binary files count as they are. exports/,
+attachments/ and other files are not part of a version. The number comes from the version before: big (2.0) when
+something a user relies on goes away or means something else (an output removed, renamed or marked "publish": false;
+an output of another kind; a param removed, renamed or of another type; a narrower range; a removed option; an input
+removed or moved), small (1.4) for everything else (new outputs, params, options and inputs, wider ranges, other
+defaults, labels, tags, descriptions, a kind pinned or unpinned that stays the same, any change to the geometry).
+big:true (--big) marks a version big when its meaning changed in a way the tools cannot see (a model that now faces
+another way).
+PUBLISHING goes in steps and stops at the first that blocks, so each problem is said once, at its cause, and a version
+number only for what would publish: (1) what the project declares: its name, the note, its outputs (names, kinds,
+tags, descriptions, clashes, the default output), loops, files it cannot read, its copies (none missing or edited by
+hand), a package this session follows; (2) every output cooked as a project that uses the package cooks it, in the
+package's own scope: one that does not cook, cooks to nothing or to another kind than pinned blocks; a warning is said
+once, under the output it belongs to (not again under a line-up that cooks it); (3) nothing changed since the last
+version blocks; (4) the number, the changes and the warnings: an output without tags or a description, one that does
+not read some of its graph's vars, an output of another kind than before, URLs and files outside the package that its
+nodes read (a version holds no copy of them) and a version above 50 MB. A DRY RUN, library {action:"publish",
+dry_run:true, note?, big?} (CLI: topotopo publish --dry-run), goes through every step and writes nothing.
 
 USING PACKAGES: project.json "uses" holds the version the project uses of each ({"studio/trees": "1.3"}), and packages/
 its own copy of each, and of the packages those use, flat: packages/<owner>/<name>/<version>/, each version once, with
 packages/lock.json (each copy's hash, the library it came from, its own uses). The copies are committed with the project,
 so it cooks anywhere without the libraries, and what it uses never changes by itself; a copy edited by hand is warned
-about. A project finds packages only in the libraries its project.json lists, "libraries": ["../shared/library", "game"]:
-a path relative to the project for a library in the same repository (every checkout and worktree uses its own), else a
-registered library's name. The tools never list a library themselves; the person does. Besides those, every project
-looks in TopoTopo's built-in library, "topotopo" (no other library takes that name): it holds TopoTopo's own packages
-(owner "topotopo"), which a project uses, copies and locks like any other; a newer version a TopoTopo release brings
-shows as an update. Only a project's graphs use packages: in a workspace that is none, naming one fails and says so,
-and library {action:"init"} (CLI: topotopo init) makes it a project.
-- First use: a build or edit whose graph names a package the project does not use yet adds its newest version, and
-  the response says so. A dry run (build {dry_run:true}) checks the graph against that version, read where its library
-  holds it, copies and writes nothing, and a note says what build or edit would add. library {action:"use",
-  package:"studio/trees"} (CLI: topotopo use studio/trees) adds one explicitly; library {action:"packages"} (CLI:
-  topotopo packages) lists what the project uses and the packages in its libraries with their newest version, note and
-  outputs (with their kinds and tags).
+about, and the warning goes once the copy is restored. init writes a .gitattributes that keeps versions/ and packages/
+byte for byte, and a .gitignore for packages/.cache.json (the hashes of the copies' files, kept between runs) and
+packages/.lock (held while a command, the viewer or an MCP server writes project.json and the lock).
+LIBRARIES: a project finds packages only in the libraries its project.json lists, "libraries": ["../shared/library",
+"game"]: a path written from the project ("./lib", "../lib") for a library in the same repository (every checkout and
+worktree uses its own), else a registered library's name. An entry that does not work (no such folder, a name not
+registered, a package's folder instead of its library's) is reported, and the others still count. The tools never list
+a library by themselves: library {action:"set", libraries:[...]} (CLI: topotopo libraries add|remove) does it when the
+person names one. Besides those, every project looks in TopoTopo's built-in library, "topotopo" (no other library takes
+that name): it holds TopoTopo's own packages (owner "topotopo"), which a project uses, copies and locks like any other;
+a newer version a TopoTopo release brings shows as an update. Only a project's graphs use packages: in a workspace that
+is none, naming one fails and says so, and library {action:"init"} (CLI: topotopo init) makes it a project, when the
+person says so.
+- First use: a build or edit whose graph names a package the project does not use yet adds its newest version once the
+  graph validates (a graph they reject adds nothing and writes nothing), and the response says so. A dry run (build
+  {dry_run:true}) checks the graph against that version, read where its library holds it, copies and writes nothing,
+  and a note says what build or edit would add. A graph-file cook (topotopo graph.json) adds it too and says so;
+  --locked fails instead, for a build machine. library {action:"use", package:"studio/trees", version?} (CLI: topotopo
+  use studio/trees [--version 1.1]) adds one explicitly; library {action:"remove", package} (CLI: topotopo remove) drops
+  one no graph of the project names any more, with the copies nothing else uses.
+- library {action:"packages"} (CLI: topotopo packages) lists what the project uses, one line each (version, outputs, up
+  to date or "1.3 is out"), the other packages in its libraries, the libraries, and what it could not check;
+  {action:"packages", package:"studio/trees"} (CLI: topotopo packages studio/trees) shows one package: its versions and
+  notes, its outputs with their kinds, tags, params and inputs.
 - A package output cooks in its version's own scope: its own assets, graphs (graph_ref) and files (relative paths read
   the version's folder) and the versions it uses. Nothing leaks either way, and two versions of one package (one the
   project uses, one another package uses) cook side by side. Its result names the version's texture files by paths
   relative to the project's folder (absolute only for a followed working folder outside the project), so exports name
   no folder of this machine.
 - Errors never guess: a package not in "uses" says how to add it, an unknown output lists the package's outputs, a
-  missing copy says which, and a package found only in a registered library the project does not list names that library.
+  missing copy says which and which package's use copies it again, and a package found only in a registered library
+  the project does not list names that library and the entry that lists it.
 
-SEARCH: library {action:"search", query?, kind?, tag?} (CLI: topotopo search [words] [--kind k] [--tag t]) looks through
-the newest version of every package in TopoTopo's built-in library, the libraries the project lists and every library
-registered on the machine. Every word of query must start a word of an output's full name, label, description or
-tags, or of its package's title or project tags ("tree" finds trees, not topotopo/street); kind and tag match exactly:
-{query:"conifer"}, {kind:"terrain"}, {query:"brick", tag:"masonry"}. Results come by library, the project's own first (those it lists, then TopoTopo's
+SEARCH: library {action:"search", query?, kind?, tag?} (CLI: topotopo search [words] [folder] --kind k --tag t, the
+folder written as a path: ., ./forest, ../forest) looks through the newest version of every package in TopoTopo's
+built-in library, the libraries the project lists and every library registered on the machine. Every word of query
+must start a word of an output's full name, label, description or tags, or of its package's title or project tags
+("tree" finds trees, not topotopo/street); kind and tag match exactly: {query:"conifer"}, {kind:"terrain"},
+{query:"brick", tag:"masonry"}. Results come by library, the project's own first (those it lists, then TopoTopo's
 built-in library), each with its full name, kind, tags, label, version and description, and say whether the project can
-use it: TopoTopo's own packages and those of a library it lists, yes (a graph that names one adds it); another library's
-only once its project.json lists it, and the result says which "libraries" entry to add. The person adds it: the tools
-never add a library.
+use it: TopoTopo's own packages and those of a library it lists, yes (a graph that names one adds it); another
+library's only once its project.json lists it, and the result says the entry that lists it.
 
 TOPOTOPO'S OWN PACKAGES: four kits in TopoTopo's built-in library, every one a package of the owner "topotopo"; their
 outputs are listed by the catalog (category "package") and help even where the project does not use them yet:
@@ -889,7 +913,7 @@ outputs are listed by the catalog (category "package") and help even where the p
   {"type": "topotopo/architecture/stairs", "params": {"steps": 12, "style": "open"}}   {"type": "topotopo/nature/rock"}
   A kit's name alone ("topotopo/nature"), or its output "kit", is its default output: its outputs side by side. Every
   output has a pinned kind (mesh; instances for scatter_rocks, forest_patch and grass_clumps; the nature kit's line-up a
-  scene) and tags (search {tag:"street-furniture"}, {query:"conifer"}). Pivots sit at the base (y = 0,
+  scene) and tags (search {tag:"street-furniture"}, {query:"conifer"}, {tag:"low-poly"}). Pivots sit at the base (y = 0,
   Y up, metres; walls start at x = 0, roofs at the wall top); every piece has prim name and material. Outputs that
   follow a curve (railing, fence, pipe_run, road_strip) take the curve as input 0, those that dress a surface
   (scatter_rocks, forest_patch, grass_clumps) the surface; unconnected they build a default one. Those three output
@@ -904,23 +928,24 @@ on:false or the end of the session; nothing about it is saved. Every edit there 
 packages' versions keep the copies they hold.
 
 OUT OF DATE AND UPDATE: what a project uses changes only by an update, after a before/after.
-- library {action:"outdated"} (CLI: topotopo outdated) lists each package the project uses: the version in use, its
-  small update (the newest version with the same big number), its big update (the newest, when its big number is
-  higher) and the note of every version after the one in use (with its outputs of another kind), and the outputs of
-  the version in use with their kinds and tags. library {action:"packages"} names the out-of-date ones in a line.
+- library {action:"outdated"} (CLI: topotopo outdated) lists the packages the project uses that have newer versions:
+  the newer versions with their notes (and their outputs of another kind), one line for those up to date, what it could
+  not check, and the update to run for each.
 - library {action:"update", package:"studio/trees", to?} (CLI: topotopo update studio/trees [--to 2.0]) is the
   before/after: every place the project uses the package (each node of its type in graphs/, assets/ and the graph files
   in the project's folder, nested graphs included, with its params and inputs as they are) cooked with the version in
   use and with the new one; what changed in each (counts, size, attributes, the largest move) with an overlay render
   (grey the same, blue only with the new version, orange only with the old); the notes of the versions between. Without
-  "to" it goes to the newest version with the same big number. A big version is named with "to", and the before/after
-  then lists what the graphs must change: sliders they set that it no longer has (with did-you-mean), outputs they use
-  and inputs they wire that are gone. The new version is read where its library holds it: nothing is written. It says
-  how far it is, stops when the call is cancelled (CLI: Ctrl+C) and reuses what was cooked before.
-- Show the before/after to the person and apply it only when they say so: {action:"update", package, to, apply:true}
-  (CLI: the same command with --apply) copies the new version in with the versions it uses, sets "uses" and the lock,
-  and deletes the copies nothing uses any more. After a big update the graphs report what they must change until they
-  do.
+  "to" it goes to the newest version with the same big number (none newer is no failure: it says so). A big version is
+  named with "to", and the before/after then lists what the graphs must change, place by place: params they set that it
+  no longer has (with did-you-mean), values its narrower range clamps, options it no longer has, outputs they use and
+  inputs they wire that are gone. The new version is read where its library holds it: nothing is written. It says how
+  far it is, stops when the call is cancelled (CLI: Ctrl+C) and reuses what was cooked before.
+- Show the before/after to the person and apply it only when they say so, naming the versions it showed:
+  {action:"update", package, from, to, apply:true} (CLI: the command the before/after ends with, --from 1.3 --to 1.4
+  --apply) copies the new version in with the versions it uses, sets "uses" and the lock, and deletes the copies
+  nothing uses any more. It is refused when project.json uses another version by then. After a big update the graphs
+  report what they must change until they do.
 
 IN THE VIEWER (preview, topotopo edit, topotopo view on a graph in a project): the Packages tab, shown while the project
 uses packages, lists each with the version in use, its outputs with their kinds and tags, its updates and the notes of
@@ -932,9 +957,9 @@ graphs must change stays listed after it. "Use the trees I'm editing" follows th
 viewer's session (never saved); a save in a working folder it does not follow offers that switch.
 
 EXPORTS record the package versions their graph used in the source block: "packages": {"studio/trees@1.3": "<hash>"}.
-CLI: topotopo init [folder] [--package owner/name] makes a folder a project (with graphs/); use, packages, publish,
-outdated and update take the project folder (default: the current one); search searches for the current folder's
-project.`,
+
+THE CLI COMMANDS (a folder named must exist; without one, the current folder's project):
+${PACKAGE_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing; boxes and simple shapes.
@@ -1246,17 +1271,20 @@ function paramLine(name: string, pd: ParamDef): string {
   return `  ${name} ${pd.type}${opts}${def}${range} — ${pd.desc}${al}`;
 }
 
-/** A package output's kind and tags (NodeDef.package), "kind mesh · tags conifer, lowpoly"; '' for other node types. */
+/**
+ * A package output's kind and tags (NodeDef.package) as every listing says them, "mesh [conifer, low-poly]" (a working
+ * folder's output that pins no kind: "kind not pinned [...]"); '' for other node types.
+ */
 export function kindTags(def: NodeDef): string {
   const p = def.package;
-  return p ? [p.kind ? `kind ${p.kind}` : '', p.tags?.length ? `tags ${p.tags.join(', ')}` : ''].filter(Boolean).join(' · ') : '';
+  return p ? `${p.kind ?? 'kind not pinned'}${p.tags?.length ? ` [${p.tags.join(', ')}]` : ''}` : '';
 }
 
 export function nodeDoc(def: NodeDef): string {
   const out = [`## ${def.type} (${def.category})${def.aliases?.length ? ` aka ${def.aliases.join(', ')}` : ''}`];
   if (def.deprecated) out.push(`DEPRECATED: ${def.deprecated}`);
   out.push(def.summary);
-  if (kindTags(def)) out.push(kindTags(def));
+  if (kindTags(def)) out.push(`what it is: ${kindTags(def)}`);
   if (def.description) out.push(def.description);
   if (def.usesTime) out.push('time-dependent: re-cooks when the frame changes (see help topic "time").');
   out.push(def.inputs.length ? 'inputs:' : 'inputs: none (generator)');
@@ -1285,7 +1313,7 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     const items = list.filter((d) => d.category === c);
     if (!items.length) continue;
     out.push(`[${c}]`);
-    for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}${kindTags(d) ? ` [${kindTags(d)}]` : ''}`);
+    for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}${kindTags(d) ? `  (${kindTags(d)})` : ''}`);
   }
   out.push(filter?.cli
     ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ')

@@ -358,7 +358,7 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
     if (run?.progress.package === pkg) { run.signal.aborted = true; await run.done; }
     const now = asked(() => readManifest(p.dir!).uses[pkg]);
     if (now !== from) err(409, now === undefined ? `this project does not use ${pkg} now: look at its packages again` : `project.json uses ${pkg} ${now} now, not ${from}: look at the before/after again`);
-    const r = asked(() => applyUpdate(p, pkg, to));
+    const r = asked(() => applyUpdate(p, pkg, { from: from as string, to: to as string }));
     if (r.mustChange.length) kept.set(pkg, { from, to: r.target.to, items: r.mustChange });
     else kept.delete(pkg);
     if (last?.result.target.package === pkg) last = null;

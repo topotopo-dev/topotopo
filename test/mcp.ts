@@ -351,9 +351,9 @@ if (url) {
   } });
   const noNote = await call('library', { action: 'publish' });
   check(noNote.isError && /a version needs a note/.test(noNote.txt), 'library publish needs a note');
-  const dry = await call('library', { action: 'publish', check: true });
+  const dry = await call('library', { action: 'publish', dry_run: true });
   check(!dry.isError && /^✓ would publish studio\/crates 1\.0 \(the first version\); publishing it needs a note/.test(dry.txt) && /\n {2}crate {2}mesh {2}"Crate"\n/.test(dry.txt) && !fs.existsSync(path.join(kit, 'versions')),
-    `library publish check:true is a dry run: the number, each output's kind, nothing written (${dry.txt.split('\n')[0]})`);
+    `library publish dry_run:true is a dry run: the number, each output's kind, nothing written (${dry.txt.split('\n')[0]})`);
   const pub = await call('library', { action: 'publish', note: 'first crates' });
   check(!pub.isError && /✓ published studio\/crates 1\.0 \(the first version\): "first crates"/.test(pub.txt) && fs.existsSync(path.join(kit, 'versions', '1.0', 'version.json')), `library publish: ${pub.txt.split('\n')[0]}`);
   const again = await call('library', { action: 'publish', note: 'again' });
@@ -365,7 +365,7 @@ if (url) {
   const pj = JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8'));
   fs.writeFileSync(path.join(yard, 'project.json'), JSON.stringify({ ...pj, libraries: ['game'] }, null, 2));
   const listed = await call('library', { action: 'packages' });
-  check(!listed.isError && /studio\/crates {2}1\.0 "first crates" {2}\[library "game"\]/.test(listed.txt) && /outputs: crate \(mesh\)/.test(listed.txt), `library packages lists the packages in the project's libraries: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
+  check(!listed.isError && /\n {2}studio\/crates 1\.0 +1 output {2}\[library "game"\]/.test(listed.txt), `library packages lists the packages in the project's libraries: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
   const found = await call('library', { action: 'search', query: 'crate' });
   check(!found.isError && /^search "crate": \d+ outputs/.test(found.txt) && /\nlibrary "game" \(.*\): project yard lists it: a graph that names one of these adds its package\n {2}studio\/crates\/crate {2}mesh {2}"Crate" {2}1\.0/.test(found.txt)
     && /\n {2}topotopo\/props\/crate {2}/.test(found.txt), `library search finds outputs in the project's library and TopoTopo's built-in one: ${found.txt.split('\n').filter((l) => /^ {2}\S/.test(l)).join(' | ')}`);
@@ -413,7 +413,7 @@ if (url) {
   check(!p11.isError && /✓ published studio\/crates 1\.1 \(small, after 1\.0\)/.test(p11.txt), `the kit publishes 1.1: ${p11.txt.split('\n')[0]}`);
   await call('library', { action: 'open', path: yard });
   const od = await call('library', { action: 'outdated' });
-  check(!od.isError && /studio\/crates 1\.0: small update 1\.1 {2}\[library "game"\]\n {4}1\.1 {2}"four times the size"/.test(od.txt) && /library \{action:"update", package:"owner\/name"\} shows the before\/after/.test(od.txt),
+  check(!od.isError && /studio\/crates 1\.0: 1\.1 is out {2}\[library "game"\]\n {4}1\.1 {2}"four times the size"/.test(od.txt) && /\nlibrary \{action:"update", package:"studio\/crates"\} shows the before\/after of 1\.0 → 1\.1/.test(od.txt),
     `library outdated: ${od.txt.split('\n').slice(0, 3).join(' | ')}`);
   const pjBefore = fs.readFileSync(path.join(yard, 'project.json'), 'utf8');
   const steps: { progress: number; total?: number; message?: string }[] = [];
@@ -421,15 +421,15 @@ if (url) {
   const baText = ba.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
   const baImages = ba.content.filter((c: any) => c.type === 'image');
   check(!ba.isError && /^before\/after: studio\/crates 1\.0 → 1\.1 \(a small update\) in project yard; nothing has changed yet/.test(baText) && /\n {2}graphs\/main\.json {2}a: studio\/crates\/crate \{"s":2\}\n/.test(baText)
-    && /\n {2}graphs\/main\.json {2}d: studio\/crates \{"s":0\.5\}\n/.test(baText) && /apply it only when they say so: library \{action:"update", package:"studio\/crates", to:"1\.1", apply:true\}/.test(baText),
+    && /\n {2}graphs\/main\.json {2}d: studio\/crates \{"s":0\.5\}\n/.test(baText) && /apply it only when they say so: library \{action:"update", package:"studio\/crates", from:"1\.0", to:"1\.1", apply:true\}/.test(baText),
     `library update shows the before/after:\n${baText.split('\n').slice(0, 6).join('\n')}`);
   check(baImages.length === 2 && baImages.every((x: any) => x.mimeType === 'image/png') && /overlay renders of the 2 places that changed, in order: graphs\/main\.json a, graphs\/main\.json d/.test(baText), `and an overlay render of each place that changed (${baImages.length})`);
   check(steps.length === 4 && steps.every((s, i) => s.progress === i && s.total === 4) && steps[0].message === 'graphs/main.json a with studio/crates 1.0', `progress notifications while it cooks (${steps.map((s) => `${s.progress}/${s.total}`).join(' ')})`);
   check(fs.readFileSync(path.join(yard, 'project.json'), 'utf8') === pjBefore && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1')), 'the before/after writes nothing');
   if (baImages[0]) fs.writeFileSync(path.join(wsDir, 'update.png'), Buffer.from(baImages[0].data, 'base64'));
   const noTo = await call('library', { action: 'update', package: 'studio/crates', apply: true });
-  check(noTo.isError && /apply:true needs "to": the version whose before\/after the person saw/.test(noTo.txt), 'applying names the version whose before/after the person saw');
-  const ap = await call('library', { action: 'update', package: 'studio/crates', to: '1.1', apply: true });
+  check(noTo.isError && /apply:true needs "from" and "to": the version in use and the version of the before\/after the person saw/.test(noTo.txt), 'applying names the version whose before/after the person saw');
+  const ap = await call('library', { action: 'update', package: 'studio/crates', from: '1.0', to: '1.1', apply: true });
   check(!ap.isError && /^updated studio\/crates 1\.0 → 1\.1 in project yard/.test(ap.txt) && JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8')).uses['studio/crates'] === '1.1'
     && fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1', 'version.json')) && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.0')), `library update with apply:true applies it: ${ap.txt.split('\n')[0]}`);
   const grown = await call('inspect', { node: 'a' });
@@ -448,7 +448,9 @@ for (const named of [false, true]) {
   const r: any = await own.callTool({ name: 'library', arguments: { action: 'packages' } });
   const txt = r.content.map((c: any) => c.text ?? '').join('\n');
   const pj = path.join(dir, 'project.json'), id = fs.existsSync(pj) ? JSON.parse(fs.readFileSync(pj, 'utf8')).id : null;
-  check(!r.isError && !!id && new RegExp(`^project ${id} \\(.*\\)\\nuses: nothing yet`).test(txt), `${named ? 'a named empty folder' : 'the default workspace'} is made a project: ${txt.split('\n')[0]}`);
+  const title = fs.existsSync(pj) ? JSON.parse(fs.readFileSync(pj, 'utf8')).title : null;
+  check(!r.isError && !!id && new RegExp(`^project ${id} \\(.*\\)\\nuses no packages yet`).test(txt) && /became a project, ".*", when the server started/.test(txt) && (named || title === path.basename(cwd)),
+    `${named ? 'a named empty folder' : 'the default workspace (named after the folder it is in)'} is made a project, and the first reply says so: ${txt.split('\n')[0]}`);
   const b: any = await own.callTool({ name: 'build', arguments: { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } } } });
   const bt = b.content.map((c: any) => c.text ?? '').join('\n');
   check(!b.isError && /✓ graph "main"/.test(bt) && new RegExp(`note: added topotopo/nature ${NV}`).test(bt), `its graphs use TopoTopo's own packages as they come: ${bt.split('\n')[0]}`);
