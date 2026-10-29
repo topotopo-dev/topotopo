@@ -57,6 +57,24 @@ export interface UVPiece { name: string; triangles: number; surfaceArea: number;
 
 export interface UVOverlapClass { pairs: number; area: number }
 
+/**
+ * Texel density of atlas charts (tiling charts are left out): sqrt(uv area / surface area), in texels per metre with a
+ * resolution (times sqrt(width · height)), else in uv units per metre. overall: all charts together; p05 / median / p95:
+ * per chart, weighted by surface area; min / max: over charts holding at least 0.1 % of the surface, with where they are.
+ */
+export interface UVDensity {
+  unit: 'texels/m' | 'uv/m';
+  charts: number;
+  overall: number;
+  p05: number;
+  median: number;
+  p95: number;
+  min: number;
+  max: number;
+  lowest: string | null;
+  highest: string | null;
+}
+
 export interface UVReport {
   attribute: string;
   /** charts run across tile borders: uv for a repeating texture, not an atlas (their overlaps are overlap.tiling) */
@@ -88,6 +106,10 @@ export interface UVReport {
    */
   overlap: { pairs: number; sameChartPairs: number; area: number; candidatePairs: number; testedPairs: number; inTile: UVOverlapClass; tiling: UVOverlapClass; acrossLods: UVOverlapClass; examples: UVOverlap[] };
   utilization: { method: 'exact' | 'raster-estimate' | 'none'; value: number; rasterSize?: number; note: string };
+  /** with charts in several tiles and no overlaps: the exact covered share of each tile (UDIM number 1001 + u + 10 v) */
+  tileUtilization: { tile: number; value: number }[];
+  /** texel density of the atlas charts (null without any) */
+  density: UVDensity | null;
   pieces: UVPiece[];
   resolution?: [number, number];
 }
@@ -172,7 +194,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
     attribute: name, tiling: false, tilingCharts: 0, complete: true, reasons: [], missing: false, triangles: nt, nonFinite: 0, collapsed: 0, collapsedTriangles: [], firstCollapsed: null, firstOutOfTile: null, mirrored: 0,
     outOfTile: 0, tiles: [], charts: 0, uvArea: 0,
     overlap: { pairs: 0, sameChartPairs: 0, area: 0, candidatePairs: 0, testedPairs: 0, inTile: { pairs: 0, area: 0 }, tiling: { pairs: 0, area: 0 }, acrossLods: { pairs: 0, area: 0 }, examples: [] },
-    utilization: { method: 'none', value: 0, note: '' }, pieces: [], ...(res ? { resolution: res } : {}),
+    utilization: { method: 'none', value: 0, note: '' }, tileUtilization: [], density: null, pieces: [], ...(res ? { resolution: res } : {}),
   };
   const f = g.findAttrib(name, ['vertex', 'point']);
   if (!f || f.attr.type !== 'float' || f.attr.isArray) {
@@ -287,6 +309,35 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
     rep.utilization = { method: 'raster-estimate', value: k / (N * N), rasterSize: N, note: `ESTIMATE: fraction of ${N} × ${N} sample points of the unit tile covered (summed areas would count overlaps twice; because of ${why})` };
   } else rep.utilization = { method: 'none', value: 0, note: 'no valid uv triangles' };
 
+  // texel density per atlas chart, and the covered share of each tile
+  {
+    const P = g.P, vp = g.vertexPoint, surf = new Map<number, number>(), area = new Map<number, number>(), first = new Map<number, number>();
+    const tileArea = new Map<number, number>();
+    let s3 = 0, sUV = 0;
+    for (let t = 0; t < nt; t++) {
+      if (!ok[t] || kind[t] === 2) continue;
+      const i0 = vp[tris[t * 3]] * 3, i1 = vp[tris[t * 3 + 1]] * 3, i2 = vp[tris[t * 3 + 2]] * 3;
+      const ux = P[i1] - P[i0], uy = P[i1 + 1] - P[i0 + 1], uz = P[i1 + 2] - P[i0 + 2], wx = P[i2] - P[i0], wy = P[i2 + 1] - P[i0 + 1], wz = P[i2 + 2] - P[i0 + 2];
+      const a3 = 0.5 * Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx), aUV = Math.abs(signed[t]), r = find(t);
+      surf.set(r, (surf.get(r) ?? 0) + a3); area.set(r, (area.get(r) ?? 0) + aUV);
+      if (!first.has(r)) first.set(r, t);
+      s3 += a3; sUV += aUV;
+      const tu = Math.floor((U[t * 6] + U[t * 6 + 2] + U[t * 6 + 4]) / 3), tv = Math.floor((U[t * 6 + 1] + U[t * 6 + 3] + U[t * 6 + 5]) / 3);
+      if (tu >= 0 && tu < 10 && tv >= 0) tileArea.set(1001 + tu + 10 * tv, (tileArea.get(1001 + tu + 10 * tv) ?? 0) + aUV);
+    }
+    if (s3 > 0 && sUV > 0) {
+      const k = res ? Math.sqrt(res[0] * res[1]) : 1;
+      const list = [...surf].filter(([r, a]) => a > 0 && (area.get(r) ?? 0) > 0).map(([r, a]) => ({ r, a, d: Math.sqrt(area.get(r)! / a) * k })).sort((x, y) => x.d - y.d || x.r - y.r);
+      const at = (q: number) => { let acc = 0; for (const c of list) { acc += c.a; if (acc >= q * s3) return c.d; } return list[list.length - 1].d; };
+      const big = list.filter((c) => c.a >= s3 * 1e-3), lo = big[0] ?? list[0], hi = big[big.length - 1] ?? list[list.length - 1];
+      rep.density = {
+        unit: res ? 'texels/m' : 'uv/m', charts: list.length, overall: Math.sqrt(sUV / s3) * k, p05: at(0.05), median: at(0.5), p95: at(0.95),
+        min: lo.d, max: hi.d, lowest: triWhere(first.get(lo.r)!), highest: triWhere(first.get(hi.r)!),
+      };
+    }
+    if (tileArea.size > 1 && rep.overlap.inTile.pairs === 0 && rep.complete) rep.tileUtilization = [...tileArea].sort((x, y) => x[0] - y[0]).map(([tile, value]) => ({ tile, value }));
+  }
+
   // per-piece surface and uv area, texel density
   const pa = g.prims.get(o.pieceAttrib || 'name');
   if (pa && pa.type === 'string') {
@@ -323,6 +374,9 @@ export function uvReportText(r: UVReport): string[] {
   for (const e of ov.examples.slice(0, 8)) out.push(`    ${e.kind === 'inTile' ? '' : `[${e.kind === 'tiling' ? 'tiling' : 'across LODs'}] `}${e.where[0]} × ${e.where[1]}${e.sameChart ? ' (same chart: a fold)' : ''}: uv area ${f(e.area)}`);
   out.push(`  utilization ${(r.utilization.value * 100).toFixed(2)}% (${r.utilization.method}${r.utilization.rasterSize ? ` ${r.utilization.rasterSize}²` : ''}): ${r.utilization.note}; uv area ${f(r.uvArea)}${r.tiling ? ' (says little for tiling uv)' : ''}`);
   if (r.outOfTile && r.firstOutOfTile && !r.tiling) out.push(`    outside 0..1, first ${r.firstOutOfTile}`);
+  if (r.tileUtilization.length) out.push(`  utilization per tile: ${r.tileUtilization.map((t) => `${t.tile} ${(t.value * 100).toFixed(1)}%`).join(', ')}`);
+  const d = r.density;
+  if (d) out.push(`  texel density (${d.unit}${d.unit === 'uv/m' ? '; --uv-resolution gives texels/m' : ` at ${r.resolution![0]}×${r.resolution![1]}`}): ${f(d.overall)} over ${d.charts} charts; per chart 5% ${f(d.p05)}, median ${f(d.median)}, 95% ${f(d.p95)} (by area); lowest ${f(d.min)} at ${d.lowest}, highest ${f(d.max)} at ${d.highest}`);
   if (r.pieces.length) {
     const shown = r.pieces.slice(0, 24);
     out.push(`  pieces (${r.pieces.length})${r.resolution ? `, texel density at ${r.resolution[0]}×${r.resolution[1]}` : ''}:`);
