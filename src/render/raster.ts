@@ -4,9 +4,11 @@
 // Opt-in overlays answer specific questions (help topic "render"): crisp 1 px edge overlays
 // (all / hard / boundary / edge groups), a section view and a persp clip plane with filled caps,
 // vector glyphs (N, up, orient, v), point/prim numbers, group/piece/attribute labels, legends,
-// flat/matcap/AO shading and a self-describing annotation footer. With none of them set the
-// output is exactly what it always was, except that a heightfield drawn at fewer samples than it has
+// flat/matcap/AO shading and a self-describing annotation footer. A heightfield drawn at fewer samples than it has
 // (above heightfieldRes quads per side) gets a second footer line saying so.
+// Framing: every 3D view fits the bounds (the 8 bbox corners projected into the view, with a small margin), so
+// nothing is cropped; zoom is relative to that fit. Views can be W×H (size [w, h]), have a transparent background,
+// a reference image (underlay) behind them, and scene empties (sockets) drawn as labelled dots.
 import { readMaterials, primMaterials } from '../core/materials.ts';
 import { Geometry } from '../core/geometry.ts';
 import { buildEdges, connectivity, primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
@@ -24,14 +26,27 @@ import type { DepthTol, LegendItem, RGB } from './overlay.ts';
 import { heightfieldPreviewStep, isHeightfield, layerStats, withHeightfieldPreview } from '../core/heightfield.ts';
 import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler } from './texview.ts';
+import { EMPTY_ATTRIB } from '../core/scene.ts';
 import { pbrScene, preparePBR } from './pbr.ts';
+import { decodePNG } from '../io/png-decode.ts';
 import type { PBRScene, PBRTextures } from './pbr.ts';
 
 /**
  * 3D views, 'persp@<azimuth>' (a persp view at that azimuth), 'section' (the cut through the section plane,
  * looking along its axis), plus 'uv': the 0..1 UV square (UDIM tiles) with every polygon drawn at its uv.
  */
-export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'uv' | 'section' | 'texture' | `persp@${number}`;
+export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'uv' | 'section' | 'texture' | `persp@${number}`
+  | 'front_left' | 'front_right' | 'back_left' | 'back_right';
+/**
+ * Named three-quarter views: persp views at these azimuths (degrees; 0 = the camera on +Z looking at the front, 90 =
+ * on +X looking at the right side), at the elevation of the persp view.
+ */
+export const NAMED_VIEWS: Record<string, number> = { front_left: -45, front_right: 45, back_left: -135, back_right: 135 };
+/** How a reference image (underlay) is placed in a view. */
+export type UnderlayFit = 'bounds' | 'width' | 'height' | 'view';
+export const UNDERLAY_FITS: UnderlayFit[] = ['bounds', 'width', 'height', 'view'];
+/** A decoded underlay: 8-bit RGBA rows, top row first. */
+export interface UnderlayImage { width: number; height: number; rgba: Uint8Array }
 /** Edge overlays: every polygon edge, edges sharper than hardAngle (+ crease/hard/sharp edge groups), open/non-manifold/flipped edges, edge groups. */
 export type WireMode = 'none' | 'all' | 'hard' | 'boundary' | 'groups';
 export type GlyphMode = 'none' | 'N' | 'up' | 'orient' | 'v' | 'custom';
@@ -48,18 +63,42 @@ export interface ClipOptions {
 
 export interface RenderOptions {
   views?: ViewName[];
-  size?: number;
+  /** pixels per view: n (square) or [width, height]; the views fit the bounds to that aspect (default 800 single, 512 several) */
+  size?: number | [number, number];
+  /** background pixels (no surface, line or point) get alpha 0; the ground grid is off; the footer stays opaque */
+  transparent?: boolean;
+  /** a reference image behind the 3D views: a PNG path, read by renderGeometryAsync */
+  underlay?: string | null;
+  /** the decoded underlay (renderGeometryAsync sets it from underlay) */
+  underlayImage?: UnderlayImage | null;
+  /** underlay opacity 0..1 (default 0.5) */
+  underlayOpacity?: number;
+  /**
+   * where the underlay goes in each view: 'bounds' (default; fitted into the rectangle the bounds cover, keeping its
+   * aspect, so a reference cropped to the object lines up with it), 'width' (its width spans the bounds' width),
+   * 'height' (its height spans the bounds' height), 'view' (fitted into the whole view)
+   */
+  underlayFit?: UnderlayFit;
+  /** scene empties (points with scene_empty 1: sockets) drawn as dots with their name and orient axes, through surfaces */
+  sockets?: boolean;
   /** true / 'auto' / false: classic edges (auto = on below 6000 polygons); 'all' | 'hard' | 'boundary' | 'groups': crisp edge overlays; 'none' = off */
   wireframe?: boolean | 'auto' | WireMode;
   colorBy?: string | null;
   highlight?: { cls: 'point' | 'prim'; mask: Uint8Array; label?: string } | null;
   /** true: every point (sized by pscale when present); 'auto': only loose points */
   points?: boolean | 'auto';
+  /** the persp ground grid on y = 0 (default true; off with transparent) */
   grid?: boolean;
+  /** persp camera azimuth in degrees around +Y: 0 = on +Z looking at the front, 90 = on +X (right side), 180 = back (default 35) */
   azimuth?: number;
+  /** persp camera elevation in degrees above the horizon (default 25; 90 = straight down) */
   elevation?: number;
+  /**
+   * relative to the fit (1 = the bounds fill the view with a small margin, 0.5 = half that size). Above 1 it magnifies
+   * around the look-at point and so crops the bounds: only with target (look_at) or orthoScale; otherwise it is held at 1
+   */
   zoom?: number;
-  /** look-at point (default bbox centre) */
+  /** look-at point in world coordinates (x right, y up, z towards the front; default the bbox centre); the views still fit the bounds around it */
   target?: Vec3 | null;
   ssaa?: number;
   /** packed instances: triangles to draw at most (default RENDER_TRIANGLE_BUDGET, 600k; up to 50M); above it an evenly spread subset */
@@ -113,7 +152,7 @@ export interface RenderOptions {
   pbrTextures?: PBRTextures;
   /** ao sample radius in output pixels (default 10) */
   aoRadius?: number;
-  /** ortho views: world width visible across a tile (default: fit the bbox) */
+  /** ortho and section views: world width in metres visible across a view (default: fit the bounds) */
   orthoScale?: number;
   /** 1..4: multiplies tile size, text, lines and markers (2 = a 2× version) */
   scale?: number;
@@ -136,7 +175,7 @@ export const VIEW_PRESETS: Record<string, ViewName[]> = {
   quad_uv: ['persp', 'uv'],
   turntable: ['persp@0', 'persp@90', 'persp@180', 'persp@270'],
 };
-export const BASE_VIEWS = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', 'uv', 'section', 'texture'];
+export const BASE_VIEWS = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', ...Object.keys(NAMED_VIEWS), 'uv', 'section', 'texture'];
 
 /** Views from a preset name, a comma/space separated list or an array (presets expand inside lists). Throws on unknown names. */
 export function parseViews(spec: string | readonly string[] | null | undefined): ViewName[] | undefined {
@@ -157,7 +196,7 @@ const AXES: Axis[] = ['x', 'y', 'z'];
 const WIRE_MODES = ['none', 'all', 'hard', 'boundary', 'groups'];
 const GLYPH_MODES = ['none', 'N', 'up', 'orient', 'v', 'custom'];
 const SHADING_MODES = ['default', 'flat', 'matcap', 'ao', 'pbr'];
-const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9];
+const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9], SOCKET_C = [0.35, 1, 0.72];
 
 export interface RenderResult { width: number; height: number; rgba: Uint8Array; notes: string[] }
 
@@ -166,7 +205,17 @@ interface Cam {
   persp: boolean;
   eye: Vec3; f: Vec3; r: Vec3; u: Vec3; c: Vec3;
   focal: number; scale: number;
+  /** the image point the view axis goes through (SSAA pixels): off centre when the fit centres asymmetric bounds */
+  ox: number; oy: number;
 }
+
+/** Margins of the fit: the bounds fill this fraction of a view's width and height (room for the label and gizmo). */
+const FIT_W = 0.9, FIT_H = 0.84;
+
+/** Whether a zoom above 1 may crop the bounds: only when the person framed the view (look_at or ortho_scale). */
+const zoomFramed = (o: RenderOptions) => !!o.target || !!(o.orthoScale && o.orthoScale > 0);
+/** The zoom a view uses: within 0.05..20, held at 1 above 1 unless the view is framed by look_at / ortho_scale. */
+const zoomOf = (o: RenderOptions) => { const z = Math.max(0.05, Math.min(20, o.zoom ?? 1)); return z > 1 && !zoomFramed(o) ? 1 : z; };
 
 const ORTHO: Record<string, { f: Vec3; r: Vec3; u: Vec3; label: string }> = {
   front: { f: [0, 0, -1], r: [1, 0, 0], u: [0, 1, 0], label: 'FRONT  X> Y^' },
@@ -176,6 +225,11 @@ const ORTHO: Record<string, { f: Vec3; r: Vec3; u: Vec3; label: string }> = {
   top: { f: [0, -1, 0], r: [1, 0, 0], u: [0, 0, -1], label: 'TOP  X> -Z^' },
   bottom: { f: [0, 1, 0], r: [1, 0, 0], u: [0, 0, 1], label: 'BOTTOM  X> Z^' },
 };
+
+/** persp, persp@<azimuth> and the named three-quarter views are perspective views. */
+export const isPerspView = (v: string) => v.startsWith('persp') || NAMED_VIEWS[v] !== undefined;
+
+const glAxisC: RGB[] = [[0.95, 0.3, 0.3], [0.4, 0.9, 0.4], [0.4, 0.6, 1]];
 
 const dot3 = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const norm3 = (a: number[]): Vec3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
@@ -197,15 +251,52 @@ function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; 
 /** Section views look along the section axis from its + side (same framing as right / top / front). */
 const SECTION_CAM = [ORTHO.right, ORTHO.top, ORTHO.front];
 
-function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o: RenderOptions, kind: string = name, azDeg?: number, secAxis = 1): Cam {
+/**
+ * The points a view fits: the geometry's points (evenly subsampled above 200,000), or the bbox corners when there are
+ * none (volumes only). Fitting the points rather than the bbox keeps rotated content (a square turned 20°) as large as
+ * it can be; nothing outside the bbox exists, so the fit never crops.
+ */
+function fitPoints(g: Geometry, bmin: Vec3, bmax: Vec3): Float64Array {
+  const np = g.numPoints, n = Math.min(np, 200_000);
+  // volumes drawn in 3D (SDFs as their bounds) count with their bbox corners
+  const corners = !np || g.volumes.some((v) => v.kind !== 'image') ? 8 : 0;
+  const out = new Float64Array((n + corners) * 3);
+  for (let k = 0; k < n; k++) { const i = Math.floor((k * np) / n) * 3; out[k * 3] = g.P[i]; out[k * 3 + 1] = g.P[i + 1]; out[k * 3 + 2] = g.P[i + 2]; }
+  for (let k = 0; k < corners; k++) { const o = (n + k) * 3; out[o] = k & 1 ? bmax[0] : bmin[0]; out[o + 1] = k & 2 ? bmax[1] : bmin[1]; out[o + 2] = k & 4 ? bmax[2] : bmin[2]; }
+  return out;
+}
+
+/**
+ * The camera of a view. Persp views stand where they always stood (the bounding sphere seen through a 32° lens, so the
+ * perspective does not change with the framing) and then fit the image of the geometry into the view: the focal length
+ * and the image centre are chosen so the projected points (fitPoints) fill FIT_W × FIT_H of it, centred (or around the
+ * look-at point when target is set). Ortho and section views fit the same way. zoom scales the fit.
+ */
+function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o: RenderOptions, kind: string = name, azDeg: number | undefined, secAxis: number, pts: Float64Array): Cam {
   const c: Vec3 = o.target ?? [(bmin[0] + bmax[0]) / 2, (bmin[1] + bmax[1]) / 2, (bmin[2] + bmax[2]) / 2];
-  const ext = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
-  const R = Math.max(1e-6, Math.hypot(ext[0], ext[1], ext[2]) / 2);
-  const zoom = Math.max(0.05, Math.min(20, o.zoom ?? 1));
+  let R = 1e-6;
+  for (let k = 0; k < 8; k++) R = Math.max(R, Math.hypot((k & 1 ? bmax[0] : bmin[0]) - c[0], (k & 2 ? bmax[1] : bmin[1]) - c[1], (k & 4 ? bmax[2] : bmin[2]) - c[2]));
+  const zoom = zoomOf(o), centred = !!o.target;
+  /** half extents and centre of the fit from the image coordinates of the points (x along r, y along u; persp: over depth) */
+  const fit = (r: number[], u: number[], f: number[] | null, from: number[]) => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < pts.length; i += 3) {
+      const dx = pts[i] - from[0], dy = pts[i + 1] - from[1], dz = pts[i + 2] - from[2];
+      const z = f ? Math.max(1e-9, dx * f[0] + dy * f[1] + dz * f[2]) : 1;
+      const x = (dx * r[0] + dy * r[1] + dz * r[2]) / z, y = (dx * u[0] + dy * u[1] + dz * u[2]) / z;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (!(x1 >= x0)) { x0 = x1 = y0 = y1 = 0; }
+    // around the look-at point (the view looks from `from` through it, so its image is x = y = 0), else centred
+    return centred
+      ? { hx: Math.max(Math.abs(x0), Math.abs(x1)), hy: Math.max(Math.abs(y0), Math.abs(y1)), cx: 0, cy: 0 }
+      : { hx: (x1 - x0) / 2, hy: (y1 - y0) / 2, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+  };
   if (kind === 'persp') {
     const az = ((azDeg ?? o.azimuth ?? 35) * Math.PI) / 180, el = ((o.elevation ?? 25) * Math.PI) / 180;
     const fov = (32 * Math.PI) / 180;
-    const dist = (R / Math.sin(fov / 2)) * 1.05 / zoom;
+    const dist = (R / Math.sin(fov / 2)) * 1.05;
     const dir: Vec3 = [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)];
     const eye: Vec3 = [c[0] + dir[0] * dist, c[1] + dir[1] * dist, c[2] + dir[2] * dist];
     const f = norm3([c[0] - eye[0], c[1] - eye[1], c[2] - eye[2]]);
@@ -213,13 +304,18 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
     if (Math.hypot(...r) < 1e-6) r = [1, 0, 0];
     r = norm3(r);
     const u = cross3(r, f);
-    return { name, persp: true, eye, f, r, u, c, focal: Math.min(W, H) / 2 / Math.tan(fov / 2), scale: 1 };
+    const q = fit(r, u, f, eye);
+    const lens = Math.min(W, H) / 2 / Math.tan(fov / 2);
+    const focal = Math.min(q.hx > 1e-9 ? (W / 2) * FIT_W / q.hx : Infinity, q.hy > 1e-9 ? (H / 2) * FIT_H / q.hy : Infinity, lens * 50) * zoom;
+    const fl = Number.isFinite(focal) && focal > 0 ? focal : lens * zoom;
+    return { name, persp: true, eye, f, r, u, c, focal: fl, scale: 1, ox: W / 2 - q.cx * fl, oy: H / 2 + q.cy * fl };
   }
   const v = kind === 'section' ? SECTION_CAM[secAxis] : ORTHO[name];
-  const halfW = Math.abs(v.r[0]) * ext[0] / 2 + Math.abs(v.r[1]) * ext[1] / 2 + Math.abs(v.r[2]) * ext[2] / 2;
-  const halfH = Math.abs(v.u[0]) * ext[0] / 2 + Math.abs(v.u[1]) * ext[1] / 2 + Math.abs(v.u[2]) * ext[2] / 2;
-  const s = (o.orthoScale && o.orthoScale > 0 ? W / o.orthoScale : Math.min((W / 2) * 0.86 / Math.max(halfW, 1e-6), (H / 2) * 0.82 / Math.max(halfH, 1e-6))) * zoom;
-  return { name, persp: false, eye: c, f: v.f, r: v.r, u: v.u, c, focal: 0, scale: s };
+  if (o.orthoScale && o.orthoScale > 0) return { name, persp: false, eye: c, f: v.f, r: v.r, u: v.u, c, focal: 0, scale: (W / o.orthoScale) * zoom, ox: W / 2, oy: H / 2 };
+  const q = fit(v.r, v.u, null, c);
+  const s0 = Math.min((W / 2) * FIT_W / Math.max(q.hx, 1e-6), (H / 2) * FIT_H / Math.max(q.hy, 1e-6));
+  const s = (Number.isFinite(s0) && s0 > 0 ? s0 : 1) * zoom;
+  return { name, persp: false, eye: c, f: v.f, r: v.r, u: v.u, c, focal: 0, scale: s, ox: W / 2 - q.cx * s, oy: H / 2 + q.cy * s };
 }
 
 /**
@@ -228,7 +324,28 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
  */
 export async function renderGeometryAsync(g: Geometry, o: RenderOptions = {}, readFile?: (path: string) => Promise<Uint8Array>): Promise<RenderResult> {
   if (o.shading === 'pbr' && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
+  if (o.underlay && !o.underlayImage) o = { ...o, underlayImage: await readUnderlay(o.underlay, readFile) };
   return renderGeometry(g, o);
+}
+
+/** A reference image for the underlay option: a PNG read through readFile (errors say what to pass instead). */
+export async function readUnderlay(p: string, readFile?: (path: string) => Promise<Uint8Array>): Promise<UnderlayImage> {
+  if (!readFile) throw new Error(`render: underlay "${p}": no file access in this render`);
+  let bytes: Uint8Array;
+  try { bytes = await readFile(p); } catch (e: any) { throw new Error(`render: underlay "${p}" cannot be read (${e?.message ?? e})`); }
+  if (!(bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47)) throw new Error(`render: underlay "${p}" is not a PNG (only PNG reference images are read; convert it to PNG)`);
+  let img: ReturnType<typeof decodePNG>;
+  try { img = decodePNG(bytes); } catch (e: any) { throw new Error(`render: underlay "${p}" is not a readable PNG (${e?.message ?? e})`); }
+  // 8-bit RGBA whatever the PNG holds (grey, grey + alpha, RGB, RGBA; 16-bit samples scaled down)
+  const n = img.width * img.height, ch = img.channels, rgba = new Uint8Array(n * 4);
+  const max = img.maxValue;
+  for (let i = 0; i < n; i++) {
+    const s = (k: number) => Math.round((img.data[i * ch + k] / max) * 255);
+    const grey = ch <= 2;
+    rgba[i * 4] = s(0); rgba[i * 4 + 1] = grey ? s(0) : s(1); rgba[i * 4 + 2] = grey ? s(0) : s(2);
+    rgba[i * 4 + 3] = ch === 2 ? s(1) : ch === 4 ? s(3) : 255;
+  }
+  return { width: img.width, height: img.height, rgba };
 }
 
 /** Render the geometry; returns RGBA pixels. Shading 'pbr' needs renderGeometryAsync first (or MikkTSpace loaded). */
@@ -261,9 +378,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const onlyImages = !g.numPoints && g.volumes.length > 0 && g.volumes.every((v) => v.kind === 'image');
   const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : ['persp', 'front', 'right', 'top'];
   const ui = Math.max(1, Math.min(4, Math.round(o.scale ?? 1)));
-  const tile = Math.max(128, Math.min(1600, Math.round(o.size ?? (views.length === 1 ? 800 : 512)))) * ui;
+  // tile size: n (square) or [width, height] pixels per view, before scale
+  const sz0 = o.size ?? (views.length === 1 ? 800 : 512);
+  const [sw, sh] = Array.isArray(sz0) ? sz0 : [sz0, sz0];
+  if (!(Number.isFinite(sw) && Number.isFinite(sh))) throw new Error(`render: size expects pixels per view, n or [width, height], got ${JSON.stringify(o.size)}`);
+  const TW = Math.max(128, Math.min(1600, Math.round(sw))) * ui, TH = Math.max(128, Math.min(1600, Math.round(sh))) * ui;
   let ss = Math.max(1, Math.min(3, Math.round(o.ssaa ?? 2)));
-  if (ui > 1) ss = Math.max(1, Math.min(ss, Math.floor(4096 / tile)));
+  if (ui > 1) ss = Math.max(1, Math.min(ss, Math.floor(4096 / Math.max(TW, TH))));
+  const transparent = !!o.transparent;
   const cols = views.length === 1 ? 1 : views.length <= 4 ? 2 : 3;
   const rows = Math.ceil(views.length / cols);
   // opt-in overlay options (validated: they arrive from MCP/CLI as free strings)
@@ -274,26 +396,36 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const glyphMode = o.glyphs && o.glyphs !== 'none' ? o.glyphs : o.glyphAttrib && o.glyphs !== 'none' ? 'custom' : null;
   if (o.shading && !SHADING_MODES.includes(o.shading)) throw new Error(`unknown shading "${o.shading}" (use ${SHADING_MODES.join(', ')})`);
   const shadingMode = o.shading && o.shading !== 'default' ? o.shading : null;
+  // reference image behind the 3D views
+  const ulFit: UnderlayFit = o.underlayFit ?? 'bounds';
+  if (!UNDERLAY_FITS.includes(ulFit)) throw new Error(`unknown underlay_fit "${o.underlayFit}" (use ${UNDERLAY_FITS.join(', ')})`);
+  const ulOpacity = Math.max(0, Math.min(1, o.underlayOpacity ?? 0.5));
+  if (o.underlayOpacity !== undefined && !Number.isFinite(o.underlayOpacity)) throw new Error(`render: underlay_opacity expects 0..1, got ${o.underlayOpacity}`);
+  if (o.underlay && !o.underlayImage) throw new Error('render: underlay needs the image read first (renderGeometryAsync reads it)');
+  const ul = o.underlayImage && !o.transparent ? o.underlayImage : null;
   const hasSection = views.includes('section');
   const secK = AXES.indexOf(o.sectionAxis ?? 'y');
   if (secK < 0) throw new Error(`unknown section_axis "${o.sectionAxis}" (use x, y or z)`);
   const clipK = o.clip ? AXES.indexOf(o.clip.axis) : -1;
   if (o.clip && clipK < 0) throw new Error(`unknown clip axis "${o.clip.axis}" (use x, y or z)`);
-  const annotate = o.annotate ?? !!(wireMode || o.pointNumbers || o.primNumbers || hasSection || clipK >= 0 || glyphMode || o.labelGroups || o.labelPieces || o.labelAttrib || o.legend || shadingMode);
+  const annotate = o.annotate ?? !!(wireMode || o.pointNumbers || o.primNumbers || hasSection || clipK >= 0 || glyphMode || o.labelGroups || o.labelPieces || o.labelAttrib || o.legend || shadingMode || o.sockets);
   // a heightfield drawn at fewer samples than it has: said on the second footer line (unless annotate is false)
   const hfLine = hfShown.map((x) => `HEIGHTFIELD ${hfShown.length > 1 ? x.v.name.toUpperCase() + ' ' : ''}SHOWN AT ${x.shown[0]}×${x.shown[1]} OF ${x.v.width}×${x.v.height}`).join('  ·  ');
   const hfFooter = !!hfLine && o.annotate !== false;
   const footerH = 22 * ui + (annotate || hfFooter ? 16 * ui : 0);
   const viewLabels = o.viewLabels ?? true;
-  const outW = cols * tile + (cols - 1) * 2, outH = rows * tile + (rows - 1) * 2 + footerH;
+  const outW = cols * TW + (cols - 1) * 2, outH = rows * TH + (rows - 1) * 2 + footerH;
   const notes: string[] = hfShown.map((x) =>
     `heightfield "${x.v.name}" shown at ${x.shown[0]}×${x.shown[1]} of ${x.v.width}×${x.v.height} samples (1 in ${x.step} per side); heightfield_res "full" (CLI --heightfield-res full) draws every sample`);
   notes.push(...hfNotes);
+  if ((o.zoom ?? 1) > 1 && !zoomFramed(o)) notes.push(`zoom ${fmtNum(o.zoom!)}: held at 1, the fit (the views fit the bounds; a zoom above 1 would crop them): add look_at [x, y, z] to zoom into a point`);
+  if (o.underlayImage && o.transparent) notes.push('underlay: not drawn on a transparent background');
 
   // --- scene data shared by all views
   const Pd = g.P, np = g.numPoints;
   const bb = g.bbox(true);
   const bmin = bb.min, bmax = bb.max;
+  const fitPts = fitPoints(g, bmin, bmax);
   const { tris, triPrim } = triangulate(g);
   const nTri = tris.length / 3;
   if (nTri > 4e6) notes.push(`large mesh (${nTri} triangles) — render may be slow`);
@@ -409,8 +541,13 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // isolated points + polylines
   const used = new Uint8Array(np);
   for (let v = 0; v < g.numVertices; v++) used[g.vertexPoint[v]] = 1;
+  // scene empties (sockets: isolated points marked scene_empty 1): drawn by the sockets overlay when asked, and not as
+  // loose points in pbr (beauty) renders
+  const emptyA = g.points.get(EMPTY_ATTRIB);
+  const isEmpty = emptyA && emptyA.type === 'int' && emptyA.size === 1 ? (i: number) => !used[i] && (emptyA.data as Int32Array)[i] !== 0 : () => false;
+  const hideEmpties = !!o.sockets || o.shading === 'pbr';
   let isolated = 0;
-  for (let i = 0; i < np; i++) if (!used[i]) isolated++;
+  for (let i = 0; i < np; i++) if (!used[i] && !(hideEmpties && isEmpty(i))) isolated++;
   const showAllPts = o.points === true;
   const drawPts = showAllPts || (o.points !== false && isolated > 0);
   const closedPrims = g.primClosed.reduce((s, c) => s + c, 0);
@@ -440,6 +577,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // --- output buffer (final res, RGB float) and per-tile SSAA buffers
   const out = new Float32Array(outW * outH * 3);
   for (let i = 0; i < out.length; i += 3) { out[i] = 0.12; out[i + 1] = 0.12; out[i + 2] = 0.13; }
+  // transparent: alpha per output pixel (0 between the views; the footer is opaque)
+  const outA = transparent ? new Float32Array(outW * outH) : null;
 
   // --- uv data (uv view, checker shading)
   const materialNames = primMaterials(g), materialTable = readMaterials(g);
@@ -661,8 +800,26 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     if (np > maxLabels) notes.push(`point numbers: first ${maxLabels} of ${np} points (max_labels)`);
     ovDesc.push('POINT NUMBERS');
   }
+  // sockets: a dot, the name and short orient axes per scene empty, drawn through surfaces (sockets often sit inside)
+  const sockets: { p: number; axes: number[] }[] = [];
+  if (o.sockets) {
+    const ori = g.points.get('orient'), nameA = g.points.get('name');
+    const L = Math.max(1e-6, diag * 0.045);
+    for (let i = 0; i < np; i++) {
+      if (!isEmpty(i)) continue;
+      const q = ori && ori.type === 'float' && ori.size === 4 ? qNormalize(ori.get(i) as unknown as Quat) : ([0, 0, 0, 1] as Quat);
+      const axes: number[] = [];
+      for (let ax = 0; ax < 3; ax++) { const d = qRotate(q, [ax === 0 ? 1 : 0, ax === 1 ? 1 : 0, ax === 2 ? 1 : 0]); axes.push(d[0] * L, d[1] * L, d[2] * L); }
+      sockets.push({ p: i, axes });
+      const nm = nameA && nameA.type === 'string' ? String(nameA.get(i) ?? '') : '';
+      wl.push({ x: Pd[i * 3], y: Pd[i * 3 + 1], z: Pd[i * 3 + 2], text: nm || `empty ${i}`, c: SOCKET_C, kind: 0 });
+    }
+    if (!sockets.length) notes.push('sockets: the geometry has no scene empties (scene_null)');
+    else legendItems.push({ color: SOCKET_C, text: `SOCKETS (${sockets.length})` });
+    ovDesc.push(`SOCKETS ${sockets.length}`);
+  }
   const bigLabels = wl.filter((l) => l.kind === 0).length;
-  const nameFs = tile >= 400 * ui && bigLabels <= 40 ? 2 * ui : ui;
+  const nameFs = Math.min(TW, TH) >= 400 * ui && bigLabels <= 40 ? 2 * ui : ui;
 
   // glyphs: world segments (start = anchor) with a base and a tip colour
   const glSeg: number[] = [], glCol: number[] = [];
@@ -728,28 +885,44 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     }
   }
   if (o.legend && !cbLegend.length) notes.push('legend: nothing to explain (use with color_by or highlight)');
-  const hasOverlay = oeA.length > 0 || dotPts.length > 0 || wl.length > 0 || glCol.length > 0 || legendItems.length > 0 || hasSection || clipK >= 0;
+  const hasOverlay = sockets.length > 0 || oeA.length > 0 || dotPts.length > 0 || wl.length > 0 || glCol.length > 0 || legendItems.length > 0 || hasSection || clipK >= 0;
   const legendView = views.findIndex((v) => v !== 'uv' && v !== 'texture');
-  const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'texture' && v !== 'section' && !(clipK >= 0 && v.startsWith('persp'))) : -1;
+  const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'texture' && v !== 'section' && !(clipK >= 0 && isPerspView(v))) : -1;
   let backPix = 0, shadedPix = 0;
   let labelsSkipped = 0;
 
   views.forEach((vname, vi) => {
-    const W = tile * ss, H = tile * ss;
+    const W = TW * ss, H = TH * ss;
     const col = new Float32Array(W * H * 3);
-    const tx = (vi % cols) * (tile + 2), ty = Math.floor(vi / cols) * (tile + 2);
-    // downsample a finished tile into the output, draw the output-resolution overlays (post), label it
-    const blit = (label: string, post?: () => void) => {
+    const tx = (vi % cols) * (TW + 2), ty = Math.floor(vi / cols) * (TH + 2);
+    // downsample a finished tile into the output, draw the output-resolution overlays (post), label it. Transparent
+    // 3D views (zb given): alpha = the covered fraction of each pixel's samples and the colour of those samples alone;
+    // whatever post and the label draw is opaque
+    const blit = (label: string, post?: () => void, zb?: Float32Array) => {
       const inv = 1 / (ss * ss);
-      for (let y = 0; y < tile; y++)
-        for (let x = 0; x < tile; x++) {
-          let r = 0, gg = 0, b = 0;
-          for (let j = 0; j < ss; j++) for (let i = 0; i < ss; i++) { const k = ((y * ss + j) * W + x * ss + i) * 3; r += col[k]; gg += col[k + 1]; b += col[k + 2]; }
-          const k = ((ty + y) * outW + tx + x) * 3;
-          out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv;
+      const cover = !!(outA && zb);
+      for (let y = 0; y < TH; y++)
+        for (let x = 0; x < TW; x++) {
+          let r = 0, gg = 0, b = 0, n = 0, cr = 0, cg = 0, cb = 0;
+          for (let j = 0; j < ss; j++) for (let i = 0; i < ss; i++) {
+            const zi = (y * ss + j) * W + x * ss + i, k = zi * 3;
+            r += col[k]; gg += col[k + 1]; b += col[k + 2];
+            if (cover && zb![zi] > -Infinity) { n++; cr += col[k]; cg += col[k + 1]; cb += col[k + 2]; }
+          }
+          const o1 = (ty + y) * outW + tx + x, k = o1 * 3;
+          if (!cover) { out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv; if (outA) outA[o1] = 1; continue; }
+          if (n) { out[k] = cr / n; out[k + 1] = cg / n; out[k + 2] = cb / n; } else { out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv; }
+          outA![o1] = n * inv;
         }
+      const snap = cover ? out.slice(ty * outW * 3, (ty + TH) * outW * 3) : null;
       if (post) post();
       if (viewLabels) drawText(out, outW, outH, tx + 6 * ui, ty + 6 * ui, label, [1, 1, 1], 2 * ui);
+      if (snap)
+        for (let y = 0; y < TH; y++)
+          for (let x = 0; x < TW; x++) {
+            const o1 = (ty + y) * outW + tx + x, k = o1 * 3, q = (y * outW + tx + x) * 3;
+            if (out[k] !== snap[q] || out[k + 1] !== snap[q + 1] || out[k + 2] !== snap[q + 2]) outA![o1] = 1;
+          }
     };
     if (vname === 'uv') {
       blit(drawUVView(g, col, W, H, ss * ui, uvd, tris, colorOf, colorByActive, notes));
@@ -759,15 +932,15 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       blit(drawTextureView(g, col, W, H, ss * ui, o.texture ?? '', notes));
       return;
     }
-    const kind = vname.startsWith('persp') ? 'persp' : vname;
-    const azDeg = vname.startsWith('persp@') ? Number(vname.slice(6)) : undefined;
+    const kind = isPerspView(vname) ? 'persp' : vname;
+    const azDeg = vname.startsWith('persp@') ? Number(vname.slice(6)) : NAMED_VIEWS[vname];
     const zb = new Float32Array(W * H).fill(-Infinity);
     for (let y = 0; y < H; y++) {
       const t = y / H;
       const r = 0.44 - t * 0.2, gg = 0.46 - t * 0.2, b = 0.5 - t * 0.2;
       for (let x = 0; x < W; x++) { const i = (y * W + x) * 3; col[i] = r; col[i + 1] = gg; col[i + 2] = b; }
     }
-    const cam = makeCam(vname, bmin, bmax, W, H, o, kind, azDeg, secK);
+    const cam = makeCam(vname, bmin, bmax, W, H, o, kind, azDeg, secK, fitPts);
     if (pbrS) pbrS.camera(cam.r, cam.u, cam.f);
     // project points
     const sx = new Float32Array(np), sy = new Float32Array(np), cz = new Float32Array(np), vz = new Float32Array(np);
@@ -776,8 +949,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const X = dx * cam.r[0] + dy * cam.r[1] + dz * cam.r[2];
       const Y = dx * cam.u[0] + dy * cam.u[1] + dz * cam.u[2];
       const Z = dx * cam.f[0] + dy * cam.f[1] + dz * cam.f[2];
-      if (cam.persp) { outp[0] = W / 2 + (X / Z) * cam.focal; outp[1] = H / 2 - (Y / Z) * cam.focal; outp[2] = Z > 1e-6 ? 1 / Z : -Infinity; outp[3] = Z; }
-      else { outp[0] = W / 2 + X * cam.scale; outp[1] = H / 2 - Y * cam.scale; outp[2] = -Z; outp[3] = Z; }
+      if (cam.persp) { outp[0] = cam.ox + (X / Z) * cam.focal; outp[1] = cam.oy - (Y / Z) * cam.focal; outp[2] = Z > 1e-6 ? 1 / Z : -Infinity; outp[3] = Z; }
+      else { outp[0] = cam.ox + X * cam.scale; outp[1] = cam.oy - Y * cam.scale; outp[2] = -Z; outp[3] = Z; }
     };
     const tmp = [0, 0, 0, 0];
     for (let i = 0; i < np; i++) { project(Pd[i * 3], Pd[i * 3 + 1], Pd[i * 3 + 2], tmp); sx[i] = tmp[0]; sy[i] = tmp[1]; cz[i] = tmp[2]; vz[i] = tmp[3]; }
@@ -805,8 +978,22 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     };
     const keptPt = (i: number) => !clipOn || (Pd[i * 3 + cK] - cC) * cS <= 0;
 
+    // reference image behind the view, placed by underlayFit against the rectangle the bounds cover in this view
+    if (ul && kind !== 'section') {
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      const q = [0, 0, 0, 0];
+      for (let k = 0; k < 8; k++) {
+        project(k & 1 ? bmax[0] : bmin[0], k & 2 ? bmax[1] : bmin[1], k & 4 ? bmax[2] : bmin[2], q);
+        x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]);
+      }
+      if (ulFit === 'view' || !(x1 > x0) || !(y1 > y0)) { x0 = 0; x1 = W; y0 = 0; y1 = H; }
+      const bw = x1 - x0, bh = y1 - y0, ia = ul.width / ul.height;
+      const w = ulFit === 'width' ? bw : ulFit === 'height' ? bh * ia : Math.min(bw, bh * ia), h = w / ia;
+      drawUnderlay(col, W, H, ul, (x0 + x1) / 2 - w / 2, (y0 + y1) / 2 - h / 2, w, h, ulOpacity);
+    }
+
     // ground grid (persp only), drawn first without depth
-    if (kind === 'persp' && o.grid !== false) {
+    if (kind === 'persp' && (o.grid ?? !transparent)) {
       const step = Math.pow(10, Math.floor(Math.log10(sceneR * 0.5)));
       const ext = Math.ceil((sceneR * 1.6) / step) * step;
       const cx = Math.round(cam.c[0] / step) * step, czz = Math.round(cam.c[2] / step) * step;
@@ -979,19 +1166,19 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
 
     // screen-space ambient occlusion on the shaded surface (before lines and points, which stay crisp)
     if (shadingMode === 'ao' && nTri) {
-      const T = tile, lin = new Float32Array(T * T);
-      for (let y = 0; y < T; y++)
-        for (let x = 0; x < T; x++) {
+      const lin = new Float32Array(TW * TH);
+      for (let y = 0; y < TH; y++)
+        for (let x = 0; x < TW; x++) {
           let m = -Infinity;
           for (let j = 0; j < ss; j++) for (let i = 0; i < ss; i++) { const z = zb[(y * ss + j) * W + x * ss + i]; if (z > m) m = z; }
-          lin[y * T + x] = m === -Infinity ? Infinity : cam.persp ? 1 / m : -m;
+          lin[y * TW + x] = m === -Infinity ? Infinity : cam.persp ? 1 / m : -m;
         }
-      const aoF = ambientOcclusion(lin, T, T, (o.aoRadius ?? 10) * ui, cam.persp ? (z) => (z * ss) / cam.focal : () => ss / cam.scale);
+      const aoF = ambientOcclusion(lin, TW, TH, (o.aoRadius ?? 10) * ui, cam.persp ? (z) => (z * ss) / cam.focal : () => ss / cam.scale);
       for (let y = 0; y < H; y++)
         for (let x = 0; x < W; x++) {
           const zi = y * W + x;
           if (zb[zi] === -Infinity) continue;
-          const f = aoF[Math.floor(y / ss) * T + Math.floor(x / ss)];
+          const f = aoF[Math.floor(y / ss) * TW + Math.floor(x / ss)];
           col[zi * 3] *= f; col[zi * 3 + 1] *= f; col[zi * 3 + 2] *= f;
         }
     }
@@ -1032,6 +1219,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     if (drawPts) {
       for (let i = 0; i < np; i++) {
         if (!showAllPts && used[i]) continue;
+        if (hideEmpties && isEmpty(i)) continue;
         if (cam.persp && vz[i] < 1e-4) continue;
         if (clipOn && !keptPt(i)) continue;
         const pc = pointColorOf(i) ?? (hl && hl.cls === 'point' ? (hl.mask[i] ? [1, 0.55, 0.1] : [0.5, 0.5, 0.5]) : [1, 0.85, 0.25]);
@@ -1109,9 +1297,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             const grid = windingGrid(seg2, m, gx, gy);
             const e = cam.eye, f = cam.f, r = cam.r, u = cam.u;
             for (let py = 0; py < H; py++) {
-              const dy = (H / 2 - (py + 0.5)) / cam.focal;
+              const dy = (cam.oy - (py + 0.5)) / cam.focal;
               for (let px = 0; px < W; px++) {
-                const dx = (px + 0.5 - W / 2) / cam.focal;
+                const dx = (px + 0.5 - cam.ox) / cam.focal;
                 const dk = f[cK] + r[cK] * dx + u[cK] * dy;
                 const t = (cC - e[cK]) / dk;
                 if (!(t > 1e-6)) continue;
@@ -1131,7 +1319,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     }
 
     // axis gizmo
-    if (kind === 'persp' && viewLabels) {
+    if (kind === 'persp' && viewLabels && !transparent) {
       const ox = 34 * ss * ui, oy = H - 34 * ss * ui, len = 22 * ss * ui;
       for (const [ax, colr, lab] of [[[1, 0, 0], [0.95, 0.3, 0.3], 'X'], [[0, 1, 0], [0.4, 0.9, 0.4], 'Y'], [[0, 0, 1], [0.4, 0.6, 1], 'Z']] as [number[], number[], string][]) {
         const ex = ox + dot3(ax, cam.r) * len, ey = oy - dot3(ax, cam.u) * len;
@@ -1139,27 +1327,27 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         drawText(col, W, H, Math.round(ex + 2 * ss * ui), Math.round(ey - 4 * ss * ui), lab, colr, ss * ui, true);
       }
     }
-    const viewLabel = (kind === 'persp' ? `PERSP  AZ ${Math.round(azDeg ?? o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}`
+    const viewLabel = (kind === 'persp' ? `${NAMED_VIEWS[vname] !== undefined ? vname.toUpperCase().replace('_', ' ') : 'PERSP'}  AZ ${Math.round(azDeg ?? o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}`
       : kind === 'section' ? `SECTION ${planeDesc(secK, secC)}  ${SECTION_CAM[secK].label.split('  ')[1]}`
       : ORTHO[vname].label) + (checkerOn ? '  CHECKER' : '') + (clipOn && kind === 'persp' ? `  CLIP ${planeDesc(cK, cC)}` : '');
 
     // output-resolution overlays: crisp 1 px lines, glyphs, cut outlines, labels, legend
     const post = !hasOverlay ? undefined : () => {
-      const T = tile, inv = 1 / ss;
-      const zt = new Float32Array(T * T); // nearest depth per output pixel
-      for (let y = 0; y < T; y++)
-        for (let x = 0; x < T; x++) {
+      const inv = 1 / ss;
+      const zt = new Float32Array(TW * TH); // nearest depth per output pixel
+      for (let y = 0; y < TH; y++)
+        for (let x = 0; x < TW; x++) {
           let m = -Infinity;
           for (let j = 0; j < ss; j++) for (let i = 0; i < ss; i++) { const z = zb[(y * ss + j) * W + x * ss + i]; if (z > m) m = z; }
-          zt[y * T + x] = m;
+          zt[y * TW + x] = m;
         }
-      const tb = new Float32Array(T * T * 3);
-      for (let y = 0; y < T; y++) tb.set(out.subarray(((ty + y) * outW + tx) * 3, ((ty + y) * outW + tx + T) * 3), y * T * 3);
+      const tb = new Float32Array(TW * TH * 3);
+      for (let y = 0; y < TH; y++) tb.set(out.subarray(((ty + y) * outW + tx) * 3, ((ty + y) * outW + tx + TW) * 3), y * TW * 3);
       const dtol: DepthTol = cam.persp ? { abs: 1e-7, rel: 0.006 } : { abs: sceneR * 0.006, rel: 0 };
       const hidden = (z: number, x: number, y: number) => {
         const xi = Math.floor(x), yi = Math.floor(y);
-        if (xi < 0 || yi < 0 || xi >= T || yi >= T) return true;
-        return z < zt[yi * T + xi] - 2 * (dtol.abs + Math.abs(z) * dtol.rel);
+        if (xi < 0 || yi < 0 || xi >= TW || yi >= TH) return true;
+        return z < zt[yi * TW + xi] - 2 * (dtol.abs + Math.abs(z) * dtol.rel);
       };
       const dim = kind === 'section' ? 0.45 : 1;
       // edge overlays (wireframe modes, group borders)
@@ -1169,18 +1357,18 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         const st = styles[oeS[e]];
         if (clipOn) {
           if (clipProj(Pd[a * 3], Pd[a * 3 + 1], Pd[a * 3 + 2], Pd[b * 3], Pd[b * 3 + 1], Pd[b * 3 + 2]))
-            lineOv(tb, T, T, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], st.c, st.a * dim, ui, zt, dtol);
+            lineOv(tb, TW, TH, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], st.c, st.a * dim, ui, zt, dtol);
           continue;
         }
         if (cam.persp && (vz[a] < 1e-4 || vz[b] < 1e-4)) continue;
-        lineOv(tb, T, T, sx[a] * inv, sy[a] * inv, cz[a], sx[b] * inv, sy[b] * inv, cz[b], st.c, st.a * dim, ui, zt, dtol);
+        lineOv(tb, TW, TH, sx[a] * inv, sy[a] * inv, cz[a], sx[b] * inv, sy[b] * inv, cz[b], st.c, st.a * dim, ui, zt, dtol);
       }
       // point-group members and glyphs (not in the section view, where they would float over the cut)
       const flat2d = kind === 'section';
       for (let k = 0; k < (flat2d ? 0 : dotPts.length); k++) {
         const i = dotPts[k];
         if (!keptPt(i) || (cam.persp && vz[i] < 1e-4) || hidden(cz[i], sx[i] * inv, sy[i] * inv)) continue;
-        dotOv(tb, T, T, sx[i] * inv, sy[i] * inv, 2 * ui, styles[dotSt[k]].c);
+        dotOv(tb, TW, TH, sx[i] * inv, sy[i] * inv, 2 * ui, styles[dotSt[k]].c);
       }
       // glyphs: anchored on visible surface points, parts behind the surface dimmed, brighter tip
       const m3 = [0, 0, 0, 0];
@@ -1191,8 +1379,20 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         if ((cam.persp && m3[3] < 1e-4) || hidden(m3[2], m3[0] * inv, m3[1] * inv)) continue;
         const pal = glPal[glCol[k]];
         const mx = x0 + (x1 - x0) * 0.62, my = y0 + (y1 - y0) * 0.62, mz = z0 + (z1 - z0) * 0.62;
-        if (clipProj(x0, y0, z0, mx, my, mz)) lineOv(tb, T, T, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], pal[0], 0.95 * dim, ui, zt, dtol, 0.3 * dim);
-        if (clipProj(mx, my, mz, x1, y1, z1)) lineOv(tb, T, T, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], pal[1], dim, ui, zt, dtol, 0.35 * dim);
+        if (clipProj(x0, y0, z0, mx, my, mz)) lineOv(tb, TW, TH, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], pal[0], 0.95 * dim, ui, zt, dtol, 0.3 * dim);
+        if (clipProj(mx, my, mz, x1, y1, z1)) lineOv(tb, TW, TH, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], pal[1], dim, ui, zt, dtol, 0.35 * dim);
+      }
+      // sockets: orient axes and a dot, through surfaces (dimmer where hidden)
+      for (const sk of (flat2d ? [] : sockets)) {
+        const i = sk.p;
+        if (!keptPt(i) || (cam.persp && vz[i] < 1e-4)) continue;
+        const x = sx[i] * inv, y = sy[i] * inv, hid = hidden(cz[i], x, y);
+        for (let ax = 0; ax < 3; ax++) {
+          project(Pd[i * 3] + sk.axes[ax * 3], Pd[i * 3 + 1] + sk.axes[ax * 3 + 1], Pd[i * 3 + 2] + sk.axes[ax * 3 + 2], m3);
+          if (cam.persp && m3[3] < 1e-4) continue;
+          lineOv(tb, TW, TH, x, y, 0, m3[0] * inv, m3[1] * inv, 0, glAxisC[ax], hid ? 0.55 : 1, ui, null, dtol);
+        }
+        dotOv(tb, TW, TH, x, y, 5 * ui, hid ? [SOCKET_C[0] * 0.6, SOCKET_C[1] * 0.6, SOCKET_C[2] * 0.6] : SOCKET_C);
       }
       // cut outlines: solid pieces dark, open sheets (no cap) yellow
       if (cut)
@@ -1201,14 +1401,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           project(cut.seg[o6], cut.seg[o6 + 1], cut.seg[o6 + 2], q0); project(cut.seg[o6 + 3], cut.seg[o6 + 4], cut.seg[o6 + 5], q1);
           if (cam.persp && (q0[3] < 1e-4 || q1[3] < 1e-4)) continue;
           const solid = closedPiece[cut.piece[s]] === 1;
-          lineOv(tb, T, T, q0[0] * inv, q0[1] * inv, 0, q1[0] * inv, q1[1] * inv, 0, solid ? [0.1, 0.02, 0.02] : [1, 0.85, 0.3], solid ? 0.9 : 1, ui, null, dtol);
+          lineOv(tb, TW, TH, q0[0] * inv, q0[1] * inv, 0, q1[0] * inv, q1[1] * inv, 0, solid ? [0.1, 0.02, 0.02] : [1, 0.85, 0.3], solid ? 0.9 : 1, ui, null, dtol);
         }
       // legend, then labels placed around it and around the view label / axis gizmo
-      const pl = new LabelPlacer(T, T);
+      const pl = new LabelPlacer(TW, TH);
       const vlRight = 6 * ui + textWidth(viewLabel, 2 * ui) + 4 * ui;
       pl.reserve(0, 0, vlRight, 22 * ui);
-      if (kind === 'persp') pl.reserve(0, T - 64 * ui, 64 * ui, T);
-      if (vi === legendView && legendItems.length) drawLegend(tb, T, T, legendItems, T >= 700 * ui ? 2 * ui : ui, pl, 6 * ui, [vlRight, 22 * ui]);
+      if (kind === 'persp') pl.reserve(0, TH - 64 * ui, 64 * ui, TH);
+      if (vi === legendView && legendItems.length) drawLegend(tb, TW, TH, legendItems, Math.min(TW, TH) >= 700 * ui ? 2 * ui : ui, pl, 6 * ui, [vlRight, 22 * ui]);
       if (kind !== 'section') {
         const m4 = [0, 0, 0, 0];
         const clipped = (x: number, y: number, z: number) => clipOn && ((cK === 0 ? x : cK === 1 ? y : z) - cC) * cS > 0;
@@ -1235,14 +1435,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             if (behind || clipped(lb.x, lb.y, lb.z)) continue;
             if (lb.kind === 1 && hidden(m4[2], ax, ay)) continue;
           }
-          if (ax < 0 || ay < 0 || ax >= T || ay >= T) continue;
-          drawLabel(tb, T, T, pl, ax, ay, lb.text, lb.c, lb.kind === 0 ? nameFs : ui);
+          if (ax < 0 || ay < 0 || ax >= TW || ay >= TH) continue;
+          drawLabel(tb, TW, TH, pl, ax, ay, lb.text, lb.c, lb.kind === 0 ? nameFs : ui);
         }
         if (vi === legendView) labelsSkipped = pl.skipped;
       }
-      for (let y = 0; y < T; y++) out.set(tb.subarray(y * T * 3, (y + 1) * T * 3), ((ty + y) * outW + tx) * 3);
+      for (let y = 0; y < TH; y++) out.set(tb.subarray(y * TW * 3, (y + 1) * TW * 3), ((ty + y) * outW + tx) * 3);
     };
-    blit(viewLabel, post);
+    blit(viewLabel, post, zb);
   });
 
   // footer
@@ -1281,8 +1481,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     if (annotate) notes.push('overlays: ' + overlays.toLowerCase());
   }
   const rgba = new Uint8Array(outW * outH * 4);
+  if (outA) outA.fill(1, (outH - footerH) * outW); // the footer stays opaque
   for (let i = 0, j = 0; i < out.length; i += 3, j += 4) {
-    rgba[j] = toSRGB(out[i]); rgba[j + 1] = toSRGB(out[i + 1]); rgba[j + 2] = toSRGB(out[i + 2]); rgba[j + 3] = 255;
+    rgba[j] = toSRGB(out[i]); rgba[j + 1] = toSRGB(out[i + 1]); rgba[j + 2] = toSRGB(out[i + 2]); rgba[j + 3] = outA ? toSRGB(outA[j >> 2]) : 255;
   }
   if (legend) notes.push(legend.toLowerCase());
   return { width: outW, height: outH, rgba, notes };
@@ -1356,6 +1557,28 @@ function drawDisc(col: Float32Array, zb: Float32Array, W: number, H: number, x: 
       const edge = d > r - 1.2 ? 0.35 : 1;
       col[i] = c[0] * edge; col[i + 1] = c[1] * edge; col[i + 2] = c[2] * edge;
     }
+}
+
+/** Blend an image into col over the rectangle (x, y, w, h) in pixels, bilinear, by opacity × the image's alpha. */
+function drawUnderlay(col: Float32Array, W: number, H: number, img: UnderlayImage, x: number, y: number, w: number, h: number, opacity: number) {
+  const xa = Math.max(0, Math.floor(x)), xb = Math.min(W, Math.ceil(x + w)), ya = Math.max(0, Math.floor(y)), yb = Math.min(H, Math.ceil(y + h));
+  const d = img.rgba, iw = img.width, ih = img.height;
+  for (let py = ya; py < yb; py++) {
+    const v = ((py + 0.5 - y) / h) * ih - 0.5;
+    if (v < -0.5 || v > ih - 0.5) continue;
+    const j0 = Math.max(0, Math.min(ih - 1, Math.floor(v))), j1 = Math.min(ih - 1, j0 + 1), fv = Math.max(0, Math.min(1, v - j0));
+    for (let px = xa; px < xb; px++) {
+      const u = ((px + 0.5 - x) / w) * iw - 0.5;
+      if (u < -0.5 || u > iw - 0.5) continue;
+      const i0 = Math.max(0, Math.min(iw - 1, Math.floor(u))), i1 = Math.min(iw - 1, i0 + 1), fu = Math.max(0, Math.min(1, u - i0));
+      const at = (i: number, j: number, c: number) => d[(j * iw + i) * 4 + c];
+      const s = (c: number) => (at(i0, j0, c) * (1 - fu) + at(i1, j0, c) * fu) * (1 - fv) + (at(i0, j1, c) * (1 - fu) + at(i1, j1, c) * fu) * fv;
+      const a = (s(3) / 255) * opacity;
+      if (!(a > 0)) continue;
+      const k = (py * W + px) * 3;
+      col[k] += (s(0) / 255 - col[k]) * a; col[k + 1] += (s(1) / 255 - col[k + 1]) * a; col[k + 2] += (s(2) / 255 - col[k + 2]) * a;
+    }
+  }
 }
 
 /** Procedural 8×8 uv checker; light cells are tinted by the position inside the tile (red = u, green = v). */

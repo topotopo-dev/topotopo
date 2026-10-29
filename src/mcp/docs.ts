@@ -964,10 +964,30 @@ Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
 overlays and notes pieces, open edges and back-facing % (also returned as text notes).
 VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
-  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>. azimuth/elevation/zoom, look_at [x,y,z],
-  ortho_scale (world width of ortho views), size (pixels per view), scale 2 (a 2× image).
+  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>, and the three-quarter views
+  front_left, front_right, back_left, back_right (persp at azimuth -45, 45, -135, 135).
   "texture" draws images flat (texture:"<image>" | "image/layer" | "<material>" picks; a geometry holding only images
   renders as it by default); textures:true shows base colour maps on the mesh. Help topic "textures".
+FRAMING: every 3D view fits the bounds: the bbox corners fill the view with a small margin, so nothing is cropped.
+  azimuth: degrees around +Y; 0 = the camera on +Z looking at the front, 90 = on +X (the right side), 180 = the back,
+    -90 = the left; default 35. elevation: degrees above the horizon (default 25; 90 looks straight down).
+    e.g. render {views:"persp", azimuth:-90, elevation:10} looks at the left side from just above.
+  zoom: relative to the fit (1 = fit, 0.5 = half size). Above 1 it magnifies around look_at and crops, so it only
+    applies with look_at (or ortho_scale); without them it is held at 1 and a note says so.
+  look_at: [x, y, z] in world metres (x right, y up, z towards the front; Y-up like everything else); the view centres
+    on it and still fits the bounds around it. e.g. render {views:"persp", look_at:[0.6, 0.15, 0], zoom:4} (a muzzle).
+  ortho_scale: the world width in metres across an ortho or section view (default: fit the bounds).
+    e.g. render {views:"front", ortho_scale:0.5} shows 50 cm across the front view, at any size.
+  size: pixels per view, n or "WxH": size:"1600x600" gives wide views a long prop fills (the fit follows the aspect);
+    scale 2 makes a 2× image.
+BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no ground grid or axis gizmo; the footer
+  stays). grid:false drops the persp ground grid. underlay:"inputs/side.png" draws a reference image (PNG, relative to
+  the workspace) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
+  rectangle the bounds cover in that view, keeping its aspect, so a reference cropped to the object lines up with it),
+  "width" / "height" (its width or height spans the bounds'), "view" (the whole view). Pick the view that matches the
+  picture: render {views:"front", underlay:"inputs/side.png", size:"1600x500"}.
+SOCKETS: sockets:true draws scene empties (scene_null: attachment points) as dots with their name and orient axes
+  (X red, Y green, Z blue), through the surface. pbr renders hide empties unless sockets is set.
 QUESTION → OPTION
   How dense / clean is the topology? Where are the triangles, poles, slivers?  wireframe:"all" (every edge, 1 px)
   Which edges are creases?                         wireframe:"hard" (dihedral > hard_angle, default 30) + crease/hard/sharp edge groups
@@ -1002,7 +1022,9 @@ Heightfields draw at most heightfield_res quads per side (default 256; "full" = 
 Examples: render {views:["persp","section"], section_axis:"z", wireframe:"hard", label_groups:true}
           render {views:"turntable", shading:"matcap"} · render {glyphs:"N", clip:{axis:"x", offset:0.5}}
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
-  --shading pbr --exposure 0.5
+  --shading pbr --exposure 0.5 --views front_left --size 1600x600 --transparent --no-grid --sockets
+  --azimuth -90 --elevation 10 --look-at 0.6,0.15,0 --zoom 4 --ortho-scale 0.5
+  --underlay ref.png --underlay-opacity 0.6 --underlay-fit width (CLI paths are relative to the current folder)
   --no-view-labels --heightfield-res full --heightfield-layer flow`,
 
   export: `EXPORT

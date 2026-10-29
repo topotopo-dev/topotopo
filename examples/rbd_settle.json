@@ -72,5 +72,5 @@
     "out": { "type": "merge", "in": ["tint", "pad_col", "settled_rocks", "crate_piles"] }
   },
   "output": "out",
-  "meta": { "render": { "views": ["persp"], "size": 1100, "azimuth": 30, "elevation": 30, "zoom": 2 } }
+  "meta": { "render": { "views": ["persp"], "size": 1100, "azimuth": 30, "elevation": 30, "look_at": [0, 0.4, 0], "zoom": 2 } }
 }

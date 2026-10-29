@@ -5,8 +5,8 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
-import { parseViews, renderGeometry } from '../src/render/raster.ts';
-import type { RenderOptions, RenderResult } from '../src/render/raster.ts';
+import { parseViews, readUnderlay, renderGeometry } from '../src/render/raster.ts';
+import type { RenderOptions, RenderResult, UnderlayImage as UnderlayImageT } from '../src/render/raster.ts';
 import { renderArgs } from '../src/render/options.ts';
 import { windingGrid } from '../src/render/section.ts';
 import { LabelPlacer } from '../src/render/overlay.ts';
@@ -300,6 +300,70 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(note(render(box, { views: ['persp'], size: 64, heightfieldLayer: 'flow' }), /no heightfield/), 'heightfield_layer without a heightfield gets a note');
   check(renderArgs({ heightfield_layer: 'flow' }).heightfieldLayer === 'flow' && renderArgs({ heightfieldLayer: 'none' }).heightfieldLayer === 'none' && renderArgs({}).heightfieldLayer === undefined,
     'renderArgs: heightfield_layer (MCP render, CLI --heightfield-layer)');
+}
+
+// ---------------------------------------------------------------- framing, size W×H, transparent, named views, underlay, sockets
+{
+  const isObj = (c: RGB) => c[0] > 120 && c[0] - c[2] > 8;
+  /** horizontal and vertical extent of object pixels in the first tile */
+  const extent = (r: RenderResult, w: number, h: number) => {
+    let x0 = Infinity, x1 = -1, y0 = Infinity, y1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (isObj(px(r, x, y))) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return { w: x1 - x0 + 1, h: y1 - y0 + 1, x0, x1, y0, y1 };
+  };
+  const rod = await cook({ out: { type: 'box', params: { size: [4, 0.25, 0.25] } } });
+  for (const v of ['persp', 'front', 'top', 'front_left'] as const) {
+    const e = extent(render(rod, { views: [v], size: T, wireframe: 'none', grid: false, viewLabels: false }), T, T);
+    check(e.w > T * 0.82 && e.w < T * 0.95 && e.x0 > 2 && e.x1 < T - 3 && e.y0 > 2 && e.y1 < T - 3, `fit: a 4 m rod fills the ${v} view without cropping (${e.w}/${T} px wide, x ${e.x0}..${e.x1})`);
+  }
+  const fitted = render(rod, { views: ['persp'], size: T });
+  const held = render(rod, { views: ['persp'], size: T, zoom: 2 });
+  check(same(fitted, held) && note(held, /zoom 2\.00: held at 1/), 'zoom above 1 without look_at is held at the fit (never crops) and a note says so');
+  const half = extent(render(rod, { views: ['persp'], size: T, wireframe: 'none', grid: false, viewLabels: false, zoom: 0.5 }), T, T);
+  check(half.w > T * 0.38 && half.w < T * 0.5, `zoom 0.5 is half the fit (${half.w} px)`);
+  const zin = extent(render(rod, { views: ['front'], size: T, wireframe: 'none', target: [2, 0, 0], zoom: 4 }), T, T);
+  check(zin.x0 < 3 && zin.x1 > T / 2 - 10 && zin.x1 < T / 2 + 10, `zoom 4 with look_at [2,0,0] zooms into the rod's end (x ${zin.x0}..${zin.x1})`);
+  const wide = render(rod, { views: ['front'], size: [400, 140], wireframe: 'none' });
+  const ew = extent(wide, 400, 140);
+  check(wide.width === 400 && wide.height === 140 + FOOT && ew.w > 400 * 0.82, `size [400, 140]: a 400×140 view the rod fills (${wide.width}×${wide.height}, ${ew.w} px)`);
+  check(renderArgs({ size: '1600x600' }).size?.toString() === '1600,600' && renderArgs({ size: '800' }).size === 800 && renderArgs({ size: [300, 200] }).size?.toString() === '300,200', 'renderArgs: size n, "WxH" or [w, h]');
+  let eSize = '';
+  try { renderArgs({ size: '12xx' }); } catch (e: any) { eSize = e.message; }
+  check(/size expects pixels per view/.test(eSize), 'renderArgs: a bad size is rejected');
+  const quadWide = render(box, { size: [200, 150] });
+  check(quadWide.width === 402 && quadWide.height === 302 + FOOT, `quad with size [200, 150]: 2 × 2 views of 200×150 (${quadWide.width}×${quadWide.height})`);
+  // transparent: background alpha 0, the object and the footer opaque
+  const tr = render(box, { views: ['persp'], size: T, transparent: true });
+  const alpha = (r: RenderResult, x: number, y: number) => r.rgba[(y * r.width + x) * 4 + 3];
+  check(alpha(tr, 3, T - 3) === 0 && alpha(tr, T / 2, T / 2) === 255 && alpha(tr, 3, T + 5) === 255, `transparent: background alpha 0, surface and footer 255 (${alpha(tr, 3, T - 3)}, ${alpha(tr, T / 2, T / 2)}, ${alpha(tr, 3, T + 5)})`);
+  check(alpha(render(box, { views: ['persp'], size: T }), 3, T - 3) === 255, 'opaque by default');
+  let edge = 0;
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) { const a = alpha(tr, x, y); if (a > 0 && a < 255) edge++; }
+  check(edge > 20, `transparent: silhouette pixels are partly covered (${edge} with 0 < alpha < 255)`);
+  // named views
+  check(parseViews('front_left,back_right')!.join() === 'front_left,back_right', 'parseViews accepts the three-quarter views');
+  const fl = render(box, { views: ['front_left'], size: T }), p45 = render(box, { views: ['persp'], size: T, azimuth: -45 });
+  check(diff(fl, p45, 30, 0, 30, T, T) === 0, 'front_left is the persp view at azimuth -45 (label aside)');
+  // underlay: an opaque red image drawn behind the view
+  const red: UnderlayImageT = { width: 4, height: 2, rgba: new Uint8Array(4 * 2 * 4).map((_, i) => (i % 4 === 0 || i % 4 === 3 ? 255 : 0)) };
+  const isRed = ([r, g, b]: RGB) => r > 200 && g < 60 && b < 60;
+  const ulView = render(box, { views: ['front'], size: T, underlayImage: red, underlayOpacity: 1, underlayFit: 'view' });
+  const ulBounds = render(rod, { views: ['front'], size: T, underlayImage: red, underlayOpacity: 1, underlayFit: 'width', wireframe: 'none' });
+  const er = extent(render(rod, { views: ['front'], size: T, wireframe: 'none' }), T, T);
+  check(count(ulView, isRed, 0, 0, T, T) > 2000 && isRed(px(ulView, 4, T / 2)) && !isRed(px(ulView, 4, 20)), `underlay fit "view": the 2:1 image fitted into the whole view, behind the object (${count(ulView, isRed, 0, 0, T, T)} red px)`);
+  check(isRed(px(ulBounds, er.x0 + 2, T / 2 - Math.round(er.w / 8) + 1)) && !isRed(px(ulBounds, Math.max(0, er.x0 - 4), T / 2)), 'underlay fit "width" spans the bounds\' width');
+  check(count(render(box, { views: ['front'], size: T, underlayImage: red, underlayOpacity: 0 }), isRed, 0, 0, T, T) === 0, 'underlay opacity 0 shows nothing');
+  let eUl = '';
+  try { await readUnderlay('x.jpg', async () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])); } catch (e: any) { eUl = e.message; }
+  check(/is not a PNG/.test(eUl), `readUnderlay: a JPEG is refused with what to do (${eUl.slice(0, 70)})`);
+  // sockets: scene empties as labelled dots, hidden from pbr renders unless asked
+  const withEmpty = await cook({ b: { type: 'box' }, out: { type: 'scene_null', in: ['b'], params: { name: 'hook', translate: [0, 0.8, 0] } } });
+  const isMint = ([r, g, b]: RGB) => g > 200 && r < 140 && b > 130 && b < 220;
+  const sk = render(withEmpty, { views: ['front'], size: T, sockets: true });
+  check(count(sk, isMint, 0, 0, T, T) > 10 && note(sk, /overlays: .*sockets 1/), `sockets: the empty drawn as a dot with its name (${count(sk, isMint, 0, 0, T, T)} px)`);
+  const noSk = render(withEmpty, { views: ['front'], size: T });
+  check(count(noSk, isMint, 0, 0, T, T) === 0, 'without sockets no socket dots');
+  check(note(render(box, { views: ['front'], size: T, sockets: true }), /no scene empties/), 'sockets without empties: a note');
 }
 
 // ---------------------------------------------------------------- helpers: tool arguments, winding fill, label placement

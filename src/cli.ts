@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Command line: cook a graph JSON file, then render / export / inspect.
 //   node src/cli.ts <graph.json> [--node name | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]
-//                   [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
+//                   [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
-//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800] [--render-scale 2] [--heightfield-res 256|full]
+//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
+//                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
@@ -75,14 +76,20 @@ if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
-    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all|topology|uv] [--uv-resolution 1024] [--json] (uv: overlaps, utilization, texel density; --json: the report as JSON)',
+    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--inspect all|topology|uv] [--uv-resolution 1024] [--json] (uv: overlaps, utilization, texel density; --json: the report as JSON)',
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ beside it)',
     '         [--follow owner/name] (use that package\'s working folder in the project\'s libraries instead of its copy, for this run; repeat it)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
-    '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800] [--render-scale 2] [--azimuth 35] [--elevation 25] [--zoom 1] [--look-at x,y,z] [--ortho-scale w]',
+    '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
+    '                          views: persp front back left right top bottom front_left front_right back_left back_right uv section texture persp@<az>',
+    '                          framing: every 3D view fits the bounds; [--zoom 1] is relative to that fit (above 1 only with --look-at or --ortho-scale)',
+    '                          [--azimuth 35] (degrees around +Y: 0 = camera on +Z at the front, 90 = on +X, the right side) [--elevation 25] (degrees above the horizon)',
+    '                          [--look-at x,y,z] (world metres, Y up, +Z front) [--ortho-scale 0.5] (metres across an ortho view)',
+    '                          [--transparent] (PNG with alpha) [--no-grid] [--sockets] (scene empties as labelled dots with orient axes)',
+    '                          [--underlay ref.png] (a reference PNG behind the 3D views) [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]',
     '                          [--textures] (base colour maps on meshes) [--texture name|image/layer|material] (adds the texture view)',
     '                          [--max-triangles 600000] (packed instances drawn; above it an evenly spread subset)',
     '                          [--heightfield-res 256|full] (heightfields: quads drawn per side, default 256, said in the footer when a field has more; full = every sample)',
@@ -261,9 +268,12 @@ async function cook() {
       ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
       ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
       ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'],
-      ['--heightfield-res', 'heightfield_res'], ['--heightfield-layer', 'heightfield_layer']]) if (get(f) !== undefined) a[k] = get(f);
-    for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures']]) if (has(f)) a[k] = true;
+      ['--heightfield-res', 'heightfield_res'], ['--heightfield-layer', 'heightfield_layer'], ['--underlay-opacity', 'underlay_opacity'], ['--underlay-fit', 'underlay_fit']]) if (get(f) !== undefined) a[k] = get(f);
+    for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures'], ['--transparent', 'transparent'], ['--sockets', 'sockets']]) if (has(f)) a[k] = true;
     if (has('--no-view-labels')) a.view_labels = false;
+    if (has('--no-grid')) a.grid = false;
+    // a reference image path is relative to the current folder, as the output paths are
+    if (get('--underlay') !== undefined) a.underlay = path.resolve(get('--underlay')!);
     try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
   }
 

@@ -112,8 +112,10 @@ function exportReport(all: { path: string; bytes: Uint8Array }[], outDir: string
   const list = files.length === 1 ? files[0].path : `${files.length} files in ${outDir}: ${files.slice(0, 12).map((f) => rel(f.path)).join(', ')}${files.length > 12 ? ', …' : ''}`;
   return `wrote ${list} (${format}, ${(total / 1024).toFixed(1)} KB): ${summary}${sourceFile ? `\nsource recorded in ${rel(sourceFile)} (graph, vars, seeds, frame; help topic "export")` : ''}${warnings.length ? '\nwarnings:\n  ' + warnings.join('\n  ') : ''}`;
 }
-function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
+function renderOpts(a: any, g: Geometry, label: string | undefined, dir: string): RenderOptions {
   const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
+  // a reference image is a path relative to the workspace, as save_to is
+  if (ro.underlay) ro.underlay = path.resolve(dir, ro.underlay);
   let highlight: RenderOptions['highlight'] = null;
   if (a.highlight) {
     const cls = a.highlight_class === 'point' ? 'point' : 'prim';
@@ -122,23 +124,29 @@ function renderOpts(a: any, g: Geometry, label?: string): RenderOptions {
   }
   return {
     ...ro, wireframe: ro.wireframe ?? 'auto', colorBy: ro.colorBy ?? null, highlight,
-    points: ro.points ?? 'auto', grid: ro.grid ?? true, target: ro.target ?? null, title: label, checker: !!ro.checker,
+    points: ro.points ?? 'auto', target: ro.target ?? null, title: label, checker: !!ro.checker,
   };
 }
 
 const RENDER_PROPS = {
-  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), "turntable" (persp at azimuth 0/90/180/270), a single view, or a list of persp/front/back/left/right/top/bottom/uv/section/texture/persp@<azimuth>. "texture" draws images flat (see texture). "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red. "section" slices along section_axis and looks along it: the cut filled red (blue = inside-out solid), open sheets as yellow lines, the far half ghosted', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+  views: { description: 'views: "quad" (persp+front+right+top, default), "quad_uv" (persp + uv side by side), "turntable" (persp at azimuth 0/90/180/270), a single view, or a list of persp/front/back/left/right/top/bottom/front_left/front_right/back_left/back_right/uv/section/texture/persp@<azimuth> (front_left … are persp views at azimuth -45/45/-135/135). Every 3D view fits the bounds. "texture" draws images flat (see texture). "uv" draws the 0..1 UV square (UDIM tiles, 0.1 grid): polygons filled by chart/island colour, island borders yellow, overlaps red. "section" slices along section_axis and looks along it: the cut filled red (blue = inside-out solid), open sheets as yellow lines, the far half ghosted', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
   checker: { type: 'boolean', description: 'shade 3D views with an 8×8 uv checker (light cells tinted red along u, green along v) to see stretch, seams and flips' },
-  size: { type: 'number', description: 'pixels per view tile (default 512 for multi-view, 800 single); scale 2 doubles it' },
+  size: { description: 'pixels per view: n (square; default 512 for several views, 800 for one) or "WxH" / [w, h] (e.g. "1600x600" for a long prop: the views fit the bounds to that aspect); scale 2 doubles it', anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'array', items: { type: 'number' } }] },
+  transparent: { type: 'boolean', description: 'transparent background: pixels without surface, line or point get alpha 0 (PNG with alpha); no ground grid or axis gizmo; the footer stays opaque' },
+  grid: { type: 'boolean', description: 'the persp ground grid on y = 0 (default true, false with transparent)' },
+  underlay: { type: 'string', description: 'a reference image (PNG, path relative to the workspace) drawn behind the 3D views, e.g. a side photo behind views:"front"' },
+  underlay_opacity: { type: 'number', description: 'underlay opacity 0..1 (default 0.5)' },
+  underlay_fit: { type: 'string', enum: ['bounds', 'width', 'height', 'view'], description: 'where the underlay goes: "bounds" (default: fitted into the rectangle the bounds cover in each view, keeping its aspect, so a reference cropped to the object lines up with it), "width" (its width spans the width of the bounds), "height" (its height spans their height), "view" (the whole view)' },
+  sockets: { type: 'boolean', description: 'draw scene empties (scene_null sockets) as dots with their name and orient axes (X red, Y green, Z blue), through surfaces; without it pbr renders hide them' },
   color_by: { type: 'string', description: 'colour by attribute (e.g. "height", "class", "N", "P.y"); ints/strings get categorical colours' },
   highlight: { type: 'string', description: 'group pattern to highlight in orange (e.g. "front", "@P.y>1")' },
   highlight_class: { type: 'string', enum: ['prim', 'point'] },
   wireframe: { description: 'true/false/"auto" (polygon edges, auto = on below 6000 polys), or a crisp 1 px edge overlay: "all" (every edge: topology density), "hard" (dihedral > hard_angle in cyan + crease/hard/sharp edge groups), "boundary" (open edges pink, non-manifold yellow, winding flips violet), "groups" (each edge group in its colour, with legend), "none"', anyOf: [{ type: 'boolean' }, { type: 'string', enum: ['auto', 'none', 'all', 'hard', 'boundary', 'groups'] }] },
   points: { type: 'boolean', description: 'draw all points, sized by pscale when present (default: only loose points)' },
-  azimuth: { type: 'number', description: 'persp camera azimuth degrees (default 35)' },
-  elevation: { type: 'number', description: 'persp camera elevation degrees (default 25)' },
-  zoom: { type: 'number', description: 'zoom factor (1 = fit bbox)' },
-  target: { type: 'array', items: { type: 'number' }, description: 'look-at point override [x,y,z]' },
+  azimuth: { type: 'number', description: 'persp camera azimuth in degrees around +Y (default 35): 0 = camera on +Z looking at the front, 90 = on +X (right side), 180 = back, -90 = left' },
+  elevation: { type: 'number', description: 'persp camera elevation in degrees above the horizon (default 25; 90 looks straight down)' },
+  zoom: { type: 'number', description: 'relative to the fit: 1 (default) = the bounds fill the view with a small margin, 0.5 = half that size. Above 1 it magnifies around look_at and crops: only with look_at or ortho_scale, else it is held at 1 (a note says so)' },
+  target: { type: 'array', items: { type: 'number' }, description: 'look-at point [x,y,z] (same as look_at)' },
   hard_angle: { type: 'number', description: 'wireframe "hard": dihedral angle threshold in degrees (default 30)' },
   point_numbers: { type: 'boolean', description: 'label visible point numbers (the first max_labels points)' },
   prim_numbers: { type: 'boolean', description: 'label visible prim numbers at prim centroids (the first max_labels prims)' },
@@ -164,8 +172,8 @@ const RENDER_PROPS = {
   shading: { type: 'string', enum: ['default', 'flat', 'matcap', 'ao', 'pbr'], description: 'flat: facets (ignores N); matcap: clay that reads form; ao: screen-space ambient occlusion darkens creases and cavities; pbr: the exported metallic-roughness material (base colour, normal, orm/roughness maps, emissive, unlit) under a fixed studio light rig, deterministic' },
   exposure: { type: 'number', description: 'shading "pbr": exposure in stops (default 0)' },
   ao_radius: { type: 'number', description: 'shading "ao": sample radius in pixels (default 10)' },
-  look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x,y,z] (same as target)' },
-  ortho_scale: { type: 'number', description: 'ortho/section views: world width across a view (default: fit the bbox)' },
+  look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x, y, z] in world metres (x right, y up, z towards the front; default the bbox centre): the view centres on it and still fits the bounds; with zoom > 1 it zooms into that point' },
+  ortho_scale: { type: 'number', description: 'ortho and section views: the world width in metres across a view (default: fit the bounds), e.g. 0.5 shows 50 cm across' },
   scale: { type: 'number', description: '2 (up to 4) for a 2× image: tiles, text, lines and markers scaled' },
   annotate: { type: 'boolean', description: 'second footer line naming the active overlays plus geometry notes (pieces, open edges, back-facing %); default on whenever an overlay option is used' },
   view_labels: { type: 'boolean', description: 'false hides the name label of every view and the persp axis gizmo (clean thumbnails); default true' },
@@ -202,7 +210,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
   const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
     const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes, await kindWarnings(name, r, a.frame)) }];
     if (r.geo && a.render) {
-      const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`);
+      const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`, ws.dir);
       const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
       const renderPath = renderDestination(name, r.target);
       fs.mkdirSync(path.dirname(renderPath), { recursive: true }); fs.writeFileSync(renderPath, png);
@@ -395,7 +403,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
       },
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
-        const { img, notes, png } = await pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`), engine.host);
+        const { img, notes, png } = await pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`, ws.dir), engine.host);
         const content: Content[] = [img];
         const info: string[] = [];
         {
