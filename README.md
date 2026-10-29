@@ -121,7 +121,7 @@ has four tabs: **Scene** (the graph's nodes and guides), **Outputs**, **Inputs**
 click one to inspect it alone, and **Scene** in the top bar returns to the whole scene. Publish extra results in graph
 JSON with `"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default (a
 named output of the output node is the default one, marked so). Each card says what the result is with the words
-packages and search use, mesh, instances, points, curves, terrain, textures, volume or scene, and its size in a line
+packages and search use, mesh, instances, points, curves, terrain, textures, material, volume or scene, and its size in a line
 beside it ("2049 × 2049 samples, 2 m apart"), and offers only the formats that write it, each with a line saying what
 it writes (a terrain: 16-bit PNG or RAW heightmap with its JSON sidecar, mask PNGs, the Unreal Landscape bundle; a
 mesh: GLB, glTF, USD, OBJ …). While a result cooks again its card keeps its picture; a card whose cook was stopped

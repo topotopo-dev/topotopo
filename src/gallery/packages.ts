@@ -48,6 +48,9 @@ import type { PackageIssue, PackageResolver, Scope } from '../graph/scope.ts';
 import type { GraphSpec, NodeDef } from '../graph/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
+import { readMaterials } from '../core/materials.ts';
+import type { Geometry } from '../core/geometry.ts';
+import { imageRef, referenceableImages } from '../core/image.ts';
 import { NAME_RE } from '../workspace.ts';
 import type { Workspace, WorkspacePackages } from '../workspace.ts';
 import {
@@ -79,6 +82,8 @@ export interface InputInfo { index: number; label: string }
 export interface OutputInfo {
   graph: string; node: string; label?: string; kind: Kind; tags: string[]; description?: string;
   sliders: Record<string, SliderInfo>; inputs: InputInfo[];
+  /** a material output: per material, the size of each map it carries (slot → [width, height]) */
+  maps?: Record<string, Record<string, [number, number]>>;
 }
 
 /** version.json */
@@ -436,7 +441,7 @@ function outputLoops(pkg: string, outs: FolderOutput[], scope: Scope): Map<strin
  * An output's record: what it is (the kind it cooked to, its tags and description) and its interface, its params (the
  * vars of its graph that its node reads, with their declarations: varsRead) and its inputs (its input nodes).
  */
-function outputInfo(o: FolderOutput, kind: Kind): OutputInfo {
+function outputInfo(o: FolderOutput, kind: Kind, maps?: OutputInfo['maps']): OutputInfo {
   const sliders: Record<string, SliderInfo> = {};
   const read = new Set(varsRead(o.spec, o.node));
   for (const [k, p] of Object.entries(graphInterface(o.spec).params)) {
@@ -455,8 +460,22 @@ function outputInfo(o: FolderOutput, kind: Kind): OutputInfo {
   }
   return {
     graph: o.graph, node: o.node, ...(o.label ? { label: o.label } : {}), kind, tags: o.tags, ...(o.description ? { description: o.description } : {}),
-    sliders, inputs: inputs.sort((a, b) => a.index - b.index),
+    sliders, inputs: inputs.sort((a, b) => a.index - b.index), ...(maps && Object.keys(maps).length ? { maps } : {}),
   };
+}
+
+/** The maps of a material output: per material, each map slot's image size. */
+function materialMaps(g: Geometry): OutputInfo['maps'] {
+  const table = readMaterials(g), images = referenceableImages(g), out: NonNullable<OutputInfo['maps']> = {};
+  for (const [name, m] of Object.entries(table)) {
+    const slots: Record<string, [number, number]> = {};
+    for (const [slot, ref] of Object.entries(m.textures ?? {})) {
+      const im = ref ? images.get(imageRef(ref) ?? '') : undefined;
+      if (im) slots[slot] = [im.width, im.height];
+    }
+    out[name] = slots;
+  }
+  return out;
 }
 
 /** Register a folder's assets/*.json into a scope; an asset that uses one registered later is tried again. */
@@ -1956,6 +1975,7 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
   // output that is a named output is that output.
   const sameNamed = (x: FolderOutput) => (x.name === null ? outs.named.find((n) => n.graph === x.graph && n.node === x.node) : undefined);
   const kinds = new Map<FolderOutput, Kind>();
+  const maps = new Map<FolderOutput, OutputInfo['maps']>();
   const scope = pk.engine.root.packages === pk.resolver ? pk.engine.root : { ...pk.engine.root, id: `publish ${m.package}`, packages: pk.resolver };
   // an output that builds on others of the package (a kit's line-up, a house of the kit's walls) cooks after them, and
   // a warning of theirs is said once, under the output it belongs to, not again under each output that builds on it
@@ -1985,8 +2005,9 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
     said.set(x, mine);
     if (!c.ok || !c.geo) { r.blocks.push(`${what} does not cook: ${c.errors.map((e) => e.message.replace(`${type} (${packageAt(self)}) failed: `, '')).join('; ') || 'no geometry'}`); continue; }
     const info = outputKind(c.geo), kind = publishedKind(info);
-    if (!kind) { r.blocks.push(`${what} cooks to nothing (no polygons, curves, points, instances, heightfields, images or volumes): there is nothing to publish`); continue; }
+    if (!kind) { r.blocks.push(`${what} cooks to nothing (no polygons, curves, points, instances, heightfields, images, materials or volumes): there is nothing to publish`); continue; }
     kinds.set(x, kind);
+    if (kind === 'material') maps.set(x, materialMaps(c.geo));
     if (x.kind && x.kind !== kind) r.blocks.push(`${what}: ${kindMismatch(x.kind, info)}`);
   }
   for (const x of all) { const same = sameNamed(x); if (same && kinds.has(same)) kinds.set(x, kinds.get(same)!); }
@@ -2013,8 +2034,8 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
     const read = new Set(varsRead(x.spec, x.node)), idle = Object.keys(x.spec.vars ?? {}).filter((k) => !read.has(k));
     if (idle.length) r.warnings.push(`${what} does not read ${idle.length === 1 ? 'the var' : 'the vars'} ${idle.map((k) => `"${k}"`).join(', ')} of its graph: ${idle.length === 1 ? 'it is not one of its params' : 'they are not its params'} (an output's params are the vars its node reads; move it to a graph of its own to give it params of its own)`);
   }
-  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x)!)]));
-  const def = outputInfo(outs.default, kinds.get(outs.default)!);
+  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x)!, maps.get(x) ?? maps.get(sameNamed(x)!))]));
+  const def = outputInfo(outs.default, kinds.get(outs.default)!, maps.get(outs.default) ?? maps.get(sameNamed(outs.default)!));
   let version = '1.0';
   if (prev) {
     const c = compareInterfaces(prev, { outputs, default: def });
@@ -2062,7 +2083,15 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
  * An output's kind and tags, as every listing says them: "mesh [conifer, low-poly]", "instances" without tags. A kind
  * not known (a working folder's output that pins none) is "kind not pinned".
  */
-export const kindTagsText = (o: { kind?: Kind; tags?: string[] }) => `${o.kind ?? 'kind not pinned'}${o.tags?.length ? ` [${o.tags.join(', ')}]` : ''}`;
+export const kindTagsText = (o: { kind?: Kind; tags?: string[]; maps?: OutputInfo['maps'] }) =>
+  `${o.kind ?? 'kind not pinned'}${o.tags?.length ? ` [${o.tags.join(', ')}]` : ''}${o.maps ? `  ${mapsText(o.maps)}` : ''}`;
+
+/** A material output's maps in a few words: "maps baseColor 2048, normal 4096" (with the material when it has several). */
+export function mapsText(maps: NonNullable<OutputInfo['maps']>): string {
+  const several = Object.keys(maps).length > 1;
+  const parts = Object.entries(maps).flatMap(([m, slots]) => Object.entries(slots).map(([slot, [w, h]]) => `${several ? `${m} ` : ''}${slot} ${w === h ? w : `${w}×${h}`}`));
+  return parts.length ? `maps ${parts.join(', ')}` : 'no maps';
+}
 
 /** The outputs of version `b` whose kind differs from version `a`'s: 'output "pine": mesh → scene'. */
 export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick<VersionInfo, 'outputs' | 'default'>): string[] {

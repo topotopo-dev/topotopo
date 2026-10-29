@@ -3673,21 +3673,23 @@ Label connected pieces with an integer attribute (default "class"), optionally a
 
 category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, `materialassign`
 
-Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims; exporters write it as a glTF material.
+Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims, or one from a material output; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the project folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the project folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used. With nothing in input 0 the result is the material alone: a material output.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | geometry |
+| 0 | `geo` | yes | no | geometry (none: the material alone, for a material output) |
+| 1 | `source` | yes | no | a material output, or any geometry carrying materials, to take the material from |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `name` | string | `"material"` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name (also the glTF material name) |
+| `name` | string | `""` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name, also the glTF material name ("" = "material", or the source material's own name with input 1) |
+| `from` | string | `""` |  |  | `source_material`, `use` | input 1: which of its materials ("" = its only one) |
 | `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
 | `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
 | `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 |
@@ -3702,7 +3704,7 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none) |
 | `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel |
 
-**Writes:** prim "material" (string), detail "materials" (JSON table)
+**Writes:** prim "material" (string), detail "materials" (JSON table); with a source, the images its maps use
 
 **Example**
 
@@ -14422,13 +14424,13 @@ category: `texture` · aliases: `texture_material`, `material_textures`, `attach
 
 Attach images as texture maps (base colour, normal, roughness, ORM) to a named material and assign it; the images travel with the geometry and exporters embed them.
 
-Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images.
+Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other projects assign through input 1 of the material node.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | mesh to texture (needs uv) |
+| 0 | `geo` | yes | no | mesh to texture (needs uv); none: the material alone, for a material output |
 | 1 | `images` | yes | no | geometry holding the images (merge texture branches) |
 
 **Parameters**

@@ -8,6 +8,7 @@ import { Image, channelsOf, imageRef, isImage, referenceableImages, resizeLayer 
 import { MATERIAL_ATTRIB, normalizeMaterial, primMaterials, readMaterials, writeMaterials } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { drawText, textWidth } from './font.ts';
+import { uvSphere } from '../core/shapes.ts';
 import { imageRowOfV } from '../core/texcoord.ts';
 
 interface Entry { label: string; img: Image; layer: string }
@@ -136,6 +137,29 @@ export function withImagePreview(g: Geometry, max = 16): Geometry {
   });
   writeMaterials(out, table);
   out.volumes = imgs;
+  return out;
+}
+
+/**
+ * A material output (materials and their maps, no geometry) as something to look at: one sphere per material, side by
+ * side in table order, each wearing its material with the maps it carries (tangents for normal maps come from the
+ * exporters and the renderer as for any mesh). Anything else comes back as it is.
+ */
+export function withMaterialPreview(g: Geometry, max = 8): Geometry {
+  if (g.numPoints) return g;
+  const table = readMaterials(g), names = Object.keys(table).slice(0, max);
+  if (!names.length || g.volumes.some((v) => !isImage(v))) return g;
+  const parts = names.map((name, k) => {
+    const s = uvSphere(0.5, 24, 48);
+    const P = s.P;
+    for (let i = 0; i < P.length; i += 3) P[i] += k * 1.25 - ((names.length - 1) * 1.25) / 2;
+    const a = s.prims.add(MATERIAL_ATTRIB, 'string', 1);
+    for (let p = 0; p < s.numPrims; p++) a.set(p, name);
+    return s;
+  });
+  const out = parts.length === 1 ? parts[0] : Geometry.merge(parts);
+  writeMaterials(out, table);
+  out.volumes = g.volumes.slice();
   return out;
 }
 

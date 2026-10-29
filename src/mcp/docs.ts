@@ -14,7 +14,7 @@ WORKFLOW
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
 7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
-OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, volume, scene; a mesh with scene_null sockets is a mesh) pins what it must cook to: build warns and publishing blocks when it does not.
+OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, material, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a project that is a package, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, material, volume, scene; a mesh with scene_null sockets is a mesh; materials alone are a material) pins what it must cook to: build warns and publishing blocks when it does not.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
@@ -413,7 +413,20 @@ NAME THE PIECES FIRST when they have no names (one node each):
 EXPORT: glTF writes one material per table entry; a named material decides the colour of its prims (their Cd is
   dropped unless vertex_colors:true). Merging pieces whose materials or images share a name but differ (two package
   outputs that both call their map "basecolor") renames the later one ("paint_2", "<material>_basecolor"), so every
-  piece keeps its own look. Inspect the table: inspect lists materials; render {shading:"pbr", textures:true}.`,
+  piece keeps its own look. Inspect the table: inspect lists materials; render {shading:"pbr", textures:true}.
+MATERIAL OUTPUTS (a material as a package output, kind "material": materials and their maps, no geometry):
+  make    texture nodes → texture_to_material with NOTHING in input 0, the images in input 1 ("in": {"images": "maps"}
+          or [null, "maps"]), {material:"steel", base_color, normal, orm} → the output; or material {name, base_color,
+          roughness} with no input for a plain one.
+          Each map keeps its texture node's resolution (a 4k normal beside a 512 mask); expose one as a param (a var
+          such as "normal_resolution" read by that node) to let a use change it.
+  use     {"type":"owner/materials/steel", "params":{...}} → input 1 of material {group:"@name=body*"} on the mesh: the
+          material and its maps are copied in and assigned (from names one when the source holds several; name
+          renames it). The material node's own colour and map params are not used then.
+  see     renders, the viewer and the Gallery show it on spheres (one per material) with its base colour maps;
+          publishing records each map's size (packages lists "maps baseColor 2048, normal 4096").
+  export  format "textures": one PNG per map + materials.json (each material's values and the files of its maps), for
+          engines to rebuild it; glb and usda need a mesh: export the mesh that uses it.`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
 Classes: point (P and per-point data), vertex (per polygon corner: uv seams, hard normals), prim (per face/curve), detail (global).
@@ -889,8 +902,9 @@ its graph's vars (they are not its params; give it a graph of its own for params
 
 WHAT AN OUTPUT IS: its kind, its tags and its description, which search, the catalog and help show.
   "outputs": {"pine": {"node": "out", "label": "Pine", "kind": "mesh", "tags": ["conifer", "low-poly"], "description": "…"}}
-- kind: mesh, instances (packed), points, curves, terrain (heightfields), textures (images alone), volume, or scene
-  (several of these: a street with its lamp posts as instances). A mesh that carries scene_null sockets is a mesh: the
+- kind: mesh, instances (packed), points, curves, terrain (heightfields), textures (images alone), material (materials
+  and their maps, no geometry: help topic "materials"), volume, or scene (several of these: a street with its lamp
+  posts as instances). A mesh that carries scene_null sockets is a mesh: the
   sockets are part of a mesh asset, and scene means several kinds of geometry together. Publishing cooks every output
   and records the kind it cooks to. "kind" pins it: publishing blocks when the output cooks to another, and build, edit
   and the viewer warn before that. A kind not on the list is an error wherever the graph is read.

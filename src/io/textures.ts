@@ -186,8 +186,10 @@ export function texturesExport(g: Geometry, dir: string, o: TexturesExportOption
     files.push({ path: joinPath(dir, f + '.png'), bytes });
   };
   const lines: string[] = [];
+  const fileOf = new Map<string, string>();
   for (const [name, img] of imgs) {
     add(name, imagePNG(img, '', o.deflate));
+    fileOf.set(name, baseOf(files[files.length - 1].path));
     const main = img.mainLayer;
     const a = img.layer(main);
     const ch = a ? channelsOf(a, img.count) : 1;
@@ -197,5 +199,22 @@ export function texturesExport(g: Geometry, dir: string, o: TexturesExportOption
       add(`${name}_${l}`, imagePNG(img, l, o.deflate));
     }
   }
-  return { files, summary: `${files.length} PNG file(s) in ${dir}: ${lines.join(', ')}` };
+  // the materials (a material output's, or a mesh's) with the files of their maps, for engines to rebuild them
+  const table = mergeMaterialTables([g, ...g.packedSources]);
+  const names = Object.keys(table);
+  if (names.length) {
+    const materials: Record<string, unknown> = {};
+    for (const n of names) {
+      const { textures, ...values } = table[n];
+      const maps: Record<string, string> = {};
+      for (const [slot, ref] of Object.entries(textures ?? {})) {
+        if (!ref) continue;
+        const img = imageRef(ref);
+        maps[slot] = img === null ? ref : fileOf.get(img) ?? ref;
+      }
+      materials[n] = { ...values, maps };
+    }
+    files.push({ path: joinPath(dir, 'materials.json'), bytes: new TextEncoder().encode(`${JSON.stringify({ materials }, null, 1)}\n`) });
+  }
+  return { files, summary: `${files.length - (names.length ? 1 : 0)} PNG file(s) in ${dir}: ${lines.join(', ')}${names.length ? ` + materials.json (${names.join(', ')})` : ''}` };
 }

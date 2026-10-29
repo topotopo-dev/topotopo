@@ -1,10 +1,10 @@
 // What a cooked output is, and the export formats that fit it. Everything that shows an output (the viewer's cards and
 // Properties, the Packages tab, the Gallery, search and help) says what it is with one word, its kind: mesh, instances,
-// points, curves, terrain, textures, volume, or scene for several of these (graph/outputs.ts KINDS). The viewer decides
+// points, curves, terrain, textures, material, volume, or scene for several of these (graph/outputs.ts KINDS). The viewer decides
 // it from the cooked geometry (OutputInfo.published) and says its size in a line beside it: "2,400 polygons, 1,204
 // points", "1,200 instances of 3 sources", "2049 × 2049 samples, 2 m apart", "1024 × 1024 px", a scene's parts each by
 // kind ("terrain 2049 × 2049, 2 m + 1,200 instances of 3 sources"), and the bounding size. Internally an output is made
-// of parts (heightfield, mesh, instances, curves, points, image, volume): format menus offer only the formats that write
+// of parts (heightfield, mesh, instances, curves, points, image, material, volume): format menus offer only the formats that write
 // them, PART_FORMATS listing the formats that write each part, best first, as the exporters do (test/viewer-outputs.ts
 // exports every part in every format to check it), and a format that needs a heightfield or an image is offered only
 // with one. A package records the same kind for each output it publishes (publishedKind). Pure: no file system.
@@ -12,12 +12,13 @@ import type { Geometry } from '../core/geometry.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { heightfieldsOf, layerStats } from '../core/heightfield.ts';
 import { referenceableImages } from '../core/image.ts';
+import { readMaterials } from '../core/materials.ts';
 import type { ExportFormat } from './export.ts';
 import { FORMAT_LABELS, targetExtension } from './targets.ts';
 import { SOURCE_INSIDE, formatWrites } from './files.ts';
 
 /** What an output can hold, in the order a mixed output names them (its main part first). */
-export const OUTPUT_PARTS = ['heightfield', 'mesh', 'instances', 'curves', 'points', 'image', 'volume'] as const;
+export const OUTPUT_PARTS = ['heightfield', 'mesh', 'instances', 'curves', 'points', 'image', 'material', 'volume'] as const;
 export type OutputPart = (typeof OUTPUT_PARTS)[number];
 /** One part, several (mixed), or nothing. */
 export type OutputKind = OutputPart | 'mixed' | 'empty';
@@ -35,6 +36,7 @@ export const PART_FORMATS: Record<OutputPart, readonly ExportFormat[]> = {
   curves: ['glb', 'gltf', 'usda', 'obj', 'geo', 'unreal_landscape', 'json'],
   points: ['csv', 'pointsjson', 'ply', 'geo', 'glb', 'gltf', 'usda', 'json'],
   image: ['textures', 'json'],
+  material: ['textures', 'json'],
   volume: ['json'],
 };
 
@@ -64,6 +66,8 @@ export interface OutputInfo {
   heightfields: number;
   /** the images it carries (its own and its packed sources'), as an image output or as textures of its parts */
   images: number;
+  /** the materials of a material output (none for the other kinds: their materials belong to their parts) */
+  materials: number;
   /** sampled SDF grids (TopoTopo JSON stores them; analytic SDFs are functions, which no format writes) */
   grids: number;
 }
@@ -88,6 +92,8 @@ export function outputKind(g: Geometry): OutputInfo {
   let loose = 0;
   for (let i = 0; i < g.numPoints; i++) if (!used[i]) loose++;
   const fields = heightfieldsOf(g), images = [...referenceableImages(g).values()];
+  // materials and their maps with no geometry: a material output (its images are its maps, not an image output)
+  const mats = !g.numPoints ? Object.keys(readMaterials(g)) : [];
   const sdfs = g.volumes.filter((v) => v.kind === 'sdf' || v.kind === 'grid'), grids = sdfs.filter((v) => v.kind === 'grid');
   const curves = polylines + splines;
   const has: Record<OutputPart, boolean> = {
@@ -95,7 +101,8 @@ export function outputKind(g: Geometry): OutputInfo {
     // loose points beside prims are an output's sockets or strays, not a part of their own
     points: loose > 0 && !g.numPrims,
     // images beside other parts are their textures
-    image: images.length > 0 && !g.numPoints && !fields.length && !sdfs.length,
+    image: images.length > 0 && !g.numPoints && !fields.length && !sdfs.length && !mats.length,
+    material: mats.length > 0 && !fields.length && !sdfs.length,
     volume: sdfs.length > 0,
   };
   const parts = OUTPUT_PARTS.filter((p) => has[p]);
@@ -114,18 +121,19 @@ export function outputKind(g: Geometry): OutputInfo {
     curves: () => (alone ? `${count(curves, 'curve')}, ${count(g.numPoints, 'point')}` : count(curves, 'curve')),
     points: () => count(loose, 'point'),
     image: () => `${images[0].width} × ${images[0].height} px${more(images.length)}`,
+    material: () => `${count(mats.length, 'material')}${images.length ? `, ${count(images.length, 'map')} (${[...new Set(images.map((im) => `${im.width} × ${im.height}`))].join(', ')} px)` : ''}`,
     volume: () => {
       const v = grids[0];
       return v ? `SDF grid ${v.dims.join(' × ')}${more(sdfs.length)}` : `${count(sdfs.length, 'SDF volume')}`;
     },
   };
   const b = g.bbox(true);
-  const size = b.empty || has.image ? null : [0, 1, 2].map((a) => b.max[a] - b.min[a]) as [number, number, number];
+  const size = b.empty || has.image || has.material ? null : [0, 1, 2].map((a) => b.max[a] - b.min[a]) as [number, number, number];
   const kind: OutputKind = parts.length === 0 ? 'empty' : alone ? parts[0] : 'mixed';
   return {
     kind, published: publishedKind({ kind }),
     parts, text: parts.length ? parts.map((p) => text[p]()).join(' + ') : 'empty', size,
-    ...(heightfield ? { heightfield } : {}), heightfields: fields.length, images: images.length, grids: grids.length,
+    ...(heightfield ? { heightfield } : {}), heightfields: fields.length, images: images.length, materials: has.material ? mats.length : 0, grids: grids.length,
   };
 }
 

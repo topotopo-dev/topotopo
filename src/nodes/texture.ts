@@ -1157,10 +1157,12 @@ defineNode({
     'separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and ' +
     'metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and ' +
     'assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render ' +
-    '{textures: true} shows base colour maps on the mesh; views "texture" shows the images.',
+    '{textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the ' +
+    'result is the material alone with the maps it uses: a material output (kind material), which other projects ' +
+    'assign through input 1 of the material node.',
   aliases: ['texture_material', 'material_textures', 'attach_textures', 'apply_textures'],
   inputs: [
-    { name: 'geo', desc: 'mesh to texture (needs uv)' },
+    { name: 'geo', desc: 'mesh to texture (needs uv); none: the material alone, for a material output', optional: true },
     { name: 'images', desc: 'geometry holding the images (merge texture branches)', optional: true },
   ],
   params: {
@@ -1193,7 +1195,7 @@ defineNode({
     const { p, type } = ctx;
     const mat = String(p.material ?? '').trim();
     if (!mat) throw new NodeError(`${type}: material name is empty`);
-    const g = ctx.input(0).clone();
+    const g = ctx.hasInput(0) ? ctx.input(0).clone() : new Geometry();
     // images by name; two different images under one name are ambiguous (reported when a slot names them)
     const pool = new Map<string, Image>(), clash = new Set<string>();
     const add = (im: Image) => {
@@ -1201,7 +1203,7 @@ defineNode({
       if (!had) pool.set(im.name, im);
       else if (!sameImage(had, im)) clash.add(im.name);
     };
-    for (const im of imagesOf(ctx.input(0))) add(im);
+    if (ctx.hasInput(0)) for (const im of imagesOf(ctx.input(0))) add(im);
     if (ctx.hasInput(1)) for (const im of imagesOf(ctx.input(1))) add(im);
     const need = (param: string): Image | null => {
       const n = String(p[param] ?? '').trim().replace(/^image:/, '');
@@ -1244,7 +1246,7 @@ defineNode({
     writeMaterials(g, table);
     // assign
     const groupSet = String(p.group ?? '').trim();
-    if (isNew || groupSet) {
+    if (g.numPrims && (isNew || groupSet)) {
       const sel = groupSet ? mask(g, 'prim', groupSet) : null;
       const a = g.prims.add(MATERIAL_ATTRIB, 'string', 1);
       for (let i = 0; i < g.numPrims; i++) if (!sel || sel[i]) a.set(i, mat);
