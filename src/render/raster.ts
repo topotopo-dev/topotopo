@@ -81,7 +81,11 @@ export interface RenderOptions {
   underlayFit?: UnderlayFit;
   /** scene empties (points with scene_empty 1: sockets) drawn as dots with their name and orient axes, through surfaces */
   sockets?: boolean;
-  /** true / 'auto' / false: classic edges (auto = on below 6000 polygons); 'all' | 'hard' | 'boundary' | 'groups': crisp edge overlays; 'none' = off */
+  /**
+   * true / 'auto' / false: classic polygon edges (auto, the default: on below AUTO_WIRE_MAX polygons, off under shading
+   * 'pbr' or textures; the footer says EDGES AUTO when auto draws them); 'all' | 'hard' | 'boundary' | 'groups': crisp
+   * edge overlays; 'none' = off
+   */
   wireframe?: boolean | 'auto' | WireMode;
   colorBy?: string | null;
   highlight?: { cls: 'point' | 'prim'; mask: Uint8Array; label?: string } | null;
@@ -196,6 +200,8 @@ const AXES: Axis[] = ['x', 'y', 'z'];
 const WIRE_MODES = ['none', 'all', 'hard', 'boundary', 'groups'];
 const GLYPH_MODES = ['none', 'N', 'up', 'orient', 'v', 'custom'];
 const SHADING_MODES = ['default', 'flat', 'matcap', 'ao', 'pbr'];
+/** The automatic wireframe draws polygon edges up to this many polygons. */
+export const AUTO_WIRE_MAX = 6000;
 const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9], SOCKET_C = [0.35, 1, 0.72];
 
 export interface RenderResult { width: number; height: number; rgba: Uint8Array; notes: string[] }
@@ -537,6 +543,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   }
 
   const colorByActive = !!o.colorBy || !!hl;
+  const pbrTint = colorByActive && o.shading === 'pbr';
 
   // isolated points + polylines
   const used = new Uint8Array(np);
@@ -552,7 +559,12 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const drawPts = showAllPts || (o.points !== false && isolated > 0);
   const closedPrims = g.primClosed.reduce((s, c) => s + c, 0);
   // the classic auto wireframe; the new edge overlays (wireMode) replace it
-  const wire = !wireMode && o.wireframe !== 'none' && (o.wireframe === true || (o.wireframe !== false && closedPrims > 0 && closedPrims <= 6000));
+  // auto (the default): on below 6,000 polygons, but never over a material look (pbr shading or texture maps), where the
+  // edges read as a defect of the material; when auto draws them the footer says so
+  const autoWire = o.wireframe === undefined || o.wireframe === 'auto';
+  const wire = !wireMode && o.wireframe !== 'none' && (o.wireframe === true
+    || (autoWire && closedPrims > 0 && closedPrims <= AUTO_WIRE_MAX && o.shading !== 'pbr' && !o.textures));
+  if (wire && autoWire) notes.push('wireframe auto: polygon edges drawn (wireframe false hides them)');
   const edges = wire ? buildEdges(g) : null;
   // triangle-dominant meshes (boolean/remesh output): hide edges between coplanar faces so the
   // wireframe shows shape, not triangulation slivers
@@ -626,7 +638,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const ev = o.exposure ?? 0;
     if (!Number.isFinite(ev)) throw new Error(`render: exposure expects a number of stops, got ${o.exposure}`);
     pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes);
-    if (o.colorBy || o.highlight || o.checker) notes.push('pbr: color_by, highlight and checker are not shown under shading "pbr"');
+    // color_by and highlight tint the shaded material (their colour, lit by its brightness); the checker is not shown
+    if (o.checker) notes.push('pbr: checker is not shown under shading "pbr" (color_by and highlight tint the material)');
     ovDesc.push(`SHADING PBR STUDIO EV ${fmtNum(ev)} (${pbrS.summary.toUpperCase()})`);
   } else if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
   // section / clip planes
@@ -1057,6 +1070,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const ca = [0, 0, 0], cb = [0, 0, 0], cc = [0, 0, 0];
       toCamSpace(na, ca); toCamSpace(nb, cb); toCamSpace(nc, cc);
       let colA = colorOf(va), colB = colorOf(vb), colC = colorOf(vc);
+      const tA = colA, tB = colB, tC = colC; // before the back-face tint: the pbr colour tint
       if (suspicious) {
         const tint = (q: number[]) => [q[0] * 0.35 + 0.12, q[1] * 0.35 + 0.22, q[2] * 0.35 + 0.6];
         colA = tint(colA); colB = tint(colB); colC = tint(colC);
@@ -1119,6 +1133,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             } else { pbrV[0] = -cam.f[0]; pbrV[1] = -cam.f[1]; pbrV[2] = -cam.f[2]; }
             pbrS.shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, pbrV, back, pbrRGB);
             const ci = zi * 3;
+            if (pbrTint) {
+              // the attribute colour lit by the material's brightness, over a third of the material itself
+              const lum = Math.min(1.2, 0.12 + 1.5 * (0.2126 * pbrRGB[0] + 0.7152 * pbrRGB[1] + 0.0722 * pbrRGB[2]));
+              for (let k = 0; k < 3; k++) pbrRGB[k] = pbrRGB[k] * 0.35 + (tA[k] * w0 + tB[k] * w1 + tC[k] * w2) * lum * 0.65;
+            }
             if (suspicious) { pbrRGB[0] = pbrRGB[0] * 0.35 + 0.12; pbrRGB[1] = pbrRGB[1] * 0.35 + 0.22; pbrRGB[2] = pbrRGB[2] * 0.35 + 0.6; }
             col[ci] = pbrRGB[0]; col[ci + 1] = pbrRGB[1]; col[ci + 2] = pbrRGB[2];
             continue;
@@ -1448,7 +1467,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // footer
   const fy = outH - footerH + 4 * ui;
   const ext = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
-  const stats = `${np} PTS  ${g.numPrims} PRIMS  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bmin[0] + bmax[0]) / 2)},${fmtNum((bmin[1] + bmax[1]) / 2)},${fmtNum((bmin[2] + bmax[2]) / 2)}`;
+  const stats = `${np} PTS  ${g.numPrims} PRIMS  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bmin[0] + bmax[0]) / 2)},${fmtNum((bmin[1] + bmax[1]) / 2)},${fmtNum((bmin[2] + bmax[2]) / 2)}${wire && autoWire ? '  EDGES AUTO' : ''}`;
   drawText(out, outW, outH, 6 * ui, fy, (o.title ? o.title.toUpperCase() + '  ' : '') + stats, [0.85, 0.85, 0.85], 2 * ui, false);
   if (legend) {
     const lx = outW - textWidth(legend, 2 * ui) - 8 * ui;

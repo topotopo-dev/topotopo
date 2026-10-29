@@ -1012,7 +1012,11 @@ QUESTION → OPTION
                    roughness map, metallic, emissive, unlit) under a fixed camera-relative studio rig (key, fill, rim and a
                    sky/ground environment), GGX specular, ACES, exposure (stops, default 0). Deterministic: the same graph
                    gives the same PNG. Texture files are read from disk; transparency is not evaluated (shaded opaque,
-                   with a note), nor are missing or non-PNG maps (named in the notes).
+                   with a note), nor are missing or non-PNG maps (named in the notes). color_by and highlight tint
+                   the shaded material (the attribute colour lit by the material's brightness); checker is not shown.
+POLYGON EDGES: wireframe "auto" (the default) draws polygon edges on meshes under 6,000 polygons, never under shading
+  "pbr" or textures:true (they would read as marks in the material); the footer says EDGES AUTO when it draws them.
+  wireframe:false hides them, true draws them always.
 Labels never overlap: ones without room are skipped (note says how many; raise size or lower max_labels).
 view_labels:false drops each view's name label and the persp axis gizmo (clean thumbnails, e.g. those of TopoTopo's own packages).
 Heightfields draw at most heightfield_res quads per side (default 256; "full" = every sample): a larger field is
