@@ -70,11 +70,11 @@ export interface SliderInfo { type: string; default?: unknown; min?: number; max
 export interface InputInfo { index: number; label: string }
 /**
  * A published output: the graph and node it cooks, what it is (its kind as it cooked, its tags, its description: the
- * output's own or else its graph's), its sliders (the graph's vars) and its inputs (its input nodes). A version
- * published before TopoTopo recorded kinds has no kind, tags or description.
+ * output's own or else its graph's, none when neither has one), its params (the graph's vars) and its inputs (its input
+ * nodes).
  */
 export interface OutputInfo {
-  graph: string; node: string; label?: string; kind?: Kind; tags?: string[]; description?: string;
+  graph: string; node: string; label?: string; kind: Kind; tags: string[]; description?: string;
   sliders: Record<string, SliderInfo>; inputs: InputInfo[];
 }
 
@@ -113,8 +113,12 @@ function readVersionInfo(dir: string): VersionInfo {
   const file = path.join(dir, 'version.json');
   let raw: any;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
-  if (!raw || typeof raw !== 'object' || typeof raw.package !== 'string' || typeof raw.version !== 'string' || typeof raw.hash !== 'string' || !raw.outputs || !raw.default)
+  if (!raw || typeof raw !== 'object' || typeof raw.package !== 'string' || typeof raw.version !== 'string' || typeof raw.hash !== 'string' || !raw.outputs || typeof raw.outputs !== 'object' || !raw.default)
     throw new Error(`${file} is not a version record: it needs package, version, hash, outputs and default`);
+  // every output records what it is: its kind and its tags
+  for (const [k, o] of [...Object.entries<any>(raw.outputs), ['(the default output)', raw.default] as [string, any]])
+    if (!o || typeof o !== 'object' || !isKind(o.kind) || !Array.isArray(o.tags) || !o.sliders || !Array.isArray(o.inputs))
+      throw new Error(`${file} is not a version record: output ${k} needs its kind (${KINDS.join(', ')}), tags, sliders and inputs`);
   return raw;
 }
 
@@ -385,7 +389,7 @@ function outputLoops(pkg: string, outs: FolderOutput[], scope: Scope): Map<strin
  * An output's record: what it is (the kind it cooked to, its tags and description) and its interface, its sliders (the
  * graph's vars, with their declarations) and its inputs (its input nodes).
  */
-function outputInfo(o: FolderOutput, kind: Kind | undefined): OutputInfo {
+function outputInfo(o: FolderOutput, kind: Kind): OutputInfo {
   const sliders: Record<string, SliderInfo> = {};
   for (const [k, p] of Object.entries(graphInterface(o.spec).params)) {
     const label = o.spec.params?.[k]?.label;
@@ -401,7 +405,7 @@ function outputInfo(o: FolderOutput, kind: Kind | undefined): OutputInfo {
     inputs.push({ index: Number(n.params?.index ?? 0), label: String(n.params?.label ?? n.note ?? '') });
   }
   return {
-    graph: o.graph, node: o.node, ...(o.label ? { label: o.label } : {}), ...(kind ? { kind } : {}), tags: o.tags, ...(o.description ? { description: o.description } : {}),
+    graph: o.graph, node: o.node, ...(o.label ? { label: o.label } : {}), kind, tags: o.tags, ...(o.description ? { description: o.description } : {}),
     sliders, inputs: inputs.sort((a, b) => a.index - b.index),
   };
 }
@@ -1458,25 +1462,24 @@ function versionFiles(dir: string, m: ProjectManifest, lock: Lock): { rel: strin
   return out.sort(byRel);
 }
 
-/** The changes of two lists of tags: "tags added conifer, lowpoly", "tag removed tree" (none: the same tags). */
+/** The changes of two lists of tags: "tags added conifer, low-poly", "tag removed tree" (none: the same tags). */
 const tagChanges = (a: string[], b: string[]) => {
   const added = b.filter((t) => !a.includes(t)), gone = a.filter((t) => !b.includes(t));
   return [added.length ? `tag${added.length > 1 ? 's' : ''} added ${added.join(', ')}` : '', gone.length ? `tag${gone.length > 1 ? 's' : ''} removed ${gone.join(', ')}` : ''].filter(Boolean);
 };
 
 /**
- * What changed between two versions' interfaces: what makes a big version (an output, slider or input that goes away
+ * What changed between two versions' interfaces: what makes a big version (an output, param or input that goes away
  * or means something else: removed or renamed, another type, a narrower range, a removed option, an input moved, an
- * output of another kind), and the rest (added outputs, sliders, options and inputs, wider ranges, changed defaults,
- * labels, tags and descriptions, a kind the previous version did not record).
+ * output of another kind), and the rest (added outputs, params, options and inputs, wider ranges, changed defaults,
+ * labels, tags and descriptions).
  */
 export function compareInterfaces(prev: Pick<VersionInfo, 'outputs' | 'default'>, next: Pick<VersionInfo, 'outputs' | 'default'>): { big: string[]; small: string[] } {
   const big: string[] = [], small: string[] = [];
   const range = (s: SliderInfo) => `${s.min ?? ''}..${s.max ?? ''}`;
   const output = (what: string, a: OutputInfo, b: OutputInfo) => {
     if (a.graph !== b.graph || a.node !== b.node) small.push(`${what} now cooks "${b.node}" of graph "${b.graph}" (was "${a.node}" of "${a.graph}")`);
-    if (a.kind && b.kind && a.kind !== b.kind) big.push(`${what}: kind ${a.kind} → ${b.kind}`);
-    else if (!a.kind && b.kind) small.push(`${what}: kind ${b.kind} (the version before recorded no kind)`);
+    if (a.kind !== b.kind) big.push(`${what}: kind ${a.kind} → ${b.kind}`);
     for (const c of tagChanges(a.tags ?? [], b.tags ?? [])) small.push(`${what}: ${c}`);
     if ((a.description ?? '') !== (b.description ?? '')) small.push(`${what}: description ${!a.description ? 'added' : !b.description ? 'removed' : 'changed'}`);
     if ((a.label ?? '') !== (b.label ?? '')) small.push(`${what}: label "${a.label ?? ''}" → "${b.label ?? ''}"`);
@@ -1680,7 +1683,7 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
     r.previous = prev.version;
     // a project may rely on what an output is: an Unreal static mesh is not a level
     const was = (k: string, now: OutputInfo, before: OutputInfo | undefined) => {
-      if (before?.kind && now.kind && before.kind !== now.kind) r.warnings.push(`${k} is now ${now.kind} (it was ${before.kind} in ${prev.version}): a project that relies on what it is may have to change, and the version is big`);
+      if (before && before.kind !== now.kind) r.warnings.push(`${k} is now ${now.kind} (it was ${before.kind} in ${prev.version}): a project that relies on what it is may have to change, and the version is big`);
     };
     for (const x of outs.named) was(outputWhat(x), outputs[x.name!], prev.outputs[x.name!]);
     if (!sameNamed(outs.default) && !Object.values(prev.outputs).some((p) => p.graph === prev.default.graph && p.node === prev.default.node)) was(outputWhat(outs.default), def, prev.default);
@@ -1710,25 +1713,26 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
   return { ...r, ok: true, version, dir: at, hash, files: hashed.length, bytes };
 }
 
-/** An output's kind and tags in a few words: "mesh: conifer, lowpoly", "instances", "" when the record has neither. */
-export const kindTagsText = (o: Pick<OutputInfo, 'kind' | 'tags'>) =>
-  [o.kind ?? (o.tags?.length ? 'kind not recorded' : ''), o.tags?.join(', ') ?? ''].filter(Boolean).join(': ');
+/**
+ * An output's kind and tags, as every listing says them: "mesh [conifer, low-poly]", "instances" without tags. A kind
+ * not known (a working folder's output that pins none) is "kind not pinned".
+ */
+export const kindTagsText = (o: { kind?: Kind; tags?: string[] }) => `${o.kind ?? 'kind not pinned'}${o.tags?.length ? ` [${o.tags.join(', ')}]` : ''}`;
 
 /**
- * A version's outputs in a line, each with its kind and tags: "pine (mesh: conifer, lowpoly), stump (mesh)", and
+ * A version's outputs in a line, each with its kind and tags: "pine (mesh [conifer, low-poly]), stump (mesh)", and
  * "(default: scene)" for a default output that is no named output.
  */
 export function outputsLine(v: Pick<VersionInfo, 'outputs' | 'default'>): string {
-  const one = (name: string, o: OutputInfo) => { const k = kindTagsText(o); return k ? `${name} (${k})` : name; };
-  const named = Object.entries(v.outputs).map(([k, o]) => one(k, o));
+  const named = Object.entries(v.outputs).map(([k, o]) => `${k} (${kindTagsText(o)})`);
   const isNamed = Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node);
-  return [...named, ...(isNamed ? [] : [v.default.kind ? `(default: ${v.default.kind})` : '(default)'])].join(', ');
+  return [...named, ...(isNamed ? [] : [`(default: ${v.default.kind})`])].join(', ');
 }
 
 /** The outputs of version `b` whose kind differs from version `a`'s: 'output "pine": mesh → scene'. */
 export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick<VersionInfo, 'outputs' | 'default'>): string[] {
   const out: string[] = [];
-  const one = (what: string, x: OutputInfo | undefined, y: OutputInfo | undefined) => { if (x?.kind && y?.kind && x.kind !== y.kind) out.push(`${what}: ${x.kind} → ${y.kind}`); };
+  const one = (what: string, x: OutputInfo | undefined, y: OutputInfo | undefined) => { if (x && y && x.kind !== y.kind) out.push(`${what}: ${x.kind} → ${y.kind}`); };
   for (const [k, o] of Object.entries(b.outputs)) one(`output "${k}"`, a.outputs[k], o);
   const named = (v: Pick<VersionInfo, 'outputs' | 'default'>) => Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node);
   if (!named(a) && !named(b)) one('the default output', a.default, b.default);
@@ -1739,8 +1743,8 @@ export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick
 export function publishText(r: PublishResult): string {
   const kind = !r.previous ? 'the first version' : r.bigBecause.length ? `big, after ${r.previous}` : `small, after ${r.previous}`;
   const said = [
-    ...(r.outputs ? ['outputs:', ...Object.entries(r.outputs).map(([k, o]) => `  ${k}  ${kindTagsText(o) || 'no kind'}${o.label ? `  "${o.label}"` : ''}`)] : []),
-    ...(r.default && r.outputs && !Object.values(r.outputs).some((o) => o.graph === r.default!.graph && o.node === r.default!.node) ? [`  (default: "${r.default.node}" of graph "${r.default.graph}")  ${r.default.kind ?? 'no kind'}`] : []),
+    ...(r.outputs ? ['outputs:', ...Object.entries(r.outputs).map(([k, o]) => `  ${k}  ${kindTagsText(o)}${o.label ? `  "${o.label}"` : ''}`)] : []),
+    ...(r.default && r.outputs && !Object.values(r.outputs).some((o) => o.graph === r.default!.graph && o.node === r.default!.node) ? [`  (default: "${r.default.node}" of graph "${r.default.graph}")  ${kindTagsText(r.default)}`] : []),
     ...(r.bigBecause.length ? ['big because:', ...r.bigBecause.map((c) => `  ${c}`)] : []),
     ...(r.changes.length ? ['changes:', ...r.changes.map((c) => `  ${c}`)] : []),
     ...(r.warnings.length ? ['warnings:', ...r.warnings.map((w) => `  ${w}`)] : []),
@@ -1828,7 +1832,7 @@ export interface SearchHit {
   package: string;
   version: string;
   label?: string;
-  kind?: Kind;
+  kind: Kind;
   tags: string[];
   description?: string;
   /** the version of the package the open project uses, when it uses it */
@@ -1914,7 +1918,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
         if (!words.every((w) => hay.some((h) => h.startsWith(w)))) continue;
         const used = manifest?.uses[f.package];
         hits.push({
-          type, ...(alias ? { alias } : {}), package: f.package, version: v.version, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags,
+          type, ...(alias ? { alias } : {}), package: f.package, version: v.version, ...(o.label ? { label: o.label } : {}), kind: o.kind, tags,
           ...(o.description ? { description: o.description } : {}), ...(used ? { used } : {}), ...(manifest?.package === f.package ? { self: true } : {}),
         });
       }
@@ -1941,7 +1945,7 @@ export function searchText(r: SearchResult, mcp = false): string {
     lines.push(`${l.standing === 'builtin' ? `TopoTopo's built-in library "${l.name}"` : `library "${l.name}" (${l.root})`}: ${standing}`);
     for (const h of l.hits) {
       const also = [h.alias ? `also ${h.alias}, its default output` : '', h.self ? 'this project\'s own package' : h.used ? `this project uses ${h.used}` : ''].filter(Boolean).join('; ');
-      lines.push(`  ${h.type}  ${h.kind ?? 'kind not recorded'}${h.tags.length ? `  [${h.tags.join(', ')}]` : ''}${h.label ? `  "${h.label}"` : ''}  ${h.version}${also ? `  (${also})` : ''}`);
+      lines.push(`  ${h.type}  ${kindTagsText(h)}${h.label ? `  "${h.label}"` : ''}  ${h.version}${also ? `  (${also})` : ''}`);
       if (h.description) lines.push(`    ${h.description.length > 300 ? `${h.description.slice(0, 299)}…` : h.description}`);
     }
   }

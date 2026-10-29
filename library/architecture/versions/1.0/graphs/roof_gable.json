@@ -119,7 +119,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "roof_gable": { "node": "out", "label": "Gable roof" } },
+  "outputs": { "roof_gable": { "node": "out", "label": "Gable roof", "kind": "mesh", "tags": ["roof", "gable-roof", "building", "modular"] } },
   "meta": {
     "watertight": true,
     "pivot": "wall_top",

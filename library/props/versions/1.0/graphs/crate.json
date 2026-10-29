@@ -75,7 +75,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint copynum" } }
   },
   "output": "out",
-  "outputs": { "crate": { "node": "out", "label": "Crate" } },
+  "outputs": { "crate": { "node": "out", "label": "Crate", "kind": "mesh", "tags": ["crate", "container", "wooden", "prop"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 35, "elevation": 25 }

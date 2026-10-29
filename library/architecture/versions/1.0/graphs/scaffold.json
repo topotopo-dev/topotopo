@@ -107,7 +107,7 @@
     }
   },
   "output": "out",
-  "outputs": { "scaffold": { "node": "out", "label": "Scaffold" } },
+  "outputs": { "scaffold": { "node": "out", "label": "Scaffold", "kind": "mesh", "tags": ["scaffold", "construction", "industrial", "modular"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 30, "elevation": 20 }

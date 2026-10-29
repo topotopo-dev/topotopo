@@ -360,7 +360,7 @@ section('publishing: the version rule');
   setGraph(RULES, 'main', g);
   const over = await publish(RULES, 'over');
   check(!over.ok && over.blocks.some((b) => /is there already: a version is never written over/.test(b)), `a version folder that is there is never written over: ${over.blocks}`);
-  check(compareInterfaces({ outputs: {}, default: { graph: 'a', node: 'n', sliders: {}, inputs: [] } }, { outputs: {}, default: { graph: 'b', node: 'n', sliders: {}, inputs: [] } }).small.some((s) => /the default output now cooks/.test(s)),
+  check(compareInterfaces({ outputs: {}, default: { graph: 'a', node: 'n', kind: 'mesh', tags: [], sliders: {}, inputs: [] } }, { outputs: {}, default: { graph: 'b', node: 'n', kind: 'mesh', tags: [], sliders: {}, inputs: [] } }).small.some((s) => /the default output now cooks/.test(s)),
     'a default output moved to another graph is a small change');
   check(['2.0', '7.0', '10.0'].every(startsBigVersion) && !['1.0', '1.1', '1.10', '2.20'].some(startsBigVersion), 'a version that starts a big version: 2.0 and 10.0, never 1.0 or 1.10');
 }
@@ -511,8 +511,17 @@ section('tags and descriptions: the rule, recorded, searched; the version rule f
   setGraph(KINDS_DIR, 'main', kindsGraph);
   const r21 = await publish(KINDS_DIR, 'unpinned');
   check(r21.ok && r21.version === '2.1' && !r21.bigBecause.length, `a pinned kind removed without a change of kind is small: ${r21.version} ${r21.bigBecause.join('; ')}`);
-  check(compareInterfaces({ outputs: { a: { graph: 'g', node: 'n', sliders: {}, inputs: [] } }, default: { graph: 'g', node: 'n', sliders: {}, inputs: [] } }, { outputs: { a: { graph: 'g', node: 'n', kind: 'mesh', tags: [], sliders: {}, inputs: [] } }, default: { graph: 'g', node: 'n', kind: 'mesh', tags: [], sliders: {}, inputs: [] } }).small.join() === 'output "a": kind mesh (the version before recorded no kind)',
-    'a version before that recorded no kind: its kind is a small change');
+  // a version record names every output's kind and tags
+  const vdir = path.join(KINDS_DIR, 'versions', '2.1'), record = readJSON(path.join(vdir, 'version.json'));
+  delete record.outputs.mesh.kind;
+  fs.writeFileSync(path.join(vdir, 'version.json'), JSON.stringify(record));
+  check(publishedVersions(KINDS_DIR, 'studio/kinds').map((v) => v.version).join() === '1.0,1.1,2.0', 'a version.json whose output has no kind is not a version record');
+  delete record.outputs.mesh.tags;
+  record.outputs.mesh.kind = 'mesh';
+  fs.writeFileSync(path.join(vdir, 'version.json'), JSON.stringify(record));
+  check(publishedVersions(KINDS_DIR, 'studio/kinds').length === 3, 'nor one without tags');
+  record.outputs.mesh.tags = ['block', 'box'];
+  fs.writeFileSync(path.join(vdir, 'version.json'), JSON.stringify(record, null, 2) + '\n');
 }
 
 section('a dry run: what publishing would do, and nothing written');
@@ -525,14 +534,14 @@ section('a dry run: what publishing would do, and nothing written');
   check(d.check && d.ok && d.version === '2.2' && d.previous === '2.1' && d.changes.includes('output "textures": tag added noise') && d.warnings.some((w) => /^output "scene" \(graph "main"\) has no tags/.test(w)) && !d.blocks.length,
     `the version number it would get, its changes and warnings (${d.version}: ${d.changes.join('; ')})`);
   const text = publishText(d);
-  check(/^✓ would publish studio\/kinds 2\.2 \(small, after 2\.1\); publishing it needs a note, one line on what changed/.test(text) && /\noutputs:\n {2}curves {2}curves: wire\n/.test(text) && /\na dry run: nothing was written$/.test(text),
+  check(/^✓ would publish studio\/kinds 2\.2 \(small, after 2\.1\); publishing it needs a note, one line on what changed/.test(text) && /\noutputs:\n {2}curves {2}curves \[wire\]\n/.test(text) && /\na dry run: nothing was written$/.test(text),
     `it says so, and that the note is still to write:\n${text.split('\n').slice(0, 3).join('\n')}`);
   check(JSON.stringify(listing(KINDS_DIR)) === JSON.stringify(before), 'nothing is written');
   kindsGraph.outputs.scene.kind = 'terrain';
   setGraph(KINDS_DIR, 'main', kindsGraph);
   const b = await publishPackage(o.ws, o.pk, { check: true, note: 'scene' });
-  check(b.check && !b.ok && b.version === '2.2' && b.blocks.length === 1 && /^output "scene" \(graph "main"\): its "kind" is "terrain", and it cooks to scene/.test(b.blocks[0])
-    && /^✗ would not publish studio\/kinds 2\.2 \(small, after 2\.1\) — 1 problem:\n {2}output "scene"/.test(publishText(b)), `a block, and the number all the same: ${publishText(b).split('\n').slice(0, 2).join(' | ')}`);
+  check(b.check && !b.ok && b.version === undefined && b.blocks.length === 1 && /^output "scene" \(graph "main"\): its "kind" is "terrain", and it cooks to scene/.test(b.blocks[0])
+    && /^✗ would not publish studio\/kinds — 1 problem:\n {2}output "scene"/.test(publishText(b)), `a block, and no version number: ${publishText(b).split('\n').slice(0, 2).join(' | ')}`);
   const noVersion = listing(KINDS_DIR).filter((f) => f.startsWith('versions/2.2'));
   check(!noVersion.length, 'still nothing written');
   delete kindsGraph.outputs.scene.kind;
@@ -987,7 +996,7 @@ section('search: every library, by words, kind and tag; what the project can use
   const text = searchText(s, true);
   check(/^search "conifer": 3 outputs in 2 of the 4 libraries looked in, for project finder\n/.test(text) && /\nTopoTopo's built-in library "topotopo": TopoTopo's own packages, which every project uses/.test(text)
     && /\nlibrary "game" \(.*game\): project finder does not list it: to use these, add "game" to "libraries" in its project\.json \(the person does: the tools never add a library\)/.test(text)
-    && /\n {2}studio\/trees\/pine {2}mesh {2}\[conifer, tree\] {2}"Pine" {2}1\.1 {2}\(also studio\/trees, its default output\)\n/.test(text) && /\nnothing matches in library "\.\.\/lib", library "other"/.test(text),
+    && /\n {2}studio\/trees\/pine {2}mesh \[conifer, tree\] {2}"Pine" {2}1\.1 {2}\(also studio\/trees, its default output\)\n/.test(text) && /\nnothing matches in library "\.\.\/lib", library "other"/.test(text),
     `it says which the project can use, and the entry it needs for the others:\n${text}`);
   check(where(find(FINDER, { query: 'conifer', kind: 'instances' })) === '../lib:listed: topotopo:builtin:topotopo/woods/grove game:unlisted: other:unlisted:', 'kind matches exactly');
   check(where(find(FINDER, { tag: 'conifer' })) === '../lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:'
@@ -1061,7 +1070,7 @@ section('the CLI: init, use, packages, publish, --follow, --catalog');
   check(again.code === 1 && /nothing changed since 1\.0/.test(again.out), 'publish without a change fails');
   check(cli(['publish', CLI, '--check']).code === 1, 'and so does its dry run');
   const found = cli(['search', 'conifer', '--kind', 'mesh'], path.join(dirs.repo, 'finder'));
-  check(found.code === 0 && /^search "conifer", kind mesh: \d+ outputs? in \d+ of the 4 libraries looked in, for project finder/.test(found.out) && /\n {2}studio\/trees\/pine {2}mesh {2}\[conifer, tree\]/.test(found.out)
+  check(found.code === 0 && /^search "conifer", kind mesh: \d+ outputs? in \d+ of the 4 libraries looked in, for project finder/.test(found.out) && /\n {2}studio\/trees\/pine {2}mesh \[conifer, tree\]/.test(found.out)
     && /add "game" to "libraries" in its project\.json, or the library's path/.test(found.out) && /--help-node owner\/name\/output/.test(found.out), `search: ${found.out.split('\n')[0]}`);
   check(cli(['search', '--tag', 'conifer'], CLI).code === 0 && /\n {2}studio\/trees\/pine /.test(cli(['search', '--tag', 'conifer'], CLI).out), 'search --tag');
   const wrong = cli(['search', '--kind', 'material'], CLI);

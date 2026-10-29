@@ -127,7 +127,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "sign_post": { "node": "out", "label": "Street sign" } },
+  "outputs": { "sign_post": { "node": "out", "label": "Street sign", "kind": "mesh", "tags": ["sign", "street-sign", "text", "street-furniture"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 20, "elevation": 10 }

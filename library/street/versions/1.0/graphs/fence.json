@@ -179,7 +179,7 @@
     }
   },
   "output": "out",
-  "outputs": { "fence": { "node": "out", "label": "Fence" } },
+  "outputs": { "fence": { "node": "out", "label": "Fence", "kind": "mesh", "tags": ["fence", "barrier", "garden", "along-curve"] } },
   "meta": {
     "pivot": "curve",
     "inputs": ["curve"],

@@ -74,7 +74,7 @@
     }
   },
   "output": "out",
-  "outputs": { "bench": { "node": "out", "label": "Bench" } },
+  "outputs": { "bench": { "node": "out", "label": "Bench", "kind": "mesh", "tags": ["bench", "seating", "park", "street-furniture"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 30, "elevation": 20 }
