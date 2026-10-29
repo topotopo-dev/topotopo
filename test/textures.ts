@@ -385,6 +385,26 @@ const UVBOX = { b: { type: 'box', params: { divisions: [2, 2, 2] } }, uv: { type
   check(cur.layers.has('convex') && cur.layers.has('concave') && Math.max(...cur.layer('concave')!) === 0, 'curvature layers convex/concave (a box has no concave edge)');
   const notch = await image({ b: { type: 'box', params: { size: [1, 1, 1] } }, e: { type: 'poly_extrude', in: ['b'], params: { group: '@P.y>0.4', distance: -0.3, inset: 0.2 } }, uv: { type: 'uv_unwrap', in: ['e'], params: { resolution: 128 } }, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05 } } }, 'c');
   check(Math.max(...notch.layer('concave')!) > 0.5, 'a recessed top has concave edges (layer concave)');
+
+  // high-res options: the "missed" layer, a cage per part from an attribute, matching pieces by name
+  const lowHigh = { low: { type: 'box' }, luv: { type: 'uv_unwrap', in: ['low'], params: { resolution: 64 } }, high: { type: 'subdivide', in: ['low'], params: { levels: 2 } } };
+  const tight = await cookOn(engine, { ...lowHigh, n: { type: 'bake_normal', in: ['luv', 'high'], params: { resolution: 64, cage: 0.001 } } }, 'n');
+  const mi = findImage(tight.geo)!.layer('missed');
+  check(!!mi && Math.max(...mi) === 1 && tight.stats.missed > 0 && tight.warnings.some((w) => w.includes('Layer "missed" shows where')), `a too tight cage: layer "missed" marks the texels (${tight.stats.missed} samples)`);
+  const perPart = await cookOn(engine, { ...lowHigh, c: { type: 'attrib_create', in: ['luv'], params: { name: 'cage', class: 'prim', value: 0.4 } }, n: { type: 'bake_normal', in: ['c', 'high'], params: { resolution: 64, cage: 0.001 } } }, 'n');
+  check(perPart.stats.missed < tight.stats.missed / 20, `a prim attribute "cage" sets the cage where it is set (misses ${tight.stats.missed} → ${perPart.stats.missed})`);
+  const named = (n: string, x: number, inp: string): Record<string, NodeSpec> => ({ [`${n}b`]: { type: 'box', params: { center: [x, 0, 0] } }, [`${n}n`]: { type: 'attrib_create', in: [`${n}b`], params: { name: 'name', class: 'prim', value: inp } } });
+  const lows = { ...named('la', 0, 'a'), ...named('lb', 1.5, 'b'), lm: { type: 'merge', in: ['lan', 'lbn'] }, luv: { type: 'uv_unwrap', in: ['lm'], params: { resolution: 64 } } };
+  // a high piece named "b" sits on the low piece "a"
+  const wrong = { ...named('ha', 0, 'b'), hs: { type: 'subdivide', in: ['han'], params: { levels: 1 } } };
+  const loose = await cookOn(engine, { ...lows, ...wrong, n: { type: 'bake_height', in: ['luv', 'hs'], params: { resolution: 64, cage: 0.3 } } }, 'n');
+  const strict = await cookOn(engine, { ...lows, ...wrong, n: { type: 'bake_height', in: ['luv', 'hs'], params: { resolution: 64, cage: 0.3, match_name: true } } }, 'n');
+  check(strict.stats.missed > loose.stats.missed && strict.warnings.some((w) => /no high prims named "a"/.test(w)), `match_name: piece "a" no longer picks up the high piece "b" lying on it (misses ${loose.stats.missed} → ${strict.stats.missed})`);
+  const right = { ...named('ha', 0, 'a'), ...named('hb', 1.5, 'b'), hm: { type: 'merge', in: ['han', 'hbn'] }, hs: { type: 'subdivide', in: ['hm'], params: { levels: 1 } } };
+  const matched = await cookOn(engine, { ...lows, ...right, n: { type: 'bake_normal', in: ['luv', 'hs'], params: { resolution: 64, cage: 0.3, match_name: true } } }, 'n');
+  const unmatched = await cookOn(engine, { ...lows, ...right, n: { type: 'bake_normal', in: ['luv', 'hs'], params: { resolution: 64, cage: 0.3 } } }, 'n');
+  check(matched.stats.missed === unmatched.stats.missed && maxDiff(findImage(matched.geo)!.layer('C')!, findImage(unmatched.geo)!.layer('C')!) < 1e-6 && !matched.warnings.some((w) => /no high prims named/.test(w)),
+    `match_name: each piece finds its own high piece (the same map as without it here; ${matched.stats.missed} corner misses)`);
   // kitbashed parts that cut into each other share no edge: the crease where they cross is concave all the same
   const kit = { b: { type: 'box' }, stud: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.5, 0] } }, m: { type: 'merge', in: ['b', 'stud'] }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 128 } } };
   const crossed = await cookOn(engine, { ...kit, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05 } } }, 'c');

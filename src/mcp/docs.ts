@@ -597,6 +597,10 @@ BAKES (input 0 = mesh with non-overlapping uv in 0..1: uv_unwrap; input 1 = opti
   low; layer distance in metres), bake_island_id (colour per uv island, layer id, stat islands), bake_mask
   (mask_group or a numeric attribute), bake_vertex_color (Cd + Alpha). Shared: resolution (default 1024), supersample
   (1..4), padding (texels of edge dilation, default 4), group (prims to bake), keep_mesh (output the mesh too).
+  With a high-res mesh: cage (search distance), cage_attrib (default "cage": a float prim/point attribute of the mesh
+  that sets the cage per part, e.g. attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03}),
+  match_name (each named piece projects only onto the high prims of its name: parts sharing one atlas), and layer
+  "missed" (1 where no high surface was found within the cage; stat missed) to see where to raise the cage.
   Rays and curvature run on the worker pool. The output is only the image unless keep_mesh.
 MATERIALS: texture_to_material {material, base_color, normal, roughness, metallic, occlusion, orm} on input 0 (mesh
   with uv) + input 1 (merged images): writes "image:<name>" slots into the material table, assigns the material (all

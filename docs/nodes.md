@@ -11822,7 +11822,7 @@ category: `texture` · aliases: `ao_bake`, `bake_ambient_occlusion`, `bake_occlu
 
 Bake ambient occlusion into uv space: white = open sky, dark in gaps, corners and contact areas.
 
-Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Each texel casts `samples` cosine-weighted rays over the hemisphere of its normal against the mesh (or the high-res input, sampled at the projected point); C = 1 - the fraction that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.
+Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` cosine-weighted rays over the hemisphere of its normal against the mesh (or the high-res input, sampled at the projected point); C = 1 - the fraction that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.
 
 **Inputs**
 
@@ -11848,6 +11848,8 @@ Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping 
 | `invert` | bool | `false` |  |  |  | write 1 - value |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `max_distance` | float | `0` | 0.. |  | `max_occluder_distance`, `distance`, `radius` | hits farther than this do not occlude (metres; 0 = unlimited) |
 | `cone_angle` | float | `0` | 0..90 |  | `spread`, `angle` | half-angle of the ray cone in degrees (0 = auto: 90, the hemisphere) |
 
@@ -11888,7 +11890,7 @@ category: `texture` · aliases: `curvature_bake`, `bake_edges`, `edge_wear_bake`
 
 Bake edge curvature into uv space: 0.5 flat, brighter on convex edges and bevels, darker in concave creases (edge wear and dirt masks).
 
-Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask.
+Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask.
 
 **Inputs**
 
@@ -11914,6 +11916,8 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | also find the concave creases where separate parts cut into each other (kitbashed meshes) |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 
 **Writes:** image <name> (default: the node name): C grey (0.5 = flat), convex, concave, mask
 
@@ -11962,7 +11966,7 @@ category: `texture` · aliases: `height_bake`, `bake_displacement`, `displacemen
 
 Bake the height of a high-res mesh (input 1) above the low mesh along its normals: a displacement / height map.
 
-Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Rays along the low normals within ±cage find the high surface; layer "distance" holds the signed distance in metres (0 on a miss) and C maps it to 0..1: mode cage = 0.5 + d / (2 cage) (0.5 = on the low surface), normalize = the min..max of the hits (stats height_min / height_max). Feed tex_normal_from_height or use it as displacement.
+Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Rays along the low normals within ±cage find the high surface; layer "distance" holds the signed distance in metres (0 on a miss) and C maps it to 0..1: mode cage = 0.5 + d / (2 cage) (0.5 = on the low surface), normalize = the min..max of the hits (stats height_min / height_max). Feed tex_normal_from_height or use it as displacement.
 
 **Inputs**
 
@@ -11984,6 +11988,8 @@ Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap)
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `mode` | enum | `"cage"` |  | `cage`, `normalize` | `range` | how distances map to 0..1 |
 
 **Writes:** image <name> (default: the node name): C grey 0..1, distance (metres), mask
@@ -12050,7 +12056,7 @@ category: `texture` · aliases: `island_id_bake`, `bake_id`, `id_bake`, `bake_uv
 
 Bake uv islands as random flat colours (an ID map for masking per island), with the island number in layer "id".
 
-Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).
+Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).
 
 **Inputs**
 
@@ -12107,7 +12113,7 @@ category: `texture` · aliases: `mask_bake`, `bake_group`, `bake_attribute`, `at
 
 Bake a mask into uv space from a prim group (1 inside) or a numeric attribute (its value), e.g. to paint per-part materials.
 
-Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. mask_group (a prim group pattern) gives 1 on its prims and 0 elsewhere; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
+Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mask_group (a prim group pattern) gives 1 on its prims and 0 elsewhere; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
 
 **Inputs**
 
@@ -12168,7 +12174,7 @@ category: `texture` · aliases: `normal_bake`, `bake_tangent_normal`, `bake_norm
 
 Bake a tangent-space normal map from a high-res mesh (input 1) onto the uv of the low mesh: OpenGL or DirectX.
 
-Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's MikkTSpace tangent frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
+Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's MikkTSpace tangent frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
 
 **Inputs**
 
@@ -12190,6 +12196,8 @@ Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `format` | enum | `"opengl"` |  | `opengl`, `directx` | `convention` | green channel convention |
 
 **Writes:** image <name> (default: the node name): C RGBA, mask
@@ -12246,7 +12254,7 @@ category: `texture` · aliases: `position_bake`, `bake_world_position`
 
 Bake world position into uv space as RGB (bbox-normalised by default): gradients, masks by height or direction.
 
-Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. mode bbox maps each axis of the bounding box to 0..1 (R = X, G = Y, B = Z), uniform maps the largest axis to 0..1 and keeps the proportions (centred), world writes metres as they are (data, beyond 0..1). Feed tex_channel extract (channel g) for a bottom-to-top gradient.
+Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mode bbox maps each axis of the bounding box to 0..1 (R = X, G = Y, B = Z), uniform maps the largest axis to 0..1 and keeps the proportions (centred), world writes metres as they are (data, beyond 0..1). Feed tex_channel extract (channel g) for a bottom-to-top gradient.
 
 **Inputs**
 
@@ -12303,7 +12311,7 @@ category: `texture` · aliases: `thickness_bake`, `bake_thick`
 
 Bake thickness into uv space: rays into the mesh measure how thick it is under each texel (white = thick).
 
-Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Each texel casts `samples` rays in a cone around its inward normal; C = the mean distance to the far side divided by max_distance (misses count as max_distance). invert gives white where thin (translucency, subsurface masks).
+Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` rays in a cone around its inward normal; C = the mean distance to the far side divided by max_distance (misses count as max_distance). invert gives white where thin (translucency, subsurface masks).
 
 **Inputs**
 
@@ -12329,6 +12337,8 @@ Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `invert` | bool | `false` |  |  |  | write 1 - value |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 | `max_distance` | float | `0` | 0.. |  | `distance`, `radius` | thickness that maps to 1 (metres; 0 = auto: 25% of the bbox diagonal) |
 | `cone_angle` | float | `0` | 0..90 |  | `spread`, `angle` | half-angle of the ray cone in degrees (0 = auto: 30) |
 
@@ -12369,7 +12379,7 @@ category: `texture` · aliases: `vertex_color_bake`, `bake_color`, `bake_cd`, `c
 
 Bake a colour attribute (Cd, with Alpha) into uv space as an RGBA image.
 
-Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. attrib (point, vertex, prim or detail; 1 or 3+ floats) is interpolated across the triangles; alpha_attrib fills A when present. Values are written as they are, the same numbers the renderer shows.
+Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. attrib (point, vertex, prim or detail; 1 or 3+ floats) is interpolated across the triangles; alpha_attrib fills A when present. Values are written as they are, the same numbers the renderer shows.
 
 **Inputs**
 
@@ -12441,7 +12451,7 @@ category: `texture` · aliases: `world_normal_bake`, `bake_worldspace_normal`
 
 Bake world-space normals into uv space as RGB (0.5 + 0.5 n): the mesh's own, or the high-res input's along the cage.
 
-Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Without input 1 the mesh's interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.
+Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Without input 1 the mesh's interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.
 
 **Inputs**
 
@@ -12463,6 +12473,8 @@ Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
+| `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
+| `match_name` | bool | `false` |  |  | `match_names`, `by_name` | high-res input: each piece projects only onto the high prims with the same prim "name" (parts sharing one atlas do not pick up their neighbours) |
 
 **Writes:** image <name> (default: the node name): C RGBA, mask
 

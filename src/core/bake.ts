@@ -382,13 +382,15 @@ export interface ProjectArgs {
 /**
  * For samples [start, end): cast a ray from P + N·cage along -N over 2·cage against the high-res scene and write the
  * signed height of the nearest hit above the low surface (D = cage - t; NaN on a miss) and, when HN (the high mesh's
- * point normals) is given, the hit's interpolated normal into NO (in the low normal's hemisphere).
+ * point normals) is given, the hit's interpolated normal into NO (in the low normal's hemisphere). A per-sample cage
+ * C (one value per sample), when given, replaces a.cage.
  */
 export function projectRange(a: ProjectArgs, A: Record<string, any>, scene: RayScene, start: number, end: number): void {
   const P: Float64Array = A.P, N: Float64Array = A.N, D: Float64Array = A.D, NO: Float64Array | undefined = A.NO;
   const HN: Float64Array | undefined = A.HN, Tri: Float64Array = A.T, triPt: Int32Array = A.triPt;
-  const cage = a.cage;
+  const C: Float64Array | undefined = A.C && A.C.length ? A.C : undefined;
   for (let i = start; i < end; i++) {
+    const cage = C ? C[i] : a.cage;
     const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2];
     if (!(nx || ny || nz)) { D[i] = NaN; continue; }
     const ox = P[i * 3] + nx * cage, oy = P[i * 3 + 1] + ny * cage, oz = P[i * 3 + 2] + nz * cage;
