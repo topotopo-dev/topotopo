@@ -529,8 +529,11 @@ NAMES: every image is named after the node that made or last filtered it ("rust_
   nodes: {base_color:"paint", normal:"detail_normal"}. A node whose input holds several images never picks one: it
   stops and lists them; set image (foreground_image, mask_image, detail_image … for the other inputs) to the one to
   use, or isolate it with tex_output {image, keep_only:true}. To edit one image of a stack in place (an atlas, a
-  material's maps), give the filter name = that image's name. merge keeps an image that several inputs carry (same
-  name and pixels, e.g. textured LOD branches) once, and warns when different images share a name.
+  material's maps), give the filter name = that image's name. merge (and every node that merges) keeps an image or
+  material several inputs carry (same name and content, e.g. textured LOD branches) once; when two inputs use a name
+  for different images or materials (two package outputs whose maps are all "basecolor"), the later one is renamed
+  ("<material>_basecolor", "paint_2") with its material table and prim "material", so each piece keeps its own maps
+  in renders, the viewer and every export.
 GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/worley × fbm/ridged/turbulence,
   tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
   hex, dots: 1 on the cells, 0 in the gaps; grid is a line mask, 1 on the lines, 0 in the cells: for grooved cells use

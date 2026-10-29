@@ -300,14 +300,23 @@ section('names: images take their node\'s name; several images need a choice; hi
   check(!(await cookErr({ ...branches, x: { type: 'tex_invert', in: ['m'], params: { image: 'bl' } } }, 'x')), '… and takes the one named');
   const fg = await cookErr({ ...branches, x: { type: 'tex_blend', in: ['n', 'm'] } }, 'x');
   check(fg.includes('input 1 holds 2 images') && fg.includes('foreground_image'), 'a second input with several images names its own param (foreground_image)');
-  // merge: an image several inputs carry is kept once; different images under one name stay, with a warning
+  // merge: an image several inputs carry is kept once; a name two inputs use for different things is made distinct
   const lod = await cookOn(engine, { n: { type: 'tex_noise', params: { resolution: 16 } }, b: { type: 'box' }, s: { type: 'sphere' }, uvb: { type: 'uv_project', in: ['b'] }, uvs: { type: 'uv_project', in: ['s'] },
     t0: { type: 'texture_to_material', in: ['uvb', 'n'], params: { material: 'm', base_color: 'n' } }, t1: { type: 'texture_to_material', in: ['uvs', 'n'], params: { material: 'm', base_color: 'n' } }, both: { type: 'merge', in: ['t0', 't1'] } }, 'both');
-  check(imagesOf(lod.geo).length === 1 && !lod.warnings.length, 'merging textured branches keeps one copy of their shared image');
+  check(imagesOf(lod.geo).length === 1 && !lod.warnings.length && Object.keys(readMaterials(lod.geo)).join() === 'm', 'merging textured branches keeps one copy of their shared image and material');
   const clash = await cookOn(engine, { a: { type: 'tex_noise', params: { resolution: 16, name: 'x' } }, b: { type: 'tex_noise', params: { resolution: 16, name: 'x', seed: 2 } }, m: { type: 'merge', in: ['a', 'b'] } }, 'm');
-  check(imagesOf(clash.geo).length === 2 && clash.warnings.some((w) => w.includes('different images share the name "x"')), 'different images under one name: both kept, merge warns');
-  const tmClash = await cookErr({ a: { type: 'tex_noise', params: { resolution: 16, name: 'x' } }, b: { type: 'tex_noise', params: { resolution: 16, name: 'x', seed: 2 } }, m: { type: 'merge', in: ['a', 'b'] }, g: { type: 'box' }, t: { type: 'texture_to_material', in: ['g', 'm'], params: { base_color: 'x' } } }, 't');
-  check(tmClash.includes('different images named "x"'), 'texture_to_material refuses an ambiguous image name');
+  check(imagesOf(clash.geo).map((i) => i.name).join() === 'x,x_2' && !clash.warnings.length, 'different images under one name: the second is renamed x_2');
+  // two pieces whose material "paint" uses an image "basecolor", in different colours: each keeps its own
+  const piece = (p: string, color: string, x: number): Record<string, NodeSpec> => ({
+    [`${p}b`]: { type: 'box', params: { center: [x, 0, 0] } }, [`${p}u`]: { type: 'uv_project', in: [`${p}b`] },
+    [`${p}c`]: { type: 'tex_constant', params: { resolution: 4, channels: 'rgba', color, name: 'basecolor' } },
+    [`${p}m`]: { type: 'texture_to_material', in: [`${p}u`, `${p}c`], params: { material: 'paint', base_color: 'basecolor' } },
+  });
+  const pair = await geo({ ...piece('r', '#ff0000', 0), ...piece('g', '#00ff00', 3), m: { type: 'merge', in: ['rm', 'gm'] } }, 'm');
+  const tt = readMaterials(pair), pmat = pair.prims.get('material')!.data as string[];
+  const colourOf = (prim: number) => findImage(pair, String(tt[pmat[prim]]?.textures?.baseColor).replace('image:', ''))!.layer('C')!;
+  check(Object.keys(tt).sort().join() === 'paint,paint_2' && tt.paint_2.textures?.baseColor === 'image:paint_basecolor' && colourOf(0)[0] === 1 && colourOf(6)[1] === 1 && colourOf(6)[0] === 0,
+    `same material and image names from two pieces: renamed for the second (${Object.keys(tt).join(', ')}; ${imagesOf(pair).map((i) => i.name).join(', ')}), each prim keeps its colour`);
   // coverage: the white fraction from the image's own histogram, whatever its range
   const narrow = { n: { type: 'tex_noise', params: { resolution: 64, seed: 3 } }, s: { type: 'tex_levels', in: ['n'], params: { out_high: 0.48 } } };
   for (const cov of [0.1, 0.3, 0.7]) {

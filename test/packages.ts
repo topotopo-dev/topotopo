@@ -1237,6 +1237,53 @@ section('the CLI: outdated, update and --apply');
   check(cli(['update']).code === 1 && /usage: .* update owner\/name \[folder\]/.test(cli(['update']).err), 'update without a package says how to use it');
 }
 
+section('textures of two packages under the same image names stay apart when their outputs are merged');
+{
+  // two kits each call their base colour map "basecolor": a red locker, a blue compressor
+  const kit = (pkg: string, material: string, color: string): GraphSpec => ({
+    nodes: {
+      b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
+      basecolor: { type: 'tex_constant', params: { resolution: 8, channels: 'rgba', color } },
+      m: { type: 'texture_to_material', in: ['uv', 'basecolor'], params: { material, base_color: 'basecolor' } },
+    },
+    output: 'm', outputs: { piece: { node: 'm', label: pkg, kind: 'mesh', tags: ['prop'], description: `a ${material}` } },
+  });
+  const LOCKERS = path.join(dirs.game, 'lockers'), COMPRESSOR = path.join(dirs.game, 'compressor');
+  project(LOCKERS, { package: 'studio/lockers' }, { main: kit('lockers', 'locker', '#ff0000') });
+  project(COMPRESSOR, { package: 'studio/compressor' }, { main: kit('compressor', 'compressor', '#0000ff') });
+  check((await publish(LOCKERS, 'lockers')).ok && (await publish(COMPRESSOR, 'compressor')).ok, 'two kits published, both with an image "basecolor"');
+  const HALL = path.join(dirs.repo, 'hall');
+  project(HALL, { libraries: ['game'] }, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  const o = await open(HALL);
+  o.pk.use('studio/lockers');
+  o.pk.use('studio/compressor');
+  const { exportGeometryAsync } = await import('../src/io/export.ts');
+  const { decodePNG } = await import('../src/io/png-decode.ts');
+  const { referenceableImages } = await import('../src/core/image.ts');
+  const { mergeMaterialTables } = await import('../src/core/materials.ts');
+  const red = (img: any) => img.layer('C')[0] > 0.9 && img.layer('C')[2] < 0.1, blue = (img: any) => img.layer('C')[2] > 0.9 && img.layer('C')[0] < 0.1;
+  for (const packed of [false, true]) {
+    const at = (n: string, x: number): Record<string, any> => packed
+      ? { [`${n}_p`]: { type: 'pack', in: [n], params: { by: 'all' } }, [`${n}_at`]: { type: 'transform', in: [`${n}_p`], params: { translate: [x, 0, 0] } } }
+      : { [`${n}_at`]: { type: 'transform', in: [n], params: { translate: [x, 0, 0] } } };
+    const r = await o.engine.cook({ nodes: { a: { type: 'studio/lockers/piece' }, a2: { type: 'studio/lockers/piece' }, c: { type: 'studio/compressor/piece' }, ...at('a', 0), ...at('a2', 4), ...at('c', 2), out: { type: 'merge', in: ['a_at', 'c_at', 'a2_at'] } }, output: 'out' });
+    const label = packed ? 'packed' : 'merged';
+    if (!r.ok || !r.geo) { check(false, `${label}: ${errorOf(r)}`); continue; }
+    const g = r.geo, table = mergeMaterialTables([g, ...g.packedSources]), imgs = referenceableImages(g);
+    const ref = (m: string) => String(table[m]?.textures?.baseColor ?? '').replace(/^image:/, '');
+    check(ref('locker') && ref('compressor') && ref('locker') !== ref('compressor') && red(imgs.get(ref('locker'))) && blue(imgs.get(ref('compressor'))) && imgs.size === 2,
+      `${label}: each material keeps its own map (locker → "${ref('locker')}", compressor → "${ref('compressor')}"; ${imgs.size} images, the two lockers share one)`);
+    const glb = await exportGeometryAsync(g, 'glb');
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength), jlen = dv.getUint32(12, true);
+    const j = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jlen))), bin = 20 + jlen + 8;
+    const texOf = (m: string) => j.textures[j.materials.find((x: any) => x.name === m).pbrMetallicRoughness.baseColorTexture.index].source;
+    const pixel = (i: number) => { const bv = j.bufferViews[j.images[i].bufferView]; const png = decodePNG(glb.subarray(bin + (bv.byteOffset ?? 0), bin + (bv.byteOffset ?? 0) + bv.byteLength)); return [png.data[0], png.data[2]]; };
+    const [lr, lb] = pixel(texOf('locker')), [cr, cb] = pixel(texOf('compressor'));
+    check(j.images.length === 2 && texOf('locker') !== texOf('compressor') && lr === 255 && lb === 0 && cr === 0 && cb === 255 && new Set(j.images.map((i: any) => i.uri ?? i.name)).size === 2,
+      `${label} GLB: two images with their own names (${j.images.map((i: any) => i.name).join(', ')}), the locker red and the compressor blue`);
+  }
+}
+
 await engines[0]?.host.pool?.close();
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);

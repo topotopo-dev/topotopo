@@ -32,6 +32,8 @@
 import type { Mat4, Vec3 } from './math.ts';
 import { EdgeSet, EDGE_KEY_LIMIT } from './edges.ts';
 import { geoContentHash } from './geohash.ts';
+import { MATERIALS_DETAIL, MATERIAL_ATTRIB, TEXTURE_SLOTS, readMaterials, writeMaterials } from './materials.ts';
+import type { MaterialTable } from './materials.ts';
 
 export type AttribClass = 'point' | 'vertex' | 'prim' | 'detail';
 /** Element types: fixed-size tuples (float/int with tuple size 1-16, or string) and variable-length arrays. */
@@ -479,8 +481,13 @@ export function cloneVolumes(vs: Volume[]): Volume[] {
 
 /** Two images with the same name, size and layers, every layer equal value for value (shared arrays compare at once). */
 export function sameImage(a: ImageVolume, b: ImageVolume): boolean {
+  return a === b || (a.name === b.name && samePixels(a, b));
+}
+
+/** Two images of the same size and layers, every layer equal value for value, whatever their names. */
+export function samePixels(a: ImageVolume, b: ImageVolume): boolean {
   if (a === b) return true;
-  if (a.name !== b.name || a.width !== b.width || a.height !== b.height || a.layers.size !== b.layers.size) return false;
+  if (a.width !== b.width || a.height !== b.height || a.layers.size !== b.layers.size) return false;
   for (const [k, x] of a.layers) {
     const y = b.layers.get(k);
     if (!y || y.length !== x.length) return false;
@@ -488,6 +495,112 @@ export function sameImage(a: ImageVolume, b: ImageVolume): boolean {
     for (let i = 0; i < x.length; i++) if (x[i] !== y[i] && !(x[i] !== x[i] && y[i] !== y[i])) return false;
   }
   return true;
+}
+
+/** The image name of an "image:<name>" texture path, else null. */
+const imageRefName = (p: string | undefined) => (p && p.startsWith('image:') ? p.slice(6).trim() : null);
+
+/**
+ * Inputs of a merge with distinct names for what differs. Each input with its packed sources is one namespace (its
+ * materials name its images, its prims its materials). Across inputs, an image name already used for other pixels is
+ * renamed "<material>_<name>" after the first of the input's materials that uses it (else "<name>_2", "_3" …), and a
+ * material name already used for another definition "<name>_2" …; the input's material tables and prim "material"
+ * follow. Two package outputs or asset instances that both call their maps "basecolor" then keep their own maps
+ * instead of the first one's, while what several inputs share (the same image, the same material) keeps its name and
+ * is stored once. Inputs that need no change are returned as they are.
+ */
+function distinctNames(geos: Geometry[]): Geometry[] {
+  const groupOf = (g: Geometry) => (g.packedSources.length ? [g, ...g.packedSources] : [g]);
+  if (!geos.some((g) => groupOf(g).some((u) => u.detail.has(MATERIALS_DETAIL) || u.volumes.some((v) => v.kind === 'image')))) return geos;
+  const images = new Map<string, ImageVolume[]>(), mats = new Map<string, string>();
+  return geos.map((g) => {
+    const units = groupOf(g);
+    const own = new Map<string, ImageVolume>();
+    for (const u of units) for (const v of u.volumes) if (v.kind === 'image' && !own.has(v.name)) own.set(v.name, v);
+    const tables = units.map((u) => (u.detail.has(MATERIALS_DETAIL) ? readMaterials(u) : null));
+    const ownMats = new Map<string, MaterialTable[string]>();
+    for (const t of tables) if (t) for (const [m, def] of Object.entries(t)) if (!ownMats.has(m)) ownMats.set(m, def);
+    // images: a name taken by other pixels gets another (the name these pixels already got, when an earlier input
+    // carried them too)
+    const reImg = new Map<string, string>(), given = new Set<string>();
+    const free = (n: string) => !images.has(n) && !own.has(n) && !given.has(n);
+    for (const [n, v] of own) {
+      const seen = images.get(n);
+      if (!seen || seen.some((s) => samePixels(s, v))) continue;
+      let to = '';
+      for (const [name, list] of images) if (!own.has(name) && list.some((s) => samePixels(s, v))) { to = name; break; }
+      if (!to) {
+        let user = '';
+        for (const [m, def] of ownMats) if (TEXTURE_SLOTS.some((k) => imageRefName(def.textures?.[k]) === n)) { user = m; break; }
+        if (user && free(`${user}_${n}`)) to = `${user}_${n}`;
+        for (let k = 2; !to; k++) if (free(`${n}_${k}`)) to = `${n}_${k}`;
+      }
+      reImg.set(n, to);
+      given.add(to);
+    }
+    for (const [n, v] of own) {
+      const fin = reImg.get(n) ?? n, list = images.get(fin);
+      if (!list) images.set(fin, [v]); else if (!list.some((s) => samePixels(s, v))) list.push(v);
+    }
+    // materials: their image references follow, then a name taken by another definition gets another
+    const retex = (def: MaterialTable[string]) => {
+      if (!reImg.size || !def.textures) return def;
+      const t: Record<string, string> = { ...def.textures };
+      for (const k of TEXTURE_SLOTS) { const r = imageRefName(t[k]); if (r && reImg.has(r)) t[k] = `image:${reImg.get(r)}`; }
+      return { ...def, textures: t };
+    };
+    const reMat = new Map<string, string>(), givenM = new Set<string>();
+    for (const [m, def] of ownMats) {
+      const key = JSON.stringify(retex(def)), had = mats.get(m);
+      if (had === key) continue;
+      // the name an earlier input already gave this definition (the family "<base>", "<base>_2" … that renames make,
+      // so a merge of merges does not keep two names for one material), else m itself when free, else the next free one
+      const base = m.replace(/_\d+$/, '');
+      let to = '';
+      for (let k = 1; !to; k++) {
+        const n = k === 1 ? base : `${base}_${k}`, at = mats.get(n);
+        if (at === undefined) break;
+        if (at === key && (n === m || !ownMats.has(n) || reMat.has(n))) to = n;
+      }
+      if (!to && had === undefined) { mats.set(m, key); continue; }
+      for (let k = 2; !to; k++) {
+        const n = `${base}_${k}`;
+        if (!mats.has(n) && !ownMats.has(n) && !givenM.has(n)) to = n;
+      }
+      if (to === m) continue;
+      reMat.set(m, to);
+      givenM.add(to);
+      mats.set(to, key);
+    }
+    if (!reImg.size && !reMat.size) return g;
+    // rewrite every unit of the input: image names, tables, prim material
+    const rewrite = (u: Geometry, t: MaterialTable | null): Geometry => {
+      const touchesImages = u.volumes.some((v) => v.kind === 'image' && reImg.has(v.name));
+      const pm = u.prims.get(MATERIAL_ATTRIB);
+      const touchesPrims = !!pm && pm.type === 'string' && reMat.size > 0 && (pm.data as string[]).some((x) => reMat.has(x));
+      const touchesTable = !!t && Object.entries(t).some(([m, def]) => reMat.has(m) || TEXTURE_SLOTS.some((k) => reImg.has(imageRefName(def.textures?.[k]) ?? '')));
+      if (!touchesImages && !touchesTable && !touchesPrims) return u;
+      const c = u.clone();
+      if (touchesImages) c.volumes = c.volumes.map((v) => (v.kind === 'image' && reImg.has(v.name) ? Object.assign(v.clone(), { name: reImg.get(v.name)! }) : v));
+      if (t && touchesTable) {
+        const out: MaterialTable = {};
+        for (const [m, def] of Object.entries(t)) out[reMat.get(m) ?? m] = retex(def);
+        writeMaterials(c, out);
+      }
+      if (touchesPrims) c.prims.set(MATERIAL_ATTRIB, new Attribute('string', 1, (pm!.data as string[]).map((x) => reMat.get(x) ?? x), ''));
+      return c;
+    };
+    const top = rewrite(g, tables[0]);
+    if (units.length > 1) {
+      const sources = g.packedSources.map((s, i) => rewrite(s, tables[i + 1]));
+      if (sources.some((s, i) => s !== g.packedSources[i])) {
+        const t = top === g ? g.clone() : top;
+        t.packedSources = sources;
+        return t;
+      }
+    }
+    return top;
+  });
 }
 
 /**
@@ -986,7 +1099,7 @@ export class Geometry {
     geos = geos.filter(Boolean);
     if (geos.length === 0) return new Geometry();
     if (geos.length === 1) return geos[0].clone();
-    geos = unifyDisplayAttribs(geos);
+    geos = unifyDisplayAttribs(distinctNames(geos));
     const out = Geometry.blank();
     const total = (f: (g: Geometry) => number) => geos.reduce((s, g) => s + f(g), 0);
     const np = total((g) => g.numPoints), nv = total((g) => g.numVertices), nprim = total((g) => g.numPrims);
@@ -995,6 +1108,13 @@ export class Geometry {
     out.prims = mergeTables(geos.map((g) => g.prims), nprim);
     out.detail = new AttribTable(1);
     for (const g of geos) for (const [k, a] of g.detail.map) if (!out.detail.has(k)) out.detail.map.set(k, a.clone());
+    // material tables: the union (names made distinct above)
+    const withTables = geos.filter((g) => g.detail.has(MATERIALS_DETAIL));
+    if (withTables.length > 1) {
+      const union: MaterialTable = {};
+      for (const g of withTables) for (const [m, def] of Object.entries(readMaterials(g))) if (!(m in union)) union[m] = def;
+      writeMaterials(out, union);
+    }
     out.primStart = new Int32Array(nprim + 1);
     out.vertexPoint = new Int32Array(nv);
     out.primClosed = new Uint8Array(nprim);

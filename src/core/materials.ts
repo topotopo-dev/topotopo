@@ -9,9 +9,10 @@
 // key is absent when a material has no texture, so tables without textures are unchanged. "orm" is a packed
 // occlusion (R) / roughness (G) / metallic (B) map, the glTF and Unreal convention.
 //
-// Geometry.merge keeps the first detail value of each name, so the table of the first input wins there.
-// The `merge` node and the exporters union tables with mergeMaterialTables() instead; other nodes that merge
-// internally (copy_to_points, foreach, boolean…) keep the table of their first input.
+// Geometry.merge (every node that merges) unions the tables, after making names distinct: a material or an
+// "image:<name>" image that two inputs define differently is renamed in the later input (its table and prim
+// `material` follow), so merged package outputs keep their own maps. The exporters and renderers union the tables of a
+// geometry and its packed sources with mergeMaterialTables().
 import type { Geometry } from './geometry.ts';
 
 export interface Material {

@@ -703,13 +703,23 @@ interface MeshJob { src: Geometry; split: boolean; onMesh?: (w: WrittenMesh) => 
  */
 function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']>, g: Geometry, o: ExportOptions, quantize: boolean): MeshJob[] {
   const kind = g.primKind!, S = g.packedSource!, X = g.packedXform!, P = g.P;
-  const bySrc = new Map<number, number[]>();
+  // a packed prim's "material" (pack carries it onto the instance) applies where its source has none of its own, as
+  // unpacking does: one instanced mesh per source and material
+  const flat = new Map<number, Geometry>();
+  const flatOf = (s: number) => { let f = flat.get(s); if (!f) { f = flattenSource(g.packedSources[s]); flat.set(s, f); } return f; };
+  const ownMat = (s: number) => { const a = flatOf(s).prims.get('material'); return !!a && a.type === 'string' && (a.data as string[]).some((x) => !!x); };
+  const pm = g.prims.get('material'), pmat = pm && pm.type === 'string' ? (pm.data as string[]) : null;
+  const bySrc = new Map<string, { s: number; mat: string; prims: number[] }>();
   for (let p = 0; p < kind.length; p++) {
     if (kind[p] !== 1 || g.primStart[p + 1] - g.primStart[p] !== 1) continue;
-    let l = bySrc.get(S[p]);
-    if (!l) { l = []; bySrc.set(S[p], l); }
-    l.push(p);
+    const s = S[p], mat = pmat?.[p] && o.materials !== false && !ownMat(s) ? pmat[p] : '';
+    const key = `${s}\u0000${mat}`;
+    let l = bySrc.get(key);
+    if (!l) { l = { s, mat, prims: [] }; bySrc.set(key, l); }
+    l.prims.push(p);
   }
+  const perSource = new Map<number, number>();
+  for (const { s } of bySrc.values()) perSource.set(s, (perSource.get(s) ?? 0) + 1);
   const ext = doc.createExtension(EXTMeshGPUInstancing).setRequired(true);
   const names = packedSourceNames(g);
   const iattrs = o.custom === true ? instanceAttribSpecs(g) : [];
@@ -717,7 +727,7 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
   for (const ia of iattrs) info[ia.sem] = { name: ia.a.name, cls: ia.a.cls, type: ia.type, size: ia.size, ...(ia.strings ? { strings: ia.strings } : {}) };
   let sheared = 0;
   const jobs: MeshJob[] = [];
-  for (const [s, prims] of bySrc) {
+  for (const { s, mat, prims } of bySrc.values()) {
     const n = prims.length;
     const T = new Float64Array(n * 3), L = new Float64Array(n * 9), Q = new Float32Array(n * 4), SC = new Float64Array(n * 3);
     prims.forEach((p, i) => {
@@ -729,8 +739,12 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
       Q.set(d.q, i * 4);
       SC.set(d.s, i * 3);
     });
-    const src = flattenSource(g.packedSources[s]);
-    const label = names[s] ?? `source_${s}`;
+    let src = flatOf(s);
+    if (mat) {
+      src = src.clone();
+      src.prims.set('material', new Attribute('string', 1, new Array<string>(src.numPrims).fill(mat), ''));
+    }
+    const label = (names[s] ?? `source_${s}`) + (mat && (perSource.get(s) ?? 0) > 1 ? `_${mat}` : '');
     jobs.push({
       src, split: false,
       onMesh: ({ node, center, extent }) => {

@@ -9177,7 +9177,7 @@ category: `flow` · aliases: `combine`, `join`
 
 Combine any number of inputs into one geometry (attributes, groups and material tables are unioned).
 
-Images (texture nodes) are combined too: one that several inputs carry, the same name and pixels (textured LOD branches each holding the material's maps), is kept once; different images under one name stay and are warned about, as texture nodes and materials then cannot tell them apart.
+Material tables are unioned and images (texture nodes) combined. What several inputs share (the same image, the same material) is kept once. A name two inputs use for different things is made distinct, so each piece keeps its own maps and material: package outputs or asset instances whose maps are all called "basecolor" get theirs renamed "<material>_basecolor" (else "basecolor_2" …), different materials of one name "<name>_2", and the input's material table and prim "material" follow. Two different images under one name inside one input are warned about, as texture nodes and materials then cannot tell them apart.
 
 **Inputs**
 
