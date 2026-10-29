@@ -1596,6 +1596,17 @@ section('textures of two packages under the same image names stay apart when the
   }
 }
 
+section('a follow policy: the used packages whose working folder it accepts');
+{
+  const g = await open(GROVE);
+  if (readManifest(GROVE).uses['studio/trees'] === undefined) g.pk.use('studio/trees');
+  const by = g.pk.setFollowPolicy((w) => path.resolve(w.dir).toLowerCase().startsWith(path.resolve(dirs.game).toLowerCase()));
+  check(by.includes('studio/trees') && g.pk.following().some((f) => f.package === 'studio/trees' && path.resolve(f.dir) === path.resolve(TREES)),
+    `a policy follows the used packages whose working folders it accepts (${by.join(', ')})`);
+  check(!g.pk.setFollowPolicy(() => false).length && !g.pk.following().length, 'a policy that accepts none follows none');
+  check(!g.pk.setFollowPolicy(null).length, 'null stops it');
+}
+
 await engines[0]?.host.pool?.close();
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);

@@ -547,7 +547,10 @@ export interface Loaded {
 }
 
 /** A package's working folder, followed this session. */
-interface Followed { package: string; dir: string; library: string; stamp: string }
+interface Followed { package: string; dir: string; library: string; stamp: string; by: 'name' | 'policy' }
+
+/** Which used packages to follow by their working folder, besides those followed by name (a workspace's opt-in). */
+export type FollowPolicy = (working: { package: string; dir: string; library: string }) => boolean;
 
 /** A published version found in one of the project's libraries. */
 interface Place { library: string; dir: string; info: VersionInfo }
@@ -659,6 +662,7 @@ export class ProjectPackages implements SessionPackages {
   private apart = new Map<string, Loaded | PackageIssue>();
   private loading = new Set<string>();
   private followed = new Map<string, Followed>();
+  private policy: FollowPolicy | null = null;
   private followLoaded = new Map<string, Loaded | PackageIssue>();
   /** the hash of every followed folder: what their outputs' results are keyed by */
   private joint = '';
@@ -714,6 +718,7 @@ export class ProjectPackages implements SessionPackages {
       this.root = { ...this.root, uses: this.manifest.uses, lock: readLock(this.store!), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
       this.error = null;
     } catch (e: any) { this.error = e.message; this.root = { ...this.root, uses: {}, lock: { packages: {} }, self: undefined }; }
+    if (this.policy) this.applyPolicy();
   }
 
   private diskStamp(): string {
@@ -1321,11 +1326,45 @@ export class ProjectPackages implements SessionPackages {
     if (found.working.length > 1)
       throw new Error(`${pkg} has a working folder in more than one library this project lists: ${found.working.map((w) => `${w.dir} ("${w.library}")`).join(', ')}; follow needs exactly one`);
     const w = found.working[0];
-    this.followed.set(pkg, { package: pkg, dir: w.dir, library: w.library, stamp: '' });
+    this.followed.set(pkg, { package: pkg, dir: w.dir, library: w.library, stamp: '', by: 'name' });
     this.restamp();
     this.rewatch();
     const v = this.root.uses[pkg];
     return `following ${pkg} for this session: its working folder ${w.dir} (${libraryText(w.library)}) instead of ${v ? `the copy of ${v}` : 'a copy (the project does not use it yet)'}; its edits re-cook, exports record it, and publishing this project is refused while it lasts`;
+  }
+
+  /**
+   * Follow, for this session, every package the project uses whose one working folder the policy accepts (a
+   * workspace's "follow my own packages live": the working folders inside the workspace), besides those followed by
+   * name; null stops it. Applied again whenever project.json changes (a package added, removed or updated). Returns
+   * the packages it follows.
+   */
+  setFollowPolicy(policy: FollowPolicy | null): string[] {
+    this.policy = policy;
+    this.applyPolicy();
+    return [...this.followed.values()].filter((f) => f.by === 'policy').map((f) => f.package);
+  }
+
+  private applyPolicy() {
+    // the policy's packages worked out afresh (the policy or the uses may have changed); a folder kept keeps its stamp
+    const before = new Map([...this.followed].filter(([, f]) => f.by === 'policy'));
+    for (const pkg of before.keys()) this.followed.delete(pkg);
+    let changed = false;
+    if (this.policy && this.dir) {
+      let scanned: Scanned | undefined;
+      for (const pkg of Object.keys(this.root.uses)) {
+        if (this.followed.has(pkg)) continue;
+        let found: Found;
+        try { found = this.find(pkg, scanned ??= this.scanLibraries()); } catch { continue; }
+        const w = found.working.length === 1 ? found.working[0] : null;
+        if (!w || !this.policy({ package: pkg, dir: w.dir, library: w.library })) continue;
+        const had = before.get(pkg);
+        this.followed.set(pkg, had?.dir === w.dir ? had : { package: pkg, dir: w.dir, library: w.library, stamp: '', by: 'policy' });
+        if (had?.dir !== w.dir) changed = true;
+      }
+    }
+    for (const pkg of before.keys()) if (!this.followed.has(pkg)) changed = true;
+    if (changed) { this.restamp(); this.rewatch(); }
   }
 
   private restamp(): boolean {
