@@ -1,5 +1,7 @@
 // Persistent output receipts shared by the CLI, MCP and viewer. Paths are registered by trusted host code;
-// HTTP callers only receive identifiers, never a route that reads an arbitrary absolute path.
+// HTTP callers only receive identifiers, never a route that reads an arbitrary absolute path. The receipts file
+// (exports/.outputs.json) holds the paths relative to the project, the folder exports/ is in ("exports/crate.glb"),
+// never a machine's absolute paths: the project folder can move, or be checked out elsewhere.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -22,9 +24,20 @@ export class ArtifactStore {
   dir: string;
   constructor(dir: string) { this.dir = path.resolve(dir); }
   get manifest() { return path.join(this.dir, '.outputs.json'); }
+  /** the folder the receipts' paths are relative to: the project (exports/'s folder) */
+  private get base() { return path.dirname(this.dir); }
+  /** A path as the receipts file holds it: relative to the project, with "/" (absolute only on another drive). */
+  private stored(p: string) {
+    const rel = path.relative(this.base, path.resolve(p));
+    return path.isAbsolute(rel) ? path.resolve(p) : rel.split(path.sep).join('/');
+  }
+  /** The receipts, their paths absolute on this machine. */
   records(): Artifact[] {
-    try { const j = JSON.parse(fs.readFileSync(this.manifest, 'utf8')); return Array.isArray(j) ? j.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.files) && a.files.every((p: unknown) => typeof p === 'string')) : []; }
-    catch { return []; }
+    try {
+      const j = JSON.parse(fs.readFileSync(this.manifest, 'utf8'));
+      return Array.isArray(j) ? j.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.files) && a.files.every((p: unknown) => typeof p === 'string'))
+        .map((a) => ({ ...a, files: a.files.map((p: string) => path.resolve(this.base, ...p.split('/'))) })) : [];
+    } catch { return []; }
   }
   record(files: string[], info: Partial<Omit<Artifact, 'id' | 'files'>> = {}): Artifact {
     if (!files.length) throw new Error('an output needs at least one file');
@@ -34,7 +47,7 @@ export class ArtifactStore {
     all.push(a);
     fs.mkdirSync(this.dir, { recursive: true });
     const temp = this.manifest + '.part';
-    fs.writeFileSync(temp, JSON.stringify(all, null, 2) + '\n');
+    fs.writeFileSync(temp, JSON.stringify(all.map((x) => ({ ...x, files: x.files.map((p) => this.stored(p)) })), null, 2) + '\n');
     fs.renameSync(temp, this.manifest);
     return a;
   }

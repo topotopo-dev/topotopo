@@ -30,7 +30,7 @@ export function createProps(ctx) {
   };
   const xyz = (vals, step = 1) => {
     const box = el('div', 'xyz');
-    for (const x of vals) { const f = el('input'); f.readOnly = true; f.value = fmtNum(x, step < 1 ? 3 : 2); f.title = 'read-only until phase 2 (transform)'; box.append(f); }
+    for (const x of vals) { const f = el('input'); f.readOnly = true; f.value = fmtNum(x, step < 1 ? 3 : 2); f.title = 'read-only'; box.append(f); }
     return box;
   };
   const numberField = (value, onSet, title) => {
@@ -90,7 +90,7 @@ export function createProps(ctx) {
     } else k.append(row('point', xyz(m.points[0])));
     out.push(k);
     // what the agent reads
-    const a = group('attributes the LLM reads');
+    const a = group('attributes your agent reads');
     const t = el('table', 'attrs');
     for (const r of M.markerAttributes(m)) {
       const tr = el('tr');
@@ -128,7 +128,7 @@ export function createProps(ctx) {
     const graph = ctx.graph.current();
     g.append(row('graph', graph?.name ?? ''), row('node', ctx.graph.shownNode() ?? ''), displayRow(DISPLAY_MODES, o.display, (m) => o.setDisplay(m)));
     // what it is (the server's decision from the cooked geometry), and a heightfield's layer drawn in red
-    if (o.about) g.append(row('is', kindLine({ about: o.about.text, size: o.about.size })));
+    if (o.about) g.append(row('is', kindLine({ kind: o.about.published ?? 'empty', about: o.about.text, size: o.about.size })));
     if (o.about?.heightfield && !ctx.isolated) {
       const s = el('select');
       for (const c of layerChoices(o.about.heightfield)) s.append(new Option(c.label, c.value));
@@ -138,11 +138,11 @@ export function createProps(ctx) {
     }
     if (o.report?.cooked) g.append(row('cook', `${fmtNum(o.report.ms, 0)} ms${o.report.ok ? '' : ' · failed'}`));
     const ec = o.mesh?.edgeCounts();
-    if (ec) g.append(row('edges', `${fmtCount(ec.open)} open · ${fmtCount(ec.nonManifold)} non-manifold · ${fmtCount(ec.flipped)} flipped`, 'drawn as the render tool draws them: pink open, yellow non-manifold, violet winding flips'));
+    if (ec) g.append(row('edges', `${fmtCount(ec.open)} open · ${fmtCount(ec.nonManifold)} non-manifold · ${fmtCount(ec.flipped)} flipped`, 'the edge check in the top bar draws them: pink open, yellow non-manifold, violet winding flips'));
+    // the whole summary, folded: the line above says what it is
+    if (o.summary) { const f = el('details', 'fold'); f.append(el('summary', '', 'Geometry details'), summaryBlock(o.summary)); g.append(f); }
+    else g.append(el('div', 'hint', o.error ?? '…'));
     out.push(g);
-    const sg = group('summary');
-    sg.append(o.summary ? summaryBlock(o.summary) : el('div', 'hint', o.error ?? '…'));
-    out.push(sg);
     return out;
   }
   function piece(e, k) {
@@ -457,9 +457,10 @@ function createControls(ctx) {
 
   /** The line above the Controls over a graph file: how many values differ from it, Save values, Reset all. */
   function renderBar() {
+    // over a graph file, with values to save or reset
     const file = ctl.mode === 'file';
-    bar.hidden = !file;
-    if (!file) return;
+    bar.hidden = !file || !ctl.rows.size;
+    if (bar.hidden) return;
     const changed = [...ctl.rows.values()].filter((r) => r.changed()).length;
     barText.textContent = sessionText(changed, ctl.file);
     // a viewer that cannot write the file (it does not name one) offers no Save

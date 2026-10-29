@@ -50,16 +50,17 @@ export function createOutliner(ctx, panes) {
   document.getElementById('add-input').onclick = () => picker.click();
   picker.onchange = () => { ctx.layers.upload([...picker.files], []); picker.value = ''; };
   // the cards' thumbnail size: one for the Outputs and Inputs cards, cycled by a button in each tab's bar
-  const sizes = [32, 56, 88];
+  const sizes = [32, 56, 88], names = { 32: 'small', 56: 'medium', 88: 'large' };
   let size = ctx.store.get('outliner.thumbnailSize', 56);
   if (!sizes.includes(size)) size = 56;
+  const label = () => `Pictures: ${names[size]}`;
   const applySize = () => {
     document.getElementById('outliner').style.setProperty('--thumb-size', size + 'px');
-    for (const b of document.querySelectorAll('.thumb-size')) b.textContent = size + ' px';
+    for (const b of document.querySelectorAll('.thumb-size')) b.textContent = label();
   };
   ctx.thumbSizeButton = () => {
-    const b = el('button', 'thumb-size', size + ' px');
-    b.type = 'button'; b.title = 'Cycle thumbnail size'; b.setAttribute('aria-label', 'Cycle thumbnail size');
+    const b = el('button', 'thumb-size', label());
+    b.type = 'button'; b.title = 'the size of the cards\' pictures: small, medium or large (click for the next)'; b.setAttribute('aria-label', 'Picture size of the cards');
     b.onclick = () => { b.blur(); size = sizes[(sizes.indexOf(size) + 1) % sizes.length]; ctx.store.set('outliner.thumbnailSize', size); applySize(); };
     return b;
   };
@@ -236,7 +237,7 @@ export function createOutliner(ctx, panes) {
         };
       });
       if (!L.list.length) note(s, 'No inputs yet: Add input, or drop meshes, curves, points, PNG, JPEG or WebP files anywhere on this page. The agent hears about new files and reads them as inputs/<name>.');
-      else note(s, 'a file node reads these as inputs/<name>; the agent hears about new ones');
+      else note(s, 'your agent reads these as inputs/<name> and hears about new ones');
     }
     tabCount('outputs', ctx.outputs?.count);
     // guides

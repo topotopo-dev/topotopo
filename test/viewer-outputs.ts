@@ -56,8 +56,14 @@ check(engine.validate({ nodes: { b: { type: 'box' } }, export: 'fbx' }).errors.s
 check(engine.validate({ nodes: { b: { type: 'box' } }, outputs: { o: { node: 'b', export: { format: 'glb', path: '/abs.glb' } } } }).errors.length === 1, 'a named output target outside exports/ fails validation');
 check(!engine.validate({ nodes: { b: { type: 'box' } }, export: { format: 'USD', path: 'scenes/b.usda', up_axis: 'z' } }).errors.length, 'a target with a path and options validates (usd means usda)');
 check(resolveTarget('unreal_landscape', 'my level').path === 'my_level' && resolveTarget('pointsjson', 'pts').path === 'pts.points.json', 'default target paths: a folder for bundles, the format extension otherwise');
-const pub = publishedOutputs('g', { nodes: { b: { type: 'box' } }, export: 'glb', outputs: { part: { node: 'b', export: 'nope' } } }, 'b');
-check(pub[0].target?.path === 'g.glb' && pub[1].target === null, 'published outputs carry their valid targets only');
+const pub = publishedOutputs('g', { nodes: { b: { type: 'box' }, s: { type: 'sphere' } }, output: 'b', export: 'glb', outputs: { part: { node: 's', export: 'nope' } } }, 'b');
+check(pub.length === 2 && pub[0].default && pub[0].output === null && pub[0].label === 'g' && pub[0].target?.path === 'g.glb' && !pub[1].default && pub[1].target === null,
+  'published outputs: the default output first, named after the graph, each with its valid target only');
+const one = publishedOutputs('g', { nodes: { b: { type: 'box' } }, export: 'glb', outputs: { yard: { node: 'b', label: 'Yard' }, crate: { node: 'b', export: 'obj' } } }, 'b');
+check(one.length === 2 && one[0].output === 'yard' && one[0].default && one[0].label === 'Yard' && one[0].target?.path === 'g.glb' && one[1].output === 'crate' && !one[1].default && one[1].target?.path === 'crate.obj',
+  'a named output that is the default output is one entry, the default, with graph.export as its target when it has none of its own');
+const own = publishedOutputs('g', { nodes: { b: { type: 'box' } }, export: 'glb', outputs: { yard: { node: 'b', export: 'usda' } } }, 'b');
+check(own.length === 1 && own[0].target?.path === 'yard.usda', 'its own target wins');
 check(ws.applyEdits('asset', [{ op: 'export', output: 'other', export: 'obj' }]).graph.outputs!.other.export === 'obj' && ws.applyEdits('asset', [{ op: 'export', export: 'glb' }]).graph.export === 'glb', 'the export op sets a named or the default target');
 check(ws.applyEdits('asset', [{ op: 'export', export: 'glb' }, { op: 'export', export: null }]).graph.export === undefined, 'export null removes a target');
 let unknown = ''; try { ws.applyEdits('asset', [{ op: 'export', output: 'othr', export: 'glb' }]); } catch (e) { unknown = (e as Error).message; }
@@ -75,9 +81,10 @@ const command = async (route: string, body: any) => { const r = await fetch(view
 try {
   let items = await settled();
   check(items.filter((x: any) => x.generated && x.view === 'model').length === 3, 'all graphs and named outputs listed');
+  check(items.filter((x: any) => x.generated && x.default).map((x: any) => `${x.graph}:${x.label}`).sort().join() === 'another:another,asset:asset', 'one default card per graph, named after it');
   // each card says what it is, decided from the cooked geometry, and offers the formats that write it
   const cards = items.filter((x: any) => x.generated && x.view === 'model');
-  check(cards.every((x: any) => x.kind === 'mesh' && /^mesh \d+ points, \d+ prims$/.test(x.about) && x.size?.length === 3)
+  check(cards.every((x: any) => x.kind === 'mesh' && /^\d+ polygons, \d+ points$/.test(x.about) && x.size?.length === 3)
     && cards.every((x: any) => x.formats[0].format === 'glb' && !x.formats.some((f: any) => ['png16', 'r16', 'mask_png', 'unreal_landscape', 'csv'].includes(f.format))),
     `mesh cards say so ("${cards[0].about}") and offer mesh formats, GLB first, no heightmap`);
   fs.mkdirSync(ws.inputDir, { recursive: true });
@@ -127,7 +134,7 @@ try {
   // two image layers and the folder's source.json
   check(maps.status === 200 && maps.data.files === 3 && fs.existsSync(path.join(ws.exportDir, 'maps', 'source.json')), 'a textures target writes every image layer into its folder');
   items = await list(); const bundle = items.find((x: any) => x.origin === 'saved' && x.label === 'maps');
-  check(bundle?.files.length === 3 && items.some((x: any) => x.parent === bundle.id && x.kind === 'image'), 'bundled images individually inspectable');
+  check(bundle?.files.length === 3 && items.some((x: any) => x.parent === bundle.id && x.view === 'image'), 'bundled images individually inspectable');
   check(bundle.files.find((f: any) => f.name === 'source.json')?.role === 'source' && !items.some((x: any) => x.parent === bundle.id && x.label === 'source.json')
     && bundle.view === 'image' && bundle.download.zip && bundle.download.name === 'maps.zip', 'a textures folder\'s source.json is metadata of the folder, not a card; the card is an image, downloaded as maps.zip');
   const zipped = await fetch(viewer.url + `api/output/zip?id=${bundle.id}`);
@@ -160,7 +167,8 @@ try {
   ws.setGraph('packed', { nodes: { file: { type: 'file', params: { path: 'asset.json' } }, pack: { type: 'pack', in: 'file' } } }); ws.bump('packed');
   ws.setGraph('reference', { nodes: { ref: { type: 'graph_ref', params: { graph: 'asset', node: 'second' } } } }); ws.bump('reference');
   items = await settled();
-  check(items.filter((x: any) => x.graph === 'image_only' && !x.parent && x.kind === 'image').length === 2, 'image-only roots open in 2D and a named main does not collide');
+  const imageRoots = items.filter((x: any) => x.graph === 'image_only' && !x.parent);
+  check(imageRoots.length === 1 && imageRoots[0].kind === 'textures' && imageRoots[0].view === 'image' && imageRoots[0].default && imageRoots[0].label === 'Named main', 'an image-only result opens in 2D; its named output "main" is the default output, one card');
   check(items.some((x: any) => x.graph === 'packed' && x.image === 'atlas'), 'packed source textures are published');
   const packed = items.find((x: any) => x.graph === 'packed' && !x.parent);
   const csv = await post({ id: packed.id, export: { format: 'csv', path: 'instances.csv', pcg: true, scale: 100, meshes: true } });
@@ -181,7 +189,7 @@ try {
   }, output: 'flow' }); ws.bump('terrain');
   items = await settled();
   const field = items.find((x: any) => x.graph === 'terrain' && !x.parent);
-  check(field.kind === 'heightfield' && field.about === 'heightfield 21 × 21, 1 m' && field.size[0] === 20 && field.heightfield.layers.some((l: any) => l.name === 'flow' && l.max === 3),
+  check(field.kind === 'terrain' && field.about === '21 × 21 samples, 1 m apart' && field.size[0] === 20 && field.heightfield.layers.some((l: any) => l.name === 'flow' && l.max === 3),
     `a heightfield card says so ("${field.about}") with its size and layers`);
   check(field.formats.map((f: any) => f.format).join() === 'png16,r16,mask_png,unreal_landscape,json' && field.formats[0].writes === '16-bit PNG + JSON sidecar with the height range and how it was made',
     `a heightfield offers the heightmap formats and no mesh format, each saying what it writes (${field.formats.map((f: any) => f.format).join(', ')})`);
@@ -213,7 +221,7 @@ try {
   fs.copyFileSync(path.join(ws.exportDir, 'asset.glb.source.json'), path.join(ws.exportDir, 'scan.glb.source.json'));
   items = await list();
   const land = items.find((x: any) => x.origin === 'saved' && x.label === 'land.png'), scan = items.find((x: any) => x.origin === 'saved' && x.label === 'scan.glb');
-  check(land?.kind === 'heightfield' && /^heightmap 21 × 21, 1 m · height -?[\d.]+ \.\. [\d.]+ m$/.test(land.about) && land.view === 'image'
+  check(land?.kind === 'terrain' && /^heightmap 21 × 21, 1 m · height -?[\d.]+ \.\. [\d.]+ m$/.test(land.about) && land.view === 'image'
     && land.files.map((f: any) => f.role ?? 'main').join() === 'main,heightmap' && land.download.name === 'land.zip' && !items.some((x: any) => /^land\.json/.test(x.label)),
     `a saved heightmap says what it is from its sidecar ("${land?.about}"), which is no card of its own`);
   check(scan?.files.map((f: any) => f.role ?? 'main').join() === 'main,source' && !items.some((x: any) => x.label === 'scan.glb.source.json') && scan.download.name === 'scan.glb',
@@ -304,24 +312,36 @@ let noTargets = ''; try { cli('--export-all'); } catch (e: any) { noTargets = St
 check(/no output of .* has an export target/.test(noTargets), 'CLI --export-all without targets says where to add one');
 fs.writeFileSync(cliGraph, JSON.stringify({ nodes: { b: { type: 'box' }, s: { type: 'sphere' } }, output: 'b', export: 'glb', outputs: { ball: { node: 's', export: { format: 'obj', path: 'parts/ball.obj' } } } }));
 cli('--export-all');
-check(fs.existsSync(path.join(cliExports, 'g.glb')) && fs.existsSync(path.join(cliExports, 'parts', 'ball.obj')), 'CLI --export-all writes every target into exports/ beside the graph');
+check(fs.existsSync(path.join(cliExports, 'g.glb')) && fs.existsSync(path.join(cliExports, 'parts', 'ball.obj')), 'CLI --export-all writes every target into exports/ beside a graph that is in no project');
 check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' && a.graph === 'g'), 'CLI target exports are registered like the viewer\'s');
+{
+  // a graph in a project exports into the project's exports/, not beside itself; the receipts hold project paths
+  const proj = path.join(tmp, 'proj'), graphFile = path.join(proj, 'graphs', 'tower.json');
+  fs.mkdirSync(path.dirname(graphFile), { recursive: true });
+  fs.writeFileSync(path.join(proj, 'project.json'), JSON.stringify({ id: 'proj', title: 'Proj', graph: 'tower' }));
+  fs.writeFileSync(graphFile, JSON.stringify({ nodes: { b: { type: 'box' } }, output: 'b', export: 'glb' }));
+  execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), graphFile, '--export-all'], { stdio: 'pipe' });
+  const receipts = fs.readFileSync(path.join(proj, 'exports', '.outputs.json'), 'utf8');
+  check(fs.existsSync(path.join(proj, 'exports', 'tower.glb')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')), 'a graph in a project exports into the project\'s exports/, not beside the graph');
+  check(receipts.includes('"exports/tower.glb"') && !receipts.includes(JSON.stringify(tmp).slice(1, -1)) && !receipts.includes(tmp)
+    && new ArtifactStore(path.join(proj, 'exports')).records()[0].files[0] === path.join(proj, 'exports', 'tower.glb'), 'the receipts hold paths relative to the project, read back as this machine\'s');
+}
 
 // What an output is and the formats that fit it (io/kinds.ts), checked against the exporters themselves: every format
 // offered for an output writes some of it (its export succeeds and differs from an export of nothing).
 {
   const samples: Record<string, { spec: GraphSpec; kind: string; formats: string; text?: RegExp }> = {
-    mesh: { spec: { nodes: { b: { type: 'box' } } }, kind: 'mesh', formats: 'glb,gltf,usda,obj,ply,stl,geo,json', text: /^mesh 8 points, 6 prims$/ },
+    mesh: { spec: { nodes: { b: { type: 'box' } } }, kind: 'mesh', formats: 'glb,gltf,usda,obj,ply,stl,geo,json', text: /^6 polygons, 8 points$/ },
     curves: { spec: { nodes: { c: { type: 'line' } } }, kind: 'curves', formats: 'glb,gltf,usda,obj,geo,json', text: /^1 curve, 2 points$/ },
     points: { spec: { nodes: { g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 20 } } }, output: 's' }, kind: 'points', formats: 'csv,pointsjson,ply,geo,glb,gltf,usda,json', text: /^20 points$/ },
     instances: { spec: { nodes: { g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 5 } }, b: { type: 'box' }, c: { type: 'copy_to_points', in: ['b', 's'], params: { pack: true } } }, output: 'c' },
       kind: 'instances', formats: 'glb,usda,csv,pointsjson,gltf,geo,obj,ply,stl,json', text: /^5 instances of 1 source$/ },
     heightfield: { spec: { nodes: { hf: { type: 'heightfield', params: { size: 8, resolution: 1 } }, n: { type: 'heightfield_noise', in: ['hf'] } }, output: 'n' },
-      kind: 'heightfield', formats: 'png16,r16,mask_png,unreal_landscape,json', text: /^heightfield 9 × 9, 1 m$/ },
+      kind: 'heightfield', formats: 'png16,r16,mask_png,unreal_landscape,json', text: /^9 × 9 samples, 1 m apart$/ },
     scene: { spec: { nodes: { hf: { type: 'heightfield', params: { size: 8, resolution: 1 } }, g: { type: 'grid' }, s: { type: 'scatter', in: ['g'], params: { count: 5 } }, b: { type: 'box' },
       c: { type: 'copy_to_points', in: ['b', 's'], params: { pack: true } }, m: { type: 'merge', in: ['hf', 'c'] } }, output: 'm' },
-      kind: 'mixed', formats: 'unreal_landscape,png16,r16,mask_png,glb,usda,csv,pointsjson,gltf,geo,obj,ply,stl,json', text: /^heightfield 9 × 9, 1 m \+ 5 instances of 1 source$/ },
-    image: { spec: { nodes: { t: { type: 'tex_noise', params: { resolution: 8 } } } }, kind: 'image', formats: 'textures,json', text: /^image 8 × 8$/ },
+      kind: 'mixed', formats: 'unreal_landscape,png16,r16,mask_png,glb,usda,csv,pointsjson,gltf,geo,obj,ply,stl,json', text: /^terrain 9 × 9, 1 m \+ 5 instances of 1 source$/ },
+    image: { spec: { nodes: { t: { type: 'tex_noise', params: { resolution: 8 } } } }, kind: 'image', formats: 'textures,json', text: /^8 × 8 px$/ },
     textured: { spec: { nodes: { b: { type: 'box' }, t: { type: 'tex_noise', params: { resolution: 8 } }, m: { type: 'merge', in: ['b', 't'] } }, output: 'm' }, kind: 'mesh', formats: 'glb,gltf,usda,obj,ply,stl,geo,textures,json' },
     grid: { spec: { nodes: { s: { type: 'sdf_shape' }, g: { type: 'sdf_grid', in: ['s'] } }, output: 'g' }, kind: 'volume', formats: 'json' },
     sdf: { spec: { nodes: { s: { type: 'sdf_shape' } } }, kind: 'volume', formats: '' },
@@ -333,7 +353,8 @@ check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' &&
     const r = await engine.cook(s.spec);
     if (!r.ok) { check(false, `${name}: the sample cooks (${r.errors.map((e) => e.message).join('; ')})`); continue; }
     const info = outputKind(r.geo!), fits = fittingFormats(info);
-    check(info.kind === s.kind && (!s.text || s.text.test(info.text)) && fits.map((f) => f.format).join() === s.formats, `${name}: ${info.kind} "${info.text}" → ${fits.map((f) => f.format).join(', ') || 'no format'}`);
+    const words: Record<string, string | null> = { heightfield: 'terrain', image: 'textures', mixed: 'scene', empty: null }, word = s.kind in words ? words[s.kind] : s.kind;
+    check(info.kind === s.kind && info.published === word && (!s.text || s.text.test(info.text)) && fits.map((f) => f.format).join() === s.formats, `${name}: ${info.published} (${info.kind}) "${info.text}" → ${fits.map((f) => f.format).join(', ') || 'no format'}`);
     const silent: string[] = [];
     for (const f of fits) {
       const out = await exportsOf(r.geo!, f.format), none = await exportsOf(nothing, f.format);
@@ -342,7 +363,7 @@ check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' &&
     check(!silent.length, `${name}: every format offered writes some of it${silent.length ? ` (not: ${silent.join(', ')})` : ''}`);
   }
   const big = await engine.cook({ nodes: { hf: { type: 'heightfield', params: { size: 4096, resolution: 2 } } } });
-  check(outputKind(big.geo!).text === 'heightfield 2049 × 2049, 2 m' && sizeText(outputKind(big.geo!).size!) === '4096 × 0 × 4096 m', 'a 4 km field at 2 m says "heightfield 2049 × 2049, 2 m"');
+  check(outputKind(big.geo!).published === 'terrain' && outputKind(big.geo!).text === '2049 × 2049 samples, 2 m apart' && sizeText(outputKind(big.geo!).size!) === '4096 × 0 × 4096 m', 'a 4 km field at 2 m is a terrain of "2049 × 2049 samples, 2 m apart"');
   const scene = fittingFormats(outputKind((await engine.cook(samples.scene.spec)).geo!));
   check(scene[0].leaves.length === 0 && scene.find((f) => f.format === 'glb')!.leaves.join() === 'heightfield' && scene.find((f) => f.format === 'png16')!.leaves.join() === 'instances'
     && scene.find((f) => f.format === 'glb')!.oneFile && !scene.find((f) => f.format === 'png16')!.oneFile, 'mixed: each format says what it leaves out; GLB downloads as one file, the heightmap as a zip');

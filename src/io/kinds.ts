@@ -1,10 +1,13 @@
-// What a cooked output is, and the export formats that fit it. The viewer's output cards say what each output is,
-// decided from its geometry: "heightfield 2049 × 2049, 2 m", "mesh 1,204 points, 2,400 prims", "1,200 instances of
-// 3 sources", "5,000 points", "12 curves, 840 points", "image 1024 × 1024", or several of these (mixed), with its
-// bounding size. Their format menus offer only the formats that write it: PART_FORMATS lists the formats that write
-// each part, best first, as the exporters do (test/viewer-outputs.ts exports every part in every format to check it),
-// and a format that needs a heightfield or an image is offered only with one. A package records the same finding as the
-// kind of each published output it publishes (publishedKind). Pure: no file system.
+// What a cooked output is, and the export formats that fit it. Everything that shows an output (the viewer's cards and
+// Properties, the Packages tab, the Gallery, search and help) says what it is with one word, its kind: mesh, instances,
+// points, curves, terrain, textures, volume, or scene for several of these (graph/outputs.ts KINDS). The viewer decides
+// it from the cooked geometry (OutputInfo.published) and says its size in a line beside it: "2,400 polygons, 1,204
+// points", "1,200 instances of 3 sources", "2049 × 2049 samples, 2 m apart", "1024 × 1024 px", a scene's parts each by
+// kind ("terrain 2049 × 2049, 2 m + 1,200 instances of 3 sources"), and the bounding size. Internally an output is made
+// of parts (heightfield, mesh, instances, curves, points, image, volume): format menus offer only the formats that write
+// them, PART_FORMATS listing the formats that write each part, best first, as the exporters do (test/viewer-outputs.ts
+// exports every part in every format to check it), and a format that needs a heightfield or an image is offered only
+// with one. A package records the same kind for each output it publishes (publishedKind). Pure: no file system.
 import type { Geometry } from '../core/geometry.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { heightfieldsOf, layerStats } from '../core/heightfield.ts';
@@ -48,9 +51,11 @@ export interface HeightfieldInfo {
 
 export interface OutputInfo {
   kind: OutputKind;
+  /** its kind in the words everything shows (graph/outputs.ts KINDS: terrain, textures, scene …), null when empty */
+  published: Kind | null;
   /** the parts it holds, main first (OUTPUT_PARTS order) */
   parts: OutputPart[];
-  /** what it is, in a few words: "heightfield 2049 × 2049, 2 m" */
+  /** its size in a few words, beside its kind: "2049 × 2049 samples, 2 m apart"; a scene's parts each by kind */
   text: string;
   /** bounding box size (x, y, z) in metres; null for images alone and for nothing */
   size: [number, number, number] | null;
@@ -101,13 +106,14 @@ export function outputKind(g: Geometry): OutputInfo {
     layers: [...hf.layers].map(([name, a]) => { const s = layerStats(a); return { name, min: s?.min ?? 0, max: s?.max ?? 0 }; }),
   };
   const more = (k: number) => (k > 1 ? ` (+${n(k - 1)} more)` : '');
+  // each part's size: alone, beside its kind; in a scene, named by its kind
   const text: Record<OutputPart, () => string> = {
-    heightfield: () => `heightfield ${hf.width} × ${hf.height}, ${len(hf.cellSize)} m${more(fields.length)}`,
+    heightfield: () => (alone ? `${hf.width} × ${hf.height} samples, ${len(hf.cellSize)} m apart` : `terrain ${hf.width} × ${hf.height}, ${len(hf.cellSize)} m`) + more(fields.length),
     instances: () => `${count(packed, 'instance')} of ${count(g.packedSources.length, 'source')}`,
-    mesh: () => (alone ? `mesh ${count(g.numPoints, 'point')}, ${count(g.numPrims, 'prim')}` : `mesh ${count(polygons, 'polygon')}`),
+    mesh: () => (alone ? `${count(polygons, 'polygon')}, ${count(g.numPoints, 'point')}` : `mesh ${count(polygons, 'polygon')}`),
     curves: () => (alone ? `${count(curves, 'curve')}, ${count(g.numPoints, 'point')}` : count(curves, 'curve')),
     points: () => count(loose, 'point'),
-    image: () => `image ${images[0].width} × ${images[0].height}${more(images.length)}`,
+    image: () => `${images[0].width} × ${images[0].height} px${more(images.length)}`,
     volume: () => {
       const v = grids[0];
       return v ? `SDF grid ${v.dims.join(' × ')}${more(sdfs.length)}` : `${count(sdfs.length, 'SDF volume')}`;
@@ -115,8 +121,9 @@ export function outputKind(g: Geometry): OutputInfo {
   };
   const b = g.bbox(true);
   const size = b.empty || has.image ? null : [0, 1, 2].map((a) => b.max[a] - b.min[a]) as [number, number, number];
+  const kind: OutputKind = parts.length === 0 ? 'empty' : alone ? parts[0] : 'mixed';
   return {
-    kind: parts.length === 0 ? 'empty' : alone ? parts[0] : 'mixed',
+    kind, published: publishedKind({ kind }),
     parts, text: parts.length ? parts.map((p) => text[p]()).join(' + ') : 'empty', size,
     ...(heightfield ? { heightfield } : {}), heightfields: fields.length, images: images.length, grids: grids.length,
   };

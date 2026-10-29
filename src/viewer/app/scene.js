@@ -39,6 +39,26 @@ export function nudge(material) {
   return material;
 }
 
+/**
+ * Push a surface a sliver away from the camera (0.2 % of the distance in persp), so another one lying in the same plane
+ * wins the depth test: an update's overlay draws the old version's polygons ("overlay_a") behind the new one's.
+ */
+export function recede(material) {
+  if (material.userData.recede) return material;
+  material.userData.recede = true;
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (sh, r) => {
+    prev?.call(material, sh, r);
+    sh.vertexShader = sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      { if (isPerspectiveMatrix(projectionMatrix)) mvPosition.xyz *= 1.002; else mvPosition.z -= 6e-5 * (-2.0 / projectionMatrix[2][2]);
+        gl_Position = projectionMatrix * mvPosition; }`);
+  };
+  const key = material.customProgramCacheKey?.bind(material);
+  material.customProgramCacheKey = () => `${key ? key() : ''}|recede`;
+  material.needsUpdate = true;
+  return material;
+}
+
 /** Backfaces tinted blue as the render tool tints them (src/render/raster.ts): colour × 0.35 + (0.12, 0.22, 0.6). */
 export function backTint(material) {
   // Authored two-sided surfaces (cards, cloth, etc.) have intentional backfaces.
@@ -142,6 +162,8 @@ const boxCorners = (b) => Array.from({ length: 8 }, (_, k) => new THREE.Vector3(
  * drawables: each connected part of a mesh, each instance of an instanced mesh, each polyline, each point cloud.
  */
 export class MeshObject {
+  /** the edge check: open, non-manifold and flipped edges drawn over meshes (off by default; the top bar turns it on) */
+  static edgeCheck = false;
   constructor(id, src, { picture = false } = {}) {
     this.id = id;
     this.picture = picture;
@@ -349,7 +371,10 @@ export class MeshObject {
     }
     part.wire.visible = on;
   }
-  /** The render tool's open / non-manifold / flipped edges of a mesh (not of instances), found after the first frame. */
+  /**
+   * The render tool's open / non-manifold / flipped edges of a mesh (not of instances), found after the first frame: their
+   * counts always (Properties), drawn while the edge check is on (MeshObject.edgeCheck, the top bar's toggle).
+   */
   edges(part, on) {
     // a picture is an image, not a surface: no edges to check
     if (part.type !== 'mesh' || this.picture || (!on && !part.edgeObj)) return;
@@ -357,7 +382,7 @@ export class MeshObject {
       part.edgeObj = null;
       setTimeout(() => { if (!this.disposed) { this.findEdges(part); this.mode = null; this.onReady?.(); } }, 0);
     }
-    if (part.edgeObj) part.edgeObj.visible = on;
+    if (part.edgeObj) part.edgeObj.visible = on && MeshObject.edgeCheck;
   }
   findEdges(part) {
     this.analyse();
