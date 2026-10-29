@@ -500,14 +500,14 @@ section('a pinned kind: publishing blocks on another kind, build warns, a kind n
   const ok = await publish(PINNED, 'pinned right');
   check(ok.ok && readJSON(path.join(PINNED, 'versions', '1.0', 'version.json')).outputs.trees.kind === 'instances', 'with the kind it cooks to it publishes');
   // a kind not on the list: an error wherever the graph is read, with the list in the hint
-  const v = o.engine.validate({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'material' as any } } });
-  check(v.errors.length === 1 && v.errors[0].message === 'named output "brick": "kind" "material" is not a kind' && /mesh, instances, points, curves, terrain, textures, volume, scene/.test(v.errors[0].hint ?? ''),
+  const v = o.engine.validate({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'level' as any } } });
+  check(v.errors.length === 1 && v.errors[0].message === 'named output "brick": "kind" "level" is not a kind' && /mesh, instances, points, curves, terrain, textures, material, volume, scene/.test(v.errors[0].hint ?? ''),
     `validate: ${v.errors.map((x) => `${x.message} (${x.hint})`).join('; ')}`);
   const cooked = await o.engine.cook({ nodes: { b: { type: 'box' } }, outputs: { brick: { node: 'b', kind: 'Mesh' as any } } });
   check(!cooked.ok && /"kind" "Mesh" is not a kind/.test(errorOf(cooked)), 'a cook of it fails the same way');
-  setGraph(PINNED, 'main', { ...scatter('instances'), outputs: { ...scatter('instances').outputs, block: { node: 'b', kind: 'material' as any } } });
+  setGraph(PINNED, 'main', { ...scatter('instances'), outputs: { ...scatter('instances').outputs, block: { node: 'b', kind: 'level' as any } } });
   const bad = await publish(PINNED, 'material');
-  check(!bad.ok && bad.blocks.some((b) => /^output "block" \(graph "main"\): "kind" "material" is not a kind \(the kinds: mesh, instances/.test(b)), `publishing blocks it: ${bad.blocks.join(' | ')}`);
+  check(!bad.ok && bad.blocks.some((b) => /^output "block" \(graph "main"\): "kind" "level" is not a kind \(the kinds: mesh, instances/.test(b)), `publishing blocks it: ${bad.blocks.join(' | ')}`);
 }
 
 section('tags and descriptions: the rule, recorded, searched; the version rule for kinds');
@@ -1082,7 +1082,7 @@ section('search: every library, by words, kind and tag; what the project can use
   check(where(find(FINDER, { query: 'conif' })) === where(s) && !find(FINDER, { query: 'onifer' }).libraries.some((l) => l.hits.length) && !find(FINDER, { query: 'ree' }).libraries.some((l) => l.hits.length),
     'a word matches the start of a word ("conif" finds conifers; "onifer" and "ree" find nothing)');
   check(where(find(FINDER, { query: 'nordic boulder' })) === '../lib:listed:nordic/rocks/boulder topotopo:builtin: game:unlisted: other:unlisted:', 'every word must match');
-  check(throws(() => find(FINDER, { kind: 'material' }), /^"material" is not a kind: mesh, instances, points, curves, terrain, textures, volume, scene$/), 'a kind not on the list says the list');
+  check(throws(() => find(FINDER, { kind: 'level' }), /^"level" is not a kind: mesh, instances, points, curves, terrain, textures, material, volume, scene$/), 'a kind not on the list says the list');
   // a project that lists the library, uses the package; the package itself; a folder in no project
   const used = find(dirs.forest, { tag: 'conifer' });
   check(used.libraries.find((l) => l.name === 'game')?.standing === 'listed' && used.libraries.find((l) => l.name === 'game')!.hits[0].used === '1.1' && /\(also studio\/trees, its default output; this project uses 1\.1\)/.test(searchText(used)),
@@ -1196,8 +1196,8 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   const there = await run('search', ['--tag', 'conifer', CLI]);
   check(there.code === 0 && /for project cliproj/.test(there.out) && /\n {2}studio\/trees\/pine /.test(there.out), 'search for the project of a folder named (a path), --tag');
   check(/^no folder .*nowhere$/.test((await run('search', ['conifer', './nowhere'], CLI)).err), 'a folder that does not exist is an error');
-  const wrong = await run('search', ['--kind', 'material'], CLI);
-  check(wrong.code === 1 && /"material" is not a kind: mesh, instances/.test(wrong.err), `search --kind with no such kind: ${wrong.err}`);
+  const wrong = await run('search', ['--kind', 'level'], CLI);
+  check(wrong.code === 1 && /"level" is not a kind: mesh, instances/.test(wrong.err), `search --kind with no such kind: ${wrong.err}`);
   // the texture of a package output names the copy relative to the root's folder (the project folder: relative paths
   // read from the nearest project.json at or above the graph file), so exports that carry texture paths name no folder
   // of this machine
