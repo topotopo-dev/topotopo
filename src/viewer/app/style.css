@@ -32,6 +32,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #top .tb select { color: var(--text); max-width: 180px; }
 #top .readout { font: var(--mono); color: var(--dim); min-width: 84px; }
 #top .mode { color: var(--sel); }
+#top button.tb.on { border-color: var(--sel); color: var(--sel); }
 .grow { flex: 1; }
 
 /* panels */
@@ -42,8 +43,9 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .phead .count { margin-left: auto; letter-spacing: 0; }
 .pscroll { overflow: auto; min-height: 0; }
 #tree { flex: 1; }
-#props-body { flex: 0 0 var(--split); }
-#controls { flex: 1; }
+/* the Controls first, as tall as they need up to the split; Properties below, scrolling */
+#controls { flex: 0 1 auto; max-height: var(--split); min-height: 32px; }
+#props-scroll { flex: 1; }
 .grip { position: absolute; z-index: 5; }
 .grip.v { top: 0; bottom: 0; width: 6px; cursor: col-resize; }
 #outliner .grip.v { right: -3px; }
@@ -135,6 +137,9 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .attrs td { padding: 1px 4px 1px 0; vertical-align: top; overflow-wrap: anywhere; }
 .attrs td:first-child { color: var(--dim); white-space: nowrap; }
 .summary { margin: 0; font: var(--mono); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* the geometry summary, folded under its one-line kind */
+.fold > summary { cursor: pointer; color: var(--dim); font-size: 11px; user-select: none; margin: 4px 0; }
+.fold > summary:hover { color: var(--text); }
 .hint { color: var(--dim); font-size: 11px; overflow-wrap: anywhere; }
 .bad { border-color: var(--err) !important; }
 .danger:hover { border-color: var(--err); color: var(--err); }

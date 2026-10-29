@@ -269,7 +269,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   // an export's sidecar (kind "metadata") says what it is: the page shows it with the file it describes
   const listInputs = () => ws.listInputs().filter((f) => !PART_RE.test(f.path))
     .map((f) => (f.sidecar ? { ...f, about: `${SIDECAR_NAMES[f.sidecar.role]}: ${SIDECAR_TEXT[f.sidecar.role]}` } : f));
-  const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? 'in the workspace' : `in ${path.dirname(ws.inputDir)}`);
+  const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? (projectOf() ? 'in the project' : 'in this folder') : `in ${path.dirname(ws.inputDir)}`);
   // Files copied into inputs/ by other means (file manager, an agent) show up too, once the folder exists. The viewer
   // does not make it just to watch it (`topotopo view`'s inputs/ beside the graph file appears with the first drop):
   // uploads and listings start the watch when the folder is there by then.
@@ -473,7 +473,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     const src = opts.source;
     if (!src || src.graph !== name) throw new HttpError(400, sessionMode(name)
       ? 'this viewer cannot write the graph file: start it with `topotopo view <graph.json>` to save values'
-      : `graph ${name} is stored in the workspace: its values are saved as they change`);
+      : `graph ${name} is the project's own: its values are saved as they change`);
     const values = ws.sessionVars(name), names = Object.keys(values);
     if (names.length) {
       try { src.save(names.map((k) => ({ path: ['vars', k], value: values[k] }))); }

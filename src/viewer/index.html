@@ -19,6 +19,7 @@
     <label class="tb" title="the current view's shading; see ? for active key bindings">shading <select id="view-shading"></select></label>
     <span class="tb readout" id="step" title="the current view's grid step"></span>
     <button class="tb" id="quad" title="single / quad view">quad</button>
+    <button class="tb" id="edge-check" title="edge check: draw open (pink), non-manifold (yellow) and flipped (violet) edges over the meshes, as the render tool does">edge check</button>
     <span class="grow"></span>
     <button class="tb" id="scene-view" title="back to the whole scene: the graph's output with the reference layers and guides">Scene</button>
     <span class="tb mode" id="mode"></span>
@@ -51,16 +52,15 @@
   </main>
   <aside id="props" class="panel">
     <div class="grip v" data-grip="right" title="drag to resize"></div>
-    <div class="phead">Properties</div>
-    <div id="output-details" hidden></div>
-    <div class="pscroll" id="props-body"></div>
-    <div class="grip h" data-grip="split" title="drag to resize"></div>
     <div class="phead">Controls <span class="count" id="controls-count"></span></div>
     <div id="controls-bar">
       <div class="cookline" id="controls-cook"><span class="cdot"></span><span class="ctext"></span></div>
       <div class="sessionline" id="controls-session" hidden><span class="stext"></span><button id="vars-save" type="button">Save values</button><button id="vars-reset" type="button">Reset all</button></div>
     </div>
     <div class="pscroll" id="controls"></div>
+    <div class="grip h" data-grip="split" title="drag to resize"></div>
+    <div class="phead">Properties</div>
+    <div class="pscroll" id="props-scroll"><div id="output-details" hidden></div><div id="props-body"></div></div>
   </aside>
   <footer id="status">
     <span class="cookline" id="status-cook"><span class="cdot"></span><span class="ctext"></span><button class="cstop" type="button" title="stop the cook at the next node">Stop</button></span>

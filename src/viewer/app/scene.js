@@ -162,6 +162,8 @@ const boxCorners = (b) => Array.from({ length: 8 }, (_, k) => new THREE.Vector3(
  * drawables: each connected part of a mesh, each instance of an instanced mesh, each polyline, each point cloud.
  */
 export class MeshObject {
+  /** the edge check: open, non-manifold and flipped edges drawn over meshes (off by default; the top bar turns it on) */
+  static edgeCheck = false;
   constructor(id, src, { picture = false } = {}) {
     this.id = id;
     this.picture = picture;
@@ -369,7 +371,10 @@ export class MeshObject {
     }
     part.wire.visible = on;
   }
-  /** The render tool's open / non-manifold / flipped edges of a mesh (not of instances), found after the first frame. */
+  /**
+   * The render tool's open / non-manifold / flipped edges of a mesh (not of instances), found after the first frame: their
+   * counts always (Properties), drawn while the edge check is on (MeshObject.edgeCheck, the top bar's toggle).
+   */
   edges(part, on) {
     // a picture is an image, not a surface: no edges to check
     if (part.type !== 'mesh' || this.picture || (!on && !part.edgeObj)) return;
@@ -377,7 +382,7 @@ export class MeshObject {
       part.edgeObj = null;
       setTimeout(() => { if (!this.disposed) { this.findEdges(part); this.mode = null; this.onReady?.(); } }, 0);
     }
-    if (part.edgeObj) part.edgeObj.visible = on;
+    if (part.edgeObj) part.edgeObj.visible = on && MeshObject.edgeCheck;
   }
   findEdges(part) {
     this.analyse();

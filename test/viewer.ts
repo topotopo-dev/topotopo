@@ -452,7 +452,7 @@ section('GET /api/input: "inputs/<rel>" through the host, the path a graph uses'
   check(view.ok && view.path === 'inputs/tri.obj' && mcp.ok && mcp.path === 'inputs/tri.obj',
     `inputs/ beside the graph file (view) and in an MCP workspace: cooked as "inputs/tri.obj" (${view.path}, ${mcp.path})`);
   check(other.ok && other.path === path.join(tmp, 'embedded_ws', 'inputs', 'tri.obj'), `an engine based elsewhere: the absolute path (${other.path})`);
-  check(mcp.where === 'in the workspace' && view.where === `in ${graphDir}`,
+  check(mcp.where === 'in this folder' && view.where === `in ${graphDir}`,
     `the page's default words for the folder: "${mcp.where}", or the folder holding a given one ("${view.where}")`);
 }
 

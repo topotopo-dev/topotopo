@@ -16,7 +16,11 @@ const vertex = /* glsl */`
   void main() {
     vec4 w = modelMatrix * vec4(position, 1.0);
     vWorld = w.xyz;
-    gl_Position = projectionMatrix * viewMatrix * w;
+    // a sliver behind its plane, so a ground lying on y = 0 hides it instead of fighting it for each pixel (polygon
+    // offset does not reach a logarithmic depth buffer)
+    vec4 mv = viewMatrix * w;
+    if (isPerspectiveMatrix(projectionMatrix)) mv.xyz *= 1.002; else mv.z -= 6e-5 * (-2.0 / projectionMatrix[2][2]);
+    gl_Position = projectionMatrix * mv;
     #include <logdepthbuf_vertex>
   }`;
 const fragment = /* glsl */`

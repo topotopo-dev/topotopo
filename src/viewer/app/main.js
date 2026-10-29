@@ -440,6 +440,16 @@ $('view-cam').onchange = (e) => { views.setCam(views.active, e.target.value); sa
 $('view-shading').replaceChildren(...SHADINGS.map(([v, t]) => new Option(t, v)));
 $('view-shading').onchange = (e) => { views.slots[views.active].shading = e.target.value; saveViews(); e.target.blur(); ctx.requestRender(); };
 $('quad').onclick = () => { toggleQuad(); $('quad').blur(); };
+// the edge check: an overlay, off until the person turns it on (remembered in this browser)
+MeshObject.edgeCheck = browser.get('edgeCheck', false);
+const syncEdgeCheck = () => { $('edge-check').classList.toggle('on', MeshObject.edgeCheck); $('edge-check').setAttribute('aria-pressed', String(MeshObject.edgeCheck)); };
+$('edge-check').onclick = () => {
+  $('edge-check').blur();
+  MeshObject.edgeCheck = !MeshObject.edgeCheck; browser.set('edgeCheck', MeshObject.edgeCheck); syncEdgeCheck();
+  for (const e of ctx.objects.values()) if (e.mesh) e.mesh.mode = null;
+  ctx.emit('output'); ctx.requestRender();
+};
+syncEdgeCheck();
 $('help').onclick = () => { KM.toggleOverlay(document.body, preset); $('help').blur(); };
 function syncTop() {
   const s = views.slots[views.active];
@@ -477,7 +487,7 @@ for (const g of document.querySelectorAll('.grip')) {
     const move = (ev) => {
       if (kind === 'left') layout.left = Math.round(Math.max(160, Math.min(innerWidth * 0.45, ev.clientX)));
       else if (kind === 'right') layout.right = Math.round(Math.max(220, Math.min(innerWidth * 0.5, innerWidth - ev.clientX)));
-      else layout.split = Math.round(Math.max(10, Math.min(90, ((ev.clientY - props0.top - 26) / Math.max(1, props0.height - 52)) * 100)));
+      else layout.split = Math.round(Math.max(10, Math.min(85, ((ev.clientY - props0.top - 60) / Math.max(1, props0.height - 52)) * 100)));
       applyLayout(); ctx.requestRender();
     };
     const up = () => { g.classList.remove('drag'); g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); browser.set('layout', layout); };

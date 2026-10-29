@@ -76,8 +76,10 @@ export function createOutputPanel(ctx) {
       row.append(text('span', 'Layer in red', 'dim'), choice);
       details.append(row);
     }
-    details.append(text('p', item.error ?? item.summary ?? '', item.error ? 'err' : 'dim'));
+    if (item.error) details.append(text('p', item.error, 'err'));
+    else if (item.summary) { const f = document.createElement('details'); f.className = 'fold'; f.append(text('summary', 'Geometry details'), text('pre', item.summary, 'summary')); details.append(f); }
     if (item.exportable) details.append(text('p', item.target ? `Export writes ${targetFile(item)} (${item.target.format})` : 'Export asks for a format and a file in exports/ the first time; Download gives you a copy without that', 'dim'));
+    if (item.live?.length) details.append(text('p', liveText(item), 'live'));
     if (item.files) {
       if (item.origin === 'saved' && !item.parent) details.append(text('p', `in ${directory}`, 'dim'));
       for (const f of item.files) {
