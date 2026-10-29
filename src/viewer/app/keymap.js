@@ -179,12 +179,12 @@ export function toggleOverlay(host, presetId) {
   head.className = 'km-head';
   head.textContent = `Keymap — ${PRESETS.find((p) => p.id === presetId)?.label ?? presetId}`;
   const table = doc.createElement('table');
-  for (const r of overlayRows(presetId)) {
+  // the actions the viewer has (the table holds the later ones too, so a preset never changes shape)
+  for (const r of overlayRows(presetId).filter((x) => x.built)) {
     const tr = doc.createElement('tr');
-    if (!r.built) tr.className = 'later';
     const a = doc.createElement('td'), b = doc.createElement('td');
     a.textContent = r.label;
-    b.textContent = r.text + (r.built ? '' : '  (phase 2)');
+    b.textContent = r.text;
     tr.append(a, b);
     table.append(tr);
   }

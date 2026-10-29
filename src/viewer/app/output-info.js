@@ -3,10 +3,28 @@
 // (src/io/kinds.ts); these plain functions are tested in Node (test/viewer-logic.ts).
 import { fmtSize } from './units.js';
 
-/** What a card says it is: "heightfield 2049 × 2049, 2 m · 4096 × 312 × 4096 m" (its view before it has cooked). */
-export function kindLine(item) {
-  const what = item.about ?? (item.kind === 'metadata' ? 'metadata' : item.kind) ?? (item.view === 'image' ? 'image' : item.view === 'file' ? 'file' : '');
+/**
+ * A result's kind as its badge shows it, in the words everything uses (src/io/kinds.ts): mesh, instances, points,
+ * curves, terrain, textures, volume, scene, or empty; '' for a texture of an output, a sidecar or a file.
+ */
+export const kindBadge = (item) => (item.kind && item.kind !== 'metadata' ? item.kind : '');
+
+/** Its size beside the badge: "2049 × 2049 samples, 2 m apart · 4096 × 312 × 4096 m". */
+export function detailLine(item) {
+  const what = item.about ?? (item.kind === 'metadata' ? 'metadata' : '');
   return [what, item.size ? fmtSize(item.size) : ''].filter(Boolean).join(' · ');
+}
+
+/** An output's kind and tags in words, as the CLI says them: "mesh [crate, wood]" (the badges read in the same order). */
+export const kindTagsLine = (o) => `${o.kind || 'kind not pinned'}${o.tags?.length ? ` [${o.tags.join(', ')}]` : ''}`;
+
+/** What a result that uses packages shown live says: its exports and downloads hold their unpublished edits. */
+export const liveText = (item) => (item.live?.length ? `uses the unpublished edits of ${item.live.join(', ')} (shown live this session): Export and Download write them too, and say so in how the file was made` : '');
+
+/** What it is in a line, its kind first: "terrain · 2049 × 2049 samples, 2 m apart · 4096 × 312 × 4096 m" (its view before it has cooked). */
+export function kindLine(item) {
+  const line = [kindBadge(item), detailLine(item)].filter(Boolean).join(' · ');
+  return line || (item.view === 'image' ? 'image' : item.view === 'file' ? 'file' : '');
 }
 
 /** A heightfield's layers a person can see in red (not the height itself): the mask first, then the others, then none. */

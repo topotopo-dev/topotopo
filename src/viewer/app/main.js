@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { api } from './api.js';
 import { createViews, CAMERA_NAMES, SHADINGS } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
-import { MeshObject, parseGLB, createLights, LINE_MATERIALS } from './scene.js';
+import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
 import { createGuides, PLACE_KINDS } from './guides.js';
 import { createSelect } from './select.js';
@@ -18,8 +18,10 @@ import { createUndo } from './undo.js';
 import { EDITOR_NAMES } from './markers.js';
 import * as KM from './keymap.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
-import { connectedLine, graphsLine } from './status.js';
+import { DISCONNECTED_LINE, RECONNECTED_LINE, messageLife } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
+import { pageTitle, defaultGraph, renderWelcome } from './welcome.js';
+import { kindLine } from './output-info.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -51,16 +53,23 @@ const ctx = {
   },
 };
 
-// ------------------------------------------------------------------------------------------- status bar
-const msgEl = $('msg');
-let heldUntil = 0;
-/** A line in the status bar; `hold` ms keeps it over routine lines (an undo over the save that follows it). */
+// ------------------------------------------------------------------------------------------- messages
+// What something the person did came to, over the view's lower left; it clears itself (status.js messageLife). The
+// status bar keeps the cook line and what is shown.
+const notesEl = $('notes'), msgEl = $('msg');
+let heldUntil = 0, noteTimer = 0;
+/** A message; `hold` ms keeps it over routine ones (an undo over the save that follows it); '' clears it. */
 ctx.message = (text, kind = '', hold = 0) => {
   const now = performance.now();
-  if (!hold && kind !== 'err' && now < heldUntil) return;
+  if (text && !hold && kind !== 'err' && now < heldUntil) return;
   heldUntil = hold ? now + hold : 0;
-  msgEl.textContent = text; msgEl.className = kind; msgEl.title = text;
+  clearTimeout(noteTimer);
+  msgEl.textContent = text; msgEl.title = text; notesEl.className = kind;
+  notesEl.hidden = !text && $('ask').hidden;
+  const life = messageLife(text, kind, hold);
+  if (text && Number.isFinite(life)) noteTimer = setTimeout(() => { if (!notesEl.matches(':hover')) ctx.message(''); else noteTimer = setTimeout(() => ctx.message(''), 3000); }, life);
 };
+$('msg-close').onclick = () => { $('msg-close').blur(); ctx.message(''); };
 // ------------------------------------------------------------------------------------------- cook state
 // What is cooking for each graph (the server's {cook} events, and /api/graphs), shown in the status bar and above the
 // Controls: the node, the time (counted on here between events), how the last cook ended. Stop stops it. While the
@@ -85,9 +94,10 @@ function renderCook() {
   else if (!running && cookTick) { clearInterval(cookTick); cookTick = 0; }
 }
 ctx.renderCook = renderCook;
-for (const el of cookLines) el.querySelector('.cstop').onclick = async (e) => {
+// one Stop, in the status bar
+$('status-cook').querySelector('.cstop').onclick = async (e) => {
   e.currentTarget.blur();
-  // the before/after's cooks are not the graph's: it has a stop of its own
+  // the cooks of an update's comparison are not the graph's: they stop on their own
   if (ctx.packages?.running) { ctx.packages.stop(); return; }
   const graph = ctx.graph.name;
   if (!graph) return;
@@ -99,11 +109,12 @@ for (const el of cookLines) el.querySelector('.cstop').onclick = async (e) => {
   else ctx.message(j.stopping ? 'stopping: the cook ends when the node it is on has finished' : 'nothing is cooking');
 };
 
-/** A small question in the status bar; resolves to the answer. */
+/** A small question with the messages; resolves to the answer. */
 ctx.ask = (text, yes = 'Yes', no = 'No') => new Promise((resolve) => {
+  ctx.message('');
   $('ask-text').textContent = text; $('ask-yes').textContent = yes; $('ask-no').textContent = no;
-  $('ask').hidden = false;
-  const done = (v) => { $('ask').hidden = true; $('ask-yes').onclick = $('ask-no').onclick = null; resolve(v); };
+  $('ask').hidden = false; notesEl.hidden = false;
+  const done = (v) => { $('ask').hidden = true; notesEl.hidden = !msgEl.textContent; $('ask-yes').onclick = $('ask-no').onclick = null; resolve(v); };
   $('ask-yes').onclick = () => done(true);
   $('ask-no').onclick = () => done(false);
   $('ask-yes').focus();
@@ -208,7 +219,7 @@ const refreshGraphs = ctx.coalesce(async () => {
   const sel = $('graph');
   // the options are rebuilt only when the graphs change, so an open list stays open
   if (names.join('\n') !== [...sel.options].map((o) => o.value).join('\n')) sel.replaceChildren(...names.map((n) => new Option(n, n)));
-  if (!names.includes(G.name)) { G.name = local.get('graph', null); if (!names.includes(G.name)) G.name = names[0] ?? null; G.node = null; }
+  if (!names.includes(G.name)) { G.name = local.get('graph', null); if (!names.includes(G.name)) G.name = defaultGraph(ctx.project, names); G.node = null; }
   sel.value = G.name ?? '';
   const g = G.current();
   if (G.node && !g?.nodes.some((n) => n.name === G.node)) G.node = null;
@@ -216,10 +227,18 @@ const refreshGraphs = ctx.coalesce(async () => {
   for (const x of list) if (x.cook && !((cooks.get(x.name)?.at ?? -1) > issued)) cooks.set(x.name, { state: x.cook, at: performance.now() });
   renderCook();
   props.controls.render(g, issued);
-  const line = graphsLine(msgEl.textContent, list.length);
-  if (line) ctx.message(line);
+  renderWelcome($('welcome'), ctx.project, !list.length);
   ctx.emit('graphs');
 });
+// the project shown: the tab's title, the graph shown first, the welcome while there is no graph
+ctx.project = null;
+const refreshProject = async () => {
+  const info = await api.project();
+  if (!info) return;
+  ctx.project = info;
+  document.title = pageTitle(info);
+  renderWelcome($('welcome'), info, !ctx.graph.list.length);
+};
 $('graph').onchange = (e) => {
   if (ctx.outputs?.active) ctx.outputs.scene();
   ctx.graph.name = e.target.value; ctx.graph.node = null;
@@ -278,16 +297,19 @@ const loadGeo = ctx.coalesce(async () => {
   ctx.emit('output'); updateCook();
 });
 
+/** The status bar's right side: what the view shows, its kind and size (a terrain says its samples, not "0 points"). */
 function updateCook() {
-  const el = $('cook'), o = ctx.output, g = ctx.graph.current();
-  if (ctx.outputs?.active?.view === 'image') {
-    const image = ctx.outputs.active; el.textContent = image.width ? `${image.width} × ${image.height} · ${image.layers?.length ?? 1} layer(s)` : image.label; return;
+  const el = $('cook'), o = ctx.output, g = ctx.graph.current(), shown = ctx.outputs?.active;
+  if (shown) {
+    // an output alone in the view (or a place of an update): its name and what it is
+    const what = shown.view === 'image' && shown.width ? `${shown.width} × ${shown.height} px · ${shown.layers?.length ?? 1} layer${(shown.layers?.length ?? 1) === 1 ? '' : 's'}` : kindLine(shown);
+    el.textContent = [shown.graph && shown.graph !== shown.label ? `${shown.graph} › ${shown.label}` : shown.label, what].filter(Boolean).join(' · ');
+    el.title = el.textContent;
+    return;
   }
   if (!g) { el.textContent = ''; return; }
-  const m = /geometry: ([\d,]+) points, ([\d,]+) prims/.exec(o.summary ?? '');
   const parts = [`${g.name}/${ctx.graph.shownNode() ?? ''}`];
-  if (m) parts.push(`${m[1]} points`, `${m[2]} prims`);
-  if (o.report?.cooked) parts.push(`cook ${fmtNum(o.report.ms, 0)} ms`);
+  if (o.about) parts.push(kindLine({ kind: o.about.published ?? 'empty', about: o.about.text }));
   // a failed cook of the graph is told by the cook line beside this (its node and message); this tells the rest
   const told = cookLine(ctx.cookState(g.name)).kind === 'failed';
   const err = o.error ?? (told ? null : (o.report?.errors?.length ? o.report.errors[0] : null) ?? g.nodes.find((n) => n.error)?.error);
@@ -418,6 +440,16 @@ $('view-cam').onchange = (e) => { views.setCam(views.active, e.target.value); sa
 $('view-shading').replaceChildren(...SHADINGS.map(([v, t]) => new Option(t, v)));
 $('view-shading').onchange = (e) => { views.slots[views.active].shading = e.target.value; saveViews(); e.target.blur(); ctx.requestRender(); };
 $('quad').onclick = () => { toggleQuad(); $('quad').blur(); };
+// the edge check: an overlay, off until the person turns it on (remembered in this browser)
+MeshObject.edgeCheck = browser.get('edgeCheck', false);
+const syncEdgeCheck = () => { $('edge-check').classList.toggle('on', MeshObject.edgeCheck); $('edge-check').setAttribute('aria-pressed', String(MeshObject.edgeCheck)); };
+$('edge-check').onclick = () => {
+  $('edge-check').blur();
+  MeshObject.edgeCheck = !MeshObject.edgeCheck; browser.set('edgeCheck', MeshObject.edgeCheck); syncEdgeCheck();
+  for (const e of ctx.objects.values()) if (e.mesh) e.mesh.mode = null;
+  ctx.emit('output'); ctx.requestRender();
+};
+syncEdgeCheck();
 $('help').onclick = () => { KM.toggleOverlay(document.body, preset); $('help').blur(); };
 function syncTop() {
   const s = views.slots[views.active];
@@ -455,7 +487,7 @@ for (const g of document.querySelectorAll('.grip')) {
     const move = (ev) => {
       if (kind === 'left') layout.left = Math.round(Math.max(160, Math.min(innerWidth * 0.45, ev.clientX)));
       else if (kind === 'right') layout.right = Math.round(Math.max(220, Math.min(innerWidth * 0.5, innerWidth - ev.clientX)));
-      else layout.split = Math.round(Math.max(10, Math.min(90, ((ev.clientY - props0.top - 26) / Math.max(1, props0.height - 52)) * 100)));
+      else layout.split = Math.round(Math.max(10, Math.min(85, ((ev.clientY - props0.top - 60) / Math.max(1, props0.height - 52)) * 100)));
       applyLayout(); ctx.requestRender();
     };
     const up = () => { g.classList.remove('drag'); g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); browser.set('layout', layout); };
@@ -658,6 +690,8 @@ ctx.previewOutput = async (item, bytes, update) => {
   const serial = ++previewSerial, src = await parseGLB(bytes);
   if (serial !== previewSerial || ctx.outputs.active?.id !== item.id) { new MeshObject('', src).dispose(); return; }
   const mesh = new MeshObject('out', src); mesh.onReady = () => ctx.requestRender();
+  // an update's overlay: the old version's polygons a sliver behind the new one's (no stripes where they meet)
+  if (item.overlay) src.traverse((o) => { for (const m of [o.material ?? []].flat()) if (m.name === 'overlay_a') recede(m); });
   ctx.output.mesh?.dispose(); ctx.output.mesh = mesh; ctx.outputRoot.add(mesh.root); ctx.previewEmpty = false;
   ctx.output.summary = item.summary ?? ''; ctx.output.error = item.error ?? null; ctx.output.about = null;
   ctx.outputGraph(item);
@@ -672,17 +706,27 @@ ctx.previewOutput = async (item, bytes, update) => {
 };
 ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); ctx.requestRender(); };
 ctx.frameOutput = frameAll;
+/** Show a node of a graph (the Packages tab's "used by"): that graph, the node's result, the Scene tab. */
+ctx.showNode = (graph, node) => {
+  if (!ctx.graph.list.some((g) => g.name === graph)) return;
+  if (ctx.outputs?.active) ctx.outputs.scene();
+  if (ctx.graph.name !== graph) { ctx.graph.name = graph; $('graph').value = graph; local.set('graph', graph); ctx.graph.renderControls(); renderCook(); }
+  ctx.graph.show(node);
+  ctx.showTab('scene');
+};
 ctx.outputs = createOutputPanel(ctx);
 ctx.packages = createPackagesPanel(ctx, $('packages'));
 
 const es = api.events({
   open() {
-    ctx.message(connectedLine(ctx.graph.list.length));
     // after a reconnect the server may have restarted: fetch everything again
-    if (es.opened) { refreshGraphs().then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
+    if (es.opened) {
+      if (msgEl.textContent === DISCONNECTED_LINE) ctx.message(RECONNECTED_LINE, 'ok');
+      refreshProject().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
+    }
     es.opened = true;
   },
-  error() { ctx.message('disconnected (server stopped?)', 'err'); },
+  error() { ctx.message(DISCONNECTED_LINE, 'err'); },
   async message(ev) {
     if (ev.cook !== undefined) { setCook(ev.cook.graph, ev.cook); if (ev.cook.graph === ctx.graph.name) updateCook(); return; }
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
@@ -700,6 +744,7 @@ syncTop();
 outliner.render();
 props.render();
 ctx.requestRender();
+await refreshProject();
 await refreshGraphs();
 await ctx.outputs.refresh();
 ctx.packages.refresh();

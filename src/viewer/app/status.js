@@ -1,20 +1,17 @@
-// The status bar's own lines: what the page says when nothing else is reported.
-// Plain functions, tested in Node (test/viewer-logic.ts).
+// The page's messages: what something the person did came to, in a small area over the view that clears itself, so
+// the status bar keeps only the cook line and what is shown. Plain functions, tested in Node (test/viewer-logic.ts).
 
-/** While the event stream is connected. */
-export const LIVE_LINE = 'live — updates on every build, edit and file save';
-/** While the workspace has no graph. */
-export const NO_GRAPHS_LINE = 'no graphs yet — build one via MCP';
-
-/** The line when the event stream (re)connects: the hint while there is no graph, else the live line. */
-export const connectedLine = (graphCount) => (graphCount ? LIVE_LINE : NO_GRAPHS_LINE);
+/** While the event stream is down: it stays until the page reconnects. */
+export const DISCONNECTED_LINE = 'the viewer server is not answering (stopped?): this page reconnects when it runs again';
+/** When the event stream comes back. */
+export const RECONNECTED_LINE = 'connected again';
 
 /**
- * The line after the graph list was read, or null to keep the one shown: the hint while there is no graph, and the
- * live line in its place once the first graph arrives. Any other line (an undo, a keymap note, an error) stays.
- * Whichever of the two runs last at startup, the page ends on the line that fits the workspace.
+ * How long a message stays (ms), Infinity until another replaces it: an error 12 s, work in progress ("busy") until its
+ * result replaces it, the disconnected line until the page reconnects, others 6 s; `hold` makes it at least that long.
  */
-export function graphsLine(shown, graphCount) {
-  if (!graphCount) return NO_GRAPHS_LINE;
-  return shown === NO_GRAPHS_LINE ? LIVE_LINE : null;
+export function messageLife(text, kind = '', hold = 0) {
+  if (!text) return 0;
+  if (kind === 'busy' || text === DISCONNECTED_LINE) return Infinity;
+  return Math.max(hold, kind === 'err' ? 12000 : 6000);
 }

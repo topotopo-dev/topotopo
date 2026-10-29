@@ -42,8 +42,15 @@ export function offeredFormats(item, formats) {
   return [...fits, { ...f, writes: 'does not fit this output: it writes none of it', leaves: [], oneFile: false, misfit: true }];
 }
 
-/** A format's line in the popover: what it writes, and the parts of the output it leaves out. */
-export const writesLine = (fit) => (fit ? `${fit.writes}${fit.leaves?.length ? ` · not the ${fit.leaves.join(' or the ')}` : ''}` : '');
+/**
+ * A format's line in the popover: what it writes, and the parts of the output it leaves out. A download is the file
+ * itself (or a zip): what an export would add beside it in exports/ is not said there.
+ */
+export const writesLine = (fit, download = false) => {
+  if (!fit) return '';
+  const writes = download ? fit.writes.replace(/\s*\(\+ [^)]*in exports\/\)/, '') : fit.writes;
+  return `${writes}${fit.leaves?.length ? ` · not the ${fit.leaves.join(' or the ')}` : ''}`;
+};
 
 /**
  * The name a download in `format` gets: the target's file name when the format is the target's, else the output's
@@ -85,6 +92,8 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', `${download ? 'Download' : 'Export'} ${item.label}`);
     const title = el('div', 'export-title', download ? `Download ${item.label}` : item.target ? `Export target of ${item.label}` : `Export ${item.label}`);
     const about = el('div', 'export-about dim', item.about ?? '');
+    // a result that uses a package shown live: the file holds its unpublished edits
+    const live = item.live?.length ? el('div', 'export-live', `Includes the unpublished edits of ${item.live.join(', ')} (live folder, this session)`) : null;
     const format = el('select'); format.setAttribute('aria-label', 'Format');
     for (const f of offered) format.append(new Option(f.misfit ? `${f.label} (does not fit)` : f.label, f.format));
     if (startFormat) format.value = startFormat;
@@ -99,6 +108,7 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     const actions = el('div', 'export-actions'); actions.append(cancel, go);
     box.append(title);
     if (item.about) box.append(about);
+    if (live) box.append(live);
     if (offered.length) box.append(field('Format', format), writes);
     else box.append(el('div', 'export-writes err', item.kind === 'volume'
       ? 'no format writes an SDF volume of functions: sdf_to_mesh makes it a mesh to export'
@@ -110,7 +120,7 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     const fit = () => offered.find((f) => f.format === format.value);
     const sync = () => {
       const f = fit();
-      writes.textContent = writesLine(f);
+      writes.textContent = writesLine(f, download);
       writes.classList.toggle('err', !!f?.misfit);
       writes.classList.toggle('part', !!f?.leaves?.length);
       where.textContent = download ? '' : inFolder(directory, file.value.trim() || '…');

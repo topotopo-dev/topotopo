@@ -76,7 +76,7 @@ npx topotopo --catalog                                      # node types by cate
 npx topotopo --help-node scatter                            # one node's params, defaults and example
 npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
-npx topotopo graph.json --export-all                        # every output's export target, into exports/ beside it
+npx topotopo graph.json --export-all                        # every output's export target, into its project's exports/
 npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
 npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
 ```
@@ -112,15 +112,20 @@ To browse the examples in the live 3D viewer without an MCP client:
 npm run preview
 ```
 
-The viewer's left panel has three tabs: **Scene** (the graph's nodes and guides), **Outputs** and **Inputs**, and a
-fourth, **Packages**, when the graphs belong to a project that uses packages (see [Packages](#packages)).
-**Outputs**, the default, shows all graphs' main results, named deliverables and their textures; click one to
-inspect it alone, and **Scene** in the top bar restores the scene. Publish extra results in graph JSON with
-`"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default. Each card says
-what the result is, decided from what it cooks to (a mesh with its points and prims, a heightfield such as
-"heightfield 2049 × 2049, 2 m", packed instances, points, curves, an image, or several of these) and its size, and
-offers only the formats that write it, each with a line saying what it writes (a heightfield: 16-bit PNG or RAW
-heightmap with its JSON sidecar, mask PNGs, the Unreal Landscape bundle; a mesh: GLB, glTF, USD, OBJ …).
+The viewer opens a project (`topotopo edit <project>`, the MCP server's project, or `topotopo view graph.json`) with
+the project's default graph in view; the browser tab is named after the project. A project's graphs are the files in
+`graphs/` and the graph files beside its `project.json`. A project without graphs shows its name, a pointer to
+TopoTopo's kits and what to ask your agent; a folder that is no project says so and how to make it one. The left panel
+has four tabs: **Scene** (the graph's nodes and guides), **Outputs**, **Inputs** and, in a project, **Packages** (see
+[Packages](#packages)). **Outputs**, the default, shows each graph's results, one card per result, and their textures;
+click one to inspect it alone, and **Scene** in the top bar returns to the whole scene. Publish extra results in graph
+JSON with `"outputs": {"rotor": {"node": "rotor_final", "label": "Rotor"}}`, keeping `"output"` as the default (a
+named output of the output node is the default one, marked so). Each card says what the result is with the words
+packages and search use, mesh, instances, points, curves, terrain, textures, volume or scene, and its size in a line
+beside it ("2049 × 2049 samples, 2 m apart"), and offers only the formats that write it, each with a line saying what
+it writes (a terrain: 16-bit PNG or RAW heightmap with its JSON sidecar, mask PNGs, the Unreal Landscape bundle; a
+mesh: GLB, glTF, USD, OBJ …). While a result cooks again its card keeps its picture; a card whose cook was stopped
+says it is out of date.
 **Download** gets the result in the format you pick as a browser download: the file itself, or one zip when the
 format writes several files (a heightmap and its sidecar, a textures folder). **Export** writes it into `exports/`:
 the first click asks for a format and a file there and stores that target in the graph (`"export": "glb"`, or
@@ -131,13 +136,17 @@ made (see below); in the Saved files and Inputs lists a sidecar or `.source.json
 A heightfield's details have a layer picker: the terrain shows that layer (the mask by default) in red. **Inputs**
 lists your files in `inputs/`, with **Add input** (or drop files anywhere on the page); the agent is told about new
 ones in its next tool answer. Images open in a 2D viewer with layers and channels (generated textures default to
-RGB; use A to inspect packed alpha/AO); JPEG/WebP are for viewing only. For `topotopo view graph.json`, `inputs/`
-and `exports/` are beside that graph.
+RGB; use A to inspect packed alpha/AO); JPEG/WebP are for viewing only. Exports always go into the project's
+`exports/`: the folder of the nearest `project.json` above the graph, from the viewer, the CLI and the agent alike (a
+graph file in no project exports beside itself). For `topotopo view graph.json`, `inputs/` is beside that graph.
 
-The **Controls** panel holds the graph's exposed vars. Above them, and in the status bar, the cook in progress: the
-node cooking and the time so far, then the last cook's time, or the failing node and its message. **Stop** ends a cook
-at the next node (long nodes such as erosion stop between their iterations; others finish first, and the line says
-so); the view keeps the last finished result. Changing a value while a cook runs starts over with the newest value.
+The **Controls** panel, at the top of the right column, holds the graph's exposed vars; **Properties** below it says
+what the selection is. Above the controls, and in the status bar, the cook in progress: the node cooking and the time
+so far, then the last cook's time, or the failing node and its message. **Stop** in the status bar ends a cook at the
+next node (long nodes such as erosion stop between their iterations; others finish first, and the line says so); the
+view keeps the last finished result. Changing a value while a cook runs starts over with the newest value. The status
+bar also says what the view shows and its size; other messages appear over the view and clear themselves. **edge
+check** in the top bar draws open, non-manifold and flipped edges as the render tool does.
 With `topotopo view graph.json` the graph file stays as you wrote it: the values you tune are kept by the viewer,
 through exports, output switches and saves of the file (a value goes back to the file's only when its declaration in
 `params` changes or the var is removed). A mark shows each value that differs from the file; ↺ takes one back,
@@ -395,9 +404,12 @@ topotopo gallery
 ```
 
 Each project has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
-`/embed/<library>/<id>`. A package's page lists its versions with their notes and dates and the outputs it publishes
-with their kinds and tags, a project's page the packages it uses, and the grid marks packages with their full name; its
-search finds their outputs by name, kind and tag as well.
+`/embed/<library>/<id>`. TopoTopo's kits have cards and pages of their own (`/k/<kit>`), with each output's thumbnail.
+A package's or kit's page lists its versions (each opens to the outputs it published), the outputs of the newest with
+their kinds and tags, and the projects that use it; a project's page links the packages it uses. The grid marks
+packages with their full name and projects that have an update; its search finds projects by the packages they use and
+the outputs of packages and kits by name, kind and tag. A project without the graph its `project.json` shows says "no
+default graph yet" instead of a failed bake.
 
 ## Packages
 
@@ -448,12 +460,15 @@ has, values its narrower range clamps, options it dropped). It ends with the com
 `--from` the version in use `--to` the new one with `--apply`.
 
 In the live viewer (`topotopo edit levels/forest`, or `topotopo view` on a graph in a project) the **Packages** tab
-lists what the project uses with the newer versions and their notes, and the Scene tree marks the nodes of a package
-that has an update. **Before/after** cooks each place with the version in use (a) and the new one (b), shown alone in
-the view as a, as b or both overlaid, with what changed; **Update** applies it and the scene cooks again, and after a
-big version the list of what the graphs must change stays in view. **Use the trees I'm editing** follows the
-package's working folder for that viewer session only, so every save there cooks the scene again; saving a working
-folder while the viewer is open offers it.
+has **Find packages**, a search of TopoTopo's kits and every library, and a box per package the project uses: its
+version and a badge (up to date, update available, live), the nodes that use it (a click shows one), and its outputs,
+folded, with the ones in use marked. Where a package has a working folder of its own, **Source: Published 1.1 | Live
+folder** shows that folder's unpublished edits for the viewer session, and every save there cooks the scene
+again; results and exports that use it are marked as holding unpublished edits. **Update to 1.2…** shows first what
+changes in each place the project uses it (a with the version in use, b with the new one, or both overlaid, chosen
+over the view) and applies it only when you confirm; a big version whose graphs must change asks once more and gives a
+line to copy for your agent. The Scene tree marks the nodes of a package with an update or a live folder. In a
+package's own project the tab shows its last version, whether it changed since, and **Check publish**, the dry run.
 
 The commands (a folder named must exist; without one, the current folder's project):
 

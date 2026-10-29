@@ -1,6 +1,6 @@
 {
   "id": "examples",
-  "graph": "main",
+  "graph": "street_block",
   "bake": {},
   "title": "Examples",
   "description": "The showcase graphs: npm run showcase renders each into renders/, npm test checks each against its golden fingerprint. Some use TopoTopo's own packages, whose copies are in packages/.",
