@@ -2,13 +2,13 @@
 
 # TopoTopo node reference
 
-234 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+235 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
-- [generate](#generate-nodes): [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
+- [generate](#generate-nodes): [beam](#beam) · [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
 - [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
@@ -30,6 +30,95 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_edge_detect](#tex_edge_detect) · [tex_gradient](#tex_gradient) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_scan](#tex_histogram_scan) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_scratches](#tex_scratches) · [tex_shape](#tex_shape) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
+
+### beam
+
+category: `generate` · aliases: `strut`, `post`, `rafter`, `joist`, `brace`, `member`, `lumber`, `girder`, `beams`
+
+Beams between two points, between point pairs or along every segment of curves: a rectangle (or any closed profile on input 1) swept straight, with an up vector, caps, uv in metres and a prim name. Posts, rafters, joists, struts, trusses.
+
+Without input 0 one beam runs from start to end. With input 0 every segment of its curves (polylines, and the edges of polygons) becomes a beam (from "segments"), or, for points only, each consecutive pair (0-1, 2-3 …: from "pairs"); "auto" picks segments when there are curves. The profile lies across the beam: its first axis runs to the side, its second along up projected square to the beam (a beam along up takes +Z, else +X, as up), then roll turns it about the beam. The default profile is a size[0] × size[1] rectangle (width to the side, height up), centred on the line; offset shifts it (offset [0, size[1] / 2] puts the line along the bottom face, e.g. joists resting on a line). A closed curve on input 1 replaces it, drawn flat in any plane (shape2d's XZ: x to the side, -z up; XY: x to the side, y up): an I-beam, a channel, a round bar; every closed loop is swept, each capped on its own (switch caps off for hollow sections). extend lengthens the start and end (negative shortens, e.g. by half a post's width). uv: along the beam (u) and around the profile (v) in metres × uv_scale; caps are mapped flat. Point attributes of the input (Cd, …) are blended along each beam and prim attributes copied from the curve a beam follows; name (with {index} for the beam number) names every beam's prims, "" keeps the curve's name.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `path` | yes | no | optional: curves (each segment a beam) or points (pairs); else start → end |
+| 1 | `profile` | yes | no | optional: a closed cross-section curve, drawn flat (else the size rectangle) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `start` | vec3 | `[0,0,0]` |  |  | `from`, `p0`, `a` | start point when input 0 is not connected |
+| `end` | vec3 | `[0,3,0]` |  |  | `to`, `p1`, `b` | end point when input 0 is not connected |
+| `from` | enum | `"auto"` |  | `auto`, `segments`, `pairs` | `mode` | input 0: every curve segment, or consecutive point pairs (auto: segments when there are curves) |
+| `size` | vec2 | `[0.1,0.2]` | 0.. |  | `section`, `dimensions` | rectangle profile [width to the side, height up] in metres |
+| `up` | vec3 | `[0,1,0]` |  |  | `up_vector` | which way the profile's second axis (the height) faces, projected square to the beam |
+| `roll` | float | `0` |  |  |  | turn the profile about the beam, degrees |
+| `offset` | vec2 | `[0,0]` |  |  |  | shift of the profile [to the side, up] in metres (the line is its origin) |
+| `extend` | vec2 | `[0,0]` |  |  | `overhang`, `extension` | lengthen [start, end] along the beam in metres (negative shortens) |
+| `divisions` | int | `1` | 1..1000 |  | `segments`, `rows` | segments along the length (for later bending) |
+| `caps` | bool | `true` |  |  | `cap`, `end_caps` | close both ends |
+| `uv_scale` | float | `1` | 0.. |  |  | uv units per metre (uv in metres at 1) |
+| `name` | string | `"beam"` |  |  | `prim_name` | prim name of every beam ({index} = the beam number; "" = keep the input curve's name) |
+
+**Writes:** polygons; prim groups sides, caps; prim string name, prim int beam (the beam number); vertex uv
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "frame": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            2.4,
+            0
+          ],
+          [
+            3,
+            2.4,
+            0
+          ],
+          [
+            3,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "posts": {
+      "type": "beam",
+      "in": [
+        "frame"
+      ],
+      "params": {
+        "size": [
+          0.12,
+          0.12
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "name": "timber_{index}"
+      }
+    }
+  },
+  "output": "posts"
+}
+```
 
 ### box
 

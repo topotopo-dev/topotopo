@@ -150,7 +150,7 @@ export const INPUTS: Record<string, string[]> = {
   // PCG: masks on the sphere, a colour map on the grid (point uv), points from scatter, samples along the curve
   attribute_from_map: ['GRID'], orient: ['PTS'], points_along_curve: ['CURVE'], cluster: ['PTS'], prune: ['PTS'],
   convert_curve: ['NURBS'], spline_fit: ['NOISY'], fillet_curve: ['ZIGZAG'], offset_curve_3d: ['NURBS'], project_curve: ['ROAD', 'BUMPY'],
-  curve_attribs: ['NURBS'], straight_skeleton: ['KIT_FOOTPRINT'],
+  curve_attribs: ['NURBS'], straight_skeleton: ['KIT_FOOTPRINT'], beam: ['ZIGZAG', 'SHAPE'],
   // textures: filters on the noise image, two-image nodes on noise + bricks, bakes on the unwrapped box
   tex_blend: ['TEX', 'TEX2', 'TEXSHAPE'], tex_levels: ['TEX'], tex_curves: ['TEX'], tex_blur: ['TEX'], tex_warp: ['TEX2', 'TEX'],
   tex_transform: ['TEX2'], tex_edge_detect: ['TEX2'], tex_invert: ['TEX'], tex_threshold: ['TEX'], tex_histogram_scan: ['TEX'],
@@ -219,6 +219,7 @@ export const PARAMS: Record<string, any> = {
   mesh_repair: { self_intersections: 'report' },
   lod: { levels: 3 },
   attrib_string: { format: 'part_{piece:02}_{index}', case: 'upper' },
+  beam: { up: [0, 0, 1], roll: 15, extend: [0.05, 0.1], divisions: 2, name: 'member_{index}' },
   mask: { by: 'slope', min: 0, max: 45, falloff: 15 },
   // attribute_from_map and image_file: { path } is filled in by createFixtureEngine() (an RGBA PNG written to the temp dir)
   orient: { random_yaw: [0, 360], tilt: [0, 10], scale_min: 0.8, scale_max: 1.2 },

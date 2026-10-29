@@ -33,3 +33,4 @@ import './rbd.ts';
 import './cloth.ts';
 import './scene.ts';
 import './solidify.ts';
+import './beam.ts';
