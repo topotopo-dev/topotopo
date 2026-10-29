@@ -207,7 +207,7 @@ export function ownOutputsNamed(pkg: string, graph: GraphSpec, node: string, sco
         const n = parsePackageName(spec.type);
         if (typeof n !== 'string' && n.package === pkg) out.add(n.output ?? '');
       } else {
-        const asset = scope.assets.get(spec.type) ?? scope.assets.get(spec.type.replace(/^asset:/, ''));
+        const asset = scope.assets.get(spec.type);
         if (asset) visit(asset.graph, at(asset.graph, asset.graph.output), depth + 1);
         else if (getNodeDef(spec.type)?.type === 'graph_ref' && typeof spec.params?.graph === 'string') {
           const ref = scope.graphs?.(spec.params.graph);
@@ -247,7 +247,7 @@ export function packagesUsed(engine: Engine, graph: GraphSpec, scope: Scope = en
         once(o.spec, o.scope, depth + 1);
       } else if (def) {
         // an asset's graph and a graph_ref's graph cook in the same scope
-        const asset = engine.asset(node.type, s) ?? engine.asset(node.type.replace(/^asset:/, ''), s);
+        const asset = engine.asset(node.type, s);
         if (asset?.def === def) once(asset.graph, s, depth + 1);
         else if (def.type === 'graph_ref' && typeof node.params?.graph === 'string') {
           const ref = s.graphs?.(node.params.graph);

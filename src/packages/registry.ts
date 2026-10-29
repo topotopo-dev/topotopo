@@ -37,7 +37,6 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { graphInterface } from '../graph/engine.ts';
 import type { Engine } from '../graph/engine.ts';
-import { migrateGraph } from '../graph/migrate.ts';
 import { KINDS, isKind, outputFieldIssues } from '../graph/outputs.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { ownOutputsNamed, packageAt, packageOutputDef, packagesNamedIn, varsRead } from '../graph/packages.ts';
@@ -312,8 +311,8 @@ export function readLock(dir: string): Lock {
   for (const [pkg, vs] of Object.entries<any>(raw.packages)) {
     if (!isPackageName(pkg) || !vs || typeof vs !== 'object' || Array.isArray(vs)) throw new Error(shape);
     for (const [v, e] of Object.entries<any>(vs)) {
-      if (!VERSION_RE.test(v) || !e || typeof e.hash !== 'string') throw new Error(shape);
-      (out.packages[pkg] ??= {})[v] = { hash: e.hash, library: typeof e.library === 'string' ? e.library : '', uses: usesOf(e.uses, `${file} ${pkg} ${v}`) };
+      if (!VERSION_RE.test(v) || !e || typeof e.hash !== 'string' || typeof e.library !== 'string') throw new Error(shape);
+      (out.packages[pkg] ??= {})[v] = { hash: e.hash, library: e.library, uses: usesOf(e.uses, `${file} ${pkg} ${v}`) };
     }
   }
   return out;
@@ -349,7 +348,7 @@ function usesClosure(uses: Record<string, string>, lock: Lock): [string, string]
 
 // -------------------------------------------------------------------------------------------- what a package holds
 
-/** A graph folder's graphs by name (top level of graphs/, migrated); unreadable ones are problems. */
+/** A graph folder's graphs by name (top level of graphs/); unreadable ones are problems. */
 function readGraphs(dir: string, problems: string[]): Map<string, GraphSpec> {
   const out = new Map<string, GraphSpec>();
   let files: string[] = [];
@@ -357,7 +356,7 @@ function readGraphs(dir: string, problems: string[]): Map<string, GraphSpec> {
   for (const f of files) {
     const name = f.slice(0, -5);
     if (!NAME_RE.test(name)) continue;
-    try { out.set(name, migrateGraph(JSON.parse(fs.readFileSync(path.join(dir, 'graphs', f), 'utf8')))); }
+    try { out.set(name, JSON.parse(fs.readFileSync(path.join(dir, 'graphs', f), 'utf8'))); }
     catch (e: any) { problems.push(`graphs/${f}: ${e.message}`); }
   }
   return out;
@@ -484,7 +483,7 @@ function registerAssets(engine: Engine, scope: Scope, dir: string, problems: str
   let files: string[] = [];
   try { files = fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json')).sort(); } catch { /* no assets */ }
   for (const f of files) {
-    try { pending.push({ name: f.slice(0, -5), graph: migrateGraph(JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8'))) }); }
+    try { pending.push({ name: f.slice(0, -5), graph: JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8')) }); }
     catch (e: any) { problems.push(`assets/${f}: ${e.message}`); }
   }
   for (let pass = 0; pending.length; pass++) {

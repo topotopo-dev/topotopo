@@ -338,7 +338,6 @@ defineNode({
     name: { type: 'string', default: 'heightfield', desc: 'new field name' },
   },
   // relative paths read the scope's folder
-  usesScope: true,
   signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
   outputs: 'the layer (a new field also gets height and mask)',
   example: { type: 'heightfield_from_image', params: { path: 'terrain.png', size: [100, 100], height_min: 0, height_max: 25 } },

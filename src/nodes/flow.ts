@@ -140,7 +140,6 @@ defineNode({
   // the body's "=expr" params and code read the parent vars, so they are part of the cache key
   usesVars: true,
   // the body's node types resolve in the scope
-  usesScope: true,
   example: {
     type: 'foreach',
     in: ['pieces'],
@@ -274,7 +273,6 @@ defineNode({
   // the body's "=expr" params and code read the parent vars
   usesVars: true,
   // the body's node types resolve in the scope
-  usesScope: true,
   example: {
     type: 'solver',
     in: ['seed'],
@@ -369,7 +367,6 @@ defineNode({
     vars: { type: 'json', default: {}, desc: 'override that graph\'s vars' },
   },
   // the graph is the scope's, and its node types resolve there
-  usesScope: true,
   signatureExtra: (p, scope) => {
     const g = scope.graphs?.(p.graph);
     return g ? String(hashString(stableStringify(g))) : 'missing';
@@ -440,7 +437,6 @@ defineNode({
     instancing: { type: 'enum', options: ['packed', 'expand'], default: 'packed', desc: 'glTF shared meshes and EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry' },
   },
   // relative paths read the scope's folder
-  usesScope: true,
   signatureExtra: (p, scope) => {
     const host = scope.files, files = directoryFiles(p.path, host);
     return files === null ? host.fileStamp(p.path) : JSON.stringify([host.fileStamp(p.path), files.map((f) => [f, host.fileStamp(childPath(p.path, f))])]);

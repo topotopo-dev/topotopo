@@ -21,7 +21,6 @@ import { diffGeometry, diffOverlay } from '../explain.ts';
 import type { DiffResult } from '../explain.ts';
 import { wiringOf } from '../graph/engine.ts';
 import type { CookReport, NodeProgress, StopSignal } from '../graph/engine.ts';
-import { migrateGraph } from '../graph/migrate.ts';
 import { upstreamOf } from '../graph/packages.ts';
 import { didYouMean, resolveParamName } from '../graph/params.ts';
 import { parsePackageName } from '../graph/scope.ts';
@@ -141,7 +140,7 @@ function graphsNaming(dir: string, pkg: string, problems: string[]): ProjectGrap
     let spec: unknown;
     try { spec = JSON.parse(text); } catch (e: any) { if (kind !== 'file') problems.push(`${file}: ${e.message}`); return; }
     if (!isGraph(spec)) return;
-    try { out.push({ file, kind, spec: migrateGraph(spec), ...(kind === 'file' ? { folder: path.dirname(abs) } : {}) }); }
+    try { out.push({ file, kind, spec: spec, ...(kind === 'file' ? { folder: path.dirname(abs) } : {}) }); }
     catch (e: any) { problems.push(`${file}: ${e.message}`); }
   };
   for (const [sub, kind] of [['graphs', 'graph'], ['assets', 'asset']] as const) {

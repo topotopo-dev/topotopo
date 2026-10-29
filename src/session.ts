@@ -13,7 +13,6 @@ import type { CookReport, Issue, NodeProgress, StopSignal } from './graph/engine
 import type { ExportTarget, GraphSpec, NodeDef, NodeSpec } from './graph/types.ts';
 import type { PackageResolver, Scope } from './graph/scope.ts';
 import { didYouMean, renameExprRefs } from './graph/params.ts';
-import { migrateGraph } from './graph/migrate.ts';
 import { maybeSidecar, sidecarOf } from './io/sidecars.ts';
 import type { Sidecar } from './io/sidecars.ts';
 import { fileFormat } from './host/sidecars.ts';
@@ -279,13 +278,12 @@ export class Session {
     const assetErrors: string[] = [];
     for (const f of fs.readdirSync(this.assetDir).filter((f) => f.endsWith('.json'))) {
       try {
-        const spec = migrateGraph(JSON.parse(fs.readFileSync(path.join(this.assetDir, f), 'utf8')));
+        const spec = JSON.parse(fs.readFileSync(path.join(this.assetDir, f), 'utf8'));
         this.engine.registerAsset(path.basename(f, '.json'), spec);
       } catch (e: any) { assetErrors.push(`${f}: ${e.message}`); }
     }
     for (const [name, file] of graphFiles(this.dir)) {
-      // migrated in memory; the file is rewritten (with its version) on the next save
-      try { this.graphs.set(name, migrateGraph(JSON.parse(fs.readFileSync(file, 'utf8')))); }
+      try { this.graphs.set(name, JSON.parse(fs.readFileSync(file, 'utf8'))); }
       catch { continue; /* skip unreadable */ }
       if (path.dirname(file) === this.dir) this.besideProject.set(name, file);
     }
@@ -321,7 +319,7 @@ export class Session {
 
   setGraph(name: string, spec: GraphSpec) {
     if (!NAME_RE.test(name)) throw new Error(`graph name must match ${NAME_RE}`);
-    this.graphs.set(name, migrateGraph(spec));
+    this.graphs.set(name, spec);
     this.settleSession(name);
     this.persist(name);
   }
@@ -487,7 +485,7 @@ export class Session {
 
   /** Merge nodes/vars/output of `patch` into an existing graph (upsert). */
   mergeGraph(name: string, patch: GraphSpec): GraphSpec {
-    patch = migrateGraph(patch);
+    patch = patch;
     const base = structuredClone(this.graphs.get(name) ?? { nodes: {} });
     Object.assign(base.nodes, patch.nodes ?? {});
     if (patch.vars) base.vars = { ...(base.vars ?? {}), ...patch.vars };
@@ -749,7 +747,7 @@ export class Session {
       }
       const j = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (!holdsGraph(j)) return;
-      const spec = migrateGraph(j);
+      const spec = j;
       const cur = this.graphs.get(name);
       if (cur && JSON.stringify(cur) === JSON.stringify(spec)) return;
       this.graphs.set(name, spec);
@@ -766,7 +764,7 @@ export class Session {
     });
     on(this.assetDir, (name, file) => {
       if (!fs.existsSync(file)) return;
-      const spec = migrateGraph(JSON.parse(fs.readFileSync(file, 'utf8')));
+      const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
       const before = this.engine.asset(name)?.hash;
       this.engine.registerAsset(name, spec);
       if (this.engine.asset(name)?.hash === before) return;

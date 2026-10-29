@@ -10,7 +10,6 @@ import os from 'node:os';
 import path from 'node:path';
 import '../nodes/index.ts';
 import { Engine } from '../graph/engine.ts';
-import { migrateGraph } from '../graph/migrate.ts';
 import { createNodeHost } from '../host/node.ts';
 import { openPackages } from '../packages/registry.ts';
 import { Session } from '../session.ts';
@@ -79,8 +78,8 @@ export class GraphFile implements GraphSource {
     this.text = text;
     const cur = this.ws.graphs.get(this.graph);
     try {
-      if (cur && JSON.stringify(migrateGraph(spec)) === JSON.stringify(cur)) return;
-      for (const n of this.ws.packages?.addFor(migrateGraph(spec)) ?? []) this.log(n);
+      if (cur && JSON.stringify(spec) === JSON.stringify(cur)) return;
+      for (const n of this.ws.packages?.addFor(spec) ?? []) this.log(n);
       this.ws.setGraph(this.graph, spec);
     } catch (e) { this.log(`${this.file}: ${errorText(e)} (keeping the last good version)`); return; }
     await this.cook();
@@ -110,7 +109,7 @@ export class GraphFile implements GraphSource {
     this.text = text;
     const spec = JSON.parse(text.replace(/^﻿/, ''));
     const cur = this.ws.graphs.get(this.graph);
-    if (!cur || JSON.stringify(migrateGraph(spec)) !== JSON.stringify(cur)) this.ws.setGraph(this.graph, spec);
+    if (!cur || JSON.stringify(spec) !== JSON.stringify(cur)) this.ws.setGraph(this.graph, spec);
   }
 
   /** Follow saves of the file: its folder is watched, so editors that save by replacing the file are followed too. */

@@ -318,7 +318,6 @@ defineNode({
     group: P.group('point', 'points to write ("" = all)'),
   },
   // relative paths read the scope's folder
-  usesScope: true,
   signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
   outputs: 'point (or vertex) float <name> (vec3 for channel rgb)',
   example: { type: 'attribute_from_map', in: ['ground_pts'], params: { path: 'density.png', projection: 'xz', size: [100, 100], name: 'density' } },

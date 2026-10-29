@@ -8,7 +8,6 @@ import type { CookReport } from '../graph/engine.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
-import { migrateGraph } from '../graph/migrate.ts';
 import { catalogText, nodeDoc, topicList, topicText, INSTRUCTIONS } from './docs.ts';
 import { nodeBudgetInput, summarize, inspect } from '../inspect.ts';
 import { glbSceneReport, sceneReportText } from '../io/inspect-scene.ts';
@@ -326,7 +325,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         const name = a.name ?? 'main';
         let spec: GraphSpec = a.graph;
         if (typeof spec === 'string') spec = JSON.parse(spec);
-        spec = migrateGraph(spec);
+        spec = spec;
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
         if (a.dry_run) {
           // a package the graph names for the first time: checked against the version a build adds, nothing copied
@@ -586,7 +585,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           }
           case 'save': {
             if (!a.name) throw new Error('"name" is required');
-            const g: GraphSpec = migrateGraph(structuredClone(a.graph ?? ws.getGraph(a.from_graph ?? 'main')));
+            const g: GraphSpec = structuredClone(a.graph ?? ws.getGraph(a.from_graph ?? 'main'));
             if (a.description) g.description = a.description;
             if (a.params) g.params = { ...(g.params ?? {}), ...a.params };
             validAsset(String(a.name), g);
