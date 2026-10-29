@@ -363,11 +363,13 @@ every sample. They show the mask layer in red; `--heightfield-layer flow` shows 
 
 Every export records how it was made in a `source` block: the graph's name and the SHA-256 of its JSON as cooked, the
 output and node, frame and fps, every var after overrides, the seeds the graph sets, the format and options, and the
-TopoTopo version. Heightmaps (`png16`, `r16`) keep it in their `.json` sidecar, instance rows in `<name>.meshes.json`
+TopoTopo version; the options are every one the format reads, the defaults included, so a later default change does not
+change what a record replays. Heightmaps (`png16`, `r16`) keep it in their `.json` sidecar, instance rows in `<name>.meshes.json`
 and the Unreal Landscape bundle in `landscape.json`; every other export writes `<file>.source.json` next to the file (a
 `textures` folder gets `source.json` inside it), and glTF also carries it in `asset.extras.source`. The same graph,
 values and options give the same bytes, so the manifest is enough to make the export again: pass its output
-(`--output`) or node (`--node`), `--frame`, `--fps` and one `--var name=<value as JSON>` per var (help topic `export`).
+(`--output`) or node (`--node`), `--frame`, `--fps`, one `--var name=<value as JSON>` per var, `--format` and every
+option as its flag (`--up-axis z`, `--custom-attribs` / `--no-custom-attribs`, `--layers a,b`; help topic `export`).
 
 Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`, output paths may contain `{frame}` or
 `{frame:04}`; without a pattern, `.0001`-style frame numbers are inserted before the extension:

@@ -148,7 +148,7 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
 {
   const x = await call('export', { path: 'exports/scene_z.obj', up_axis: 'z', scale: 100, frame: 3 });
   const s = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'scene_z.obj.source.json'), 'utf8')).source;
-  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"scale":100,"up_axis":"z"}}', 'the source records the frame and the export options given');
+  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"instancing":"packed","scale":100,"split_by_name":true,"up_axis":"z"}}', `the source records the frame, the export options given and the defaults of the rest (${JSON.stringify(s.export)})`);
 }
 {
   const x = await call('export', { path: 'exports/scene_meshopt.glb', compress: 'meshopt' });
@@ -176,7 +176,7 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
   // formats with a sidecar or manifest keep the source there
   const bundleSource = JSON.parse(fs.readFileSync(man, 'utf8')).source;
   const rowsSource = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'shrubs.meshes.json'), 'utf8')).source;
-  check(bundleSource?.graph === 'ue' && bundleSource.export.format === 'unreal_landscape' && rowsSource?.node === 'inst' && JSON.stringify(rowsSource.export.options) === '{"pcg":true}'
+  check(bundleSource?.graph === 'ue' && bundleSource.export.format === 'unreal_landscape' && rowsSource?.node === 'inst' && JSON.stringify(rowsSource.export.options) === '{"custom_attribs":false,"instances":"rows","instancing":"packed","materials":true,"meshes":true,"pcg":true,"pcg_struct":false,"scale":100,"up_axis":"y"}'
     && !fs.existsSync(path.join(wsDir, 'exports', 'shrubs.csv.source.json')) && /source recorded in shrubs\.meshes\.json/.test(b2.txt),
     'unreal_landscape records the source in landscape.json, instance rows in <name>.meshes.json');
 }

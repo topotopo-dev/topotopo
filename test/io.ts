@@ -298,8 +298,8 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     const prepared = await prepareTarget(g, 'g', part as typeof part & { target: NonNullable<typeof part.target> }, dir, engine.host, { frame: 5 });
     const man = json(prepared.files.find((f) => f.path === prepared.sourceManifest)!.bytes).source;
     check(prepared.sourceManifest === path.join(dir, 'parts', 'b.obj.source.json') && man.graph === 'g' && man.output === 'part' && man.node === 'b' && man.frame === 5 && man.fps === 24
-      && JSON.stringify(man.export) === '{"format":"obj","options":{"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
-      'an export target records its source from the graph it is published from');
+      && JSON.stringify(man.export) === '{"format":"obj","options":{"instancing":"packed","scale":1,"split_by_name":true,"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
+      `an export target records its source from the graph it is published from, every option the format reads with its default (${JSON.stringify(man.export)})`);
     writeTargets([prepared], dir);
     check(fs.existsSync(path.join(dir, 'parts', 'b.obj.source.json')) && new ArtifactStore(dir).records()[0].files.length === 2, 'writeTargets writes the manifest with the export and records both');
   } finally {

@@ -117,6 +117,25 @@ export function exportSource(i: SourceInput): ExportSource {
   };
 }
 
+/** The source block with these export options (an export records the options it used, defaults included). */
+export function withExportOptions(s: ExportSource, options: Record<string, unknown>): ExportSource {
+  return { ...s, export: { format: s.export.format, options: sorted(options) } };
+}
+
+/**
+ * The command line that makes an export again from its source block: the output (or node), frame, fps, every var as
+ * JSON, the format and every export option as its flag (io/targets.ts exportOptionFlags), then --export <path>.
+ * Run it on the graph file the block names (its graph_sha256 says whether the file still is the one exported).
+ */
+export function replayArgs(s: ExportSource, exportPath: string, flags: (o: Record<string, unknown>) => string[]): string[] {
+  return [
+    ...(s.output ? ['--output', s.output] : ['--node', s.node]),
+    '--frame', String(s.frame), '--fps', String(s.fps),
+    ...Object.entries(s.vars).flatMap(([k, v]) => ['--var', `${k}=${JSON.stringify(v)}`]),
+    '--format', s.export.format, ...flags(s.export.options), '--export', exportPath,
+  ];
+}
+
 /**
  * A standalone source manifest: the files of the export (relative to the manifest's folder, "/" separated) and the
  * source block.

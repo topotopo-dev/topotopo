@@ -32,9 +32,90 @@ const NUMBER = ['scale', 'height_min', 'height_max', 'tile_size', 'heightfield']
 const NAMES = ['attributes', 'layers'];
 const OPTIONS = [...BOOLEAN, ...Object.keys(CHOICES), ...NUMBER, ...NAMES, 'layer'];
 
-/** The export tool's options among `a` (the tool's arguments), those that are set: what an export's source records. */
+/** The export tool's options among `a` (the tool's arguments), those that are set. */
 export function exportToolOptions(a: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(OPTIONS.filter((k) => a[k] !== undefined && a[k] !== null).map((k) => [k, a[k]]));
+}
+
+const MESH = { up_axis: 'y', scale: 1, instancing: 'packed' };
+const GLTF = { ...MESH, split_by_name: true, custom_attribs: false, materials: true, compress: 'none', quantize: false, tangents: 'auto' };
+/** instance rows (csv / points.json of packed prims) write one GLB per source with these */
+const ROWS = { instances: 'rows', meshes: true, materials: true, custom_attribs: false };
+
+/**
+ * The options a format reads, with the value each takes when it is not given. Every export passes them explicitly
+ * (host/export-targets.ts serializeExport) and records them in its source block, so a record replays to the same bytes
+ * even when a later version changes a default. Options whose default depends on the data (height_min / height_max:
+ * the layer's range; attributes: all; layers) are recorded only when given.
+ */
+export function exportDefaults(format: ExportFormat, a: Record<string, unknown> = {}): Record<string, unknown> {
+  switch (format) {
+    case 'glb': case 'gltf': return { ...GLTF };
+    case 'usda': return { ...MESH, split_by_name: true, custom_attribs: false, materials: true };
+    case 'obj': return { ...MESH, split_by_name: true };
+    case 'ply': return { ...MESH, custom_attribs: true };
+    case 'stl': return { ...MESH };
+    case 'json': return { instancing: 'packed' };
+    case 'geo': return { precision: 64, instancing: 'packed' };
+    // PCG rows are in Unreal centimetres unless a scale is given
+    case 'csv': return { up_axis: 'y', scale: a.pcg || a.pcg_struct ? 100 : 1, pcg: false, pcg_struct: false, instancing: 'packed', ...ROWS };
+    case 'pointsjson': return { up_axis: 'y', scale: 1, instancing: 'packed', ...ROWS };
+    case 'png16': case 'r16': return { layer: 'height', heightfield: 0 };
+    case 'mask_png': return a.layers ? { heightfield: 0 } : { layer: 'mask', heightfield: 0 };
+    case 'unreal_landscape': return { layer: 'height', heightfield: 0, tile_size: 0, materials: true, custom_attribs: false };
+    case 'textures': return {};
+  }
+  return {};
+}
+
+/** The options an export of `format` uses: the given ones over the format's defaults (keys sorted). */
+export function resolvedExportOptions(format: ExportFormat, a: Record<string, unknown>): Record<string, unknown> {
+  const o: Record<string, unknown> = { ...exportDefaults(format, a), ...exportToolOptions(a) };
+  return Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
+}
+
+/** "custom_attribs" → "--custom-attribs" */
+const flagOf = (k: string) => '--' + k.replace(/_/g, '-');
+
+/** Export options as CLI flags: booleans as --name / --no-name, lists comma-joined, the rest --name value. */
+export function exportOptionFlags(o: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const k of Object.keys(o).sort()) {
+    const v = o[k];
+    if (v === undefined || v === null) continue;
+    if (BOOLEAN.includes(k)) out.push(v ? flagOf(k) : '--no-' + k.replace(/_/g, '-'));
+    else if (Array.isArray(v)) out.push(flagOf(k), v.join(','));
+    else out.push(flagOf(k), String(v));
+  }
+  return out;
+}
+
+/**
+ * The export options among CLI arguments (the reverse of exportOptionFlags): every option of the export tool as a flag.
+ * Throws on a value the option does not take (targetError's checks).
+ */
+export function exportOptionsFromFlags(argv: string[]): Record<string, unknown> {
+  const a: Record<string, unknown> = {};
+  const val = (f: string) => { const i = argv.indexOf(f); if (i < 0) return undefined; const v = argv[i + 1]; if (v === undefined || v.startsWith('--')) throw new Error(`${f} needs a value`); return v; };
+  for (const k of OPTIONS) {
+    const f = flagOf(k);
+    if (BOOLEAN.includes(k)) {
+      const on = argv.includes(f), off = argv.includes('--no-' + k.replace(/_/g, '-'));
+      if (on && off) throw new Error(`use ${f} or --no-${k.replace(/_/g, '-')}, not both`);
+      if (on || off) a[k] = on;
+      continue;
+    }
+    const v = val(f);
+    if (v === undefined) continue;
+    if (NAMES.includes(k)) a[k] = v.split(/[\s,]+/).filter(Boolean);
+    else if (NUMBER.includes(k) || k === 'precision') { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`${f} expects a number, got "${v}"`); a[k] = n; }
+    else a[k] = v;
+  }
+  // --pcg-struct implies --pcg (the struct cells are a PCG layout)
+  if (a.pcg_struct === true && a.pcg === undefined) a.pcg = true;
+  const err = targetError({ format: 'glb', ...a });
+  if (err) throw new Error(err.replace(/^export option /, '').replace(/^(\w+)/, (m) => flagOf(m)));
+  return a;
 }
 
 /** A path segment Windows and POSIX both accept, and that cannot climb out of exports/. */

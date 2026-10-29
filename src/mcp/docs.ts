@@ -1057,7 +1057,8 @@ export {path:"exports/thing.glb"} — format from the extension:
   obj usda ply stl json (lossless topotopo)
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
-  custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
+  custom_attribs (extra numeric attributes: default off for glb / gltf / usda and the GLBs of instance rows and bundles,
+  on for ply), materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
@@ -1067,13 +1068,18 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
   --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
   cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
   (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
-  export: {format, options}, topotopo (the version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
+  export: {format, options: every option the format reads, the given ones and the defaults of the rest}, topotopo (the
+  version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
   instance rows in <name>.meshes.json, unreal_landscape in landscape.json; every other export writes <file>.source.json
   next to the file ({format:"topotopo-export-source", version, files, source}; a textures folder: source.json inside
   it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
-  graph, values and options give the same bytes. Replay on the command line: topotopo <graph>.json --output <output>
-  (or --node <node>) --frame <frame> --fps <fps>, one --var <name>=<value as JSON> per var, and --export <path> with the
-  same options. These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
+  graph, values and options give the same bytes, and a later version changing a default does not change what the
+  record replays. Replay on the command line: topotopo <graph>.json --output <output> (or --node <node>) --frame <frame>
+  --fps <fps>, one --var <name>=<value as JSON> per var, --format <format>, every option as its flag (up_axis "z" →
+  --up-axis z, custom_attribs false → --no-custom-attribs, layers ["a","b"] → --layers a,b) and --export <path>. e.g.
+    topotopo graphs/crate.json --node h --frame 1 --fps 24 --format glb --compress none --custom-attribs
+      --instancing packed --materials --no-quantize --scale 100 --split-by-name --tangents auto --up-axis z --export crate.glb
+  These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
   them with it (kind "metadata"), and a file node reading one says what to read instead.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with

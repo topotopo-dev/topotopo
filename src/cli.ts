@@ -7,7 +7,9 @@
 //                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
 //                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
-//                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes]
+//                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--no-materials]
+//                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
+//                   (every option of the export tool has a flag; booleans take --name / --no-name)
 //                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--json]]
 //   --output picks a named output (the graph's "outputs"); --var overrides a graph var for this run (src/graph/vars.ts).
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
@@ -54,7 +56,7 @@ import { ArtifactStore } from './host/artifacts.ts';
 import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
-import { publishedOutputs } from './io/targets.ts';
+import { exportOptionsFromFlags, publishedOutputs } from './io/targets.ts';
 import { budgetReport, inspect, nodeBudgetInput, summarize } from './inspect.ts';
 import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
 import { uvReport } from './core/uvreport.ts';
@@ -109,13 +111,17 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           side.png: the front view over the reference; beauty.png: a pbr three-quarter view. Options after the last of several',
     '           --render apply to it alone (a warning says so)',
     '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails)',
-    '         export options: [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '         export options (every option of the export tool; booleans as --name / --no-name):',
+    '                         [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '                         [--custom-attribs | --no-custom-attribs] (extra numeric attributes; glTF and USD default off, PLY on) [--materials | --no-materials]',
+    '                         [--split-by-name | --no-split-by-name] [--precision 32|64] (geo) [--layer height] [--height-min 0] [--height-max 100] [--heightfield 0]',
     '                         [--instancing packed|expand] (packed instances: glb/usda/geo keep them by default)',
     '                         [--instances rows|expand] [--no-meshes] (csv/points.json of packed instances: one row per instance + meshes sidecar + GLBs)',
     '       export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json; heightfields .png (png16) .r16,',
     '                       --format mask_png --layers a,b, --format unreal_landscape (a directory bundle; --tile-size 1008 for tiled Landscape);',
     '                       images: --format textures --export out/maps (one PNG per image; --layers a,b or * for extra layers)',
-    '       every export records how it was made (graph, graph hash, output, node, frame, fps, vars, seeds, options, version) in its sidecar',
+    '       every export records how it was made (graph, graph hash, output, node, frame, fps, vars, seeds, every option with its default, version)',
+    '                       in its sidecar; replay: --output/--node, --frame, --fps, --var per var, --format and each option as its flag',
     '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a project: its packages' outputs too, --help-node owner/name/output)`,
@@ -371,8 +377,6 @@ async function cook() {
       const raw = (opt('--format') ?? exportFormatFromPath(ex)).toLowerCase();
       const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
       if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
-      if (argv.includes('--tile-size') && opt('--tile-size') === undefined) fail('--tile-size requires a number of quads (e.g. 1008)');
-      if (opt('--tangents') !== undefined && !['auto', 'preserve', 'none'].includes(opt('--tangents')!)) fail(`--tangents must be auto, preserve or none (got "${opt('--tangents')}")`);
       // the export tool's options (the MCP export tool and export targets use the same names and code)
       const a = exportArgs();
       const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph), version: TOPOTOPO_VERSION });
@@ -387,20 +391,8 @@ async function cook() {
 
   /** The export flags given, as the export tool's options (snake_case, as export targets and the MCP export tool name them). */
   function exportArgs(): Record<string, unknown> {
-    const a: Record<string, unknown> = {};
-    const up = opt('--up-axis');
-    if (up === 'y' || up === 'z') a.up_axis = up;
-    for (const [f, k] of [['--compress', 'compress'], ['--tangents', 'tangents'], ['--layer', 'layer']]) if (opt(f) !== undefined) a[k] = opt(f);
-    for (const [f, k] of [['--scale', 'scale'], ['--tile-size', 'tile_size']]) if (opt(f) !== undefined) a[k] = Number(opt(f));
-    if (opt('--attributes') !== undefined) a.attributes = opt('--attributes')!.split(/[\s,]+/).filter(Boolean);
-    if (opt('--layers') !== undefined) a.layers = opt('--layers')!.split(',');
-    if (argv.includes('--quantize')) a.quantize = true;
-    if (argv.includes('--pcg') || argv.includes('--pcg-struct')) a.pcg = true;
-    if (argv.includes('--pcg-struct')) a.pcg_struct = true;
-    if (opt('--instancing') === 'expand') a.instancing = 'expand';
-    if (opt('--instances') === 'expand') a.instances = 'expand';
-    if (argv.includes('--no-meshes')) a.meshes = false;
-    return a;
+    // every option of the export tool has a flag: --name value, booleans --name / --no-name (io/targets.ts)
+    try { return exportOptionsFromFlags(argv); } catch (e) { return fail(`export: ${(e as Error).message}`); }
   }
 
   if (framesArg) {

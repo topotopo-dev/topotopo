@@ -11,6 +11,8 @@ import { Engine, resolveTime, STOPPED } from '../src/graph/engine.ts';
 import type { CookOptions, CookReport } from '../src/graph/engine.ts';
 import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
 import { createNodeHost, projectBaseDir } from '../src/host/node.ts';
+import { replayArgs } from '../src/io/source.ts';
+import { exportOptionFlags } from '../src/io/targets.ts';
 import { GRAPH_VERSION } from '../src/graph/types.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { migrateGraph, migrateGraphDetailed } from '../src/graph/migrate.ts';
@@ -833,15 +835,15 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const s = man?.source;
   check(man?.format === 'topotopo-export-source' && JSON.stringify(man.files) === '["land.glb"]' && s.graph === 'land' && s.output === 'mesh' && s.node === 'ground'
     && s.frame === 1 && s.fps === 24 && JSON.stringify(s.vars) === '{"count":10,"relief":5,"seed":3}' && JSON.stringify(s.seeds) === '{"hills":"=seed","pts":2}'
-    && JSON.stringify(s.export) === '{"format":"glb","options":{}}' && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
-    'the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format, graph hash, version');
+    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y"}}'
+    && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
+    `the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format and every option with its default, graph hash, version (${JSON.stringify(s?.export)})`);
   const glb = fs.readFileSync(path.join(dir, 'a', 'land.glb'));
   const asset = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')).asset;
   check(JSON.stringify(asset.extras?.source) === JSON.stringify(s), 'the GLB carries the same block in asset.extras.source');
-  // replay: the manifest's output, frame, fps and vars on the command line give the same bytes
-  const replay = [...(s.output ? ['--output', s.output] : ['--node', s.node]), '--frame', String(s.frame), '--fps', String(s.fps),
-    ...Object.entries(s.vars).flatMap(([k, v]) => ['--var', `${k}=${JSON.stringify(v)}`])];
-  const again = cli(g, ...replay, '--export', path.join(dir, 'b', 'land.glb'));
+  // replay: the manifest's output, frame, fps, vars, format and every option on the command line give the same bytes
+  const replay = replayArgs(s, path.join(dir, 'b', 'land.glb'), exportOptionFlags);
+  const again = cli(g, ...replay);
   check(again.status === 0 && sha(path.join(dir, 'b', 'land.glb')) === sha(path.join(dir, 'a', 'land.glb'))
     && fs.readFileSync(path.join(dir, 'b', 'land.glb.source.json'), 'utf8') === fs.readFileSync(manifestFile, 'utf8'),
     `replaying the manifest (${replay.join(' ')}) writes the same GLB and a byte-identical manifest`);
@@ -855,6 +857,26 @@ section('CLI --output, --var and export sources (replay from the manifest)');
     && JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'exports', 'mesh.glb.source.json'), 'utf8')).source) === JSON.stringify(s),
     '--export-all with the same vars writes the same GLB and source through the output\'s export target');
   // a heightmap keeps the source in its sidecar
+  // an export target with options of its own (custom attributes on, Z up, centimetres): its record replays on the CLI
+  const tg = path.join(dir, 'target.json');
+  fs.writeFileSync(tg, JSON.stringify({
+    nodes: { b: { type: 'box', params: { divisions: [2, 2, 2] } }, h: { type: 'attrib_randomize', in: ['b'], params: { name: 'heat' } } },
+    output: 'h', export: { format: 'glb', path: 'crate.glb', custom_attribs: true, up_axis: 'z', scale: 100 },
+  }));
+  const tAll = cli(tg, '--export-all');
+  const tSrc = JSON.parse(fs.readFileSync(path.join(dir, 'exports', 'crate.glb.source.json'), 'utf8')).source;
+  const tReplay = cli(tg, ...replayArgs(tSrc, path.join(dir, 'r', 'crate.glb'), exportOptionFlags));
+  check(tAll.status === 0 && tSrc.export.options.custom_attribs === true && tSrc.export.options.materials === true && tReplay.status === 0
+    && sha(path.join(dir, 'r', 'crate.glb')) === sha(path.join(dir, 'exports', 'crate.glb'))
+    && JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'r', 'crate.glb.source.json'), 'utf8')).source) === JSON.stringify(tSrc),
+    `an export target's record (custom attributes on, Z up, cm) replays on the CLI to the same bytes and record (${replayArgs(tSrc, 'crate.glb', exportOptionFlags).join(' ')})`);
+  const on = cli(tg, '--custom-attribs', '--export', path.join(dir, 'r', 'on.glb')), off = cli(tg, '--no-custom-attribs', '--export', path.join(dir, 'r', 'off.glb'));
+  const dflt = cli(tg, '--export', path.join(dir, 'r', 'default.glb'));
+  check(on.status === 0 && off.status === 0 && dflt.status === 0 && sha(path.join(dir, 'r', 'on.glb')) !== sha(path.join(dir, 'r', 'off.glb')) && sha(path.join(dir, 'r', 'default.glb')) === sha(path.join(dir, 'r', 'off.glb'))
+    && /"custom_attribs": false/.test(fs.readFileSync(path.join(dir, 'r', 'off.glb.source.json'), 'utf8')) && /_HEAT/.test(fs.readFileSync(path.join(dir, 'r', 'on.glb')).toString('latin1')),
+    '--custom-attribs / --no-custom-attribs on the CLI export: off by default for glTF, and the record says which');
+  const badFlag = cli(tg, '--up-axis', 'x', '--export', path.join(dir, 'r', 'bad.glb'));
+  check(badFlag.status === 1 && /--up_axis must be one of y, z|--up-axis must be one of y, z/.test(badFlag.stderr), `an export flag with a value it does not take is refused (${badFlag.stderr.trim()})`);
   const field = cli(g, '--output', 'field', '--var', 'relief=5', '--export', path.join(dir, 'h', 'field.png'));
   const side = JSON.parse(fs.readFileSync(path.join(dir, 'h', 'field.json'), 'utf8'));
   check(field.status === 0 && side.source.output === 'field' && side.source.node === 'hills' && side.source.export.format === 'png16' && side.height_max > 0

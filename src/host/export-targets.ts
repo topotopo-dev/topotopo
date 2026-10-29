@@ -10,15 +10,22 @@ import type { Geometry } from '../core/geometry.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
 import type { ExportFile } from '../io/files.ts';
-import { exportSource } from '../io/source.ts';
+import { exportSource, withExportOptions } from '../io/source.ts';
+import { resolvedExportOptions } from '../io/targets.ts';
 import type { ExportSource } from '../io/source.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
 
-/** The files an export writes, nothing written yet; `a` holds the export tool's snake_case options. */
-export async function serializeExport(geo: Geometry, format: ExportFormat, p: string, a: Record<string, any>, host: Host, source?: ExportSource) {
+/**
+ * The files an export writes, nothing written yet; `a` holds the export tool's snake_case options. Every option the
+ * format reads is passed explicitly, the given ones over the format's defaults (io/targets.ts exportDefaults), and the
+ * source block records exactly those, so the record replays to the same bytes.
+ */
+export async function serializeExport(geo: Geometry, format: ExportFormat, p: string, given: Record<string, any>, host: Host, source?: ExportSource) {
+  const a: Record<string, any> = resolvedExportOptions(format, given);
+  if (source) source = withExportOptions(source, a);
   const warnings: string[] = [];
   const outDir = format === 'unreal_landscape' && !/\.json$/i.test(p) ? p : path.dirname(p);
   const res = await exportFilesAsync(geo, format, p, {
