@@ -89,6 +89,9 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   bake_mask: { resolution: [8, 48] },
   bake_vertex_color: { resolution: [8, 48] },
   tex_height_to_ao: { directions: [1, 8], steps: [1, 8] },
+  tex_ao: { directions: [1, 8], steps: [1, 8] },
+  tex_slope_blur: { samples: [1, 8] },
+  tex_warp: { directions: [1, 8] },
   // cloth: few steps; max_points stays at its default (random values would refuse most inputs)
   drape: { steps: [0, 12], substeps: [1, 4], iterations: [1, 2], max_points: 'keep' },
   inflate: { steps: [0, 12], substeps: [1, 4], iterations: [1, 2], max_points: 'keep' },

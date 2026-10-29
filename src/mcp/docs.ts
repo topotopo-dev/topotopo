@@ -592,9 +592,11 @@ GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/
   tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
   hex, dots: 1 on the cells, 0 in the gaps; grid is a line mask, 1 on the lines, 0 in the cells: for grooved cells use
   tiles; gap = mortar or line width, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance /
-  edges / id / crackle) · tex_gradient · tex_constant (one grey value, or an RGBA colour with channels:"rgba";
-  input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star, ring; falloff; tile) ·
-  tex_splatter (blobs) · tex_scratches (strokes) · tex_text.
+  edges / id / crackle / crystal: a tilted flat facet per cell) · tex_gradient · tex_constant (one grey value, or an
+  RGBA colour with channels:"rgba"; input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star,
+  ring; falloff; tile) · tex_sdf_shape (the signed distance in metres to a disc, box, polygon, star, capsule or cross;
+  corner rounding; tile; see SHAPES below) · tex_grunge (dirt / leaks / spots with a coverage fraction and edge
+  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text.
 FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
   (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
   (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).
@@ -602,18 +604,51 @@ FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colou
 FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer and takes the filter's
   name; every other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min,
   max, difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable
-  keeps the mean) · tex_warp (directional/slope/vector by input 1) · tex_transform (offset, rotate, scale, tile) ·
-  tex_edge_detect · tex_invert · tex_threshold · tex_histogram_scan (THE mask maker: coverage 0.3 = the brightest 30 %
-  turn white, whatever the input's range; or position = a value cut; contrast = hardness; stat coverage) ·
+  keeps the mean) · tex_directional_blur (motion blur, length in metres: brushed metal from noise; symmetric off = a
+  trail) · tex_slope_blur (smear input 0 along the slopes of input 1 for distance metres: blur, min = eroded ragged
+  edges, max = grown) · tex_warp (directional/slope/vector by input 1; nonuniform adds an angle map on input 2;
+  multi averages several directions) · tex_transform (offset, rotate, scale, tile) · tex_make_tile (blend with
+  half-shifted copies so a photo or non-tileable noise tiles; noise = a wandering patch edge) · tex_edge_detect
+  (sobel, or outline / inner / outer: a line line_width metres wide along a mask's outline, roundness 1 = a ridge) ·
+  tex_invert · tex_threshold · tex_clamp · tex_quantize (levels; round or floor = posterize) · tex_auto_levels (own
+  range to 0..1; clip ignores outliers; stats range_min/max) · tex_histogram_range (squeeze around position) ·
+  tex_histogram_select (a band position ± range/2, contrast = edge hardness) · tex_histogram_scan (THE mask maker:
+  coverage 0.3 = the brightest 30 % turn white, whatever the input's range; or position = a value cut; contrast =
+  hardness; stat coverage) ·
   tex_normal_from_height (physical: depth = metres a value of 1 stands, size = metres the image spans, so the slope is
   real and the same at any resolution; paint grain 0.0003, hammered metal 0.002, bricks 0.015; opengl/directx) ·
   tex_normal_blend (detail normal map over a base, e.g. micro grain over a bake: mode rnm (default, reoriented: both
   reliefs keep their depth) | udn | linear; strength scales the detail; input 2 = mask; never tex_blend overlay on
-  normals) · tex_height_to_ao · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or
-  extract) · tex_tile_sampler (stamp input 0 on a grid with jitter/rotation/scale; mask input 1) · tex_output (rename,
-  or copy a layer out as a new image: brick_ids = tex_output {layer:"id"}; keep_only drops the rest).
+  normals) · tex_normal_normalize (unit vectors again after blur/resize/blend) · tex_normal_invert (green = OpenGL ↔
+  DirectX; red; both) · tex_height_from_normal (integrates a normal map back to a height: same depth and size as
+  tex_normal_from_height round-trips; FFT when tileable; stat relief in metres) · tex_curvature (from a normal map:
+  0.5 flat, radius = the bend radius in metres that reads full white/black; blur metres for broader curvature;
+  layers convex/concave, as bake_curvature) · tex_ao (ground-truth AO of a height in metres: depth, size, radius;
+  a plane stays white; same result at any resolution; prefer it to tex_height_to_ao, whose units are image widths)
+  · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or extract) · tex_tile_sampler
+  (stamp input 0 on a grid with jitter/rotation/scale; mask input 1 = keep probability; inputs 2/3/4 = scale,
+  rotation (0..1 = 360°) and intensity maps read at each instance; stamps:"random" picks among every image of input
+  0; output id / color = a random value / colour per instance with layer mask; tileable off cuts at the borders) ·
+  tex_output (rename, or copy a layer out as a new image: brick_ids = tex_output {layer:"id"}; keep_only drops the
+  rest).
   To process a layer as its own image, copy it out first (tex_output layer:"id") and filter that.
   Inputs of different sizes are resized to the first input (bilinear up, area average down).
+UNITS: nodes with a size param measure in metres like tex_normal_from_height: size = metres the image width covers
+  (1 by default, so metres = image widths); their widths, radii and distances are metres, so the same graph gives the
+  same maps at 512 and 4096. Give every node of a material the same size (the uv tile's span on the model). Filters
+  with tileable (default on) read across the borders exactly like anywhere else.
+SHAPES AND REGIONS (metres): an SDF image holds the signed distance in metres in C (negative inside). tex_sdf_shape
+  makes one; tex_sdf_from_mask measures one from any mask (threshold; sub-pixel accurate) · tex_sdf_op (offset grows,
+  round / fillet round convex / concave corners, stroke = a band on the outline, invert, redistance) ·
+  tex_sdf_boolean (union, subtract, intersect, xor with smoothness metres; morph) · tex_sdf_to_mask (fill, outline,
+  bevel with profile linear/smooth/round/ramp, distance = the 0.5-at-the-edge encoding). From masks directly:
+  tex_bevel (distance metres, > 0 inward, < 0 outward; profile) · tex_distance (grow a mask: gradient falloff or a hard
+  grown edge; with input 1 its values bleed out from the mask, e.g. per-tile colours into the gaps) ·
+  tex_flood_fill (the separate tiles of a mask: random grey, random colour, a gradient across each tile (angle,
+  angle_random), bbox_size in metres, position; layer id; stat tiles; random values stay with a tile at any resolution).
+  Panels: plates = tex_sdf_shape {shape:"box", extent:[0.46,0.46], corner:0.025, tile:[2,2]} → tex_sdf_to_mask
+  {mode:"bevel", width:0.012, profile:"round"} → tex_normal_from_height {depth:0.006}; rivets near the edges =
+  tex_sdf_boolean(rivet grid, tex_sdf_op(tex_sdf_op(plates, offset -0.035), stroke 0.07)) {mode:"intersect"}.
 BAKES (input 0 = mesh with non-overlapping uv in 0..1: uv_unwrap; input 1 = optional high-res mesh): bake_ao
   (samples, max_distance; white = open), bake_curvature (edges' dihedral angles within radius: 0.5 flat, bright convex,
   dark concave; layers convex/concave; creases where separate parts cut into each other count as concave too),
@@ -655,7 +690,12 @@ RECIPE (brick wall + worn crate: examples/textures.json):
   tex_output layer "convex" → tex_blend subtract noise → tex_histogram_scan {coverage} = edge wear →
   tex_blend(wood, paint, wear) → tex_channel(ao, rough) = ORM → texture_to_material {base_color, orm}.
   Detail on a bake: grain = tex_noise {scale:60} → grain_n = tex_normal_from_height {depth:0.0003, size:<uv span in m>}
-  → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.`,
+  → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.
+RECIPE (worn painted metal from texture nodes only: examples/texture_lab.json): SDF plates and rivets → height →
+  normal, tex_ao · edge wear = tex_curvature(normal) layer convex × tex_grunge chips → tex_slope_blur {mode:"max"}
+  (ragged) → tex_histogram_scan {coverage:0.07} · steel = tex_directional_blur(fine noise) under the paint · per-plate
+  paint = tex_flood_fill(plate mask) → tex_histogram_range → tex_colorize · rust runs = tex_directional_blur(rivet
+  mask) {angle:-90, symmetric:false} × tex_grunge {style:"leaks"} · ORM = tex_channel(ao, roughness, metallic).`,
 
   loops: `FOREACH LOOPS
 {"type": "foreach", "in": ["lots"], "params": {"mode": "prims", "body": {

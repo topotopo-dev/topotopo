@@ -1,0 +1,50 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 48,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "95713c513e1bfc2b"
+        },
+        "name": "target"
+      }
+    ]
+  },
+  "name": "node.tex_sdf_shape",
+  "ok": true,
+  "source": "fixture for node type \"tex_sdf_shape\" (test/fixtures.ts)",
+  "warnings": []
+}
