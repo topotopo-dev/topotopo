@@ -80,13 +80,74 @@ function xatlasScale(pos: number[]): number {
 }
 
 /**
+ * xatlas charts of a set of triangles (vertex triples into g). A corner's input vertex is keyOf(v) (its point, or a
+ * seam-split key); triangles of different group(t) never share a chart. The triangles are scaled on their own to a
+ * bounding-box diagonal of XATLAS_SIZE, so a small part of a large model is charted as finely as it would be alone.
+ * Returns the chart per triangle (-1: xatlas dropped it, e.g. no area) and the uv per triangle corner in xatlas texel
+ * space: each chart's shape (where xatlas placed it is not used).
+ */
+export function xatlasCharts(
+  X: any, g: Geometry, tris: ArrayLike<number>,
+  o: { keyOf: (v: number) => number; group?: ((t: number) => number) | null; chart: XatlasChartOptions },
+): { triChart: Int32Array; cornerUV: Float64Array; chartCount: number } {
+  const nt = Math.floor(tris.length / 3), P = g.P;
+  const remap = new Map<number, number>(), pos: number[] = [], idx = new Uint32Array(nt * 3);
+  for (let i = 0; i < nt * 3; i++) {
+    const v = tris[i], key = o.keyOf(v);
+    let x = remap.get(key);
+    if (x === undefined) {
+      x = pos.length / 3;
+      remap.set(key, x);
+      const pt = g.vertexPoint[v];
+      pos.push(P[pt * 3], P[pt * 3 + 1], P[pt * 3 + 2]);
+    }
+    idx[i] = x;
+  }
+  const res = { triChart: new Int32Array(nt).fill(-1), cornerUV: new Float64Array(nt * 6), chartCount: 0 };
+  if (!nt) return res;
+  let chart = o.chart;
+  const k = xatlasScale(pos);
+  if (k !== 1) {
+    for (let i = 0; i < pos.length; i++) pos[i] *= k;
+    chart = { ...chart };
+    if (chart.maxChartArea) chart.maxChartArea *= k * k;
+    if (chart.maxBoundaryLength) chart.maxBoundaryLength *= k;
+  }
+  const atlas = X.createAtlas();
+  try {
+    const decl: any = { positions: Float32Array.from(pos), indices: idx };
+    if (o.group) decl.faceMaterialData = Uint32Array.from({ length: nt }, (_, t) => Math.max(0, o.group!(t)));
+    const err = atlas.addMesh(decl);
+    if (err !== 0) throw new Error(`xatlas addMesh failed: ${X.addMeshErrorString ? X.addMeshErrorString(err) : err}`);
+    atlas.computeCharts(chart);
+    // xatlas writes uv only when it packs; the placement is thrown away, so the atlas is as small as keeps the shapes
+    // precise (its cost grows with its area)
+    atlas.packCharts({ resolution: Math.max(64, Math.min(1024, Math.round(Math.sqrt(nt) * 8))), padding: 0, rotateCharts: false, rotateChartsToAxis: false, blockAlign: true });
+    const m = atlas.getMesh(0);
+    res.chartCount = m.chartCount;
+    const out = m.indices as Uint32Array;
+    const verts = m.vertices as { chartIndex: number; uv: [number, number] }[];
+    for (let i = 0; i < out.length && i < nt * 3; i++) {
+      const ov = verts[out[i]];
+      res.cornerUV[i * 2] = ov.uv[0];
+      res.cornerUV[i * 2 + 1] = ov.uv[1];
+      const t = (i / 3) | 0;
+      if (ov.chartIndex >= 0 && res.triChart[t] < 0) res.triChart[t] = ov.chartIndex;
+    }
+  } finally {
+    atlas.destroy();
+  }
+  return res;
+}
+
+/**
  * Run xatlas on the closed polygons of g (prims outside primMask are skipped). Input vertices are the
  * geometry points, or per-vertex keys (`vertexKey[v]`, e.g. split along seams); `faceGroup[prim]`
  * keeps prims with different values in different charts.
  */
 export function runXatlas(
   X: any, g: Geometry, chart: XatlasChartOptions, pack: XatlasPackOptions | null,
-  opts: { vertexKey?: Int32Array | null; faceGroup?: Int32Array | null; primMask?: ArrayLike<number> | null; unmirror?: boolean } = {},
+  opts: { vertexKey?: Int32Array | null; faceGroup?: Int32Array | null; primMask?: ArrayLike<number> | null } = {},
 ): XatlasResult {
   const { tris, triPrim } = triangulate(g, opts.primMask ?? null);
   const nt = tris.length / 3;
@@ -115,7 +176,7 @@ export function runXatlas(
   // xatlas compares positions and areas against absolute epsilons (about 1e-4 and 1.2e-7), so on a model a few
   // centimetres across it welds bevel corners and drops small faces as degenerate. Scale small inputs up to a
   // bounding-box diagonal of XATLAS_SIZE; the world-unit options scale with them, so the result is unchanged.
-  const k = xatlasScale(pos), repack = pack;
+  const k = xatlasScale(pos);
   if (k !== 1) {
     for (let i = 0; i < pos.length; i++) pos[i] *= k;
     chart = { ...chart };
@@ -144,58 +205,8 @@ export function runXatlas(
       const t = (i / 3) | 0;
       if (ov.chartIndex >= 0 && result.triChart[t] < 0) { result.triChart[t] = ov.chartIndex; result.triAtlas[t] = ov.atlasIndex; }
     }
-    if (opts.unmirror && repack) unmirrorAndRepack(X, result, out, verts.length, repack);
   } finally {
     atlas.destroy();
   }
   return result;
-}
-
-/**
- * xatlas charts come out in either orientation (its texel space is y-down and LSCM/planar charts are not
- * winding-aware). Mirror the charts whose uv winding disagrees with the polygon winding, then repack all
- * charts with xatlas's UV-mesh packer so the packing stays tight and overlap-free.
- */
-function unmirrorAndRepack(X: any, r: XatlasResult, out: Uint32Array, nOut: number, pack: XatlasPackOptions): void {
-  const nt = r.triChart.length;
-  const signed = new Map<number, number>();
-  for (let t = 0; t < nt; t++) {
-    const c = r.triChart[t];
-    if (c < 0) continue;
-    const u = r.cornerUV, i = t * 6;
-    const a = (u[i + 2] - u[i]) * (u[i + 5] - u[i + 1]) - (u[i + 3] - u[i + 1]) * (u[i + 4] - u[i]);
-    signed.set(c, (signed.get(c) ?? 0) + a);
-  }
-  let mirrored = 0;
-  for (const [, a] of signed) if (a < 0) mirrored++;
-  if (!mirrored) return;
-  const uvs = new Float32Array(nOut * 2);
-  for (let i = 0; i < out.length; i++) {
-    const c = r.triChart[(i / 3) | 0];
-    const flip = c >= 0 && signed.get(c)! < 0;
-    uvs[out[i] * 2] = flip ? -r.cornerUV[i * 2] : r.cornerUV[i * 2];
-    uvs[out[i] * 2 + 1] = r.cornerUV[i * 2 + 1];
-  }
-  const b = X.createAtlas();
-  try {
-    const err = b.addUvMesh({ uvs, indices: out, faceMaterialData: Uint32Array.from(r.triChart, (c) => c + 1) });
-    if (err !== 0) return;
-    b.computeCharts();
-    b.packCharts(pack);
-    const m = b.getMesh(0);
-    const o2 = m.indices as Uint32Array;
-    const v2 = m.vertices as { atlasIndex: number; uv: [number, number] }[];
-    if (o2.length !== out.length) return;
-    for (let i = 0; i < o2.length; i++) {
-      const ov = v2[o2[i]];
-      r.cornerUV[i * 2] = ov.uv[0];
-      r.cornerUV[i * 2 + 1] = ov.uv[1];
-      if (i % 3 === 0) r.triAtlas[i / 3] = ov.atlasIndex;
-    }
-    r.width = b.width; r.height = b.height; r.atlasCount = b.atlasCount;
-    r.utilization = [];
-    for (let a = 0; a < b.atlasCount; a++) r.utilization.push(b.getUtilization(a));
-  } finally {
-    b.destroy();
-  }
 }

@@ -13,6 +13,7 @@ import { packCharts } from '../core/uvpack.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import { primWhere } from '../core/report.ts';
 import { loadXatlas, runXatlas } from '../core/xatlas.ts';
+import { unwrapMesh } from '../core/unwrap.ts';
 import type { XatlasChartOptions } from '../core/xatlas.ts';
 import { mask, P } from './util.ts';
 
@@ -147,11 +148,16 @@ function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandO
 defineNode({
   type: 'uv_unwrap',
   category: 'uv',
-  summary: 'Automatic UV unwrap with xatlas: cut into charts, flatten each, pack into the 0..1 square. Polygons are kept.',
+  summary: 'Automatic UV unwrap: xatlas cuts and flattens charts per connected piece; they are packed without overlaps into the 0..1 square. Polygons are kept.',
   description:
-    'Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho) and packed. ' +
-    'Polygons are triangulated for xatlas internally; the output keeps the original polygons, with per-corner uv (seams split vertices, not points). ' +
-    'Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles. Writes prim chart (and atlas when several atlases are made).',
+    'Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is ' +
+    'charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the ' +
+    'polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles ' +
+    '(straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour\'s chart. A chart that ' +
+    'folds onto itself is charted again (lower cost, then per polygon, then per triangle). The charts are packed like uv_layout: on the texel ' +
+    'grid of `resolution`, `padding` texels apart, uniform texel density, never overlapping; the result is checked and every warning names ' +
+    'the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles. Writes prim chart (and atlas ' +
+    'with overflow stack).',
   aliases: ['uvunwrap', 'autouv', 'xatlas', 'uv_auto', 'unwrap'],
   inputs: [{ name: 'geo', desc: 'polygon geometry (polylines are skipped)' }],
   params: {
@@ -165,15 +171,15 @@ defineNode({
     texture_seam_weight: { type: 'float', default: 0.5, min: 0, desc: 'weight of existing texture seams' },
     max_cost: { type: 'float', default: 2, min: 0.01, desc: 'a chart stops growing when the weighted cost exceeds this; lower = more, flatter charts' },
     max_iterations: { type: 'int', default: 1, min: 1, max: 16, desc: 'chart growing/seeding iterations (higher = better charts, slower)' },
-    padding: { type: 'int', default: 2, min: 0, max: 64, desc: 'texels between charts' },
-    resolution: { type: 'int', default: 0, min: 0, max: 16384, desc: 'atlas size in texels; 0 = automatic from texels_per_unit (or about 1024 when both are 0). With texels_per_unit set, charts that do not fit spill into more atlases' },
-    texels_per_unit: { type: 'float', default: 0, min: 0, desc: 'texel density (texels per world unit); 0 = derived from resolution' },
-    bruteforce: { type: 'bool', default: false, desc: 'slower, tighter packing' },
-    rotate_charts: { type: 'bool', default: true, desc: 'rotate each chart to the axis of its convex hull before packing (xatlas packing-time 90° turns are not used: they mirror the chart)' },
-    block_align: { type: 'bool', default: false, desc: 'align charts to 4×4 texel blocks (faster packing, for block-compressed textures)' },
-    udim: { type: 'bool', default: true, desc: 'when xatlas makes several atlases, place atlas k in UDIM tile 1001+k (u offset k); off = all atlases overlap in 0..1 (see prim atlas)' },
+    straddling: { type: 'enum', options: ['split', 'unfold'], default: 'split', desc: 'a polygon xatlas cuts across charts: split = it becomes its triangles, each with its chart\'s exact uv; unfold = it stays one polygon, its other corners mapped onto its main chart (can overlap a neighbour)' },
+    padding: { type: 'int', default: 2, min: 0, max: 64, desc: 'texels between charts (half of it, rounded up, to the tile border)' },
+    resolution: { type: 'int', default: 1024, min: 16, max: 16384, desc: 'texture size: padding is in its texels and charts are placed on its texel grid' },
+    texels_per_unit: { type: 'float', default: 0, min: 0, desc: 'texel density (texels per world unit); 0 = the largest density at which every chart fits one tile' },
+    overflow: { type: 'enum', options: ['udim', 'shrink', 'stack'], default: 'udim', desc: 'charts that do not fit one tile at texels_per_unit: udim = more tiles to the right (1002, 1003, …), shrink = a lower density so they fit the tile, stack = more atlases all in 0..1 (prim atlas tells them apart)' },
+    rotate_charts: { type: 'bool', default: true, desc: 'rotate each chart to its minimum bounding rectangle and allow 90° turns when packing (rotations keep the uv winding)' },
+    iterations: { type: 'int', default: 4, min: 1, max: 64, desc: 'chart orders the packer tries; the densest wins' },
   },
-  outputs: 'vertex uv, prim chart, prim atlas (several atlases only)',
+  outputs: 'vertex uv, prim chart, prim atlas (overflow stack with several atlases)',
   example: { type: 'uv_unwrap', in: ['geo'], params: { padding: 4, resolution: 1024 } },
   cook: async ({ input, p, warn }) => {
     const src = input(0);
@@ -197,114 +203,31 @@ defineNode({
       roundnessWeight: p.roundness, straightnessWeight: p.straightness, normalSeamWeight: p.normal_seam_weight,
       textureSeamWeight: p.texture_seam_weight, maxCost: p.max_cost, maxIterations: Math.max(1, Math.min(16, p.max_iterations)), fixWinding: true,
     };
-    const resolution = p.resolution > 0 ? Math.max(16, p.resolution) : 0;
-    const res = runXatlas(X, g, chart, {
-      padding: Math.max(0, p.padding), resolution, texelsPerUnit: Math.max(0, p.texels_per_unit),
-      bruteForce: p.bruteforce, rotateCharts: false, rotateChartsToAxis: p.rotate_charts, blockAlign: p.block_align,
-    }, { vertexKey, faceGroup, unmirror: true });
-    // ---- map triangles back to polygon corners
-    const norm = Math.max(1, res.width, res.height);
-    const uv = readUV(g) ?? new Float64Array(nv * 2);
-    const assigned = new Uint8Array(nv);
-    const primChart = new Int32Array(g.numPrims).fill(-1), primAtlas = new Int32Array(g.numPrims).fill(-1);
-    const Pd = g.P, vp = g.vertexPoint;
-    const triArea = (t: number) => {
-      const a = vp[res.tris[t * 3]] * 3, b = vp[res.tris[t * 3 + 1]] * 3, c = vp[res.tris[t * 3 + 2]] * 3;
-      const ux = Pd[b] - Pd[a], uy = Pd[b + 1] - Pd[a + 1], uz = Pd[b + 2] - Pd[a + 2];
-      const wx = Pd[c] - Pd[a], wy = Pd[c + 1] - Pd[a + 1], wz = Pd[c + 2] - Pd[a + 2];
-      return Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx);
-    };
-    const tileOf = (atlas: number) => (p.udim && res.atlasCount > 1 && atlas > 0 ? atlas : 0);
-    const nt = res.triPrim.length;
-    let straddled = 0;
-    for (let t0 = 0; t0 < nt;) {
-      const prim = res.triPrim[t0];
-      let t1 = t0;
-      while (t1 < nt && res.triPrim[t1] === prim) t1++;
-      // dominant chart by area
-      const acc = new Map<number, number>();
-      for (let t = t0; t < t1; t++) if (res.triChart[t] >= 0) acc.set(res.triChart[t], (acc.get(res.triChart[t]) ?? 0) + triArea(t) + 1e-30);
-      let best = -1, bw = -1;
-      for (const [c, a] of acc) if (a > bw) { bw = a; best = c; }
-      if (acc.size > 1) straddled++;
-      if (best >= 0) {
-        primChart[prim] = best;
-        for (let t = t0; t < t1; t++) {
-          if (res.triChart[t] !== best) continue;
-          primAtlas[prim] = res.triAtlas[t];
-          const du = tileOf(res.triAtlas[t]);
-          for (let k = 0; k < 3; k++) {
-            const i = t * 3 + k, v = res.tris[i];
-            uv[v * 2] = res.cornerUV[i * 2] / norm + du;
-            uv[v * 2 + 1] = res.cornerUV[i * 2 + 1] / norm;
-            assigned[v] = 1;
-          }
-        }
-        // corners only in triangles of other charts: unfold across an assigned edge (similarity transform)
-        for (let pass = 0; pass < t1 - t0; pass++) {
-          let progress = false;
-          for (let t = t0; t < t1; t++) {
-            const cs = [res.tris[t * 3], res.tris[t * 3 + 1], res.tris[t * 3 + 2]];
-            const un = cs.filter((v) => !assigned[v]);
-            if (un.length !== 1) continue;
-            const ks = [0, 1, 2].filter((k) => assigned[cs[k]]), ku = [0, 1, 2].find((k) => !assigned[cs[k]])!;
-            const [ka, kb] = ks;
-            const sax = res.cornerUV[(t * 3 + ka) * 2], say = res.cornerUV[(t * 3 + ka) * 2 + 1];
-            const sbx = res.cornerUV[(t * 3 + kb) * 2], sby = res.cornerUV[(t * 3 + kb) * 2 + 1];
-            const scx = res.cornerUV[(t * 3 + ku) * 2], scy = res.cornerUV[(t * 3 + ku) * 2 + 1];
-            const va = cs[ka], vb = cs[kb], vc = cs[ku];
-            const dx = sbx - sax, dy = sby - say, d2 = dx * dx + dy * dy;
-            if (d2 < 1e-20) continue;
-            const tx = uv[vb * 2] - uv[va * 2], ty = uv[vb * 2 + 1] - uv[va * 2 + 1];
-            // complex ratio (tx + i ty) / (dx + i dy)
-            const cr = (tx * dx + ty * dy) / d2, ci = (ty * dx - tx * dy) / d2;
-            const qx = scx - sax, qy = scy - say;
-            uv[vc * 2] = uv[va * 2] + qx * cr - qy * ci;
-            uv[vc * 2 + 1] = uv[va * 2 + 1] + qx * ci + qy * cr;
-            assigned[vc] = 1;
-            progress = true;
-          }
-          if (!progress) break;
-        }
-      }
-      t0 = t1;
-    }
-    // corners xatlas ignored (zero-area faces): take the uv of another corner on the same point
-    const ptUV = new Map<number, number>();
-    for (let v = 0; v < nv; v++) if (assigned[v] && !ptUV.has(vp[v])) ptUV.set(vp[v], v);
-    let unplaced = 0;
-    for (let pr = 0; pr < g.numPrims; pr++) {
-      if (!g.primClosed[pr] || g.primSize(pr) < 3) continue;
-      for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) {
-        if (assigned[v]) continue;
-        const o = ptUV.get(vp[v]);
-        if (o !== undefined) { uv[v * 2] = uv[o * 2]; uv[v * 2 + 1] = uv[o * 2 + 1]; }
-        else { uv[v * 2] = 0; uv[v * 2 + 1] = 0; unplaced++; }
-      }
-    }
-    // charts must keep the polygon winding (fixWinding, no packing transposes, and a repack in runXatlas otherwise)
-    const chartSum = new Map<number, number>();
-    for (let pr = 0; pr < g.numPrims; pr++) {
-      const c = primChart[pr];
-      if (c < 0) continue;
-      const s = g.primStart[pr], e = g.primStart[pr + 1];
-      let a = 0;
-      for (let v = s; v < e; v++) { const w = v + 1 < e ? v + 1 : s; a += uv[v * 2] * uv[w * 2 + 1] - uv[w * 2] * uv[v * 2 + 1]; }
-      chartSum.set(c, (chartSum.get(c) ?? 0) + a);
-    }
-    const mirrored = [...chartSum.values()].filter((a) => a < 0).length;
-    if (mirrored) warn(`${mirrored} charts are mirrored (uv winding opposite to the polygons)`);
-    writeUV(g, uv);
-    writePrimInt(g, 'chart', primChart);
-    g.prims.delete('atlas');
-    if (res.atlasCount > 1) writePrimInt(g, 'atlas', primAtlas);
+    const r = unwrapMesh(X, g, {
+      chart, vertexKey, faceGroup, straddling: p.straddling === 'unfold' ? 'unfold' : 'split', resolution: Math.max(16, p.resolution || 1024),
+      padding: Math.max(0, p.padding), texelsPerUnit: Math.max(0, p.texels_per_unit), overflow: p.overflow, rotate: !!p.rotate_charts,
+      iterations: Math.max(1, Math.min(64, Math.floor(p.iterations) || 1)),
+    });
+    const out = r.geo;
+    writeUV(out, r.uv);
+    writePrimInt(out, 'chart', r.chart);
+    out.prims.delete('atlas');
+    if (r.atlas) writePrimInt(out, 'atlas', r.atlas);
+    const at = (prim: number) => primWhere(out, prim);
+    const firstOf = (k: number) => { for (let q = 0; q < out.numPrims; q++) if (r.chart[q] === k) return q; return -1; };
     let open = 0;
     for (let pr = 0; pr < g.numPrims; pr++) if (!g.primClosed[pr]) open++;
-    if (open) warn(`${open} polylines skipped (only polygons are unwrapped)`);
-    if (straddled) warn(`${straddled} polygons were split across xatlas charts; their extra corners were unfolded onto the main chart (may overlap a neighbour slightly; uv_layout repacks)`);
-    if (unplaced) warn(`${unplaced} corners of degenerate (zero-area) polygons were placed at uv 0,0`);
-    if (res.atlasCount > 1) warn(`${res.atlasCount} atlases (charts did not fit one ${res.width}×${res.height} atlas)${p.udim ? '; placed in UDIM tiles 1001..' : ''}`);
-    return g;
+    if (open) warn(`uv_unwrap: ${open} polylines skipped (only polygons are unwrapped)`);
+    if (r.degenerate || r.isolated) warn(`uv_unwrap: ${r.degenerate + r.isolated} polygons have no area (xatlas cannot chart them); their uv is collapsed${r.degenerate ? ' onto a neighbour\'s chart' : ''}${r.isolated ? ` (${r.isolated} with no charted neighbour, each piece's on a spot of its own)` : ''}. First: ${primWhere(src, r.firstDegenerate)}`);
+    if (r.straddled) warn(`uv_unwrap: ${r.straddled} polygons were cut across xatlas charts; ${p.straddling === 'unfold' ? 'their other corners were mapped onto the main chart (may overlap a neighbour)' : 'each became its triangles, which keep their charts\' uv'}. First: ${primWhere(src, r.firstStraddled)}`);
+    const [rc, , rs] = r.refolded;
+    if (rs) warn(`uv_unwrap: ${rc} charts folded onto themselves and were charted again (xatlas at a lower cost, then a conformal map); ${rs} still folded (a crack or a cone no flat map avoids) and were cut where they overlap, into ${r.splitInto} charts`);
+    if (r.folds && r.foldPair) warn(`uv_unwrap: ${r.folds} triangle pairs overlap inside charts (folds). Largest: ${uvPairText(out, r.uv, r.tris, r.triPrim, r.foldPair[0], r.foldPair[1])}`);
+    if (r.across && r.acrossPair) warn(`uv_unwrap: ${r.across} triangle pairs of different charts overlap; this is a bug, please report it with the graph. Largest: ${uvPairText(out, r.uv, r.tris, r.triPrim, r.acrossPair[0], r.acrossPair[1])}`);
+    if (r.collapsed) warn(`uv_unwrap: ${r.collapsed} triangles with area got no uv area (collapsed: bakes and normal maps have no direction there)`);
+    if (r.tiles > 1) warn(`uv_unwrap: at ${p.texels_per_unit} texels per unit the charts fill ${r.tiles} ${p.overflow === 'stack' ? 'atlases, stacked in 0..1 (see prim atlas)' : 'UDIM tiles (1001..)'}; overflow "shrink" keeps one tile`);
+    if (r.cappedBy >= 0 && r.coverage < 0.5) { const q = firstOf(r.cappedBy); if (q >= 0) warn(`uv_unwrap: charts cover ${(r.coverage * 100).toFixed(0)}% of the tile because the longest chart (${at(q)}) spans the tile and sets the scale; lower max_chart_area or max_boundary_length to cut it`); }
+    return out;
   },
 });
 

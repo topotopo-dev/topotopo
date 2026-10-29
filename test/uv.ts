@@ -13,6 +13,7 @@ import { uvReport } from '../src/core/uvreport.ts';
 import { encodePNG } from '../src/render/png.ts';
 import zlib from 'node:zlib';
 import type { GraphSpec } from '../src/graph/types.ts';
+import { getNodeDef } from '../src/graph/registry.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -331,6 +332,106 @@ const sameTopology = (a: Geometry, b: Geometry) =>
   const small = uvReport((await cook(part(1))).geo, { resolution: 1024 }), big = uvReport((await cook(part(100))).geo, { resolution: 1024 });
   check(small.overlap.pairs === 0 && small.collapsed === 0, `uv_unwrap at real size (6 cm): ${small.overlap.pairs} overlapping pairs, ${small.collapsed} collapsed triangles`);
   check(small.charts === big.charts, `uv_unwrap: the same charts at 1x and 100x (${small.charts} / ${big.charts})`);
+}
+
+// ---------------------------------------------------------------- uv_unwrap robustness (hand-built meshes)
+/** Cook one node on a geometry; params over the node's defaults. */
+async function cookNode(type: string, g: Geometry, params: Record<string, any> = {}) {
+  const def = getNodeDef(type)!;
+  const p = { ...Object.fromEntries(Object.entries(def.params).map(([k, v]) => [k, (v as any).default])), ...params };
+  const warnings: string[] = [];
+  const geo: Geometry = await (def.cook as any)({ input: () => g, inputs: [g], hasInput: () => true, p, warn: (m: string) => warnings.push(m) });
+  return { geo, warnings };
+}
+const named = (g: Geometry, name: string) => { const a = g.prims.add('name', 'string', 1); for (let p = 0; p < g.numPrims; p++) a.set(p, name); return g; };
+
+// a polygon with no area (a sliver filling a T-junction) collapses onto its neighbour's chart instead of spanning the atlas
+{
+  const pts = [[0, 0, 0], [1, 0, 0], [1, 0, 0.5], [1, 0, 1], [0, 0, 1], [2, 0, 0], [2, 0, 1]];
+  const g = named(new Geometry({ positions: pts.flat(), prims: [[0, 4, 3, 2, 1], [1, 3, 6, 5].reverse(), [1, 2, 3]] }), 'plate');
+  const { geo, warnings } = await cookNode('uv_unwrap', g);
+  const rep = uvReport(geo), uv = readUV(geo)!;
+  const sliver = [geo.primStart[2], geo.primStart[2] + 1, geo.primStart[2] + 2].map((v) => [uv[v * 2], uv[v * 2 + 1]]);
+  const area = Math.abs((sliver[1][0] - sliver[0][0]) * (sliver[2][1] - sliver[0][1]) - (sliver[2][0] - sliver[0][0]) * (sliver[1][1] - sliver[0][1])) / 2;
+  const span = Math.max(...sliver.map((q) => Math.hypot(q[0] - sliver[0][0], q[1] - sliver[0][1])));
+  const w = warnings.find((m) => m.includes('no area')) ?? '';
+  check(rep.overlap.pairs === 0 && area < 1e-12 && span < 0.6, `uv_unwrap: a no-area sliver collapses onto a neighbour's chart (uv area ${area.toExponential(1)}, span ${span.toFixed(3)}, ${rep.overlap.pairs} overlapping pairs)`);
+  check(/prim 2 of "plate"/.test(w), `uv_unwrap: the sliver warning names the part ("${w.slice(0, 120)}")`);
+}
+
+// a polygon xatlas cuts across two charts becomes its triangles, every corner kept (collinear corners too)
+{
+  const r = (120 * Math.PI) / 180;
+  const pts = [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [3, 0, 1], [3, Math.sin(r), 1 + Math.cos(r)], [0, Math.sin(r), 1 + Math.cos(r)], [0, 0, 1]];
+  const g = new Geometry({ positions: pts.flat(), prims: [[0, 1, 2, 3, 4, 5, 6, 7]] });
+  const split = await cookNode('uv_unwrap', g);
+  const used = new Set<number>();
+  for (let v = 0; v < split.geo.numVertices; v++) used.add(split.geo.vertexPoint[v]);
+  const rep = uvReport(split.geo);
+  check(split.geo.numPrims > 1 && used.size === 8 && rep.overlap.pairs === 0 && split.warnings.some((m) => m.includes('cut across xatlas charts')),
+    `uv_unwrap straddling split: the bent 8-gon becomes ${split.geo.numPrims} triangles using all ${used.size} of 8 points, ${rep.overlap.pairs} overlapping pairs`);
+  const unfold = await cookNode('uv_unwrap', g, { straddling: 'unfold' });
+  check(unfold.geo.numPrims === 1 && unfold.warnings.some((m) => m.includes('mapped onto the main chart')), `uv_unwrap straddling unfold: the polygon stays whole (${unfold.geo.numPrims} prim) and the warning says so`);
+}
+
+// a chart xatlas folds (a strip whose low ridges end in open cracks, on a tilted plane) is charted again until none folds
+{
+  // strip along z, half-width a; n ridges of half-width b, height h, length L, gaps gp, end margins m. Under each ridge end
+  // the plane has its own centre point (a crack below the ridge apex), as booleans and bevels leave them
+  const n = 3, a = 1, b = 0.6, h = 0.08, L = 1.7, gp = 0.55, m = 0.55, end = 2 * m + n * L + (n - 1) * gp;
+  const pos: number[][] = [], prims: number[][] = [];
+  const pt = (u: number, y: number, z: number) => { pos.push([(-u + y) * Math.SQRT1_2, (u + y) * Math.SQRT1_2, z]); return pos.length - 1; };
+  const S0 = pt(0, 0, 0), Sp = pt(a, 0, 0), Sm = pt(-a, 0, 0), E0 = pt(0, 0, end), Ep = pt(a, 0, end), Em = pt(-a, 0, end);
+  const R = Array.from({ length: n }, (_, k) => {
+    const w0 = m + k * (L + gp), w1 = w0 + L;
+    return { A0: pt(0, h, w0), A1: pt(0, h, w1), P0: pt(b, 0, w0), P1: pt(b, 0, w1), M0: pt(-b, 0, w0), M1: pt(-b, 0, w1), C0: pt(0, 0, w0), C1: pt(0, 0, w1) };
+  });
+  for (const t of R) prims.push([t.A0, t.P0, t.P1], [t.A0, t.A1, t.M0], [t.A0, t.P1, t.A1], [t.A1, t.M1, t.M0]);
+  prims.push([R[0].P0, S0, Sp], [S0, R[0].M0, Sm], [R[0].C0, S0, R[0].P0], [S0, R[0].C0, R[0].M0]);
+  for (let k = 0; k < n; k++) {
+    // the strip beside ridge k: fans to the strip's corners (the last ridge's minus side closes towards Em below)
+    prims.push([R[k].P0, k ? Ep : Sp, R[k].P1]);
+    if (k + 1 < n) prims.push([R[k].M1, Sm, R[k].M0]);
+    if (k + 1 < n) {
+      const t = R[k], u = R[k + 1];
+      prims.push([t.P1, u.P0, t.C1], [u.C0, t.C1, u.P0], [t.C1, u.C0, t.M1], [t.M1, u.C0, u.M0], [t.P1, Ep, u.P0], [t.M1, u.M0, Sm]);
+    }
+  }
+  prims.push([R[0].P1, Sp, Ep], [R[n - 1].M0, Em, Sm], [R[n - 1].M0, R[n - 1].M1, Em]);
+  const t = R[n - 1];
+  prims.push([t.P1, E0, t.C1], [t.C1, E0, t.M1], [t.P1, Ep, E0], [t.M1, E0, Em]);
+  const g = new Geometry({ positions: pos.flat(), prims });
+  const { geo, warnings } = await cookNode('uv_unwrap', g);
+  const rep = uvReport(geo);
+  check(rep.overlap.pairs === 0 && rep.charts <= 10 && warnings.some((w) => w.includes('folded onto themselves')), `uv_unwrap: a folding chart is charted again without folds (${rep.overlap.pairs} overlapping pairs, ${rep.charts} charts; warnings: ${warnings.join('; ').slice(0, 200) || 'none'})`);
+}
+
+// pieces 1000x apart in size are charted on their own: no overlaps, no collapsed uv, the same texel density
+{
+  const { geo } = await cook({
+    big: { type: 'box', params: { size: [10, 10, 10] } },
+    small: { type: 'box', params: { size: [0.01, 0.01, 0.01], center: [20, 0, 0] } },
+    sb: { type: 'poly_bevel', in: ['small'], params: { offset: 0.0005, divisions: 2 } },
+    m: { type: 'merge', in: ['big', 'sb'] },
+    out: { type: 'uv_unwrap', in: ['m'], params: { resolution: 4096, padding: 1 } },
+  });
+  const rep = uvReport(geo, { resolution: 4096 });
+  check(rep.overlap.pairs === 0 && rep.collapsed === 0, `uv_unwrap: a 1 cm bevelled box beside a 10 m box (${rep.charts} charts): ${rep.overlap.pairs} overlapping pairs, ${rep.collapsed} collapsed triangles`);
+}
+
+// texels_per_unit with overflow: udim spills into more tiles, shrink keeps one, stack puts every atlas in 0..1
+{
+  const nodes = (overflow: string): GraphSpec['nodes'] => ({
+    s: { type: 'sphere', params: { type: 'ico', level: 2 } },
+    out: { type: 'uv_unwrap', in: ['s'], params: { texels_per_unit: 2000, resolution: 512, overflow } },
+  });
+  const range = (g: Geometry) => { const u = readUV(g)!; let mu = 0, mv = 0; for (let i = 0; i < u.length; i += 2) { mu = Math.max(mu, u[i]); mv = Math.max(mv, u[i + 1]); } return [mu, mv]; };
+  const ud = await cook(nodes('udim')), sh = await cook(nodes('shrink')), st = await cook(nodes('stack'));
+  const [uu] = range(ud.geo), [su, sv] = range(sh.geo), [tu, tv] = range(st.geo);
+  check(uu > 1 && ud.warnings.some((w) => w.includes('UDIM tiles')), `uv_unwrap overflow udim: charts spill into more tiles (u max ${uu.toFixed(2)})`);
+  check(su <= 1 && sv <= 1 && uvReport(sh.geo).overlap.pairs === 0, `uv_unwrap overflow shrink: one tile (u max ${su.toFixed(3)}, v max ${sv.toFixed(3)})`);
+  const atl = st.geo.prims.get('atlas');
+  check(tu <= 1 && tv <= 1 && !!atl && new Set(atl.data as Int32Array).size > 1, `uv_unwrap overflow stack: ${atl ? new Set(atl.data as Int32Array).size : 0} atlases, all in 0..1 (prim atlas)`);
 }
 
 console.log(fail ? `\n${fail} uv check(s) failed` : '\nuv: all checks passed');

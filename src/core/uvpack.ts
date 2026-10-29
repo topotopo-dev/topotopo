@@ -53,6 +53,13 @@ export interface PackOptions {
   angles?: ArrayLike<number> | null;
   /** fixed uv triangles (6 numbers each) the packed islands keep clear of, with padding (e.g. prims outside a group) */
   obstacles?: Float64Array | null;
+  /**
+   * > 0: islands at this density (texels per island unit: per metre with scale_mode uniform), filling the tiles first-fit;
+   * when they do not fit `tiles`, or an island is larger than a tile, the density drops until they do
+   */
+  texelsPerUnit?: number;
+  /** > 0: the densest the search may go (texels per island unit) */
+  maxTexelsPerUnit?: number;
 }
 
 export interface PackResult {
@@ -335,7 +342,9 @@ export function packCharts(uv: Float64Array, islands: PackIsland[], o: PackOptio
   // scale bounds: every island must fit a tile; start from the area
   let maxDim = 0, area = 0, largest = -1;
   for (let k = 0; k < nI; k++) { if (Math.max(prep.w[k], prep.h[k]) > maxDim) { maxDim = Math.max(prep.w[k], prep.h[k]); largest = k; } area += prep.area[k]; }
-  const sCap = maxDim > 0 ? (G - 2 * b - 3) / maxDim : 1;
+  const sFix = (o.texelsPerUnit ?? 0) > 0 ? (o.texelsPerUnit! * G) / res : 0;
+  const sMax = (o.maxTexelsPerUnit ?? 0) > 0 ? (o.maxTexelsPerUnit! * G) / res : Infinity;
+  const sCap = Math.min(sMax, maxDim > 0 ? (G - 2 * b - 3) / maxDim : sFix > 0 ? sFix : 1);
   if (!(sCap > 0)) return result;
   let s0 = area > 0 ? Math.sqrt((0.55 * tiles * G * G) / area) : sCap;
   s0 = Math.min(sCap, s0);
@@ -357,9 +366,17 @@ export function packCharts(uv: Float64Array, islands: PackIsland[], o: PackOptio
     }
     return { lo, hi };
   };
-  const first = search(orders[0], s0, 0, Infinity, 24);
+  if (sFix > 0) {
+    // a fixed density: one pack over the tiles; only when it does not fit does the density drop
+    const s = Math.min(sFix, sCap);
+    const r = packAt(s, orders[0], G);
+    result.packs++;
+    if (r.ok) { bestS = s; best = r; }
+    else search(orders[0], s * 0.97, 0, s, 24);
+  }
+  const first = sFix > 0 ? { lo: bestS, hi: Infinity } : search(orders[0], s0, 0, Infinity, 24);
   // other orderings at the scale found: one that fits there too continues the search upwards
-  for (let i = 1; i < orders.length && bestS > 0 && bestS < sCap; i++) {
+  for (let i = 1; i < orders.length && bestS > 0 && bestS < sCap && !(sFix > 0); i++) {
     const s = Math.min(sCap, bestS * 1.004);
     const r = packAt(s, orders[i], G);
     result.packs++;
