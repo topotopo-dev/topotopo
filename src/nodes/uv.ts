@@ -10,6 +10,7 @@ import {
 } from '../core/uv.ts';
 import type { Island, Sides } from '../core/uv.ts';
 import { packCharts } from '../core/uvpack.ts';
+import { cutLongCharts, islandWeights, packsDenser, worldAngles } from '../core/uvislands.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import { primWhere } from '../core/report.ts';
 import { loadXatlas, runXatlas } from '../core/xatlas.ts';
@@ -94,53 +95,90 @@ const LAYOUT_PARAMS = {
 };
 
 interface LayoutRun {
-  rotate: boolean;
+  /** min_rect: minimum bounding rectangle, with 90° turns; world: world up to +v; keep: as the islands are */
+  orient: 'min_rect' | 'world' | 'keep';
   scaleMode: 'uniform' | 'keep';
   /** texels, and the texture size they are measured at */
   padding: number;
   resolution: number;
+  /** atlas: one tile, a texelsPerUnit too high for it is lowered; udim: up to `tiles` tiles, texelsPerUnit kept */
+  fit: 'atlas' | 'udim';
   tiles: number;
+  /** texels per island unit (world unit with scale_mode uniform); 0 = the largest at which the islands fit */
+  texelsPerUnit: number;
   iterations: number;
   seed: number;
-  /** per island texel weight and fixed angle (radians, NaN = by rotate), or null */
-  weights?: ArrayLike<number> | null;
-  angles?: ArrayLike<number> | null;
+  /** prim attribute with texel weights ("" = none); cut long and hollow islands into parts */
+  texelWeight: string;
+  cutLong: boolean;
   /** names for messages: the node, and island_attrib when islands come from it */
   node: string;
   islandAttrib?: string;
 }
 
+interface LayoutOut {
+  uv: Float64Array;
+  /** island per prim after cutting, and the island count */
+  labels: Int32Array;
+  count: number;
+  /** islands cut into parts; the texel weight attribute was found */
+  cut: number;
+  weighted: boolean;
+}
+
 /**
- * Lay islands out with the raster packer (core/uvpack.ts); prims in no island keep their uv and are obstacles. The
- * result is checked exactly (core/uvoverlap.ts): overlaps between islands (never expected: a packing bug) and overlaps
- * inside islands (kept from the input) are reported with the parts they are in.
+ * Lay islands out with the raster packer (core/uvpack.ts); prims in no island keep their uv and are obstacles. Texel
+ * weights, world angles and cuts come from core/uvislands.ts. The result is checked exactly (core/uvoverlap.ts):
+ * overlaps between islands (never expected: a packing bug) and overlaps inside islands (kept from the input) are
+ * reported with the parts they are in.
  */
-function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandOfPrim: Int32Array, o: LayoutRun, warn: (m: string) => void): Float64Array {
-  if (!islands.length) return uv;
+function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandOfPrim: Int32Array, o: LayoutRun, warn: (m: string) => void): LayoutOut {
+  const res: LayoutOut = { uv, labels: islandOfPrim, count: islands.length, cut: 0, weighted: false };
+  if (!islands.length) return res;
+  const tiles = o.fit === 'udim' ? Math.max(1, Math.floor(o.tiles)) : 1;
+  const tpu = Math.max(0, o.texelsPerUnit), fixed = tpu > 0 ? tpu / Math.max(1, o.resolution) : 0, spill = fixed > 0 && o.fit === 'udim';
   const tri = triangulate(g);
-  const per: number[][] = islands.map(() => []);
-  const obstacles: number[] = [];
-  for (let t = 0; t < tri.triPrim.length; t++) {
-    const k = islandOfPrim[tri.triPrim[t]];
-    if (k >= 0) per[k].push(tri.tris[t * 3], tri.tris[t * 3 + 1], tri.tris[t * 3 + 2]);
-    else for (let c = 0; c < 3; c++) { const v = tri.tris[t * 3 + c]; obstacles.push(uv[v * 2], uv[v * 2 + 1]); }
+  const pack = (labels: Int32Array, isls: Island[]) => {
+    const per: number[][] = isls.map(() => []);
+    const obstacles: number[] = [];
+    for (let t = 0; t < tri.triPrim.length; t++) {
+      const k = labels[tri.triPrim[t]];
+      if (k >= 0) per[k].push(tri.tris[t * 3], tri.tris[t * 3 + 1], tri.tris[t * 3 + 2]);
+      else for (let c = 0; c < 3; c++) { const v = tri.tris[t * 3 + c]; obstacles.push(uv[v * 2], uv[v * 2 + 1]); }
+    }
+    const weights = o.texelWeight ? islandWeights(g, labels, isls.length, o.texelWeight) : null;
+    const angles = o.orient === 'world' ? worldAngles(g, uv, labels, isls.length) : null;
+    const r = packCharts(uv, isls.map((isl, k) => ({ verts: isl.verts, tris: per[k], area3: isl.area3, areaUV: isl.areaUV })), {
+      resolution: o.resolution, padding: o.padding, turns: o.orient === 'min_rect', orient: o.orient === 'min_rect' ? 'min_rect' : 'keep', scaleMode: o.scaleMode,
+      tiles, iterations: o.iterations, seed: o.seed, weights, angles, obstacles: obstacles.length ? Float64Array.from(obstacles) : null,
+      texelsPerUnit: spill ? tpu : 0, maxTexelsPerUnit: spill ? 0 : tpu,
+    });
+    return { labels, isls, r, weights, obstacles: obstacles.length > 0 };
+  };
+  let best = pack(islandOfPrim, islands);
+  res.weighted = !!best.weights;
+  if (o.cutLong) {
+    const c = cutLongCharts(g, uv, islandOfPrim, islands.length, { scaleMode: o.scaleMode, weights: best.weights, tiles, tileScale: spill ? fixed : 0, maxTileScale: spill ? 0 : fixed });
+    if (c.cut) {
+      // the parts only when they pack denser: a ring's hole often takes the small islands well enough
+      const alt = pack(c.labels, islandsFrom(g, uv, c.labels, c.count));
+      if (packsDenser(alt.r, best.r)) { best = alt; res.labels = c.labels; res.count = c.count; res.cut = c.cut; }
+    }
   }
-  const r = packCharts(uv, islands.map((isl, k) => ({ verts: isl.verts, tris: per[k], area3: isl.area3, areaUV: isl.areaUV })), {
-    resolution: o.resolution, padding: o.padding, turns: o.rotate, orient: o.rotate ? 'min_rect' : 'keep', scaleMode: o.scaleMode,
-    tiles: o.tiles, iterations: o.iterations, seed: o.seed, weights: o.weights ?? null, angles: o.angles ?? null,
-    obstacles: obstacles.length ? Float64Array.from(obstacles) : null,
-  });
+  const { labels, isls, r } = best;
   if (!r.packed) {
-    const why = obstacles.length ? 'the prims outside the group and the padding leave no room' : `${o.padding} texels of padding at resolution ${o.resolution} leave no room`;
-    warn(`${o.node}: the ${islands.length} islands do not fit ${o.tiles > 1 ? `${o.tiles} tiles` : 'the tile'} at any scale (${why}); uv unchanged`);
-    return uv;
+    const why = best.obstacles ? 'the prims outside the group and the padding leave no room' : `${o.padding} texels of padding at resolution ${o.resolution} leave no room`;
+    warn(`${o.node}: the ${isls.length} islands do not fit ${tiles > 1 ? `${tiles} tiles` : 'the tile'} at any scale (${why}); uv unchanged`);
+    return res;
   }
-  const chk = uvOverlapCheck(r.uv, tri.tris, tri.triPrim, islandOfPrim);
+  res.uv = r.uv;
+  const chk = uvOverlapCheck(r.uv, tri.tris, tri.triPrim, labels);
   if (chk.across && chk.firstAcross) warn(`${o.node}: ${chk.across} triangle pairs of different islands overlap after packing; this is a bug, please report it with the graph. Largest: ${uvPairText(g, r.uv, tri.tris, tri.triPrim, chk.firstAcross.t[0], chk.firstAcross.t[1])}`);
   if (chk.within && chk.firstWithin) warn(`${o.node}: ${chk.within} overlapping triangle pairs inside islands were already in the input (folds${o.islandAttrib ? `, or pieces joined by island_attrib "${o.islandAttrib}"` : ''}); packing moves each island whole, so they stay. Largest: ${uvPairText(g, r.uv, tri.tris, tri.triPrim, chk.firstWithin.t[0], chk.firstWithin.t[1])}`);
   const used = r.uvArea / Math.max(1, r.tilesUsed);
-  if (r.cappedBy >= 0 && used < 0.5) warn(`${o.node}: islands cover ${(used * 100).toFixed(0)}% of the tile because the longest island (${primWhere(g, islands[r.cappedBy].prims[0])}) spans the tile and sets the scale; cut it with seams for a denser layout`);
-  return r.uv;
+  if (r.cappedBy >= 0 && used < 0.5) warn(`${o.node}: islands cover ${(used * 100).toFixed(0)}% of the tile because the longest island (${primWhere(g, isls[r.cappedBy].prims[0])}) spans the tile and sets the scale; ${o.cutLong ? 'cut it with seams' : 'cut_long cuts it'} for a denser layout`);
+  if (tpu > 0 && r.texelsPerUnit < tpu * 0.999) warn(`${o.node}: at ${tpu} texels per unit the islands do not fit ${tiles > 1 ? `${tiles} tiles` : 'the tile'}; packed at ${+r.texelsPerUnit.toPrecision(4)} texels per unit${o.fit === 'atlas' ? ' (fit "udim" keeps the density over more tiles)' : ' (raise udims for more tiles)'}`);
+  return res;
 }
 
 // ---------------------------------------------------------------- uv_unwrap
@@ -154,10 +192,13 @@ defineNode({
     'charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the ' +
     'polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles ' +
     '(straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour\'s chart. A chart that ' +
-    'folds onto itself is charted again (lower cost, then per polygon, then per triangle). The charts are packed like uv_layout: on the texel ' +
-    'grid of `resolution`, `padding` texels apart, uniform texel density, never overlapping; the result is checked and every warning names ' +
-    'the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles. Writes prim chart (and atlas ' +
-    'with overflow stack).',
+    'folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin ' +
+    'charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are ' +
+    'cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of ' +
+    '`resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile ' +
+    '(fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big ' +
+    'smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger ' +
+    'charts (less padding). Writes prim chart (and atlas with fit stack).',
   aliases: ['uvunwrap', 'autouv', 'xatlas', 'uv_auto', 'unwrap'],
   inputs: [{ name: 'geo', desc: 'polygon geometry (polylines are skipped)' }],
   params: {
@@ -175,13 +216,16 @@ defineNode({
     padding: { type: 'int', default: 2, min: 0, max: 64, desc: 'texels between charts (half of it, rounded up, to the tile border)' },
     resolution: { type: 'int', default: 1024, min: 16, max: 16384, desc: 'texture size: padding is in its texels and charts are placed on its texel grid' },
     texels_per_unit: { type: 'float', default: 0, min: 0, desc: 'texel density (texels per world unit); 0 = the largest density at which every chart fits one tile' },
-    overflow: { type: 'enum', options: ['udim', 'shrink', 'stack'], default: 'udim', desc: 'charts that do not fit one tile at texels_per_unit: udim = more tiles to the right (1002, 1003, …), shrink = a lower density so they fit the tile, stack = more atlases all in 0..1 (prim atlas tells them apart)' },
-    rotate_charts: { type: 'bool', default: true, desc: 'rotate each chart to its minimum bounding rectangle and allow 90° turns when packing (rotations keep the uv winding)' },
+    fit: { type: 'enum', options: ['atlas', 'udim', 'stack'], default: 'atlas', desc: 'charts that do not fit one tile at texels_per_unit: atlas = a lower density so they fit the 0..1 tile, udim = keep the density and fill more tiles to the right (1002, 1003, …), stack = more atlases all in 0..1 (prim atlas tells them apart)' },
+    orient: { type: 'enum', options: ['min_rect', 'world', 'keep'], default: 'min_rect', desc: 'chart orientation: min_rect = turned to its minimum bounding rectangle, with 90° turns while packing (densest); world = world up (+Y) points to +v (horizontal charts: +X to +u), no turns; keep = as charted. Rotations keep the uv winding' },
+    merge_thin: { type: 'bool', default: true, desc: 'join thin charts (bevel strips, narrow bands: narrower than three paddings) onto a neighbouring chart where their shared seam lines up and nothing overlaps, so fewer charts lose space to padding (and fewer seams); off = the charts as cut' },
+    cut_long: { type: 'bool', default: true, desc: 'cut charts longer than the tile, and rings and arcs whose hull is mostly empty, across their length into parts, when that packs denser (each cut is a seam); off = charts stay whole' },
+    texel_weight: { type: 'string', default: 'texel_weight', desc: 'prim attribute scaling the texel density of each chart (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1' },
     iterations: { type: 'int', default: 4, min: 1, max: 64, desc: 'chart orders the packer tries; the densest wins' },
   },
-  outputs: 'vertex uv, prim chart, prim atlas (overflow stack with several atlases)',
+  outputs: 'vertex uv, prim chart, prim atlas (fit stack with several atlases)',
   example: { type: 'uv_unwrap', in: ['geo'], params: { padding: 4, resolution: 1024 } },
-  cook: async ({ input, p, warn }) => {
+  cook: async ({ input, p, warn, stat }) => {
     const src = input(0);
     const g = src.clone();
     if (!g.numPrims) return g;
@@ -205,8 +249,8 @@ defineNode({
     };
     const r = unwrapMesh(X, g, {
       chart, vertexKey, faceGroup, straddling: p.straddling === 'unfold' ? 'unfold' : 'split', resolution: Math.max(16, p.resolution || 1024),
-      padding: Math.max(0, p.padding), texelsPerUnit: Math.max(0, p.texels_per_unit), overflow: p.overflow, rotate: !!p.rotate_charts,
-      iterations: Math.max(1, Math.min(64, Math.floor(p.iterations) || 1)),
+      padding: Math.max(0, p.padding), texelsPerUnit: Math.max(0, p.texels_per_unit), fit: p.fit, orient: p.orient, cutLong: !!p.cut_long, mergeThin: !!p.merge_thin,
+      texelWeight: String(p.texel_weight ?? ''), iterations: Math.max(1, Math.min(64, Math.floor(p.iterations) || 1)),
     });
     const out = r.geo;
     writeUV(out, r.uv);
@@ -225,8 +269,11 @@ defineNode({
     if (r.folds && r.foldPair) warn(`uv_unwrap: ${r.folds} triangle pairs overlap inside charts (folds). Largest: ${uvPairText(out, r.uv, r.tris, r.triPrim, r.foldPair[0], r.foldPair[1])}`);
     if (r.across && r.acrossPair) warn(`uv_unwrap: ${r.across} triangle pairs of different charts overlap; this is a bug, please report it with the graph. Largest: ${uvPairText(out, r.uv, r.tris, r.triPrim, r.acrossPair[0], r.acrossPair[1])}`);
     if (r.collapsed) warn(`uv_unwrap: ${r.collapsed} triangles with area got no uv area (collapsed: bakes and normal maps have no direction there)`);
-    if (r.tiles > 1) warn(`uv_unwrap: at ${p.texels_per_unit} texels per unit the charts fill ${r.tiles} ${p.overflow === 'stack' ? 'atlases, stacked in 0..1 (see prim atlas)' : 'UDIM tiles (1001..)'}; overflow "shrink" keeps one tile`);
-    if (r.cappedBy >= 0 && r.coverage < 0.5) { const q = firstOf(r.cappedBy); if (q >= 0) warn(`uv_unwrap: charts cover ${(r.coverage * 100).toFixed(0)}% of the tile because the longest chart (${at(q)}) spans the tile and sets the scale; lower max_chart_area or max_boundary_length to cut it`); }
+    if (r.tiles > 1) warn(`uv_unwrap: at ${p.texels_per_unit} texels per unit the charts fill ${r.tiles} ${p.fit === 'stack' ? 'atlases, stacked in 0..1 (see prim atlas)' : 'UDIM tiles (1001..)'}; fit "atlas" keeps one tile`);
+    if (r.cappedBy >= 0 && r.coverage < 0.5) { const q = firstOf(r.cappedBy); if (q >= 0) warn(`uv_unwrap: charts cover ${(r.coverage * 100).toFixed(0)}% of the tile because the longest chart (${at(q)}) spans the tile and sets the scale; ${p.cut_long ? 'lower max_chart_area or max_boundary_length to cut it' : 'cut_long cuts it'}`); }
+    if (p.texel_weight && p.texel_weight !== 'texel_weight' && !r.weighted) warn(`uv_unwrap: texel_weight "${p.texel_weight}" is not a numeric prim attribute; every chart has weight 1`);
+    if (r.cut) stat('charts cut', r.cut);
+    if (r.merged) stat('thin charts joined', r.merged);
     return out;
   },
 });
@@ -303,9 +350,9 @@ defineNode({
     if (p.layout && islands.length) {
       const fresh = islandsFrom(g, uv, comp, charts.length);
       out = layoutIslands(g, uv, fresh, comp, {
-        rotate: true, scaleMode: 'uniform', padding: paddingTexels(p.padding, p.units, p.resolution), resolution: p.resolution,
-        tiles: 1, iterations: 4, seed: 0, node: 'uv_flatten',
-      }, warn);
+        orient: 'min_rect', scaleMode: 'uniform', padding: paddingTexels(p.padding, p.units, p.resolution), resolution: p.resolution,
+        fit: 'atlas', tiles: 1, texelsPerUnit: 0, iterations: 4, seed: 0, texelWeight: 'texel_weight', cutLong: false, node: 'uv_flatten',
+      }, warn).uv;
     }
     writeUV(g, out);
     if (gm) {
@@ -326,31 +373,38 @@ defineNode({
 defineNode({
   type: 'uv_layout',
   category: 'uv',
-  summary: 'Pack UV islands into the 0..1 square (or UDIM tiles) without overlaps: rotate to minimal bounds, equalise texel density, fill every gap.',
+  summary: 'Pack UV islands into the 0..1 square (or UDIM tiles) without overlaps: rotate to minimal bounds (or keep, or align to the world), equalise texel density, fill every gap.',
   description:
-    'Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is rotated to its ' +
-    'minimum-area bounding rectangle (rotate), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area) and placed on the ' +
-    'texel grid of `resolution`: bottom-left, into any gap its shape fits (inside rings, between the arms of other islands), `padding` texels ' +
-    'from every other island and half of it from the tile border, so islands never overlap. The scale is the largest at which every island ' +
-    'fits; iterations tries other island orders and keeps the densest. Prims outside `group` keep their uv and the islands keep clear of them. ' +
-    'The result is checked: overlaps inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the ' +
-    'part they are in. UDIM tiles fill 1001, 1002, … (u offset), ten per row; an island goes to the first tile it fits.',
+    'Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is oriented ' +
+    '(orient: its minimum-area bounding rectangle, as it is, or world up to +v), scaled so texel density is uniform (scale_mode uniform: uv ' +
+    'area ∝ 3D area, times the texel_weight attribute) and placed on the texel grid of `resolution`: bottom-left, into any gap its shape ' +
+    'fits (inside rings, between the arms of other islands), `padding` texels from every other island and half of it from the tile border, ' +
+    'so islands never overlap. The scale is the largest at which every island fits (or texels_per_unit); iterations tries other island ' +
+    'orders and keeps the densest. fit atlas keeps everything in the 0..1 tile; fit udim fills UDIM tiles 1001, 1002, … (u offset, ten per ' +
+    'row; an island goes to the first tile it fits), up to udims. cut_long cuts islands longer than the tile, and rings and arcs, into parts ' +
+    'when the parts pack denser (each cut is a seam). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps ' +
+    'inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the part they are in; islands ' +
+    'that do not fit at any scale leave the uv unchanged, with a warning.',
   aliases: ['uvlayout', 'uvpack', 'uv_pack', 'pack_uv'],
   inputs: [{ name: 'geo', desc: 'geometry with uv' }],
   params: {
     island_attrib: { type: 'string', default: '', desc: 'prim attribute defining islands (e.g. "chart"); "" = connected uv regions' },
     group: P.group('prim', 'prims to lay out; the others keep their uv and the islands keep clear of them (with padding)'),
-    rotate: { type: 'bool', default: true, desc: 'rotate islands to their minimum bounding rectangle and allow 90° turns' },
+    orient: { type: 'enum', options: ['min_rect', 'keep', 'world'], default: 'min_rect', desc: 'island orientation: min_rect = turned to its minimum bounding rectangle, with 90° turns while packing (densest); keep = as it is, no turns; world = world up (+Y) points to +v (horizontal islands: +X to +u), no turns. Rotations keep the uv winding' },
     scale_mode: { type: 'enum', options: ['uniform', 'keep'], default: 'uniform', desc: 'uniform = same texel density on every island (by 3D area); keep = keep the relative uv scale' },
+    texel_weight: { type: 'string', default: 'texel_weight', desc: 'prim attribute scaling the texel density of each island (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1' },
     ...LAYOUT_PARAMS,
-    udims: { type: 'int', default: 1, min: 1, max: 100, desc: 'number of UDIM tiles to fill (1 = the 0..1 square)' },
+    texels_per_unit: { type: 'float', default: 0, min: 0, desc: 'texel density at `resolution` (texels per world unit with scale_mode uniform); 0 = the largest at which every island fits' },
+    fit: { type: 'enum', options: ['atlas', 'udim'], default: 'atlas', desc: 'atlas = everything in the 0..1 tile (a texels_per_unit too high for it is lowered, with a warning); udim = UDIM tiles 1001, 1002, …: the islands keep texels_per_unit and spill into more tiles (up to udims), or fill udims tiles at the largest scale' },
+    udims: { type: 'int', default: 1, min: 1, max: 100, desc: 'fit udim: the most UDIM tiles to fill' },
+    cut_long: { type: 'bool', default: true, desc: 'cut islands longer than the tile, and rings and arcs whose hull is mostly empty, across their length into parts, when that packs denser (each cut is a seam; prim island tells the parts apart); off = islands stay whole' },
     iterations: { type: 'int', default: 4, min: 1, max: 64, desc: 'island orders tried (longest side first, then tallest, largest box, largest area, then shuffles by seed); the densest wins' },
     seed: P.seed(),
     write_island: { type: 'bool', default: true, desc: 'write prim int attribute island' },
   },
   outputs: 'vertex uv, prim island',
   example: { type: 'uv_layout', in: ['geo'], params: { padding: 8, resolution: 2048 } },
-  cook: ({ input, p, warn }) => {
+  cook: ({ input, p, warn, stat }) => {
     const g = input(0).clone();
     const uv = readUV(g);
     if (!uv) throw new NodeError('uv_layout: no uv attribute', 'run uv_project, uv_flatten or uv_unwrap first');
@@ -363,11 +417,14 @@ defineNode({
     }
     const { islands, islandOfPrim } = findIslands(g, uv, attr, gm);
     const out = layoutIslands(g, uv, islands, islandOfPrim, {
-      rotate: p.rotate, scaleMode: p.scale_mode, padding: paddingTexels(p.padding, p.units, p.resolution), resolution: p.resolution,
-      tiles: p.udims, iterations: p.iterations, seed: Math.floor(Number(p.seed) || 0), node: 'uv_layout', islandAttrib: attr ? p.island_attrib : undefined,
+      orient: p.orient, scaleMode: p.scale_mode, padding: paddingTexels(p.padding, p.units, p.resolution), resolution: p.resolution,
+      fit: p.fit, tiles: p.udims, texelsPerUnit: Math.max(0, p.texels_per_unit), iterations: p.iterations, seed: Math.floor(Number(p.seed) || 0),
+      texelWeight: String(p.texel_weight ?? ''), cutLong: !!p.cut_long, node: 'uv_layout', islandAttrib: attr ? p.island_attrib : undefined,
     }, warn);
-    writeUV(g, out);
-    if (p.write_island) writePrimInt(g, 'island', islandOfPrim);
+    if (p.texel_weight && p.texel_weight !== 'texel_weight' && !out.weighted) warn(`uv_layout: texel_weight "${p.texel_weight}" is not a numeric prim attribute; every island has weight 1`);
+    if (out.cut) stat('islands cut', out.cut);
+    writeUV(g, out.uv);
+    if (p.write_island) writePrimInt(g, 'island', out.labels);
     return g;
   },
 });

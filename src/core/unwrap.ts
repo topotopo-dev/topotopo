@@ -6,9 +6,12 @@
 //    no overlap). A corner only degenerate triangles reach is mapped onto its polygon's chart the same way.
 //  - A polygon whose triangles xatlas puts in different charts is split into its triangles (straddling "split"), each
 //    keeping its chart's uv exactly; "unfold" keeps the polygon and maps its other corners onto its main chart.
-//  - Charts whose uv winding is opposite to the polygons' are mirrored back.
+//  - Charts whose uv winding is opposite to the polygons' are mirrored back. Charts stretched one way (xatlas widens
+//    very thin charts, such as bevel strips, in its atlas) are flattened again by a least squares conformal map.
 //  - Folded charts (overlaps inside a chart) are charted again: by xatlas from their triangles with a quarter of the max
 //    cost, then by a least squares conformal map; one still folded (a crack or cone no flat map avoids) is cut where it overlaps itself.
+//  - Thin charts join a neighbour where their seam lines up; charts longer than the tile, rings and arcs are cut into
+//    parts when the parts pack denser (core/uvislands.ts).
 //  - The charts are packed with the raster packer (core/uvpack.ts) and the result is checked exactly (uvoverlap.ts).
 import type { Geometry } from './geometry.ts';
 import { GeoBuilder } from './geometry.ts';
@@ -17,6 +20,7 @@ import { lscm, readUV } from './uv.ts';
 import { xatlasCharts } from './xatlas.ts';
 import type { XatlasChartOptions } from './xatlas.ts';
 import { packCharts } from './uvpack.ts';
+import { cutLongCharts, islandWeights, mergeThinCharts, packsDenser, worldAngles } from './uvislands.ts';
 import { OVERLAP_REL, triIntersectionArea, uvOverlapCheck, uvOverlapPairs, uvTriangleAreas } from './uvoverlap.ts';
 
 export interface UnwrapOptions {
@@ -31,10 +35,15 @@ export interface UnwrapOptions {
   padding: number;
   /** texels per world unit: 0 = the largest density that fits one tile */
   texelsPerUnit: number;
-  /** charts that do not fit one tile at texelsPerUnit: udim = more tiles to the right, shrink = a lower density, stack = more atlases in 0..1 */
-  overflow: 'udim' | 'shrink' | 'stack';
-  /** rotate charts to their minimum bounding rectangle and allow 90° turns when packing */
-  rotate: boolean;
+  /** charts that do not fit one tile at texelsPerUnit: atlas = a lower density so they fit the tile, udim = more tiles to the right, stack = more atlases in 0..1 */
+  fit: 'atlas' | 'udim' | 'stack';
+  /** chart orientation: min_rect = turned to the minimum bounding rectangle (and 90° turns when packing), world = world up (+Y) to +v, keep = as charted */
+  orient: 'min_rect' | 'world' | 'keep';
+  /** cut charts longer than the tile, and rings and arcs, into parts; join thin charts onto a neighbour (core/uvislands.ts) */
+  cutLong: boolean;
+  mergeThin: boolean;
+  /** prim attribute with a texel weight per polygon ("" = none) */
+  texelWeight: string;
   /** island orders the packer tries */
   iterations: number;
 }
@@ -54,6 +63,8 @@ export interface UnwrapResult {
   /** polygons xatlas put in several charts (split into triangles, or unfolded) */
   straddled: number;
   firstStraddled: number;
+  /** charts stretched one way (thin strips) flattened again by a conformal map */
+  unstretched: number;
   /** charts mirrored back to the polygon winding */
   mirrored: number;
   /** folded charts charted again, by stage: xatlas at a quarter of the cost, a conformal map (LSCM), cut where it overlaps itself; and the charts the cuts made */
@@ -73,6 +84,14 @@ export interface UnwrapResult {
   /** summed uv area per tile used, and the packer's cap (index of the chart that spans the tile, or -1) */
   coverage: number;
   cappedBy: number;
+  /** charts cut into parts (cutLong), the charts they became, and a prim of the first one cut (-1) */
+  cut: number;
+  cutParts: number;
+  firstCut: number;
+  /** the texel weight attribute was found */
+  weighted: boolean;
+  /** thin charts joined onto a neighbour (mergeThin) */
+  merged: number;
 }
 
 /** Signed uv area of triangle t in U (6 numbers per triangle), doubled. */
@@ -146,6 +165,9 @@ export function unwrapMesh(X: any, g: Geometry, o: UnwrapOptions): UnwrapResult 
     for (const [, s] of sum) if (s < 0) mirrored++;
   };
   unmirror(0);
+  // ---- stretch: charts stretched one way (thin strips xatlas widened) are flattened again by a conformal map
+  let unstretched = 0;
+  for (const list of stretchedCharts(g, tris, cu, triChart, nCharts)) { lscmChart(g, tris, list, keyOf, cu); unstretched++; }
   // ---- folds: chart again until no chart overlaps itself
   const refolded: [number, number, number] = [0, 0, 0];
   let splitInto = 0;
@@ -359,52 +381,78 @@ export function unwrapMesh(X: any, g: Geometry, o: UnwrapOptions): UnwrapResult 
     for (let t = 0; t < nt; t++) { oTris.push(tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2]); oTriPrim.push(triPrim[t]); }
   }
   return finishUnwrap(out, o, outChart, outUV, Uint32Array.from(oTris), Uint32Array.from(oTriPrim), {
-    pieces: nPieces, degenerate, firstDegenerate, isolated, straddled, firstStraddled, mirrored, refolded, splitInto,
+    pieces: nPieces, degenerate, firstDegenerate, isolated, straddled, firstStraddled, mirrored, unstretched, refolded, splitInto,
   });
 }
 
-type UnwrapStats = Pick<UnwrapResult, 'pieces' | 'degenerate' | 'firstDegenerate' | 'isolated' | 'straddled' | 'firstStraddled' | 'mirrored' | 'refolded' | 'splitInto'>;
+type UnwrapStats = Pick<UnwrapResult, 'pieces' | 'degenerate' | 'firstDegenerate' | 'isolated' | 'straddled' | 'firstStraddled' | 'mirrored' | 'unstretched' | 'refolded' | 'splitInto'>;
 
 /** Pack the charts (islands) into the tile(s), lay stacked atlases back into 0..1, and check the result. */
 function finishUnwrap(g: Geometry, o: UnwrapOptions, chart: Int32Array, uv: Float64Array, T: Uint32Array, TP: Uint32Array, st: UnwrapStats): UnwrapResult {
   const nt = TP.length, P = g.P, vp = g.vertexPoint;
-  // islands: the charts in use, renumbered from 0
-  const ids = new Map<number, number>(), isl: { verts: number[]; tris: number[]; area3: number; areaUV: number }[] = [];
+  // islands: the charts in use, renumbered from 0 (in triangle order)
+  const ids = new Map<number, number>();
+  for (let t = 0; t < nt; t++) { const c = chart[TP[t]]; if (c >= 0 && !ids.has(c)) ids.set(c, ids.size); }
+  let newChart: Int32Array = new Int32Array(g.numPrims).fill(-1), count = ids.size;
+  for (let p = 0; p < g.numPrims; p++) { const k = chart[p] >= 0 ? ids.get(chart[p]) : undefined; if (k !== undefined) newChart[p] = k; }
+  let merged = 0;
+  if (o.mergeThin) {
+    const mt = mergeThinCharts(g, uv, newChart, count, { resolution: o.resolution, padding: o.padding });
+    if (mt.merged) { newChart = mt.labels; count = mt.count; merged = mt.merged; }
+  }
+  const spill = o.texelsPerUnit > 0 && o.fit !== 'atlas';
   const solid = new Uint8Array(nt);
   for (let t = 0; t < nt; t++) {
-    const c = chart[TP[t]];
-    if (c < 0) continue;
-    let k = ids.get(c);
-    if (k === undefined) { ids.set(c, (k = isl.length)); isl.push({ verts: [], tris: [], area3: 0, areaUV: 0 }); }
-    const I = isl[k], a = vp[T[t * 3]] * 3, b = vp[T[t * 3 + 1]] * 3, d = vp[T[t * 3 + 2]] * 3;
+    const a = vp[T[t * 3]] * 3, b = vp[T[t * 3 + 1]] * 3, d = vp[T[t * 3 + 2]] * 3;
     const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], wx = P[d] - P[a], wy = P[d + 1] - P[a + 1], wz = P[d + 2] - P[a + 2];
     const cr = Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx);
     const e2 = ux * ux + uy * uy + uz * uz + wx * wx + wy * wy + wz * wz + (wx - ux) ** 2 + (wy - uy) ** 2 + (wz - uz) ** 2;
     if (cr > 1e-9 * e2) solid[t] = 1;
-    I.tris.push(T[t * 3], T[t * 3 + 1], T[t * 3 + 2]);
-    I.area3 += cr / 2;
-    const p0 = T[t * 3] * 2, p1 = T[t * 3 + 1] * 2, p2 = T[t * 3 + 2] * 2;
-    I.areaUV += Math.abs((uv[p1] - uv[p0]) * (uv[p2 + 1] - uv[p0 + 1]) - (uv[p2] - uv[p0]) * (uv[p1 + 1] - uv[p0 + 1])) / 2;
   }
-  const newChart = new Int32Array(g.numPrims).fill(-1);
-  for (let p = 0; p < g.numPrims; p++) {
-    const k = chart[p] >= 0 ? ids.get(chart[p]) : undefined;
-    if (k === undefined) continue;
-    newChart[p] = k;
-    for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) isl[k].verts.push(v);
+  /** islands of a labelling (triangles, corners, 3D and uv area), packed */
+  const pack = (lab: Int32Array, n: number) => {
+    const isl: { verts: number[]; tris: number[]; area3: number; areaUV: number }[] = Array.from({ length: n }, () => ({ verts: [], tris: [], area3: 0, areaUV: 0 }));
+    for (let t = 0; t < nt; t++) {
+      const k = lab[TP[t]];
+      if (k < 0) continue;
+      const I = isl[k], a = vp[T[t * 3]] * 3, b = vp[T[t * 3 + 1]] * 3, d = vp[T[t * 3 + 2]] * 3;
+      const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], wx = P[d] - P[a], wy = P[d + 1] - P[a + 1], wz = P[d + 2] - P[a + 2];
+      I.tris.push(T[t * 3], T[t * 3 + 1], T[t * 3 + 2]);
+      I.area3 += Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2;
+      const p0 = T[t * 3] * 2, p1 = T[t * 3 + 1] * 2, p2 = T[t * 3 + 2] * 2;
+      I.areaUV += Math.abs((uv[p1] - uv[p0]) * (uv[p2 + 1] - uv[p0 + 1]) - (uv[p2] - uv[p0]) * (uv[p1 + 1] - uv[p0 + 1])) / 2;
+    }
+    for (let p = 0; p < g.numPrims; p++) {
+      const k = lab[p];
+      if (k >= 0) for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) isl[k].verts.push(v);
+    }
+    const weights = o.texelWeight ? islandWeights(g, lab, n, o.texelWeight) : null;
+    const angles = o.orient === 'world' ? worldAngles(g, uv, lab, n) : null;
+    const run = (padding: number) => packCharts(uv, isl, {
+      resolution: o.resolution, padding, turns: o.orient === 'min_rect', orient: o.orient === 'min_rect' ? 'min_rect' : 'keep', scaleMode: 'uniform',
+      tiles: spill ? 100 : 1, iterations: o.iterations, seed: 0, weights, angles,
+      texelsPerUnit: spill ? o.texelsPerUnit : 0, maxTexelsPerUnit: o.fit === 'atlas' ? o.texelsPerUnit : 0,
+    });
+    let r = run(o.padding);
+    if (!r.packed && o.padding > 0) r = run(0);
+    return { lab, n, isl, r, weights };
+  };
+  let best = pack(newChart, count), cut = { cut: 0, parts: count, firstCut: -1 };
+  if (o.cutLong) {
+    const fixed = o.texelsPerUnit > 0 ? o.texelsPerUnit / o.resolution : 0;
+    const c = cutLongCharts(g, uv, newChart, count, { scaleMode: 'uniform', weights: best.weights, tiles: 1, tileScale: spill ? fixed : 0, maxTileScale: spill ? 0 : fixed });
+    if (c.cut) {
+      // the parts only when they pack denser: a ring's hole often takes the small charts well enough
+      const alt = pack(c.labels, c.count);
+      if (packsDenser(alt.r, best.r)) { best = alt; cut = c; }
+    }
   }
-  const spill = o.texelsPerUnit > 0 && o.overflow !== 'shrink';
-  const run = (padding: number) => packCharts(uv, isl, {
-    resolution: o.resolution, padding, turns: o.rotate, orient: o.rotate ? 'min_rect' : 'keep', scaleMode: 'uniform',
-    tiles: spill ? 100 : 1, iterations: o.iterations, seed: 0,
-    texelsPerUnit: spill ? o.texelsPerUnit : 0, maxTexelsPerUnit: o.overflow === 'shrink' ? o.texelsPerUnit : 0,
-  });
-  let r = run(o.padding);
-  if (!r.packed && o.padding > 0) r = run(0);
+  newChart = best.lab; count = best.n;
+  const isl = best.isl, r = best.r, weighted = !!best.weights;
   const out = r.packed ? r.uv : uv;
-  // overflow stack: every atlas in 0..1, told apart by prim atlas
+  // fit stack: every atlas in 0..1, told apart by prim atlas
   let atlas: Int32Array | null = null;
-  if (o.overflow === 'stack' && r.tilesUsed > 1) {
+  if (o.fit === 'stack' && r.tilesUsed > 1) {
     atlas = new Int32Array(g.numPrims).fill(-1);
     for (let k = 0; k < isl.length; k++) {
       const v0 = isl[k].verts[0];
@@ -426,6 +474,7 @@ function finishUnwrap(g: Geometry, o: UnwrapOptions, chart: Int32Array, uv: Floa
     geo: g, chart: newChart, atlas, ...st, charts: isl.length, tiles: Math.max(1, r.tilesUsed),
     folds: chk.within, foldPair: chk.firstWithin ? chk.firstWithin.t : null, across: chk.across, acrossPair: chk.firstAcross ? chk.firstAcross.t : null,
     collapsed, tris: T, triPrim: TP, uv: out, coverage: r.packed ? r.uvArea / Math.max(1, r.tilesUsed) : 0, cappedBy: r.cappedBy >= 0 ? r.cappedBy : -1,
+    cut: cut.cut, cutParts: cut.parts, firstCut: cut.firstCut, weighted, merged,
   };
 }
 
@@ -446,6 +495,37 @@ function foldedCharts(cu: Float64Array, triChart: Int32Array, nCharts: number): 
     if (fold) out.push(list);
   }
   return out;
+}
+
+/** A chart is stretched when the mean ratio (by 3D area) of the larger to the smaller stretch of its triangles' 3D → uv maps passes this. */
+const STRETCH_MAX = 1.25;
+
+/**
+ * Charts (triangle lists) whose uv is stretched more one way than the other (STRETCH_MAX): xatlas gives very thin charts
+ * (bevel strips) a minimum width in its atlas, so they come out stretched across. A conformal map flattens them again.
+ */
+function stretchedCharts(g: Geometry, tris: ArrayLike<number>, cu: Float64Array, triChart: Int32Array, nCharts: number): number[][] {
+  const P = g.P, vp = g.vertexPoint, sum = new Float64Array(nCharts), wsum = new Float64Array(nCharts);
+  for (let t = 0; t < triChart.length; t++) {
+    const c = triChart[t];
+    if (c < 0) continue;
+    const a = vp[tris[t * 3]] * 3, b = vp[tris[t * 3 + 1]] * 3, d = vp[tris[t * 3 + 2]] * 3;
+    const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2], e2x = P[d] - P[a], e2y = P[d + 1] - P[a + 1], e2z = P[d + 2] - P[a + 2];
+    const l1 = Math.hypot(e1x, e1y, e1z), nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x, nl = Math.hypot(nx, ny, nz);
+    if (!(l1 > 0) || !(nl > 0)) continue;
+    // the triangle in its own plane: (0, 0), (l1, 0), (qx, qy)
+    const qx = (e2x * e1x + e2y * e1y + e2z * e1z) / l1, qy = nl / l1;
+    const o = t * 6, du1 = cu[o + 2] - cu[o], dv1 = cu[o + 3] - cu[o + 1], du2 = cu[o + 4] - cu[o], dv2 = cu[o + 5] - cu[o + 1];
+    // Jacobian J with J (l1, 0) = (du1, dv1) and J (qx, qy) = (du2, dv2)
+    const j00 = du1 / l1, j10 = dv1 / l1, j01 = (du2 - j00 * qx) / qy, j11 = (dv2 - j10 * qx) / qy;
+    const f = j00 * j00 + j01 * j01 + j10 * j10 + j11 * j11, det = Math.abs(j00 * j11 - j01 * j10);
+    if (!(det > 0) || !Number.isFinite(f)) continue;
+    const s1 = Math.sqrt((f + Math.sqrt(Math.max(0, f * f - 4 * det * det))) / 2), w = nl / 2;
+    sum[c] += (s1 / (det / s1)) * w; wsum[c] += w;
+  }
+  const lists: number[][] = Array.from({ length: nCharts }, () => []);
+  for (let t = 0; t < triChart.length; t++) { const c = triChart[t]; if (c >= 0 && wsum[c] > 0 && sum[c] / wsum[c] > STRETCH_MAX) lists[c].push(t); }
+  return lists.filter((l) => l.length > 0);
 }
 
 /** uv for triangles `list` by a least squares conformal map over their shared corners (keyOf), pinned on the border. */

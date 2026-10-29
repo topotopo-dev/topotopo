@@ -4601,7 +4601,7 @@ category: `topology` · aliases: `polyreduce`, `simplify`, `reduce`, `decimate_p
 
 Reduce triangle count while preserving shape, uv seams and attributes (meshoptimizer). Output is triangles; also thins point clouds.
 
-Houdini: PolyReduce SOP. Polygons are triangulated first and the result is triangles. meshoptimizer simplifyWithAttributes collapses edges by quadric error: corners whose vertex attributes differ (uv seams, hard normals) and borders between prims with different string attributes or prim groups stay intact, and the "attributes" (float point or vertex attributes with weights) steer which edges go. Points keep their exact positions and attributes (meshoptimizer only removes points); corners copy the corner they stand for. max_error stops early (relative to the mesh extent, or in scene units with error_absolute); the achieved error is written to detail "error" (and "error_abs" in scene units). prune lets whole small pieces vanish; aggressive (sloppy) ignores topology and seams to reach any target. group decimates only those prims (points shared with other prims stay; sparse speeds up small groups of big meshes). mode points (or auto on a point cloud) thins points with simplifyPoints, keeping an even spread and the point_attributes (Cd, pscale).
+Houdini: PolyReduce SOP. Polygons are triangulated first and the result is triangles. meshoptimizer simplifyWithAttributes collapses edges by quadric error: corners whose vertex attributes differ (uv seams, hard normals) and borders between prims with different string attributes or prim groups stay intact, and the "attributes" (float point or vertex attributes with weights) steer which edges go. Points keep their exact positions and attributes (meshoptimizer only removes points); corners copy the corner they stand for. max_error stops early (relative to the mesh extent, or in scene units with error_absolute); the achieved error is written to detail "error" (and "error_abs" in scene units). prune lets whole small pieces vanish; aggressive (sloppy) ignores topology and seams to reach any target. group decimates only those prims (points shared with other prims stay; sparse speeds up small groups of big meshes). keep_uv: a collapse keeps its corners' uv, so it can fold the uv where the map bends (bevels, curved chart borders) even with uv steering; when the input uv has no overlaps, the reduction is checked and, where it folds, goes in steps that lock the points around each fold, so the output has none (it may stop above the target there; the warning names the parts; not with group or aggressive). Reducing before uv_unwrap gives the full reduction. mode points (or auto on a point cloud) thins points with simplifyPoints, keeping an even spread and the point_attributes (Cd, pscale).
 
 **Inputs**
 
@@ -4623,6 +4623,7 @@ Houdini: PolyReduce SOP. Polygons are triangulated first and the result is trian
 | `sparse` | bool | `false` |  |  |  | faster when the group is a small part of a big mesh (use error_absolute for consistent errors) *(advanced)* |
 | `regularize` | bool | `false` |  |  |  | favour evenly sized triangles over exact shape *(advanced)* |
 | `aggressive` | bool | `false` |  |  | `sloppy` | sloppy mode: ignores topology and seams, reaches any target |
+| `keep_uv` | bool | `true` |  |  |  | when the input uv has no overlaps, keep the output free of uv folds: where a collapse would fold the uv, reduce in steps around it (can stop above the target); off = one plain reduction (not checked with group or aggressive) |
 | `group` | group (prim) | `""` |  |  |  | prims to decimate ("" = all); points shared with other prims stay |
 | `lock` | group (point) | `""` |  |  | `lock_points` | point group that must not move or disappear ("" = none) |
 | `mode` | enum | `"auto"` |  | `auto`, `mesh`, `points` |  | auto = points when the input has no polygons; points thins a point cloud |
@@ -4981,7 +4982,7 @@ category: `topology` · aliases: `lod_tree`, `polyreduce_lod`, `lod_create`, `lo
 
 Levels of detail in one go: decimated copies tagged with prim lod and named {name}_lod0, {name}_lod1 … (merged), or one level (switch); optionally of one group only.
 
-Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. Every level's prims get prim int "lod" and prim "name" = name_format with {name} = the prim's input name (or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open borders, with point counts (or the max_error limit). Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
+Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. Every level's prims get prim int "lod" and prim "name" = name_format with {name} = the prim's input name (or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open borders, with point counts (or the max_error limit), or the parts where a plain reduction folds the uv (keep_uv, as in decimate: a level never folds a clean uv atlas). Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
 
 **Inputs**
 
@@ -5002,6 +5003,7 @@ Houdini: PolyReduce per level + a name per level (LOD Create). Each level is dec
 | `attributes` | string | `"uv N Cd"` |  |  |  | float point/vertex attributes that steer the reduction, with optional weights ("uv:2 N:0.5") |
 | `lock_border` | bool | `false` |  |  |  | keep open borders fixed in every level |
 | `prune` | bool | `true` |  |  |  | let small disconnected pieces (leaves, bolts) vanish in coarse levels |
+| `keep_uv` | bool | `true` |  |  |  | when the input uv has no overlaps, keep every level free of uv folds (as decimate keep_uv: reduce in steps around a fold; a level can stop above its target); off = plain reductions |
 | `mode` | enum | `"merge"` |  | `merge`, `switch` |  | merge = all levels in one geometry; switch = only "level" |
 | `level` | int | `0` | 0.. |  |  | switch mode: the level to output |
 | `name_format` | string | `"{name}_lod{level}"` |  |  | `name_pattern`, `suffix_format` | prim name of each level: {name} = the input prim name (or base_name), {level} = the level number (merge needs {level}) |
@@ -8912,9 +8914,9 @@ Charts are the polygon regions bounded by seams: edges where the input uv is dis
 | `pins` | json | `[]` |  |  |  | two point numbers to pin in every chart that contains both, e.g. [0, 12]; [] = the two farthest-apart border points |
 | `cut_closed` | bool | `true` |  |  |  | open closed charts and charts with handles with a cut graph (otherwise they fold) |
 | `layout` | bool | `true` |  |  |  | pack the charts into the 0..1 square (uniform texel density); off = every chart fills 0..1 on its own |
-| `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv") |
+| `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv"); half of it, rounded up, to the tile border |
 | `units` | enum | `"texels"` |  | `texels`, `uv` |  | unit of padding |
-| `resolution` | int | `1024` | 16..16384 |  |  | texture size the padding is measured against |
+| `resolution` | int | `1024` | 16..16384 |  |  | texture size: padding is in its texels, and islands are placed on its texel grid (at most 2048 cells per tile) |
 
 **Writes:** vertex uv, prim chart
 
@@ -8945,9 +8947,9 @@ Charts are the polygon regions bounded by seams: edges where the input uv is dis
 
 category: `uv` · aliases: `uvlayout`, `uvpack`, `uv_pack`, `pack_uv`
 
-Pack UV islands into the 0..1 square (or UDIM tiles): rotate to minimal bounds, equalise texel density, skyline packing.
+Pack UV islands into the 0..1 square (or UDIM tiles) without overlaps: rotate to minimal bounds (or keep, or align to the world), equalise texel density, fill every gap.
 
-Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is rotated to its minimum-area bounding rectangle (rotate), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area) and packed bottom-left on a skyline; iterations tries perturbed orders and keeps the tightest. UDIM tiles fill 1001, 1002, … (u offset), ten per row.
+Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is oriented (orient: its minimum-area bounding rectangle, as it is, or world up to +v), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area, times the texel_weight attribute) and placed on the texel grid of `resolution`: bottom-left, into any gap its shape fits (inside rings, between the arms of other islands), `padding` texels from every other island and half of it from the tile border, so islands never overlap. The scale is the largest at which every island fits (or texels_per_unit); iterations tries other island orders and keeps the densest. fit atlas keeps everything in the 0..1 tile; fit udim fills UDIM tiles 1001, 1002, … (u offset, ten per row; an island goes to the first tile it fits), up to udims. cut_long cuts islands longer than the tile, and rings and arcs, into parts when the parts pack denser (each cut is a seam). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the part they are in; islands that do not fit at any scale leave the uv unchanged, with a warning.
 
 **Inputs**
 
@@ -8960,14 +8962,18 @@ Islands are polygon regions whose uv is continuous across shared edges, or the v
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `island_attrib` | string | `""` |  |  |  | prim attribute defining islands (e.g. "chart"); "" = connected uv regions |
-| `group` | group (prim) | `""` |  |  |  | prims to lay out (others keep their uv) |
-| `rotate` | bool | `true` |  |  |  | rotate islands to their minimum bounding rectangle and allow 90° turns |
+| `group` | group (prim) | `""` |  |  |  | prims to lay out; the others keep their uv and the islands keep clear of them (with padding) |
+| `orient` | enum | `"min_rect"` |  | `min_rect`, `keep`, `world` |  | island orientation: min_rect = turned to its minimum bounding rectangle, with 90° turns while packing (densest); keep = as it is, no turns; world = world up (+Y) points to +v (horizontal islands: +X to +u), no turns. Rotations keep the uv winding |
 | `scale_mode` | enum | `"uniform"` |  | `uniform`, `keep` |  | uniform = same texel density on every island (by 3D area); keep = keep the relative uv scale |
-| `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv") |
+| `texel_weight` | string | `"texel_weight"` |  |  |  | prim attribute scaling the texel density of each island (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1 |
+| `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv"); half of it, rounded up, to the tile border |
 | `units` | enum | `"texels"` |  | `texels`, `uv` |  | unit of padding |
-| `resolution` | int | `1024` | 16..16384 |  |  | texture size the padding is measured against |
-| `udims` | int | `1` | 1..100 |  |  | number of UDIM tiles to fill (1 = the 0..1 square) |
-| `iterations` | int | `4` | 1..64 |  |  | packing orders tried (the first is sorted by size); the tightest wins |
+| `resolution` | int | `1024` | 16..16384 |  |  | texture size: padding is in its texels, and islands are placed on its texel grid (at most 2048 cells per tile) |
+| `texels_per_unit` | float | `0` | 0.. |  |  | texel density at `resolution` (texels per world unit with scale_mode uniform); 0 = the largest at which every island fits |
+| `fit` | enum | `"atlas"` |  | `atlas`, `udim` |  | atlas = everything in the 0..1 tile (a texels_per_unit too high for it is lowered, with a warning); udim = UDIM tiles 1001, 1002, …: the islands keep texels_per_unit and spill into more tiles (up to udims), or fill udims tiles at the largest scale |
+| `udims` | int | `1` | 1..100 |  |  | fit udim: the most UDIM tiles to fill |
+| `cut_long` | bool | `true` |  |  |  | cut islands longer than the tile, and rings and arcs whose hull is mostly empty, across their length into parts, when that packs denser (each cut is a seam; prim island tells the parts apart); off = islands stay whole |
+| `iterations` | int | `4` | 1..64 |  |  | island orders tried (longest side first, then tallest, largest box, largest area, then shuffles by seed); the densest wins |
 | `seed` | float | `0` |  |  |  | random seed |
 | `write_island` | bool | `true` |  |  |  | write prim int attribute island |
 
@@ -8993,6 +8999,8 @@ Islands are polygon regions whose uv is continuous across shared edges, or the v
 category: `uv` · aliases: `uvproject`, `texture`, `uv_texture`
 
 Project UVs: planar, box (tri-planar per face), cylindrical or spherical.
+
+uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps.
 
 **Inputs**
 
@@ -9084,9 +9092,9 @@ Translate / scale / rotate existing UVs (vertex or point uv).
 
 category: `uv` · aliases: `uvunwrap`, `autouv`, `xatlas`, `uv_auto`, `unwrap`
 
-Automatic UV unwrap with xatlas: cut into charts, flatten each, pack into the 0..1 square. Polygons are kept.
+Automatic UV unwrap: xatlas cuts and flattens charts per connected piece; they are packed without overlaps into the 0..1 square. Polygons are kept.
 
-Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho) and packed. Polygons are triangulated for xatlas internally; the output keeps the original polygons, with per-corner uv (seams split vertices, not points). Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles. Writes prim chart (and atlas when several atlases are made).
+Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Writes prim chart (and atlas with fit stack).
 
 **Inputs**
 
@@ -9108,15 +9116,18 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 | `texture_seam_weight` | float | `0.5` | 0.. |  |  | weight of existing texture seams |
 | `max_cost` | float | `2` | 0.01.. |  |  | a chart stops growing when the weighted cost exceeds this; lower = more, flatter charts |
 | `max_iterations` | int | `1` | 1..16 |  |  | chart growing/seeding iterations (higher = better charts, slower) |
-| `padding` | int | `2` | 0..64 |  |  | texels between charts |
-| `resolution` | int | `0` | 0..16384 |  |  | atlas size in texels; 0 = automatic from texels_per_unit (or about 1024 when both are 0). With texels_per_unit set, charts that do not fit spill into more atlases |
-| `texels_per_unit` | float | `0` | 0.. |  |  | texel density (texels per world unit); 0 = derived from resolution |
-| `bruteforce` | bool | `false` |  |  |  | slower, tighter packing |
-| `rotate_charts` | bool | `true` |  |  |  | rotate each chart to the axis of its convex hull before packing (xatlas packing-time 90° turns are not used: they mirror the chart) |
-| `block_align` | bool | `false` |  |  |  | align charts to 4×4 texel blocks (faster packing, for block-compressed textures) |
-| `udim` | bool | `true` |  |  |  | when xatlas makes several atlases, place atlas k in UDIM tile 1001+k (u offset k); off = all atlases overlap in 0..1 (see prim atlas) |
+| `straddling` | enum | `"split"` |  | `split`, `unfold` |  | a polygon xatlas cuts across charts: split = it becomes its triangles, each with its chart's exact uv; unfold = it stays one polygon, its other corners mapped onto its main chart (can overlap a neighbour) |
+| `padding` | int | `2` | 0..64 |  |  | texels between charts (half of it, rounded up, to the tile border) |
+| `resolution` | int | `1024` | 16..16384 |  |  | texture size: padding is in its texels and charts are placed on its texel grid |
+| `texels_per_unit` | float | `0` | 0.. |  |  | texel density (texels per world unit); 0 = the largest density at which every chart fits one tile |
+| `fit` | enum | `"atlas"` |  | `atlas`, `udim`, `stack` |  | charts that do not fit one tile at texels_per_unit: atlas = a lower density so they fit the 0..1 tile, udim = keep the density and fill more tiles to the right (1002, 1003, …), stack = more atlases all in 0..1 (prim atlas tells them apart) |
+| `orient` | enum | `"min_rect"` |  | `min_rect`, `world`, `keep` |  | chart orientation: min_rect = turned to its minimum bounding rectangle, with 90° turns while packing (densest); world = world up (+Y) points to +v (horizontal charts: +X to +u), no turns; keep = as charted. Rotations keep the uv winding |
+| `merge_thin` | bool | `true` |  |  |  | join thin charts (bevel strips, narrow bands: narrower than three paddings) onto a neighbouring chart where their shared seam lines up and nothing overlaps, so fewer charts lose space to padding (and fewer seams); off = the charts as cut |
+| `cut_long` | bool | `true` |  |  |  | cut charts longer than the tile, and rings and arcs whose hull is mostly empty, across their length into parts, when that packs denser (each cut is a seam); off = charts stay whole |
+| `texel_weight` | string | `"texel_weight"` |  |  |  | prim attribute scaling the texel density of each chart (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1 |
+| `iterations` | int | `4` | 1..64 |  |  | chart orders the packer tries; the densest wins |
 
-**Writes:** vertex uv, prim chart, prim atlas (several atlases only)
+**Writes:** vertex uv, prim chart, prim atlas (fit stack with several atlases)
 
 **Example**
 

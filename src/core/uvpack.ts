@@ -79,6 +79,8 @@ export interface PackResult {
   cells: { island: number; padded: number };
   /** the island whose size capped the scale (it spans a tile), or -1 when the tiles' area set the scale */
   cappedBy: number;
+  /** the texel density packed at: texels (of resolution) per island unit (0 when not packed) */
+  texelsPerUnit: number;
 }
 
 /** Rasteriser margin: a cell an island touches within EPS counts as taken (conservative). */
@@ -293,7 +295,7 @@ export function packCharts(uv: Float64Array, islands: PackIsland[], o: PackOptio
   // free gaps of 2b cells or fewer hold no island (every island to place is at least 1 + 2b cells tall): merged away
   const gap = 2 * b;
   const tiles = Math.max(1, Math.min(100, Math.floor(o.tiles || 1)));
-  const result: PackResult = { uv: out, packed: false, grid: G, padCells, tilesUsed: 0, uvArea: 0, packs: 0, cells: { island: 0, padded: 0 }, cappedBy: -1 };
+  const result: PackResult = { uv: out, packed: false, grid: G, padCells, tilesUsed: 0, uvArea: 0, packs: 0, cells: { island: 0, padded: 0 }, cappedBy: -1, texelsPerUnit: 0 };
   const nI = islands.length;
   if (!nI) return result;
   const prep = prepare(uv, islands, o);
@@ -405,6 +407,7 @@ export function packCharts(uv: Float64Array, islands: PackIsland[], o: PackOptio
   result.packed = true;
   result.tilesUsed = P.tilesUsed;
   if (bestS >= sCap * 0.999) result.cappedBy = largest;
+  result.texelsPerUnit = (bestS * res) / G;
   const tileCells = G * G * Math.max(1, P.tilesUsed);
   result.cells = { island: cellsIsland / tileCells, padded: cellsPadded / tileCells };
   return result;

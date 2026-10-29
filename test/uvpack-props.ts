@@ -2,7 +2,8 @@
 //  - skylinePack (image atlases): random rect sets with identical, nearly identical (1e-10 apart) and thin rects, widths
 //    that sum exactly to the bin, rotation on and off: every rect inside its bin, no two rects in a bin overlap;
 //  - packCharts (uv_layout, uv_flatten): random island sets (rectangles, thin strips, identical and nearly identical
-//    copies, L shapes, rings, fans) with random padding, resolution, turns, tiles and fixed obstacles: no two islands and
+//    copies, L shapes, rings, fans) with random padding, resolution, turns, tiles, fixed obstacles, texel weights and
+//    fixed angles (orient world): no two islands and
 //    no island and obstacle overlap (exact clipping, core/uvoverlap.ts), every island inside a tile and ceil(padding / 2)
 //    texels from its border, and the Euclidean distance between triangles of different islands (and obstacles) is at
 //    least the padding.
@@ -137,11 +138,14 @@ function packProps(r: Rand, check: Check, round: number): void {
     const cx = r(), cy = r(), s = 0.02 + r() * 0.2;
     obst.push(cx, cy, cx + s * r(), cy + s * (0.2 + r()), cx - s * r(), cy + s * r());
   }
+  // texel weights per island, and fixed angles (world orientation) when there are no turns
+  const weights = r() < 0.3 ? islands.map(() => 0.5 + r() * 2.5) : null;
+  const angles = !turns && r() < 0.3 ? islands.map(() => (r() < 0.2 ? NaN : (r() - 0.5) * 2 * Math.PI)) : null;
   const res = packCharts(Float64Array.from(uv), islands, {
     resolution, padding, turns, orient: turns ? 'min_rect' : 'keep', scaleMode: r() < 0.8 ? 'uniform' : 'keep', tiles,
-    iterations: 1 + Math.floor(r() * 3), seed: round, obstacles: obst.length ? Float64Array.from(obst) : null,
+    iterations: 1 + Math.floor(r() * 3), seed: round, obstacles: obst.length ? Float64Array.from(obst) : null, weights, angles,
   });
-  const label = `packCharts #${round}: ${islands.length} islands, res ${resolution}, padding ${padding}, turns ${turns}, ${tiles} tile(s), ${obst.length / 6} obstacles`;
+  const label = `packCharts #${round}: ${islands.length} islands, res ${resolution}, padding ${padding}, turns ${turns}, ${tiles} tile(s), ${obst.length / 6} obstacles${weights ? ', texel weights' : ''}${angles ? ', fixed angles' : ''}`;
   if (!res.packed) {
     // allowed when obstacles take room, or the padding alone needs a large share of the tiles
     const padShare = (islands.length * (1 + res.padCells) ** 2) / (tiles * res.grid * res.grid);

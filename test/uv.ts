@@ -4,7 +4,7 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
-import { triangulate } from '../src/core/topology.ts';
+import { primNormals, triangulate } from '../src/core/topology.ts';
 import { buildCharts, lscm, polygonSides, readUV, uvSeamPairs } from '../src/core/uv.ts';
 import { exportGeometryAsync } from '../src/io/export.ts';
 import { importGeometryAsync } from '../src/io/import.ts';
@@ -222,7 +222,7 @@ const sameTopology = (a: Geometry, b: Geometry) =>
   const spread = Math.max(...ratios) / Math.min(...ratios);
   check(spread < 1.05, `uv_layout: uniform texel density across islands (max/min uv:3D area ratio ${spread.toFixed(3)})`);
   // UDIMs
-  const { geo: u } = await cook({ b: { type: 'box', params: { divisions: [2, 2, 2] } }, out: { type: 'uv_layout', in: ['b'], params: { udims: 3 } } });
+  const { geo: u } = await cook({ b: { type: 'box', params: { divisions: [2, 2, 2] } }, out: { type: 'uv_layout', in: ['b'], params: { fit: 'udim', udims: 3 } } });
   const uvu = readUV(u)!;
   let umax = 0, vmax = 0;
   for (let i = 0; i < uvu.length; i += 2) { umax = Math.max(umax, uvu[i]); vmax = Math.max(vmax, uvu[i + 1]); }
@@ -419,19 +419,138 @@ const named = (g: Geometry, name: string) => { const a = g.prims.add('name', 'st
   check(rep.overlap.pairs === 0 && rep.collapsed === 0, `uv_unwrap: a 1 cm bevelled box beside a 10 m box (${rep.charts} charts): ${rep.overlap.pairs} overlapping pairs, ${rep.collapsed} collapsed triangles`);
 }
 
-// texels_per_unit with overflow: udim spills into more tiles, shrink keeps one, stack puts every atlas in 0..1
+// texels_per_unit with fit: atlas (the default) keeps one tile, udim spills into more tiles, stack puts every atlas in 0..1
+const uvMax = (g: Geometry) => { const u = readUV(g)!; let mu = 0, mv = 0; for (let i = 0; i < u.length; i += 2) { mu = Math.max(mu, u[i]); mv = Math.max(mv, u[i + 1]); } return [mu, mv]; };
 {
-  const nodes = (overflow: string): GraphSpec['nodes'] => ({
+  const nodes = (fit: string): GraphSpec['nodes'] => ({
     s: { type: 'sphere', params: { type: 'ico', level: 2 } },
-    out: { type: 'uv_unwrap', in: ['s'], params: { texels_per_unit: 2000, resolution: 512, overflow } },
+    out: { type: 'uv_unwrap', in: ['s'], params: { texels_per_unit: 2000, resolution: 512, fit } },
   });
-  const range = (g: Geometry) => { const u = readUV(g)!; let mu = 0, mv = 0; for (let i = 0; i < u.length; i += 2) { mu = Math.max(mu, u[i]); mv = Math.max(mv, u[i + 1]); } return [mu, mv]; };
-  const ud = await cook(nodes('udim')), sh = await cook(nodes('shrink')), st = await cook(nodes('stack'));
-  const [uu] = range(ud.geo), [su, sv] = range(sh.geo), [tu, tv] = range(st.geo);
-  check(uu > 1 && ud.warnings.some((w) => w.includes('UDIM tiles')), `uv_unwrap overflow udim: charts spill into more tiles (u max ${uu.toFixed(2)})`);
-  check(su <= 1 && sv <= 1 && uvReport(sh.geo).overlap.pairs === 0, `uv_unwrap overflow shrink: one tile (u max ${su.toFixed(3)}, v max ${sv.toFixed(3)})`);
+  const ud = await cook(nodes('udim')), sh = await cook(nodes('atlas')), st = await cook(nodes('stack'));
+  const [uu] = uvMax(ud.geo), [su, sv] = uvMax(sh.geo), [tu, tv] = uvMax(st.geo);
+  check(uu > 1 && ud.warnings.some((w) => w.includes('UDIM tiles')), `uv_unwrap fit udim: charts spill into more tiles (u max ${uu.toFixed(2)})`);
+  check(su <= 1 && sv <= 1 && uvReport(sh.geo).overlap.pairs === 0, `uv_unwrap fit atlas: one tile (u max ${su.toFixed(3)}, v max ${sv.toFixed(3)})`);
   const atl = st.geo.prims.get('atlas');
-  check(tu <= 1 && tv <= 1 && !!atl && new Set(atl.data as Int32Array).size > 1, `uv_unwrap overflow stack: ${atl ? new Set(atl.data as Int32Array).size : 0} atlases, all in 0..1 (prim atlas)`);
+  check(tu <= 1 && tv <= 1 && !!atl && new Set(atl.data as Int32Array).size > 1, `uv_unwrap fit stack: ${atl ? new Set(atl.data as Int32Array).size : 0} atlases, all in 0..1 (prim atlas)`);
+}
+
+// uv_layout texels_per_unit: fit atlas lowers a density too high for the tile (and says so); fit udim keeps it over more tiles
+{
+  const nodes = (fit: string): GraphSpec['nodes'] => ({
+    b: { type: 'box', params: { size: [2, 2, 2] } },
+    p: { type: 'uv_unwrap', in: ['b'], params: { resolution: 256 } },
+    out: { type: 'uv_layout', in: ['p'], params: { texels_per_unit: 200, resolution: 512, fit, udims: 8, island_attrib: 'chart' } },
+  });
+  const at = await cook(nodes('atlas')), ud = await cook(nodes('udim'));
+  const [au, av] = uvMax(at.geo), [uu] = uvMax(ud.geo);
+  const dA = uvReport(at.geo, { resolution: 512 }).density!, dU = uvReport(ud.geo, { resolution: 512 }).density!;
+  check(au <= 1 && av <= 1 && dA.overall < 200 && at.warnings.some((w) => w.includes('200 texels per unit') && w.includes('fit "udim"')), `uv_layout fit atlas: everything in 0..1 at ${dA.overall.toFixed(0)} texels/m, with a warning`);
+  check(uu > 1 && Math.abs(dU.overall - 200) < 200 * 0.02 && uvReport(ud.geo).overlap.pairs === 0, `uv_layout fit udim: the density is kept (${dU.overall.toFixed(1)} texels/m) over tiles up to u ${uu.toFixed(2)}`);
+}
+
+// texel_weight: a prim attribute scales the density of its islands (set on a group with attrib_create; 0 elsewhere counts as 1)
+for (const node of ['uv_layout', 'uv_unwrap']) {
+  const nodes: GraphSpec['nodes'] = {
+    a: { type: 'box', params: { center: [-1, 0, 0] } }, an: { type: 'attrib_create', in: ['a'], params: { name: 'name', class: 'prim', value: 'plain' } },
+    b: { type: 'box', params: { center: [1, 0, 0] } }, bn: { type: 'attrib_create', in: ['b'], params: { name: 'name', class: 'prim', value: 'detail' } },
+    m: { type: 'merge', in: ['an', 'bn'] },
+    w: { type: 'attrib_create', in: ['m'], params: { name: 'texel_weight', class: 'prim', value: 2, group: '@name=detail' } },
+    p: { type: 'uv_unwrap', in: ['w'], params: { resolution: 256 } },
+    out: node === 'uv_layout' ? { type: 'uv_layout', in: ['p'], params: { resolution: 1024, island_attrib: 'chart' } } : { type: 'uv_unwrap', in: ['w'], params: { resolution: 1024 } },
+  };
+  const { geo } = await cook(nodes);
+  const rep = uvReport(geo, { resolution: 1024 }), d = (n: string) => rep.pieces.find((q) => q.name === n)!.texelsPerMetre!;
+  const ratio = d('detail') / d('plain');
+  check(Math.abs(ratio - 2) < 0.1 && rep.overlap.pairs === 0, `${node} texel_weight 2 on "detail": ${ratio.toFixed(3)}× the texels per metre of "plain", no overlaps`);
+}
+
+// orient world: on every side face of a box world up (+Y) points to +v; min_rect may turn them any way
+{
+  const upAlongV = (g: Geometry) => {
+    const uv = readUV(g)!, P = g.P, vp = g.vertexPoint, n = primNormals(g);
+    let good = 0, sides = 0;
+    for (let p = 0; p < g.numPrims; p++) {
+      if (Math.abs(n[p * 3 + 1]) > 0.5) continue;
+      sides++;
+      // the corner highest in y has the highest v
+      let top = -1, topV = -1;
+      for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) { if (top < 0 || P[vp[v] * 3 + 1] > P[vp[top] * 3 + 1] + 1e-9) top = v; }
+      for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) { if (topV < 0 || uv[v * 2 + 1] > uv[topV * 2 + 1] + 1e-9) topV = v; }
+      if (Math.abs(P[vp[topV] * 3 + 1] - P[vp[top] * 3 + 1]) < 1e-9) good++;
+    }
+    return { good, sides };
+  };
+  for (const node of ['uv_layout', 'uv_unwrap']) {
+    const { geo, warnings } = await cook({
+      b: { type: 'box', params: { size: [1, 2, 0.5] } }, p: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
+      out: node === 'uv_layout' ? { type: 'uv_layout', in: ['p'], params: { orient: 'world' } } : { type: 'uv_unwrap', in: ['b'], params: { orient: 'world' } },
+    });
+    const u = upAlongV(geo), rep = uvReport(geo);
+    check(u.sides > 0 && u.good === u.sides && rep.overlap.pairs === 0 && warnings.length === 0, `${node} orient world: up is +v on ${u.good} of ${u.sides} side faces, no overlaps`);
+  }
+}
+
+// cut_long: a rail far longer than the tile is cut into parts and the atlas fills (whole, the rail sets the scale)
+{
+  const nodes = (cut: boolean): GraphSpec['nodes'] => ({
+    rail: { type: 'box', params: { size: [8, 0.03, 0.03], center: [0, 1, 0], divisions: [32, 1, 1] } }, crate: { type: 'box' }, m: { type: 'merge', in: ['rail', 'crate'] },
+    out: { type: 'uv_unwrap', in: ['m'], params: { cut_long: cut, resolution: 1024 } },
+  });
+  const whole = await cook(nodes(false)), cut = await cook(nodes(true));
+  const rw = uvReport(whole.geo), rc = uvReport(cut.geo);
+  check(rc.overlap.pairs === 0 && rc.utilization.value > rw.utilization.value * 2 && rc.charts > rw.charts, `uv_unwrap cut_long: a rail 8× the crate cut into parts (${rw.charts} → ${rc.charts} charts) fills ${(rc.utilization.value * 100).toFixed(0)}% of the tile (whole: ${(rw.utilization.value * 100).toFixed(0)}%)`);
+}
+
+// merge_thin: the bevel strips of a bevelled plate (small charts: max_chart_area) join the faces beside them: fewer
+// charts, no overlaps, no new folds; and no chart is stretched one way (xatlas widens thin strips; they are flattened again)
+{
+  /** the worst chart's mean (by 3D area) ratio of the larger to the smaller stretch of the 3D → uv map */
+  const worstStretch = (g: Geometry) => {
+    const uv = readUV(g)!, { tris, triPrim } = triangulate(g), P = g.P, vp = g.vertexPoint, chart = g.prims.get('chart')!.data as Int32Array;
+    const sum = new Map<number, number>(), wsum = new Map<number, number>();
+    for (let t = 0; t < triPrim.length; t++) {
+      const [a, b, c] = [tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2]];
+      const e1 = [0, 1, 2].map((k) => P[vp[b] * 3 + k] - P[vp[a] * 3 + k]), e2 = [0, 1, 2].map((k) => P[vp[c] * 3 + k] - P[vp[a] * 3 + k]);
+      const l1 = Math.hypot(...e1), n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]], nl = Math.hypot(...n);
+      if (!(l1 > 0 && nl > 0)) continue;
+      const qx = (e2[0] * e1[0] + e2[1] * e1[1] + e2[2] * e1[2]) / l1, qy = nl / l1;
+      const du1 = uv[b * 2] - uv[a * 2], dv1 = uv[b * 2 + 1] - uv[a * 2 + 1], du2 = uv[c * 2] - uv[a * 2], dv2 = uv[c * 2 + 1] - uv[a * 2 + 1];
+      const j00 = du1 / l1, j10 = dv1 / l1, j01 = (du2 - j00 * qx) / qy, j11 = (dv2 - j10 * qx) / qy;
+      const f = j00 ** 2 + j01 ** 2 + j10 ** 2 + j11 ** 2, det = Math.abs(j00 * j11 - j01 * j10);
+      if (!(det > 0)) continue;
+      const s1 = Math.sqrt((f + Math.sqrt(Math.max(0, f * f - 4 * det * det))) / 2), k = chart[triPrim[t]];
+      sum.set(k, (sum.get(k) ?? 0) + (s1 * s1 / det) * nl); wsum.set(k, (wsum.get(k) ?? 0) + nl);
+    }
+    return Math.max(...[...sum].map(([k, s]) => s / wsum.get(k)!));
+  };
+  const nodes = (merge: boolean): GraphSpec['nodes'] => ({
+    b: { type: 'box', params: { size: [1, 0.06, 0.6], divisions: [8, 1, 6] } }, bv: { type: 'poly_bevel', in: ['b'], params: { offset: 0.008, divisions: 2, group: 'angle>40' } },
+    out: { type: 'uv_unwrap', in: ['bv'], params: { merge_thin: merge, resolution: 1024, padding: 4, max_chart_area: 0.002 } },
+  });
+  const off = await cook(nodes(false)), on = await cook(nodes(true));
+  const r0 = uvReport(off.geo), r1 = uvReport(on.geo);
+  check(r1.charts < r0.charts && r1.overlap.pairs === 0 && r1.collapsed === 0 && r1.mirrored === 0, `uv_unwrap merge_thin: a bevelled plate in ${r1.charts} charts (${r0.charts} without), 0 overlaps, 0 mirrored; ${(r1.utilization.value * 100).toFixed(0)}% used (${(r0.utilization.value * 100).toFixed(0)}% without)`);
+  const s0 = worstStretch(off.geo), s1 = worstStretch(on.geo);
+  check(s0 < 1.3 && s1 < 1.3, `uv_unwrap: no chart of the bevelled plate is stretched one way (worst chart ${s0.toFixed(3)}, joined ${s1.toFixed(3)}; xatlas left the strips 8× wider than long)`);
+}
+
+// inspect uv: the density of a uniform layout is even across charts
+{
+  const { geo } = await cook({ b: { type: 'box', params: { divisions: [2, 2, 2] } }, out: { type: 'uv_layout', in: ['b'], params: { fit: 'udim', udims: 3 } } });
+  const rep = uvReport(geo, { resolution: 1024 }), d = rep.density!;
+  check(!!d && d.charts === rep.charts && d.max / d.min < 1.01 && Math.abs(d.median - d.overall) < d.overall * 0.01 && rep.tileUtilization.length >= 2, `inspect uv after uv_layout: ${d.overall.toFixed(1)} texels/m over ${d.charts} charts (spread ${(d.max / d.min).toFixed(4)}), tiles ${rep.tileUtilization.map((t) => `${t.tile} ${(t.value * 100).toFixed(0)}%`).join(', ')}`);
+}
+
+// uv_project box: faces looking along +X, +Y and -Z are mirrored (one projection per axis), -X, -Y and +Z are not
+{
+  const { geo } = await cook({ b: { type: 'box' }, out: { type: 'uv_project', in: ['b'], params: { method: 'box' } } });
+  const uv = readUV(geo)!, n = primNormals(geo), mirrored: string[] = [];
+  for (let p = 0; p < geo.numPrims; p++) {
+    let a = 0;
+    for (let v = geo.primStart[p], e = geo.primStart[p + 1]; v < e; v++) { const w = v + 1 < e ? v + 1 : geo.primStart[p]; a += uv[v * 2] * uv[w * 2 + 1] - uv[w * 2] * uv[v * 2 + 1]; }
+    if (a < 0) mirrored.push(['-X', '+X', '-Y', '+Y', '-Z', '+Z'][[0, 1, 2].findIndex((k) => Math.abs(n[p * 3 + k]) > 0.5) * 2 + (n[p * 3 + [0, 1, 2].findIndex((k) => Math.abs(n[p * 3 + k]) > 0.5)] > 0 ? 1 : 0)]);
+  }
+  check(mirrored.sort().join(' ') === '+X +Y -Z', `uv_project box: mirrored faces ${mirrored.join(' ')} (as documented: +X +Y -Z)`);
 }
 
 // decimating after the unwrap: a plain reduction folds the uv of a torus; keep_uv (the default) never does, says where

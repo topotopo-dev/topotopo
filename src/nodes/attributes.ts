@@ -1148,6 +1148,13 @@ defineNode({
   type: 'uv_project',
   category: 'uv',
   summary: 'Project UVs: planar, box (tri-planar per face), cylindrical or spherical.',
+  description:
+    'uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). ' +
+    'planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis ' +
+    'its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a ' +
+    'texture reads backwards there, and their uv winding is opposite to the polygon\'s: inspect uv counts them as mirrored), while -X, -Y and ' +
+    '+Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u ' +
+    '= angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps.',
   aliases: ['uvproject', 'texture', 'uv_texture'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
