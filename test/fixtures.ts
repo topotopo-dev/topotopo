@@ -127,7 +127,7 @@ export const INPUTS: Record<string, string[]> = {
   resample: ['CURVE'], carve: ['CURVE'], ends: ['CIRCLE'], sweep: ['CURVE', 'PROFILEXY'], polywire: ['CURVE'], revolve: ['PROFILE'],
   extrude: ['SHAPE'], offset_curve: ['SHAPE'], boolean2d: ['SHAPE', 'CIRCLE'], fill: ['SHAPE'], loft: ['LOFT'],
   copy_to_points: ['MESH', 'PTS'], ray: ['PTS_ABOVE', 'MESH'], attrib_copy: ['MESH', 'COLORED'], attrib_transfer: ['MESH', 'COLORED'],
-  boolean: ['BOX', 'CUTTER'], remove_interior: ['OVERLAP'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
+  boolean: ['BOX', 'CUTTER'], remove_interior: ['OVERLAP'], material: ['MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],
   sdf_grid: ['SDF'], grid_combine: ['SDFGRID', 'SDFGRID2'], grid_offset: ['SDFGRID'], grid_blur: ['SDFGRID'],
   grid_dilate: ['SDFGRID'], grid_erode: ['SDFGRID'], grid_resample: ['SDFGRID'], grid_to_mesh: ['SDFGRID'],
