@@ -29,7 +29,8 @@ import { encodePNG } from '../render/png.ts';
 import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
 import { fittingFormats, kindMismatch, outputKind } from '../io/kinds.ts';
-import { packagesUsed } from '../graph/packages.ts';
+import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
+import { ProjectPackages } from '../gallery/packages.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
@@ -70,6 +71,8 @@ export interface OutputEntry {
   tags?: string[];
   /** it shows the last finished result, not the values now: its cook was stopped */
   stale?: boolean;
+  /** the packages it uses whose working folder this session shows live: it holds their unpublished edits, and so do its exports */
+  live?: string[];
   /** a named output: the kind its graph pins ("kind" in its outputs), and what it says when it cooks to another */
   pinned?: string; warning?: string;
   /** its heightfield (samples, spacing, layers with their ranges): the page colours the terrain by a layer */
@@ -276,23 +279,27 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     // the packages: an update, or a save in a working folder the session follows, changes what they resolve to
     const workspaceRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
+    // the packages shown live this session (their working folders): the results that use them hold unpublished edits
+    const following = ws.packages instanceof ProjectPackages ? ws.packages.following().map((f) => f.package) : [];
     // the graph the page shows first cooks first: its cards are queued before the others'
     const first = opts.first?.();
     const graphs = [...ws.graphs].sort(([a], [b]) => Number(b === first) - Number(a === first));
     for (const [graph, spec] of graphs) {
+      const live = following.length ? packagesNamedIn(spec).filter((x) => following.includes(x)) : [];
       for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name)) {
         const id = idFor('graph', graph, p.output === null ? 'default' : 'named', p.output ?? 'main'); alive.add(id);
         const key = workspaceRevision, old = items.get(id);
         const named = p.output === null ? undefined : spec.outputs?.[p.output], pinned = named?.kind, tags = named?.tags;
         const meta = {
           label: p.label, output: p.output, default: p.default, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null,
-          saved: lastSaved(records, graph, p), ...(pinned ? { pinned } : {}), ...(Array.isArray(tags) && tags.length ? { tags } : {}),
+          saved: lastSaved(records, graph, p), ...(pinned ? { pinned } : {}), ...(Array.isArray(tags) && tags.length ? { tags } : {}), ...(live.length ? { live } : {}),
         };
         // the same inputs, or a graph held after a stop (the card keeps what it shows until something changes)
         if (old?.key === key || (old && ws.held(graph))) {
           Object.assign(old.entry, meta);
           if (!meta.saved) delete old.entry.saved;
           if (!meta.tags) delete old.entry.tags;
+          if (!meta.live) delete old.entry.live;
           continue;
         }
         // while it cooks again, the card keeps what it said (summary, kind, formats), so the details shown for it keep

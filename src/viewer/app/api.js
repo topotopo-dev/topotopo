@@ -65,6 +65,12 @@ export const api = {
   },
   /** The project's packages: {project, packages, problems, running, compare} (project null: no project), or null */
   async packages() { const { status, j } = await json('/api/packages'); return status === 200 ? j : null; },
+  /** Find packages: {libraries: [{name, standing, hits}], problems} or {ok: false, error} */
+  async searchPackages(q) { const { status, j } = await json('/api/packages/search?' + new URLSearchParams({ q })); return status === 200 ? { ok: true, ...j } : fail(j.error ?? `${status}`); },
+  /** In a package's own project: {ok, package, last, published, note, changed} */
+  async authorState() { const { status, j } = await json('/api/packages/author'); return status === 200 ? j : fail(j.error ?? `${status}`); },
+  /** The publish dry run: {ok, check: {ok, version, previous, blocks, warnings, changes, bigBecause}} */
+  async checkPublish() { const { status, j } = await json('/api/packages/check', post({})); return status === 200 ? j : fail(j.error ?? `${status}`); },
   /** The before/after of updating a package (to `to`, else the newest with the same big number), once it is done or stopped */
   async compare(pkg, to) { const { status, j } = await json('/api/packages/compare', post({ package: pkg, ...(to ? { to } : {}) })); return status === 200 ? j : { ...fail(j.error ?? `${status}`), status }; },
   /** {compare: the last before/after or null, running: the one in progress or null} */

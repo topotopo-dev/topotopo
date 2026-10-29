@@ -8,6 +8,10 @@
 // follow it), and a version published there is a new update.
 //
 //   GET  /api/packages               the project and its packages (project null: the graphs are in no project)
+//   GET  /api/packages/search        ?q&kind&tag: the outputs of the packages in TopoTopo's built-in library and every
+//                                    library, by words, kind and tag, and whether the project can use them (Find packages)
+//   GET  /api/packages/author        in a package's own project: its last version, and whether its files changed since
+//   POST /api/packages/check         in a package's own project: the publish dry run (every check, nothing written)
 //   POST /api/packages/compare       {package, to?}: the before/after, answered when it is done or stopped
 //   GET  /api/packages/compare       the last before/after in full, and the one in progress
 //   GET  /api/packages/compare/geo   ?id&place&side=a|b|overlay: a place cooked with one version, or both overlaid
@@ -25,7 +29,10 @@ import { diffOverlay } from '../explain.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
 import type { Scope } from '../graph/scope.ts';
 import { readManifest } from '../gallery/library.ts';
-import { ProjectPackages, compareVersions, loadProject, startsBigVersion } from '../gallery/packages.ts';
+import { ProjectPackages, compareVersions, loadProject, publishPackage, publishedVersions, searchPackages, startsBigVersion, workingHash } from '../gallery/packages.ts';
+import { BUILTIN_LIBRARY } from '../gallery/library.ts';
+import { parsePackageName } from '../graph/scope.ts';
+import type { GraphSpec } from '../graph/types.ts';
 import type { VersionInfo } from '../gallery/packages.ts';
 import { applyUpdate, beforeAfter, setText } from '../gallery/update.ts';
 import type { BeforeAfter, CookedSide, UsePlace } from '../gallery/update.ts';
@@ -43,8 +50,20 @@ export interface PackageRow {
   /** the note and date of the version in use, from the project's copy */
   note?: string;
   published?: string;
-  /** the outputs of the version in use (its copy's record) with their kinds and tags: "owner/name/output", or "owner/name" for a default output that is no named output */
-  outputs?: { type: string; label?: string; kind?: string; tags: string[] }[];
+  /**
+   * the outputs of the version in use (its copy's record) with their kinds and tags: "owner/name/output", or
+   * "owner/name" for a default output that is no named output; `used` when a graph of the project names it
+   */
+  outputs?: { type: string; label?: string; kind?: string; tags: string[]; used?: boolean }[];
+  /** one of TopoTopo's own packages (its kits) */
+  kit: boolean;
+  /**
+   * it can show the edits of its working folder live: it has exactly one, and it is no kit of TopoTopo's unless the
+   * project is inside TopoTopo's own repository (whose library folder holds the kits' working folders)
+   */
+  canFollow: boolean;
+  /** the nodes of the project's graphs that use it: a node of its type, or one whose nested graph names it */
+  usedBy: { graph: string; node: string; type: string }[];
   /** the small update (the newest version with the same big number) and the big one */
   small?: string;
   big?: string;
@@ -86,7 +105,7 @@ export interface CompareProgress {
 
 export interface PackagesState {
   /** null: the viewer's graphs are in no project (nothing to show) */
-  project: { id: string; label: string; dir: string; libraries: string[] } | null;
+  project: { id: string; title: string; label: string; dir: string; libraries: string[]; package: string | null } | null;
   packages: PackageRow[];
   problems: string[];
   /** the before/after in progress, and the last one finished (GET /api/packages/compare has it in full) */
@@ -105,12 +124,32 @@ function asked<T>(f: () => T): T {
 const sameDir = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
 const versionRow = (v: VersionInfo): VersionRow => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: !!v.big });
 /** A version's outputs by the node type a graph names them with, with their kinds and tags (PackageRow.outputs). */
-const outputRows = (pkg: string, v: VersionInfo): NonNullable<PackageRow['outputs']> => {
-  const row = (type: string, o: VersionInfo['default']) => ({ type, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [] });
-  const rows = Object.entries(v.outputs).map(([k, o]) => row(`${pkg}/${k}`, o));
-  return Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node) ? rows : [row(pkg, v.default), ...rows];
+const outputRows = (pkg: string, v: VersionInfo, used: Set<string> = new Set()): NonNullable<PackageRow['outputs']> => {
+  const isDefault = (o: { graph: string; node: string }) => o.graph === v.default.graph && o.node === v.default.node;
+  // used: a graph names it, or names the package alone and it is the default output
+  const row = (type: string, o: VersionInfo['default'], dflt: boolean) => ({
+    type, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [], ...(used.has(type) || (dflt && used.has(pkg)) ? { used: true } : {}),
+  });
+  const rows = Object.entries(v.outputs).map(([k, o]) => row(`${pkg}/${k}`, o, isDefault(o)));
+  return Object.values(v.outputs).some(isDefault) ? rows : [row(pkg, v.default, true), ...rows];
 };
 const byName = <T extends { package: string }>(a: T, b: T) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0);
+const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';
+/**
+ * The package output types a node names, as its type and in its nested graphs (foreach and solver bodies), as
+ * "owner/name/output" or "owner/name".
+ */
+function typesNamedBy(node: unknown, depth = 0): string[] {
+  if (!node || typeof node !== 'object' || depth > 64) return [];
+  const out: string[] = [], n = node as { type?: unknown; params?: Record<string, unknown> };
+  if (typeof n.type === 'string' && n.type.includes('/') && typeof parsePackageName(n.type) !== 'string') out.push(n.type);
+  if (n.params && typeof n.params === 'object') for (const v of Object.values(n.params)) if (isGraph(v)) for (const inner of Object.values(v.nodes)) out.push(...typesNamedBy(inner, depth + 1));
+  return out;
+}
+const packageOf = (type: string) => type.split('/').slice(0, 2).join('/');
+/** The folder of TopoTopo's own repository, whose library/ holds the kits' working folders. */
+const TOPOTOPO_REPO = path.dirname(BUILTIN_LIBRARY.path);
+const inside = (dir: string, root: string) => { const r = path.relative(root, dir); return !r.startsWith('..') && !path.isAbsolute(r); };
 
 export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
   const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
@@ -130,24 +169,42 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
     const base = { running: run?.progress ?? null, compare: last ? { id: last.id, package: last.result.target.package, from: last.result.target.from, to: last.result.target.to } : null };
     if (!pk?.dir) return { project: null, packages: [], problems: [], ...base };
     pk.refresh();
-    if (!pk.manifest) return { project: { id: '', label: pk.label, dir: pk.dir, libraries: [] }, packages: [], problems: [pk.error ?? `${pk.dir}: project.json cannot be read`], ...base };
+    if (!pk.manifest) return { project: { id: '', title: '', label: pk.label, dir: pk.dir, libraries: [], package: null }, packages: [], problems: [pk.error ?? `${pk.dir}: project.json cannot be read`], ...base };
     const problems: string[] = [];
     let outdated: ReturnType<ProjectPackages['outdated']> = [];
     try { outdated = pk.outdated(); } catch (e: any) { problems.push(e.message); }
     const following = new Map(pk.following().map((f) => [f.package, { library: f.library, dir: f.dir }]));
+    // where the project's graphs use each package: the nodes, and the output types they name
+    const usedBy = new Map<string, PackageRow['usedBy']>(), usedTypes = new Set<string>();
+    for (const [graph, g] of ws.graphs) for (const [node, spec] of Object.entries(g.nodes)) {
+      const types = typesNamedBy(spec);
+      for (const type of types) usedTypes.add(type);
+      for (const pkg of new Set(types.map(packageOf))) {
+        const list = usedBy.get(pkg) ?? [];
+        list.push({ graph, node, type: types.find((t) => packageOf(t) === pkg)! });
+        usedBy.set(pkg, list);
+      }
+    }
+    const developing = inside(pk.dir, TOPOTOPO_REPO);
+    const row = (o: { package: string; working: { library: string; dir: string }[] }, followed: { library: string; dir: string } | null) => {
+      const kit = o.package.startsWith('topotopo/');
+      return { kit, canFollow: !!followed || (o.working.length === 1 && (!kit || developing)), usedBy: usedBy.get(o.package) ?? [] };
+    };
     const packages: PackageRow[] = outdated.map((o) => {
-      const info = pk.copyInfo(o.package, o.version);
+      const info = pk.copyInfo(o.package, o.version), followed = following.get(o.package) ?? null;
+      const outputs = info ? outputRows(o.package, info, usedTypes) : undefined;
       return {
-        package: o.package, version: o.version, ...(info ? { note: info.note, published: info.published, outputs: outputRows(o.package, info) } : {}),
+        package: o.package, version: o.version, ...(info ? { note: info.note, published: info.published, outputs } : {}),
         ...(o.small ? { small: o.small } : {}), ...(o.big ? { big: o.big } : {}),
-        newer: o.newer.map(versionRow), libraries: o.libraries, working: o.working, followed: following.get(o.package) ?? null,
+        newer: o.newer.map(versionRow), libraries: o.libraries, working: o.working, followed, ...row(o, followed),
         ...(o.error ? { error: o.error } : {}), ...(kept.has(o.package) ? { mustChange: kept.get(o.package) } : {}),
       };
     });
     // a package followed before the project uses it (a working folder without a published version, say)
-    for (const [p, f] of following) if (!packages.some((r) => r.package === p)) packages.push({ package: p, version: null, newer: [], libraries: [f.library], working: [f], followed: f });
+    for (const [p, f] of following) if (!packages.some((r) => r.package === p)) packages.push({ package: p, version: null, newer: [], libraries: [f.library], working: [f], followed: f, ...row({ package: p, working: [f] }, f) });
     problems.push(...pk.check());
-    return { project: { id: pk.manifest.id, label: pk.label, dir: pk.dir, libraries: pk.manifest.libraries }, packages: packages.sort(byName), problems: [...new Set(problems)], ...base };
+    const m = pk.manifest;
+    return { project: { id: m.id, title: m.title, label: pk.label, dir: pk.dir, libraries: m.libraries, package: m.package ?? null }, packages: packages.sort(byName), problems: [...new Set(problems)], ...base };
   }
 
   /** Tell the pages that what the tab shows changed (`force`: after something a page did), and watch its folders. */
@@ -323,11 +380,18 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
     };
   }
 
-  /** The overlay as the view draws it: diffOverlay's colours, without the materials that would tint them. */
+  /**
+   * The overlay as the view draws it: diffOverlay's colours, without the materials that would tint them. b's polygons
+   * and a's (those left where they do not lie on b) are told apart by the material they name, "overlay_b" and
+   * "overlay_a": the view draws a's a sliver behind b's, so where the two lie in one plane b's colour shows, without
+   * the stripes of two surfaces fighting for each pixel.
+   */
   const overlayOf = (a: Geometry, b: Geometry) => {
     const g = diffOverlay(a, b);
     g.table('prim').delete('material');
     g.table('detail').delete('materials');
+    const m = g.prims.add('material', 'string', 1), nb = b.numPrims;
+    for (let p = 0; p < g.numPrims; p++) m.set(p, p < nb ? 'overlay_b' : 'overlay_a');
     return g;
   };
   /** A place of the last before/after as a GLB: side a (the version in use), b (the new one), or both overlaid. */
@@ -367,6 +431,25 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
     return { ok: true, text: r.text, package: pkg, from: r.target.from, to: r.target.to, big: r.target.big, mustChange: r.mustChange };
   }
 
+  // ---------------------------------------------------------------- the package's own project
+  /** Its last published version, and whether its files changed since (a publish would make a new version). */
+  function authorState() {
+    const p = need(), m = p.manifest;
+    if (!m?.package) err(400, 'this project is no package: its project.json names none ("package": "owner/name")');
+    const last = publishedVersions(p.dir!, m.package).at(-1);
+    let changed: boolean | null = null;
+    try { changed = last ? workingHash(p.dir!) !== last.hash : null; } catch { /* unreadable files: the check says why */ }
+    return { ok: true, package: m.package, last: last?.version ?? null, published: last?.published ?? null, note: last?.note ?? '', changed };
+  }
+  /** The publish dry run: every check, every output cooked, the number it would get; nothing is written. */
+  let checking: Promise<unknown> | null = null;
+  async function checkPublish() {
+    const p = need();
+    if (!p.manifest?.package) err(400, 'this project is no package: its project.json names none ("package": "owner/name")');
+    checking ??= publishPackage(ws, p, { check: true }).finally(() => { checking = null; });
+    return { ok: true, check: await checking };
+  }
+
   function follow(pkg: string, on: boolean) {
     const p = need();
     const text = asked(() => p.follow(pkg, on));
@@ -397,11 +480,19 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
       if (u.pathname !== '/api/packages' && !u.pathname.startsWith('/api/packages/')) return false;
       const json = (status: number, body: unknown) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
       try {
-        const gets = ['/api/packages', '/api/packages/compare', '/api/packages/compare/geo'];
-        const posts = ['/api/packages/compare', '/api/packages/stop', '/api/packages/update', '/api/packages/follow', '/api/packages/dismiss'];
+        const gets = ['/api/packages', '/api/packages/search', '/api/packages/author', '/api/packages/compare', '/api/packages/compare/geo'];
+        const posts = ['/api/packages/compare', '/api/packages/stop', '/api/packages/update', '/api/packages/follow', '/api/packages/dismiss', '/api/packages/check'];
         if (!gets.includes(u.pathname) && !posts.includes(u.pathname)) err(404, `no route ${u.pathname}`);
         if (req.method === 'GET' || req.method === 'HEAD') {
           if (u.pathname === '/api/packages') { json(200, state()); return true; }
+          if (u.pathname === '/api/packages/author') { json(200, authorState()); return true; }
+          if (u.pathname === '/api/packages/search') {
+            // Find packages: TopoTopo's kits and every library's packages, and whether this project can use each
+            const q = { query: u.searchParams.get('q') ?? '', ...(u.searchParams.get('kind') ? { kind: u.searchParams.get('kind')! } : {}), ...(u.searchParams.get('tag') ? { tag: u.searchParams.get('tag')! } : {}) };
+            const r = asked(() => searchPackages(pk?.dir ?? null, q));
+            json(200, { ...r, libraries: r.libraries.map((l) => ({ name: l.name, standing: l.standing, hits: l.hits })) });
+            return true;
+          }
           if (u.pathname === '/api/packages/compare') { json(200, { compare: last ? summary(last) : null, running: run?.progress ?? null }); return true; }
           if (u.pathname === '/api/packages/compare/geo') {
             const id = u.searchParams.get('id'), place = Number(u.searchParams.get('place') || NaN);
@@ -416,6 +507,7 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
         }
         if (req.method !== 'POST' || !posts.includes(u.pathname)) err(405, 'GET required');
         const body = await readJSON(req) ?? {};
+        if (u.pathname === '/api/packages/check') { json(200, await checkPublish()); return true; }
         if (u.pathname === '/api/packages/stop') {
           if (run) { run.signal.aborted = true; run.progress.stopping = true; send(run); }
           json(200, { ok: true, stopping: !!run });

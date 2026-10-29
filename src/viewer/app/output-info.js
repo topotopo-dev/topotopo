@@ -15,6 +15,9 @@ export function detailLine(item) {
   return [what, item.size ? fmtSize(item.size) : ''].filter(Boolean).join(' · ');
 }
 
+/** What a result that uses packages shown live says: its exports and downloads hold their unpublished edits. */
+export const liveText = (item) => (item.live?.length ? `uses the unpublished edits of ${item.live.join(', ')} (shown live this session): Export and Download write them too, and say so in how the file was made` : '');
+
 /** What it is in a line, its kind first: "terrain · 2049 × 2049 samples, 2 m apart · 4096 × 312 × 4096 m" (its view before it has cooked). */
 export function kindLine(item) {
   const line = [kindBadge(item), detailLine(item)].filter(Boolean).join(' · ');

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { api } from './api.js';
 import { createViews, CAMERA_NAMES, SHADINGS } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
-import { MeshObject, parseGLB, createLights, LINE_MATERIALS } from './scene.js';
+import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
 import { createGuides, PLACE_KINDS } from './guides.js';
 import { createSelect } from './select.js';
@@ -669,6 +669,8 @@ ctx.previewOutput = async (item, bytes, update) => {
   const serial = ++previewSerial, src = await parseGLB(bytes);
   if (serial !== previewSerial || ctx.outputs.active?.id !== item.id) { new MeshObject('', src).dispose(); return; }
   const mesh = new MeshObject('out', src); mesh.onReady = () => ctx.requestRender();
+  // an update's overlay: the old version's polygons a sliver behind the new one's (no stripes where they meet)
+  if (item.overlay) src.traverse((o) => { for (const m of [o.material ?? []].flat()) if (m.name === 'overlay_a') recede(m); });
   ctx.output.mesh?.dispose(); ctx.output.mesh = mesh; ctx.outputRoot.add(mesh.root); ctx.previewEmpty = false;
   ctx.output.summary = item.summary ?? ''; ctx.output.error = item.error ?? null; ctx.output.about = null;
   ctx.outputGraph(item);
@@ -683,6 +685,14 @@ ctx.previewOutput = async (item, bytes, update) => {
 };
 ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); ctx.requestRender(); };
 ctx.frameOutput = frameAll;
+/** Show a node of a graph (the Packages tab's "used by"): that graph, the node's result, the Scene tab. */
+ctx.showNode = (graph, node) => {
+  if (!ctx.graph.list.some((g) => g.name === graph)) return;
+  if (ctx.outputs?.active) ctx.outputs.scene();
+  if (ctx.graph.name !== graph) { ctx.graph.name = graph; $('graph').value = graph; local.set('graph', graph); ctx.graph.renderControls(); renderCook(); }
+  ctx.graph.show(node);
+  ctx.showTab('scene');
+};
 ctx.outputs = createOutputPanel(ctx);
 ctx.packages = createPackagesPanel(ctx, $('packages'));
 

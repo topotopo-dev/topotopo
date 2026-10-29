@@ -7,7 +7,7 @@
 import { createImageView } from './image-view.js';
 import { fmtBytes } from './units.js';
 import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
-import { kindLine, detailLine, kindBadge, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, detailLine, kindBadge, liveText, layerChoices, shownLayer } from './output-info.js';
 import { inputImageURL } from './layers.js';
 
 const url = (route, item, more = {}) => `/api/output/${route}?` + new URLSearchParams({ id: item.id, rev: item.revision, ...more });
@@ -224,6 +224,8 @@ export function createOutputPanel(ctx) {
         if (item.default && entries.filter((v) => !v.parent && v.exportable).length > 1) { const b = text('span', 'default', 'badge default'); b.title = 'the graph\'s default output: what the graph shows and exports when no output is named'; marks.push(b); }
         const kind = kindBadge(item);
         if (kind) { const b = text('span', kind, 'badge kind'); b.title = 'what it is'; marks.push(b); }
+        // it uses a package shown live: unpublished edits, in its exports too
+        if (item.live?.length) { const b = text('span', 'unpublished edits', 'badge live'); b.title = liveText(item); marks.push(b); }
         badges.replaceChildren(...marks);
         tags.replaceChildren(...(item.tags ?? []).map((t) => text('span', t, 'tag')));
         tags.hidden = !item.tags?.length;
