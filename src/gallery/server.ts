@@ -15,7 +15,8 @@ import type { ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
-import { galleryDir, graphNames, isStale, listFiles, loadConfig, readBakeState, readGraph, scanLibrary } from './library.ts';
+import { galleryDir, isStale, listFiles, loadConfig, readBakeState, scanLibrary } from './library.ts';
+import { graphFiles } from '../workspace.ts';
 import type { BakeState, GalleryConfig, LibraryScan, Project } from './library.ts';
 import { builtinVersions, compareVersions, copyRecord, publishedVersions, startsBigVersion } from './packages.ts';
 import type { VersionInfo } from './packages.ts';
@@ -100,8 +101,12 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       if (p) broadcast({ project: keyOf(p), ok: state?.ok ?? false, version: state?.at ?? 0 });
     },
   });
+  /** A project's graphs (graphs/, and graph files beside project.json), and whether it has the one project.json shows. */
+  const graphsOf = (p: Project) => graphFiles(p.dir);
+  const hasDefault = (p: Project) => graphsOf(p).has(p.manifest.bake.graph ?? p.manifest.graph);
   const bakeIfStale = (p: Project) => {
-    if (!bakeOn || queue.pending(p.dir)) return;
+    // nothing to bake before the project has its default graph: its card says so ("no default graph yet")
+    if (!bakeOn || queue.pending(p.dir) || !hasDefault(p)) return;
     try { if (isStale(p) && queue.add(p.dir)) broadcast({ project: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
   };
   rescan();
@@ -185,7 +190,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     app: (name) => `/app/${name}`,
     three: '/vendor/three/',
   };
-  const status = (p: Project, s: BakeState | null) => (queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
+  const status = (p: Project, s: BakeState | null) => (!hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
   const cardOf = (p: Project): CardData => {
     const s = readBakeState(p.dir);
     const m = p.manifest;
@@ -218,8 +223,9 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   };
   const projectData = (p: Project): ProjectData => {
     const s = readBakeState(p.dir);
-    const graphs = graphNames(p.dir).map((name) => {
-      const g = readGraph(p.dir, name) ?? {};
+    const graphs = [...graphsOf(p)].map(([name, file]) => {
+      let g: any = {};
+      try { g = JSON.parse(fs.readFileSync(file, 'utf8')) ?? {}; } catch { /* unreadable: listed without nodes */ }
       const meta = g.params ?? {};
       return {
         name, nodes: Object.keys(g.nodes ?? {}).length,
@@ -237,7 +243,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(home ? { url: urls.project(home.lib, home.id) } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {
-      ...cardOf(p), rel: p.rel, links: m.links, graph: m.graph, graphs, created: m.created,
+      ...cardOf(p), rel: p.rel, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
       attachments: listFiles(path.join(p.dir, 'attachments')), exports: listFiles(path.join(p.dir, 'exports')),
       glb: fs.existsSync(path.join(galleryDir(p.dir), 'preview.glb')), bake: s,
       share: { link: abs(urls.project(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },

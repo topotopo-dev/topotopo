@@ -21,7 +21,7 @@ export interface Urls {
 
 export interface CardData {
   lib: string; id: string; title: string; collection: string; tags: string[]; description: string; updated: number;
-  /** 'ok' | 'failed' | 'baking' | 'new' */
+  /** 'ok' | 'failed' | 'baking' | 'new', or 'empty': the project has not the graph project.json shows (nothing to bake yet) */
   status: string; version: string;
   /** a package: its full name and newest version (null before the first is published) */
   pkg?: { name: string; version: string | null };
@@ -62,7 +62,7 @@ export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
 
 const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
 const when = (ms: number) => (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '');
-const STATUS: Record<string, string> = { ok: '', failed: 'bake failed', baking: 'baking…', new: 'not baked yet' };
+const STATUS: Record<string, string> = { ok: '', failed: 'bake failed', baking: 'baking…', new: 'not baked yet', empty: 'no default graph yet' };
 
 function shell(title: string, u: Urls, body: string, opts: { page: string; data?: object }) {
   return `<!doctype html>
@@ -177,8 +177,10 @@ export function projectPage(p: ProjectData, u: Urls): string {
   const images = p.attachments.filter((f) => f.image), other = p.attachments.filter((f) => !f.image);
   const edit = u.edit(p.lib, p.id);
   const snippet = (label: string, value: string) => `<label class="copy"><span>${label}</span><input readonly value="${esc(value)}"><button type="button" data-copy>Copy</button></label>`;
-  const b = p.bake;
-  const bakeLine = !b ? 'Not baked yet.'
+  const b = p.status === 'empty' ? null : p.bake;
+  const bakeLine = p.status === 'empty'
+    ? (p.graphs.length ? `No default graph yet: project.json shows "${p.graph}", which this project does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this project has no graphs. Ask your agent to build one; the preview appears here when it exists.')
+    : !b ? 'Not baked yet.'
     : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${b.points ?? 0} points, ${b.prims ?? 0} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
     : `Bake failed ${when(b.at)}`;
   const view = p.glb
@@ -201,7 +203,7 @@ export function projectPage(p: ProjectData, u: Urls): string {
       <button class="btn" type="button" data-post="bake">Re-bake</button>
       <button class="btn" type="button" data-post="reveal">Show folder</button>
     </div>
-    <p class="bake ${b && !b.ok ? 'err' : ''}" id="bake">${esc(bakeLine)}</p>
+    <p class="bake ${b && !b.ok ? 'err' : ''}${p.status === 'empty' ? ' empty' : ''}" id="bake">${esc(bakeLine)}</p>
     ${b && !b.ok && b.error ? `<pre class="error">${esc(b.error)}</pre>` : ''}
     ${b?.warnings?.length ? `<details class="warn"><summary>${b.warnings.length} warning${b.warnings.length > 1 ? 's' : ''}</summary><pre>${esc(b.warnings.join('\n'))}</pre></details>` : ''}
     <h2>On your board</h2>
@@ -215,7 +217,7 @@ export function projectPage(p: ProjectData, u: Urls): string {
     ${p.package ? packageSection(p.package) : ''}
     ${usesSection(p.uses)}
     <h2>Graphs</h2>
-    ${p.graphs.length ? p.graphs.map((g) => `<div class="graph"><h3>${esc(g.name)}${g.name === p.graph ? ' <span class="tag">shown</span>' : ''} <span class="count">${g.nodes} nodes</span></h3>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('') : '<p class="dim">No graphs yet: build one with an agent (MCP <code>library {action:"open"}</code>, then <code>build</code>) or open the editor.</p>'}
+    ${p.graphs.length ? p.graphs.map((g) => `<div class="graph"><h3>${esc(g.name)}${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes</span></h3>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('') : '<p class="dim">No graphs yet. Ask your agent to build one in this project (its library tool opens the project); open the editor to watch it appear.</p>'}
     ${p.exports.length ? `<h2>Exports</h2>${fileList(p.exports, p.lib, p.id, 'exports', u)}` : ''}
     <p class="dim small">Folder <code>${esc(p.rel)}</code> in library ${esc(p.lib)}${p.created ? ` · created ${esc(p.created)}` : ''} · updated ${esc(when(p.updated))}</p>
   </section>

@@ -62,6 +62,8 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 .out code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 td .tags { margin-top: 4px; }
 .s-failed { color: var(--err); }
+.s-empty { color: var(--dim); font-style: italic; }
+.bake.empty { color: var(--text); }
 .s-baking { color: var(--accent); }
 
 .project { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "stage info" "more info"; padding-top: 16px; }

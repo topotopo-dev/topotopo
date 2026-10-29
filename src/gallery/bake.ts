@@ -48,7 +48,7 @@ export async function bakeProject(dir: string): Promise<BakeState> {
     ws.load();
     const name = m.bake.graph ?? m.graph;
     const g = ws.graphs.get(name);
-    if (!g) return finish({ ok: false, error: `no graph "${name}" in graphs/ (project.json "graph")` });
+    if (!g) return finish({ ok: false, error: `no default graph yet: the project has no graph "${name}" (project.json "graph")` });
     const r = await engine.cook(g, { target: m.bake.node, frame: m.bake.frame });
     if (!r.ok || !r.geo) return finish({ ok: false, error: r.errors.map((e) => `[${e.node}] ${e.message}`).join('\n') || 'the cook gave no geometry' });
     writeAtomic(path.join(out, 'thumb.png'), thumbnailPNG(r.geo, g, (d) => zlib.deflateSync(d, { level: 9 }), THUMB_SIZE));

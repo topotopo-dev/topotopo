@@ -106,6 +106,27 @@ try {
     check((await req('/p/game/barrel')).status === 200, 'and has its page');
   }
 
+  section('a project without its default graph, and graph files beside project.json');
+  {
+    const empty = createProject(lib, 'props/empty', { title: 'Empty' });
+    const beside = createProject(lib, 'props/beside', { title: 'Beside' });
+    fs.writeFileSync(path.join(beside.dir, 'tower.json'), JSON.stringify(BOX));
+    const file = path.join(beside.dir, 'project.json'), m = JSON.parse(fs.readFileSync(file, 'utf8'));
+    fs.writeFileSync(file, JSON.stringify({ ...m, graph: 'tower' }, null, 2));
+    g.rescan();
+    await sleep(1500);
+    const grid = (await req('/')).body.toString();
+    const at = grid.indexOf('data-key="game/empty"'), card = grid.slice(at, grid.indexOf('</a>', at));
+    check(card.includes('<span class="status s-empty">no default graph yet</span>') && !card.includes('bake failed'), 'a new project\'s card says it has no default graph yet, never a failed bake');
+    const page = (await req('/p/game/empty')).body.toString();
+    check(/No default graph yet: this project has no graphs\. Ask your agent to build one/.test(page) && !/class="bake err/.test(page) && /No graphs yet\. Ask your agent to build one/.test(page),
+      'its page says what to do, not an error');
+    check(!fs.existsSync(path.join(empty.dir, '.gallery', 'bake.json')), 'nothing is baked before it has a default graph');
+    const bp = (await req('/p/game/beside')).body.toString();
+    check(/<h3>tower <span class="tag">default<\/span>/.test(bp), 'a graph file beside project.json is a graph of the project, here its default one');
+    check(await until(() => fs.existsSync(path.join(beside.dir, '.gallery', 'thumb.png')), 60000), 'and is baked');
+  }
+
   section('packages: a package\'s versions and outputs, the packages a project uses, the grid marks packages');
   {
     // a package with two published versions and a project that uses the first, their records as publishing and use

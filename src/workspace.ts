@@ -1,6 +1,8 @@
 // A workspace: named graphs (persisted as JSON files), saved assets, the human's input files, and the engine
 // that cooks them. Shared by the MCP server, the live viewer and the CLI.
 //   <dir>/graphs/<name>.json   graphs        <dir>/assets/<name>.json   saved assets
+//   <dir>/<name>.json          in a project (a folder with project.json), its graph files beside project.json are
+//                              graphs too (examples/ keeps its graphs there); graphs/ wins a name both have
 //   <dir>/inputs/…             files people drop in (meshes, guide curves, PNG masks), read with file nodes; or a
 //                              folder given to the constructor (`topotopo view`: inputs/ beside the graph file)
 //   <dir>/exports/…            export output
@@ -161,6 +163,31 @@ export class EditRejected extends Error {
 /** The folders a workspace makes in its own folder (Workspace.load): graphs, assets, exports and inputs. */
 export const WORKSPACE_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
 
+/** A graph file's text holds a graph: an object with "nodes" (project.json and other JSON files do not). */
+const holdsGraph = (j: unknown) => !!j && typeof j === 'object' && !Array.isArray(j) && !!(j as any).nodes && typeof (j as any).nodes === 'object';
+
+/**
+ * The graph files of a folder by graph name: graphs/<name>.json, and in a project (a folder holding project.json) the
+ * graph files beside project.json, not below it, whose name graphs/ does not have. A file there is a graph when it
+ * holds an object with "nodes"; an unreadable one is left out. The gallery, `topotopo edit` and the MCP server read a
+ * project's graphs here.
+ */
+export function graphFiles(dir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const json = (d: string) => { try { return fs.readdirSync(d).filter((f) => f.endsWith('.json')).sort(); } catch { return []; } };
+  for (const f of json(path.join(dir, 'graphs'))) {
+    const name = f.slice(0, -'.json'.length);
+    if (NAME_RE.test(name)) out.set(name, path.join(dir, 'graphs', f));
+  }
+  if (!fs.existsSync(path.join(dir, 'project.json'))) return out;
+  for (const f of json(dir)) {
+    const name = f.slice(0, -'.json'.length), file = path.join(dir, f);
+    if (f === 'project.json' || out.has(name) || !NAME_RE.test(name)) continue;
+    try { if (fs.statSync(file).isFile() && holdsGraph(JSON.parse(fs.readFileSync(file, 'utf8')))) out.set(name, file); } catch { /* not a graph */ }
+  }
+  return out;
+}
+
 /**
  * The packages of the project a workspace belongs to (src/gallery/packages.ts), attached by whoever opens it: a graph
  * set or edited through the workspace that names a package the project does not use yet adds it (first use).
@@ -211,6 +238,8 @@ export class Workspace {
   private cookSeq = new Map<string, number>();
   private recordedSeq = new Map<string, number>();
   private lastYield = 0;
+  /** graphs kept in a project's own folder (graphFiles): their file, where they are saved; the others go in graphs/ */
+  private besideProject = new Map<string, string>();
   /** the inputs folder given to the constructor (WorkspaceOptions.inputs), if any */
   private inputsAt: string | undefined;
   private exportsAt: string | undefined;
@@ -244,17 +273,23 @@ export class Workspace {
         this.engine.registerAsset(path.basename(f, '.json'), spec);
       } catch (e: any) { assetErrors.push(`${f}: ${e.message}`); }
     }
-    for (const f of fs.readdirSync(this.graphDir).filter((f) => f.endsWith('.json'))) {
+    for (const [name, file] of graphFiles(this.dir)) {
       // migrated in memory; the file is rewritten (with its version) on the next save
-      try { this.graphs.set(path.basename(f, '.json'), migrateGraph(JSON.parse(fs.readFileSync(path.join(this.graphDir, f), 'utf8')))); }
-      catch { /* skip unreadable */ }
+      try { this.graphs.set(name, migrateGraph(JSON.parse(fs.readFileSync(file, 'utf8')))); }
+      catch { continue; /* skip unreadable */ }
+      if (path.dirname(file) === this.dir) this.besideProject.set(name, file);
     }
     return { graphs: this.graphs.size, assets: this.engine.assetsIn().length, assetErrors };
   }
 
+  /** Where a graph is saved: its file beside project.json, or graphs/<name>.json. */
+  graphFile(name: string): string {
+    return this.besideProject.get(name) ?? path.join(this.graphDir, name + '.json');
+  }
+
   private persist(name: string) {
     const g = this.graphs.get(name);
-    const file = path.join(this.graphDir, name + '.json');
+    const file = this.graphFile(name);
     if (!g) { if (fs.existsSync(file)) fs.unlinkSync(file); return; }
     fs.writeFileSync(file, JSON.stringify(g, null, 2));
   }
@@ -663,11 +698,12 @@ export class Workspace {
   private watchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
-   * Follow what other processes write into graphs/ and assets/ (a second Workspace on the same folder: the gallery's
-   * editor next to an MCP server, or a person editing the JSON). A graph file whose content differs from the stored
-   * graph replaces it and notifies the listeners; a removed file removes the graph. Our own writes read back equal, so
-   * they change nothing. An asset whose content changed is registered again and every graph is notified (any may use
-   * it); a removed asset stays registered until the next load(). Two writers to one graph: the last write wins.
+   * Follow what other processes write into graphs/ and assets/, and in a project the graph files beside project.json (a
+   * second Workspace on the same folder: the gallery's editor next to an MCP server, or a person editing the JSON). A
+   * graph file whose content differs from the stored graph replaces it and notifies the listeners; a removed file
+   * removes the graph. Our own writes read back equal, so they change nothing. An asset whose content changed is
+   * registered again and every graph is notified (any may use it); a removed asset stays registered until the next
+   * load(). Two writers to one graph: the last write wins.
    */
   watch() {
     if (this.watchers.length) return;
@@ -694,19 +730,29 @@ export class Workspace {
         this.watchers.push(w);
       } catch { /* no folder: nothing to follow */ }
     };
-    on(this.graphDir, (name, file) => {
-      if (!NAME_RE.test(name)) return;
+    const graphChanged = (name: string, file: string) => {
+      if (!NAME_RE.test(name) || this.graphFile(name) !== file) return;
       if (!fs.existsSync(file)) {
+        this.besideProject.delete(name);
         if (this.graphs.delete(name)) { this.lastReport.delete(name); this.bump(name); }
         return;
       }
-      const spec = migrateGraph(JSON.parse(fs.readFileSync(file, 'utf8')));
+      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (!holdsGraph(j)) return;
+      const spec = migrateGraph(j);
       const cur = this.graphs.get(name);
       if (cur && JSON.stringify(cur) === JSON.stringify(spec)) return;
       this.graphs.set(name, spec);
       this.settleSession(name);
       this.lastReport.delete(name);
       this.bump(name);
+    };
+    on(this.graphDir, graphChanged);
+    // a project's graph files beside project.json, when graphs/ has no graph of that name
+    if (fs.existsSync(path.join(this.dir, 'project.json'))) on(this.dir, (name, file) => {
+      if (name === 'project' || fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
+      if (!this.graphs.has(name) && fs.existsSync(file)) this.besideProject.set(name, file);
+      graphChanged(name, file);
     });
     on(this.assetDir, (name, file) => {
       if (!fs.existsSync(file)) return;
