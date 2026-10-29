@@ -11730,7 +11730,7 @@ category: `texture` · aliases: `curvature_bake`, `bake_edges`, `edge_wear_bake`
 
 Bake edge curvature into uv space: 0.5 flat, brighter on convex edges and bevels, darker in concave creases (edge wear and dirt masks).
 
-Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. tex_histogram_scan or tex_levels on "convex" make an edge-wear mask.
+Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask.
 
 **Inputs**
 
@@ -11753,6 +11753,7 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `radius` | float | `0` | 0.. |  | `width`, `edge_width`, `distance` | how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal) |
 | `strength` | float | `1` | 0.. |  | `intensity`, `contrast` | contrast multiplier |
 | `min_angle` | float | `0.5` | 0..179 |  |  | edges bending less than this (degrees) are ignored |
+| `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | also find the concave creases where separate parts cut into each other (kitbashed meshes) |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
 

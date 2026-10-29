@@ -297,14 +297,18 @@ defineBake({
     'edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, ' +
     'weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; ' +
     'layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side ' +
-    'of a thin plank) are ignored; points are matched by position, so unwelded boxes work. tex_histogram_scan or ' +
-    'tex_levels on "convex" make an edge-wear mask.',
+    'of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by ' +
+    'default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet ' +
+    'or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt ' +
+    'gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, ' +
+    'on "concave" a dirt or cavity mask.',
   aliases: ['curvature_bake', 'bake_edges', 'edge_wear_bake'],
   params: {
     ...BAKE_PARAMS(),
     radius: { type: 'float', default: 0, min: 0, desc: 'how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal)', aliases: ['width', 'edge_width', 'distance'] },
     strength: { type: 'float', default: 1, min: 0, desc: 'contrast multiplier', aliases: ['intensity', 'contrast'] },
     min_angle: { type: 'float', default: 0.5, min: 0, max: 179, desc: 'edges bending less than this (degrees) are ignored' },
+    intersections: { type: 'bool', default: true, desc: 'also find the concave creases where separate parts cut into each other (kitbashed meshes)', aliases: ['crossings', 'intersection_creases'] },
     cage: cageParam(), cage_normals: cageNormalsParam(),
   },
   outputs: 'image <name> (default: the node name): C grey (0.5 = flat), convex, concave, mask',
@@ -322,11 +326,14 @@ defineBake({
     const high = highOf(ctx);
     const go = (P: Float64Array, N: Float64Array, src: Geometry) => {
       const r = p.radius > 0 ? p.radius : 0.01 * b.diag;
-      const edges = curvatureEdges(src, 1e-6 * (bboxDiagonal(src) || 1), p.min_angle);
+      const counts = { shared: 0, crossing: 0, capped: false };
+      const edges = curvatureEdges(src, 1e-6 * (bboxDiagonal(src) || 1), p.min_angle, !!p.intersections, counts);
+      if (counts.capped) ctx.warn(`${ctx.type}: the search for crossing parts stopped early on this large mesh; some creases where parts cut into each other may be missing`);
       const grid = edgeGrid(edges, r);
       const args: CurvatureArgs = { radius: r, facing: 0.25, origin: grid.origin, cell: grid.cell, dims: grid.dims };
       const V = new Float64Array(b.s.n);
       ctx.stat('edges', edges.count);
+      ctx.stat('crossing_edges', counts.crossing);
       const run = ctx.parallelMap('bake_curvature', {
         count: b.s.n, args, inputs: { P, N }, results: { V }, shared: { E: edges.E, D: edges.D, K: edges.K, FN: edges.FN, start: grid.start, items: grid.items },
       });

@@ -376,6 +376,14 @@ const UVBOX = { b: { type: 'box', params: { divisions: [2, 2, 2] } }, uv: { type
   check(cur.layers.has('convex') && cur.layers.has('concave') && Math.max(...cur.layer('concave')!) === 0, 'curvature layers convex/concave (a box has no concave edge)');
   const notch = await image({ b: { type: 'box', params: { size: [1, 1, 1] } }, e: { type: 'poly_extrude', in: ['b'], params: { group: '@P.y>0.4', distance: -0.3, inset: 0.2 } }, uv: { type: 'uv_unwrap', in: ['e'], params: { resolution: 128 } }, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05 } } }, 'c');
   check(Math.max(...notch.layer('concave')!) > 0.5, 'a recessed top has concave edges (layer concave)');
+  // kitbashed parts that cut into each other share no edge: the crease where they cross is concave all the same
+  const kit = { b: { type: 'box' }, stud: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.5, 0] } }, m: { type: 'merge', in: ['b', 'stud'] }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 128 } } };
+  const crossed = await cookOn(engine, { ...kit, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05 } } }, 'c');
+  const uncrossed = await image({ ...kit, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05, intersections: false } } }, 'c');
+  check(Math.max(...findImage(crossed.geo)!.layer('concave')!) > 0.5 && crossed.stats.crossing_edges > 0 && Math.max(...uncrossed.layer('concave')!) === 0,
+    `a stud sunk into a box: concave where they cross (${crossed.stats.crossing_edges} crossing edges), none with intersections off`);
+  const hiKit = await image({ low: { type: 'box' }, uvl: { type: 'uv_unwrap', in: ['low'], params: { resolution: 128 } }, stud: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.5, 0] } }, high: { type: 'merge', in: ['low', 'stud'] }, c: { type: 'bake_curvature', in: ['uvl', 'high'], params: { resolution: 128, radius: 0.05, cage: 0.2 } } }, 'c');
+  check(Math.max(...hiKit.layer('concave')!) > 0.5, 'from a high mesh of crossing parts too');
 
   // padding dilates the islands; texels beyond it get the background
   const p0 = await image({ ...UVBOX, p: { type: 'bake_position', in: ['uv'], params: { resolution: 128, padding: 0 } } }, 'p');

@@ -559,7 +559,8 @@ FILTERS (input 0 = an image; image/layer pick what to process, the result replac
   Inputs of different sizes are resized to the first input (bilinear up, area average down).
 BAKES (input 0 = mesh with non-overlapping uv in 0..1: uv_unwrap; input 1 = optional high-res mesh): bake_ao
   (samples, max_distance; white = open), bake_curvature (edges' dihedral angles within radius: 0.5 flat, bright convex,
-  dark concave; layers convex/concave), bake_thickness, bake_position (bbox/uniform/world), bake_world_normal,
+  dark concave; layers convex/concave; creases where separate parts cut into each other count as concave too),
+  bake_thickness, bake_position (bbox/uniform/world), bake_world_normal,
   bake_normal (tangent space from the high mesh along averaged-normal cage rays; cage distance), bake_height (high above
   low; layer distance in metres), bake_island_id (colour per uv island, layer id, stat islands), bake_mask
   (mask_group or a numeric attribute), bake_vertex_color (Cd + Alpha). Shared: resolution (default 1024), supersample
