@@ -457,9 +457,10 @@ function createControls(ctx) {
 
   /** The line above the Controls over a graph file: how many values differ from it, Save values, Reset all. */
   function renderBar() {
+    // over a graph file, with values to save or reset
     const file = ctl.mode === 'file';
-    bar.hidden = !file;
-    if (!file) return;
+    bar.hidden = !file || !ctl.rows.size;
+    if (bar.hidden) return;
     const changed = [...ctl.rows.values()].filter((r) => r.changed()).length;
     barText.textContent = sessionText(changed, ctl.file);
     // a viewer that cannot write the file (it does not name one) offers no Save

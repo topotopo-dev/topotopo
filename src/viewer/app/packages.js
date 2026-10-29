@@ -136,12 +136,9 @@ export function createPackagesPanel(ctx, host) {
   const open = new Set();
   let query = '', found = null, searchSeq = 0;
 
-  // the progress of a before/after, kept across renders; its Stop is the viewer's Stop for it
-  const line = el('div', 'cookline none'), lineText = el('span', 'ctext'), stopButton = el('button', 'cstop', 'Stop');
-  stopButton.type = 'button';
-  stopButton.title = 'stop the before/after at the next node; what was compared stays';
-  stopButton.onclick = () => { stopButton.blur(); P.stop(); };
-  line.append(el('span', 'cdot'), lineText, stopButton);
+  // the progress of an update's comparison, kept across renders; the status bar's Stop stops it (one Stop)
+  const line = el('div', 'cookline none'), lineText = el('span', 'ctext');
+  line.append(el('span', 'cdot'), lineText);
   /** The before/after line: its progress while it runs, then how it ended. */
   P.renderLine = () => {
     const r = P.running;

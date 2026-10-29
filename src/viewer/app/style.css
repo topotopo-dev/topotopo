@@ -173,7 +173,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .cookline.stopped .cdot { background: var(--dim); border-radius: 1px; }
 .cookline.ok .cdot { background: var(--ok); }
 .cookline.none .cdot { visibility: hidden; }
-#status .cookline { max-width: 55%; }
+#status .cookline { max-width: 60%; }
 .ctl > .cw { flex: 1; display: flex; gap: 4px; align-items: center; min-width: 0; }
 .cw input { padding: 1px 4px; }
 .cw input[type=range] { flex: 1; min-width: 40px; padding: 0; border: 0; background: none; accent-color: var(--sel); }
@@ -192,15 +192,18 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 
 /* status bar */
 #status { grid-area: status; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; color: var(--dim); }
-#msg { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-#msg.err { color: var(--err); }
-#msg.ok { color: var(--ok); }
-#msg.busy { color: var(--sel); }
 #cook { overflow: hidden; text-overflow: ellipsis; min-width: 0; font: var(--mono); }
 #cook .err { color: var(--err); }
+/* messages: over the view's lower left, clearing themselves (status.js) */
+#notes { position: absolute; left: 8px; bottom: 8px; z-index: 5; display: flex; align-items: flex-start; gap: 6px; max-width: min(640px, calc(100% - 96px)); padding: 5px 4px 5px 10px; background: rgba(38, 40, 44, 0.94); border: 1px solid var(--line); border-radius: 3px; color: var(--text); }
+#msg { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 6.5em; overflow: hidden; }
+#notes.err { border-color: var(--err); } #notes.err #msg { color: var(--err); }
+#notes.ok #msg { color: var(--ok); }
+#notes.busy #msg { color: var(--sel); }
 #ask { display: flex; gap: 6px; align-items: center; color: var(--text); }
 #ask[hidden] { display: none; }
 #ask button { padding: 0 8px; }
+#msg-close { flex: none; width: 18px; height: 18px; }
 
 /* drop zone */
 #drop { position: fixed; inset: 8px; z-index: 20; display: none; align-items: center; justify-content: center; text-align: center; border: 2px dashed var(--sel); background: rgba(240, 160, 48, 0.06); color: var(--sel); font-size: 15px; pointer-events: none; }

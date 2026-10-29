@@ -360,7 +360,7 @@ section('graph file edits (json-edit.ts): only what changes');
   check(JSON.stringify(applyJSONEdits({ a: { b: 1 }, c: 2 }, [{ path: ['a', 'd'], value: 3 }, { path: ['c'] }])) === '{"a":{"b":1,"d":3}}', 'applyJSONEdits: the value the edited text must read as');
 }
 
-section('status line (section 4)');
+section('the tab\'s title, the welcome, and messages that clear themselves (section 4)');
 {
   const welcome = await import('../src/viewer/app/welcome.js');
   const kits = [{ name: 'topotopo/street', title: 'Street kit', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
@@ -373,19 +373,10 @@ section('status line (section 4)');
   check(wp.kind === 'project' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.kits.length === 1,
     'a project without graphs: its name, ask your agent, TopoTopo\'s kits');
   check(wf.kind === 'folder' && /not a TopoTopo project/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no project says so and how to make it one');
-  check(status.graphsLine('', 0) === status.NO_GRAPHS_LINE && status.graphsLine(status.LIVE_LINE, 0) === status.NO_GRAPHS_LINE,
-    'no graph: the hint, whatever was shown');
-  check(status.graphsLine(status.NO_GRAPHS_LINE, 1) === status.LIVE_LINE, 'the first graph replaces the hint with the live line');
-  check(status.graphsLine(status.LIVE_LINE, 3) === null && status.graphsLine('undid guide', 2) === null && status.graphsLine('keymap: Maya (? shows it)', 1) === null,
-    'with graphs, any other line stays');
-  check(status.connectedLine(0) === status.NO_GRAPHS_LINE && status.connectedLine(2) === status.LIVE_LINE,
-    'connecting shows the hint without graphs and the live line with them');
-  // startup runs the graph fetch and the stream's open in either order; both orders end on the same line
-  const ends = (n: number) => {
-    const fetchFirst = status.connectedLine(n), openFirst = status.graphsLine(status.connectedLine(0), n) ?? status.connectedLine(0);
-    return [fetchFirst, openFirst];
-  };
-  check(ends(0).every((l) => l === status.NO_GRAPHS_LINE) && ends(1).every((l) => l === status.LIVE_LINE), 'either startup order ends on the line that fits the workspace');
+  check(status.messageLife('saved 2 values', 'ok') === 6000 && status.messageLife('no such node', 'err') === 12000 && status.messageLife('undid move', '', 2000) === 6000 && status.messageLife('x', '', 9000) === 9000,
+    'a message clears itself: 6 s, an error 12 s, longer when held');
+  check(status.messageLife('exporting crate…', 'busy') === Infinity && status.messageLife(status.DISCONNECTED_LINE, 'err') === Infinity && status.messageLife('', 'err') === 0,
+    'work in progress stays until its result replaces it; so does the disconnected line, until the page reconnects');
 }
 
 section('output cards: what an output is, its formats and downloads');

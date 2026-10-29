@@ -18,9 +18,10 @@ import { createUndo } from './undo.js';
 import { EDITOR_NAMES } from './markers.js';
 import * as KM from './keymap.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
-import { connectedLine, graphsLine } from './status.js';
+import { DISCONNECTED_LINE, RECONNECTED_LINE, messageLife } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
 import { pageTitle, defaultGraph, renderWelcome } from './welcome.js';
+import { kindLine } from './output-info.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -52,16 +53,23 @@ const ctx = {
   },
 };
 
-// ------------------------------------------------------------------------------------------- status bar
-const msgEl = $('msg');
-let heldUntil = 0;
-/** A line in the status bar; `hold` ms keeps it over routine lines (an undo over the save that follows it). */
+// ------------------------------------------------------------------------------------------- messages
+// What something the person did came to, over the view's lower left; it clears itself (status.js messageLife). The
+// status bar keeps the cook line and what is shown.
+const notesEl = $('notes'), msgEl = $('msg');
+let heldUntil = 0, noteTimer = 0;
+/** A message; `hold` ms keeps it over routine ones (an undo over the save that follows it); '' clears it. */
 ctx.message = (text, kind = '', hold = 0) => {
   const now = performance.now();
-  if (!hold && kind !== 'err' && now < heldUntil) return;
+  if (text && !hold && kind !== 'err' && now < heldUntil) return;
   heldUntil = hold ? now + hold : 0;
-  msgEl.textContent = text; msgEl.className = kind; msgEl.title = text;
+  clearTimeout(noteTimer);
+  msgEl.textContent = text; msgEl.title = text; notesEl.className = kind;
+  notesEl.hidden = !text && $('ask').hidden;
+  const life = messageLife(text, kind, hold);
+  if (text && Number.isFinite(life)) noteTimer = setTimeout(() => { if (!notesEl.matches(':hover')) ctx.message(''); else noteTimer = setTimeout(() => ctx.message(''), 3000); }, life);
 };
+$('msg-close').onclick = () => { $('msg-close').blur(); ctx.message(''); };
 // ------------------------------------------------------------------------------------------- cook state
 // What is cooking for each graph (the server's {cook} events, and /api/graphs), shown in the status bar and above the
 // Controls: the node, the time (counted on here between events), how the last cook ended. Stop stops it. While the
@@ -86,9 +94,10 @@ function renderCook() {
   else if (!running && cookTick) { clearInterval(cookTick); cookTick = 0; }
 }
 ctx.renderCook = renderCook;
-for (const el of cookLines) el.querySelector('.cstop').onclick = async (e) => {
+// one Stop, in the status bar
+$('status-cook').querySelector('.cstop').onclick = async (e) => {
   e.currentTarget.blur();
-  // the before/after's cooks are not the graph's: it has a stop of its own
+  // the cooks of an update's comparison are not the graph's: they stop on their own
   if (ctx.packages?.running) { ctx.packages.stop(); return; }
   const graph = ctx.graph.name;
   if (!graph) return;
@@ -100,11 +109,12 @@ for (const el of cookLines) el.querySelector('.cstop').onclick = async (e) => {
   else ctx.message(j.stopping ? 'stopping: the cook ends when the node it is on has finished' : 'nothing is cooking');
 };
 
-/** A small question in the status bar; resolves to the answer. */
+/** A small question with the messages; resolves to the answer. */
 ctx.ask = (text, yes = 'Yes', no = 'No') => new Promise((resolve) => {
+  ctx.message('');
   $('ask-text').textContent = text; $('ask-yes').textContent = yes; $('ask-no').textContent = no;
-  $('ask').hidden = false;
-  const done = (v) => { $('ask').hidden = true; $('ask-yes').onclick = $('ask-no').onclick = null; resolve(v); };
+  $('ask').hidden = false; notesEl.hidden = false;
+  const done = (v) => { $('ask').hidden = true; notesEl.hidden = !msgEl.textContent; $('ask-yes').onclick = $('ask-no').onclick = null; resolve(v); };
   $('ask-yes').onclick = () => done(true);
   $('ask-no').onclick = () => done(false);
   $('ask-yes').focus();
@@ -217,8 +227,6 @@ const refreshGraphs = ctx.coalesce(async () => {
   for (const x of list) if (x.cook && !((cooks.get(x.name)?.at ?? -1) > issued)) cooks.set(x.name, { state: x.cook, at: performance.now() });
   renderCook();
   props.controls.render(g, issued);
-  const line = graphsLine(msgEl.textContent, list.length);
-  if (line) ctx.message(line);
   renderWelcome($('welcome'), ctx.project, !list.length);
   ctx.emit('graphs');
 });
@@ -289,16 +297,19 @@ const loadGeo = ctx.coalesce(async () => {
   ctx.emit('output'); updateCook();
 });
 
+/** The status bar's right side: what the view shows, its kind and size (a terrain says its samples, not "0 points"). */
 function updateCook() {
-  const el = $('cook'), o = ctx.output, g = ctx.graph.current();
-  if (ctx.outputs?.active?.view === 'image') {
-    const image = ctx.outputs.active; el.textContent = image.width ? `${image.width} × ${image.height} · ${image.layers?.length ?? 1} layer(s)` : image.label; return;
+  const el = $('cook'), o = ctx.output, g = ctx.graph.current(), shown = ctx.outputs?.active;
+  if (shown) {
+    // an output alone in the view (or a place of an update): its name and what it is
+    const what = shown.view === 'image' && shown.width ? `${shown.width} × ${shown.height} px · ${shown.layers?.length ?? 1} layer${(shown.layers?.length ?? 1) === 1 ? '' : 's'}` : kindLine(shown);
+    el.textContent = [shown.graph && shown.graph !== shown.label ? `${shown.graph} › ${shown.label}` : shown.label, what].filter(Boolean).join(' · ');
+    el.title = el.textContent;
+    return;
   }
   if (!g) { el.textContent = ''; return; }
-  const m = /geometry: ([\d,]+) points, ([\d,]+) prims/.exec(o.summary ?? '');
   const parts = [`${g.name}/${ctx.graph.shownNode() ?? ''}`];
-  if (m) parts.push(`${m[1]} points`, `${m[2]} prims`);
-  if (o.report?.cooked) parts.push(`cook ${fmtNum(o.report.ms, 0)} ms`);
+  if (o.about) parts.push(kindLine({ kind: o.about.published ?? 'empty', about: o.about.text }));
   // a failed cook of the graph is told by the cook line beside this (its node and message); this tells the rest
   const told = cookLine(ctx.cookState(g.name)).kind === 'failed';
   const err = o.error ?? (told ? null : (o.report?.errors?.length ? o.report.errors[0] : null) ?? g.nodes.find((n) => n.error)?.error);
@@ -698,12 +709,14 @@ ctx.packages = createPackagesPanel(ctx, $('packages'));
 
 const es = api.events({
   open() {
-    ctx.message(connectedLine(ctx.graph.list.length));
     // after a reconnect the server may have restarted: fetch everything again
-    if (es.opened) { refreshProject().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load(); }
+    if (es.opened) {
+      if (msgEl.textContent === DISCONNECTED_LINE) ctx.message(RECONNECTED_LINE, 'ok');
+      refreshProject().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
+    }
     es.opened = true;
   },
-  error() { ctx.message('disconnected (server stopped?)', 'err'); },
+  error() { ctx.message(DISCONNECTED_LINE, 'err'); },
   async message(ev) {
     if (ev.cook !== undefined) { setCook(ev.cook.graph, ev.cook); if (ev.cook.graph === ctx.graph.name) updateCook(); return; }
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }

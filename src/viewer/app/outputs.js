@@ -275,11 +275,12 @@ export function createOutputPanel(ctx) {
     if (changedSelection) { image.hide(); ctx.hideModelPreview(); }
     selected = id; P.active = item; ctx.isolated = true; ctx.guides.setMode(null);
     render(); showDetails(item);
-    if (item.status === 'loading') { ctx.message('Preparing ' + item.label, 'busy'); return; }
+    // it shows once it has cooked (the card says it is cooking)
+    if (item.status === 'loading') { ctx.emit('output'); return; }
     if (item.status === 'error') { ctx.message(item.error, 'err'); return; }
     await ctx.outputGraph?.(item);
     if (seq !== sequence) return;
-    if (item.view === 'image') { ctx.hideModelPreview(); image.show(item); ctx.message(item.label); ctx.emit('output'); return; }
+    if (item.view === 'image') { ctx.hideModelPreview(); image.show(item); ctx.emit('output'); return; }
     image.hide();
     if (item.view !== 'model') { ctx.hideModelPreview(); ctx.message(`${item.label}: ${kindLine(item) || 'a file'} · Download gets it`); return; }
     try {
@@ -292,7 +293,6 @@ export function createOutputPanel(ctx) {
       }
       if (seq !== sequence) return;
       await ctx.previewOutput(item, bytes, update);
-      ctx.message(item.message ?? item.label);
     } catch (e) { if (seq === sequence) ctx.message(e.message, 'err'); }
   };
   /**
@@ -303,7 +303,7 @@ export function createOutputPanel(ctx) {
   P.isolate = (item, update = false) => { other = item; return P.select(item.id, update); };
   P.scene = () => {
     sequence++; initial = false; ctx.rememberOutputView?.(selected); selected = null; P.active = null;
-    image.hide(); ctx.isolated = false; showDetails(null); render(); ctx.restoreScene();
+    image.hide(); ctx.isolated = false; showDetails(null); render(); ctx.restoreScene(); ctx.emit('output');
   };
   P.refresh = async () => {
     if (refreshing) { refreshAgain = true; return refreshing; }
@@ -329,7 +329,12 @@ export function createOutputPanel(ctx) {
     })();
     return refreshing;
   };
-  document.getElementById('scene-view').onclick = P.scene;
+  // Scene: back to the whole scene, the graph's output (not a node shown on its own) with the layers and guides
+  document.getElementById('scene-view').onclick = (e) => {
+    e.currentTarget.blur();
+    if (P.active) P.scene();
+    if (ctx.graph.node) ctx.graph.show(ctx.graph.current()?.output ?? null);
+  };
   P.openInput = async (path, update = false) => {
     const f = ctx.layers.list.find((v) => v.path === path); if (!f) return;
     input = { id: 'input:' + path, inputPath: path, label: path, view: 'image', kind: 'image', status: 'ready', revision: `${f.mtime}:${f.size}`, sourceURL: inputImageURL(f), summary: ctx.layers.info.get(path)?.summary ?? ctx.layers.fileText(f) };
