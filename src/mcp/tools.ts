@@ -430,7 +430,7 @@ export function makeTools(ws: Workspace, opts: { onPreview?: () => Promise<strin
           up_axis: { type: 'string', enum: ['y', 'z'] },
           scale: { type: 'number', description: 'multiply positions (100 = metres → centimetres; pcg csv defaults to 100)' },
           split_by_name: { type: 'boolean', description: 'separate meshes per prim "name" (default true)' },
-          custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: include extra numeric attributes (glTF _NAME accessors; default true for glTF and PLY, false for USD)' },
+          custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: also write the extra numeric attributes (glTF _NAME vertex and per-instance accessors, PLY properties, USD primvars); default false: only the standard channels' },
           materials: { type: 'boolean', description: 'glTF: write materials from the prim "material" attribute + table (default true)' },
           compress: { type: 'string', enum: ['none', 'meshopt', 'draco'], description: 'glTF: meshopt = EXT_meshopt_compression + quantization; draco needs the optional draco3dgltf package' },
           quantize: { type: 'boolean', description: 'glTF: KHR_mesh_quantization (smaller, lossy) without compression' },

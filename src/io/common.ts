@@ -15,8 +15,8 @@ export interface ExportOptions {
   /** cusp angle for computed normals */
   cuspAngle?: number;
   /**
-   * include extra numeric attributes (glTF `_NAME` accessors, PLY properties, USD primvars).
-   * glTF default: true; PLY default: true; USD default: false.
+   * include extra numeric attributes: glTF `_NAME` vertex and per-instance accessors, PLY properties, USD primvars
+   * (the export tool's custom_attribs). Default false in every format: only the standard channels are written.
    */
   custom?: boolean;
   /** glTF: write NORMAL (N if present, else computed with cuspAngle). false = only when N exists. Default true. */

@@ -624,9 +624,9 @@ Read them: primintrinsic(0, "bounds", pr) in a wrangle (or primintrinsic('n', pr
 See them: render draws instances (an evenly spread subset above 600k triangles, with a note "rendering 9.5k of 30k
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
 Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",
-  TRANSLATION/ROTATION/SCALE per instance, anchor attributes as _NAME instance accessors (Cd → _COLOR); shear is
-  approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices, positions, orientations,
-  scales, ids, velocities, primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
+  TRANSLATION/ROTATION/SCALE per instance, with custom_attribs:true the anchor attributes as _NAME instance accessors
+  (Cd → _COLOR); shear is approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
+  positions, orientations, scales, ids, velocities, with custom_attribs:true primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
   csv / points.json → one row per instance (instance stream: Position/Rotation/Scale or P/orient/scale, Mesh column)
   + <name>.meshes.json + one GLB per source; json keeps them losslessly; obj/ply/stl expand them (warned).
   instancing:"expand" (export option) always writes real geometry (instances:"expand" for csv/points.json only).
@@ -1016,7 +1016,8 @@ export {path:"exports/thing.glb"} — format from the extension:
   obj usda ply stl json (lossless topotopo)
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
-  custom_attribs, materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
+  custom_attribs (default false: glTF / PLY / USD write only their standard channels; true adds every other numeric
+  attribute, below), materials (default true), compress "none" | "meshopt" (EXT_meshopt_compression + KHR_mesh_quantization,
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
@@ -1044,8 +1045,11 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   vertices are welded (uv seams, hard normals and mirrored islands keep their own frames), the same frame bake_normal
   bakes in; a valid point/vertex "tangent" float[4] (from an import) is written on other primitives. "preserve" writes
   the supplied attribute wherever it exists (malformed = error), "none" never writes TANGENT. Collapsed uvs are
-  reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors). Custom attributes: every other numeric point/vertex attribute
-  of size 1-4 → _NAME (upper-cased, float or the smallest int type); mesh extras keep the original names and types.
+  reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors).
+  Custom attributes (custom_attribs true): every other numeric point/vertex attribute of size 1-4 → _NAME (upper-cased,
+  float or the smallest int type), mesh extras keep the original names and types, and packed instances carry their
+  anchor attributes as per-instance accessors. The attributes only scene empties use (scene_empty, parent, orient, scale,
+  their extras) never become mesh channels.
 MATERIALS: the material node writes prim "material" + the detail table. Vertex colours win: prims whose Cd is not all
   white export baseColor white × COLOR_0 with the material's metallic/roughness/emissive; otherwise baseColor = the
   material colour. alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
@@ -1112,9 +1116,10 @@ HOUDINI: File SOP reads .geo (and glb/obj/usd); packed prims are written as Pack
   stored once in sharedprimitivedata (layout not yet confirmed against a Houdini-written file: instancing "expand" is
   the safe path). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
   A material name becomes a Houdini material path with a wrangle: s@shop_materialpath = "/mat/" + s@material;
-BLENDER: File > Import > glTF 2.0 (custom attributes arrive as mesh attributes named _NAME).
-PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing with per-instance attributes, usda a
-  PointInstancer with per-instance primvars, geo PackedGeometry prims, csv/points.json the instance stream, json keeps
+BLENDER: File > Import > glTF 2.0 (custom attributes, exported with custom_attribs:true, arrive as mesh attributes
+  named _NAME).
+PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing (per-instance attributes with
+  custom_attribs:true), usda a PointInstancer (per-instance primvars with custom_attribs:true), geo PackedGeometry prims, csv/points.json the instance stream, json keeps
   them; obj/ply/stl expand them. Option instancing "expand" writes real geometry everywhere.
 SPLINES (Bezier/NURBS prims, help topic "curves"): every format but json writes the evaluated polylines (closed curves as
   polygons), with a note; json keeps the spline prims. convert_curve first to choose the resolution.

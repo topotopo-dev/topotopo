@@ -15,9 +15,11 @@
 //   keep their own frames, for every primitive whose material has a normal map; a supplied point/vertex "tangent"
 //   float[4] attribute is written on the others ('preserve': everywhere it exists). Collapsed or missing uvs are
 //   reported, never written as invalid tangents.
-//   Custom attributes: every other numeric point/vertex attribute of size 1–4 becomes `_NAME` (upper-cased; float,
-//   or the smallest integer type that holds an int attribute). The original names and types are kept in mesh
-//   extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale as `_PSCALE`.
+//   Custom attributes (option custom, default off): every other numeric point/vertex attribute of size 1–4 becomes
+//   `_NAME` (upper-cased; float, or the smallest integer type that holds an int attribute). The original names and
+//   types are kept in mesh extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale
+//   as `_PSCALE`. Attributes only scene empties use (scene_empty, parent, orient, scale and their extras, at their
+//   defaults on every mesh point) are never written as mesh channels.
 //   Materials: the prim "material" attribute names a material of the detail table "materials" (core/materials.ts).
 //   Colour space: TopoTopo colours (Cd, material base/emissive colours) are display values; glTF defines
 //   baseColorFactor, emissiveFactor and COLOR_0 as linear, so they are converted on export and back on import.
@@ -31,7 +33,7 @@
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
 //   (TRANSLATION / ROTATION / SCALE per instance; a 3×3 with shear is written as its nearest rotation and the
 //   scale of its columns, with a warning); the rest of the geometry as above. instancing 'expand' writes real copies.
-//   Per-instance attributes (custom, default on): the anchor point / packed prim attributes become extra instance
+//   Per-instance attributes (custom, default off): the anchor point / packed prim attributes become extra instance
 //   accessors with the extension's "_" prefix: Cd (+ Alpha) → _COLOR (VEC3/VEC4 float), every other numeric attribute
 //   of size 1–4 → _NAME, single strings → _NAME indices into a table in the node's extras; all as 32-bit floats (exact
 //   for integers below 2^24; 1- and 2-byte components break EXT_meshopt_compression's 4-byte instance strides); the
@@ -366,6 +368,34 @@ const rgbAllOnes = (d: number[], size: number) => {
 
 // ------------------------------------------------------------------ export: document
 
+/**
+ * The empties' own point attributes are no mesh data: once the empties are split out (`g` holds only the other points,
+ * a copy the caller owns), their marker, parent, orient, scale and extras hold nothing but the default fill a merge
+ * gave the mesh points. Those are deleted so no mesh carries a channel for them; one a mesh point really sets stays.
+ */
+function dropEmptyAttributes(g: Geometry, empties: SceneEmpty[]): void {
+  const names = new Set([EMPTY_ATTRIB, PARENT_ATTRIB, 'orient', 'scale']);
+  for (const e of empties) for (const k of Object.keys(e.extras)) names.add(k);
+  for (const n of names) {
+    const a = g.points.get(n);
+    if (!a) continue;
+    if (n === EMPTY_ATTRIB || onlyDefaults(a)) g.points.delete(n);
+  }
+}
+
+/** Every element of a fixed-size attribute holds its default (or, for numbers, all zeros: an unset fill). */
+function onlyDefaults(a: Attribute): boolean {
+  if (a.isArray) return false;
+  if (a.type === 'string') { const d = a.def; return (a.data as string[]).every((s) => s === '' || s === d); }
+  const d = a.def as number[], sz = a.size, data = a.data as Float64Array | Int32Array;
+  for (let i = 0; i < data.length; i += sz) {
+    let def = true, zero = true;
+    for (let c = 0; c < sz; c++) { const x = data[i + c]; if (x !== (d[c] ?? 0)) def = false; if (x !== 0) zero = false; }
+    if (!def && !zero) return false;
+  }
+  return true;
+}
+
 /** Build a gltf-transform Document for the geometry (no IO yet). */
 export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   if (hasSplinesDeep(g)) g = splinesToPolylinesDeep(g).geo; // Bezier/NURBS prims (also in packed sources) as polylines
@@ -375,16 +405,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     const keep = new Uint8Array(g.numPoints).fill(1);
     for (const e of empties) keep[e.point] = 0;
     g = g.subsetPoints(keep);
-    // the empties' own attributes are no mesh data: merged meshes only hold their default fill
-    g.points.delete(EMPTY_ATTRIB);
-    for (const n of ['orient', 'scale']) {
-      const a = g.points.get(n);
-      if (!a || a.type !== 'float' || typeof a.def === 'string') continue;
-      const d = a.def, sz = a.size, data = a.data as Float64Array;
-      let fill = true;
-      for (let i = 0; i < data.length && fill; i++) fill = data[i] === d[i % sz] || data[i] === 0;
-      if (fill) g.points.delete(n);
-    }
+    dropEmptyAttributes(g, empties);
   }
   const doc = new Document();
   doc.getRoot().getAsset().generator = 'topotopo';
@@ -400,7 +421,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
     data: o.textureData, textures: new Map(), uris: new Set(), warn: o.warn,
   };
   let noUV = 0;
-  const custom = o.custom !== false;
+  const custom = o.custom === true;
   const tangentMode = o.tangents ?? 'auto';
   const lineMode = o.lineMode ?? 'strip';
   // what to write: the geometry, or (packed) its non-instanced part plus one instanced mesh per packed source
@@ -667,7 +688,7 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
   }
   const ext = doc.createExtension(EXTMeshGPUInstancing).setRequired(true);
   const names = packedSourceNames(g);
-  const iattrs = o.custom === false ? [] : instanceAttribSpecs(g);
+  const iattrs = o.custom === true ? instanceAttribSpecs(g) : [];
   const info: Record<string, InstanceAttribInfo> = {};
   for (const ia of iattrs) info[ia.sem] = { name: ia.a.name, cls: ia.a.cls, type: ia.type, size: ia.size, ...(ia.strings ? { strings: ia.strings } : {}) };
   let sheared = 0;

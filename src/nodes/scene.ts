@@ -18,8 +18,10 @@ defineNode({
     '(model) space, so later transform nodes move the empty with the mesh; glTF export writes it as a node without a ' +
     'mesh under its parent with the local transform that keeps this geometry-space placement. parent names another ' +
     'empty or a mesh (the prim "name" of the pieces export splits by); missing, ambiguous and cyclic parents are export ' +
-    'errors. Other point attributes set on the empty (e.g. a "forward" vector) export as node extras. Ordinary loose ' +
-    'points still export as POINTS.',
+    'errors. Other point attributes set on the empty (e.g. a "forward" vector) export as node extras. The empty\'s ' +
+    'attributes (scene_empty, parent, orient, scale and such extras) only hold their defaults on the mesh points after ' +
+    'a merge, and export never writes them as mesh channels, even with custom_attribs. Ordinary loose points still ' +
+    'export as POINTS.',
   aliases: ['null_object', 'empty', 'socket', 'locator', 'scene_empty', 'attachment_point'],
   inputs: [{ name: 'geo', desc: 'geometry to add the empty to (optional)', optional: true }],
   params: {

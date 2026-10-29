@@ -69,7 +69,11 @@ const srcPolys = scene.primClosed.reduce((s, c) => s + c, 0);
 const srcCurves = scene.numPrims - srcPolys;
 
 // ---------------------------------------------------------------- glTF
-const variants: [string, ExportOptions][] = [['plain', {}], ['quantized', { quantize: true }], ['meshopt', { compress: 'meshopt' }]];
+const variants: [string, ExportOptions][] = [['plain', { custom: true }], ['quantized', { quantize: true, custom: true }], ['meshopt', { compress: 'meshopt', custom: true }]];
+{
+  const plain = await importGeometryAsync(await exportGeometryAsync(scene, 'glb'), 'glb');
+  check(!plain.points.has('heat') && !plain.points.has('tag') && plain.points.has('Cd'), 'glb by default: standard channels only, no custom "heat" or "tag"');
+}
 for (const [label, opts] of variants) {
   const bytes = await exportGeometryAsync(scene, 'glb', opts);
   await validate(bytes, `glb ${label}`);
@@ -536,7 +540,7 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
     return m;
   };
   const want = byId(iscene);
-  for (const opts of [{}, { quantize: true }, { compress: 'meshopt' as const }]) {
+  for (const opts of [{ custom: true }, { quantize: true, custom: true }, { compress: 'meshopt' as const, custom: true }]) {
     const label = JSON.stringify(opts);
     const glb = await exportGeometryAsync(iscene, 'glb', opts);
     await validate(glb, `glb instance attributes ${label}`);
@@ -555,10 +559,10 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
     const names = back.prims.get('name');
     check(!!names && new Set(back.packedSources.map((s) => (s.prims.get('name')?.get(0) as string))).size === 3 && packedSourceNames(back).slice().sort().join() === 'boulder,crate,post', 'glb: instanced meshes keep the source names');
   }
-  const noCustom = await importGeometryAsync(await exportGeometryAsync(iscene, 'glb', { custom: false }), 'glb');
-  check(!noCustom.points.has('tint') && noCustom.numPacked === 30, 'glb custom:false: no instance attributes');
+  const noCustom = await importGeometryAsync(await exportGeometryAsync(iscene, 'glb'), 'glb');
+  check(!noCustom.points.has('tint') && noCustom.numPacked === 30, 'glb by default (custom off): no instance attributes');
 
-  const usd = new TextDecoder().decode(exportGeometry(iscene, 'usda'));
+  const usd = new TextDecoder().decode(exportGeometry(iscene, 'usda', { custom: true }));
   const inst = usd.slice(usd.indexOf('def PointInstancer'), usd.indexOf('def Scope "prototypes"'));
   const arrayLen = (re: RegExp) => { const m = re.exec(inst); return m ? m[1].split(/,\s*(?![^()]*\))/).filter((x) => x.trim()).length : -1; };
   check(arrayLen(/color3f\[\] primvars:displayColor = \[([^\]]*)\] \(\s*interpolation = "vertex"/) === 30, 'usda: primvars:displayColor per instance (interpolation vertex)');
@@ -568,8 +572,8 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
   const primvars = [...inst.matchAll(/\S+\[\] primvars:(\w+)/g)].map((m) => m[1]);
   check(!primvars.includes('orient') && !primvars.includes('N'), `usda instancer primvars: ${primvars.join(' ')}`);
   check(/def Material "crate"/.test(usd) && /uniform token info:id = "UsdPreviewSurface"/.test(usd) && /rel material:binding = <\/root\/materials\/crate>/.test(usd), 'usda: UsdPreviewSurface materials bound to the prototype meshes');
-  const usdNo = new TextDecoder().decode(exportGeometry(iscene, 'usda', { custom: false, materials: false }));
-  check(!/primvars:tint/.test(usdNo) && /int64\[\] ids/.test(usdNo) && !/def Material/.test(usdNo), 'usda custom:false: ids/velocities/displayColor only; materials:false: no materials');
+  const usdNo = new TextDecoder().decode(exportGeometry(iscene, 'usda', { materials: false }));
+  check(!/primvars:tint/.test(usdNo) && /int64\[\] ids/.test(usdNo) && !/def Material/.test(usdNo), 'usda by default (custom off): ids/velocities/displayColor only; materials:false: no materials');
 }
 
 // ---------------------------------------------------------------- Houdini .geo: PackedGeometry with shared embedded geometry

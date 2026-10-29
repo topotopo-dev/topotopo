@@ -101,7 +101,7 @@ export function exportPLY(g: Geometry, o: ExportOptions = {}): Uint8Array {
   g = expandForExport(g, o, 'ply');
   const np = g.numPoints;
   const N = g.points.get('N'), Cd = g.points.get('Cd');
-  const custom = o.custom !== false ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && (a.type === 'float' || a.type === 'int') && a.size <= 4) : [];
+  const custom = o.custom === true ? [...g.points.map].filter(([n, a]) => !SKIP_CUSTOM.has(n) && (a.type === 'float' || a.type === 'int') && a.size <= 4) : [];
   const props: string[] = ['property float x', 'property float y', 'property float z'];
   if (N && N.size === 3) props.push('property float nx', 'property float ny', 'property float nz');
   if (Cd && Cd.size >= 3) props.push('property uchar red', 'property uchar green', 'property uchar blue');
@@ -289,7 +289,7 @@ function usdaInstancer(g: Geometry, o: ExportOptions, uniq: (n: string) => strin
     if ((a.name === 'Cd' || a.name === 'Alpha') && t === 'float' && num.every((v) => v.every((x) => x === 1))) continue;
     if (a.name === 'Cd' && t === 'float' && sz >= 3) { out.push(`        color3f[] primvars:displayColor = [${num.map((v) => tupColor(v, 0, 3)).join(', ')}] (`, ...vertex); continue; }
     if (a.name === 'Alpha' && t === 'float' && sz === 1) { out.push(`        float[] primvars:displayOpacity = [${num.map((v) => fmt(v[0])).join(', ')}] (`, ...vertex); continue; }
-    if (o.custom === false) continue;
+    if (o.custom !== true) continue;
     const ut = usdArrayType(t, sz);
     if (!ut) continue;
     const body = t === 'string' ? (vals as string[]).map(usdStr).join(', ') : sz === 1 ? num.map((v) => fmt(v[0])).join(', ') : num.map((v) => tup(v, 0, sz)).join(', ');
