@@ -90,7 +90,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint scale orient copynum" } }
   },
   "output": "out",
-  "outputs": { "brick_wall": { "node": "out", "label": "Brick wall" } },
+  "outputs": { "brick_wall": { "node": "out", "label": "Brick wall", "kind": "mesh", "tags": ["wall", "brick", "masonry", "modular"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 25, "elevation": 15 }

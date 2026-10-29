@@ -199,6 +199,8 @@ export interface Viewer {
    * reconnects and reloads, so the URL stays the same.
    */
   setWorkspace: (ws: Workspace) => void;
+  /** what a change in a package's working folder sets off, without waiting for the file watchers (tests) */
+  pokePackages: (pkg?: string, rel?: string) => void;
   close: () => void;
 }
 
@@ -686,6 +688,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   return {
     url: `http://127.0.0.1:${actual}/`,
     clients: () => clients.size,
+    pokePackages: (pkg, rel) => packages.poke(pkg, rel),
     setWorkspace: (next: Workspace) => {
       if (next === ws || closed) return;
       ws.listeners.delete(graphChanged);

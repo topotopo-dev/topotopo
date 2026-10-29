@@ -166,7 +166,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "lamp_post": { "node": "out", "label": "Lamp post" } },
+  "outputs": { "lamp_post": { "node": "out", "label": "Lamp post", "kind": "mesh", "tags": ["lamp", "street-light", "lighting", "street-furniture"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 20, "elevation": 15 }

@@ -422,7 +422,7 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
     if (run?.progress.package === pkg) { run.signal.aborted = true; await run.done; }
     const now = asked(() => readManifest(p.dir!).uses[pkg]);
     if (now !== from) err(409, now === undefined ? `this project does not use ${pkg} now: look at its packages again` : `project.json uses ${pkg} ${now} now, not ${from}: look at the before/after again`);
-    const r = asked(() => applyUpdate(p, pkg, to));
+    const r = asked(() => applyUpdate(p, pkg, { from: from as string, to: to as string }));
     if (r.mustChange.length) kept.set(pkg, { from, to: r.target.to, items: r.mustChange });
     else kept.delete(pkg);
     if (last?.result.target.package === pkg) last = null;
@@ -446,7 +446,7 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
   async function checkPublish() {
     const p = need();
     if (!p.manifest?.package) err(400, 'this project is no package: its project.json names none ("package": "owner/name")');
-    checking ??= publishPackage(ws, p, { check: true }).finally(() => { checking = null; });
+    checking ??= publishPackage(p, { dryRun: true }).finally(() => { checking = null; });
     return { ok: true, check: await checking };
   }
 
@@ -464,6 +464,15 @@ export function createPackages(ws: Workspace, broadcast: (ev: object) => void) {
   return {
     /** what the Packages tab shows (GET /api/packages) */
     state,
+    /**
+     * What a change in a package's working folder sets off (`rel`: the file, as the watcher names it), and the check
+     * the timer makes, at once: for a test, or a host that knows a folder changed, without waiting for the watchers.
+     */
+    poke(pkg?: string, rel?: string) {
+      if (pkg) onWorking(pkg, rel ?? '');
+      pk?.poke();
+      check();
+    },
     close() {
       closed = true;
       if (run) run.signal.aborted = true;

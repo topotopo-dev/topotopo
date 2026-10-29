@@ -101,7 +101,7 @@
     "out": { "type": "attrib_delete", "in": ["paint"], "params": { "groups": "*" } }
   },
   "output": "out",
-  "outputs": { "beam_truss": { "node": "out", "label": "Truss" } },
+  "outputs": { "beam_truss": { "node": "out", "label": "Truss", "kind": "mesh", "tags": ["truss", "beam", "structural", "steel", "timber", "industrial"] } },
   "meta": {
     "watertight": true,
     "thumbnail_render": { "azimuth": 12, "elevation": 12, "zoom": 0.95 }

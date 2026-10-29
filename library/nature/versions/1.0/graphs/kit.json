@@ -19,5 +19,6 @@
     "tree_lowpoly_at": {"type":"transform","in":["tree_lowpoly"],"params":{"translate":[65.564,0,0]}},
     "kit": {"type":"merge","in":["bush_at","cliff_block_at","forest_patch_at","grass_clumps_at","log_at","rock_at","scatter_rocks_at","tree_lowpoly_at"]}
   },
-  "output": "kit"
+  "output": "kit",
+  "outputs": {"kit":{"node":"kit","label":"Nature kit","kind":"scene","tags":["kit","lineup","nature"]}}
 }

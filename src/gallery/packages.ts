@@ -15,7 +15,9 @@
 //
 // A copy holds the files of the version but the copies the version holds itself, which sit flat beside it; it keeps the
 // version's lock. A version's hash covers every file of the version but version.json: the sorted posix paths, each with
-// the SHA-256 of the file's bytes ("<sha256>  <path>" lines, hashed again). A copy is checked against it together with
+// the SHA-256 of the file's content ("<sha256>  <path>" lines, hashed again). A text file's content is read with LF line
+// ends, so a checkout that turns them into CRLF (core.autocrlf on Windows) keeps every hash; binary files are hashed as
+// they are (textContent). A copy is checked against it together with
 // the copies it uses as the project holds them, so a copy edited by hand shows. A project finds packages only in the
 // libraries its project.json lists: a path relative to the project (a library in the same repository, so every checkout
 // and worktree reads its own) or a registered library's name, and before those in TopoTopo's built-in library, which
@@ -38,7 +40,7 @@ import type { Engine } from '../graph/engine.ts';
 import { migrateGraph } from '../graph/migrate.ts';
 import { KINDS, isKind, outputFieldIssues } from '../graph/outputs.ts';
 import type { Kind } from '../graph/outputs.ts';
-import { ownOutputsNamed, packageAt, packageOutputDef, packagesNamedIn } from '../graph/packages.ts';
+import { ownOutputsNamed, packageAt, packageOutputDef, packagesNamedIn, varsRead } from '../graph/packages.ts';
 import { didYouMean, resolveParamName } from '../graph/params.ts';
 import { getNodeDef } from '../graph/registry.ts';
 import { ID_RE, parsePackageName } from '../graph/scope.ts';
@@ -48,7 +50,10 @@ import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
 import { NAME_RE } from '../workspace.ts';
 import type { Workspace, WorkspacePackages } from '../workspace.ts';
-import { BUILTIN_LIBRARY, VERSION_RE, loadConfig, manifestFile, projectDirOf, readManifest, scanLibrary, writeAtomic, writeManifest } from './library.ts';
+import {
+  BUILTIN_LIBRARY, VERSION_RE, libraryEntry, loadConfig, manifestFile, program, projectDirOf, readManifest, renameInto, scanLibrary, withProjectLock, writeAtomic,
+  writeManifest,
+} from './library.ts';
 import type { GalleryConfig, ProjectManifest } from './library.ts';
 
 /** Publishing warns about a version above this size: every project that uses it keeps a copy. */
@@ -56,7 +61,7 @@ export const MAX_VERSION_BYTES = 50 * 2 ** 20;
 /** The owner of TopoTopo's own packages: nobody else publishes under it. */
 export const RESERVED_OWNER = 'topotopo';
 /** How a folder becomes a project, said where only a project will do. */
-const MAKE_PROJECT = 'topotopo init <folder> (MCP: library {action:"init"} for the open workspace) makes the folder a project (project.json)';
+const makeProject = () => `${program()} init <folder> (MCP: library {action:"init"} for the open workspace, when the person says so) makes the folder a project (project.json)`;
 /** A library as messages name it: library "game", and TopoTopo's built-in library by its name and what it is. */
 export const libraryText = (name: string) => `library "${name}"${name === BUILTIN_LIBRARY.name ? ' (TopoTopo\'s built-in library)' : ''}`;
 
@@ -68,11 +73,11 @@ export interface SliderInfo { type: string; default?: unknown; min?: number; max
 export interface InputInfo { index: number; label: string }
 /**
  * A published output: the graph and node it cooks, what it is (its kind as it cooked, its tags, its description: the
- * output's own or else its graph's), its sliders (the graph's vars) and its inputs (its input nodes). A version
- * published before TopoTopo recorded kinds has no kind, tags or description.
+ * output's own or else its graph's, none when neither has one), its params (the graph's vars) and its inputs (its input
+ * nodes).
  */
 export interface OutputInfo {
-  graph: string; node: string; label?: string; kind?: Kind; tags?: string[]; description?: string;
+  graph: string; node: string; label?: string; kind: Kind; tags: string[]; description?: string;
   sliders: Record<string, SliderInfo>; inputs: InputInfo[];
 }
 
@@ -111,8 +116,12 @@ function readVersionInfo(dir: string): VersionInfo {
   const file = path.join(dir, 'version.json');
   let raw: any;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
-  if (!raw || typeof raw !== 'object' || typeof raw.package !== 'string' || typeof raw.version !== 'string' || typeof raw.hash !== 'string' || !raw.outputs || !raw.default)
+  if (!raw || typeof raw !== 'object' || typeof raw.package !== 'string' || typeof raw.version !== 'string' || typeof raw.hash !== 'string' || !raw.outputs || typeof raw.outputs !== 'object' || !raw.default)
     throw new Error(`${file} is not a version record: it needs package, version, hash, outputs and default`);
+  // every output records what it is: its kind and its tags
+  for (const [k, o] of [...Object.entries<any>(raw.outputs), ['(the default output)', raw.default] as [string, any]])
+    if (!o || typeof o !== 'object' || !isKind(o.kind) || !Array.isArray(o.tags) || !o.sliders || !Array.isArray(o.inputs))
+      throw new Error(`${file} is not a version record: output ${k} needs its kind (${KINDS.join(', ')}), tags, sliders and inputs`);
   return raw;
 }
 
@@ -126,9 +135,14 @@ const copyAt = (packages: string, pkg: string, v: string) => path.join(packages,
 /** a version's own copies (not its lock), which a copy of it leaves out */
 const nestedCopy = (rel: string) => rel.startsWith('packages/') && rel !== 'packages/lock.json';
 
-/** what is said about a copy that is missing, and about one edited by hand (a loaded copy warns, publishing blocks) */
-const missingCopy = (pkg: string, v: string, at: string) => `the copy of ${pkg} ${v} is missing: ${at}`;
-const editedCopy = (pkg: string, v: string, at: string) => `the copy of ${pkg} ${v} (${at}) was edited by hand: its files no longer match the hash packages/lock.json records; restore it, or delete it and run topotopo use with the package the project uses that needs it, which copies what is missing`;
+/**
+ * What is said about a copy that is missing, and about one edited by hand (a loaded copy warns, publishing blocks).
+ * `direct`: the package the project uses that needs it (itself, or the one that uses it), whose `use` copies it again.
+ */
+const missingCopy = (pkg: string, v: string, at: string, direct?: string) =>
+  `the copy of ${pkg} ${v} is missing: ${at}${direct ? `; restore it, or run ${program()} use ${direct}, which copies what is missing` : ''}`;
+const editedCopy = (pkg: string, v: string, at: string, direct?: string) =>
+  `the copy of ${pkg} ${v} (${at}) was edited by hand: its files no longer match the hash packages/lock.json records; restore it, or delete it and run ${program()} use ${direct ?? pkg}, which copies what is missing`;
 
 /** Every file below `dir`, dot-files and dot-folders skipped: posix paths relative to it, sorted. */
 function filesBelow(dir: string): { rel: string; abs: string }[] {
@@ -149,19 +163,81 @@ function filesBelow(dir: string): { rel: string; abs: string }[] {
   return out.sort(byRel);
 }
 
-/** SHA-256 of files kept while their size and time stay the same: copies and followed folders are read again often. */
+/** Files that are never text, whatever their bytes: images, meshes, fonts, archives. */
+const BINARY = /\.(png|jpe?g|webp|gif|avif|bmp|tga|tiff?|exr|hdr|dds|ktx2?|glb|bin|bgeo|sc|usdc|usdz|fbx|abc|vdb|r16|r32|raw|wasm|ttf|otf|woff2?|zip|gz|7z|pdf|mp4|webm|wav|ogg|mp3)$/i;
+
+/**
+ * A file's content as a version's hash reads it: a text file with its CRLF line ends read as LF, so that a checkout that
+ * turns LF into CRLF (core.autocrlf) keeps the hash; anything else as it is. Text is what version control takes for
+ * text: no NUL byte in the first 8000 bytes, and no binary format by its name.
+ */
+export function textContent(name: string, bytes: Uint8Array): Uint8Array {
+  if (BINARY.test(name)) return bytes;
+  const head = Math.min(bytes.length, 8000);
+  for (let i = 0; i < head; i++) if (bytes[i] === 0) return bytes;
+  let crlf = 0;
+  for (let i = 0; i + 1 < bytes.length; i++) if (bytes[i] === 13 && bytes[i + 1] === 10) crlf++;
+  if (!crlf) return bytes;
+  const out = new Uint8Array(bytes.length - crlf);
+  let j = 0;
+  for (let i = 0; i < bytes.length; i++) if (!(bytes[i] === 13 && bytes[i + 1] === 10)) out[j++] = bytes[i];
+  return out;
+}
+
+/** The SHA-256 a version's hash takes of a file: of its text with LF line ends, or of its bytes (textContent). */
+export const contentSha = (name: string, bytes: Uint8Array) => sha(textContent(name, bytes));
+
+/**
+ * SHA-256 of files kept while their size and time stay the same: copies and followed folders are read again often. A
+ * project keeps those of its own files between runs in packages/.cache.json (never committed: init lists it in its
+ * .gitignore), so a new process does not read every byte of its copies again.
+ */
 const shaCache = new Map<string, { stamp: string; sha: string }>();
+let shaFresh = false;
 function fileSha(abs: string, cached: boolean): string {
-  if (!cached) return sha(fs.readFileSync(abs));
+  if (!cached) return contentSha(abs, fs.readFileSync(abs));
   const st = fs.statSync(abs), stamp = `${st.size}:${st.mtimeMs}`;
   const c = shaCache.get(abs);
   if (c?.stamp === stamp) return c.sha;
-  const h = sha(fs.readFileSync(abs));
+  const h = contentSha(abs, fs.readFileSync(abs));
   shaCache.set(abs, { stamp, sha: h });
+  shaFresh = true;
   return h;
 }
 
-/** The hash of a set of files: their sorted posix paths, each with the SHA-256 of its bytes. */
+/** The file that keeps a project's file hashes between runs, and the shape it is written in. */
+const shaCacheFile = (dir: string) => path.join(dir, 'packages', '.cache.json');
+const SHA_CACHE_FORMAT = 1;
+const shaCacheRead = new Set<string>();
+
+/** Take in the hashes a project kept (packages/.cache.json), once per process. */
+function readShaCache(dir: string) {
+  if (shaCacheRead.has(dir)) return;
+  shaCacheRead.add(dir);
+  let raw: any;
+  try { raw = JSON.parse(fs.readFileSync(shaCacheFile(dir), 'utf8')); } catch { return; }
+  if (raw?.format !== SHA_CACHE_FORMAT || !raw.files || typeof raw.files !== 'object') return;
+  for (const [rel, s] of Object.entries(raw.files)) {
+    const [stamp, h] = String(s).split(' ');
+    const abs = path.join(dir, ...rel.split('/'));
+    if (stamp && h && !shaCache.has(abs)) shaCache.set(abs, { stamp, sha: h });
+  }
+}
+
+/** Keep the hashes of the project's files that are still there (packages/.cache.json), when new ones were taken. */
+function writeShaCache(dir: string) {
+  if (!shaFresh || !fs.existsSync(path.join(dir, 'packages'))) return;
+  shaFresh = false;
+  const files: Record<string, string> = {};
+  for (const [abs, c] of shaCache) {
+    const rel = path.relative(dir, abs);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || !fs.existsSync(abs)) continue;
+    files[rel.split(path.sep).join('/')] = `${c.stamp} ${c.sha}`;
+  }
+  try { writeAtomic(shaCacheFile(dir), JSON.stringify({ format: SHA_CACHE_FORMAT, files: sortKeys(files) }) + '\n'); } catch { /* a cache: kept next time */ }
+}
+
+/** The hash of a set of files: their sorted posix paths, each with the SHA-256 of its content (contentSha). */
 export function filesHash(files: { rel: string; sha: string }[]): string {
   return sha([...files].sort(byRel).map((f) => `${f.sha}  ${f.rel}\n`).join(''));
 }
@@ -172,7 +248,7 @@ export function filesHash(files: { rel: string; sha: string }[]): string {
  */
 export function workingHash(dir: string): string {
   const m = readManifest(dir), lock = readLock(dir);
-  return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? sha(f.bytes) : fileSha(f.abs!, true) })));
+  return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? contentSha(f.rel, f.bytes) : fileSha(f.abs!, true) })));
 }
 
 /** The hash of a version folder as published: every file but its version.json. */
@@ -204,7 +280,7 @@ function copyTree(from: string, to: string, keep: (rel: string) => boolean = () 
       fs.copyFileSync(f.abs, dest);
     }
     fs.mkdirSync(part, { recursive: true });
-    fs.renameSync(part, to);
+    renameInto(part, to);
   } catch (e) { fs.rmSync(part, { recursive: true, force: true }); throw e; }
 }
 
@@ -253,15 +329,16 @@ function writeLock(dir: string, lock: Lock) {
 /** Every version `uses` needs through the lock (its uses, theirs …), sorted; throws for one the lock does not list. */
 function usesClosure(uses: Record<string, string>, lock: Lock): [string, string][] {
   const out = new Map<string, [string, string]>();
-  const visit = (pkg: string, v: string, by: string) => {
+  // `top`: the package of `uses` that needs it, whose `use` copies and records what is missing
+  const visit = (pkg: string, v: string, by: string, top: string) => {
     const key = `${pkg}@${v}`;
     if (out.has(key)) return;
     const e = lock.packages[pkg]?.[v];
-    if (!e) throw new Error(`packages/lock.json does not list ${pkg} ${v} (${by} uses it): copy it with topotopo use ${pkg}`);
+    if (!e) throw new Error(`packages/lock.json does not list ${pkg} ${v} (${by} uses it): ${program()} use ${top} copies it and records it`);
     out.set(key, [pkg, v]);
-    for (const [p, w] of Object.entries(e.uses)) visit(p, w, `${pkg} ${v}`);
+    for (const [p, w] of Object.entries(e.uses)) visit(p, w, `${pkg} ${v}`, top);
   };
-  for (const [pkg, v] of Object.entries(uses)) visit(pkg, v, 'project.json');
+  for (const [pkg, v] of Object.entries(uses)) visit(pkg, v, 'project.json', pkg);
   return [...out.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : compareVersions(a[1], b[1])));
 }
 
@@ -356,12 +433,14 @@ function outputLoops(pkg: string, outs: FolderOutput[], scope: Scope): Map<strin
 }
 
 /**
- * An output's record: what it is (the kind it cooked to, its tags and description) and its interface, its sliders (the
- * graph's vars, with their declarations) and its inputs (its input nodes).
+ * An output's record: what it is (the kind it cooked to, its tags and description) and its interface, its params (the
+ * vars of its graph that its node reads, with their declarations: varsRead) and its inputs (its input nodes).
  */
-function outputInfo(o: FolderOutput, kind: Kind | undefined): OutputInfo {
+function outputInfo(o: FolderOutput, kind: Kind): OutputInfo {
   const sliders: Record<string, SliderInfo> = {};
+  const read = new Set(varsRead(o.spec, o.node));
   for (const [k, p] of Object.entries(graphInterface(o.spec).params)) {
+    if (!read.has(k)) continue;
     const label = o.spec.params?.[k]?.label;
     sliders[k] = {
       type: p.type, default: p.default,
@@ -375,7 +454,7 @@ function outputInfo(o: FolderOutput, kind: Kind | undefined): OutputInfo {
     inputs.push({ index: Number(n.params?.index ?? 0), label: String(n.params?.label ?? n.note ?? '') });
   }
   return {
-    graph: o.graph, node: o.node, ...(o.label ? { label: o.label } : {}), ...(kind ? { kind } : {}), tags: o.tags, ...(o.description ? { description: o.description } : {}),
+    graph: o.graph, node: o.node, ...(o.label ? { label: o.label } : {}), kind, tags: o.tags, ...(o.description ? { description: o.description } : {}),
     sliders, inputs: inputs.sort((a, b) => a.index - b.index),
   };
 }
@@ -427,7 +506,7 @@ interface Context {
 }
 
 /** A package version (or a followed working folder) loaded into the engine: its scope and its output node types. */
-interface Loaded {
+export interface Loaded {
   package: string;
   version: string | null;
   dir: string;
@@ -439,6 +518,14 @@ interface Loaded {
   noDefault?: string;
   /** outputs that name each other in a loop (by name, "" for the default output), and the loop, said */
   loops: Map<string, string>;
+  /** what loading it found: its copy edited by hand, files it cannot read, loops (each said with the version) */
+  problems: string[];
+  /** its graphs and assets that cannot be read or registered, said by file ("assets/bark.json: …") */
+  fileProblems: string[];
+  /** a copy that loaded with a warning (edited by hand, not in the lock): loaded afresh when the project is checked again */
+  warned: boolean;
+  /** the versions it uses, as its scope resolves them */
+  deps: () => (Loaded | PackageIssue)[];
 }
 
 /** A package's working folder, followed this session. */
@@ -453,11 +540,14 @@ interface Found { package: string; libraries: string[]; working: { library: stri
 /** A package's folder in a library: its versions/, and `working` when it is the package's working folder (a project). */
 interface PackageFolder { package: string; library: string; dir: string; working: boolean }
 
+/** The libraries a project lists, and what is wrong with the entries that do not work (the others still do). */
+export interface Listed { libs: { entry: string; root: string }[]; problems: string[] }
+
 /**
  * The project's libraries and the packages in them, scanned once for several finds: TopoTopo's built-in library first,
- * then the libraries project.json lists.
+ * then the libraries project.json lists; and what is wrong with an entry or a library (the others still count).
  */
-interface Scanned { libs: { entry: string; root: string }[]; packages: PackageFolder[] }
+interface Scanned { libs: { entry: string; root: string }[]; packages: PackageFolder[]; problems: string[] }
 
 /**
  * The packages of TopoTopo's built-in library at `dir`: topotopo/<name> for each folder <name> with versions/, a working
@@ -520,6 +610,11 @@ export interface UpdateTarget {
 
 export interface UpdateResult { copied: string[]; deleted: string[]; text: string }
 
+/** An update asked for when there is none to make (the version in use is the newest of its big number): not a failure. */
+export class NothingToUpdate extends Error {
+  constructor(message: string) { super(message); this.name = 'NothingToUpdate'; }
+}
+
 /**
  * The packages of one project in one engine: the resolver of the engine's root scope (the project's uses), a scope per
  * copied version (its own assets, graphs, files and uses), adding packages on first use, the session's followed
@@ -534,10 +629,11 @@ export class ProjectPackages implements WorkspacePackages {
   manifest: ProjectManifest | null = null;
   /** why project.json or the lock could not be read */
   error: string | null = null;
-  /** copies edited by hand, files a copy cannot read: the CLI prints them, the library tool lists them, cooks warn */
-  readonly problems = new Set<string>();
-  /** files that versions read apart (Update's before/after) cannot read */
-  readonly apartProblems = new Set<string>();
+  /**
+   * what the last look at TopoTopo's built-in library found wrong with its packages (the catalog's offer of them):
+   * replaced by each look
+   */
+  libraryProblems: string[] = [];
   /** what the engine's root scope resolves package names with */
   readonly resolver: PackageResolver;
   private root: Context;
@@ -566,17 +662,29 @@ export class ProjectPackages implements WorkspacePackages {
     this.builtin = path.resolve(opts.builtin ?? BUILTIN_LIBRARY.path);
     this.root = { label: 'this project', uses: {}, packages: this.dir ? path.join(this.dir, 'packages') : '', lock: { packages: {} }, follows: true };
     this.resolver = { resolve: (name) => this.resolveIn(this.root, name), names: () => this.namesIn(this.root), offered: () => this.offered() };
+    if (this.dir) readShaCache(this.dir);
     this.reload();
   }
 
   /** "project lantern (D:/lib/props/lantern)" */
   get label(): string { return this.manifest ? `project ${this.manifest.id}` : 'this folder'; }
 
+  /** WorkspacePackages: why the graphs cannot use packages (a folder in no project, a project.json that is not valid). */
+  notice(): string | null {
+    if (!this.dir) return `this workspace is in no project, so its graphs cannot use packages yet, TopoTopo's own among them: ${makeProject()}`;
+    return this.error ? `the project's packages cannot be read: ${this.error}` : null;
+  }
+
+  /** Load afresh, when next named, the copies that could not load or loaded with a warning (edited by hand). */
+  private forgetWarned() {
+    for (const [k, v] of this.loaded) if ('error' in v || v.warned) this.loaded.delete(k);
+  }
+
   /** Read project.json and the lock again (the tools wrote them, or another process did). */
   private reload() {
     this.disk = this.diskStamp();
-    // a version that loaded stays as it is (it is frozen); one that could not load is tried again
-    for (const [k, v] of this.loaded) if ('error' in v) this.loaded.delete(k);
+    // a version that loaded stays as it is (it is frozen); one that could not load, or loaded with a warning, is tried again
+    this.forgetWarned();
     // the project's own package is read again with its uses and lock (its files are hashed again when next named)
     this.selfLoaded = null;
     this.selfStamp = '';
@@ -616,9 +724,27 @@ export class ProjectPackages implements WorkspacePackages {
 
   /** The project folder and its manifest; throws when the folder is in no project or project.json is not valid. */
   project(): { dir: string; manifest: ProjectManifest } {
-    if (!this.dir) throw new Error(`this folder is in no project: ${MAKE_PROJECT}, whose graphs can use packages`);
+    if (!this.dir) throw new Error(`this folder is in no project: ${makeProject()}, whose graphs can use packages`);
     if (!this.manifest) throw new Error(this.error ?? `${manifestFile(this.dir)} cannot be read`);
     return { dir: this.dir, manifest: this.manifest };
+  }
+
+  /**
+   * The project's own package (when it is one) as its graphs are now, loaded as a project that uses it would: its own
+   * scope with its graphs, assets, files and copies, a node type per published output. null for a project that names
+   * no package.
+   */
+  ownPackage(): Loaded | PackageIssue | null {
+    return this.root.self ? this.root.self.get() : null;
+  }
+
+  /** The package of the project's uses that needs version `v` of `pkg`: the package itself, or one that uses it. */
+  private directUser(pkg: string, v: string): string | undefined {
+    if (this.root.uses[pkg] === v) return pkg;
+    for (const [top, w] of Object.entries(this.root.uses)) {
+      try { if (usesClosure({ [top]: w }, this.root.lock).some(([p, x]) => p === pkg && x === v)) return top; } catch { /* the lock misses a version */ }
+    }
+    return undefined;
   }
 
   // ---------------------------------------------------------------------------------------------- resolution
@@ -665,12 +791,14 @@ export class ProjectPackages implements WorkspacePackages {
     const v = ctx.uses[pkg];
     if (v !== undefined) return this.loadCopy(ctx, pkg, v);
     if (ctx !== this.root && !ctx.unavailable) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
-    if (!this.dir) return { error: `package ${pkg}: this graph is in no project, and only projects use packages`, hint: `${MAKE_PROJECT}; then a graph of it that names ${pkg} adds the package (or topotopo use ${pkg})` };
+    if (!this.dir) return { error: `package ${pkg}: this graph is in no project, and only projects use packages`, hint: `${makeProject()}; then a graph of it that names ${pkg} adds the package (or ${program()} use ${pkg})` };
     if (this.error) return { error: `package ${pkg}: ${this.error}` };
     const why = (ctx.unavailable ?? this.unavailable).get(pkg);
     return {
       error: `package ${pkg} is not in this project's uses (project.json)${why ? `, and it could not be added: ${why}` : ''}`,
-      hint: `topotopo use ${pkg} (MCP: library {action:"use", package:"${pkg}"}) adds its newest version from the libraries the project lists; build and edit add it when a graph first names it`,
+      hint: why
+        ? 'a graph that names it adds it once that is solved'
+        : `${program()} use ${pkg} (MCP: library {action:"use", package:"${pkg}"}) adds its newest version from the libraries the project lists; build and edit add it when a graph first names it`,
     };
   }
 
@@ -701,18 +829,20 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   private loadCopyNow(ctx: Context, pkg: string, v: string, dir: string): Loaded | PackageIssue {
+    // the package the project uses that needs it, whose `use` copies and records it again
+    const direct = ctx.packages === this.root.packages ? this.directUser(pkg, v) : undefined;
     if (!fs.existsSync(path.join(dir, 'version.json')))
-      return { error: missingCopy(pkg, v, this.shown(dir)), hint: `${ctx.label} uses it, and the copies are kept with the project (commit packages/): restore it, or run topotopo use ${ctx === this.root ? pkg : 'with the package the project uses that needs it'}, which copies what is missing` };
+      return { error: missingCopy(pkg, v, this.shown(dir)), hint: `${ctx.label} uses it, and the copies are kept with the project (commit packages/): restore it, or run ${program()} use ${direct ?? pkg}, which copies what is missing` };
     const info = readVersionInfo(dir);
     const m = readManifest(dir);
     const hash = copyHash(dir, ctx.packages);
     const expected = ctx.lock.packages[pkg]?.[v]?.hash;
     let warning: string | undefined;
-    if (expected === undefined) warning = `${this.shown(path.dirname(ctx.packages))}/packages/lock.json does not list ${pkg} ${v}: topotopo use ${pkg} records it`;
-    else if (expected !== hash) warning = editedCopy(pkg, v, this.shown(dir));
-    if (warning) this.problems.add(warning);
+    if (expected === undefined) warning = `${this.shown(path.dirname(ctx.packages))}/packages/lock.json does not list ${pkg} ${v}: ${program()} use ${direct ?? pkg} records it`;
+    else if (expected !== hash) warning = editedCopy(pkg, v, this.shown(dir), direct);
     const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: ctx.packages, lock: ctx.lock, follows: false };
-    return this.build({ pkg, version: v, dir, hash, signature: hash, info, warning, manifest: m, ctx: vctx, scope: `${pkg}@${v}` });
+    // the scope is the files' too: a copy restored after an edit is another scope, with results of its own
+    return this.build({ pkg, version: v, dir, hash, signature: hash, info, warning, manifest: m, ctx: vctx, scope: `${pkg}@${v}${warning ? `#${hash.slice(0, 16)}` : ''}` });
   }
 
   /**
@@ -749,7 +879,7 @@ export class ProjectPackages implements WorkspacePackages {
         if (hash !== expected) r = { error: `${pkg} ${v} in ${dir} was changed after publishing: its files do not match the hash it was published with` };
         else {
           const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: place ? path.join(dir, 'packages') : ctx.packages, lock: place ? readLock(dir) : ctx.lock, follows: false, apart: true };
-          r = this.build({ pkg, version: v, dir, hash, signature: `${hash}|${dir}`, info, manifest: m, ctx: vctx, scope: `${pkg}@${v}|${dir}`, problems: this.apartProblems });
+          r = this.build({ pkg, version: v, dir, hash, signature: `${hash}|${dir}`, info, manifest: m, ctx: vctx, scope: `${pkg}@${v}|${dir}` });
         }
       }
     } catch (e: any) { r = { error: `${pkg} ${v} (${dir}): ${e.message}` }; }
@@ -802,7 +932,7 @@ export class ProjectPackages implements WorkspacePackages {
    * as the version's record (`info`) says, or in a working folder as its author pinned and tagged it. Its graphs and
    * assets name its own outputs by full name: they resolve to what this builds (Context.self).
    */
-  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; info?: VersionInfo; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string; problems?: Set<string> }): Loaded {
+  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; info?: VersionInfo; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string }): Loaded {
     const problems: string[] = [];
     const graphs = readGraphs(o.dir, problems);
     const scope = this.engine.createScope(o.scope, { folder: o.dir, graphs: (n) => graphs.get(n), packages: this.resolverOf(o.ctx) });
@@ -822,27 +952,51 @@ export class ProjectPackages implements WorkspacePackages {
       named: new Map(outs.named.map((x) => [x.name!, def(x)])),
       default: outs.default ? def(outs.default) : null,
       ...(outs.default ? {} : { noDefault: outs.problems.find((p) => p.startsWith('no default output'))?.replace(/^no default output: /, '') }),
-      loops: new Map(),
+      loops: new Map(), problems: [], fileProblems: problems, warned: !!o.warning,
+      deps: () => Object.keys(o.ctx.uses).filter((p) => p !== o.pkg).map((p) => this.packageIn(o.ctx, p)),
     };
     // its outputs exist before its assets register: an asset may name one
     o.ctx.self = { package: o.pkg, get: () => loaded };
     registerAssets(this.engine, scope, o.dir, problems);
     loaded.loops = outputLoops(o.pkg, [...outs.named, ...(outs.default ? [outs.default] : [])], scope);
     const at = packageAt({ package: o.pkg, version: o.version });
-    for (const p of [...problems, ...outs.problems.filter((p) => !p.startsWith('no default output')), ...new Set(loaded.loops.values())]) (o.problems ?? this.problems).add(`${at}: ${p}`);
+    loaded.problems = [...(o.warning ? [o.warning] : []), ...[...problems, ...outs.problems.filter((p) => !p.startsWith('no default output')), ...new Set(loaded.loops.values())].map((p) => `${at}: ${p}`)];
     return loaded;
   }
 
-  /** Load every version the project uses (and those they use), so that problems with the copies are known. */
+  /**
+   * What is wrong with the versions `start` reaches (each loaded as it is used, then those they use): copies edited by
+   * hand, files they cannot read, versions that do not load. Each once.
+   */
+  private problemsOf(start: (Loaded | PackageIssue)[]): string[] {
+    const out = new Set<string>(), seen = new Set<Loaded>();
+    const visit = (p: Loaded | PackageIssue) => {
+      if ('error' in p) { out.add(p.error); return; }
+      if (seen.has(p)) return;
+      seen.add(p);
+      for (const x of p.problems) out.add(x);
+      for (const d of p.deps()) visit(d);
+    };
+    for (const p of start) visit(p);
+    return [...out];
+  }
+
+  /**
+   * Check every version the project uses (and those they use) as the files are now: what is wrong with them, worked out
+   * afresh each time (a copy restored by hand, a lock fixed since, shows no more). Also the project's own package and
+   * the working folders this session follows. Each problem once.
+   */
   check(): string[] {
-    if (this.dir && this.manifest) {
-      for (const pkg of Object.keys(this.root.uses)) {
-        const p = this.packageIn(this.root, pkg);
-        if ('error' in p) this.problems.add(p.error);
-        else p.scope.packages?.names(); // loads the versions it uses
-      }
-    }
-    return [...this.problems];
+    if (!this.dir || !this.manifest) return [];
+    this.refresh();
+    // a copy that loaded with a warning is hashed again: it may have been restored
+    this.forgetWarned();
+    const start: (Loaded | PackageIssue)[] = Object.keys(this.root.uses).filter((p) => !this.followed.has(p)).map((p) => this.packageIn(this.root, p));
+    for (const p of this.followed.keys()) start.push(this.loadFollowed(p));
+    if (this.root.self && this.selfStamp) start.push(this.root.self.get());
+    const out = this.problemsOf(start);
+    writeShaCache(this.dir);
+    return out;
   }
 
   /** The copies the project's uses need, checked now: one the lock does not list, one missing, one edited by hand. */
@@ -854,20 +1008,43 @@ export class ProjectPackages implements WorkspacePackages {
     const out: string[] = [];
     for (const [pkg, v] of closure) {
       const at = copyAt(packages, pkg, v);
-      if (!fs.existsSync(path.join(at, 'version.json'))) out.push(missingCopy(pkg, v, this.shown(at)));
-      else if (copyHash(at, packages) !== lock.packages[pkg][v].hash) out.push(editedCopy(pkg, v, this.shown(at)));
+      if (!fs.existsSync(path.join(at, 'version.json'))) out.push(missingCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
+      else if (copyHash(at, packages) !== lock.packages[pkg][v].hash) out.push(editedCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
     }
     return out;
   }
 
   // ------------------------------------------------------------------------------------------------ first use
 
-  /** WorkspacePackages: add the packages a graph names that the project does not use yet. */
+  /**
+   * What keeps a graph from cooking with the project exactly as it is (a build machine's --locked): a package it names
+   * that the project does not use, a copy missing or edited by hand. Writes nothing.
+   */
+  locked(graph: GraphSpec): string[] {
+    const adds = this.dryRun(graph).adds.map((a) => `the graph names ${a.package}, which project.json does not use: ${program()} use ${a.package} adds it (a cook without --locked adds it)`);
+    return [...adds, ...(this.dir && this.manifest ? this.verifyCopies() : [])];
+  }
+
+  /** The packages a graph names that the project does not use yet (nor follows, nor is). */
+  private freshIn(graph: GraphSpec): string[] {
+    if (!this.dir || !this.manifest || this.error) return [];
+    return packagesNamedIn(graph).filter((pkg) => this.root.uses[pkg] === undefined && !this.followed.has(pkg) && pkg !== this.manifest!.package);
+  }
+
+  /**
+   * WorkspacePackages: add the packages a graph names that the project does not use yet, once the graph is valid as a
+   * dry run checks it (dryRun: those packages at the version first use adds, read where their library holds them). A
+   * graph that does not validate adds nothing and writes nothing; why a package could not be added is said when the
+   * graph names it.
+   */
   addFor(graph: GraphSpec): string[] {
-    if (!this.dir || !this.manifest) return [];
+    const fresh = this.freshIn(graph);
+    if (!fresh.length) return [];
+    const d = this.dryRun(graph);
+    for (const [pkg, why] of d.unavailable) this.unavailable.set(pkg, why);
+    if (this.engine.validate(graph, '', { ...this.engine.root, id: d.id, packages: d.resolver }).errors.length) return [];
     const notes: string[] = [];
-    for (const pkg of packagesNamedIn(graph)) {
-      if (this.root.uses[pkg] !== undefined || this.followed.has(pkg) || pkg === this.manifest.package) continue;
+    for (const pkg of fresh) {
       try { notes.push(this.use(pkg).text); this.unavailable.delete(pkg); }
       catch (e: any) { this.unavailable.set(pkg, e.message); }
     }
@@ -875,36 +1052,44 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
-   * Add a package to the project: its newest version in the libraries the project lists, copied in with the versions
-   * it uses, recorded in project.json "uses" and in the lock. For a package the project uses already, the copies of the
-   * version in use (and of those it uses) that went missing are copied again.
+   * Add a package to the project: its newest version in the libraries the project lists (or `version`), copied in with
+   * the versions it uses, recorded in project.json "uses" and in the lock. For a package the project uses already, the
+   * copies of the version in use (and of those it uses) that went missing are copied again.
    */
-  use(pkg: string): UseResult {
+  use(pkg: string, o: { version?: string } = {}): UseResult {
     const { dir } = this.project();
+    const at = /^([^@\s]+)@(.*)$/.exec(pkg);
+    if (at && isPackageName(at[1])) throw new Error(`"${pkg}" is not a package name: name the version apart, ${program()} use ${at[1]} --version ${at[2] || '<version>'} (MCP: library {action:"use", package:"${at[1]}", version:"${at[2]}"})`);
     if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name (lower-case letters, digits, - and _)`);
-    const m = readManifest(dir);
-    if (pkg === m.package) throw new Error(`this project is the package ${pkg}: its graphs name its own outputs by full name, with no entry in "uses"`);
-    const inUse = m.uses[pkg];
-    if (inUse !== undefined) {
-      const packages = path.join(dir, 'packages');
-      let complete = false;
-      try { complete = usesClosure({ [pkg]: inUse }, readLock(dir)).every(([p, w]) => fs.existsSync(path.join(copyAt(packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
-      if (complete) return { version: inUse, copied: [], text: `${this.label} already uses ${pkg} ${inUse}` };
-    }
-    const { version: v, place } = this.versionToAdd(pkg, inUse);
-    const copied = this.copyIn(pkg, v, place);
-    if (inUse === undefined) {
-      m.uses = sortKeys({ ...m.uses, [pkg]: v });
-      writeManifest(dir, m);
-    }
-    this.reload();
-    const deps = copied.filter((c) => c !== `${pkg} ${v}`);
-    return {
-      version: v, copied,
-      text: inUse === undefined
-        ? `added ${pkg} ${v} to ${this.label} from ${libraryText(place.library)}${deps.length ? `, with ${deps.join(', ')}` : ''}: packages/${pkg}/${v}`
-        : `copied what was missing of ${pkg} ${v} again from ${libraryText(place.library)}: ${copied.join(', ')}`,
-    };
+    if (o.version !== undefined && !VERSION_RE.test(o.version)) throw new Error(`"${o.version}" is not a version: write big.small, such as ${/^\d+$/.test(o.version) ? `${o.version}.0` : '1.1'}`);
+    return withProjectLock(dir, () => {
+      const m = readManifest(dir);
+      if (pkg === m.package) throw new Error(`this project is the package ${pkg}: its graphs name its own outputs by full name, with no entry in "uses"`);
+      const inUse = m.uses[pkg];
+      if (inUse !== undefined && o.version !== undefined && o.version !== inUse)
+        throw new Error(`this project uses ${pkg} ${inUse}: ${program()} update ${pkg} --to ${o.version} shows the before/after of going to ${o.version}, and applies it when asked`);
+      if (inUse !== undefined) {
+        const packages = path.join(dir, 'packages');
+        let complete = false;
+        try { complete = usesClosure({ [pkg]: inUse }, readLock(dir)).every(([p, w]) => fs.existsSync(path.join(copyAt(packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
+        if (complete) return { version: inUse, copied: [], text: `${this.label} already uses ${pkg} ${inUse}` };
+      }
+      const { version: v, place } = this.versionToAdd(pkg, inUse ?? o.version);
+      const copied = this.copyIn(pkg, v, place);
+      if (inUse === undefined) {
+        m.uses = sortKeys({ ...m.uses, [pkg]: v });
+        writeManifest(dir, m);
+      }
+      this.reload();
+      writeShaCache(dir);
+      const deps = copied.filter((c) => c !== `${pkg} ${v}`);
+      return {
+        version: v, copied,
+        text: inUse === undefined
+          ? `added ${pkg} ${v} to ${this.label} from ${libraryText(place.library)}${deps.length ? `, with ${deps.join(', ')}` : ''}: packages/${pkg}/${v}`
+          : `copied what was missing of ${pkg} ${v} again from ${libraryText(place.library)}: ${copied.join(', ')}`,
+      };
+    });
   }
 
   /**
@@ -915,11 +1100,11 @@ export class ProjectPackages implements WorkspacePackages {
     const found = this.find(pkg, scanned);
     if (!found.versions.size) {
       const w = found.working[0];
-      throw new Error(`${pkg} is in library "${w?.library ?? found.libraries[0]}"${w ? ` (${w.dir})` : ''} but has no published version yet: publish one in its folder (topotopo publish --note "...")`);
+      throw new Error(`${pkg} is in library "${w?.library ?? found.libraries[0]}"${w ? ` (${w.dir})` : ''} but has no published version yet: publish one in its folder (${program()} publish ${w ? `${w.dir} ` : ''}--note "...")`);
     }
     const version = v ?? newestOf(found.versions.keys())!;
     const place = found.versions.get(version)?.[0];
-    if (!place) throw new Error(`project.json uses ${pkg} ${version}, and no library this project lists has that version (they have ${[...found.versions.keys()].sort(compareVersions).join(', ')})`);
+    if (!place) throw new Error(`no library this project lists has ${pkg} ${version}: they have ${[...found.versions.keys()].sort(compareVersions).join(', ')}`);
     return { version, place };
   }
 
@@ -927,25 +1112,29 @@ export class ProjectPackages implements WorkspacePackages {
    * WorkspacePackages.dryRun: the packages a graph is checked with where nothing may be written (a dry run, a trial of
    * a person's values). A package it names for the first time is the version its first use would add, the newest in
    * the libraries the project looks in (TopoTopo's built-in library among them), read where that library holds it:
-   * nothing is copied, and project.json and the lock stay as they are. The notes say what build or edit add. Outside a
-   * project, and for a graph that names nothing new, it is the project's own resolver.
+   * nothing is copied, and project.json and the lock stay as they are. The notes say what build or edit add, and
+   * `unavailable` why the others could not be added; `adds` the versions first use adds. Outside a project, and for a
+   * graph that names nothing new, it is the project's own resolver. `id`: the id of a scope that resolves with it, the
+   * root's own ("") for the project's resolver, else one for the uses it resolves by.
    */
-  dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[] } {
-    if (!this.dir || !this.manifest || this.error) return { resolver: this.resolver, notes: [] };
-    const fresh = packagesNamedIn(graph).filter((pkg) => this.root.uses[pkg] === undefined && !this.followed.has(pkg) && pkg !== this.manifest!.package);
-    if (!fresh.length) return { resolver: this.resolver, notes: [] };
+  dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[]; adds: { package: string; version: string }[]; unavailable: Map<string, string>; id: string } {
+    const fresh = this.freshIn(graph);
+    if (!fresh.length) return { resolver: this.resolver, notes: [], adds: [], unavailable: new Map(), id: this.engine.root.id };
     const uses = { ...this.root.uses }, library = new Map<string, Place>(), unavailable = new Map<string, string>(), notes: string[] = [];
+    const adds: { package: string; version: string }[] = [];
     let scanned: Scanned | undefined;
     for (const pkg of fresh) {
       try {
         const { version, place } = this.versionToAdd(pkg, undefined, scanned ??= this.scanLibraries());
         uses[pkg] = version;
         library.set(`${pkg}@${version}`, place);
+        adds.push({ package: pkg, version });
         notes.push(`build or edit adds ${pkg} ${version} to ${this.label} on first use, from ${libraryText(place.library)}: this dry run read it there and copied nothing`);
       } catch (e: any) { unavailable.set(pkg, e.message); }
     }
     const ctx: Context = { ...this.root, uses: sortKeys(uses), library, unavailable };
-    return { resolver: { ...this.resolverOf(ctx), offered: () => this.offered() }, notes };
+    const id = `dry run ${sha(JSON.stringify([ctx.uses, [...library.values()].map((p) => p.dir)])).slice(0, 16)}`;
+    return { resolver: { ...this.resolverOf(ctx), offered: () => this.offered() }, notes, adds, unavailable, id };
   }
 
   /** Copy a version as published, and the versions it holds copies of, into the project; record them in the lock. */
@@ -991,26 +1180,57 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
-   * The libraries the project lists (project.json as it is now): a path relative to the project, or a registered
-   * library's name. TopoTopo's built-in library, which every project looks in, is not one of them (listing it by its
-   * name changes nothing).
+   * The libraries the project lists (project.json as it is now): a path relative to the project ("./lib", "../lib"), or
+   * a registered library's name; and what is wrong with the entries that do not work (the others still do). TopoTopo's
+   * built-in library, which every project looks in, is not one of them (listing it by its name changes nothing).
    */
-  libraries(): { entry: string; root: string }[] {
+  libraries(): Listed {
     return listedLibraries(this.project().dir);
   }
 
-  /** The packages of TopoTopo's built-in library: their versions, and in TopoTopo's repository their working folders. */
-  private builtinPackages(): PackageFolder[] {
-    return builtinPackages(this.builtin, this.problems);
+  /**
+   * Set the libraries the project lists (project.json "libraries"), as the person asks: each a path relative to the
+   * project or a registered library's name (libraryEntry). Under the project's lock; says what it lists now and what
+   * is wrong with an entry.
+   */
+  setLibraries(entries: string[]): string {
+    const { dir } = this.project();
+    if (!Array.isArray(entries) || entries.some((e) => typeof e !== 'string' || !e.trim())) throw new Error('"libraries" is a list of paths relative to the project ("../lib") and registered library names');
+    for (const e of entries) { const k = libraryEntry(e); if ('error' in k) throw new Error(`"libraries": ${k.error}`); }
+    return withProjectLock(dir, () => {
+      const m = readManifest(dir);
+      m.libraries = [...new Set(entries.map((e) => e.trim().replace(/\\/g, '/')))];
+      writeManifest(dir, m);
+      this.reload();
+      const { libs, problems } = this.libraries();
+      return [
+        `${this.label} lists ${m.libraries.length ? m.libraries.map((e) => `"${e}"`).join(', ') : 'no libraries'} in project.json "libraries"${libs.length ? `: ${libs.map((l) => `${l.entry} (${l.root})`).join(', ')}` : ''}; TopoTopo's built-in library is looked in as well`,
+        ...problems.map((p) => `problem: ${p}`),
+      ].join('\n');
+    });
   }
 
-  /** TopoTopo's built-in library and the project's libraries, and the packages in them (their folders). */
+  /** The packages of TopoTopo's built-in library: their versions, and in TopoTopo's repository their working folders. */
+  private builtinPackages(problems: string[]): PackageFolder[] {
+    const found = new Set<string>(), out = builtinPackages(this.builtin, found);
+    problems.push(...found);
+    return out;
+  }
+
+  /**
+   * TopoTopo's built-in library and the project's libraries, and the packages in them (their folders); what is wrong
+   * with an entry or a library is a problem, and the others still count.
+   */
   private scanLibraries(): Scanned {
-    const libs = this.libraries();
-    const builtin = this.builtinPackages(), seen = new Set(builtin.map((p) => path.resolve(p.dir).toLowerCase()));
+    const { libs, problems } = this.libraries();
+    const builtin = this.builtinPackages(problems), seen = new Set(builtin.map((p) => path.resolve(p.dir).toLowerCase()));
     // a library listed that is the built-in library's folder holds nothing more
-    const listed = libs.flatMap((lib) => scanLibrary({ name: lib.entry, path: lib.root }).projects.flatMap((p) => (p.manifest.package && !seen.has(path.resolve(p.dir).toLowerCase()) ? [{ package: p.manifest.package, library: lib.entry, dir: p.dir, working: true }] : [])));
-    return { libs, packages: [...builtin, ...listed] };
+    const listed = libs.flatMap((lib) => {
+      const scan = scanLibrary({ name: lib.entry, path: lib.root });
+      problems.push(...scan.problems.map((p) => `${libraryText(lib.entry)}: ${p}`));
+      return scan.projects.flatMap((p) => (p.manifest.package && !seen.has(path.resolve(p.dir).toLowerCase()) ? [{ package: p.manifest.package, library: lib.entry, dir: p.dir, working: true }] : []));
+    });
+    return { libs, packages: [...builtin, ...listed], problems };
   }
 
   /** The libraries, working folders and versions of a package in the libraries the project looks in; throws saying where it is not. */
@@ -1018,11 +1238,12 @@ export class ProjectPackages implements WorkspacePackages {
     const { libs } = scanned;
     const found: Found = { package: pkg, libraries: [], working: [], versions: new Map() };
     const others = new Set(scanned.packages.map((p) => p.package));
+    const unread = new Set<string>();
     for (const p of scanned.packages) {
       if (p.package !== pkg) continue;
       if (!found.libraries.includes(p.library)) found.libraries.push(p.library);
       if (p.working) found.working.push({ library: p.library, dir: p.dir });
-      for (const place of readVersions(p.dir, pkg, p.library, this.problems)) {
+      for (const place of readVersions(p.dir, pkg, p.library, unread)) {
         const list = found.versions.get(place.info.version) ?? [];
         list.push(place);
         found.versions.set(place.info.version, list);
@@ -1034,19 +1255,23 @@ export class ProjectPackages implements WorkspacePackages {
       if (other) throw new Error(`${pkg} ${v} has different files in ${places[0].dir} (library "${places[0].library}") and in ${other.dir} (library "${other.library}"): one of them was changed after publishing, and TopoTopo never picks one`);
     }
     if (found.libraries.length) return found;
-    // in a registered library the project does not list?
+    // in a registered library the project does not list? Then the line that lists it: its path from the project when
+    // it is near (the same repository, most likely), else its name
     let cfg: GalleryConfig | null = null;
     try { cfg = loadConfig(); } catch { /* an unreadable config: only the listed libraries count */ }
     const listed = new Set(libs.map((l) => path.resolve(l.root).toLowerCase()));
+    const scanProblems = scanned.problems.length ? `; and could not check ${scanned.problems.length}: ${scanned.problems.join('; ')}` : '';
     for (const lib of cfg?.libraries ?? []) {
       if (listed.has(path.resolve(lib.path).toLowerCase())) continue;
-      if (scanLibrary(lib).projects.some((p) => p.manifest.package === pkg))
-        throw new Error(`${pkg} is in library "${lib.name}" (${lib.path}), which this project does not list: add "${lib.name}" to "libraries" in its project.json (or the library's path relative to the project, when it is in the same repository)`);
+      if (scanLibrary(lib).projects.some((p) => p.manifest.package === pkg)) {
+        const entry = entryFor(this.dir!, lib.path, lib.name);
+        throw new Error(`${pkg} is in library "${lib.name}" (${lib.path}), which this project does not list: ${program()} libraries add ${entry} lists it ("libraries": [${[...(this.manifest?.libraries ?? []), entry].map((e) => JSON.stringify(e)).join(', ')}] in project.json; MCP: library {action:"set", libraries:[...]}, when the person says so)${scanProblems}`);
+      }
     }
     const s = didYouMean(pkg, [...others]);
     throw new Error(libs.length
-      ? `no library this project lists has a package ${pkg}${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; it looks in ${libs.map((l) => `"${l.entry}" (${l.root})`).join(', ')} and in TopoTopo's built-in library`
-      : `this project lists no libraries to find ${pkg} in${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}, and TopoTopo's built-in library, which every project looks in, holds TopoTopo's own packages alone: add "libraries" to its project.json, a path relative to the project or a registered library's name`);
+      ? `no library this project lists has a package ${pkg}${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; it looks in ${libs.map((l) => `"${l.entry}" (${l.root})`).join(', ')} and in TopoTopo's built-in library${scanProblems}`
+      : `this project lists no libraries to find ${pkg} in${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}, and TopoTopo's built-in library, which every project looks in, holds TopoTopo's own packages alone: ${program()} libraries add <folder or registered name> lists one (project.json "libraries")${scanProblems}`);
   }
 
   // ------------------------------------------------------------------------------------------------- following
@@ -1135,6 +1360,16 @@ export class ProjectPackages implements WorkspacePackages {
     this.rewatch();
   }
 
+  /**
+   * What a change in a followed working folder sets off, without waiting for the file watcher (which a test, or a host
+   * that knows a folder changed, calls): refresh, and `onChange` when anything changed. Says whether it did.
+   */
+  poke(): boolean {
+    if (!this.refresh()) return false;
+    this.onChange?.();
+    return true;
+  }
+
   unwatch() {
     this.onChange = null;
     this.rewatch();
@@ -1149,7 +1384,7 @@ export class ProjectPackages implements WorkspacePackages {
       try {
         const w = fs.watch(f.dir, { recursive: true }, () => {
           clearTimeout(this.watchTimer);
-          this.watchTimer = setTimeout(() => { if (this.refresh()) this.onChange?.(); }, 150);
+          this.watchTimer = setTimeout(() => this.poke(), 150);
           this.watchTimer.unref?.();
         });
         w.on('error', () => w.close());
@@ -1163,20 +1398,28 @@ export class ProjectPackages implements WorkspacePackages {
 
   /**
    * Every package in TopoTopo's built-in library and the project's libraries: its folder (a working folder, or for one
-   * of TopoTopo's own the folder of its versions), and its versions with their records.
+   * of TopoTopo's own the folder of its versions), and its versions with their records. What is wrong with a library,
+   * an entry of "libraries" or a version goes into `problems`.
    */
-  catalog(): (PackageFolder & { versions: VersionInfo[] })[] {
-    return this.scanLibraries().packages
-      .map((p) => ({ ...p, versions: readVersions(p.dir, p.package, p.library, this.problems).map((x) => x.info).sort((a, b) => compareVersions(a.version, b.version)) }))
+  catalog(problems: string[] = []): (PackageFolder & { versions: VersionInfo[] })[] {
+    const scanned = this.scanLibraries(), unread = new Set<string>();
+    const out = scanned.packages
+      .map((p) => ({ ...p, versions: readVersions(p.dir, p.package, p.library, unread).map((x) => x.info).sort((a, b) => compareVersions(a.version, b.version)) }))
       .sort((a, b) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0));
+    problems.push(...scanned.problems, ...unread);
+    return out;
   }
 
-  /** For each package the project uses: the version in use, the small and the big update, every version after it. */
-  outdated(): Outdated[] {
+  /**
+   * For each package the project uses: the version in use, the small and the big update, every version after it. What
+   * is wrong with a library or an entry of "libraries" goes into `problems`; a package whose versions could not be
+   * looked up says why (error).
+   */
+  outdated(problems: string[] = []): Outdated[] {
     const { dir } = this.project();
     const uses = readManifest(dir).uses;
     let scanned: Scanned | null = null, why = '';
-    if (Object.keys(uses).length) try { scanned = this.scanLibraries(); } catch (e: any) { why = e.message; }
+    if (Object.keys(uses).length) try { scanned = this.scanLibraries(); problems.push(...scanned.problems); } catch (e: any) { why = e.message; }
     return Object.entries(uses).map(([pkg, version]) => {
       const o: Outdated = { package: pkg, version, newer: [], libraries: [], working: [] };
       if (!scanned) return { ...o, error: why };
@@ -1210,7 +1453,7 @@ export class ProjectPackages implements WorkspacePackages {
         ? `this project does not use ${pkg} itself (${users.join('; ')}): a version keeps what it uses, so updating the package that uses it can bring another`
         : `this project does not use ${pkg}: its uses are ${Object.keys(uses).join(', ') || 'none'}`);
     }
-    if (to !== undefined && !VERSION_RE.test(to)) throw new Error(`"${to}" is not a version: write big.small, such as 1.4`);
+    if (to !== undefined && !VERSION_RE.test(to)) throw new Error(`"${to}" is not a version: write big.small, such as ${/^[1-9]\d*$/.test(to) ? `${to}.0` : '1.4'}`);
     const found = this.find(pkg);
     const all = [...found.versions.keys()].sort(compareVersions);
     const bigOf = (v: string) => versionParts(v)[0];
@@ -1218,10 +1461,10 @@ export class ProjectPackages implements WorkspacePackages {
     if (target === undefined) {
       target = all.filter((v) => bigOf(v) === bigOf(from) && compareVersions(v, from) > 0).at(-1);
       const big = all.filter((v) => bigOf(v) > bigOf(from)).at(-1);
-      if (!target) throw new Error(big
-        ? `${pkg} ${from} is the newest ${bigOf(from)}.x in the project's libraries, and ${big} is a big version, a step of its own: name it, --to ${big} (library {action:"update", package:"${pkg}", to:"${big}"})`
+      if (!target) throw new NothingToUpdate(big
+        ? `${pkg} ${from} is the newest ${bigOf(from)}.x in the project's libraries, and ${big} is a big version, a step of its own: name it, ${program()} update ${pkg} --to ${big} (library {action:"update", package:"${pkg}", to:"${big}"})`
         : `${pkg} ${from} is the newest version in the project's libraries: there is nothing to update`);
-    } else if (target === from) throw new Error(`this project uses ${pkg} ${from} already`);
+    } else if (target === from) throw new NothingToUpdate(`this project uses ${pkg} ${from} already: there is nothing to update`);
     const place = found.versions.get(target)?.[0];
     if (!place) throw new Error(`no library this project lists has ${pkg} ${target}: they have ${all.join(', ') || 'no version of it'}`);
     const [lo, hi] = compareVersions(target, from) > 0 ? [from, target] : [target, from];
@@ -1236,16 +1479,17 @@ export class ProjectPackages implements WorkspacePackages {
   /**
    * The package resolvers of Update's before/after: the project as its copies cook it now (what this session follows
    * plays no part) and as it would after the update, which reads the new version where its library holds it. Nothing
-   * is copied. `key` tells pairs apart, for the ids of scopes made with them.
+   * is copied. `key` tells pairs apart, for the ids of scopes made with them; `problems` says what is wrong with the
+   * version the update goes to and those it uses, as they load (worked out when asked, for this update only).
    */
-  updateResolvers(t: UpdateTarget): { before: PackageResolver; after: PackageResolver; key: string } {
+  updateResolvers(t: UpdateTarget): { before: PackageResolver; after: PackageResolver; key: string; problems: () => string[] } {
     const uses = sortKeys({ ...this.root.uses, [t.package]: t.to });
     const before = this.followed.size ? this.resolverOf({ ...this.root, follows: false }) : this.resolver;
-    const after = this.resolverOf({
+    const ctx: Context = {
       label: 'this project after the update', uses, packages: this.root.packages, lock: this.root.lock, follows: false, self: this.root.self,
       library: new Map([[`${t.package}@${t.to}`, { library: t.library, dir: t.dir, info: t.toInfo }]]),
-    });
-    return { before, after, key: sha(JSON.stringify([this.root.uses, uses, t.dir])).slice(0, 16) };
+    };
+    return { before, after: this.resolverOf(ctx), key: sha(JSON.stringify([this.root.uses, uses, t.dir])).slice(0, 16), problems: () => this.problemsOf([this.packageIn(ctx, t.package)]) };
   }
 
   /**
@@ -1254,29 +1498,16 @@ export class ProjectPackages implements WorkspacePackages {
    */
   applyUpdate(t: UpdateTarget): UpdateResult {
     const { dir } = this.project();
-    const m = readManifest(dir);
-    if (m.uses[t.package] !== t.from) throw new Error(`project.json uses ${t.package} ${m.uses[t.package] ?? 'no more'} now, not ${t.from}: look at the before/after again`);
-    const packages = path.join(dir, 'packages');
-    let before: [string, string][] = [];
-    try { before = usesClosure(m.uses, readLock(dir)); } catch { /* the lock misses a version: nothing is deleted */ }
-    const copied = this.copyIn(t.package, t.to, { library: t.library, dir: t.dir, info: t.toInfo });
-    m.uses = sortKeys({ ...m.uses, [t.package]: t.to });
-    writeManifest(dir, m);
-    const lock = readLock(dir);
-    let keep: Set<string> | null = null;
-    try { keep = new Set(usesClosure(m.uses, lock).map(([p, v]) => `${p}@${v}`)); } catch { /* the lock misses a version: every copy stays */ }
-    const deleted: string[] = [];
-    for (const [p, v] of keep ? before : []) {
-      if (keep!.has(`${p}@${v}`)) continue;
-      if (lock.packages[p]) { delete lock.packages[p][v]; if (!Object.keys(lock.packages[p]).length) delete lock.packages[p]; }
-      const at = copyAt(packages, p, v);
-      fs.rmSync(at, { recursive: true, force: true });
-      // the package's and the owner's folders go once they are empty
-      for (let d = path.dirname(at); d.length > packages.length; d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
-      this.loaded.delete(`${p}@${v}`);
-      deleted.push(`${p} ${v}`);
-    }
-    writeLock(dir, lock);
+    const { copied, deleted } = withProjectLock(dir, () => {
+      const m = readManifest(dir);
+      if (m.uses[t.package] !== t.from) throw new Error(`project.json uses ${t.package} ${m.uses[t.package] ?? 'no more'} now, not ${t.from}: look at the before/after again`);
+      let before: [string, string][] = [];
+      try { before = usesClosure(m.uses, readLock(dir)); } catch { /* the lock misses a version: nothing is deleted */ }
+      const copied = this.copyIn(t.package, t.to, { library: t.library, dir: t.dir, info: t.toInfo });
+      m.uses = sortKeys({ ...m.uses, [t.package]: t.to });
+      writeManifest(dir, m);
+      return { copied, deleted: this.dropUnused(before, m.uses) };
+    });
     this.reload();
     return {
       copied, deleted,
@@ -1289,23 +1520,102 @@ export class ProjectPackages implements WorkspacePackages {
   }
 
   /**
+   * Delete the copies the uses needed `before` and the project's uses (`uses`, as project.json now holds them) need no
+   * more, with their entries in the lock; the folders of a package and an owner go once they are empty. Says which.
+   * When the lock misses a version, every copy stays.
+   */
+  private dropUnused(before: [string, string][], uses: Record<string, string>): string[] {
+    const dir = this.dir!, packages = path.join(dir, 'packages'), lock = readLock(dir);
+    let keep: Set<string>;
+    try { keep = new Set(usesClosure(uses, lock).map(([p, v]) => `${p}@${v}`)); } catch { return []; }
+    const deleted: string[] = [];
+    for (const [p, v] of before) {
+      if (keep.has(`${p}@${v}`)) continue;
+      if (lock.packages[p]) { delete lock.packages[p][v]; if (!Object.keys(lock.packages[p]).length) delete lock.packages[p]; }
+      const at = copyAt(packages, p, v);
+      fs.rmSync(at, { recursive: true, force: true });
+      for (let d = path.dirname(at); d.length > packages.length; d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
+      this.loaded.delete(`${p}@${v}`);
+      deleted.push(`${p} ${v}`);
+    }
+    writeLock(dir, lock);
+    return deleted;
+  }
+
+  /**
+   * Remove a package the project uses: drop it from "uses", and delete its copy and the copies it needed that nothing
+   * else uses, with their entries in the lock. `places`: where the project's graphs still name it (file and node); while
+   * one does, it is refused, listing them.
+   */
+  remove(pkg: string, places: string[]): { deleted: string[]; text: string } {
+    const { dir } = this.project();
+    if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name`);
+    const { v, deleted } = withProjectLock(dir, () => {
+      const m = readManifest(dir), v = m.uses[pkg];
+      if (v === undefined) {
+        const users = Object.entries(readLock(dir).packages).flatMap(([p, vs]) => Object.entries(vs).filter(([, e]) => e.uses[pkg]).map(([w]) => `${p} ${w}`));
+        throw new Error(users.length
+          ? `this project does not use ${pkg} itself: ${users.join(', ')} ${users.length === 1 ? 'uses' : 'use'} it, and keeps it until ${users.length === 1 ? 'that package goes' : 'those packages go'}`
+          : `this project does not use ${pkg}: its uses are ${Object.keys(m.uses).join(', ') || 'none'}`);
+      }
+      if (places.length)
+        throw new Error(`${places.length === 1 ? 'a graph of the project still names' : `${places.length} places in the project's graphs still name`} ${pkg}: ${places.join(', ')}; change or remove ${places.length === 1 ? 'that node' : 'those nodes'} first, then remove the package`);
+      let before: [string, string][] = [];
+      try { before = usesClosure(m.uses, readLock(dir)); } catch { /* the lock misses a version: only the package goes from the uses */ }
+      delete m.uses[pkg];
+      writeManifest(dir, m);
+      return { v, deleted: this.dropUnused(before, m.uses) };
+    });
+    this.reload();
+    return {
+      deleted,
+      text: `removed ${pkg} ${v} from ${this.label}: project.json no longer uses it; deleted the copies nothing uses any more: ${deleted.length ? deleted.join(', ') : 'none'}`,
+    };
+  }
+
+  /**
    * PackageResolver.offered: the outputs of TopoTopo's own packages the project does not use, at the newest version its
    * built-in library holds, read there (nothing is copied): the catalog and help list them, and a graph's first use adds
    * the package. Outside a project as well, where naming one is an error that says how to make the folder a project.
    */
   private offered(): NodeDef[] {
-    const out: NodeDef[] = [];
-    for (const b of this.builtinPackages()) {
+    const out: NodeDef[] = [], problems: string[] = [], unread = new Set<string>();
+    for (const b of this.builtinPackages(problems)) {
       if (this.root.uses[b.package] !== undefined || this.followed.has(b.package) || b.package === this.root.self?.package) continue;
-      const place = readVersions(b.dir, b.package, b.library, this.problems).at(-1);
+      const place = readVersions(b.dir, b.package, b.library, unread).at(-1);
       if (!place) continue;
-      const v = place.info.version;
-      const p = this.packageIn({ label: `${b.package} ${v}`, uses: { [b.package]: v }, packages: '', lock: { packages: {} }, follows: false, library: new Map([[`${b.package}@${v}`, place]]) }, b.package);
-      if ('error' in p) { this.problems.add(p.error); continue; }
+      const p = this.readApart(place);
+      if ('error' in p) { problems.push(p.error); continue; }
+      problems.push(...p.problems);
       if (p.default && !p.loops.has('')) out.push(p.default);
       for (const [k, d] of p.named) if (!p.loops.has(k)) out.push(d);
     }
+    this.libraryProblems = [...new Set([...problems, ...unread])];
     return out;
+  }
+
+  /** A published version where its library holds it, read there apart from the project's copies (nothing is copied). */
+  private readApart(place: Place): Loaded | PackageIssue {
+    const pkg = place.info.package, v = place.info.version;
+    return this.packageIn({ label: `${pkg} ${v}`, uses: { [pkg]: v }, packages: '', lock: { packages: {} }, follows: false, library: new Map([[`${pkg}@${v}`, place]]) }, pkg);
+  }
+
+  /**
+   * The node type of a package output the project does not use (yet), at the newest version in the libraries it looks in,
+   * read where its library holds it, nothing copied: what help and the catalog say about an output search found. null
+   * when no library it looks in has it (and for a package it uses: those resolve as they cook).
+   */
+  describe(name: string): NodeDef | null {
+    const n = parsePackageName(name);
+    if (typeof n === 'string' || !this.dir || !this.manifest || this.root.uses[n.package] !== undefined) return null;
+    let found: Found;
+    try { found = this.find(n.package); } catch { return null; }
+    const newest = newestOf(found.versions.keys());
+    const place = newest ? found.versions.get(newest)?.[0] : undefined;
+    if (!place) return null;
+    const p = this.readApart(place);
+    if ('error' in p) return null;
+    return (n.output === null ? p.default : p.named.get(n.output)) ?? null;
   }
 
   /** The version record of a copy the project holds, null when it is missing. */
@@ -1330,24 +1640,43 @@ export class ProjectPackages implements WorkspacePackages {
 }
 
 /**
- * The libraries the project folder `dir` lists in its project.json (as it is now): a path relative to the project, or a
- * registered library's name. TopoTopo's built-in library is none of them (listing it by its name changes nothing).
- * Throws for one that is not registered or not a folder.
+ * The libraries the project folder `dir` lists in its project.json (as it is now): a path relative to the project
+ * ("./lib", "../lib"), or a registered library's name; and what is wrong with each entry that does not work: a name not
+ * registered on this machine, a folder that is not there, a package's folder instead of its library's, an entry of
+ * neither form. The others still work. TopoTopo's built-in library is none of them (listing it by its name changes
+ * nothing).
  */
-function listedLibraries(dir: string): { entry: string; root: string }[] {
+function listedLibraries(dir: string): Listed {
   const manifest = readManifest(dir);
-  let cfg: GalleryConfig | null = null;
-  return manifest.libraries.filter((entry) => entry !== BUILTIN_LIBRARY.name).map((entry) => {
-    if (ID_RE.test(entry)) {
-      cfg ??= loadConfig();
-      const lib = cfg.libraries.find((l) => l.name === entry);
-      if (!lib) throw new Error(`project.json lists library "${entry}", which is not registered on this machine (${cfg.file}): topotopo library add ${entry} <folder>, or list the library by its path relative to the project`);
-      return { entry, root: lib.path };
+  const out: Listed = { libs: [], problems: [] };
+  let cfg: GalleryConfig | null | undefined;
+  const said = (entry: string, why: string) => out.problems.push(`project.json "libraries": "${entry}" ${why}; the other libraries still count`);
+  for (const entry of manifest.libraries) {
+    if (entry === BUILTIN_LIBRARY.name) continue;
+    const k = libraryEntry(entry);
+    if ('error' in k) { out.problems.push(`project.json "libraries": ${k.error}; the other libraries still count`); continue; }
+    if ('name' in k) {
+      if (cfg === undefined) { try { cfg = loadConfig(); } catch (e: any) { cfg = null; out.problems.push(e.message); } }
+      const lib = cfg?.libraries.find((l) => l.name === entry);
+      if (lib) { out.libs.push({ entry, root: lib.path }); continue; }
+      const here = path.resolve(dir, entry);
+      said(entry, fs.statSync(here, { throwIfNoEntry: false })?.isDirectory()
+        ? `names no registered library, and a folder of that name is beside project.json: a path is written from the project, "./${entry}"`
+        : `is not registered on this machine${cfg ? ` (${cfg.file} has ${cfg.libraries.map((l) => l.name).join(', ') || 'none'})` : ''}: ${program()} library add ${entry} <folder> registers it, or list the library by its path from the project ("../lib")`);
+      continue;
     }
-    const root = path.resolve(dir, entry);
-    if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`project.json lists library "${entry}", and ${root} is not a folder`);
-    return { entry, root };
-  });
+    const root = path.resolve(dir, k.path);
+    if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) { said(entry, `is no folder (${root})`); continue; }
+    if (fs.existsSync(manifestFile(root))) {
+      let pkg = '';
+      try { pkg = readManifest(root).package ?? ''; } catch { /* named without its package */ }
+      const parent = path.posix.dirname(k.path.replace(/\\/g, '/'));
+      said(entry, `is a project${pkg ? ` (the package ${pkg})` : ''}, not a library: list the folder that holds it, "${parent === '.' ? '.' : parent}"`);
+      continue;
+    }
+    out.libs.push({ entry, root });
+  }
+  return out;
 }
 
 /** The records of a package's published versions (its versions/ folder), oldest first; unreadable ones are left out. */
@@ -1432,44 +1761,43 @@ function versionFiles(dir: string, m: ProjectManifest, lock: Lock): { rel: strin
   return out.sort(byRel);
 }
 
-/** The changes of two lists of tags: "tags added conifer, lowpoly", "tag removed tree" (none: the same tags). */
+/** The changes of two lists of tags: "tags added conifer, low-poly", "tag removed tree" (none: the same tags). */
 const tagChanges = (a: string[], b: string[]) => {
   const added = b.filter((t) => !a.includes(t)), gone = a.filter((t) => !b.includes(t));
   return [added.length ? `tag${added.length > 1 ? 's' : ''} added ${added.join(', ')}` : '', gone.length ? `tag${gone.length > 1 ? 's' : ''} removed ${gone.join(', ')}` : ''].filter(Boolean);
 };
 
 /**
- * What changed between two versions' interfaces: what makes a big version (an output, slider or input that goes away
+ * What changed between two versions' interfaces: what makes a big version (an output, param or input that goes away
  * or means something else: removed or renamed, another type, a narrower range, a removed option, an input moved, an
- * output of another kind), and the rest (added outputs, sliders, options and inputs, wider ranges, changed defaults,
- * labels, tags and descriptions, a kind the previous version did not record).
+ * output of another kind), and the rest (added outputs, params, options and inputs, wider ranges, changed defaults,
+ * labels, tags and descriptions).
  */
 export function compareInterfaces(prev: Pick<VersionInfo, 'outputs' | 'default'>, next: Pick<VersionInfo, 'outputs' | 'default'>): { big: string[]; small: string[] } {
   const big: string[] = [], small: string[] = [];
   const range = (s: SliderInfo) => `${s.min ?? ''}..${s.max ?? ''}`;
   const output = (what: string, a: OutputInfo, b: OutputInfo) => {
     if (a.graph !== b.graph || a.node !== b.node) small.push(`${what} now cooks "${b.node}" of graph "${b.graph}" (was "${a.node}" of "${a.graph}")`);
-    if (a.kind && b.kind && a.kind !== b.kind) big.push(`${what}: kind ${a.kind} → ${b.kind}`);
-    else if (!a.kind && b.kind) small.push(`${what}: kind ${b.kind} (the version before recorded no kind)`);
+    if (a.kind !== b.kind) big.push(`${what}: kind ${a.kind} → ${b.kind}`);
     for (const c of tagChanges(a.tags ?? [], b.tags ?? [])) small.push(`${what}: ${c}`);
     if ((a.description ?? '') !== (b.description ?? '')) small.push(`${what}: description ${!a.description ? 'added' : !b.description ? 'removed' : 'changed'}`);
     if ((a.label ?? '') !== (b.label ?? '')) small.push(`${what}: label "${a.label ?? ''}" → "${b.label ?? ''}"`);
     for (const [k, s] of Object.entries(a.sliders)) {
       const t = b.sliders[k];
-      if (!t) { big.push(`${what}: slider "${k}" removed`); continue; }
-      if (t.type !== s.type) { big.push(`${what}: slider "${k}" is now ${t.type} (was ${s.type})`); continue; }
+      if (!t) { big.push(`${what}: param "${k}" removed`); continue; }
+      if (t.type !== s.type) { big.push(`${what}: param "${k}" is now ${t.type} (was ${s.type})`); continue; }
       const narrower = (t.min !== undefined && (s.min === undefined || t.min > s.min)) || (t.max !== undefined && (s.max === undefined || t.max < s.max));
       const wider = (s.min !== undefined && (t.min === undefined || t.min < s.min)) || (s.max !== undefined && (t.max === undefined || t.max > s.max));
-      if (narrower) big.push(`${what}: slider "${k}" range ${range(s)} → ${range(t)} (narrower)`);
-      else if (wider) small.push(`${what}: slider "${k}" range ${range(s)} → ${range(t)} (wider)`);
+      if (narrower) big.push(`${what}: param "${k}" range ${range(s)} → ${range(t)} (narrower)`);
+      else if (wider) small.push(`${what}: param "${k}" range ${range(s)} → ${range(t)} (wider)`);
       const gone = s.options && t.options ? s.options.filter((x) => !t.options!.includes(x)) : [];
-      if (gone.length) big.push(`${what}: slider "${k}" lost option${gone.length > 1 ? 's' : ''} ${gone.map((x) => JSON.stringify(x)).join(', ')}`);
+      if (gone.length) big.push(`${what}: param "${k}" lost option${gone.length > 1 ? 's' : ''} ${gone.map((x) => JSON.stringify(x)).join(', ')}`);
       const added = t.options && s.options ? t.options.filter((x) => !s.options!.includes(x)) : [];
-      if (added.length) small.push(`${what}: slider "${k}" gained option${added.length > 1 ? 's' : ''} ${added.map((x) => JSON.stringify(x)).join(', ')}`);
-      if (JSON.stringify(s.default) !== JSON.stringify(t.default)) small.push(`${what}: slider "${k}" default ${JSON.stringify(s.default)} → ${JSON.stringify(t.default)}`);
-      if ((s.label ?? '') !== (t.label ?? '') || (s.desc ?? '') !== (t.desc ?? '')) small.push(`${what}: slider "${k}" label or description changed`);
+      if (added.length) small.push(`${what}: param "${k}" gained option${added.length > 1 ? 's' : ''} ${added.map((x) => JSON.stringify(x)).join(', ')}`);
+      if (JSON.stringify(s.default) !== JSON.stringify(t.default)) small.push(`${what}: param "${k}" default ${JSON.stringify(s.default)} → ${JSON.stringify(t.default)}`);
+      if ((s.label ?? '') !== (t.label ?? '') || (s.desc ?? '') !== (t.desc ?? '')) small.push(`${what}: param "${k}" label or description changed`);
     }
-    for (const k of Object.keys(b.sliders)) if (!a.sliders[k]) small.push(`${what}: slider "${k}" added`);
+    for (const k of Object.keys(b.sliders)) if (!a.sliders[k]) small.push(`${what}: param "${k}" added`);
     for (const i of a.inputs) {
       const at = b.inputs.find((x) => x.index === i.index);
       const moved = i.label ? b.inputs.find((x) => x.label === i.label && x.index !== i.index) : undefined;
@@ -1529,15 +1857,15 @@ export interface PublishOptions {
    * a dry run: every check, every output cooked, the number the version would get, its changes, blocks and warnings,
    * and nothing written (the note may still be missing: publishing needs it)
    */
-  check?: boolean;
+  dryRun?: boolean;
 }
 
 export interface PublishResult {
   ok: boolean;
-  /** a dry run (PublishOptions.check): ok says it would publish, and nothing was written */
-  check: boolean;
+  /** a dry run (PublishOptions.dryRun): ok says it would publish, and nothing was written */
+  dryRun: boolean;
   package: string;
-  /** the version written, or that a dry run would write */
+  /** the version written, or that a dry run would write (none while something blocks) */
   version?: string;
   /** the version before it */
   previous?: string;
@@ -1562,66 +1890,119 @@ export interface PublishResult {
 const outputWhat = (x: FolderOutput) => (x.name === null ? `the default output ("${x.node}" of graph "${x.graph}")` : `output "${x.name}" (graph "${x.graph}")`);
 
 /**
- * Publish the project of a workspace as the next version of its package: check its name, outputs and default output,
- * cook every published output and record what it is, number the version by comparing it with the previous one (and the
- * author's `big`), and write versions/<big>.<small>/. Blocks: an output that does not cook, one that cooks to nothing
- * or to another kind than its author pinned, a malformed kind or tag, an output name clash, outputs that name each
- * other in a loop, no default output, a copy edited by hand, nothing changed, no note, a package the session follows.
- * Warnings: an output without tags or a description, an output of another kind than before, files it reads that the
- * version does not hold, the size. A dry run (o.check) goes through every step it can and writes nothing.
+ * Publish the project as the next version of its package, in steps, each of which stops publishing (and a dry run)
+ * when it blocks, so that a problem is said once, at its cause, and a version number only for what would publish:
+ *   1. what the project declares: its name, the note, its outputs (names, kinds, tags, descriptions, clashes, the
+ *      default output), outputs that name each other in a loop, files it cannot read, its copies (none missing or
+ *      edited by hand), a package the session follows, versions/ of another package name;
+ *   2. every published output cooked as a project that uses the package cooks it, through the package's own scope
+ *      (its graphs, assets, files and copies, as the version will hold them): an output that does not cook, cooks to
+ *      nothing or to another kind than its author pinned blocks, and the kind it cooks to is recorded;
+ *   3. its files: nothing changed since the previous version blocks;
+ *   4. the number, by comparing with the previous version (and the author's `big`), its changes and the warnings: an
+ *      output without tags or a description, one whose graph has vars it does not read (they are not its params), an
+ *      output of another kind than before, files it reads that the version does not hold, the size;
+ *   5. versions/<big>.<small>/ written through a .part folder, never over one that is there.
+ * A dry run (o.dryRun) goes through every step and writes nothing.
  */
-export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: PublishOptions): Promise<PublishResult> {
+export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Promise<PublishResult> {
   const { dir } = pk.project();
   // what its graphs name resolves as its files are now (its own outputs, the copies)
   pk.refresh();
   const m = readManifest(dir);
   // one line: a note says what changed
   const note = (o.note ?? '').replace(/\s+/g, ' ').trim();
-  const check = !!o.check;
-  const r: PublishResult = { ok: false, check, package: m.package ?? '', note, bigBecause: [], changes: [], blocks: [], warnings: [] };
-  // a publish stops at the first step that blocks; a dry run goes on as far as it can, to say everything
-  const stop = () => r.blocks.length > 0 && !check;
+  const dryRun = !!o.dryRun;
+  const r: PublishResult = { ok: false, dryRun, package: m.package ?? '', note, bigBecause: [], changes: [], blocks: [], warnings: [] };
+  const done = () => { r.blocks = [...new Set(r.blocks)]; r.warnings = [...new Set(r.warnings)]; return r; };
+
+  // 1. what the project declares
   // TopoTopo's own packages: a folder of its built-in library, named as the package
   const inBuiltin = path.relative(pk.builtin, dir), kit = !!inBuiltin && !inBuiltin.startsWith('..') && !path.isAbsolute(inBuiltin) && !/[\\/]/.test(inBuiltin);
-  if (!m.package) r.blocks.push(`project.json has no "package": the author names the package once, e.g. "package": "<owner>/${m.id}" (owner and name: lower-case letters, digits, - and _)`);
+  if (!m.package) r.blocks.push(`project.json has no "package": the author names the package once, "package": "<owner>/${m.id}" (${program()} init --package <owner>/${m.id}; owner and name: lower-case letters, digits, - and _)`);
   else if (o.builtin) {
     if (!kit) r.blocks.push(`only a folder of TopoTopo's built-in library (${pk.builtin}) publishes one of TopoTopo's own packages, and ${dir} is none`);
     else if (m.package !== `${RESERVED_OWNER}/${inBuiltin}`) r.blocks.push(`the folder ${inBuiltin} of TopoTopo's built-in library holds the package ${RESERVED_OWNER}/${inBuiltin}, and its project.json names ${m.package}`);
   } else if (m.package.split('/')[0] === RESERVED_OWNER) r.blocks.push(`the owner "${RESERVED_OWNER}" is reserved for TopoTopo's own packages, which TopoTopo's repository publishes into its built-in library: publish under your own owner`);
-  if (!note && !check) r.blocks.push('a version needs a note, one line on what changed: --note "..." (library {action:"publish", note})');
+  if (!note && !dryRun) r.blocks.push('a version needs a note, one line on what changed: --note "..." (library {action:"publish", note})');
   for (const f of pk.following()) r.blocks.push(`this session follows ${f.package} from its working folder (${f.dir}): stop following it to publish`);
+  // a package keeps its name: versions/ of another name are not this package's
+  if (m.package) {
+    const others = new Map<string, string[]>();
+    let names: string[] = [];
+    try { names = fs.readdirSync(path.join(dir, 'versions')).filter((v) => VERSION_RE.test(v)); } catch { /* none yet */ }
+    for (const v of names) {
+      try { const info = readVersionInfo(path.join(dir, 'versions', v)); if (info.package !== m.package) others.set(info.package, [...(others.get(info.package) ?? []), v]); } catch { /* said when its versions are read */ }
+    }
+    for (const [other, vs] of others)
+      r.blocks.push(`versions/ holds the versions of ${other} (${vs.sort(compareVersions).join(', ')}), and project.json names the package ${m.package}: a package keeps its name; put "package": "${other}" back, or move versions/ away to publish ${m.package} from 1.0`);
+  }
   let lock: Lock = { packages: {} };
   try { lock = readLock(dir); } catch (e: any) { r.blocks.push(e.message); }
   // a version holds its copies as published: none missing, none edited by hand
   r.blocks.push(...pk.verifyCopies());
-  const problems: string[] = [];
-  const graphs = readGraphs(dir, problems);
-  r.blocks.push(...problems);
+  const unread: string[] = [];
+  const graphs = readGraphs(dir, unread);
   const outs = folderOutputs(m, graphs);
-  r.blocks.push(...outs.problems);
-  if (stop()) return r;
-  const all = [...outs.named, ...(outs.default ? [outs.default] : [])];
-  // its outputs name each other only without a loop (the project's assets and graphs are the root scope's)
-  if (m.package) r.blocks.push(...new Set(outputLoops(m.package, all, ws.engine.root).values()));
-  if (stop()) return r;
+  // the package as a project that uses it cooks it: its own scope, its graphs as they are now
+  const self = m.package ? pk.ownPackage() : null;
+  if (self && 'error' in self) r.blocks.push(self.error);
+  r.blocks.push(...(self && !('error' in self) ? self.fileProblems : unread), ...outs.problems);
+  if (self && !('error' in self)) r.blocks.push(...self.loops.values());
+  if (r.blocks.length || !self || 'error' in self || !outs.default) return done();
+  const all = [...outs.named, outs.default];
 
-  // every published output cooks, to something, and to the kind its author pinned; its kind is recorded. A default
+  // 2. every published output cooks, to something, and to the kind its author pinned; its kind is recorded. A default
   // output that is a named output is that output.
   const sameNamed = (x: FolderOutput) => (x.name === null ? outs.named.find((n) => n.graph === x.graph && n.node === x.node) : undefined);
   const kinds = new Map<FolderOutput, Kind>();
-  for (const x of all) {
-    const same = sameNamed(x);
-    if (same) { const k = kinds.get(same); if (k) kinds.set(x, k); continue; }
-    const what = outputWhat(x);
-    const c = await ws.engine.cook(x.spec, { target: x.node });
-    for (const w of c.warnings) r.warnings.push(`${what}: [${w.node}] ${w.message}`);
-    if (!c.ok || !c.geo) { r.blocks.push(`${what} does not cook: ${c.errors.map((e) => `[${e.node}] ${e.message}`).join('; ') || 'no geometry'}`); continue; }
+  const scope = pk.engine.root.packages === pk.resolver ? pk.engine.root : { ...pk.engine.root, id: `publish ${m.package}`, packages: pk.resolver };
+  // an output that builds on others of the package (a kit's line-up, a house of the kit's walls) cooks after them, and
+  // a warning of theirs is said once, under the output it belongs to, not again under each output that builds on it
+  const byName = new Map(all.map((x) => [x.name ?? '', x]));
+  const uses = new Map(all.map((x) => [x, ownOutputsNamed(m.package!, x.spec, x.node, self.scope).map((n) => byName.get(n)).filter((y): y is FolderOutput => !!y && y !== x)]));
+  const order: FolderOutput[] = [], placed = new Set<FolderOutput>();
+  const place = (x: FolderOutput) => { if (placed.has(x)) return; placed.add(x); for (const y of uses.get(x)!) place(y); order.push(x); };
+  for (const x of all) place(x);
+  const core = (s: string) => s.replace(/^(\[[^\]]*\]\s*)+/, '');
+  const said = new Map<FolderOutput, Set<string>>();
+  const below = (x: FolderOutput, seen = new Set<FolderOutput>()): Set<string> => {
+    const out = new Set<string>();
+    for (const y of uses.get(x)!) { if (seen.has(y)) continue; seen.add(y); for (const k of said.get(y) ?? []) out.add(k); for (const k of below(y, seen)) out.add(k); }
+    return out;
+  };
+  for (const x of order) {
+    if (sameNamed(x)) continue;
+    const what = outputWhat(x), type = x.name === null ? m.package! : `${m.package}/${x.name}`;
+    const c = await pk.engine.cook({ nodes: { output: { type } }, output: 'output' }, { scope });
+    const theirs = below(x), mine = new Set<string>();
+    for (const w of c.warnings) {
+      const k = core(w.message);
+      if (theirs.has(k) || mine.has(k)) continue;
+      mine.add(k);
+      r.warnings.push(`${what}: ${w.message}`);
+    }
+    said.set(x, mine);
+    if (!c.ok || !c.geo) { r.blocks.push(`${what} does not cook: ${c.errors.map((e) => e.message.replace(`${type} (${packageAt(self)}) failed: `, '')).join('; ') || 'no geometry'}`); continue; }
     const info = outputKind(c.geo), kind = publishedKind(info);
     if (!kind) { r.blocks.push(`${what} cooks to nothing (no polygons, curves, points, instances, heightfields, images or volumes): there is nothing to publish`); continue; }
     kinds.set(x, kind);
     if (x.kind && x.kind !== kind) r.blocks.push(`${what}: ${kindMismatch(x.kind, info)}`);
   }
-  // what search finds an output by
+  for (const x of all) { const same = sameNamed(x); if (same && kinds.has(same)) kinds.set(x, kinds.get(same)!); }
+  if (r.blocks.length) return done();
+
+  // 3. its files
+  let hashed: { rel: string; bytes: Uint8Array }[] = [], hash = '';
+  try {
+    hashed = versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, bytes: f.bytes ?? fs.readFileSync(f.abs!) }));
+    hash = filesHash(hashed.map((f) => ({ rel: f.rel, sha: contentSha(f.rel, f.bytes) })));
+  } catch (e: any) { r.blocks.push(e.message); return done(); }
+  const bytes = hashed.reduce((s, f) => s + f.bytes.byteLength, 0);
+  const prev = readVersions(dir, m.package!, '', new Set()).at(-1)?.info;
+  if (prev && prev.hash === hash) { r.blocks.push(`nothing changed since ${prev.version}`); return done(); }
+
+  // 4. the number, the changes and the warnings
   for (const x of all) {
     if (sameNamed(x)) continue;
     const what = outputWhat(x);
@@ -1629,20 +2010,11 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
       ? `${what} has no tags, which search finds an output by: tags go on a named output, so name it in its graph's "outputs" with "tags"`
       : `${what} has no tags, which search finds an output by: "tags": ["conifer", "low-poly"] in its graph's outputs`);
     if (!x.description) r.warnings.push(`${what} has no description: ${x.name === null ? 'describe its graph ("description")' : 'give it "description" in its graph\'s outputs, or describe its graph'}`);
+    const read = new Set(varsRead(x.spec, x.node)), idle = Object.keys(x.spec.vars ?? {}).filter((k) => !read.has(k));
+    if (idle.length) r.warnings.push(`${what} does not read ${idle.length === 1 ? 'the var' : 'the vars'} ${idle.map((k) => `"${k}"`).join(', ')} of its graph: ${idle.length === 1 ? 'it is not one of its params' : 'they are not its params'} (an output's params are the vars its node reads; move it to a graph of its own to give it params of its own)`);
   }
-  if (stop()) return r;
-
-  let hashed: { rel: string; bytes: Uint8Array }[] = [], hash = '';
-  try {
-    hashed = versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, bytes: f.bytes ?? fs.readFileSync(f.abs!) }));
-    hash = filesHash(hashed.map((f) => ({ rel: f.rel, sha: sha(f.bytes) })));
-  } catch (e: any) { r.blocks.push(e.message); }
-  const bytes = hashed.reduce((s, f) => s + f.bytes.byteLength, 0);
-  const prev = m.package ? readVersions(dir, m.package, '', new Set()).at(-1)?.info : undefined;
-  if (prev && hash && prev.hash === hash) { r.blocks.push(`nothing changed since ${prev.version}`); return r; }
-  if (stop() || !outs.default) return r;
-  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x))]));
-  const def = outputInfo(outs.default, kinds.get(outs.default));
+  const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x)!)]));
+  const def = outputInfo(outs.default, kinds.get(outs.default)!);
   let version = '1.0';
   if (prev) {
     const c = compareInterfaces(prev, { outputs, default: def });
@@ -1653,7 +2025,7 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
     r.previous = prev.version;
     // a project may rely on what an output is: an Unreal static mesh is not a level
     const was = (k: string, now: OutputInfo, before: OutputInfo | undefined) => {
-      if (before?.kind && now.kind && before.kind !== now.kind) r.warnings.push(`${k} is now ${now.kind} (it was ${before.kind} in ${prev.version}): a project that relies on what it is may have to change, and the version is big`);
+      if (before && before.kind !== now.kind) r.warnings.push(`${k} is now ${now.kind} (it was ${before.kind} in ${prev.version}): a project that relies on what it is may have to change, and the version is big`);
     };
     for (const x of outs.named) was(outputWhat(x), outputs[x.name!], prev.outputs[x.name!]);
     if (!sameNamed(outs.default) && !Object.values(prev.outputs).some((p) => p.graph === prev.default.graph && p.node === prev.default.node)) was(outputWhat(outs.default), def, prev.default);
@@ -1664,11 +2036,14 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
   try { for (const f of fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json'))) sources.set(`assets/${f}`, JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8'))); } catch { /* no assets */ }
   r.warnings.push(...unheldFiles(sources));
 
-  // write it: through a .part folder renamed into place, never over a version that is there
+  // 5. write it: through a .part folder renamed into place, never over a version that is there
   const at = path.join(dir, 'versions', version);
-  if (fs.existsSync(at)) r.blocks.push(`${at} is there already: a version is never written over`);
-  if (check) return { ...r, ok: !r.blocks.length, ...(hash ? { hash, files: hashed.length, bytes } : {}) };
-  if (r.blocks.length) return r;
+  if (fs.existsSync(at)) {
+    r.blocks.push(`${at} is there already, and a version is never written over: move that folder away (it holds no version.json of ${m.package}), then publish again`);
+    delete r.version;
+    return done();
+  }
+  if (dryRun) return { ...done(), ok: true, hash, files: hashed.length, bytes };
   const info: VersionInfo = { package: m.package!, version, note, published: new Date().toISOString(), big: !!o.big, hash, outputs, default: def, topotopo: TOPOTOPO_VERSION };
   const part = path.join(dir, 'versions', `.${version}.${process.pid}-${Date.now().toString(36)}.part`);
   try {
@@ -1678,30 +2053,21 @@ export async function publishPackage(ws: Workspace, pk: ProjectPackages, o: Publ
       fs.writeFileSync(dest, f.bytes);
     }
     fs.writeFileSync(path.join(part, 'version.json'), JSON.stringify(info, null, 2) + '\n');
-    fs.renameSync(part, at);
+    renameInto(part, at);
   } catch (e) { fs.rmSync(part, { recursive: true, force: true }); throw e; }
-  return { ...r, ok: true, version, dir: at, hash, files: hashed.length, bytes };
+  return { ...done(), ok: true, version, dir: at, hash, files: hashed.length, bytes };
 }
-
-/** An output's kind and tags in a few words: "mesh: conifer, lowpoly", "instances", "" when the record has neither. */
-export const kindTagsText = (o: Pick<OutputInfo, 'kind' | 'tags'>) =>
-  [o.kind ?? (o.tags?.length ? 'kind not recorded' : ''), o.tags?.join(', ') ?? ''].filter(Boolean).join(': ');
 
 /**
- * A version's outputs in a line, each with its kind and tags: "pine (mesh: conifer, lowpoly), stump (mesh)", and
- * "(default: scene)" for a default output that is no named output.
+ * An output's kind and tags, as every listing says them: "mesh [conifer, low-poly]", "instances" without tags. A kind
+ * not known (a working folder's output that pins none) is "kind not pinned".
  */
-export function outputsLine(v: Pick<VersionInfo, 'outputs' | 'default'>): string {
-  const one = (name: string, o: OutputInfo) => { const k = kindTagsText(o); return k ? `${name} (${k})` : name; };
-  const named = Object.entries(v.outputs).map(([k, o]) => one(k, o));
-  const isNamed = Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node);
-  return [...named, ...(isNamed ? [] : [v.default.kind ? `(default: ${v.default.kind})` : '(default)'])].join(', ');
-}
+export const kindTagsText = (o: { kind?: Kind; tags?: string[] }) => `${o.kind ?? 'kind not pinned'}${o.tags?.length ? ` [${o.tags.join(', ')}]` : ''}`;
 
 /** The outputs of version `b` whose kind differs from version `a`'s: 'output "pine": mesh → scene'. */
 export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick<VersionInfo, 'outputs' | 'default'>): string[] {
   const out: string[] = [];
-  const one = (what: string, x: OutputInfo | undefined, y: OutputInfo | undefined) => { if (x?.kind && y?.kind && x.kind !== y.kind) out.push(`${what}: ${x.kind} → ${y.kind}`); };
+  const one = (what: string, x: OutputInfo | undefined, y: OutputInfo | undefined) => { if (x && y && x.kind !== y.kind) out.push(`${what}: ${x.kind} → ${y.kind}`); };
   for (const [k, o] of Object.entries(b.outputs)) one(`output "${k}"`, a.outputs[k], o);
   const named = (v: Pick<VersionInfo, 'outputs' | 'default'>) => Object.values(v.outputs).some((o) => o.graph === v.default.graph && o.node === v.default.node);
   if (!named(a) && !named(b)) one('the default output', a.default, b.default);
@@ -1712,17 +2078,18 @@ export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick
 export function publishText(r: PublishResult): string {
   const kind = !r.previous ? 'the first version' : r.bigBecause.length ? `big, after ${r.previous}` : `small, after ${r.previous}`;
   const said = [
-    ...(r.outputs ? ['outputs:', ...Object.entries(r.outputs).map(([k, o]) => `  ${k}  ${kindTagsText(o) || 'no kind'}${o.label ? `  "${o.label}"` : ''}`)] : []),
-    ...(r.default && r.outputs && !Object.values(r.outputs).some((o) => o.graph === r.default!.graph && o.node === r.default!.node) ? [`  (default: "${r.default.node}" of graph "${r.default.graph}")  ${r.default.kind ?? 'no kind'}`] : []),
+    ...(r.outputs ? ['outputs:', ...Object.entries(r.outputs).map(([k, o]) => `  ${k}  ${kindTagsText(o)}${o.label ? `  "${o.label}"` : ''}`)] : []),
+    ...(r.default && r.outputs && !Object.values(r.outputs).some((o) => o.graph === r.default!.graph && o.node === r.default!.node) ? [`  (default: "${r.default.node}" of graph "${r.default.graph}")  ${kindTagsText(r.default)}`] : []),
     ...(r.bigBecause.length ? ['big because:', ...r.bigBecause.map((c) => `  ${c}`)] : []),
     ...(r.changes.length ? ['changes:', ...r.changes.map((c) => `  ${c}`)] : []),
     ...(r.warnings.length ? ['warnings:', ...r.warnings.map((w) => `  ${w}`)] : []),
   ];
-  if (r.check) {
+  if (r.dryRun) {
     const number = r.version ? `${r.package} ${r.version} (${kind})` : r.package || 'the package';
     const noted = r.note ? `: "${r.note}"` : '; publishing it needs a note, one line on what changed (--note "...")';
+    const problems = `${r.blocks.length} problem${r.blocks.length === 1 ? '' : 's'}`;
     return [
-      r.ok ? `✓ would publish ${number}${noted}` : `✗ would not publish ${number} — ${r.blocks.length} problem${r.blocks.length === 1 ? '' : 's'}:`,
+      r.ok ? `✓ would publish ${number}${noted}` : `✗ would not publish ${r.package || 'the package'} — ${problems}:`,
       ...(r.ok ? [] : r.blocks.map((b) => `  ${b}`)),
       ...(r.ok && r.hash ? [`  ${r.files} files, ${((r.bytes ?? 0) / 1024).toFixed(1)} KB, hash ${r.hash.slice(0, 16)}…`] : []),
       ...said,
@@ -1737,47 +2104,98 @@ export function publishText(r: PublishResult): string {
   ].join('\n');
 }
 
-/** The project's packages as `topotopo packages` and the library tool list them. */
-export function packagesText(pk: ProjectPackages): string {
-  if (!pk.dir) return `this folder is in no project: ${MAKE_PROJECT}, whose graphs can use packages`;
+/** How many outputs a version publishes: its named outputs, and its default output when it is none of them. */
+const outputCount = (v: Pick<VersionInfo, 'outputs' | 'default'>) => {
+  const named = Object.values(v.outputs);
+  const n = named.length + (named.some((o) => o.graph === v.default.graph && o.node === v.default.node) ? 0 : 1);
+  return `${n} output${n === 1 ? '' : 's'}`;
+};
+
+/** How a package the project uses stands to its libraries: "up to date", "1.3 is out", "2.0 is out (big)". */
+const standing = (o: Outdated) =>
+  o.error ? 'could not check' : o.small || o.big ? [o.small ? `${o.small} is out` : '', o.big ? `${o.big} is out (big)` : ''].filter(Boolean).join(', ') : 'up to date';
+
+/**
+ * The project's packages as `topotopo packages` and the library tool list them, one line each: those it uses (version,
+ * outputs, up to date or the newer version that is out), then the others in the libraries it looks in; the libraries;
+ * what could not be checked. `packages owner/name` (packageText) shows one with its outputs.
+ */
+export function packagesText(pk: ProjectPackages, mcp = false): string {
+  if (!pk.dir) return `this folder is in no project: ${makeProject()}, whose graphs can use packages`;
   if (!pk.manifest) return `${manifestFile(pk.dir)}: ${pk.error}`;
-  const m = pk.manifest, lines: string[] = [`${pk.label} (${pk.dir})${m.package ? `, package ${m.package}` : ''}`];
-  const problems = [...new Set([...pk.verifyCopies(), ...pk.check()])];
-  const entries = pk.lockEntries();
-  lines.push(entries.length ? 'uses:' : 'uses: nothing yet (a graph that names "owner/name/output" adds the package, or topotopo use owner/name)');
-  for (const e of entries) {
-    const info = pk.copyInfo(e.package, e.version);
-    lines.push(`  ${e.package} ${e.version}${e.direct ? '' : ' (used by another package)'}${e.entry ? `  from ${libraryText(e.entry.library)}` : '  (not in packages/lock.json)'}${info ? '' : '  COPY MISSING'}${info?.note ? `  "${info.note}"` : ''}`);
+  const m = pk.manifest, lines: string[] = [`${pk.label} (${pk.dir})${m.package ? `, the package ${m.package}` : ''}`];
+  const problems: string[] = [...pk.verifyCopies(), ...pk.check()];
+  const outdated = Object.keys(m.uses).length ? pk.outdated(problems) : [];
+  for (const o of outdated) if (o.error) problems.push(`${o.package}: ${o.error}`);
+  const late = outdated.filter((o) => o.small || o.big).length, unchecked = outdated.filter((o) => o.error).length;
+  lines.push(outdated.length
+    ? `uses ${outdated.length} package${outdated.length === 1 ? '' : 's'}: ${[late ? `${late} out of date` : '', outdated.length - late - unchecked ? `${outdated.length - late - unchecked} up to date` : '', unchecked ? `could not check ${unchecked}` : ''].filter(Boolean).join(', ')}`
+    : `uses no packages yet: a graph that names "owner/name/output" adds the package (${mcp ? 'library {action:"use", package}' : `${program()} use owner/name`} adds one by hand)`);
+  const width = Math.max(0, ...outdated.map((o) => `${o.package} ${o.version}`.length));
+  for (const o of outdated) {
+    const info = pk.copyInfo(o.package, o.version);
+    lines.push(`  ${`${o.package} ${o.version}`.padEnd(width)}  ${info ? outputCount(info) : 'COPY MISSING'}  ${standing(o)}`);
   }
-  // the libraries it lists (one that cannot be read is said on the libraries line), and TopoTopo's built-in library
-  let libs: { entry: string; root: string }[] | null = null, why = '';
-  try { libs = pk.libraries(); } catch (e: any) { why = e.message; }
-  if (Object.keys(m.uses).length && libs) {
-    const outdated = pk.outdated(), late = outdated.filter((o) => o.small || o.big);
-    problems.push(...outdated.flatMap((o) => (o.error ? [`${o.package}: ${o.error}`] : [])));
-    lines.push(late.length
-      ? `out of date: ${late.map((o) => `${o.package} ${o.version} (${[o.small ? `small update ${o.small}` : '', o.big ? `big update ${o.big}` : ''].filter(Boolean).join(', ')})`).join(', ')}; outdated lists the notes of the newer versions, update owner/name shows the before/after`
-      : outdated.some((o) => o.error) ? 'out of date: none of the packages its libraries have (the others are under problems)' : 'out of date: nothing, every package it uses is the newest in its libraries');
+  const indirect = pk.lockEntries().filter((e) => !e.direct);
+  if (indirect.length) lines.push(`  and, used by those: ${indirect.map((e) => `${e.package} ${e.version}`).join(', ')}`);
+  // the others in its libraries
+  let cat: ReturnType<ProjectPackages['catalog']> = [];
+  try { cat = pk.catalog(problems); } catch (e: any) { problems.push(e.message); }
+  const held = new Set(pk.lockEntries().map((e) => e.package));
+  const others = cat.filter((c) => !held.has(c.package) && m.uses[c.package] === undefined && c.package !== m.package);
+  if (others.length) {
+    lines.push(`in its libraries, not used yet (${others.length}):`);
+    const w2 = Math.max(0, ...others.map((c) => `${c.package} ${c.versions.at(-1)?.version ?? ''}`.length));
+    for (const c of others) {
+      const v = c.versions.at(-1);
+      lines.push(`  ${`${c.package} ${v?.version ?? ''}`.padEnd(w2)}  ${v ? outputCount(v) : 'no version published yet'}  [${libraryText(c.library)}]`);
+    }
   }
   const followed = pk.following();
   if (followed.length) lines.push('following this session:', ...followed.map((f) => `  ${f.package}  ${f.dir} (library "${f.library}")`));
-  const builtin = `TopoTopo's built-in library "${BUILTIN_LIBRARY.name}" (${pk.builtin}), which every project looks in`;
-  if (!libs) lines.push(`libraries: ${why}`);
-  else {
-    lines.push(libs.length
-      ? `libraries: ${libs.map((l) => `${l.entry} (${l.root})`).join(', ')}, and ${builtin}`
-      : `libraries: none listed (add "libraries" to project.json: a path relative to the project, or a registered library's name); ${builtin}`);
-    let cat: ReturnType<ProjectPackages['catalog']> = [];
-    try { cat = pk.catalog(); } catch (e: any) { lines.push(`  ${e.message}`); }
-    lines.push(cat.length ? 'packages in them:' : 'packages in them: none yet (a project becomes a package with "package": "owner/name" in its project.json and topotopo publish)');
-    for (const c of cat) {
-      const v = c.versions.at(-1);
-      const used = m.uses[c.package];
-      lines.push(`  ${c.package}  ${v ? `${v.version} "${v.note}"` : 'no version published yet'}  [${libraryText(c.library)}]${used ? `  (this project uses ${used})` : ''}`);
-      if (v) lines.push(`    outputs: ${outputsLine(v)}; default: "${v.default.node}" of graph "${v.default.graph}"`);
-    }
+  let libs: Listed = { libs: [], problems: [] };
+  try { libs = pk.libraries(); } catch (e: any) { problems.push(e.message); }
+  lines.push(`libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root})`).join(', ') : `none listed (${mcp ? 'library {action:"set", libraries:[...]}' : `${program()} libraries add <folder or registered name>`} lists one)`}; TopoTopo's built-in library is looked in as well`);
+  const said = [...new Set(problems)];
+  if (said.length) lines.push(`could not check ${said.length}:`, ...said.map((p) => `  ${p}`));
+  lines.push(mcp ? 'library {action:"packages", package:"owner/name"} shows one with its outputs; {action:"outdated"} the notes of the newer versions' : `${program()} packages owner/name shows one with its outputs; ${program()} outdated the notes of the newer versions`);
+  return lines.join('\n');
+}
+
+/**
+ * One package of the project's libraries (`topotopo packages owner/name`): where it is, the version the project uses,
+ * its versions with their notes, and the outputs of the version in use (else of the newest) with their kinds, tags,
+ * params and inputs, by the node type a graph names them with.
+ */
+export function packageText(pk: ProjectPackages, pkg: string, mcp = false): string {
+  const { manifest: m } = pk.project();
+  const n = parsePackageName(pkg);
+  if (typeof n === 'string' || n.output !== null) throw new Error(`"${pkg}" is not a package name: write owner/name`);
+  const problems: string[] = [];
+  const c = pk.catalog(problems).find((x) => x.package === pkg);
+  const used = m.uses[pkg], inUse = used ? pk.copyInfo(pkg, used) : null;
+  if (!c && !inUse) {
+    const s = didYouMean(pkg, pk.catalog().map((x) => x.package));
+    throw new Error(`no library this project looks in has a package ${pkg}${s.length ? ` — did you mean ${s.join(', ')}?` : ''}${problems.length ? `; could not check ${problems.length}: ${problems.join('; ')}` : ''}`);
   }
-  if (problems.length) lines.push('problems:', ...problems.map((p) => `  ${p}`));
+  const versions = c?.versions ?? [];
+  const shown = inUse ?? versions.at(-1);
+  const lines = [`${pkg}${c ? ` in ${libraryText(c.library)} (${c.dir})` : ''}${used ? `: ${pk.label} uses ${used}` : `: ${pk.label} does not use it yet (a graph that names one of its outputs adds it)`}`];
+  if (versions.length) lines.push('versions:', ...versions.map((v) => `  ${v.version}  "${v.note}"${v.version === used ? '  (in use)' : ''}`));
+  else if (!inUse) lines.push('no version published yet');
+  if (shown) {
+    lines.push(`outputs of ${shown.version}:`);
+    const isDefault = (o: OutputInfo) => o.graph === shown.default.graph && o.node === shown.default.node;
+    const one = (type: string, o: OutputInfo) => {
+      const params = Object.keys(o.sliders), inputs = o.inputs.map((i) => i.label || `input ${i.index}`);
+      return `  ${type}  ${kindTagsText(o)}${o.label ? `  "${o.label}"` : ''}${params.length ? `  params ${params.join(', ')}` : ''}${inputs.length ? `  inputs ${inputs.join(', ')}` : ''}${isDefault(o) ? `  (also ${pkg}, its default output)` : ''}`;
+    };
+    if (!Object.values(shown.outputs).some(isDefault)) lines.push(one(pkg, shown.default));
+    for (const [k, o] of Object.entries(shown.outputs)) lines.push(one(`${pkg}/${k}`, o));
+    const first = Object.keys(shown.outputs)[0], example = first ? `${pkg}/${first}` : pkg;
+    lines.push(mcp ? `help {nodes:["${example}"]} gives an output's params and inputs` : `${program()} --help-node ${example} gives an output's params and inputs`);
+  }
+  if (problems.length) lines.push(`could not check ${problems.length}:`, ...problems.map((p) => `  ${p}`));
   return lines.join('\n');
 }
 
@@ -1801,7 +2219,7 @@ export interface SearchHit {
   package: string;
   version: string;
   label?: string;
-  kind?: Kind;
+  kind: Kind;
   tags: string[];
   description?: string;
   /** the version of the package the open project uses, when it uses it */
@@ -1815,8 +2233,10 @@ export interface SearchLibrary {
   /** as project.json lists it, a registered library's name, or "topotopo" for TopoTopo's built-in library */
   name: string;
   root: string;
-  /** "builtin": every project uses it; "listed": the open project lists it; "unlisted": its project.json would have to list it */
+  /** "builtin": every project can use it; "listed": the open project lists it; "unlisted": its project.json would have to list it */
   standing: 'builtin' | 'listed' | 'unlisted';
+  /** an unlisted library: the entry the open project's "libraries" would list it by (its path from the project when near, else its name) */
+  entry?: string;
   hits: SearchHit[];
 }
 
@@ -1846,13 +2266,14 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
   const key = (p: string) => path.resolve(p).toLowerCase(), seen = new Set([key(builtin)]);
   const libs: Omit<SearchLibrary, 'hits'>[] = [];
   if (dir && manifest) {
-    try { for (const l of listedLibraries(dir)) if (!seen.has(key(l.root))) { seen.add(key(l.root)); libs.push({ name: l.entry, root: l.root, standing: 'listed' }); } }
-    catch (e: any) { problems.add(e.message); }
+    const listed = listedLibraries(dir);
+    for (const p of listed.problems) problems.add(p);
+    for (const l of listed.libs) if (!seen.has(key(l.root))) { seen.add(key(l.root)); libs.push({ name: l.entry, root: l.root, standing: 'listed' }); }
   }
   libs.push({ name: BUILTIN_LIBRARY.name, root: builtin, standing: 'builtin' });
   try {
     for (const l of [...loadConfig().libraries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
-      if (!seen.has(key(l.path))) { seen.add(key(l.path)); libs.push({ name: l.name, root: l.path, standing: 'unlisted' }); }
+      if (!seen.has(key(l.path))) { seen.add(key(l.path)); libs.push({ name: l.name, root: l.path, standing: 'unlisted', ...(dir && manifest ? { entry: entryFor(dir, l.path, l.name) } : {}) }); }
   } catch (e: any) { problems.add(e.message); }
   // each word of the query starts a word of what an output says about itself or of its package's title and project
   // tags: "tree" finds trees, not every output of topotopo/street; a package's description, which lists its contents,
@@ -1887,7 +2308,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
         if (!words.every((w) => hay.some((h) => h.startsWith(w)))) continue;
         const used = manifest?.uses[f.package];
         hits.push({
-          type, ...(alias ? { alias } : {}), package: f.package, version: v.version, ...(o.label ? { label: o.label } : {}), ...(o.kind ? { kind: o.kind } : {}), tags,
+          type, ...(alias ? { alias } : {}), package: f.package, version: v.version, ...(o.label ? { label: o.label } : {}), kind: o.kind, tags,
           ...(o.description ? { description: o.description } : {}), ...(used ? { used } : {}), ...(manifest?.package === f.package ? { self: true } : {}),
         });
       }
@@ -1897,6 +2318,16 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
   return { query: q, project: dir && manifest ? `project ${manifest.id}` : null, libraries, problems: [...problems] };
 }
 
+/**
+ * The entry project.json would list for a registered library at `root` (named `name`): its path from the project when
+ * it is near (in the same repository, most likely: every checkout and worktree then reads its own), else its name.
+ */
+function entryFor(dir: string, root: string, name: string): string {
+  const rel = path.relative(dir, root).split(path.sep).join('/');
+  const near = !!rel && !path.isAbsolute(rel) && !/^[A-Za-z]:/.test(rel) && rel.split('/').filter((x) => x === '..').length <= 3;
+  return near ? (rel.startsWith('.') ? rel : `./${rel}`) : name;
+}
+
 /** A search as the CLI (or, `mcp`, the library tool) says it: the hits by library, and whether the project can use them. */
 export function searchText(r: SearchResult, mcp = false): string {
   const q = r.query, hits = r.libraries.flatMap((l) => l.hits);
@@ -1904,22 +2335,22 @@ export function searchText(r: SearchResult, mcp = false): string {
   const lines = [hits.length
     ? `search ${asked}: ${hits.length} output${hits.length === 1 ? '' : 's'} in ${r.libraries.filter((l) => l.hits.length).length} of the ${r.libraries.length} libraries looked in${r.project ? `, for ${r.project}` : ''}`
     : `search ${asked}: no output matches in ${r.libraries.map((l) => libraryText(l.name)).join(', ')}`];
-  if (!r.project) lines.push(`this folder is in no project, and only a project's graphs use packages: ${mcp ? 'library {action:"init"} makes the open workspace one, when the person says so' : MAKE_PROJECT}`);
+  if (!r.project) lines.push(`this folder is in no project, and only a project's graphs use packages: ${mcp ? 'library {action:"init"} makes the open workspace one, when the person says so' : makeProject()}`);
   for (const l of r.libraries) {
     if (!l.hits.length) continue;
-    const standing = l.standing === 'builtin' ? 'TopoTopo\'s own packages, which every project uses: a graph that names one adds it'
+    const standing = l.standing === 'builtin' ? 'TopoTopo\'s own packages, which every project can use: a graph that names one adds it'
       : l.standing === 'listed' ? `${r.project} lists it: a graph that names one of these adds its package`
-      : r.project ? `${r.project} does not list it: to use these, add "${l.name}" to "libraries" in its project.json${mcp ? ' (the person does: the tools never add a library)' : ''}, or the library's path relative to the project when it is in the same repository`
+      : r.project ? `${r.project} does not list it: to use these, ${mcp ? `library {action:"set", libraries:[…, "${l.entry ?? l.name}"]} lists it, when the person says so (the tools never add a library by themselves)` : `${program()} libraries add ${l.entry ?? l.name} lists it`}`
       : 'a registered library';
     lines.push(`${l.standing === 'builtin' ? `TopoTopo's built-in library "${l.name}"` : `library "${l.name}" (${l.root})`}: ${standing}`);
     for (const h of l.hits) {
       const also = [h.alias ? `also ${h.alias}, its default output` : '', h.self ? 'this project\'s own package' : h.used ? `this project uses ${h.used}` : ''].filter(Boolean).join('; ');
-      lines.push(`  ${h.type}  ${h.kind ?? 'kind not recorded'}${h.tags.length ? `  [${h.tags.join(', ')}]` : ''}${h.label ? `  "${h.label}"` : ''}  ${h.version}${also ? `  (${also})` : ''}`);
+      lines.push(`  ${h.type}  ${kindTagsText(h)}${h.label ? `  "${h.label}"` : ''}  ${h.version}${also ? `  (${also})` : ''}`);
       if (h.description) lines.push(`    ${h.description.length > 300 ? `${h.description.slice(0, 299)}…` : h.description}`);
     }
   }
   if (hits.length && r.libraries.some((l) => !l.hits.length)) lines.push(`nothing matches in ${r.libraries.filter((l) => !l.hits.length).map((l) => libraryText(l.name)).join(', ')}`);
-  if (hits.length) lines.push(mcp ? 'help {nodes:["owner/name/output"]} gives an output\'s sliders and inputs' : '--help-node owner/name/output gives an output\'s sliders and inputs');
-  if (r.problems.length) lines.push('problems:', ...r.problems.map((p) => `  ${p}`));
+  if (hits.length) lines.push(mcp ? `help {nodes:["${hits[0].type}"]} gives an output's params and inputs` : `${program()} --help-node ${hits[0].type} gives an output's params and inputs`);
+  if (r.problems.length) lines.push(`could not check ${r.problems.length}:`, ...r.problems.map((p) => `  ${p}`));
   return lines.join('\n');
 }

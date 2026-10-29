@@ -8,9 +8,9 @@
   "links": [],
   "created": "2026-10-28",
   "uses": {
-    "topotopo/architecture": "1.1",
-    "topotopo/nature": "1.1",
-    "topotopo/props": "1.1",
-    "topotopo/street": "1.1"
+    "topotopo/architecture": "1.0",
+    "topotopo/nature": "1.0",
+    "topotopo/props": "1.0",
+    "topotopo/street": "1.0"
   }
 }

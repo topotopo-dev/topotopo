@@ -252,5 +252,5 @@
     }
   },
   "output": "out",
-  "outputs": { "house": { "node": "out", "label": "House" } }
+  "outputs": { "house": { "node": "out", "label": "House", "kind": "mesh", "tags": ["house", "building", "residential", "footprint", "modular"] } }
 }

@@ -81,6 +81,6 @@
     "out": { "type": "attrib_delete", "in": ["all"], "params": { "names": "copynum" } }
   },
   "output": "out",
-  "outputs": { "barrel": { "node": "out", "label": "Barrel" } },
+  "outputs": { "barrel": { "node": "out", "label": "Barrel", "kind": "mesh", "tags": ["barrel", "container", "wooden", "prop"] } },
   "meta": { "watertight": true }
 }

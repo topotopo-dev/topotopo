@@ -1,0 +1,536 @@
+{
+  "package": "topotopo/nature",
+  "version": "1.0",
+  "note": "first version",
+  "published": "2026-10-29T16:36:49.276Z",
+  "big": false,
+  "hash": "202baabb479135c7a8c95f65277d388ecce0f0123a53fa8330ac73000e6febe0",
+  "outputs": {
+    "bush": {
+      "graph": "bush",
+      "node": "out",
+      "label": "Bush",
+      "kind": "mesh",
+      "tags": [
+        "bush",
+        "foliage",
+        "vegetation",
+        "low-poly"
+      ],
+      "description": "Low-poly bush: overlapping faceted blobs, cut flat at the ground. Pivot at the centre of the base. Piece: bush (foliage_dark). Open at the bottom.",
+      "sliders": {
+        "size": {
+          "type": "float",
+          "default": 1.2,
+          "min": 0.2,
+          "max": 5,
+          "desc": "width (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 0.8,
+          "min": 0.1,
+          "max": 4,
+          "desc": "approximate height (m)"
+        },
+        "blobs": {
+          "type": "int",
+          "default": 6,
+          "min": 1,
+          "max": 16,
+          "desc": "number of blobs"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0,
+          "max": 0.5,
+          "desc": "blob displacement (fraction of the blob radius)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": []
+    },
+    "cliff_block": {
+      "graph": "cliff_block",
+      "node": "out",
+      "label": "Cliff block",
+      "kind": "mesh",
+      "tags": [
+        "cliff",
+        "rock",
+        "mountain",
+        "low-poly"
+      ],
+      "description": "Cliff block: a tall rock mass with ridged noise, horizontal strata ledges and banded colour, flat on the ground. Pivot at the centre of the base. Piece: cliff (cliff_rock). Closed (watertight).",
+      "sliders": {
+        "width": {
+          "type": "float",
+          "default": 4,
+          "min": 1,
+          "max": 20,
+          "desc": "size along X (m)"
+        },
+        "height": {
+          "type": "float",
+          "default": 5,
+          "min": 1,
+          "max": 30,
+          "desc": "height (m)"
+        },
+        "depth": {
+          "type": "float",
+          "default": 3,
+          "min": 1,
+          "max": 20,
+          "desc": "size along Z (m)"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "desc": "noise and ledge strength (0 = smooth block)"
+        },
+        "strata": {
+          "type": "int",
+          "default": 6,
+          "min": 0,
+          "max": 20,
+          "desc": "number of strata ledges (0 = none)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "noise seed"
+        }
+      },
+      "inputs": []
+    },
+    "forest_patch": {
+      "graph": "forest_patch",
+      "node": "out",
+      "label": "Forest",
+      "kind": "instances",
+      "tags": [
+        "forest",
+        "trees",
+        "conifer",
+        "vegetation",
+        "scatter",
+        "low-poly"
+      ],
+      "description": "Forest on a surface (input 0; without one, a 30 × 30 m ground patch at y = 0): trees scattered by density with a minimum spacing on faces flatter than max_slope, kept upright with random yaw and height, as packed copies of three tree_lowpoly variants (conifer, round, poplar) picked by conifer_ratio, plus optional bushes between them. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Pieces: tree_trunk, tree_canopy, bush.",
+      "sliders": {
+        "density": {
+          "type": "float",
+          "default": 0.02,
+          "min": 0.001,
+          "max": 0.5,
+          "desc": "trees per square metre before spacing"
+        },
+        "min_distance": {
+          "type": "float",
+          "default": 3,
+          "min": 0.5,
+          "max": 20,
+          "desc": "minimum distance between trees (m)"
+        },
+        "min_height": {
+          "type": "float",
+          "default": 4,
+          "min": 1,
+          "max": 30,
+          "desc": "smallest tree height (m)"
+        },
+        "max_height": {
+          "type": "float",
+          "default": 9,
+          "min": 1,
+          "max": 40,
+          "desc": "largest tree height (m)"
+        },
+        "conifer_ratio": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "desc": "share of conifers; the rest is split between round and poplar trees"
+        },
+        "max_slope": {
+          "type": "float",
+          "default": 30,
+          "min": 0,
+          "max": 90,
+          "desc": "no trees on faces steeper than this (degrees)"
+        },
+        "bushes": {
+          "type": "bool",
+          "default": true,
+          "desc": "scatter bushes (three times the tree density)"
+        },
+        "ground_size": {
+          "type": "float",
+          "default": 30,
+          "min": 2,
+          "max": 200,
+          "desc": "size of the ground patch used when nothing is connected (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "surface to plant on (polygons); optional"
+        }
+      ]
+    },
+    "grass_clumps": {
+      "graph": "grass_clumps",
+      "node": "out",
+      "label": "Grass",
+      "kind": "instances",
+      "tags": [
+        "grass",
+        "foliage",
+        "vegetation",
+        "ground-cover",
+        "scatter"
+      ],
+      "description": "Grass clumps on a surface (input 0; without one, a 4 × 4 m ground patch at y = 0): each clump is a fan of thin two-sided blades leaning outwards; clumps are scattered by density on faces flatter than max_slope and copied as packed instances of two variants with random yaw and size. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: grass (grass, double sided).",
+      "sliders": {
+        "density": {
+          "type": "float",
+          "default": 8,
+          "min": 0.1,
+          "max": 40,
+          "desc": "clumps per square metre"
+        },
+        "height": {
+          "type": "float",
+          "default": 0.35,
+          "min": 0.05,
+          "max": 2,
+          "desc": "blade height (m)"
+        },
+        "blades": {
+          "type": "int",
+          "default": 12,
+          "min": 3,
+          "max": 30,
+          "desc": "blades per clump"
+        },
+        "spread": {
+          "type": "float",
+          "default": 0.5,
+          "min": 0,
+          "max": 1.5,
+          "desc": "how far the blades lean out (fraction of the height)"
+        },
+        "max_slope": {
+          "type": "float",
+          "default": 45,
+          "min": 0,
+          "max": 90,
+          "desc": "no grass on faces steeper than this (degrees)"
+        },
+        "ground_size": {
+          "type": "float",
+          "default": 4,
+          "min": 0.5,
+          "max": 20,
+          "desc": "size of the ground patch used when nothing is connected (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "surface to grow on (polygons); optional"
+        }
+      ]
+    },
+    "kit": {
+      "graph": "kit",
+      "node": "kit",
+      "label": "Nature kit",
+      "kind": "scene",
+      "tags": [
+        "kit",
+        "lineup",
+        "nature"
+      ],
+      "description": "TopoTopo's nature kit, its 8 outputs side by side at their defaults. The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.",
+      "sliders": {},
+      "inputs": []
+    },
+    "log": {
+      "graph": "log",
+      "node": "out",
+      "label": "Log",
+      "kind": "mesh",
+      "tags": [
+        "log",
+        "deadwood",
+        "wood",
+        "low-poly"
+      ],
+      "description": "Felled log lying along X: a tapered trunk with ridged bark, light end grain and a few branch stubs. Pivot at the centre of the base (the log rests on y = 0). Pieces: log_trunk (bark, ends wood_end), log_stubs (bark). The trunk is closed.",
+      "sliders": {
+        "log_length": {
+          "type": "float",
+          "default": 2.4,
+          "min": 0.4,
+          "max": 8,
+          "desc": "length along X (m)"
+        },
+        "radius": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0.05,
+          "max": 0.8,
+          "desc": "radius at the thick end (m)"
+        },
+        "taper": {
+          "type": "float",
+          "default": 0.2,
+          "min": 0,
+          "max": 0.6,
+          "desc": "how much thinner the other end is (fraction of radius)"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.12,
+          "min": 0,
+          "max": 0.3,
+          "desc": "bark displacement as a fraction of radius"
+        },
+        "stubs": {
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 10,
+          "desc": "branch stubs"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed (bark noise, stubs)"
+        }
+      },
+      "inputs": []
+    },
+    "rock": {
+      "graph": "rock",
+      "node": "out",
+      "label": "Rock",
+      "kind": "mesh",
+      "tags": [
+        "rock",
+        "stone",
+        "boulder",
+        "low-poly"
+      ],
+      "description": "Low-poly rock: a noise-displaced icosphere, flattened, with faceted shading and a mottled tint. Pivot at the centre of the base (sink lowers it into the ground). Piece: rock (rock). Closed (watertight).",
+      "sliders": {
+        "size": {
+          "type": "float",
+          "default": 1,
+          "min": 0.1,
+          "max": 6,
+          "desc": "approximate width (m)"
+        },
+        "roughness": {
+          "type": "float",
+          "default": 0.35,
+          "min": 0,
+          "max": 0.8,
+          "desc": "displacement as a fraction of the size"
+        },
+        "flatness": {
+          "type": "float",
+          "default": 0.65,
+          "min": 0.2,
+          "max": 1,
+          "desc": "height / width"
+        },
+        "level": {
+          "type": "int",
+          "default": 2,
+          "min": 1,
+          "max": 4,
+          "desc": "icosphere subdivision level (2 = 162 points)"
+        },
+        "sink": {
+          "type": "float",
+          "default": 0,
+          "min": 0,
+          "max": 0.5,
+          "desc": "part of the height below y = 0"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "shape seed"
+        }
+      },
+      "inputs": []
+    },
+    "scatter_rocks": {
+      "graph": "scatter_rocks",
+      "node": "out",
+      "label": "Scattered rocks",
+      "kind": "instances",
+      "tags": [
+        "rocks",
+        "stone",
+        "ground-cover",
+        "scatter"
+      ],
+      "description": "Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this kit's rock output) sunk slightly into the ground. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).",
+      "sliders": {
+        "density": {
+          "type": "float",
+          "default": 0.4,
+          "min": 0.01,
+          "max": 5,
+          "desc": "rocks per square metre before pruning"
+        },
+        "min_scale": {
+          "type": "float",
+          "default": 0.35,
+          "min": 0.05,
+          "max": 5,
+          "desc": "smallest rock width (m)"
+        },
+        "max_scale": {
+          "type": "float",
+          "default": 1.1,
+          "min": 0.05,
+          "max": 8,
+          "desc": "largest rock width (m)"
+        },
+        "max_slope": {
+          "type": "float",
+          "default": 40,
+          "min": 0,
+          "max": 90,
+          "desc": "no rocks on faces steeper than this (degrees)"
+        },
+        "ground_size": {
+          "type": "float",
+          "default": 8,
+          "min": 1,
+          "max": 60,
+          "desc": "size of the ground patch used when nothing is connected (m)"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed"
+        }
+      },
+      "inputs": [
+        {
+          "index": 0,
+          "label": "surface to scatter on (polygons); optional"
+        }
+      ]
+    },
+    "tree_lowpoly": {
+      "graph": "tree_lowpoly",
+      "node": "out",
+      "label": "Tree",
+      "kind": "mesh",
+      "tags": [
+        "tree",
+        "conifer",
+        "deciduous",
+        "vegetation",
+        "low-poly"
+      ],
+      "description": "Low-poly tree in three styles: round (a cluster of faceted blobs), conifer (stacked cones) and poplar (a tall narrow crown). Pivot at the base of the trunk. Pieces: tree_trunk (bark), tree_canopy (foliage, or foliage_dark for conifers). Every piece is closed.",
+      "sliders": {
+        "height": {
+          "type": "float",
+          "default": 6,
+          "min": 1.5,
+          "max": 25,
+          "desc": "total height (m)"
+        },
+        "trunk_radius": {
+          "type": "float",
+          "default": 0.18,
+          "min": 0.04,
+          "max": 1,
+          "desc": "trunk radius at the base (m)"
+        },
+        "canopy_radius": {
+          "type": "float",
+          "default": 1.8,
+          "min": 0.4,
+          "max": 8,
+          "desc": "crown radius (m)"
+        },
+        "style": {
+          "type": "enum",
+          "default": "round",
+          "options": [
+            "round",
+            "conifer",
+            "poplar"
+          ],
+          "desc": "crown shape"
+        },
+        "seed": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "desc": "random seed (blob placement, rotation, tint)"
+        }
+      },
+      "inputs": []
+    }
+  },
+  "default": {
+    "graph": "kit",
+    "node": "kit",
+    "kind": "scene",
+    "tags": [
+      "kit",
+      "lineup",
+      "nature"
+    ],
+    "description": "TopoTopo's nature kit, its 8 outputs side by side at their defaults. The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.",
+    "sliders": {},
+    "inputs": []
+  },
+  "topotopo": "0.4.0"
+}

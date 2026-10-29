@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Engine, wiringOf } from './graph/engine.ts';
 import type { CookReport, Issue, NodeProgress, StopSignal } from './graph/engine.ts';
-import type { ExportTarget, GraphSpec, NodeSpec } from './graph/types.ts';
+import type { ExportTarget, GraphSpec, NodeDef, NodeSpec } from './graph/types.ts';
 import type { PackageResolver, Scope } from './graph/scope.ts';
 import { didYouMean, renameExprRefs } from './graph/params.ts';
 import { migrateGraph } from './graph/migrate.ts';
@@ -193,14 +193,24 @@ export function graphFiles(dir: string): Map<string, string> {
  * set or edited through the workspace that names a package the project does not use yet adds it (first use).
  */
 export interface WorkspacePackages {
-  /** add the packages a graph names that the project does not use yet; says what was added */
+  /**
+   * add the packages a graph names that the project does not use yet, once the graph validates (nothing is written for
+   * one that does not); says what was added
+   */
   addFor(graph: GraphSpec): string[];
   /**
    * what a graph is checked with where nothing may be written (a dry run, a trial of a person's values): the project's
    * packages, and those the graph names for the first time at the version build or edit would add, read where a library
-   * holds them, nothing copied; the notes say what build or edit add
+   * holds them, nothing copied; the notes say what build or edit add; `id` is the id of a scope that resolves with it
    */
-  dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[] };
+  dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[]; id: string };
+  /**
+   * the node type of an output of a package the project does not use yet, read where a library it looks in holds the
+   * newest version (nothing copied): what help says about an output search found; null when none has it
+   */
+  describe(name: string): NodeDef | null;
+  /** why the workspace's graphs cannot use packages, and how that changes (null when they can) */
+  notice(): string | null;
   /** read again what changed on disk (project.json, the lock, working folders followed this session); true if anything did */
   refresh(): boolean;
   /**
@@ -622,18 +632,18 @@ export class Workspace {
   }
 
   /**
-   * The one path for an edit, whoever makes it (the MCP edit tool, the viewer's controls): apply the ops, add the
-   * packages the graph now names to the project (first use), validate (an invalid result throws EditRejected listing
-   * the per-node errors and stores nothing), store, cook at `frame`, then notify the listeners. They hear after the
-   * cook so that what they read (lastReport, cached geometry) is the new version's; a cook that throws still notifies,
-   * since the graph was stored. A cook that was stopped (`signal`, Workspace.stop) does not: whoever stopped it cooks
-   * again or tells the listeners.
+   * The one path for an edit, whoever makes it (the MCP edit tool, the viewer's controls): apply the ops, validate as a
+   * dry run sees the graph (an invalid result throws EditRejected listing the per-node errors, and stores, adds and
+   * writes nothing), add the packages the graph now names to the project (first use), store, cook at `frame`, then
+   * notify the listeners. They hear after the cook so that what they read (lastReport, cached geometry) is the new
+   * version's; a cook that throws still notifies, since the graph was stored. A cook that was stopped (`signal`,
+   * Workspace.stop) does not: whoever stopped it cooks again or tells the listeners.
    */
   async edit(name: string, ops: EditOp[], opts: { frame?: number; kind?: CookKind; signal?: StopSignal } = {}): Promise<{ graph: GraphSpec; notes: string[]; report: CookReport }> {
     const { graph, notes } = this.applyEdits(name, ops);
-    notes.push(...(this.packages?.addFor(graph) ?? []));
-    const v = this.engine.validate(graph);
+    const v = this.engine.validate(graph, '', this.dryScope(graph).scope);
     if (v.errors.length) throw new EditRejected(v.errors, notes);
+    notes.push(...(this.packages?.addFor(graph) ?? []));
     this.setGraph(name, graph);
     let report: CookReport | undefined;
     try { report = await this.cook(name, undefined, opts.frame, { kind: opts.kind, signal: opts.signal }); }
@@ -644,12 +654,12 @@ export class Workspace {
   /**
    * The scope a graph is checked in where nothing may be written (a dry run, a trial of a person's values): the
    * engine's root, whose packages include those the graph names for the first time at the version build or edit would
-   * add (WorkspacePackages.dryRun), with notes that say so. Nothing is copied or written.
+   * add (WorkspacePackages.dryRun), with notes that say so, under an id of its own. Nothing is copied or written.
    */
   dryScope(graph: GraphSpec): { scope: Scope; notes: string[] } {
     const root = this.engine.root, d = this.packages?.dryRun(graph);
     if (!d || d.resolver === root.packages) return { scope: root, notes: d?.notes ?? [] };
-    return { scope: { ...root, packages: d.resolver }, notes: d.notes };
+    return { scope: { ...root, id: d.id, packages: d.resolver }, notes: d.notes };
   }
 
   /**

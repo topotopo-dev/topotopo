@@ -62,9 +62,10 @@ export interface NodeDef {
   usesTime?: boolean;
   /**
    * The result depends on the scope the node cooks in (CookContext.scope): the node reads files or graphs through it,
-   * or cooks nested graphs in it (subcook, lib.run), whose node types resolve there. Every node that reads ctx.scope,
-   * or calls ctx.subcook without naming a scope (CookOptions.scope), says so. Outside the root scope the scope's id is
-   * then part of its signature.
+   * or cooks nested graphs in it (subcook, lib.run), whose node types resolve there. Outside the root scope the scope's
+   * id is then part of its signature. The engine finds this by itself, as it finds time dependence: when signatureExtra
+   * reads the scope it is given, or the cook reads ctx.scope or calls ctx.subcook without naming a scope. Saying it
+   * here keys the very first cook by the scope too, before the engine has seen the node read it.
    */
   usesScope?: boolean;
   /** deprecation notice naming the replacement; hidden from the catalog, warned about on cook */
@@ -160,7 +161,7 @@ export interface CookContext {
   engine: Engine;
   /**
    * The scope the node cooks in (src/graph/scope.ts): the files it reads, the graphs graph_ref reads and the node
-   * types of nested cooks, which run in it too. A node that reads it sets NodeDef.usesScope.
+   * types of nested cooks, which run in it too. Reading it makes the result depend on it (NodeDef.usesScope).
    */
   scope: Scope;
   /** cache signatures of the inputs (for nested cooks) */
