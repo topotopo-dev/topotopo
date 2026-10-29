@@ -96,16 +96,47 @@ function addRun(r: number[], s: number, e: number, gap: number): void {
   r.splice(i, j - i, ns, ne);
 }
 
-/** A profile from sorted, merged runs per column. */
-function toProfile(w: number, cols: (number[] | undefined)[]): Profile {
-  let n = 0, top = 0;
-  for (let c = 0; c < w; c++) { const r = cols[c]; if (r) { n += r.length / 2; if (r.length && r[r.length - 1] + 1 > top) top = r[r.length - 1] + 1; } }
-  const C = new Int32Array(n), L = new Int32Array(n), H = new Int32Array(n);
-  for (let c = 0, k = 0; c < w; c++) {
-    const r = cols[c];
-    if (r) for (let i = 0; i < r.length; i += 2, k++) { C[k] = c; L[k] = r[i]; H[k] = r[i + 1]; }
+/**
+ * Runs per column while a profile is built: a column with one run keeps it in lo/hi (the common case); a column with
+ * more keeps a sorted run list (hi = -2). Runs fewer than gap + 1 free cells apart merge.
+ */
+class RunCols {
+  w: number;
+  gap: number;
+  lo: Int32Array;
+  hi: Int32Array;
+  more: (number[] | undefined)[] | null = null;
+  constructor(w: number, gap: number) {
+    this.w = w; this.gap = gap;
+    this.lo = new Int32Array(w);
+    this.hi = new Int32Array(w).fill(-1);
   }
-  return { w, top, n, c: C, lo: L, hi: H };
+  add(c: number, s: number, e: number): void {
+    const h = this.hi[c], g = this.gap;
+    if (h === -1) { this.lo[c] = s; this.hi[c] = e; return; }
+    if (h >= 0) {
+      const l = this.lo[c];
+      if (s <= h + g + 1 && e >= l - g - 1) { if (s < l) this.lo[c] = s; if (e > h) this.hi[c] = e; return; }
+      (this.more ??= new Array(this.w))[c] = l < s ? [l, h, s, e] : [s, e, l, h];
+      this.hi[c] = -2;
+      return;
+    }
+    addRun(this.more![c]!, s, e, g);
+  }
+  profile(): Profile {
+    const w = this.w, lo = this.lo, hi = this.hi;
+    let n = 0, top = 0;
+    for (let c = 0; c < w; c++) {
+      if (hi[c] >= 0) { n++; if (hi[c] + 1 > top) top = hi[c] + 1; }
+      else if (hi[c] === -2) { const r = this.more![c]!; n += r.length / 2; if (r[r.length - 1] + 1 > top) top = r[r.length - 1] + 1; }
+    }
+    const C = new Int32Array(n), L = new Int32Array(n), H = new Int32Array(n);
+    for (let c = 0, k = 0; c < w; c++) {
+      if (hi[c] >= 0) { C[k] = c; L[k] = lo[c]; H[k] = hi[c]; k++; }
+      else if (hi[c] === -2) { const r = this.more![c]!; for (let i = 0; i < r.length; i += 2, k++) { C[k] = c; L[k] = r[i]; H[k] = r[i + 1]; } }
+    }
+    return { w, top, n, c: C, lo: L, hi: H };
+  }
 }
 
 /** Conservative raster of triangles as runs per column; px holds cell coordinates (2 per local vertex), all >= 0. */
@@ -113,7 +144,7 @@ function rasterise(px: Float64Array, tris: Int32Array, gap: number): Profile {
   let maxX = 0;
   for (let i = 0; i < px.length; i += 2) if (px[i] > maxX) maxX = px[i];
   const w = Math.floor(maxX + EPS) + 1;
-  const cols: (number[] | undefined)[] = new Array(w);
+  const cols = new RunCols(w, gap);
   for (let t = 0; t < tris.length; t += 3) {
     const ax = px[tris[t] * 2], ay = px[tris[t] * 2 + 1], bx = px[tris[t + 1] * 2], by = px[tris[t + 1] * 2 + 1], cx = px[tris[t + 2] * 2], cy = px[tris[t + 2] * 2 + 1];
     const c0 = Math.max(0, Math.floor(Math.min(ax, bx, cx) - EPS)), c1 = Math.min(w - 1, Math.floor(Math.max(ax, bx, cx) + EPS));
@@ -136,19 +167,18 @@ function rasterise(px: Float64Array, tris: Int32Array, gap: number): Profile {
         }
       }
       if (!(y0 <= y1)) continue;
-      const r0 = Math.max(0, Math.floor(y0 - EPS)), r1 = Math.floor(y1 + EPS);
-      addRun((cols[c] ??= []), r0, r1, gap);
+      cols.add(c, Math.max(0, Math.floor(y0 - EPS)), Math.floor(y1 + EPS));
     }
   }
-  return toProfile(w, cols);
+  return cols.profile();
 }
 
 /** Chebyshev dilation by d cells; the result's origin is d cells left of and below the input's. */
 function dilate(p: Profile, d: number, gap: number): Profile {
   if (d <= 0) return p;
-  const w = p.w + 2 * d, cols: (number[] | undefined)[] = new Array(w);
-  for (let i = 0; i < p.n; i++) for (let k = 0; k <= 2 * d; k++) addRun((cols[p.c[i] + k] ??= []), p.lo[i], p.hi[i] + 2 * d, gap);
-  return toProfile(w, cols);
+  const cols = new RunCols(p.w + 2 * d, gap);
+  for (let i = 0; i < p.n; i++) for (let k = 0; k <= 2 * d; k++) cols.add(p.c[i] + k, p.lo[i], p.hi[i] + 2 * d);
+  return cols.profile();
 }
 
 function cellsOf(p: Profile): number {
