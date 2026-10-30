@@ -16,6 +16,8 @@ import { didYouMean, renameExprRefs } from './graph/params.ts';
 import { maybeSidecar, sidecarOf } from './io/sidecars.ts';
 import type { Sidecar } from './io/sidecars.ts';
 import { fileFormat } from './host/sidecars.ts';
+import { godotIgnore, isEngineFile } from './engines.ts';
+import { targetRefusal } from './io/targets.ts';
 
 export interface EditOp {
   op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert' | 'export';
@@ -291,6 +293,8 @@ export class Session {
     // the package's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
     // is made by the first file written into it
     for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir, ...(this.inputsAt ? [] : [this.inputDir])]) fs.mkdirSync(d, { recursive: true });
+    // inside a Godot project the package's own inputs/ is no game content: Godot imports nothing in it
+    if (!this.inputsAt) godotIgnore(this.dir, ['inputs']);
     // as a package version reads them (registerAssets): an asset that uses one registered later is tried again
     const assetErrors: string[] = [], graphErrors: string[] = [];
     registerAssets(this.engine, this.engine.root, this.dir, assetErrors);
@@ -464,7 +468,8 @@ export class Session {
   }
 
   /**
-   * Every file under inputs/, recursively: posix paths relative to it, sorted. Dot-files and dot-folders are skipped.
+   * Every file under inputs/, recursively: posix paths relative to it, sorted. Dot-files and dot-folders are skipped, as
+   * are the files an engine writes beside ours (*.import, *.uid, *.translation, *.uasset).
    * An export's sidecar (a heightmap's .json, <file>.source.json …) is kind "metadata", with the file it describes.
    */
   listInputs(): InputFile[] {
@@ -473,7 +478,7 @@ export class Session {
       let entries: fs.Dirent[];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
       for (const e of entries) {
-        if (e.name.startsWith('.')) continue;
+        if (e.name.startsWith('.') || (!e.isDirectory() && isEngineFile(e.name))) continue;
         const abs = path.join(dir, e.name), r = rel ? `${rel}/${e.name}` : e.name;
         let st: fs.Stats;
         try { st = fs.statSync(abs); } catch { continue; } // a broken link
@@ -615,6 +620,9 @@ export class Session {
         case 'export': {
           // the target of the default output, or of a named one; null removes it (validated with the graph)
           if (op.export === undefined) throw new Error(`${where}: give "export": a format ("glb"), {format, path?, ...options}, or null`);
+          // a new target never takes the prefix that is gone (one a graph holds already only warns when it cooks)
+          const refused = op.export === null ? null : targetRefusal(op.export);
+          if (refused) throw new Error(`${where}: ${refused}`);
           if (op.output === undefined) { if (op.export === null) delete g.export; else g.export = op.export; break; }
           const out = g.outputs?.[op.output];
           if (!out) {

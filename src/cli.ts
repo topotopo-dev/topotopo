@@ -25,16 +25,16 @@
 //   node src/cli.ts mcp [--package dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
-//   node src/cli.ts web [--port 7340] [--library dir]  the web app for the libraries (src/packages/commands.ts)
-//   node src/cli.ts library add|list|new|bake …           registered libraries and packages; edit [folder] opens the
+//   node src/cli.ts web [--port 7340] [--library dir]  the web app for the workspaces and libraries (src/packages/commands.ts)
+//   node src/cli.ts library add|remove|list|new|bake …    registered libraries and packages; edit [folder] opens the
 //                                                         live viewer on a package
-// The workspace (the game) around packages (src/workspace.ts), a package and the packages it uses (src/packages/commands.ts,
+// The workspace around packages (src/workspace.ts), a package and the packages it uses (src/packages/commands.ts,
 // src/packages/registry.ts, src/packages/update.ts):
 //   node src/cli.ts workspace [folder]
-//   node src/cli.ts workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
+//   node src/cli.ts workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--library <name or folder>] [--follow | --no-follow]
+//   node src/cli.ts workspace library add|remove <name or folder> [--workspace <folder>]
 //   node src/cli.ts workspace add|list [folder]
 //   node src/cli.ts init [folder] [--name owner/name]
-//   node src/cli.ts libraries add|remove <folder or name> [folder]
 //   node src/cli.ts use owner/name [folder] [--version 1.1]
 //   node src/cli.ts remove owner/name [folder]
 //   node src/cli.ts packages [owner/name] [folder]
@@ -73,7 +73,7 @@ import { ArtifactStore } from './host/artifacts.ts';
 import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
-import { exportOptionsFromFlags, publishedOutputs } from './io/targets.ts';
+import { exportOptionsFromFlags, prefixGone, publishedOutputs } from './io/targets.ts';
 import { budgetReport, inspect, nodeBudgetInput, summarize } from './inspect.ts';
 import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
 import { uvReport } from './core/uvreport.ts';
@@ -110,7 +110,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
-    '         [--follow owner/name] (show that package\'s working folder in the package\'s libraries instead of its copy, for this run: renders and inspect use it, exports the published copy; repeat it)',
+    '         [--follow owner/name] (show that package\'s working folder, where the package finds it, instead of its copy, for this run: renders and inspect use it, exports the published copy; repeat it)',
     '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
@@ -148,8 +148,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output)`,
     `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
-    `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: every library's packages, stable links for a board)`,
-    `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
+    `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: the registered workspaces and every library's packages, stable links for a board)`,
+    `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
     '       a package and the packages it uses (a folder named must exist; default: the current folder\'s package; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
     ...PACKAGE_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
@@ -456,6 +456,9 @@ async function cook() {
     const published = publishedOutputs(name, graph, engine.findOutput(graph).name);
     if (!published.some((p) => p.target)) fail(`--export-all: no output of ${file} has an export target; add "export": "glb" to the graph (default output) or to an entry of "outputs"`);
     const prepared: PreparedTarget[] = [];
+    // a target the export refuses (its path written with a prefix that is gone) fails the run before anything cooks
+    const refused = published.find((p) => p.target?.refused);
+    if (refused) fail(`--export-all: "${refused.label}": ${prefixGone(refused.target!.refused!)}; nothing was written`);
     for (const p of published) {
       if (!p.target) continue;
       const r = await engine.cook(graph, { target: p.node, frame: single, fps, ...(exportScope ? { scope: exportScope } : {}) });

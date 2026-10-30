@@ -1,5 +1,5 @@
 // The Packages tab (src/viewer/packages.ts serves it), in every package: the package's name, Find packages (a search of
-// TopoTopo's built-in packages and every library's packages, which says whether the package can use each), and a box per package
+// TopoTopo's built-in packages and the packages of the places the package looks in, which says whether it can use each), and a box per package
 // the package uses. A box says the package's name, the version in use and its state as a badge (up to date, update
 // available, live); its source, as a two-way switch naming both states, "Published 1.1 | Live folder", where the
 // package has a working folder of its own (TopoTopo's built-in packages only inside TopoTopo's own repository): Published is the
@@ -22,8 +22,8 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 /** The day of an ISO time ("2026-10-28"), '' without one. */
 export const day = (iso) => (typeof iso === 'string' ? iso.slice(0, 10) : '');
 
-/** The libraries that hold a package, as a box names them: library "game", and TopoTopo's built-in library ("topotopo"). */
-export const librariesText = (libs) => (libs ?? []).map((l) => (l === 'topotopo' ? 'TopoTopo\'s built-in library' : `library "${l}"`)).join(', ');
+/** The places that have a package, as a box names them: the workspace "x", library "props", TopoTopo's built-in library. */
+export const placesText = (places) => (places ?? []).join(', ');
 
 /**
  * An output of the version in use in a package's box: {name, kind, tags, used}; its name without the package ("pine"),
@@ -44,11 +44,11 @@ export function packageState(p) {
   if (p.followed) {
     return {
       kind: 'live', text: 'live',
-      title: `this session shows the edits of ${p.followed.dir} (library "${p.followed.library}")${p.version ? ` instead of the published copy of ${p.version}` : ''}; every save there cooks the scene again; nothing about it is saved${updates ? `\n${updates}` : ''}`,
+      title: `this session shows the edits of ${p.followed.dir} (${p.followed.place})${p.version ? ` instead of the published copy of ${p.version}` : ''}; every save there cooks the scene again; nothing about it is saved${updates ? `\n${updates}` : ''}`,
     };
   }
   if (p.error) return { kind: 'error', text: 'not found', title: p.error };
-  if (!ups.length) return { kind: 'current', text: 'up to date', title: `${p.version} is the newest version in ${librariesText(p.libraries) || 'the package\'s libraries'}` };
+  if (!ups.length) return { kind: 'current', text: 'up to date', title: `${p.version} is the newest version in ${placesText(p.places) || 'the places the package looks in'}` };
   return { kind: 'update', text: 'update available', title: updates };
 }
 
@@ -191,7 +191,7 @@ export function createPackagesPanel(ctx, host) {
   // ---------------------------------------------------------------- the tab
   const bar = el('div', 'packages-bar'), head = el('div', 'pkg-package'), search = el('input', 'pkg-search'), results = el('div', 'pkg-found');
   search.type = 'search'; search.placeholder = 'Find packages: tree, lamp, crate…'; search.setAttribute('aria-label', 'Find packages');
-  search.title = 'search TopoTopo\'s built-in packages and every library\'s packages by name, kind and tag';
+  search.title = 'search the packages of the places this package looks in and TopoTopo\'s built-in packages by name, kind and tag';
   let searchTimer = 0;
   search.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(search.value), 200); };
   search.onkeydown = (e) => { if (e.key === 'Escape') { search.value = ''; runSearch(''); search.blur(); } };
@@ -218,12 +218,12 @@ export function createPackagesPanel(ctx, host) {
     const libs = (found.libraries ?? []).filter((l) => l.hits.length);
     if (!libs.length) parts.push(el('div', 'pkg-sub', `Nothing found for "${query}". TopoTopo's built-in packages hold walls, houses, roofs, stairs, rocks, trees, props and roads.`));
     for (const l of libs) {
-      parts.push(el('div', 'pkg-libhead', l.standing === 'builtin' ? 'TopoTopo\'s built-in packages' : `library "${l.name}"${l.standing === 'unlisted' ? ' · not listed in this package' : ''}`));
+      parts.push(el('div', 'pkg-libhead', l.standing === 'builtin' ? 'TopoTopo\'s built-in packages' : `${l.place ?? `library "${l.name}"`}${l.standing === 'unlisted' ? ' · the workspace does not list it' : ''}`));
       for (const h of l.hits.slice(0, 40)) {
         const row = el('div', 'pkg-hit');
         const name = el('code', '', h.type), kind = h.kind ? el('span', 'badge kind', h.kind) : null, tags = el('span', 'pkg-tags line');
         for (const t of h.tags) tags.append(el('span', 'tag', t));
-        const state = h.used ? `in use (${h.used})` : h.self ? 'this package' : l.standing === 'unlisted' ? `its manifest would list library "${l.name}"` : 'ready to use';
+        const state = h.used ? `in use (${h.used})` : h.self ? 'this package' : l.standing === 'unlisted' ? `the workspace would list library "${l.name}"` : 'ready to use';
         row.append(name, ...(kind ? [kind] : []), el('span', 'pkg-hitstate dim', state), tags);
         row.title = `${h.type}${h.label ? ` (${h.label})` : ''} · ${kindTagsLine(h)}${h.description ? `\n${h.description}` : ''}\nTo use it, ask your agent: use ${h.type}`;
         row.append(button('Copy name', 'pkg-hitcopy', `copy ${h.type}: your agent uses it as a node type`, async () => {
@@ -249,7 +249,7 @@ export function createPackagesPanel(ctx, host) {
     count.title = [late ? `${late} of the ${rows.length} packages it uses ${late === 1 ? 'has' : 'have'} an update` : `it uses ${rows.length === 1 ? '1 package' : `${rows.length} packages`}`, live ? `${live} live this session` : ''].filter(Boolean).join('; ');
     if (P.package) {
       head.replaceChildren(el('strong', '', P.package.title || P.package.id), el('span', 'dim', ` · ${rows.length ? `${rows.length} package${rows.length === 1 ? '' : 's'} in use` : 'no packages yet'}`));
-      head.title = `${P.package.dir}\nThe package finds packages in TopoTopo's built-in library${P.package.libraries.length ? ` and in ${P.package.libraries.map((l) => `"${l}"`).join(', ')}` : ''}; the copies of the versions it uses are in packages/.`;
+      head.title = `${P.package.dir}\nThe package finds packages in ${[...(P.package.places ?? []), 'TopoTopo\'s built-in library'].join(', ')}, a name from the first place that has it; the copies of the versions it uses are kept with it (packages/), or in a workspace with the workspace (topotopo-packages/).`;
     }
     const parts = [];
     if (P.problems.length) parts.push(list(P.problems, 'err'));

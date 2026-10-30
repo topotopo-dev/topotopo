@@ -1,14 +1,16 @@
 // A package: a folder holding one <id>.topo file, its manifest, whose name is the package id, with the folders TopoTopo
 // works with (graphs/ assets/ inputs/ exports/) and, when it publishes versions or uses packages, its published versions/
-// and the copies in packages/ (src/packages/). Reading and writing the manifest, finding the package a folder belongs to,
-// the libraries it lists, making a folder a package (init, and the MCP server's rule when it starts), and the lock its
-// package commands hold while they write.
+// and the copies in packages/ (src/packages/). Reading and writing the manifest, finding the package a folder belongs to
+// and the places it finds packages in (its workspace and the libraries the workspace lists, else the registered
+// libraries), making a folder a package (init, and the MCP server's rule when it starts), and the lock its package
+// commands hold while they write.
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE, parsePackageName } from './graph/scope.ts';
 import { MANIFEST_EXT, NAME_RE, PACKAGE_FOLDERS, graphFiles, topoFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
-import { readWorkspace, writeWorkspace } from './workspace.ts';
+import { engineFile, readWorkspace, writeWorkspace } from './workspace.ts';
+import { folderKey, forgetScans, unscanned } from './scan.ts';
 import type { WebConfig } from './config.ts';
 
 /** a package version: big.small, from 1.0 */
@@ -106,8 +108,6 @@ export interface PackageManifest {
   name?: string;
   /** the packages its graphs use, with the version in use: {"owner/name": "1.3"} (written by the tools) */
   uses: Record<string, string>;
-  /** where it finds packages to add: paths relative to the package (a library in the same repository) or registered library names */
-  libraries: string[];
 }
 
 export const slugify = (s: string) =>
@@ -139,8 +139,12 @@ export function parseUses(v: unknown, where = ''): Record<string, string> {
   return Object.fromEntries(Object.entries(v as Record<string, string>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-/** A manifest checked and normalised; throws naming the problem. `id`: the package id, its file's name (the default title). */
-export function parseManifest(raw: any, id: string): PackageManifest {
+/**
+ * A manifest checked and normalised; throws naming the problem. `id`: the package id, its file's name (the default
+ * title); `dir`: the package's folder, when the manifest is read from one (what a manifest that still lists
+ * "libraries" is told depends on where it is).
+ */
+export function parseManifest(raw: any, id: string, dir?: string): PackageManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('a package manifest must be an object');
   if (Object.hasOwn(raw, 'id')) throw new Error('"id": the file\'s name is the package id; remove "id"');
   if (Object.hasOwn(raw, 'package')) throw new Error('"package" is "name" now: rename it');
@@ -159,10 +163,8 @@ export function parseManifest(raw: any, id: string): PackageManifest {
   const name = raw.name === undefined ? undefined : str(raw.name, 'name');
   if (name !== undefined && !isPackageName(name)) throw new Error(`"name" "${name}" must be "owner/name": each part lower-case letters, digits, - and _, starting with a letter or digit`);
   const uses = parseUses(raw.uses);
-  // each entry's form is checked where the libraries are looked in (libraryEntry): one that is wrong is said there, and
-  // the others still work
-  const libraries = raw.libraries ?? [];
-  if (!Array.isArray(libraries) || libraries.some((l: unknown) => typeof l !== 'string' || !l.trim())) throw new Error('"libraries" must be a list of registered library names and paths relative to the package ("./lib", "../../art/topotopo")');
+  // a package lists no libraries: its workspace does (an empty list is dropped)
+  if (raw.libraries !== undefined && !(Array.isArray(raw.libraries) && !raw.libraries.length)) throw new Error(librariesGone(raw.libraries, dir));
   return {
     graph, bake,
     title: str(raw.title, 'title', id),
@@ -172,8 +174,36 @@ export function parseManifest(raw: any, id: string): PackageManifest {
     created: str(raw.created, 'created'),
     ...(name !== undefined ? { name } : {}),
     uses,
-    libraries: libraries as string[],
   };
+}
+
+/**
+ * What a manifest that still lists "libraries" is told: where each entry goes now, for the package in `dir` (its
+ * entries' paths were written from it). In a workspace, the workspace lists the shared libraries its packages use:
+ * the command that lists each (a path entry by its folder; one inside the workspace needs nothing, its packages are
+ * found by themselves). Outside a workspace every registered library counts: the command that registers one.
+ */
+function librariesGone(v: unknown, dir?: string): string {
+  if (!dir) return `"libraries" is gone from the package manifest: a workspace lists the shared libraries its packages use (${program()} workspace library add <name or folder>); outside a workspace every registered library counts; remove "libraries"`;
+  const entries = Array.isArray(v) ? v.filter((e): e is string => typeof e === 'string' && !!e.trim()) : [];
+  const q = (s: string) => (/[\s"]/.test(s) ? JSON.stringify(s) : s);
+  const ws = locate(dir).workspace;
+  let registered: { name: string; path: string }[] = [];
+  try { registered = loadConfig().libraries; } catch { /* none to name */ }
+  const said = entries.map((e) => {
+    const k = libraryEntry(e);
+    if ('error' in k) return `"${e}" is no library: ${k.error}`;
+    const abs = 'path' in k ? path.resolve(dir, k.path) : null;
+    const reg = abs ? registered.find((l) => folderKey(l.path) === folderKey(abs)) : registered.find((l) => l.name === e);
+    if (ws) {
+      if (abs && within(abs, ws)) return `"${e}" (${abs}) is inside the workspace, whose packages are found by themselves: nothing to list`;
+      return `${program()} workspace library add ${reg ? reg.name : q(abs ?? e)}${workspaceFlag(ws)}`;
+    }
+    if (reg) return `"${e}" is the registered library "${reg.name}", which counts already`;
+    return abs ? `${program()} library add ${libraryName(abs) ?? (slugify(path.basename(abs)) || 'library')} ${q(abs)}` : `${program()} library add ${e} <its folder>`;
+  });
+  const how = said.length ? said.join('; ') : ws ? `${program()} workspace library add <name or folder>${workspaceFlag(ws)}` : `${program()} library add <name> <folder>`;
+  return `"libraries" is gone from the package manifest: ${ws ? `the workspace lists the shared libraries its packages use (${how})` : `outside a workspace every registered library counts (${how})`}; remove "libraries"`;
 }
 
 /**
@@ -229,9 +259,14 @@ export const packageId = (dir: string) => needManifest(dir).id;
 
 export function readManifest(dir: string): PackageManifest {
   const { file, id } = needManifest(dir);
+  return readManifestFile(file, id);
+}
+
+/** A manifest file read and checked (`id`: its name, the package id); throws naming the file. */
+export function readManifestFile(file: string, id: string): PackageManifest {
   let raw: any;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
-  try { return parseManifest(raw, id); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
+  try { return parseManifest(raw, id, path.dirname(file)); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
 }
 
 /**
@@ -243,55 +278,17 @@ export function writeManifest(dir: string, m: PackageManifest, id?: string) {
   let raw: any = {};
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new or unreadable: replaced */ }
   const out = { ...raw, ...m };
-  // "uses" and "libraries" appear once they hold something (or when the file had them already)
+  // "uses" appears once it holds something (or when the file had it already); an empty "libraries" goes
   if (!Object.keys(m.uses).length && !Object.hasOwn(raw, 'uses')) delete out.uses;
-  if (!m.libraries.length && !Object.hasOwn(raw, 'libraries')) delete out.libraries;
+  if (Array.isArray(out.libraries) && !out.libraries.length) delete out.libraries;
   writeAtomic(file, JSON.stringify(out, null, 2) + '\n');
+  forgetScans();
 }
 
 /** Written as a dot-file next to the target and renamed, so readers never see half a file. */
 export function writeAtomic(file: string, data: string | Uint8Array) {
   const part = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}-${Date.now().toString(36)}.part`);
   try { fs.writeFileSync(part, data); renameInto(part, file); } catch (e) { fs.rmSync(part, { force: true }); throw e; }
-}
-
-// ------------------------------------------------------------------------------------- the libraries a package lists
-
-/**
- * What an entry of the manifest's "libraries" names: a path relative to the package, written "./lib" or "../../art/lib"
- * (a library in the same repository, so every checkout and worktree reads its own), or a registered library's name
- * ("game"). Anything else says how to write it.
- */
-export function libraryEntry(entry: string): { path: string } | { name: string } | { error: string } {
-  const e = entry.trim();
-  if (path.isAbsolute(e) || /^[A-Za-z]:/.test(e))
-    return { error: `"${entry}" is an absolute path: list a library in the same repository by its path relative to the package ("../lib"), any other by its registered name` };
-  if (e === '.' || e === '..' || /^\.\.?[\\/]/.test(e)) return { path: e };
-  if (ID_RE.test(e)) return { name: e };
-  return { error: `"${entry}" is neither a path written from the package ("./${e.replace(/\\/g, '/')}") nor a registered library's name (lower-case letters, digits, - and _)` };
-}
-
-/**
- * The entry the manifest lists for a library a person names (`topotopo libraries add`): a folder (absolute, or relative
- * to `cwd`) as its path relative to the package, "./x" or "../x"; else a registered library's name. Throws for what is
- * neither, and for a folder that is a package rather than a library.
- */
-export function libraryEntryFor(packageDir: string, given: string, cwd = process.cwd()): string {
-  const abs = path.resolve(cwd, given);
-  if (fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory()) {
-    const at = manifestAt(abs);
-    if (at) throw new Error(`${abs} is a package (it holds ${path.basename(at.file)}), not a library: list the folder that holds it, ${path.dirname(abs)}`);
-    const rel = path.relative(packageDir, abs).split(path.sep).join('/') || '.';
-    if (path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) throw new Error(`${abs} is on another drive than the package: register it (topotopo library add <name> ${abs}) and list it by its name`);
-    return rel.startsWith('.') ? rel : `./${rel}`;
-  }
-  if (ID_RE.test(given)) {
-    let cfg: WebConfig | null = null;
-    try { cfg = loadConfig(); } catch { /* an unreadable config registers nothing */ }
-    if (cfg?.libraries.some((l) => l.name === given) || given === BUILTIN_LIBRARY.name) return given;
-    throw new Error(`"${given}" is no folder here and no registered library (${cfg?.libraries.map((l) => l.name).join(', ') || 'none are registered'}): give the library's folder, or register it first (${program()} library add ${given} <folder>)`);
-  }
-  throw new Error(`no folder ${abs}: give the library's folder or a registered library's name`);
 }
 
 /**
@@ -356,9 +353,9 @@ export function ownPackageName(pkg: string): string {
 const STARTER = { description: 'A starting point: replace it with the package\'s graph.', nodes: { box: { type: 'box' } }, output: 'box' };
 
 /**
- * Make a folder a package (`topotopo init`), in a library or anywhere: <id>.topo (the id and title from the folder's
- * name, or from `title`; the graph it shows; "libraries": [], where the person lists the libraries it finds packages
- * in; and the name it publishes under, `name`, "owner/name"), graphs/ with a starter graph when it holds none (so that
+ * Make a folder a package (`topotopo init`), in a workspace, a library or anywhere: <id>.topo (the id and title from the
+ * folder's name, or from `title`; the graph it shows; and the name it publishes under, `name`, "owner/name"), graphs/
+ * with a starter graph when it holds none (so that
  * the graph the manifest shows is there: graphs/main.json, a box), a .gitignore for the derived files and a
  * .gitattributes that keeps its versions and package copies byte for byte (both completed when they exist). In a folder
  * that is a package already, `name` sets the name it publishes under (when it has none yet); without it, that is an
@@ -391,9 +388,10 @@ export function initPackage(dir: string, o: { name?: string; title?: string } = 
   const held = [...graphFiles(abs).keys()];
   const graph = held.length && !held.includes('main') ? held[0] : 'main';
   if (!held.length) fs.writeFileSync(path.join(graphs, 'main.json'), JSON.stringify(STARTER, null, 2) + '\n');
-  const raw = { title, graph, created: new Date().toISOString().slice(0, 10), ...(o.name !== undefined ? { name: o.name } : {}), libraries: [] };
+  const raw = { title, graph, created: new Date().toISOString().slice(0, 10), ...(o.name !== undefined ? { name: o.name } : {}) };
   const manifest = parseManifest(raw, id);
   writeAtomic(path.join(abs, `${id}${MANIFEST_EXT}`), JSON.stringify(raw, null, 2) + '\n');
+  forgetScans();
   packageRepoFiles(abs);
   return { dir: abs, id, manifest, said: `package ${id} → ${abs}${manifest.name ? ` (publishes as ${manifest.name})` : ''}` };
 }
@@ -452,7 +450,7 @@ export function startPackage(dir: string, o: { title?: string } = {}): PackageSt
   const file = `${made.id}${MANIFEST_EXT}`;
   return {
     dir: abs, log: `made the folder ${abs} a package (${file}): it held nothing but what TopoTopo makes itself`,
-    note: `The folder ${abs} became a package, "${made.id}", when the server started (${file}, graphs/${made.manifest.graph}.json): it held nothing but TopoTopo's own folders. Its graphs use packages as they come, TopoTopo's own packages ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish versions of it, workspace {action:"set", name:"<owner>/${made.id}"} names it; to use packages from another library, workspace {action:"set", libraries:[...]} when the person names it.`,
+    note: `The folder ${abs} became a package, "${made.id}", when the server started (${file}, graphs/${made.manifest.graph}.json): it held nothing but TopoTopo's own folders. Its graphs use packages as they come, TopoTopo's own packages ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish versions of it, workspace {action:"set", name:"<owner>/${made.id}"} names it. It finds packages in its workspace and the libraries the workspace lists (workspace {action:"libraries"} shows them), or outside a workspace in every registered library.`,
   };
 }
 
@@ -466,15 +464,30 @@ export const LIBRARY_FILE = 'library.json';
 export interface Located {
   /** the package the folder belongs to (itself or the nearest folder above with a .topo file) */
   package: string | null;
-  /** the workspace around it: the nearest folder at or above the package (or the folder) with topotopo-workspace.json */
+  /**
+   * the workspace around it: the nearest folder at or above the package (or the folder) with topotopo-workspace.json,
+   * when the workspace's scan reaches the package (src/scan.ts); else null
+   */
   workspace: string | null;
+  /** the workspace above whose scan does not reach the package (another engine project on the way, say), and why */
+  outside?: { workspace: string; why: string };
 }
 
-/** Where a folder sits: the package it belongs to and the workspace (the game) around it. */
+/**
+ * Where a folder sits: the package it belongs to and the workspace (the game) around it. A package is the workspace's
+ * when the workspace's scan finds it: one the scan never reaches (in another engine project inside the workspace, a dot
+ * folder, deeper than the scan looks) is in no workspace, and keeps its own copies.
+ */
 export function locate(start: string): Located {
   const inside = packageDirOf(start);
   for (let d = path.resolve(inside ?? start); ; ) {
-    if (fs.existsSync(path.join(d, WORKSPACE_FILE))) return { package: inside, workspace: d };
+    if (fs.existsSync(path.join(d, WORKSPACE_FILE))) {
+      let engine: string | null;
+      // a workspace file that cannot be read: said where the packages are looked up
+      try { engine = engineFile(d, readWorkspace(d)); } catch { return { package: inside, workspace: d }; }
+      const why = unscanned(d, inside ?? start, { engine });
+      return why ? { package: inside, workspace: null, outside: { workspace: d, why } } : { package: inside, workspace: d };
+    }
     const up = path.dirname(d);
     if (up === d) return { package: inside, workspace: null };
     d = up;
@@ -489,75 +502,162 @@ export function libraryName(root: string): string | null {
   } catch { return null; }
 }
 
-/** A library a package looks in: the entry that lists it, its folder, its name, and who lists it. */
-export interface LibraryAt { entry: string; root: string; name: string; from: 'package' | 'workspace' }
-/** The libraries a package looks in, and what is wrong with the entries that do not work (the others still do). */
-export interface Libraries { libs: LibraryAt[]; problems: string[] }
+/**
+ * A place a package finds packages in, besides TopoTopo's built-in library (librariesFor). `from`: "self", the workspace
+ * the package is in, or outside a workspace the library it is in (scanned from the package's own checkout); "listed",
+ * a shared library the workspace's file lists; "registered", outside a workspace, a library registered on this machine.
+ */
+export interface LibraryAt {
+  from: 'self' | 'listed' | 'registered';
+  /** what names it: the workspace file's entry, a registered name, or the workspace's or library's own name */
+  entry: string;
+  root: string;
+  /** the workspace's name, a registered name, a library's own name (library.json), else the entry */
+  name: string;
+  /** a workspace (from "self"), not a library */
+  workspace?: boolean;
+  /**
+   * found by its folder (the workspace, a library.json above the package, a path in the workspace file), not by a
+   * registered name: the lock records it by its path from the folder of the copies
+   */
+  byPath: boolean;
+}
+/** The places a package finds packages in, in order, and what is wrong with the entries that do not work (the others still do). */
+export interface Libraries {
+  libs: LibraryAt[];
+  problems: string[];
+  /** the workspace around the folder, or null */
+  workspace: string | null;
+  /** the workspace, or the library the folder is in, when it is the first place */
+  self: LibraryAt | null;
+}
+
+/** A place as messages name it: the workspace "my-game", library "props". */
+export const placeText = (l: Pick<LibraryAt, 'name' | 'workspace'>) => (l.workspace ? `the workspace "${l.name}"` : `library "${l.name}"`);
+/** TopoTopo's built-in library as messages name it. */
+export const BUILTIN_TEXT = 'TopoTopo\'s built-in library';
+
+/** `inner` is `outer` or a folder inside it. */
+export const within = (inner: string, outer: string) => { const r = path.relative(path.resolve(outer), path.resolve(inner)); return !r.startsWith('..') && !path.isAbsolute(r); };
+const isDir = (p: string) => !!fs.statSync(p, { throwIfNoEntry: false })?.isDirectory();
 
 /**
- * The libraries a package looks in, in order: those its manifest lists (as it is now), then those of the workspace
- * around it (topotopo-workspace.json "libraries"), a library listed by both counted once. Each entry is a path relative
- * to the file that lists it ("./lib", "../lib") or a registered library's name. A library is named by its library.json
- * when it has one, else by the entry. What is wrong with an entry is a problem: a name not registered on this machine,
- * a folder that is not there, a package's folder instead of its library's, an entry of neither form; the others still
- * work. TopoTopo's built-in library is none of them (listing it by its name changes nothing).
+ * What a `workspace library` command a hint names needs to act on the workspace `ws`: " --workspace <folder>" (its path
+ * from `cwd`) when `cwd` is outside it, for the command acts on the workspace around the current folder; else ''.
  */
-export function librariesFor(dir: string): Libraries {
-  const lists: LibraryList[] = [{ file: path.basename(manifestFile(dir)), base: dir, entries: readManifest(dir).libraries, from: 'package' }];
-  const problems: string[] = [];
-  const ws = locate(dir).workspace;
+export function workspaceFlag(ws: string, cwd = process.cwd()): string {
+  if (within(cwd, ws)) return '';
+  const r = path.relative(path.resolve(cwd), path.resolve(ws));
+  const p = !r || path.isAbsolute(r) ? path.resolve(ws) : r;
+  return ` --workspace ${/[\s"]/.test(p) ? JSON.stringify(p) : p}`;
+}
+
+/**
+ * What an entry of a workspace's "libraries" names: a registered library's name ("props"), or a path written from the
+ * workspace, "../shared/props" (a library in the same repository, so every checkout and worktree reads its own).
+ * Anything else says how to write it.
+ */
+export function libraryEntry(entry: string): { path: string } | { name: string } | { error: string } {
+  const e = entry.trim();
+  if (path.isAbsolute(e) || /^[A-Za-z]:/.test(e))
+    return { error: `"${entry}" is an absolute path: register the library (${program()} library add <name> ${e}) and list it by its name, or list it by its path from the workspace ("../shared/props")` };
+  if (e === '.' || e === '..' || /^\.\.?[\\/]/.test(e)) return { path: e };
+  if (ID_RE.test(e)) return { name: e };
+  return { error: `"${entry}" is neither a path written from the workspace ("../${e.replace(/\\/g, '/')}") nor a registered library's name (lower-case letters, digits, - and _)` };
+}
+
+/**
+ * The places a folder's package finds packages in, in order (TopoTopo's built-in library comes after them, and only it
+ * has the packages named "topotopo/…"):
+ *   in a workspace: the workspace itself (its scan), then the shared libraries its file lists, in order;
+ *   outside a workspace, in a library (a registered library's root at or above the folder, or a library.json): that
+ *   library, scanned from the package's own checkout so its siblings come from the same worktree, then every other
+ *   registered library;
+ *   outside both: every registered library.
+ * A workspace file that cannot be read is a problem, and only the built-in library is looked in until it is fixed.
+ */
+export function librariesFor(start: string): Libraries {
+  const { package: pkg, workspace: ws } = locate(start);
+  const out: Libraries = { libs: [], problems: [], workspace: ws, self: null };
   if (ws) {
-    try { lists.push({ file: path.join(ws, WORKSPACE_FILE), base: ws, entries: readWorkspace(ws).libraries, from: 'workspace' }); }
-    catch (e: any) { problems.push(e.message); }
+    let m: ReturnType<typeof readWorkspace>;
+    try { m = readWorkspace(ws); } catch (e: any) { out.problems.push(`${e.message}; until it is fixed, packages are found in ${BUILTIN_TEXT} only`); return out; }
+    out.self = { from: 'self', entry: '.', root: ws, name: m.name, workspace: true, byPath: true };
+    const listed = resolveListed(ws, m.libraries);
+    out.libs.push(out.self, ...listed.libs);
+    out.problems.push(...listed.problems);
+    return out;
   }
-  const out = resolveLibraries(lists);
-  out.problems.unshift(...problems);
+  let cfg: WebConfig | null = null;
+  try { cfg = loadConfig(); } catch (e: any) { out.problems.push(e.message); }
+  const registered = cfg?.libraries ?? [];
+  out.self = libraryAround(pkg ?? start, registered);
+  if (out.self) out.libs.push(out.self);
+  const seen = new Set(out.libs.map((l) => folderKey(l.root)));
+  for (const l of registered) {
+    // the library the package is in, reached from another checkout under its registered name, counts once
+    if (seen.has(folderKey(l.path)) || l.name === out.self?.name) continue;
+    seen.add(folderKey(l.path));
+    out.libs.push({ from: 'registered', entry: l.name, root: l.path, name: l.name, byPath: false });
+  }
   return out;
 }
 
-/** A file's "libraries": the file (for messages), the folder its paths are written from, its entries, who lists them. */
-export interface LibraryList { file: string; base: string; entries: string[]; from: LibraryAt['from'] }
+/** The library a folder outside a workspace is in: the nearest registered library's root or library.json at or above it. */
+function libraryAround(start: string, registered: { name: string; path: string }[]): LibraryAt | null {
+  for (let d = path.resolve(start); ; ) {
+    const reg = registered.find((l) => folderKey(l.path) === folderKey(d));
+    if (reg) return { from: 'self', entry: reg.name, root: reg.path, name: reg.name, byPath: false };
+    if (fs.existsSync(path.join(d, LIBRARY_FILE))) {
+      const name = libraryName(d) ?? (slugify(path.basename(d)) || 'library');
+      return { from: 'self', entry: name, root: d, name, byPath: true };
+    }
+    const up = path.dirname(d);
+    if (up === d) return null;
+    d = up;
+  }
+}
 
 /**
- * The libraries some lists name, in order, a library named twice counted once; what is wrong with an entry is a
- * problem and the others still count (see librariesFor).
+ * The shared libraries a workspace's file lists, in order, each once; what is wrong with an entry is a problem and the
+ * others still count: a name not registered on this machine, a folder that is not there, a package's folder, an entry
+ * of neither form, a library inside the workspace (its packages are found by themselves) or holding it. TopoTopo's
+ * built-in library is none of them (listing it changes nothing).
  */
-export function resolveLibraries(lists: LibraryList[]): Libraries {
-  const out: Libraries = { libs: [], problems: [] };
+export function resolveListed(ws: string, entries: string[]): { libs: LibraryAt[]; problems: string[] } {
+  const out = { libs: [] as LibraryAt[], problems: [] as string[] };
+  const file = path.join(ws, WORKSPACE_FILE);
   let cfg: WebConfig | null | undefined;
-  for (const { file, base, entries, from } of lists) {
-    const said = (entry: string, why: string) => out.problems.push(`${file} "libraries": "${entry}" ${why}; the other libraries still count`);
-    const add = (entry: string, root: string) => {
-      if (out.libs.some((l) => path.resolve(l.root).toLowerCase() === path.resolve(root).toLowerCase())) return;
-      out.libs.push({ entry, root, name: libraryName(root) ?? entry, from });
-    };
-    for (const entry of entries) {
-      if (entry === BUILTIN_LIBRARY.name) continue;
-      const k = libraryEntry(entry);
-      if ('error' in k) { out.problems.push(`${file} "libraries": ${k.error}; the other libraries still count`); continue; }
-      if ('name' in k) {
-        if (cfg === undefined) { try { cfg = loadConfig(); } catch (e: any) { cfg = null; out.problems.push(e.message); } }
-        const lib = cfg?.libraries.find((l) => l.name === entry);
-        if (lib) { add(entry, lib.path); continue; }
-        const here = path.resolve(base, entry);
-        said(entry, fs.statSync(here, { throwIfNoEntry: false })?.isDirectory()
-          ? `names no registered library, and a folder of that name is beside ${from === 'package' ? file : WORKSPACE_FILE}: a path is written from the ${from}, "./${entry}"`
-          : `is not registered on this machine${cfg ? ` (${cfg.file} has ${cfg.libraries.map((l) => l.name).join(', ') || 'none'})` : ''}: ${program()} library add ${entry} <folder> registers it, or list the library by its path from the ${from} ("../lib")`);
+  const said = (entry: string, why: string) => out.problems.push(`${file} "libraries": "${entry}" ${why}; the other libraries still count`);
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (entry === BUILTIN_LIBRARY.name) continue;
+    const k = libraryEntry(entry);
+    if ('error' in k) { out.problems.push(`${file} "libraries": ${k.error}; the other libraries still count`); continue; }
+    let root: string, name: string;
+    if ('name' in k) {
+      if (cfg === undefined) { try { cfg = loadConfig(); } catch (e: any) { cfg = null; out.problems.push(e.message); } }
+      const lib = cfg?.libraries.find((l) => l.name === entry);
+      if (!lib) {
+        said(entry, cfg?.workspaces.some((w) => w.name === entry)
+          ? 'is a registered workspace, not a library: a workspace\'s packages are found from inside it ("libraries" holds shared libraries only)'
+          : `is not registered on this machine${cfg ? ` (${cfg.file} has ${cfg.libraries.map((l) => l.name).join(', ') || 'none'})` : ''}: ${program()} library add ${entry} <folder> registers it`);
         continue;
       }
-      const root = path.resolve(base, k.path);
-      if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) { said(entry, `is no folder (${root})`); continue; }
+      root = path.resolve(lib.path); name = entry;
+    } else {
+      root = path.resolve(ws, k.path);
+      if (!isDir(root)) { said(entry, `is no folder (${root})`); continue; }
       let at: ReturnType<typeof manifestAt> = null;
       try { at = manifestAt(root); } catch (e: any) { said(entry, `is a package's folder that cannot be read: ${e.message}`); continue; }
-      if (at) {
-        let pkg = '';
-        try { pkg = readManifest(root).name ?? ''; } catch { /* named without its name */ }
-        const parent = path.posix.dirname(k.path.replace(/\\/g, '/'));
-        said(entry, `is a package${pkg ? ` (published as ${pkg})` : ''}, not a library: list the folder that holds it, "${parent === '.' ? '.' : parent}"`);
-        continue;
-      }
-      add(entry, root);
+      if (at) { said(entry, `is a package's folder (${path.basename(at.file)}), not a library: list the folder of the library that holds it`); continue; }
+      name = libraryName(root) ?? entry;
     }
+    if (within(root, ws)) { said(entry, `is inside the workspace (${root}): its packages are found by themselves; remove it from "libraries"`); continue; }
+    if (within(ws, root)) { said(entry, `(${root}) holds the workspace: list a shared library outside it; the workspace's own packages are found by themselves`); continue; }
+    if (seen.has(folderKey(root))) continue;
+    seen.add(folderKey(root));
+    out.libs.push({ from: 'listed', entry, root, name, byPath: !('name' in k) });
   }
   return out;
 }

@@ -3,6 +3,7 @@
 // examples/ is a package: the graphs that name TopoTopo's own packages cook them from its copies in examples/packages/.
 //   node test/showcase.ts [filter]
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import '../src/nodes/index.ts';
@@ -15,6 +16,9 @@ import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
+// an empty config of its own: the libraries registered on this machine play no part in the renders
+process.env.TOPOTOPO_CONFIG = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-config-')), 'config.json');
+delete process.env.TOPOTOPO_LIBRARIES;
 const dir = path.join(root, 'examples');
 const outDir = path.join(dir, 'renders');
 fs.mkdirSync(outDir, { recursive: true });

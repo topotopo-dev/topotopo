@@ -1,5 +1,7 @@
-// The web app server: the registered workspaces (the games: engine, libraries, packages, the packages they use),
-// every library's packages as a grid, TopoTopo's built-in library last, a page per package with its 3D preview, and
+// The web app server: the registered workspaces (their engine, the shared libraries they list, their packages as the
+// scan finds them, the packages they use), every library's packages as a grid (a library inside a registered workspace
+// is the workspace's), TopoTopo's built-in library last, a page per package with its 3D preview (a workspace's package
+// at /p/<workspace name>/<id>: workspaces and libraries share one set of names), and
 // stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their notes and
 // the outputs it publishes with their kinds, tags and thumbnails (from its versions' records), which the grid's search
 // finds as well, and the packages that use it; any package's page the packages it uses, linked, and the grid marks a
@@ -17,11 +19,12 @@ import type { ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
-import { webDir, isStale, listFiles, readBakeState, scanLibrary } from './library.ts';
+import { webDir, isStale, listFiles, readBakeState, scanAll } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { WORKSPACE_FILE, resolveLibraries } from '../package.ts';
-import { engineAddress, readWorkspace } from '../workspace.ts';
+import { resolveListed } from '../package.ts';
+import { readWorkspace } from '../workspace.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
+import { forgetScans } from '../scan.ts';
 import { graphFiles } from '../session.ts';
 import type { BakeState, LibraryScan, Package } from './library.ts';
 import type { WebConfig } from '../config.ts';
@@ -103,22 +106,28 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       builtinAt.set(b.dir, { from: b.from, thumb });
     }
     return {
-      name: BUILTIN_LIBRARY.name, root: BUILTIN_LIBRARY.path, problems: [],
+      name: BUILTIN_LIBRARY.name, root: BUILTIN_LIBRARY.path, problems: [], workspaces: [],
       packages: list.map((b) => ({ lib: BUILTIN_LIBRARY.name, id: b.id, dir: b.dir, rel: b.id, collection: '', manifest: b.manifest, updated: Date.parse(b.versions.at(-1)?.published ?? '') || 0 })),
     };
   };
-  /** the registered workspaces: their files, and the packages inside each (read with the libraries) */
+  /** the registered workspaces: their files, and the packages inside each (scanned with the libraries) */
   let games: { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; scan: LibraryScan | null }[] = [];
   const rescan = () => {
-    // TopoTopo's built-in library last, read again each time: a built-in package published while the web app runs shows
-    scans = [...cfg.libraries.map(scanLibrary), scanBuiltin()];
+    forgetScans();
+    // the libraries (but those inside a registered workspace) and the workspaces; TopoTopo's built-in library last,
+    // read again each time: a built-in package published while the web app runs shows
+    const all = scanAll(cfg);
+    scans = [...all, scanBuiltin()];
     packages.clear();
-    for (const s of scans) for (const p of s.packages) packages.set(keyOf(p), p);
-    games = cfg.workspaces.map((w) => {
-      try { const m = readWorkspace(w.path); return { name: m.name, dir: w.path, m, scan: scanLibrary({ name: m.name, path: w.path }) }; }
-      catch (e: any) { return { name: w.name, dir: w.path, m: null, problem: e.message, scan: null }; }
+    // a package's address is its library's or workspace's name and its id: the first folder of an id keeps it (the scan says so)
+    for (const s of scans) for (const p of s.packages) if (!packages.has(keyOf(p))) packages.set(keyOf(p), p);
+    games = all.filter((s) => s.workspace).map((s) => {
+      try { const m = readWorkspace(s.root); return { name: m.name, dir: s.root, m, scan: s }; }
+      catch (e: any) { return { name: s.name, dir: s.root, m: null, problem: e.message, scan: null }; }
     });
   };
+  /** The libraries' scans, for the grid: a workspace's packages are on its card. */
+  const libraryScans = () => scans.filter((s) => !(s as LibraryScan).workspace);
   /** Read TopoTopo's built-in library again (a few small files), the other libraries as they were scanned. */
   const refreshBuiltin = () => {
     const b = scanBuiltin();
@@ -255,10 +264,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const workspaceCard = (g: (typeof games)[number], homes = packageHomes()): WorkspaceCardData => {
     if (!g.m) return { name: g.name, dir: g.dir, engine: null, libraries: [], packages: [], uses: [], problems: [g.problem ?? 'its file cannot be read'] };
     const e = g.m.engine;
-    const libs = resolveLibraries([{ file: path.join(g.dir, WORKSPACE_FILE), base: g.dir, entries: g.m.libraries, from: 'workspace' }]);
-    const byDir = new Map([...packages.values()].map((p) => [path.resolve(p.dir).toLowerCase(), p]));
+    const libs = resolveListed(g.dir, g.m.libraries);
     const inside = (g.scan?.packages ?? []).map((p) => {
-      const at = byDir.get(path.resolve(p.dir).toLowerCase());
+      const at = packages.get(keyOf(p)) === p ? p : null;
       return { title: p.manifest.title, rel: p.rel, ...(at ? { url: urls.package(at.lib, at.id) } : {}), ...(p.manifest.name ? { pkg: p.manifest.name } : {}) };
     });
     const uses = Object.entries(g.m.uses).map(([name, v]) => {
@@ -267,8 +275,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     });
     return {
       name: g.name, dir: g.dir,
-      engine: e ? `${e.type === 'godot' ? 'Godot' : 'Unreal'} · ${e.project}${e.assets ? ` · exports to ${engineAddress(e, e.assets)}` : ''}` : null,
-      libraries: libs.libs.map((l) => l.name), packages: inside, uses, problems: [...libs.problems, ...(g.scan?.problems ?? [])],
+      engine: e && e !== 'none' ? `${e.type === 'godot' ? 'Godot' : 'Unreal'} · ${e.project}` : null,
+      libraries: libs.libs.map((l) => l.name), packages: inside, uses, problems: [...libs.problems, ...(g.scan?.problems ?? []), ...(g.scan?.workspaces.length ? [`other workspaces inside, not scanned: ${g.scan.workspaces.join(', ')}`] : [])],
     };
   };
   const status = (p: Package, s: BakeState | null) => (isBuiltin(p) ? 'ok' : !hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
@@ -333,7 +341,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(home ? { url: urls.package(home.lib, home.id) } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {
-      ...cardOf(p), builtin, rel: p.rel, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
+      ...cardOf(p), builtin, rel: p.rel, place: games.some((g) => g.scan?.packages.includes(p)) ? `the workspace "${p.lib}"` : `library "${p.lib}"`, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
       attachments: listFiles(path.join(p.dir, 'attachments')), exports: listFiles(path.join(p.dir, 'exports')),
       glb: !builtin && fs.existsSync(path.join(webDir(p.dir), 'preview.glb')), bake: s,
       share: { link: abs(urls.package(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
@@ -406,7 +414,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (u.pathname === '/' || u.pathname === '/index.html') {
         // TopoTopo's built-in library as it is now: a built-in package published while the web app runs shows
         refreshBuiltin();
-        return html(frontPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.packages.map(cardOf), ...(s.name === BUILTIN_LIBRARY.name ? { builtin: true } : {}) })), workspaces: games.map((g) => workspaceCard(g)), problems: scans.flatMap((s) => s.problems) }, urls));
+        return html(frontPage({ libraries: libraryScans().map((s) => ({ name: s.name, cards: s.packages.filter((p) => packages.get(keyOf(p)) === p).map(cardOf), ...(s.name === BUILTIN_LIBRARY.name ? { builtin: true } : {}) })), workspaces: games.map((g) => workspaceCard(g)), problems: libraryScans().flatMap((s) => s.problems) }, urls));
       }
       if (seg[0] === 'static') { const p = readStatic(assetDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'app') { const p = readStatic(appDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }

@@ -26,6 +26,21 @@ export function inFolder(folder, p) {
   return `${String(folder).replace(/[\\/]+$/, '')}${sep}${String(p).split(/[\\/]/).join(sep)}`;
 }
 
+/**
+ * Why a path typed for a target inside exports/ is refused, '' when it is fine: the "engine:" prefix is gone (the path
+ * without it said), and a path stays inside exports/.
+ */
+export function exportPathError(p) {
+  if (p.startsWith(GONE)) return `the "${GONE}" prefix is gone: write the path inside exports/ ("${p.slice(GONE.length)}")`;
+  if (!p || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').some((s) => !s || s === '.' || s === '..')) return 'a path inside exports/, without ".." or a drive';
+  return '';
+}
+/** The export path prefix that is gone (io/targets.ts), kept only to refuse it. */
+const GONE = 'engine' + ':';
+
+/** A target's path as the popover starts with it: one still written with the prefix that is gone, without it. */
+export const targetPathShown = (p) => (String(p).startsWith(GONE) ? String(p).slice(GONE.length) : String(p));
+
 /** A file name without its folders and extension (".points.json" counts as one), as the server names a zip. */
 export const stemOf = (p) => String(p).replace(/[\\/]+$/, '').replace(/^.*[\\/]/, '').replace(/(\.points\.json|\.[^.]*)$/i, '') || 'export';
 
@@ -99,7 +114,8 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     if (startFormat) format.value = startFormat;
     const writes = el('div', 'export-writes');
     const file = el('input'); file.type = 'text'; file.spellcheck = false; file.setAttribute('aria-label', 'File in exports/');
-    file.value = item.target?.path ?? (startFormat ? defaultPath(stem, startFormat, formats) : '');
+    const dflt = startFormat ? defaultPath(stem, startFormat, formats) : '';
+    file.value = item.target?.path ? targetPathShown(item.target.path) || dflt : dflt;
     const where = el('div', 'export-where dim');
     const error = el('div', 'export-error err');
     const cancel = el('button', '', 'Cancel'), go = el('button', 'primary', download ? 'Download' : 'Export');
@@ -139,7 +155,8 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
       if (!offered.length) return;
       if (download) { close({ format: format.value }); return; }
       const p = file.value.trim().replace(/\\/g, '/');
-      if (!p || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').some((s) => !s || s === '.' || s === '..')) { error.textContent = 'a path inside exports/ (or engine: and a path inside the game engine\'s assets folder), without ".." or a drive'; file.focus(); return; }
+      const wrong = exportPathError(p);
+      if (wrong) { error.textContent = wrong; file.focus(); return; }
       close({ format: format.value, path: p });
     };
     sync();

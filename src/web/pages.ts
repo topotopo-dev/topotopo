@@ -50,6 +50,8 @@ export interface PackageData extends CardData {
   /** one of TopoTopo's own packages (its built-in library): nothing to bake or edit here */
   builtin: boolean;
   rel: string;
+  /** where it is, for people: library "props", the workspace "my-game" */
+  place: string;
   links: { label: string; url: string }[];
   graph: string;
   graphs: { name: string; nodes: number; vars: VarRow[] }[];
@@ -67,13 +69,13 @@ export interface PackageData extends CardData {
 }
 
 /**
- * A registered workspace (a game) on the front page: its engine project, the libraries its packages look in, its
- * packages (linked when a library of the web app holds them) and the packages it uses, those with a newer version marked.
+ * A registered workspace on the front page: its engine project, the shared libraries it lists, its packages (every folder
+ * in it with a .topo file, each linked to its page) and the packages it uses, those with a newer version marked.
  */
 export interface WorkspaceCardData {
   name: string;
   dir: string;
-  /** "Godot · game/project.godot · exports to res://assets/topotopo", or null */
+  /** "Godot · ../project.godot", or null */
   engine: string | null;
   libraries: string[];
   packages: { title: string; rel: string; url?: string; pkg?: string }[];
@@ -151,11 +153,11 @@ export function frontPage(d: WebData, u: Urls): string {
   const wsSection = ws.length ? `
   <section class="hub" id="workspaces">
     <h2>Workspaces <span class="count">${ws.length}</span></h2>
-    <p class="dim small">The games your packages belong to: the libraries every package inside looks in, one copy of each package for the whole game, and the engine project exports go to.</p>
+    <p class="dim small">Your workspaces: every folder in one with a .topo file is a package of it, they find each other by themselves and use the shared libraries it lists, with one copy of each package version for the whole workspace.</p>
     ${ws.map((w) => `<article class="workspace" id="ws-${esc(w.name)}">
       <h3>${esc(w.name)}${w.engine ? ` <span class="dim small">${esc(w.engine)}</span>` : ''}</h3>
       <table class="vars ws"><tbody>
-        <tr><th>Libraries</th><td>${w.libraries.length ? w.libraries.map(esc).join(', ') : '<span class="dim">none listed</span>'}</td></tr>
+        <tr><th>Shared libraries</th><td>${w.libraries.length ? w.libraries.map(esc).join(', ') : '<span class="dim">none listed</span>'}</td></tr>
         <tr><th>Packages</th><td>${w.packages.length ? w.packages.map((p) => `${link(p.title, p.url)}${p.pkg ? ` <code>${esc(p.pkg)}</code>` : ''}`).join(', ') : '<span class="dim">none yet</span>'}</td></tr>
         <tr><th>Uses</th><td>${w.uses.length ? w.uses.map((x) => `${link(x.name, x.url)} ${esc(x.version)}${x.newest ? ` <span class="newer">${esc(x.newest)} is out</span>` : ''}`).join(', ') : '<span class="dim">none used yet</span>'}</td></tr>
       </tbody></table>
@@ -293,7 +295,7 @@ export function packagePage(p: PackageData, u: Urls): string {
     <h2>Graphs</h2>
     ${p.graphs.length ? p.graphs.map((g) => `<div class="graph"><h3>${esc(g.name)}${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes</span></h3>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('') : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its workspace tool opens the package); open the editor to watch it appear.</p>'}
     ${p.exports.length ? `<h2>Exports</h2>${fileList(p.exports, p.lib, p.id, 'exports', u)}` : ''}
-    <p class="dim small">Folder <code>${esc(p.rel)}</code> in library ${esc(p.lib)}${p.created ? ` · created ${esc(p.created)}` : ''} · updated ${esc(when(p.updated))}</p>
+    <p class="dim small">Folder <code>${esc(p.rel)}</code> in ${esc(p.place)}${p.created ? ` · created ${esc(p.created)}` : ''} · updated ${esc(when(p.updated))}</p>
   </section>
 </main>`, { page: 'package', data: { lib: p.lib, id: p.id } });
 }

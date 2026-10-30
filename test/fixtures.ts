@@ -457,3 +457,16 @@ export async function createFixtureEngine(): Promise<{ engine: Engine; tmp: stri
 
 /** Repository root (works on Windows file URLs too). */
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * Point TopoTopo at an empty config of its own ($TOPOTOPO_CONFIG, a file in a new temp folder that is not there yet), so
+ * that no test and no gate depends on the libraries registered on the developer's machine; returns the file. Every test
+ * and gate script that imports these fixtures runs with one (a test that registers libraries points at its own after).
+ */
+export function isolateConfig(): string {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-config-')), 'config.json');
+  process.env.TOPOTOPO_CONFIG = file;
+  delete process.env.TOPOTOPO_LIBRARIES;
+  return file;
+}
+isolateConfig();

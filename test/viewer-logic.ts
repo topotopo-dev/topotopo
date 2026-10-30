@@ -297,17 +297,17 @@ section('cook state line');
 
 section('the Packages tab: a package\'s state and source, the Scene tree\'s mark, an update\'s places');
 {
-  const p = (o: any) => ({ package: 'studio/trees', version: '1.1', newer: [], working: [{ library: '../lib', dir: '/lib/trees' }], followed: null, ...o });
+  const p = (o: any) => ({ package: 'studio/trees', version: '1.1', newer: [], working: [{ place: 'library "lib"', dir: '/lib/trees' }], followed: null, ...o });
   const cur = pkgs.packageState(p({})), small = pkgs.packageState(p({ small: '1.3', big: '2.0' })), big = pkgs.packageState(p({ big: '2.0' }));
   check(cur.kind === 'current' && cur.text === 'up to date' && small.kind === 'update' && small.text === 'update available' && /1\.3 is the newest 1\.x; 2\.0 is a big version, a step of its own/.test(small.title) && big.kind === 'update',
     'the badge: up to date, or update available (a small one, a big one)');
-  const fol = pkgs.packageState(p({ small: '1.3', followed: { library: '../lib', dir: '/lib/trees' } }));
-  check(fol.kind === 'live' && fol.text === 'live' && /shows the edits of \/lib\/trees \(library "\.\.\/lib"\) instead of the published copy of 1\.1/.test(fol.title) && /1\.3 is the newest/.test(fol.title),
+  const fol = pkgs.packageState(p({ small: '1.3', followed: { place: 'library "lib"', dir: '/lib/trees' } }));
+  check(fol.kind === 'live' && fol.text === 'live' && /shows the edits of \/lib\/trees \(library "lib"\) instead of the published copy of 1\.1/.test(fol.title) && /1\.3 is the newest/.test(fol.title),
     `live: said even when an update exists (${fol.text})`);
-  check(pkgs.packageState(p({ error: 'no library this package lists has a package studio/trees' })).kind === 'error', 'a package its libraries do not have: the error');
-  check(pkgs.librariesText(['topotopo', '../lib']) === 'TopoTopo\'s built-in library, library "../lib"' && pkgs.packageState(p({ package: 'topotopo/nature', libraries: ['topotopo'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
-    && cur.title === '1.1 is the newest version in the package\'s libraries', 'the badge names the libraries that hold its package, TopoTopo\'s built-in library by what it is');
-  check(/published copy of 1\.1: it changes only when you update/.test(pkgs.sourceText(p({}))) && /showing edits from lib\/trees as they are saved · exports use the published version · this session only/.test(pkgs.sourceText(p({ followed: { library: '../lib', dir: '/lib/trees' } }))),
+  check(pkgs.packageState(p({ error: 'no place this package looks in has a package studio/trees' })).kind === 'error', 'a package no place has: the error');
+  check(pkgs.placesText(['the workspace "valley"', 'library "lib"']) === 'the workspace "valley", library "lib"' && pkgs.packageState(p({ package: 'topotopo/nature', places: ['TopoTopo\'s built-in library'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
+    && cur.title === '1.1 is the newest version in the places the package looks in', 'the badge names the place that has its package, TopoTopo\'s built-in library by what it is');
+  check(/published copy of 1\.1: it changes only when you update/.test(pkgs.sourceText(p({}))) && /showing edits from lib\/trees as they are saved · exports use the published version · this session only/.test(pkgs.sourceText(p({ followed: { place: 'library "lib"', dir: '/lib/trees' } }))),
     'the source switch says what each state means');
   check(!/you are editing|I'm editing/.test(pkgs.savedOffer('studio/trees')) && /new edits in its working folder that are not published yet/.test(pkgs.savedOffer('studio/trees')), 'the offer after a save does not assume the reader is its author');
   const named = pkgs.outputLine('studio/trees', { type: 'studio/trees/pine', kind: 'mesh', tags: ['conifer'], used: true }), dflt = pkgs.outputLine('studio/trees', { type: 'studio/trees', tags: [] });
@@ -401,6 +401,10 @@ section('output cards: what an output is, its formats and downloads');
   check(pop.writesLine(png) === '16-bit PNG + JSON sidecar · not the instances' && pop.writesLine(glb) === 'binary glTF', 'a format\'s line: what it writes, and what it leaves out');
   const inside = { ...glb, writes: 'binary glTF with its textures and how it was made inside (+ .source.json in exports/)' };
   check(pop.writesLine(inside, true) === 'binary glTF with its textures and how it was made inside' && /in exports\//.test(pop.writesLine(inside)), 'a download does not say what an export adds in exports/');
+  check(typeof pop.exportPathError === 'function' && /the "engine:" prefix is gone: write the path inside exports\/ \("props\/crate\.glb"\)/.test(pop.exportPathError('engine:props/crate.glb'))
+    && pop.exportPathError('props/crate.glb') === '' && /without "\.\." or a drive/.test(pop.exportPathError('../x.glb')) && /without "\.\." or a drive/.test(pop.exportPathError('C:/x.glb'))
+    && pop.targetPathShown('engine:props/crate.glb') === 'props/crate.glb' && pop.targetPathShown('a.glb') === 'a.glb',
+    'the Export popover refuses an "engine:" path, saying the path without it, and shows a refused target\'s path without the prefix');
   check(pop.downloadName(card, glb) === 'land.glb' && pop.downloadName(card, png) === 'land.zip' && pop.downloadName({ ...card, target: { format: 'glb', path: 'parts/rock.glb' } }, glb) === 'rock.glb'
     && pop.downloadName({ ...card, output: 'trees', target: { format: 'csv', path: 'pcg/trees.points.json' } }, { ...png, format: 'csv' }) === 'trees.zip', 'download names: the target\'s file, else the output\'s stem; a zip unless one file');
   check(pop.downloadSpec({ target: { format: 'obj', path: 'a/b.obj', options: { up_axis: 'z' } } }, 'obj').up_axis === 'z' && pop.downloadSpec({ target: { format: 'obj', path: 'a.obj', options: {} } }, 'glb') === 'glb',

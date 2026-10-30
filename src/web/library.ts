@@ -1,6 +1,7 @@
-// Libraries of packages, as the web app shows them: scanning a library for its packages (.topo files only: it
-// never creates folders and never cooks), creating a package in one, a package's files, and baking its previews
-// (.web/: thumb.png, preview.glb, bake.json, all derived). Packages themselves are src/package.ts.
+// Libraries and workspaces of packages, as the web app shows them: scanning one for its packages (the one scan,
+// src/scan.ts: .topo files only; it never creates folders and never cooks), creating a package in one, a package's
+// files, and baking its previews (.web/: thumb.png, preview.glb, bake.json, all derived). Packages themselves are
+// src/package.ts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -9,21 +10,22 @@ import { graphFiles } from '../session.ts';
 import { loadConfig } from '../config.ts';
 import type { WebConfig, LibraryRef } from '../config.ts';
 import type { PackageLink, PackageManifest } from '../package.ts';
-import { WORKSPACE_PACKAGES, manifestAt, oldManifest, parseManifest, packageRepoFiles, readManifest, slugify, writeManifest } from '../package.ts';
+import { manifestAt, parseManifest, packageRepoFiles, slugify, within, writeManifest } from '../package.ts';
+import { folderKey, forgetScans, scanTree, unscanned } from '../scan.ts';
+import type { Package, Scan } from '../scan.ts';
+import { engineFile, readWorkspace, scanWorkspace } from '../workspace.ts';
+import { godotIgnore, isEngineFile } from '../engines.ts';
+
+export type { Package };
 
 /** Bumped when the baked files change shape (render options, GLB options), so every package bakes again. */
 export const BAKE_VERSION = 1;
 /** a library name or package id: lower-case letters, digits, "-" and "_", starting with a letter or digit (the package name rule) */
 export { ID_RE };
 
-const MAX_DEPTH = 8;
-/**
- * folders a scan never enters (besides dot-folders); a package's own folders are never entered either, nor its
- * published versions and package copies, whose manifests are not packages
- */
-const SKIP = new Set(['node_modules', 'graphs', 'assets', 'inputs', 'exports', 'attachments', 'versions', 'packages']);
-/** a folder no package is looked for in (a workspace's shared copies too; read when called: package.ts loads after this module) */
-const skipped = (name: string) => SKIP.has(name) || name === WORKSPACE_PACKAGES;
+/** Folder names a scan never enters (src/scan.ts), which no package path may hold. */
+const SKIPPED = new Set(['node_modules', 'topotopo-packages', 'binaries', 'intermediate', 'saved', 'deriveddatacache', '__externalactors__', '__externalobjects__']);
+const jsonFiles = (dir: string) => { try { return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort(); } catch { return []; } };
 const PKG_VERSION = (() => {
   // package.json sits two levels above both src/web/library.ts and dist/web/library.js
   try { return String(JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version); } catch { return '0'; }
@@ -43,69 +45,31 @@ export interface BakeState {
   warnings?: string[];
 }
 
-export interface Package {
-  lib: string;
-  id: string;
-  /** absolute folder */
-  dir: string;
-  /** posix path of the folder relative to the library root */
-  rel: string;
-  /** the parent folders' path ("" at the top), how the web app groups packages */
-  collection: string;
-  manifest: PackageManifest;
-  /** newest change to its manifest, graphs/ or assets/ (ms) */
-  updated: number;
-}
+/** A library's or workspace's packages (src/scan.ts); `workspace`: it is a registered workspace. */
+export type LibraryScan = Scan & { workspace?: boolean };
 
-export interface LibraryScan { name: string; root: string; packages: Package[]; problems: string[] }
+/** A registered library or workspace: its name and folder (a workspace's packages are scanned as its file says). */
+export type PlaceRef = LibraryRef & { workspace?: boolean };
 
 // ------------------------------------------------------------------------------------------------------------ scan
 
-const mtime = (p: string) => fs.statSync(p, { throwIfNoEntry: false })?.mtimeMs ?? 0;
-const jsonFiles = (dir: string) => { try { return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort(); } catch { return []; } };
-
-/** Every package below a library root, sorted by path. Ids used twice: the first path keeps it, the others are problems. */
-export function scanLibrary(lib: LibraryRef): LibraryScan {
-  const root = path.resolve(lib.path);
-  const out: LibraryScan = { name: lib.name, root, packages: [], problems: [] };
-  if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) { out.problems.push(`library "${lib.name}": no folder ${root}`); return out; }
-  const seen = new Map<string, string>();
-  const walk = (dir: string, rel: string, depth: number) => {
-    let at: ReturnType<typeof manifestAt> = null;
-    try { at = manifestAt(dir); } catch (e: any) { out.problems.push(e.message); return; }
-    if (at) {
-      if (!rel) { out.problems.push(`${at.file}: the library folder itself is not a package; put packages in folders below it`); }
-      else {
-        try {
-          const manifest = readManifest(dir);
-          const prev = seen.get(at.id);
-          if (prev !== undefined) out.problems.push(`${rel}: id "${at.id}" is already used by ${prev} (rename its ${path.basename(at.file)})`);
-          else {
-            seen.set(at.id, rel);
-            const updated = Math.round(Math.max(mtime(at.file), ...['graphs', 'assets'].flatMap((d) => jsonFiles(path.join(dir, d)).map((f) => mtime(path.join(dir, d, f))))));
-            out.packages.push({ lib: lib.name, id: at.id, dir, rel, collection: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', manifest, updated });
-          }
-        } catch (e: any) { out.problems.push(e.message); }
-        return;
-      }
-    }
-    // a folder that holds project.json instead: said, and not entered
-    const old = rel ? oldManifest(dir) : null;
-    if (old) { out.problems.push(old); return; }
-    if (depth >= MAX_DEPTH) return;
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-      if (!e.isDirectory() || e.name.startsWith('.') || skipped(e.name)) continue;
-      walk(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1);
-    }
-  };
-  walk(root, '', 0);
-  return out;
+/**
+ * Every package below a library's (or, `workspace`, a workspace's) root, sorted by path (src/scan.ts). A workspace goes
+ * by the name in its file, which its packages carry, whatever name it was registered under.
+ */
+export function scanLibrary(lib: PlaceRef): LibraryScan {
+  if (!lib.workspace) return scanTree(lib.name, lib.path);
+  try { return { ...scanWorkspace(path.resolve(lib.path)), workspace: true }; }
+  catch (e: any) { return { name: lib.name, root: path.resolve(lib.path), packages: [], problems: [e.message], workspaces: [], workspace: true }; }
 }
 
+/**
+ * The registered libraries and workspaces, scanned: the libraries first, then the workspaces; a library inside a
+ * registered workspace is left out (its packages are the workspace's).
+ */
 export function scanAll(cfg: WebConfig = loadConfig()): LibraryScan[] {
-  return cfg.libraries.map(scanLibrary);
+  const libs = cfg.libraries.filter((l) => !cfg.workspaces.some((w) => within(l.path, w.path)));
+  return [...libs.map((l) => scanLibrary(l)), ...cfg.workspaces.map((w) => scanLibrary({ ...w, workspace: true }))];
 }
 
 // ---------------------------------------------------------------------------------------------------------- create
@@ -113,14 +77,16 @@ export function scanAll(cfg: WebConfig = loadConfig()): LibraryScan[] {
 export interface CreateOptions { title?: string; description?: string; tags?: string[]; links?: PackageLink[]; graph?: object }
 
 /**
- * A new package at `<library root>/<rel>` ("props/lantern"): <id>.topo, the package folders, attachments/, a
- * .gitignore for the derived files and a .gitattributes that keeps its versions and copies byte for byte. `graph` (a
- * graph spec) becomes graphs/main.json. Fails when the folder holds a package already or the id is taken in the library.
+ * A new package at `<root>/<rel>` ("props/lantern") of a library or a workspace: <id>.topo, the package folders,
+ * attachments/, a .gitignore for the derived files and a .gitattributes that keeps its versions and copies byte for
+ * byte (inside a Godot project, a .gdignore in inputs/). `graph` (a graph spec) becomes graphs/main.json. Fails when
+ * the folder holds a package already, lies inside one, the path holds a folder the scan never enters, or the id is
+ * taken in the library or workspace.
  */
-export function createPackage(lib: LibraryRef, rel: string, o: CreateOptions = {}): Package {
+export function createPackage(lib: PlaceRef, rel: string, o: CreateOptions = {}): Package {
   const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean);
-  if (!parts.length || parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || skipped(p) || /[<>:"|?*\u0000-\u001f]/.test(p)))
-    throw new Error(`bad package path "${rel}": give folders below the library, e.g. "props/lantern"`);
+  if (!parts.length || parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || SKIPPED.has(p.toLowerCase()) || /[<>:"|?*\u0000-\u001f]/.test(p)))
+    throw new Error(`bad package path "${rel}": give folders below the ${lib.workspace ? 'workspace' : 'library'}, e.g. "props/lantern" (no dot folders, node_modules, topotopo-packages or engine build folders)`);
   const root = path.resolve(lib.path);
   const dir = path.join(root, ...parts);
   if (manifestAt(dir)) throw new Error(`${dir} is a package already`);
@@ -128,8 +94,13 @@ export function createPackage(lib: LibraryRef, rel: string, o: CreateOptions = {
   if (!ID_RE.test(id)) throw new Error(`"${parts[parts.length - 1]}" gives no usable id: use letters or digits`);
   const scan = scanLibrary(lib);
   const taken = scan.packages.find((p) => p.id === id);
-  if (taken) throw new Error(`id "${id}" is used by ${taken.rel} in library "${lib.name}": pick another folder name`);
+  if (taken) throw new Error(`id "${id}" is used by ${taken.rel} in ${lib.workspace ? 'the workspace' : 'library'} "${lib.name}": pick another folder name`);
   if (scan.packages.some((p) => dir.startsWith(p.dir + path.sep))) throw new Error(`${rel} is inside another package`);
+  // a folder the scan never reaches holds no package it finds (src/scan.ts says why)
+  let engine: string | null = null;
+  if (lib.workspace) { try { engine = engineFile(root, readWorkspace(root)); } catch { /* its file cannot be read: the scan finds nothing either */ } }
+  const unreached = unscanned(root, dir, { engine });
+  if (unreached) throw new Error(`bad package path "${rel}": ${unreached}: ${lib.workspace ? 'the workspace' : 'the library'} would not find a package there; pick another folder`);
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) fs.mkdirSync(path.join(dir, d), { recursive: true });
   packageRepoFiles(dir);
   const manifest = parseManifest({
@@ -137,8 +108,37 @@ export function createPackage(lib: LibraryRef, rel: string, o: CreateOptions = {
     graph: 'main', created: new Date().toISOString().slice(0, 10),
   }, id);
   writeManifest(dir, manifest, id);
+  godotIgnore(dir);
   if (o.graph) fs.writeFileSync(path.join(dir, 'graphs', 'main.json'), JSON.stringify(o.graph, null, 2));
-  return scanLibrary(lib).packages.find((p) => p.id === id)!;
+  forgetScans();
+  const made = scanLibrary(lib).packages.find((p) => folderKey(p.dir) === folderKey(dir));
+  if (!made) throw new Error(`made the package ${dir}, and the scan of ${lib.workspace ? 'the workspace' : 'library'} "${lib.name}" does not find it: ${scanLibrary(lib).problems.find((p) => p.includes(parts.join('/'))) ?? 'see topotopo library list'}`);
+  return made;
+}
+
+/**
+ * The place a registered library's or workspace's name stands for, as the web app serves it: a library, a workspace by
+ * the name in its file, or for a library inside a registered workspace that workspace (its packages are the
+ * workspace's, at /p/<workspace>/<id>), with the library's folder below it (`prefix`, posix; '' for a place that is
+ * itself). null for a name none has.
+ */
+export function placeNamed(cfg: WebConfig, name: string): { place: PlaceRef; prefix: string } | null {
+  const lib = cfg.libraries.find((l) => l.name === name);
+  if (lib) {
+    const w = cfg.workspaces.find((x) => within(lib.path, x.path));
+    if (!w) return { place: lib, prefix: '' };
+    const prefix = path.relative(path.resolve(w.path), path.resolve(lib.path)).split(path.sep).join('/');
+    return { place: workspaceRef(w), prefix };
+  }
+  const ws = cfg.workspaces.map(workspaceRef).find((w) => w.name === name);
+  return ws ? { place: ws, prefix: '' } : null;
+}
+
+/** A registered workspace's name as a place of the web app (and createPackage), or null when its file cannot be read. */
+export function workspaceRef(w: LibraryRef): PlaceRef {
+  let name = w.name;
+  try { name = readWorkspace(w.path).name; } catch { /* its registered name */ }
+  return { name, path: w.path, workspace: true };
 }
 
 // ------------------------------------------------------------------------------------------------------ package files
@@ -146,7 +146,10 @@ export function createPackage(lib: LibraryRef, rel: string, o: CreateOptions = {
 export interface PackageFile { path: string; size: number; mtime: number; image: boolean }
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif)$/i;
 
-/** Files under a package subfolder (attachments/, exports/), recursively: posix paths, dot-files skipped. */
+/**
+ * Files under a package subfolder (attachments/, exports/, inputs/), recursively: posix paths; dot-files and the files
+ * an engine writes beside ours (*.import, *.uid, *.uasset …) skipped.
+ */
 export function listFiles(dir: string): PackageFile[] {
   const out: PackageFile[] = [];
   const walk = (d: string, rel: string, depth: number) => {
@@ -158,7 +161,7 @@ export function listFiles(dir: string): PackageFile[] {
       let st: fs.Stats;
       try { st = fs.statSync(abs); } catch { continue; }
       if (st.isDirectory()) { if (depth < 16) walk(abs, r, depth + 1); }
-      else if (st.isFile()) out.push({ path: r, size: st.size, mtime: Math.round(st.mtimeMs), image: IMAGE_RE.test(e.name) });
+      else if (st.isFile() && !isEngineFile(e.name)) out.push({ path: r, size: st.size, mtime: Math.round(st.mtimeMs), image: IMAGE_RE.test(e.name) });
     }
   };
   walk(dir, '', 0);

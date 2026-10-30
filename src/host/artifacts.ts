@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { sidecarFile } from './sidecars.ts';
+import { isEngineFile } from '../engines.ts';
+
 
 export interface Artifact {
   id: string;
@@ -64,7 +66,8 @@ export class ArtifactStore {
       // a folder can be missing, or vanish between listing its parent and reading it
       const entries = (() => { try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; } })();
       for (const e of entries.sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
-        if (e.name.startsWith('.') || e.isSymbolicLink()) continue;
+        // files an engine writes beside the exports it imports (*.import, *.uasset …) are not TopoTopo's
+        if (e.name.startsWith('.') || e.isSymbolicLink() || (e.isFile() && isEngineFile(e.name))) continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) walk(p);
         else if (e.isFile() && !known.has(p)) found.push({ id: artifactId(p), label: path.relative(this.dir, p).split(path.sep).join('/'), files: [p] });

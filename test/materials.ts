@@ -147,7 +147,9 @@ const MAPS: Record<string, NodeSpec> = {
   check(bad.blocks.some((b) => /its "kind" is "material", and it cooks to mesh/.test(b)), 'pinned material that cooks to a mesh: publishing blocks');
   json(path.join(mats, 'graphs', 'main.json'), matGraph);
   // another package uses it by name on its own mesh
-  json(path.join(house, 'house.topo'), { title: 'house', graph: 'main', libraries: ['../lib'] });
+  // the library is registered: a package outside any workspace finds packages in every registered library
+  json(process.env.TOPOTOPO_CONFIG!, { libraries: [{ name: 'lib', path: lib }] });
+  json(path.join(house, 'house.topo'), { title: 'house', graph: 'main' });
   const houseGraph: GraphSpec = {
     nodes: {
       box: { type: 'box' }, uv: { type: 'uv_project', in: ['box'], params: { method: 'box' } },
