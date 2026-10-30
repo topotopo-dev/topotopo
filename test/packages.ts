@@ -2097,6 +2097,18 @@ section('two listed libraries of one name are two places: the first has the name
   check(where === 'props-wt:dup/crate/block props-main:dup/barrel/block', `search shows each package once, under the place that has it (${where})`);
 }
 
+section('check outside a workspace: the package and the library it is in, not the other registered libraries');
+{
+  const names = (r: Awaited<ReturnType<typeof checkAll>>) => r.items.map((i) => `${i.what === 'package' ? 'package ' : ''}${i.name.replace(/ \d+\.\d+$/, '')}`).sort().join(', ');
+  // a registered library ("game"): the newest versions of its packages, and the package's graphs
+  const inRegistered = await checkAll(GROVE);
+  // a library found by its library.json
+  const inOwn = await checkAll(path.join(tmp, 'props-main', 'barrel'));
+  const ofGame = new Set(scanLibrary({ name: 'game', path: dirs.game }).packages.map((p) => p.manifest.name)), reg = names(inRegistered).split(', ');
+  check(['package grove', 'studio/grove', 'studio/trees'].every((n) => reg.includes(n)) && reg.every((n) => n === 'package grove' || ofGame.has(n)) && names(inOwn) === 'dup/barrel, dup/crate, package barrel',
+    `check of a package outside a workspace covers its own library, found by its registered name or its library.json, and no other (${names(inRegistered)}; ${names(inOwn)})`);
+}
+
 section('a registered library the workspace does not list: named only when listing it would help');
 {
   const { removeLibrary } = await import('../src/config.ts');
